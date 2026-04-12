@@ -28,6 +28,7 @@ fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-github = { path = "../fabro-github" }
 fabro-interview = { path = "../fabro-interview" }
+fabro-template = { path = "../fabro-template" }
 fabro-util = { path = "../fabro-util" }
 fabro-checkpoint = { path = "../fabro-checkpoint" }
 fabro-llm = { path = "../fabro-llm" }
@@ -36,10 +37,13 @@ fabro-retro = { path = "../fabro-retro" }
 fabro-core = { path = "../fabro-core" }
 fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../fabro-types" }
+fabro-http.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+bytes.workspace = true
+object_store.workspace = true
 ulid.workspace = true
 uuid.workspace = true
 rand.workspace = true
@@ -58,13 +62,13 @@ git2.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
-reqwest.workspace = true
+tempfile = "3"
+toml.workspace = true
 [dev-dependencies]
 base64.workspace = true
-toml.workspace = true
 fabro-mcp = { path = "../fabro-mcp" }
 tokio = { workspace = true, features = ["test-util", "macros"] }
-tempfile = "3"
+object_store.workspace = true
 assert_cmd = "2"
 predicates = "3"
 fabro-macros = { path = "../fabro-macros" }

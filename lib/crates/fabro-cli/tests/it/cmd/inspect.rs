@@ -1,10 +1,9 @@
+use fabro_test::{fabro_snapshot, test_context};
 use insta::assert_snapshot;
 
-use fabro_test::{fabro_snapshot, test_context};
-
 use super::support::{
-    compact_git_inspect, compact_inspect, run_success, setup_completed_dry_run,
-    setup_created_dry_run, setup_git_backed_changed_run,
+    compact_git_inspect, compact_inspect, run_success, setup_completed_fast_dry_run,
+    setup_created_fast_dry_run, setup_git_backed_changed_run,
 };
 
 #[test]
@@ -24,13 +23,13 @@ fn help() {
       <RUN>  Run ID prefix or workflow name (most recent run)
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -38,7 +37,7 @@ fn help() {
 #[test]
 fn inspect_created_run_shows_run_record_without_start_or_conclusion() {
     let context = test_context!();
-    let run = setup_created_dry_run(&context);
+    let run = setup_created_fast_dry_run(&context);
     let output = run_success(&context, &["inspect", &run.run_id]);
 
     assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r###"
@@ -51,7 +50,13 @@ fn inspect_created_run_shows_run_record_without_start_or_conclusion() {
           "workflow_name": "Simple",
           "workflow_slug": "simple",
           "sandbox_provider": "local",
-          "dry_run": true
+          "dry_run": true,
+          "provenance": {
+            "server_version": "[VERSION]",
+            "client_name": "fabro-cli",
+            "client_version": "[VERSION]",
+            "subject_auth_method": "disabled"
+          }
         },
         "start_record": null,
         "conclusion": null,
@@ -65,10 +70,10 @@ fn inspect_created_run_shows_run_record_without_start_or_conclusion() {
 #[test]
 fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let output = run_success(&context, &["inspect", &run.run_id]);
 
-    assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r###"
+    assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r#"
     [
       {
         "run_id": "[ULID]",
@@ -78,7 +83,13 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
           "workflow_name": "Simple",
           "workflow_slug": "simple",
           "sandbox_provider": "local",
-          "dry_run": true
+          "dry_run": true,
+          "provenance": {
+            "server_version": "[VERSION]",
+            "client_name": "fabro-cli",
+            "client_version": "[VERSION]",
+            "subject_auth_method": "disabled"
+          }
         },
         "start_record": {
           "has_start_time": true
@@ -86,7 +97,7 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
         "conclusion": {
           "status": "success",
           "duration_ms": "[DURATION_MS]",
-          "stage_count": 3
+          "stage_count": null
         },
         "checkpoint": {
           "current_node": "report",
@@ -102,7 +113,73 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
         }
       }
     ]
-    "###);
+    "#);
+}
+
+#[test]
+fn inspect_json_omits_run_dir() {
+    let context = test_context!();
+    let run = setup_completed_fast_dry_run(&context);
+    let output = run_success(&context, &["inspect", &run.run_id]);
+    let items: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("inspect output should parse");
+    let first = items
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("inspect output should contain one item");
+    assert!(
+        first.get("run_dir").is_none(),
+        "inspect JSON should not expose run_dir"
+    );
+}
+
+#[test]
+fn inspect_completed_run_reads_store_without_disk_metadata_files() {
+    let context = test_context!();
+    let run = setup_completed_fast_dry_run(&context);
+    let output = run_success(&context, &["inspect", &run.run_id]);
+
+    assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r#"
+    [
+      {
+        "run_id": "[ULID]",
+        "status": "succeeded",
+        "run_record": {
+          "goal": "Run tests and report results",
+          "workflow_name": "Simple",
+          "workflow_slug": "simple",
+          "sandbox_provider": "local",
+          "dry_run": true,
+          "provenance": {
+            "server_version": "[VERSION]",
+            "client_name": "fabro-cli",
+            "client_version": "[VERSION]",
+            "subject_auth_method": "disabled"
+          }
+        },
+        "start_record": {
+          "has_start_time": true
+        },
+        "conclusion": {
+          "status": "success",
+          "duration_ms": "[DURATION_MS]",
+          "stage_count": null
+        },
+        "checkpoint": {
+          "current_node": "report",
+          "completed_nodes": [
+            "start",
+            "run_tests",
+            "report"
+          ],
+          "next_node_id": "exit"
+        },
+        "sandbox": {
+          "provider": "local"
+        }
+      }
+    ]
+    "#);
 }
 
 #[test]
@@ -113,7 +190,7 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
 
     assert_snapshot!(
         serde_json::to_string_pretty(&compact_git_inspect(&output)).unwrap(),
-        @r###"
+        @r#"
     [
       {
         "run_id": "[ULID]",
@@ -123,7 +200,13 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
           "workflow_name": "Flow",
           "workflow_slug": "flow",
           "llm_provider": "openai",
-          "sandbox_provider": "local"
+          "sandbox_provider": "local",
+          "provenance": {
+            "server_version": "[VERSION]",
+            "client_name": "fabro-cli",
+            "client_version": "[VERSION]",
+            "subject_auth_method": "disabled"
+          }
         },
         "start_record": {
           "has_start_time": true,
@@ -134,7 +217,7 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
           "status": "success",
           "duration_ms": "[DURATION_MS]",
           "final_git_commit_sha": "[SHA]",
-          "stage_count": 3
+          "stage_count": null
         },
         "checkpoint": {
           "current_node": "step_two",
@@ -152,6 +235,6 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
         }
       }
     ]
-    "###
+    "#
     );
 }

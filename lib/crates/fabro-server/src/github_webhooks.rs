@@ -103,7 +103,7 @@ fn parse_event_metadata(body: &[u8]) -> (String, String) {
 
 /// A running webhook listener that can be shut down.
 pub struct WebhookListener {
-    port: u16,
+    port:        u16,
     shutdown_tx: oneshot::Sender<()>,
 }
 
@@ -255,7 +255,7 @@ async fn update_github_app_webhook(
     let jwt =
         fabro_github::sign_app_jwt(app_id, private_key_pem).map_err(|e| anyhow::anyhow!(e))?;
 
-    let client = reqwest::Client::new();
+    let client = fabro_http::http_client()?;
     let body = serde_json::json!({
         "url": webhook_url,
         "content_type": "json",
@@ -281,10 +281,15 @@ async fn update_github_app_webhook(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;
+
+    use super::*;
+
+    fn test_http_client() -> fabro_http::HttpClient {
+        fabro_http::test_http_client().unwrap()
+    }
 
     // -----------------------------------------------------------------------
     // verify_signature
@@ -407,7 +412,7 @@ mod tests {
         let body = b"{}";
         let sig = compute_signature(secret, body);
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .post(format!("http://127.0.0.1:{port}/webhooks/github"))
             .header("x-hub-signature-256", sig)

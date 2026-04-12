@@ -1,74 +1,53 @@
+//! Project-level config loading and workflow discovery.
+//!
+//! Stage 3 replaced the parse-time `ProjectConfig` type with the v2 parse
+//! tree in `fabro_types::settings::v2`. This module keeps the workflow
+//! discovery helpers and re-exports resolved project settings.
+
 use std::fmt::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
-use anyhow::{Context, bail};
-use serde::{Deserialize, Serialize};
+use fabro_types::settings::SettingsLayer;
+use serde::Serialize;
 
-use crate::FabroSettings;
-use crate::config::ConfigLayer;
-use crate::run;
-pub use fabro_types::settings::project::ProjectSettings;
+use crate::load::load_settings_path;
+use crate::parse::parse_settings_layer;
+use crate::{
+    Error, Result, resolve_project_from_file, resolve_run_from_file, resolve_workflow_from_file,
+    run,
+};
 
-const CONFIG_FILENAME: &str = "fabro.toml";
-const SUPPORTED_VERSION: u32 = 1;
-const RUN_GRAPH_FILE: &str = "workflow.fabro";
-const LEGACY_RUN_GRAPH_FILE: &str = "graph.fabro";
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct ProjectConfig {
-    pub root: Option<String>,
-}
-
+const CONFIG_FILENAME: &str = ".fabro/project.toml";
 #[derive(Clone, Debug)]
 pub struct WorkflowPathResolution {
     pub resolved_workflow_path: PathBuf,
-    pub dot_path: PathBuf,
-    pub workflow_config: Option<ConfigLayer>,
-    pub workflow_toml_path: Option<PathBuf>,
-    pub workflow_slug: Option<String>,
-}
-
-fn default_root() -> String {
-    ".".to_string()
-}
-
-impl From<ProjectConfig> for ProjectSettings {
-    fn from(value: ProjectConfig) -> Self {
-        Self {
-            root: value.root.unwrap_or_else(default_root),
-        }
-    }
+    pub dot_path:               PathBuf,
+    pub workflow_config:        Option<SettingsLayer>,
+    pub workflow_toml_path:     Option<PathBuf>,
+    pub workflow_slug:          Option<String>,
 }
 
 /// Parse a project config from a TOML string.
-pub fn parse_project_config(content: &str) -> anyhow::Result<ConfigLayer> {
-    let config: ConfigLayer = toml::from_str(content).context("Failed to parse project config")?;
-    let version = config.version.unwrap_or(0);
-    if version != SUPPORTED_VERSION {
-        bail!(
-            "Unsupported project config version: {version}. Only version {SUPPORTED_VERSION} is supported.",
-        );
-    }
-    Ok(config)
+pub fn parse_project_config(content: &str) -> Result<SettingsLayer> {
+    parse_settings_layer(content).map_err(|err| Error::parse("Failed to parse project config", err))
 }
 
 /// Load a project config from a file path.
-pub fn load_project_config(path: &Path) -> anyhow::Result<ConfigLayer> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
-    let config = parse_project_config(&content)?;
-    let root = config
-        .fabro
-        .as_ref()
-        .and_then(|f| f.root.as_deref())
-        .unwrap_or(".");
+///
+/// Goes through [`load_settings_path`] so that relative `run.goal.file`
+/// paths are anchored at the directory of `path` at load time.
+pub fn load_project_config(path: &Path) -> Result<SettingsLayer> {
+    let config = load_settings_path(path)?;
+    let root = resolve_project_from_file(&config)
+        .map_err(|errors| Error::resolve("Failed to resolve project settings", errors))?
+        .directory;
     tracing::debug!(path = %path.display(), root = %root, "Loaded project config");
     Ok(config)
 }
 
-/// Walk ancestor directories from `start` looking for `fabro.toml`.
+/// Walk ancestor directories from `start` looking for `.fabro/project.toml`.
 /// Returns the config file path and parsed config, or `None` if not found.
-pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, ConfigLayer)>> {
+pub fn discover_project_config(start: &Path) -> Result<Option<(PathBuf, SettingsLayer)>> {
     for ancestor in start.ancestors() {
         let candidate = ancestor.join(CONFIG_FILENAME);
         if candidate.is_file() {
@@ -98,46 +77,22 @@ fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
     Some(file_stem.into_owned())
 }
 
-fn cached_workflow_graph_path(path: &Path) -> Option<PathBuf> {
-    if path.file_name().and_then(|name| name.to_str()) != Some("workflow.toml") {
-        return None;
-    }
-
-    let canonical = path.with_file_name(RUN_GRAPH_FILE);
-    if canonical.exists() {
-        return Some(canonical);
-    }
-
-    let legacy = path.with_file_name(LEGACY_RUN_GRAPH_FILE);
-    if legacy.exists() {
-        return Some(legacy);
-    }
-
-    None
-}
-
 /// Resolve a workflow argument to a path.
-///
-/// - If the arg has a file extension (`.toml`, `.fabro`, etc.), return it as-is.
-/// - If no extension, attempt project-based resolution: find `fabro.toml`, resolve
-///   `{fabro_root}/workflows/{name}/workflow.toml`. Returns an error with suggestions
-///   if an `fabro.toml` exists but the workflow wasn't found.
-pub fn resolve_workflow_arg(arg: &Path) -> anyhow::Result<PathBuf> {
+pub fn resolve_workflow_arg(arg: &Path) -> Result<PathBuf> {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     resolve_workflow_arg_from(arg, &start)
 }
 
-pub fn resolve_workflow_path(
-    workflow_path: &Path,
-    cwd: &Path,
-) -> anyhow::Result<WorkflowPathResolution> {
+pub fn resolve_workflow_path(workflow_path: &Path, cwd: &Path) -> Result<WorkflowPathResolution> {
     let path = resolve_workflow_arg_from(workflow_path, cwd)?;
     let workflow_slug = workflow_slug_from_path(&path);
     if path.extension().is_some_and(|ext| ext == "toml") {
         match run::load_run_config(&path) {
             Ok(cfg) => {
-                let dot_path =
-                    run::resolve_graph_path(&path, cfg.graph.as_deref().unwrap_or(RUN_GRAPH_FILE));
+                let workflow = resolve_workflow_from_file(&cfg).map_err(|errors| {
+                    Error::resolve("Failed to resolve workflow settings", errors)
+                })?;
+                let dot_path = run::resolve_graph_path(&path, &workflow.graph);
                 Ok(WorkflowPathResolution {
                     resolved_workflow_path: path.clone(),
                     dot_path,
@@ -146,18 +101,7 @@ pub fn resolve_workflow_path(
                     workflow_slug,
                 })
             }
-            Err(_) if !path.exists() => {
-                let Some(dot_path) = cached_workflow_graph_path(&path) else {
-                    anyhow::bail!("Workflow not found: {}", path.display());
-                };
-                Ok(WorkflowPathResolution {
-                    resolved_workflow_path: path,
-                    dot_path,
-                    workflow_config: None,
-                    workflow_toml_path: None,
-                    workflow_slug,
-                })
-            }
+            Err(_) if !path.exists() => Err(Error::WorkflowNotFound(path.display().to_string())),
             Err(err) => Err(err),
         }
     } else {
@@ -171,11 +115,15 @@ pub fn resolve_workflow_path(
     }
 }
 
-pub fn resolve_working_directory(settings: &FabroSettings, caller_cwd: &Path) -> PathBuf {
-    let Some(work_dir) = settings.work_dir.as_deref() else {
+pub fn resolve_working_directory(settings: &SettingsLayer, caller_cwd: &Path) -> PathBuf {
+    let Some(work_dir) = resolve_run_from_file(settings)
+        .ok()
+        .and_then(|settings| settings.working_dir)
+        .map(|value| value.as_source())
+    else {
         return caller_cwd.to_path_buf();
     };
-    let path = PathBuf::from(work_dir);
+    let path = PathBuf::from(&work_dir);
     if path.is_absolute() {
         path
     } else {
@@ -183,18 +131,27 @@ pub fn resolve_working_directory(settings: &FabroSettings, caller_cwd: &Path) ->
     }
 }
 
-fn resolve_workflow_arg_from(arg: &Path, start_dir: &Path) -> anyhow::Result<PathBuf> {
-    resolve_workflow_arg_impl(arg, start_dir, user_workflows_dir().as_deref())
+fn resolve_workflow_arg_from(arg: &Path, start_dir: &Path) -> Result<PathBuf> {
+    resolve_workflow_arg_impl(arg, start_dir, Some(&user_workflows_dir()))
 }
 
 fn resolve_workflow_arg_impl(
     arg: &Path,
     start_dir: &Path,
     user_workflows: Option<&Path>,
-) -> anyhow::Result<PathBuf> {
+) -> Result<PathBuf> {
     if arg.extension().is_some() {
-        tracing::debug!(arg = %arg.display(), "Workflow arg has extension, returning as-is");
-        return Ok(arg.to_path_buf());
+        let resolved = if arg.is_absolute() {
+            arg.to_path_buf()
+        } else {
+            start_dir.join(arg)
+        };
+        tracing::debug!(
+            arg = %arg.display(),
+            resolved = %resolved.display(),
+            "Workflow arg has extension, resolving relative to start dir"
+        );
+        return Ok(resolved);
     }
 
     let name = arg.to_string_lossy();
@@ -217,10 +174,10 @@ fn resolve_workflow_arg_impl(
             let project_wf_dir = fabro_root.join("workflows");
             let available = list_available_workflows(Some(&project_wf_dir), user_workflows);
             if available.is_empty() {
-                bail!(
+                return Err(Error::other(format!(
                     "Unknown workflow '{name}'\n\nNo workflows found in {}",
                     project_wf_dir.display()
-                );
+                )));
             }
             let mut msg = format!(
                 "Unknown workflow '{name}'\n\nAvailable workflows: {}",
@@ -229,7 +186,7 @@ fn resolve_workflow_arg_impl(
             if let Some(suggestion) = find_closest_match(&name, &available) {
                 let _ = write!(msg, "\n\nDid you mean '{suggestion}'?");
             }
-            bail!("{msg}");
+            Err(Error::other(msg))
         }
         Ok(None) => {
             if let Some(resolved) = resolve_user_workflow(user_workflows, &name, arg) {
@@ -258,15 +215,15 @@ fn resolve_user_workflow(user_workflows: Option<&Path>, name: &str, arg: &Path) 
 }
 
 /// Return the user-level workflows directory (`~/.fabro/workflows/`).
-fn user_workflows_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".fabro").join("workflows"))
+fn user_workflows_dir() -> PathBuf {
+    crate::Home::from_env().workflows_dir()
 }
 
 /// Metadata about a discovered workflow.
 #[derive(Clone, Debug, Serialize)]
 pub struct WorkflowInfo {
-    pub name: String,
-    pub goal: Option<String>,
+    pub name:   String,
+    pub goal:   Option<String>,
     pub source: WorkflowSource,
 }
 
@@ -278,7 +235,8 @@ pub enum WorkflowSource {
     User,
 }
 
-/// List workflow names in a single directory by scanning for subdirs containing `workflow.toml`.
+/// List workflow names in a single directory by scanning for subdirs containing
+/// `workflow.toml`.
 fn list_workflows_in(workflows_dir: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(workflows_dir) else {
         return Vec::new();
@@ -296,14 +254,21 @@ fn list_workflows_in(workflows_dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Read the `goal` field from a `workflow.toml` without full config validation.
+/// Read the `run.goal` field from a `workflow.toml` without full config
+/// validation.
 fn read_workflow_goal(workflow_toml: &Path) -> Option<String> {
     let content = std::fs::read_to_string(workflow_toml).ok()?;
     let table: toml::Table = content.parse().ok()?;
-    table.get("goal")?.as_str().map(String::from)
+    table
+        .get("run")?
+        .as_table()?
+        .get("goal")?
+        .as_str()
+        .map(String::from)
 }
 
-/// List workflows with metadata by scanning project and user workflow directories.
+/// List workflows with metadata by scanning project and user workflow
+/// directories.
 pub fn list_workflows_detailed(
     project_workflows_dir: Option<&Path>,
     user_workflows_dir: Option<&Path>,
@@ -341,7 +306,6 @@ pub fn list_workflows_detailed(
 }
 
 /// List workflow names by scanning project and user workflow directories.
-/// Project workflows appear first; user workflows are deduplicated.
 pub fn list_available_workflows(
     project_workflows_dir: Option<&Path>,
     user_workflows_dir: Option<&Path>,
@@ -363,7 +327,8 @@ pub fn list_available_workflows(
     names
 }
 
-/// Find the closest match using normalized Levenshtein distance (threshold: 0.5).
+/// Find the closest match using normalized Levenshtein distance (threshold:
+/// 0.5).
 fn find_closest_match(input: &str, candidates: &[String]) -> Option<String> {
     candidates
         .iter()
@@ -374,165 +339,140 @@ fn find_closest_match(input: &str, candidates: &[String]) -> Option<String> {
 }
 
 /// Resolve a workflow argument to a DOT path and optional run config.
-///
-/// Calls `resolve_workflow_arg` first, then if the result is a `.toml` file,
-/// loads the run config and resolves the graph path within it.
-pub fn resolve_workflow(arg: &Path) -> anyhow::Result<(PathBuf, Option<ConfigLayer>)> {
+pub fn resolve_workflow(arg: &Path) -> Result<(PathBuf, Option<SettingsLayer>)> {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let resolution = resolve_workflow_path(arg, &start)?;
     Ok((resolution.dot_path, resolution.workflow_config))
 }
 
 /// Check whether retros are enabled in the project config.
-/// Returns `false` (the default) if no config is found or on error.
-/// Retros are an experimental feature gated behind `[features] retros = true`.
+/// Retros are now expressed as `[run.execution] retros = true` in v2.
 pub fn is_retro_enabled() -> bool {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match discover_project_config(&start) {
         Ok(Some((_path, config))) => config
-            .features
+            .run
             .as_ref()
-            .and_then(|f| f.retros)
+            .and_then(|r| r.execution.as_ref())
+            .and_then(|e| e.retros)
             .unwrap_or(false),
         _ => false,
     }
 }
 
+fn normalize_joined_path(base_dir: &Path, reference: &Path) -> PathBuf {
+    if reference.is_absolute() {
+        return reference.to_path_buf();
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in base_dir.join(reference).components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::RootDir => normalized.push(Path::new("/")),
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+        }
+    }
+    normalized
+}
+
 /// Resolve the fabro root directory from a config file path and its config.
-/// The returned path is the directory containing `fabro.toml` joined with the `root` value.
-pub fn resolve_fabro_root(config_path: &Path, config: &ConfigLayer) -> PathBuf {
+/// The returned path is the config file's parent directory joined with the
+/// `project.directory` value (default: `.`).
+pub fn resolve_fabro_root(config_path: &Path, config: &SettingsLayer) -> PathBuf {
     let project_dir = config_path
         .parent()
         .expect("config_path should have a parent directory");
-    let root = config
-        .fabro
-        .as_ref()
-        .and_then(|f| f.root.as_deref())
-        .unwrap_or(".");
-    project_dir.join(root)
+    let root = resolve_project_from_file(config)
+        .expect("project settings should resolve")
+        .directory;
+    normalize_joined_path(project_dir, Path::new(&root))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::run::{LlmConfig, PullRequestConfig};
     use std::fs;
+
     use tempfile::TempDir;
+
+    use super::*;
 
     #[test]
     fn parse_minimal_config() {
-        let config = parse_project_config("version = 1\n").unwrap();
+        let config = parse_project_config("_version = 1\n").unwrap();
         assert_eq!(config.version, Some(1));
-        assert_eq!(config.fabro, None,);
+        assert!(config.project.is_none());
     }
 
     #[test]
-    fn parse_full_config() {
-        let config = parse_project_config("version = 1\n[fabro]\nroot = \"fabro/\"\n").unwrap();
-        assert_eq!(config.fabro.unwrap().root.as_deref(), Some("fabro/"));
+    fn parse_with_project_directory() {
+        let config = parse_project_config(
+            r#"
+_version = 1
+
+[project]
+directory = "custom/"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_project_from_file(&config).unwrap().directory,
+            "custom/"
+        );
     }
 
     #[test]
-    fn parse_retros_default_false() {
-        let config = parse_project_config("version = 1\n").unwrap();
-        assert!(
-            !config
-                .features
+    fn parse_with_run_execution_retros() {
+        let config = parse_project_config(
+            "
+_version = 1
+
+[run.execution]
+retros = true
+",
+        )
+        .unwrap();
+        assert_eq!(
+            config
+                .run
                 .as_ref()
-                .and_then(|f| f.retros)
-                .unwrap_or(false)
+                .and_then(|r| r.execution.as_ref())
+                .and_then(|e| e.retros),
+            Some(true)
         );
     }
 
     #[test]
-    fn parse_retros_enabled() {
-        let config = parse_project_config("version = 1\n[features]\nretros = true\n").unwrap();
-        assert_eq!(config.features.unwrap().retros, Some(true));
-    }
-
-    #[test]
-    fn parse_version_mismatch() {
-        let err = parse_project_config("version = 2\n").unwrap_err();
+    fn parse_rejects_legacy_llm_section() {
+        let err = parse_project_config("_version = 1\n[llm]\nprovider = \"openai\"\n").unwrap_err();
+        let text = format!("{err:#}");
         assert!(
-            err.to_string().contains("Unsupported"),
-            "Expected 'Unsupported' in error, got: {err}"
+            text.contains("run.model") || text.contains("llm"),
+            "expected rename hint for [llm]: {text}"
         );
     }
 
     #[test]
-    fn parse_pull_request_config() {
-        let config =
-            parse_project_config("version = 1\n\n[pull_request]\nenabled = true\ndraft = false\n")
-                .unwrap();
-        assert_eq!(
-            config.pull_request,
-            Some(PullRequestConfig {
-                enabled: Some(true),
-                draft: Some(false),
-                auto_merge: None,
-                merge_strategy: None,
-            })
-        );
-    }
-
-    #[test]
-    fn parse_project_config_with_sandbox() {
-        let toml = r#"
-version = 1
-[sandbox]
-provider = "daytona"
-[sandbox.daytona.snapshot]
-name = "my-snapshot"
-cpu = 4
-memory = 8
-"#;
-        let config = parse_project_config(toml).unwrap();
-        let sandbox = config.sandbox.unwrap();
-        assert_eq!(sandbox.provider.as_deref(), Some("daytona"));
-        let snap = sandbox.daytona.unwrap().snapshot.unwrap();
-        assert_eq!(snap.name.as_deref(), Some("my-snapshot"));
-        assert_eq!(snap.cpu, Some(4));
-        assert_eq!(snap.memory, Some(8));
-    }
-
-    #[test]
-    fn parse_project_config_with_hooks_and_mcp() {
-        let toml = r#"
-version = 1
-[[hooks]]
-event = "run_start"
-command = "echo start"
-[mcp_servers.playwright]
-type = "stdio"
-command = ["npx", "@playwright/mcp@latest"]
-"#;
-        let config = parse_project_config(toml).unwrap();
-        assert_eq!(config.hooks.len(), 1);
-        assert_eq!(config.mcp_servers.len(), 1);
-        assert!(config.mcp_servers.contains_key("playwright"));
-    }
-
-    #[test]
-    fn parse_project_config_with_llm_and_work_dir() {
-        let toml = r#"
-version = 1
-work_dir = "/workspace"
-[llm]
-model = "claude-sonnet-4-6"
-"#;
-        let config = parse_project_config(toml).unwrap();
-        assert_eq!(config.work_dir.as_deref(), Some("/workspace"));
-        assert_eq!(
-            config.llm.unwrap().model.as_deref(),
-            Some("claude-sonnet-4-6")
+    fn parse_higher_version_errors() {
+        let err = parse_project_config("_version = 2\n").unwrap_err();
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains("Upgrade") || chain.to_lowercase().contains("version"),
+            "Expected version hint in chain: {chain}"
         );
     }
 
     #[test]
     fn load_from_disk() {
         let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("fabro.toml");
-        fs::write(&path, "version = 1\n").unwrap();
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        let path = config_dir.join("project.toml");
+        fs::write(&path, "_version = 1\n").unwrap();
         let config = load_project_config(&path).unwrap();
         assert_eq!(config.version, Some(1));
     }
@@ -540,208 +480,110 @@ model = "claude-sonnet-4-6"
     #[test]
     fn discover_walks_ancestors() {
         let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("fabro.toml"), "version = 1\n").unwrap();
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(config_dir.join("project.toml"), "_version = 1\n").unwrap();
         let sub = tmp.path().join("sub").join("dir");
         fs::create_dir_all(&sub).unwrap();
 
         let (found_path, config) = discover_project_config(&sub).unwrap().unwrap();
-        assert_eq!(found_path, tmp.path().join("fabro.toml"));
+        assert_eq!(found_path, config_dir.join("project.toml"));
         assert_eq!(config.version, Some(1));
     }
 
     #[test]
-    fn discover_returns_none_when_absent() {
+    fn load_project_config_rewrites_relative_goal_file_path() {
+        use fabro_types::settings::run::RunGoalLayer;
+
         let tmp = TempDir::new().unwrap();
-        let result = discover_project_config(tmp.path()).unwrap();
-        assert!(result.is_none());
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        let path = config_dir.join("project.toml");
+        fs::write(
+            &path,
+            r#"_version = 1
+
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+
+        let config = load_project_config(&path).unwrap();
+        let Some(RunGoalLayer::File { file }) =
+            config.run.as_ref().and_then(|run| run.goal.as_ref())
+        else {
+            panic!("expected file variant");
+        };
+        let expected = config_dir.join("prompts").join("goal.md");
+        assert_eq!(file.as_source(), expected.to_string_lossy());
     }
 
     #[test]
-    fn resolve_fabro_root_with_subdirectory() {
-        let config_path = Path::new("/repo/fabro.toml");
-        let config = ConfigLayer {
-            version: Some(1),
-            fabro: Some(ProjectConfig {
-                root: Some("fabro/".to_string()),
-            }),
-            ..Default::default()
-        };
+    fn default_directory_resolves_to_config_parent() {
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("project.toml");
+        fs::write(&config_path, "_version = 1\n").unwrap();
+
+        let config = load_project_config(&config_path).unwrap();
+
+        assert_eq!(resolve_fabro_root(&config_path, &config), config_dir);
+    }
+
+    #[test]
+    fn custom_relative_directory_resolves_from_config_parent() {
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("project.toml");
+        fs::write(
+            &config_path,
+            r#"_version = 1
+
+[project]
+directory = "../custom"
+"#,
+        )
+        .unwrap();
+
+        let config = load_project_config(&config_path).unwrap();
+
         assert_eq!(
-            resolve_fabro_root(config_path, &config),
-            Path::new("/repo/fabro/")
+            resolve_fabro_root(&config_path, &config),
+            tmp.path().join("custom")
         );
     }
 
     #[test]
-    fn resolve_fabro_root_with_dot() {
-        let config_path = Path::new("/repo/fabro.toml");
-        let config = ConfigLayer {
-            version: Some(1),
-            fabro: Some(ProjectConfig {
-                root: Some(".".to_string()),
-            }),
-            ..Default::default()
-        };
-        assert_eq!(
-            resolve_fabro_root(config_path, &config),
-            Path::new("/repo/.")
-        );
-    }
+    fn relative_goal_file_resolves_from_config_dir() {
+        use fabro_types::settings::run::RunGoalLayer;
 
-    #[test]
-    fn resolve_fabro_root_without_fabro_section() {
-        let config_path = Path::new("/repo/fabro.toml");
-        let config = ConfigLayer::default();
-        assert_eq!(
-            resolve_fabro_root(config_path, &config),
-            Path::new("/repo/.")
-        );
-    }
-
-    #[test]
-    fn for_workflow_discovers_project_from_workflow_location() {
         let tmp = TempDir::new().unwrap();
-        let project_dir = tmp.path().join("project");
-        let other_dir = tmp.path().join("other");
-        let workflow_dir = project_dir.join("workflows").join("demo");
-        fs::create_dir_all(&workflow_dir).unwrap();
-        fs::create_dir_all(&other_dir).unwrap();
-
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("project.toml");
         fs::write(
-            project_dir.join("fabro.toml"),
-            "version = 1\nverbose = true\n",
-        )
-        .unwrap();
-        fs::write(
-            other_dir.join("fabro.toml"),
-            "version = 1\nverbose = false\n",
-        )
-        .unwrap();
-        fs::write(workflow_dir.join("workflow.toml"), "version = 1\n").unwrap();
+            &config_path,
+            r#"_version = 1
 
-        let layer =
-            ConfigLayer::for_workflow(&workflow_dir.join("workflow.toml"), &other_dir).unwrap();
-
-        assert_eq!(layer.verbose, Some(true));
-    }
-
-    #[test]
-    fn chained_resolve_preserves_precedence_order() {
-        let tmp = TempDir::new().unwrap();
-        let project_dir = tmp.path().join("project");
-        let workflow_dir = project_dir.join("workflows").join("demo");
-        fs::create_dir_all(&workflow_dir).unwrap();
-
-        fs::write(
-            project_dir.join("fabro.toml"),
-            "version = 1\nverbose = true\n[llm]\nmodel = \"project-model\"\n",
-        )
-        .unwrap();
-        fs::write(
-            workflow_dir.join("workflow.toml"),
-            "version = 1\ndry_run = true\n[llm]\nmodel = \"workflow-model\"\n",
+[run.goal]
+file = "prompts/goal.md"
+"#,
         )
         .unwrap();
 
-        let cli_defaults = ConfigLayer {
-            verbose: Some(false),
-            llm: Some(LlmConfig {
-                model: Some("cli-model".to_string()),
-                provider: None,
-                fallbacks: None,
-            }),
-            ..Default::default()
-        };
-        let overrides = ConfigLayer {
-            dry_run: Some(false),
-            ..Default::default()
+        let config = load_project_config(&config_path).unwrap();
+        let Some(RunGoalLayer::File { file }) =
+            config.run.as_ref().and_then(|run| run.goal.as_ref())
+        else {
+            panic!("expected file variant");
         };
 
-        let settings = overrides
-            .combine(
-                ConfigLayer::for_workflow(
-                    &workflow_dir.join("workflow.toml"),
-                    project_dir.as_path(),
-                )
-                .unwrap(),
-            )
-            .combine(cli_defaults)
-            .resolve()
-            .unwrap();
-
         assert_eq!(
-            settings.llm.as_ref().and_then(|llm| llm.model.as_deref()),
-            Some("workflow-model")
+            file.as_source(),
+            config_dir.join("prompts").join("goal.md").to_string_lossy()
         );
-        assert_eq!(settings.dry_run, Some(false));
-        assert_eq!(settings.verbose, Some(true));
-    }
-
-    #[test]
-    fn resolve_workflow_arg_toml_extension_returned_as_is() {
-        let tmp = TempDir::new().unwrap();
-        let result = resolve_workflow_arg_from(Path::new("my-workflow.toml"), tmp.path()).unwrap();
-        assert_eq!(result, Path::new("my-workflow.toml"));
-    }
-
-    #[test]
-    fn resolve_workflow_arg_fabro_extension_returned_as_is() {
-        let tmp = TempDir::new().unwrap();
-        let result = resolve_workflow_arg_from(Path::new("my-workflow.fabro"), tmp.path()).unwrap();
-        assert_eq!(result, Path::new("my-workflow.fabro"));
-    }
-
-    #[test]
-    fn resolve_workflow_arg_no_extension_no_config_returns_literal() {
-        let tmp = TempDir::new().unwrap();
-        let result = resolve_workflow_arg_from(Path::new("my-workflow"), tmp.path()).unwrap();
-        assert_eq!(result, Path::new("my-workflow"));
-    }
-
-    #[test]
-    fn resolve_workflow_arg_no_extension_with_config_and_workflow_file() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("fabro.toml"), "version = 1\n").unwrap();
-        let wf_dir = tmp.path().join("workflows").join("my-workflow");
-        fs::create_dir_all(&wf_dir).unwrap();
-        fs::write(
-            wf_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"workflow.fabro\"\n",
-        )
-        .unwrap();
-
-        let result = resolve_workflow_arg_from(Path::new("my-workflow"), tmp.path()).unwrap();
-        assert_eq!(result, wf_dir.join("workflow.toml"));
-    }
-
-    #[test]
-    fn resolve_workflow_arg_typo_suggests_similar_name() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("fabro.toml"), "version = 1\n").unwrap();
-        let wf_dir = tmp.path().join("workflows").join("implement");
-        fs::create_dir_all(&wf_dir).unwrap();
-        fs::write(
-            wf_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"w.fabro\"\n",
-        )
-        .unwrap();
-
-        let err = resolve_workflow_arg_from(Path::new("implemet"), tmp.path()).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("Unknown workflow 'implemet'"), "got: {msg}");
-        assert!(msg.contains("Did you mean 'implement'?"), "got: {msg}");
-    }
-
-    #[test]
-    fn parse_project_config_with_github() {
-        let toml = r#"
-version = 1
-
-[github]
-permissions = { contents = "read" }
-"#;
-        let config = parse_project_config(toml).unwrap();
-        let github = config.github.unwrap();
-        assert_eq!(github.permissions["contents"], "read");
     }
 }

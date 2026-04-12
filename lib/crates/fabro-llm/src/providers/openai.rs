@@ -1,7 +1,8 @@
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use futures::{StreamExt, stream};
 
-use crate::error::{SdkError, error_from_status_code};
+use crate::error::{Error, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream, validate_tool_choice};
 use crate::providers::common::{
     self as common, parse_error_body, parse_rate_limit_headers, parse_retry_after,
@@ -9,30 +10,31 @@ use crate::providers::common::{
 };
 use crate::types::{
     AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
-    ResponseFormat, ResponseFormatType, Role, StreamEvent, ToolCall, ToolChoice, ToolDefinition,
-    Usage,
+    ResponseFormat, ResponseFormatType, Role, StreamEvent, TokenCounts, ToolCall, ToolChoice,
+    ToolDefinition,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
 /// Provider adapter for the `OpenAI` Responses API (`/v1/responses`).
 ///
-/// Per spec Section 2.7, this adapter uses the Responses API (not Chat Completions)
-/// to properly surface reasoning tokens, built-in tools, and server-side state.
+/// Per spec Section 2.7, this adapter uses the Responses API (not Chat
+/// Completions) to properly surface reasoning tokens, built-in tools, and
+/// server-side state.
 pub struct Adapter {
     pub(crate) http: super::http_api::HttpApi,
-    org_id: Option<String>,
-    project_id: Option<String>,
+    org_id:          Option<String>,
+    project_id:      Option<String>,
     /// When true, always use streaming (required by the Codex endpoint).
-    codex_mode: bool,
+    codex_mode:      bool,
 }
 
 impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            http: super::http_api::HttpApi::new(api_key, DEFAULT_BASE_URL),
-            org_id: None,
+            http:       super::http_api::HttpApi::new(api_key, DEFAULT_BASE_URL),
+            org_id:     None,
             project_id: None,
             codex_mode: false,
         }
@@ -78,8 +80,9 @@ impl Adapter {
         }
     }
 
-    /// Build a `reqwest::RequestBuilder` with default headers, org/project headers, and auth.
-    fn build_request(&self, url: &str) -> reqwest::RequestBuilder {
+    /// Build a `fabro_http::RequestBuilder` with default headers, org/project
+    /// headers, and auth.
+    fn build_request(&self, url: &str) -> fabro_http::RequestBuilder {
         let mut req = self.http.client.post(url);
         // Apply default_headers first so adapter-specific headers can override
         for (key, value) in &self.http.default_headers {
@@ -97,7 +100,7 @@ impl Adapter {
 
     /// Complete a request by streaming and collecting the final response.
     /// Used for the Codex endpoint which requires `stream: true`.
-    async fn complete_via_stream(&self, request: &Request) -> Result<Response, SdkError> {
+    async fn complete_via_stream(&self, request: &Request) -> Result<Response, Error> {
         use futures::StreamExt;
         let mut event_stream = self.stream(request).await?;
         let mut last_response: Option<Response> = None;
@@ -107,9 +110,9 @@ impl Adapter {
                 break;
             }
         }
-        last_response.ok_or_else(|| SdkError::Network {
+        last_response.ok_or_else(|| Error::Network {
             message: "Stream ended without a finish event".into(),
-            source: None,
+            source:  None,
         })
     }
 }
@@ -118,53 +121,52 @@ impl Adapter {
 
 #[derive(serde::Serialize)]
 struct ApiRequest {
-    model: String,
-    input: Vec<serde_json::Value>,
+    model:             String,
+    input:             Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    instructions: Option<String>,
+    instructions:      Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f64>,
+    temperature:       Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f64>,
+    top_p:             Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<serde_json::Value>>,
+    tools:             Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_choice: Option<serde_json::Value>,
+    tool_choice:       Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    reasoning: Option<serde_json::Value>,
+    reasoning:         Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    text: Option<serde_json::Value>,
+    text:              Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    stop: Option<Vec<String>>,
+    stop:              Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    metadata: Option<std::collections::HashMap<String, String>>,
-    store: bool,
+    metadata:          Option<std::collections::HashMap<String, String>>,
+    store:             bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    include: Vec<String>,
+    include:           Vec<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
-    stream: bool,
+    stream:            bool,
 }
 
 // --- Response types (Responses API format) ---
 
 #[derive(serde::Deserialize)]
 struct ApiResponse {
-    id: String,
-    model: Option<String>,
+    id:     String,
+    model:  Option<String>,
     output: Vec<serde_json::Value>,
     status: Option<String>,
-    usage: Option<ApiUsage>,
+    usage:  Option<ApiUsage>,
 }
 
 #[derive(serde::Deserialize)]
 struct ApiUsage {
-    input_tokens: i64,
-    output_tokens: i64,
-    total_tokens: Option<i64>,
+    input_tokens:          i64,
+    output_tokens:         i64,
     output_tokens_details: Option<OutputTokenDetails>,
-    input_tokens_details: Option<InputTokenDetails>,
+    input_tokens_details:  Option<InputTokenDetails>,
 }
 
 #[derive(serde::Deserialize)]
@@ -378,8 +380,9 @@ fn translate_response_format(format: &ResponseFormat) -> Option<serde_json::Valu
 
 /// Build an `ApiRequest` from a unified `Request`.
 ///
-/// When `codex_mode` is true, unsupported fields (`temperature`, `max_output_tokens`, `top_p`)
-/// are omitted and empty instructions are sent as `""` (required by the Codex endpoint).
+/// When `codex_mode` is true, unsupported fields (`temperature`,
+/// `max_output_tokens`, `top_p`) are omitted and empty instructions are sent as
+/// `""` (required by the Codex endpoint).
 fn build_api_request(request: &Request, stream: bool, codex_mode: bool) -> ApiRequest {
     let (instructions, input) = translate_input(&request.messages);
     let api_tools = request.tools.as_ref().map(|t| translate_tools(t));
@@ -432,7 +435,8 @@ fn build_api_request(request: &Request, stream: bool, codex_mode: bool) -> ApiRe
     }
 }
 
-/// Serialize an `ApiRequest` to JSON and merge any `provider_options.openai` keys into it.
+/// Serialize an `ApiRequest` to JSON and merge any `provider_options.openai`
+/// keys into it.
 fn build_request_body(request: &Request, stream: bool, codex_mode: bool) -> serde_json::Value {
     let api_request = build_api_request(request, stream, codex_mode);
     let mut body = serde_json::to_value(&api_request).unwrap_or_else(|_| serde_json::json!({}));
@@ -533,29 +537,29 @@ fn parse_output(output: &[serde_json::Value]) -> (Vec<ContentPart>, bool) {
 
 /// Mutable state carried through SSE stream processing.
 struct SseStreamState {
-    line_reader: super::common::LineReader,
-    model: String,
-    response_id: String,
-    response_model: String,
-    accumulated_text: String,
-    tool_calls: Vec<ToolCall>,
+    line_reader:             super::common::LineReader,
+    model:                   String,
+    response_id:             String,
+    response_model:          String,
+    accumulated_text:        String,
+    tool_calls:              Vec<ToolCall>,
     /// Raw reasoning output items to preserve for round-tripping.
-    reasoning_items: Vec<serde_json::Value>,
+    reasoning_items:         Vec<serde_json::Value>,
     /// Raw message output items to preserve for round-tripping.
-    message_items: Vec<serde_json::Value>,
-    usage: Usage,
-    finish_reason: FinishReason,
-    emitted_start: bool,
-    emitted_text_start: bool,
+    message_items:           Vec<serde_json::Value>,
+    usage:                   TokenCounts,
+    finish_reason:           FinishReason,
+    emitted_start:           bool,
+    emitted_text_start:      bool,
     emitted_reasoning_start: bool,
-    raw_response: Option<serde_json::Value>,
-    rate_limit: Option<RateLimitInfo>,
+    raw_response:            Option<serde_json::Value>,
+    rate_limit:              Option<RateLimitInfo>,
 }
 
 /// Parse a single SSE message block into an (`event_type`, `data`) pair.
 ///
-/// Each SSE message consists of one or more lines (`event:` and `data:` prefixed).
-/// Returns `None` if the block has no `data:` lines.
+/// Each SSE message consists of one or more lines (`event:` and `data:`
+/// prefixed). Returns `None` if the block has no `data:` lines.
 fn parse_sse_message(message_block: &str) -> Option<(Option<String>, String)> {
     let mut current_event: Option<String> = None;
     let mut current_data = String::new();
@@ -586,7 +590,7 @@ fn parse_sse_message(message_block: &str) -> Option<(Option<String>, String)> {
 }
 
 /// Process the next chunk(s) from the byte stream and return `StreamEvent`s.
-async fn process_next_sse_events(state: &mut SseStreamState) -> Result<Vec<StreamEvent>, SdkError> {
+async fn process_next_sse_events(state: &mut SseStreamState) -> Result<Vec<StreamEvent>, Error> {
     loop {
         match state.line_reader.read_next_chunk("\n\n").await? {
             Some(message_block) => {
@@ -675,7 +679,8 @@ fn handle_response_created(state: &mut SseStreamState, json: &serde_json::Value)
     }
 }
 
-/// Handle `response.output_text.delta` by accumulating text and emitting events.
+/// Handle `response.output_text.delta` by accumulating text and emitting
+/// events.
 fn handle_text_delta(
     state: &mut SseStreamState,
     json: &serde_json::Value,
@@ -691,7 +696,8 @@ fn handle_text_delta(
     }
 }
 
-/// Handle `response.function_call_arguments.delta` by accumulating args and emitting events.
+/// Handle `response.function_call_arguments.delta` by accumulating args and
+/// emitting events.
 fn handle_tool_call_delta(
     state: &mut SseStreamState,
     json: &serde_json::Value,
@@ -827,7 +833,8 @@ fn handle_output_item_done(
     }
 }
 
-/// Handle `response.completed` by extracting usage and building the final response.
+/// Handle `response.completed` by extracting usage and building the final
+/// response.
 fn handle_response_completed(
     state: &mut SseStreamState,
     json: &serde_json::Value,
@@ -837,19 +844,21 @@ fn handle_response_completed(
 
     if let Some(usage_data) = response_data.get("usage") {
         if let Ok(u) = serde_json::from_value::<ApiUsage>(usage_data.clone()) {
-            state.usage = Usage {
+            let reasoning_tokens = u
+                .output_tokens_details
+                .as_ref()
+                .and_then(|d| d.reasoning_tokens)
+                .unwrap_or(0);
+            state.usage = TokenCounts {
                 input_tokens: u.input_tokens,
-                output_tokens: u.output_tokens,
-                total_tokens: u.total_tokens.unwrap_or(u.input_tokens + u.output_tokens),
-                reasoning_tokens: u
-                    .output_tokens_details
-                    .as_ref()
-                    .and_then(|d| d.reasoning_tokens),
+                output_tokens: u.output_tokens.saturating_sub(reasoning_tokens),
+                reasoning_tokens,
                 cache_read_tokens: u
                     .input_tokens_details
                     .as_ref()
-                    .and_then(|d| d.cached_tokens),
-                ..Usage::default()
+                    .and_then(|d| d.cached_tokens)
+                    .unwrap_or(0),
+                ..TokenCounts::default()
             };
         }
     }
@@ -909,9 +918,9 @@ fn handle_response_completed(
         model,
         provider: "openai".to_string(),
         message: Message {
-            role: Role::Assistant,
-            content: content_parts,
-            name: None,
+            role:         Role::Assistant,
+            content:      content_parts,
+            name:         None,
             tool_call_id: None,
         },
         finish_reason: state.finish_reason.clone(),
@@ -934,7 +943,7 @@ impl ProviderAdapter for Adapter {
         "openai"
     }
 
-    async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+    async fn complete(&self, request: &Request) -> Result<Response, Error> {
         // Codex endpoint requires streaming; collect the stream into a response.
         if self.codex_mode {
             return self.complete_via_stream(request).await;
@@ -953,7 +962,7 @@ impl ProviderAdapter for Adapter {
         let (body, headers) = send_and_read_response(req, "openai", "type").await?;
 
         let api_resp: ApiResponse = serde_json::from_str(&body)
-            .map_err(|e| SdkError::network(format!("failed to parse OpenAI response: {e}"), e))?;
+            .map_err(|e| Error::network(format!("failed to parse OpenAI response: {e}"), e))?;
 
         let (content_parts, has_tool_calls) = parse_output(&api_resp.output);
         let finish_reason = map_finish_reason(api_resp.status.as_deref(), has_tool_calls);
@@ -961,19 +970,23 @@ impl ProviderAdapter for Adapter {
         let usage = api_resp
             .usage
             .as_ref()
-            .map_or_else(Usage::default, |u| Usage {
-                input_tokens: u.input_tokens,
-                output_tokens: u.output_tokens,
-                total_tokens: u.total_tokens.unwrap_or(u.input_tokens + u.output_tokens),
-                reasoning_tokens: u
+            .map_or_else(TokenCounts::default, |u| {
+                let reasoning_tokens = u
                     .output_tokens_details
                     .as_ref()
-                    .and_then(|d| d.reasoning_tokens),
-                cache_read_tokens: u
-                    .input_tokens_details
-                    .as_ref()
-                    .and_then(|d| d.cached_tokens),
-                ..Usage::default()
+                    .and_then(|d| d.reasoning_tokens)
+                    .unwrap_or(0);
+                TokenCounts {
+                    input_tokens: u.input_tokens,
+                    output_tokens: u.output_tokens.saturating_sub(reasoning_tokens),
+                    reasoning_tokens,
+                    cache_read_tokens: u
+                        .input_tokens_details
+                        .as_ref()
+                        .and_then(|d| d.cached_tokens)
+                        .unwrap_or(0),
+                    ..TokenCounts::default()
+                }
             });
 
         Ok(Response {
@@ -981,9 +994,9 @@ impl ProviderAdapter for Adapter {
             model: api_resp.model.unwrap_or_else(|| request.model.clone()),
             provider: "openai".to_string(),
             message: Message {
-                role: Role::Assistant,
-                content: content_parts,
-                name: None,
+                role:         Role::Assistant,
+                content:      content_parts,
+                name:         None,
                 tool_call_id: None,
             },
             finish_reason,
@@ -994,7 +1007,7 @@ impl ProviderAdapter for Adapter {
         })
     }
 
-    async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+    async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
@@ -1006,7 +1019,7 @@ impl ProviderAdapter for Adapter {
             .json(&request_body)
             .send()
             .await
-            .map_err(|e| SdkError::network(e.to_string(), e))?;
+            .map_err(|e| Error::network(e.to_string(), e))?;
 
         let status = http_resp.status();
         if !status.is_success() {
@@ -1014,7 +1027,7 @@ impl ProviderAdapter for Adapter {
             let body = http_resp
                 .text()
                 .await
-                .map_err(|e| SdkError::network(e.to_string(), e))?;
+                .map_err(|e| Error::network(e.to_string(), e))?;
             let (msg, code, raw) = parse_error_body(&body, "type");
             return Err(error_from_status_code(
                 status.as_u16(),
@@ -1039,7 +1052,7 @@ impl ProviderAdapter for Adapter {
             tool_calls: Vec::new(),
             reasoning_items: Vec::new(),
             message_items: Vec::new(),
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             finish_reason: FinishReason::Stop,
             emitted_start: false,
             emitted_text_start: false,
@@ -1050,7 +1063,7 @@ impl ProviderAdapter for Adapter {
 
         let stream = stream::unfold(state, |mut state| async move {
             let events = process_next_sse_events(&mut state).await;
-            let items: Vec<Result<StreamEvent, SdkError>> = match events {
+            let items: Vec<Result<StreamEvent, Error>> = match events {
                 Ok(events) if events.is_empty() => return None,
                 Ok(events) => events.into_iter().map(Ok).collect(),
                 Err(e) => vec![Err(e)],
@@ -1065,26 +1078,27 @@ impl ProviderAdapter for Adapter {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::providers::common::LineReader;
     use crate::types::{AudioData, DocumentData};
-    use std::collections::HashMap;
 
     fn minimal_request() -> Request {
         Request {
-            model: "gpt-4o".to_string(),
-            messages: vec![Message::user("Hello")],
-            provider: None,
-            tools: None,
-            tool_choice: None,
-            response_format: None,
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            stop_sequences: None,
+            model:            "gpt-4o".to_string(),
+            messages:         vec![Message::user("Hello")],
+            provider:         None,
+            tools:            None,
+            tool_choice:      None,
+            response_format:  None,
+            temperature:      None,
+            top_p:            None,
+            max_tokens:       None,
+            stop_sequences:   None,
             reasoning_effort: None,
-            speed: None,
-            metadata: None,
+            speed:            None,
+            metadata:         None,
             provider_options: None,
         }
     }
@@ -1223,17 +1237,16 @@ mod tests {
         assert!(adapter.project_id.is_none());
         assert!(adapter.http.default_headers.is_empty());
     }
-
     #[test]
     fn audio_content_produces_text_fallback() {
         let msg = Message {
-            role: Role::User,
-            content: vec![ContentPart::Audio(AudioData {
-                url: Some("https://example.com/audio.wav".to_string()),
-                data: None,
+            role:         Role::User,
+            content:      vec![ContentPart::Audio(AudioData {
+                url:        Some("https://example.com/audio.wav".to_string()),
+                data:       None,
                 media_type: None,
             })],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
@@ -1250,14 +1263,14 @@ mod tests {
     #[test]
     fn document_content_produces_text_fallback_with_filename() {
         let msg = Message {
-            role: Role::User,
-            content: vec![ContentPart::Document(DocumentData {
-                url: Some("https://example.com/doc.pdf".to_string()),
-                data: None,
+            role:         Role::User,
+            content:      vec![ContentPart::Document(DocumentData {
+                url:        Some("https://example.com/doc.pdf".to_string()),
+                data:       None,
                 media_type: None,
-                file_name: Some("report.pdf".to_string()),
+                file_name:  Some("report.pdf".to_string()),
             })],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
@@ -1274,14 +1287,14 @@ mod tests {
     #[test]
     fn document_content_produces_text_fallback_without_filename() {
         let msg = Message {
-            role: Role::User,
-            content: vec![ContentPart::Document(DocumentData {
-                url: None,
-                data: Some(vec![1, 2, 3]),
+            role:         Role::User,
+            content:      vec![ContentPart::Document(DocumentData {
+                url:        None,
+                data:       Some(vec![1, 2, 3]),
                 media_type: None,
-                file_name: None,
+                file_name:  None,
             })],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
@@ -1332,9 +1345,9 @@ mod tests {
         tc.provider_metadata = Some(serde_json::json!({"id": "fc_abc123"}));
 
         let msg = Message {
-            role: Role::Assistant,
-            content: vec![ContentPart::ToolCall(tc)],
-            name: None,
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(tc)],
+            name:         None,
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
@@ -1351,9 +1364,9 @@ mod tests {
         let tc = ToolCall::new("call_xyz789", "get_weather", serde_json::json!({}));
 
         let msg = Message {
-            role: Role::Assistant,
-            content: vec![ContentPart::ToolCall(tc)],
-            name: None,
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(tc)],
+            name:         None,
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
@@ -1443,15 +1456,15 @@ mod tests {
         tc.provider_metadata = Some(serde_json::json!({"id": "fc_def456"}));
 
         let msg = Message {
-            role: Role::Assistant,
-            content: vec![
+            role:         Role::Assistant,
+            content:      vec![
                 ContentPart::Other {
                     kind: ContentPart::OPENAI_REASONING.to_string(),
                     data: reasoning,
                 },
                 ContentPart::ToolCall(tc),
             ],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
@@ -1487,8 +1500,8 @@ mod tests {
         tc.provider_metadata = Some(serde_json::json!({"id": "fc_def456"}));
 
         let msg = Message {
-            role: Role::Assistant,
-            content: vec![
+            role:         Role::Assistant,
+            content:      vec![
                 ContentPart::Other {
                     kind: ContentPart::OPENAI_REASONING.to_string(),
                     data: reasoning,
@@ -1500,7 +1513,7 @@ mod tests {
                 ContentPart::text("Checking now."),
                 ContentPart::ToolCall(tc),
             ],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
@@ -1522,9 +1535,9 @@ mod tests {
         // For non-OpenAI turns or turns without preserved message items,
         // Text parts should still produce a constructed message.
         let msg = Message {
-            role: Role::Assistant,
-            content: vec![ContentPart::text("Hello")],
-            name: None,
+            role:         Role::Assistant,
+            content:      vec![ContentPart::text("Hello")],
+            name:         None,
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
@@ -1549,9 +1562,9 @@ mod tests {
 
         // Now translate back to input format
         let msg = Message {
-            role: Role::Assistant,
-            content: parts,
-            name: None,
+            role:         Role::Assistant,
+            content:      parts,
+            name:         None,
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
@@ -1584,23 +1597,23 @@ mod tests {
 
     fn empty_sse_state() -> SseStreamState {
         let http_resp = http::Response::builder().status(200).body("").unwrap();
-        let response = reqwest::Response::from(http_resp);
+        let response = fabro_http::Response::from(http_resp);
         SseStreamState {
-            line_reader: LineReader::new(response, None),
-            model: String::new(),
-            response_id: String::new(),
-            response_model: String::new(),
-            accumulated_text: String::new(),
-            tool_calls: Vec::new(),
-            reasoning_items: Vec::new(),
-            message_items: Vec::new(),
-            usage: Usage::default(),
-            finish_reason: FinishReason::Stop,
-            emitted_start: true,
-            emitted_text_start: false,
+            line_reader:             LineReader::new(response, None),
+            model:                   String::new(),
+            response_id:             String::new(),
+            response_model:          String::new(),
+            accumulated_text:        String::new(),
+            tool_calls:              Vec::new(),
+            reasoning_items:         Vec::new(),
+            message_items:           Vec::new(),
+            usage:                   TokenCounts::default(),
+            finish_reason:           FinishReason::Stop,
+            emitted_start:           true,
+            emitted_text_start:      false,
             emitted_reasoning_start: false,
-            raw_response: None,
-            rate_limit: None,
+            raw_response:            None,
+            rate_limit:              None,
         }
     }
 

@@ -1,6 +1,17 @@
-use fabro_test::{fabro_snapshot, test_context};
+#![allow(clippy::absolute_paths)]
 
-use super::support::setup_completed_dry_run;
+use fabro_config::Storage;
+use fabro_server::bind::Bind;
+use fabro_test::{fabro_snapshot, test_context};
+use fabro_types::run_event::PullRequestCreatedProps;
+use fabro_types::{EventBody, RunEvent, RunId};
+
+use super::support::setup_completed_fast_dry_run;
+
+#[derive(Debug, serde::Deserialize)]
+struct TestServerRecord {
+    bind: Bind,
+}
 
 #[test]
 fn help() {
@@ -19,13 +30,13 @@ fn help() {
       <RUN_ID>  Run ID or prefix
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -33,7 +44,7 @@ fn help() {
 #[test]
 fn pr_view_missing_pull_request_json_errors() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let mut cmd = context.command();
     cmd.args(["pr", "view", &run.run_id]);
 
@@ -42,7 +53,82 @@ fn pr_view_missing_pull_request_json_errors() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: No pull_request.json found in run directory. Create one first with: fabro pr create [ULID]
-      > No such file or directory (os error 2)
+    error: No pull request found in store. Create one first with: fabro pr create [ULID]
+    ");
+}
+
+#[test]
+fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
+    let context = test_context!();
+    let run = setup_completed_fast_dry_run(&context);
+    let run_id: RunId = run.run_id.parse().unwrap();
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let record_path = Storage::new(&context.storage_dir)
+            .server_state()
+            .record_path();
+        let record: TestServerRecord =
+            serde_json::from_str(&std::fs::read_to_string(record_path).unwrap()).unwrap();
+        let (client, base_url) = match record.bind {
+            Bind::Unix(path) => (
+                fabro_http::HttpClientBuilder::new()
+                    .unix_socket(path)
+                    .no_proxy()
+                    .build()
+                    .unwrap(),
+                "http://fabro".to_string(),
+            ),
+            Bind::Tcp(addr) => (
+                fabro_http::HttpClientBuilder::new()
+                    .no_proxy()
+                    .build()
+                    .unwrap(),
+                format!("http://{addr}"),
+            ),
+        };
+        let event = RunEvent {
+            id: ulid::Ulid::new().to_string(),
+            ts: chrono::Utc::now(),
+            run_id,
+            node_id: None,
+            node_label: None,
+            stage_id: None,
+            parallel_group_id: None,
+            parallel_branch_id: None,
+            session_id: None,
+            parent_session_id: None,
+            tool_call_id: None,
+            actor: None,
+            body: EventBody::PullRequestCreated(PullRequestCreatedProps {
+                pr_url:      "https://github.com/fabro-sh/fabro/pull/123".to_string(),
+                pr_number:   123,
+                owner:       "fabro-sh".to_string(),
+                repo:        "fabro".to_string(),
+                base_branch: "main".to_string(),
+                head_branch: "fabro/run/demo".to_string(),
+                title:       "Map the constellations".to_string(),
+                draft:       false,
+            }),
+        };
+        client
+            .post(format!("{base_url}/api/v1/runs/{run_id}/events"))
+            .json(&event)
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+    });
+
+    let mut cmd = context.command();
+    cmd.args(["pr", "view", &run.run_id]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: GitHub credentials required — run `gh auth login` or configure a GitHub App with `fabro install`
     ");
 }

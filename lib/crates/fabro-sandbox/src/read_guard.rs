@@ -1,17 +1,19 @@
-use crate::Sandbox;
 use std::collections::HashSet;
 use std::path::{Component, PathBuf};
 use std::sync::{Arc, Mutex};
+
 use tracing::{debug, warn};
+
+use crate::Sandbox;
 
 /// Decorator that prevents writing to files the agent hasn't read first.
 ///
 /// Tracks which file paths the agent has seen (via `mark_agent_read`, called by
-/// tool executors after agent-visible reads) and returns an error when `write_file`
-/// or `delete_file` targets an existing file that hasn't been read.
-/// Writing to new (non-existent) files is always allowed.
+/// tool executors after agent-visible reads) and returns an error when
+/// `write_file` or `delete_file` targets an existing file that hasn't been
+/// read. Writing to new (non-existent) files is always allowed.
 pub struct ReadBeforeWriteSandbox {
-    inner: Arc<dyn Sandbox>,
+    inner:    Arc<dyn Sandbox>,
     read_set: Mutex<HashSet<String>>,
 }
 
@@ -99,10 +101,11 @@ crate::delegate_sandbox! {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::GrepOptions;
     use crate::test_support::MockSandbox;
-    use std::collections::HashMap;
 
     fn mock_with_files(files: HashMap<String, String>) -> MockSandbox {
         MockSandbox {

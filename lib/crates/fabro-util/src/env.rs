@@ -8,6 +8,7 @@ pub trait Env: Send + Sync {
 }
 
 /// Reads real process environment variables.
+#[derive(Clone, Debug)]
 pub struct SystemEnv;
 
 impl Env for SystemEnv {
@@ -20,6 +21,7 @@ impl Env for SystemEnv {
 ///
 /// Intended for use in tests across the workspace. Unconditionally compiled
 /// because it is trivial and has no external dependencies.
+#[derive(Clone, Debug)]
 pub struct TestEnv(pub std::collections::HashMap<String, String>);
 
 impl Env for TestEnv {

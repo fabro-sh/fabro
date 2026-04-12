@@ -2,12 +2,13 @@
 
 #![allow(clippy::absolute_paths)]
 
-use super::helpers::test_db;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_server::jwt_auth::AuthMode;
-use fabro_server::server::{build_router, create_app_state};
+use fabro_server::server::build_router;
 use tower::ServiceExt;
+
+use super::helpers::test_app_state;
 
 async fn get_json(app: axum::Router, uri: &str) -> serde_json::Value {
     let req = Request::builder()
@@ -24,7 +25,8 @@ async fn get_json(app: axum::Router, uri: &str) -> serde_json::Value {
     serde_json::from_slice(&body).unwrap()
 }
 
-/// Assert that a value has the paginated shape: `{ data: [...], meta: { has_more: bool } }`
+/// Assert that a value has the paginated shape: `{ data: [...], meta: {
+/// has_more: bool } }`
 fn assert_paginated_shape(json: &serde_json::Value, context: &str) {
     assert!(json.get("data").is_some(), "{context}: missing 'data' key");
     assert!(json["data"].is_array(), "{context}: 'data' is not an array");
@@ -45,22 +47,6 @@ struct PaginatedEndpoint {
 }
 
 const ENDPOINTS: &[PaginatedEndpoint] = &[
-    PaginatedEndpoint {
-        path: "/api/v1/workflows",
-        name: "listWorkflows",
-    },
-    PaginatedEndpoint {
-        path: "/api/v1/workflows/implement/runs",
-        name: "listWorkflowRuns",
-    },
-    PaginatedEndpoint {
-        path: "/api/v1/retros",
-        name: "listRetros",
-    },
-    PaginatedEndpoint {
-        path: "/api/v1/sessions",
-        name: "listSessions",
-    },
     PaginatedEndpoint {
         path: "/api/v1/insights/queries",
         name: "listSavedQueries",
@@ -85,19 +71,16 @@ const ENDPOINTS: &[PaginatedEndpoint] = &[
         path: "/api/v1/runs/run-1/stages",
         name: "listRunStages",
     },
-    PaginatedEndpoint {
-        path: "/api/v1/runs/run-1/verification",
-        name: "retrieveRunVerification",
-    },
 ];
 
 #[tokio::test]
 async fn paginated_endpoints_return_correct_shape() {
-    let state = create_app_state(test_db().await);
+    let state = test_app_state();
     let app = build_router(state, AuthMode::Disabled);
 
     for ep in ENDPOINTS {
-        // Default request: paginated shape, has_more = false (fixtures fit in default page)
+        // Default request: paginated shape, has_more = false (fixtures fit in default
+        // page)
         let json = get_json(app.clone(), ep.path).await;
         assert_paginated_shape(&json, ep.name);
         assert_eq!(

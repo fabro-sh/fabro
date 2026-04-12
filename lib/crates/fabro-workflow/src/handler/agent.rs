@@ -4,29 +4,25 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
-use fabro_store::NodeVisitRef;
+use fabro_graphviz::graph::{Graph, Node};
+use fabro_model::Provider;
+use fabro_template::{TemplateContext, render as render_template};
 use fabro_types::RunId;
 
-use crate::context::keys;
-use crate::context::{Context, WorkflowContext};
-use crate::error::FabroError;
-use crate::event::EventEmitter;
-use crate::outcome::{
-    FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus, StageUsage,
-};
-use crate::run_dir::{node_dir, visit_from_context};
-use crate::vars::expand_vars;
-use fabro_graphviz::graph::{Graph, Node};
-use tokio::fs;
-
 use super::{EngineServices, Handler};
+use crate::context::{Context, WorkflowContext, keys};
+use crate::error::Error;
+use crate::event::{Emitter, Event, StageScope};
+use crate::outcome::{
+    BilledModelUsage, FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus,
+};
 
 /// Result from a `CodergenBackend` invocation.
 pub enum CodergenResult {
     Text {
-        text: String,
-        usage: Option<StageUsage>,
-        files_touched: Vec<String>,
+        text:              String,
+        usage:             Option<BilledModelUsage>,
+        files_touched:     Vec<String>,
         last_file_touched: Option<String>,
     },
     Full(Outcome),
@@ -43,11 +39,10 @@ pub trait CodergenBackend: Send + Sync {
         prompt: &str,
         context: &Context,
         thread_id: Option<&str>,
-        emitter: &Arc<EventEmitter>,
-        stage_dir: &Path,
+        emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-    ) -> Result<CodergenResult, FabroError>;
+    ) -> Result<CodergenResult, Error>;
 
     /// Run a single LLM call with no tools (one_shot mode).
     async fn one_shot(
@@ -55,9 +50,8 @@ pub trait CodergenBackend: Send + Sync {
         _node: &Node,
         _prompt: &str,
         _system_prompt: Option<&str>,
-        _stage_dir: &Path,
-    ) -> Result<CodergenResult, FabroError> {
-        Err(FabroError::Validation(
+    ) -> Result<CodergenResult, Error> {
+        Err(Error::Validation(
             "one_shot mode not supported by this backend".into(),
         ))
     }
@@ -75,14 +69,16 @@ impl AgentHandler {
     }
 }
 
-/// Expand `$variable` placeholders in text using graph attributes.
-///
-/// Known variables are built from graph attributes (e.g. `$goal`). Any
-/// `$identifier` not in the map produces an error, catching typos like
-/// `$gaol` at runtime.
-pub(crate) fn expand_variables(text: &str, graph: &Graph) -> Result<String, FabroError> {
-    let vars = HashMap::from([("goal".to_string(), graph.goal().to_string())]);
-    expand_vars(text, &vars).map_err(|e| FabroError::Validation(e.to_string()))
+/// Expand `{{ goal }}` / `{{ inputs.* }}` placeholders in handler prompts.
+pub(crate) fn expand_variables(
+    text: &str,
+    graph: &Graph,
+    inputs: &HashMap<String, toml::Value>,
+) -> Result<String, Error> {
+    let ctx = TemplateContext::new()
+        .with_goal(graph.goal())
+        .with_inputs(inputs.clone());
+    Ok(render_template(text, &ctx)?)
 }
 
 /// Status fields that indicate a JSON object contains routing directives.
@@ -228,7 +224,7 @@ impl Handler for AgentHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         Ok(simulate_llm_handler(node))
     }
 
@@ -237,15 +233,15 @@ impl Handler for AgentHandler {
         node: &Node,
         context: &Context,
         graph: &Graph,
-        run_dir: &Path,
+        _run_dir: &Path,
         services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         // 1. Build prompt (prepend fidelity preamble if present)
         let raw_prompt = node
             .prompt()
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| node.label());
-        let expanded = expand_variables(raw_prompt, graph)?;
+        let expanded = expand_variables(raw_prompt, graph, &services.inputs)?;
         let preamble = context.preamble();
         let prompt = if preamble.is_empty() {
             expanded
@@ -253,29 +249,30 @@ impl Handler for AgentHandler {
             format!("{preamble}\n\n{expanded}")
         };
 
-        // 2. Write prompt to logs
-        let visit = visit_from_context(context);
-        let stage_dir = node_dir(run_dir, &node.id, visit);
-        fs::create_dir_all(&stage_dir).await?;
-        let node_ref = NodeVisitRef {
-            node_id: &node.id,
-            visit: u32::try_from(visit).unwrap_or(u32::MAX),
-        };
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_prompt(&node_ref, &prompt)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        } else {
-            fs::write(stage_dir.join("prompt.md"), &prompt).await?;
-        }
+        let prompt_provider = node
+            .provider()
+            .map(String::from)
+            .or_else(|| Some(Provider::default_from_env().as_str().to_string()));
+        let prompt_model = node.model().map(String::from);
+        let stage_scope = StageScope::for_handler(context, &node.id);
+        services.emitter.emit_scoped(
+            &Event::Prompt {
+                stage:    node.id.clone(),
+                visit:    stage_scope.visit,
+                text:     prompt.clone(),
+                mode:     Some("agent".to_string()),
+                provider: prompt_provider,
+                model:    prompt_model,
+            },
+            &stage_scope,
+        );
 
         // 3. Call LLM backend (agent loop)
         let thread_id = context.thread_id();
         let run_id = context
             .run_id()
             .parse::<RunId>()
-            .map_err(|err| FabroError::handler(format!("invalid internal run_id: {err}")))?;
+            .map_err(|err| Error::handler(format!("invalid internal run_id: {err}")))?;
         let tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>> =
             services.hook_runner.as_ref().map(|hr| {
                 Arc::new(fabro_hooks::WorkflowToolHookCallback {
@@ -296,18 +293,12 @@ impl Handler for AgentHandler {
                         context,
                         thread_id.as_deref(),
                         &services.emitter,
-                        &stage_dir,
                         &services.sandbox,
                         tool_hooks,
                     )
                     .await;
                 match result {
-                    Ok(CodergenResult::Full(outcome)) => {
-                        let status_json = serde_json::to_string_pretty(&outcome)
-                            .unwrap_or_else(|_| "{}".to_string());
-                        fs::write(stage_dir.join("status.json"), &status_json).await?;
-                        return Ok(outcome);
-                    }
+                    Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
                     Ok(CodergenResult::Text {
                         text,
                         usage,
@@ -330,17 +321,28 @@ impl Handler for AgentHandler {
                 )
             };
 
-        // 4. Write response to logs
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_response(&node_ref, &response_text)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        } else {
-            fs::write(stage_dir.join("response.md"), &response_text).await?;
-        }
+        let response_model = stage_usage
+            .as_ref()
+            .map(|usage| usage.model_id().to_string())
+            .or_else(|| node.model().map(String::from))
+            .unwrap_or_default();
+        let response_provider = node
+            .provider()
+            .map(String::from)
+            .or_else(|| Some(Provider::default_from_env().as_str().to_string()))
+            .unwrap_or_default();
+        services.emitter.emit_scoped(
+            &Event::PromptCompleted {
+                node_id:  node.id.clone(),
+                response: response_text.clone(),
+                model:    response_model,
+                provider: response_provider,
+                billing:  stage_usage.clone(),
+            },
+            &stage_scope,
+        );
 
-        // 7. Build and write status
+        // Build and write status
         let mut outcome = Outcome::success();
         outcome.notes = Some(format!("Stage completed: {}", node.id));
         outcome
@@ -389,24 +391,51 @@ impl Handler for AgentHandler {
         outcome.usage = stage_usage;
         outcome.files_touched = backend_files_touched;
 
-        let status_json =
-            serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
-        fs::write(stage_dir.join("status.json"), &status_json).await?;
-
         Ok(outcome)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::event::EventEmitter;
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use fabro_graphviz::graph::AttrValue;
+    use fabro_store::{Database, RunDatabase, StageId};
     use fabro_types::fixtures;
+    use object_store::memory::InMemory;
     use tempfile::TempDir;
+
+    use super::*;
+    use crate::event::Emitter;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
+    }
+
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
+    }
+
+    async fn make_services_with_run_store() -> (
+        EngineServices,
+        RunDatabase,
+        crate::event::StoreProgressLogger,
+    ) {
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let services = EngineServices {
+            emitter: Arc::new(crate::event::Emitter::new(fixtures::RUN_1)),
+            run_store: run_store.clone().into(),
+            ..EngineServices::test_default()
+        };
+        let logger = crate::event::StoreProgressLogger::new(run_store.clone());
+        logger.register(services.emitter.as_ref());
+        (services, run_store, logger)
     }
 
     fn test_context() -> Context {
@@ -449,7 +478,7 @@ mod tests {
         let mut node = Node::new("plan");
         node.attrs.insert(
             "prompt".to_string(),
-            AttrValue::String("Achieve: $goal".to_string()),
+            AttrValue::String("Achieve: {{ goal }}".to_string()),
         );
         let context = test_context();
         let mut graph = Graph::new("test");
@@ -458,16 +487,20 @@ mod tests {
             AttrValue::String("Build a feature".to_string()),
         );
         let tmp = TempDir::new().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let prompt_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("plan").join("prompt.md"))
-                .unwrap();
-        assert_eq!(prompt_content, "Achieve: Build a feature");
+        let state = run_store.state().await.unwrap();
+        let node_state = state.node(&StageId::new("plan", 1)).unwrap();
+        assert_eq!(
+            node_state.prompt.as_deref(),
+            Some("Achieve: Build a feature")
+        );
     }
 
     #[tokio::test]
@@ -481,16 +514,17 @@ mod tests {
         let context = test_context();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let prompt_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("work").join("prompt.md"))
-                .unwrap();
-        assert_eq!(prompt_content, "Do work");
+        let state = run_store.state().await.unwrap();
+        let node_state = state.node(&StageId::new("work", 1)).unwrap();
+        assert_eq!(node_state.prompt.as_deref(), Some("Do work"));
     }
 
     #[tokio::test]
@@ -564,16 +598,16 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
-                    text: r#"Done. {"outcome": "success", "preferred_next_label": "approve"}"#
-                        .to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:
+                        r#"Done. {"outcome": "success", "preferred_next_label": "approve"}"#
+                            .to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -621,15 +655,14 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
-                    text: "Done writing results.".to_string(),
-                    usage: None,
-                    files_touched: vec!["results.md".to_string()],
+                    text:              "Done writing results.".to_string(),
+                    usage:             None,
+                    files_touched:     vec!["results.md".to_string()],
                     last_file_touched: Some("results.md".to_string()),
                 })
             }
@@ -668,6 +701,66 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn codergen_handler_projects_provider_used_from_agent_session_events() {
+        struct ProviderEventBackend;
+
+        #[async_trait]
+        impl CodergenBackend for ProviderEventBackend {
+            async fn run(
+                &self,
+                node: &Node,
+                _prompt: &str,
+                context: &Context,
+                _thread_id: Option<&str>,
+                emitter: &Arc<Emitter>,
+                _sandbox: &Arc<dyn fabro_agent::Sandbox>,
+                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+            ) -> Result<CodergenResult, Error> {
+                let scope = StageScope::for_handler(context, &node.id);
+                emitter.emit_scoped(
+                    &crate::event::Event::Agent {
+                        stage:             node.id.clone(),
+                        visit:             scope.visit,
+                        event:             fabro_agent::AgentEvent::SessionStarted {
+                            provider: Some("openai".to_string()),
+                            model:    Some("gpt-5.4".to_string()),
+                        },
+                        session_id:        Some("session_123".to_string()),
+                        parent_session_id: None,
+                    },
+                    &scope,
+                );
+                Ok(CodergenResult::Text {
+                    text:              "done".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
+                    last_file_touched: None,
+                })
+            }
+        }
+
+        let handler = AgentHandler::new(Some(Box::new(ProviderEventBackend)));
+        let node = Node::new("step");
+        let context = test_context();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
+
+        handler
+            .execute(&node, &context, &graph, tmp.path(), &services)
+            .await
+            .unwrap();
+        logger.flush().await;
+
+        let state = run_store.state().await.unwrap();
+        let node_state = state.node(&StageId::new("step", 1)).unwrap();
+        assert_eq!(
+            node_state.provider_used.as_ref().unwrap()["provider"],
+            "openai"
+        );
+    }
+
     #[test]
     fn expand_variables_replaces_goal() {
         let mut graph = Graph::new("test");
@@ -675,16 +768,17 @@ mod tests {
             "goal".to_string(),
             AttrValue::String("Fix bugs".to_string()),
         );
-        let result = expand_variables("Goal is: $goal, do it", &graph).unwrap();
+        let result =
+            expand_variables("Goal is: {{ goal }}, do it", &graph, &HashMap::new()).unwrap();
         assert_eq!(result, "Goal is: Fix bugs, do it");
     }
 
     #[test]
     fn expand_variables_errors_on_unknown_variable() {
         let graph = Graph::new("test");
-        let err = expand_variables("Do $foo now", &graph).unwrap_err();
+        let err = expand_variables("Do {{ inputs.foo }} now", &graph, &HashMap::new()).unwrap_err();
         assert!(
-            err.to_string().contains("Undefined variable: $foo"),
+            err.to_string().contains("undefined"),
             "unexpected error: {err}"
         );
     }
@@ -692,14 +786,14 @@ mod tests {
     #[test]
     fn expand_variables_allows_bare_dollar() {
         let graph = Graph::new("test");
-        let result = expand_variables("costs $5", &graph).unwrap();
+        let result = expand_variables("costs $5", &graph, &HashMap::new()).unwrap();
         assert_eq!(result, "costs $5");
     }
 
     #[test]
     fn expand_variables_allows_dollar_alone() {
         let graph = Graph::new("test");
-        let result = expand_variables("just a $ sign", &graph).unwrap();
+        let result = expand_variables("just a $ sign", &graph, &HashMap::new()).unwrap();
         assert_eq!(result, "just a $ sign");
     }
 
@@ -730,16 +824,15 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
                 Ok(CodergenResult::Text {
-                    text: "ok".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "ok".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -783,16 +876,15 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
                 Ok(CodergenResult::Text {
-                    text: "ok".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "ok".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -831,12 +923,11 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
-                Err(FabroError::handler("Request timed out".to_string()))
+            ) -> Result<CodergenResult, Error> {
+                Err(Error::handler("Request timed out".to_string()))
             }
         }
 
@@ -975,12 +1066,11 @@ Some text in between.
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
-                Err(FabroError::Validation("bad config".to_string()))
+            ) -> Result<CodergenResult, Error> {
+                Err(Error::Validation("bad config".to_string()))
             }
         }
 
@@ -1014,16 +1104,15 @@ Some text in between.
                 prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                _stage_dir: &std::path::Path,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
                 Ok(CodergenResult::Text {
-                    text: "ok".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "ok".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -1084,16 +1173,15 @@ Some text in between.
                 prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                _stage_dir: &std::path::Path,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
                 Ok(CodergenResult::Text {
-                    text: "ok".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "ok".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -1139,15 +1227,17 @@ Some text in between.
         );
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let prompt_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("report").join("prompt.md"))
-                .unwrap();
+        let state = run_store.state().await.unwrap();
+        let node_state = state.node(&StageId::new("report", 1)).unwrap();
+        let prompt_content = node_state.prompt.as_deref().unwrap();
         assert!(
             prompt_content.contains("## Script Output\nAll tests passed"),
             "prompt.md should contain preamble"

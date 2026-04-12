@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use fabro_interview::WebInterviewer;
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
@@ -8,6 +7,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::client::{SlackApiError, SlackClient, parse_wss_url};
 use crate::dispatch::{DispatchAction, dispatch};
+use crate::payload::SlackAnswerSubmission;
 use crate::socket::{SocketAck, SocketEnvelope};
 use crate::threads::ThreadRegistry;
 
@@ -57,7 +57,7 @@ pub fn process_message(
 
 /// Fetch a WebSocket URL from Slack's `apps.connections.open` endpoint.
 pub async fn open_socket_url(
-    http: &reqwest::Client,
+    http: &fabro_http::HttpClient,
     app_token: &str,
 ) -> Result<String, ConnectionError> {
     let resp = http
@@ -83,8 +83,8 @@ pub async fn open_socket_url(
 /// On disconnect, returns so the caller can reconnect.
 pub async fn run_event_loop(
     wss_url: &str,
-    interviewer: &Arc<WebInterviewer>,
     thread_registry: &ThreadRegistry,
+    on_submit: &Arc<dyn Fn(SlackAnswerSubmission) + Send + Sync>,
 ) -> Result<(), ConnectionError> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(wss_url)
         .await
@@ -117,21 +117,20 @@ pub async fn run_event_loop(
 
         let (ack_json, outcome, action) = process_message(&text, thread_registry);
 
-        // Send ack immediately (Slack requires within 3 seconds)
         if let Some(ack) = ack_json {
             if let Err(e) = write.send(Message::Text(ack.into())).await {
                 error!("Failed to send ack: {e}");
             }
         }
 
-        // Handle dispatch action
         match action {
-            DispatchAction::SubmitAnswer {
-                question_id,
-                answer,
-            } => {
-                debug!(question_id, "Submitting answer from Slack");
-                let _ = interviewer.submit_answer(&question_id, answer);
+            DispatchAction::SubmitAnswer(submission) => {
+                debug!(
+                    run_id = submission.run_id,
+                    qid = submission.qid,
+                    "Submitting answer from Slack"
+                );
+                on_submit(submission);
             }
             DispatchAction::Connected => {
                 info!("Socket Mode handshake complete");
@@ -149,12 +148,13 @@ pub async fn run_event_loop(
     Ok(())
 }
 
-/// Top-level runner: connects, runs the event loop, and reconnects on disconnect.
+/// Top-level runner: connects, runs the event loop, and reconnects on
+/// disconnect.
 pub async fn run(
     slack_client: &SlackClient,
     app_token: &str,
-    interviewer: Arc<WebInterviewer>,
     thread_registry: &ThreadRegistry,
+    on_submit: Arc<dyn Fn(SlackAnswerSubmission) + Send + Sync>,
 ) {
     let mut backoff = std::time::Duration::from_secs(1);
     let max_backoff = std::time::Duration::from_secs(30);
@@ -173,7 +173,7 @@ pub async fn run(
             }
         };
 
-        match run_event_loop(&wss_url, &interviewer, thread_registry).await {
+        match run_event_loop(&wss_url, thread_registry, &on_submit).await {
             Ok(()) => {
                 info!("Event loop ended, reconnecting...");
                 backoff = std::time::Duration::from_secs(1);
@@ -189,8 +189,11 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::{Arc, Mutex};
+
     use fabro_interview::AnswerValue;
+
+    use super::*;
 
     fn registry() -> ThreadRegistry {
         ThreadRegistry::new()
@@ -213,9 +216,9 @@ mod tests {
             "payload": {
                 "type": "block_actions",
                 "actions": [{
-                    "action_id": "q-1:yes",
+                    "action_id": "interview.answer",
                     "type": "button",
-                    "value": "yes"
+                    "value": "{\"kind\":\"yes\",\"run_id\":\"run-1\",\"qid\":\"q-1\"}"
                 }]
             }
         }"#;
@@ -224,12 +227,10 @@ mod tests {
         assert!(ack.unwrap().contains("env-1"));
         assert_eq!(outcome, ProcessOutcome::Continue);
         match action {
-            DispatchAction::SubmitAnswer {
-                question_id,
-                answer,
-            } => {
-                assert_eq!(question_id, "q-1");
-                assert_eq!(answer.value, AnswerValue::Yes);
+            DispatchAction::SubmitAnswer(submission) => {
+                assert_eq!(submission.run_id, "run-1");
+                assert_eq!(submission.qid, "q-1");
+                assert_eq!(submission.answer.value, AnswerValue::Yes);
             }
             other => panic!("expected SubmitAnswer, got {other:?}"),
         }
@@ -272,7 +273,7 @@ mod tests {
     #[test]
     fn process_thread_reply_with_registered_question() {
         let reg = registry();
-        reg.register("1234.5678", "q-10");
+        reg.register("1234.5678", "run-10", "q-10");
         let text = serde_json::json!({
             "type": "events_api",
             "envelope_id": "env-50",
@@ -290,59 +291,78 @@ mod tests {
         assert!(ack.is_some());
         assert_eq!(outcome, ProcessOutcome::Continue);
         match action {
-            DispatchAction::SubmitAnswer {
-                question_id,
-                answer,
-            } => {
-                assert_eq!(question_id, "q-10");
-                assert_eq!(answer.value, AnswerValue::Text("my answer".to_string()));
+            DispatchAction::SubmitAnswer(submission) => {
+                assert_eq!(submission.run_id, "run-10");
+                assert_eq!(submission.qid, "q-10");
+                assert_eq!(
+                    submission.answer.value,
+                    AnswerValue::Text("my answer".to_string())
+                );
             }
             other => panic!("expected SubmitAnswer, got {other:?}"),
         }
     }
 
     #[tokio::test]
-    async fn submit_answer_reaches_web_interviewer() {
-        let interviewer = Arc::new(WebInterviewer::new());
-        let i_clone = Arc::clone(&interviewer);
+    async fn run_event_loop_submits_answers_via_callback() {
+        use tokio::net::TcpListener;
 
-        let handle = tokio::spawn(async move {
-            use fabro_interview::{Interviewer, Question, QuestionType};
-            let q = Question::new("approve?", QuestionType::YesNo);
-            i_clone.ask(q).await
-        });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let url = format!("ws://{addr}");
 
-        sleep(std::time::Duration::from_millis(50)).await;
+        let registry = registry();
+        let submissions = Arc::new(Mutex::new(Vec::new()));
+        let callback_submissions = Arc::clone(&submissions);
+        let on_submit: Arc<dyn Fn(SlackAnswerSubmission) + Send + Sync> =
+            Arc::new(move |submission| {
+                callback_submissions.lock().unwrap().push(submission);
+            });
 
-        let pending = interviewer.pending_questions();
-        assert_eq!(pending.len(), 1);
+        let server = async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
 
-        let question_id = pending[0].id.clone();
-        let text = serde_json::json!({
-            "type": "interactive",
-            "envelope_id": "e1",
-            "payload": {
-                "type": "block_actions",
-                "actions": [{
-                    "action_id": format!("{question_id}:yes"),
-                    "type": "button",
-                    "value": "yes"
-                }]
+            ws.send(Message::Text(r#"{"type":"hello"}"#.into()))
+                .await
+                .unwrap();
+            ws.send(Message::Text(
+                r#"{
+                    "type": "interactive",
+                    "envelope_id": "env-1",
+                    "payload": {
+                        "type": "block_actions",
+                        "actions": [{
+                            "action_id": "interview.answer",
+                            "type": "button",
+                            "value": "{\"kind\":\"yes\",\"run_id\":\"run-1\",\"qid\":\"q-1\"}"
+                        }]
+                    }
+                }"#
+                .into(),
+            ))
+            .await
+            .unwrap();
+
+            while let Some(msg) = ws.next().await {
+                match msg.unwrap() {
+                    Message::Text(text) if text.contains("\"envelope_id\":\"env-1\"") => {
+                        let _ = ws.send(Message::Close(None)).await;
+                        break;
+                    }
+                    _ => {}
+                }
             }
-        })
-        .to_string();
-        let (_, _, action) = process_message(&text, &registry());
-        match action {
-            DispatchAction::SubmitAnswer {
-                question_id: qid,
-                answer,
-            } => {
-                assert!(interviewer.submit_answer(&qid, answer));
-            }
-            other => panic!("expected SubmitAnswer, got {other:?}"),
-        }
+        };
 
-        let answer = handle.await.unwrap();
-        assert_eq!(answer.value, AnswerValue::Yes);
+        let _server_task = tokio::spawn(server);
+        let loop_result = run_event_loop(&url, &registry, &on_submit).await;
+        assert!(loop_result.is_ok());
+
+        let submissions = submissions.lock().unwrap();
+        assert_eq!(submissions.len(), 1);
+        assert_eq!(submissions[0].run_id, "run-1");
+        assert_eq!(submissions[0].qid, "q-1");
+        assert_eq!(submissions[0].answer.value, AnswerValue::Yes);
     }
 }

@@ -5,9 +5,9 @@ use fabro_graphviz::graph::types::{Graph as GvGraph, Node as GvNode};
 
 const DEFAULT_BACKOFF: BackoffPolicy = BackoffPolicy {
     initial_delay: Duration::from_millis(5_000),
-    factor: 2.0,
-    max_delay: Duration::from_millis(60_000),
-    jitter: true,
+    factor:        2.0,
+    max_delay:     Duration::from_millis(60_000),
+    jitter:        true,
 };
 
 /// Build a retry policy from node and graph attributes.
@@ -35,22 +35,22 @@ fn preset_retry_policy(preset: &str) -> Option<RetryPolicy> {
     match preset {
         "none" => Some(RetryPolicy {
             max_attempts: 1,
-            backoff: DEFAULT_BACKOFF,
+            backoff:      DEFAULT_BACKOFF,
         }),
         "standard" => Some(RetryPolicy {
             max_attempts: 5,
-            backoff: DEFAULT_BACKOFF,
+            backoff:      DEFAULT_BACKOFF,
         }),
         "aggressive" => Some(RetryPolicy {
             max_attempts: 5,
-            backoff: BackoffPolicy {
+            backoff:      BackoffPolicy {
                 initial_delay: Duration::from_millis(500),
                 ..DEFAULT_BACKOFF
             },
         }),
         "linear" => Some(RetryPolicy {
             max_attempts: 3,
-            backoff: BackoffPolicy {
+            backoff:      BackoffPolicy {
                 initial_delay: Duration::from_millis(500),
                 factor: 1.0,
                 ..DEFAULT_BACKOFF
@@ -58,7 +58,7 @@ fn preset_retry_policy(preset: &str) -> Option<RetryPolicy> {
         }),
         "patient" => Some(RetryPolicy {
             max_attempts: 3,
-            backoff: BackoffPolicy {
+            backoff:      BackoffPolicy {
                 initial_delay: Duration::from_millis(2_000),
                 factor: 3.0,
                 ..DEFAULT_BACKOFF

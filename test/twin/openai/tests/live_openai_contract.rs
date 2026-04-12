@@ -1,3 +1,5 @@
+#![allow(clippy::print_stderr)]
+
 mod common;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
@@ -21,8 +23,8 @@ const RESPONSES_STREAM_MILESTONES: &[&str] = &[
 ];
 
 #[derive(Clone)]
-struct LiveConfig {
-    api: common::ApiClient,
+struct LiveOptions {
+    api:   common::ApiClient,
     model: String,
 }
 
@@ -44,14 +46,14 @@ enum ChatStreamMilestone {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ToolCallObservation {
-    name: String,
+    name:      String,
     arguments: Value,
 }
 
 #[tokio::test]
 #[ignore = "requires OPENAI_API_KEY and outbound network"]
 async fn live_openai_contract_smoke_suite() {
-    let Some(config) = LiveConfig::from_env().expect("live config should load") else {
+    let Some(config) = LiveOptions::from_env().expect("live config should load") else {
         eprintln!("skipping live OpenAI smoke suite because OPENAI_API_KEY is not set");
         return;
     };
@@ -203,7 +205,7 @@ async fn live_openai_contract_smoke_suite() {
     );
 }
 
-impl LiveConfig {
+impl LiveOptions {
     fn from_env() -> Result<Option<Self>> {
         let Some(api_key) = non_empty_env("OPENAI_API_KEY") else {
             return Ok(None);
@@ -232,7 +234,7 @@ fn collect_failure(failures: &mut Vec<String>, name: &str, result: Result<()>) {
     }
 }
 
-async fn probe_responses_availability(config: &LiveConfig) -> Result<SurfaceAvailability> {
+async fn probe_responses_availability(config: &LiveOptions) -> Result<SurfaceAvailability> {
     probe_surface_availability(
         &config.api,
         "/v1/responses",
@@ -246,7 +248,7 @@ async fn probe_responses_availability(config: &LiveConfig) -> Result<SurfaceAvai
     .await
 }
 
-async fn probe_chat_availability(config: &LiveConfig) -> Result<SurfaceAvailability> {
+async fn probe_chat_availability(config: &LiveOptions) -> Result<SurfaceAvailability> {
     probe_surface_availability(
         &config.api,
         "/v1/chat/completions",
@@ -268,7 +270,7 @@ async fn probe_surface_availability(
 ) -> Result<SurfaceAvailability> {
     let response = client.post_json_recorded(path, body).await;
 
-    if response.status == reqwest::StatusCode::OK {
+    if response.status == fabro_http::StatusCode::OK {
         return Ok(SurfaceAvailability::Available);
     }
 
@@ -284,7 +286,7 @@ async fn probe_surface_availability(
     );
 }
 
-async fn compare_responses_non_stream_text(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_non_stream_text(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -319,7 +321,7 @@ async fn compare_responses_non_stream_text(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_stream_text(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_stream_text(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -347,7 +349,7 @@ async fn compare_responses_stream_text(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_structured_output(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_structured_output(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let schema = smoke_schema();
     let request = json!({
@@ -386,7 +388,7 @@ async fn compare_responses_structured_output(config: &LiveConfig) -> Result<()> 
     Ok(())
 }
 
-async fn compare_responses_stream_structured_output(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_stream_structured_output(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let schema = smoke_schema();
     let request = json!({
@@ -436,7 +438,7 @@ async fn compare_responses_stream_structured_output(config: &LiveConfig) -> Resu
     Ok(())
 }
 
-async fn compare_responses_tool_call(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_tool_call(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_tool_scenario(&server, "responses", &config.model, false).await;
 
@@ -494,7 +496,7 @@ async fn compare_responses_tool_call(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_stream_tool_call(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_stream_tool_call(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_tool_scenario(&server, "responses", &config.model, true).await;
 
@@ -553,7 +555,7 @@ async fn compare_responses_stream_tool_call(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_continuation(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_continuation(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_responses_continuation_scenarios(&server, &config.model).await;
 
@@ -656,7 +658,7 @@ async fn compare_responses_continuation(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_stream_continuation(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_stream_continuation(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_responses_continuation_scenarios(&server, &config.model).await;
 
@@ -746,7 +748,7 @@ async fn compare_responses_stream_continuation(config: &LiveConfig) -> Result<()
     Ok(())
 }
 
-async fn compare_responses_image_input(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_image_input(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -782,7 +784,7 @@ async fn compare_responses_image_input(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_stream_image_input(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_stream_image_input(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -821,7 +823,7 @@ async fn compare_responses_stream_image_input(config: &LiveConfig) -> Result<()>
     Ok(())
 }
 
-async fn compare_responses_tool_choice_none(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_tool_choice_none(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -867,7 +869,7 @@ async fn compare_responses_tool_choice_none(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_non_stream_text(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_non_stream_text(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -902,7 +904,7 @@ async fn compare_chat_non_stream_text(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_stream_text(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_stream_text(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -925,7 +927,7 @@ async fn compare_chat_stream_text(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_structured_output(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_structured_output(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let schema = smoke_schema();
     let request = json!({
@@ -964,7 +966,7 @@ async fn compare_chat_structured_output(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_stream_structured_output(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_stream_structured_output(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let schema = smoke_schema();
     let request = json!({
@@ -1009,7 +1011,7 @@ async fn compare_chat_stream_structured_output(config: &LiveConfig) -> Result<()
     Ok(())
 }
 
-async fn compare_chat_tool_call(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_tool_call(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_tool_scenario(&server, "chat.completions", &config.model, false).await;
 
@@ -1065,7 +1067,7 @@ async fn compare_chat_tool_call(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_stream_tool_call(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_stream_tool_call(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_tool_scenario(&server, "chat.completions", &config.model, true).await;
 
@@ -1109,7 +1111,7 @@ async fn compare_chat_stream_tool_call(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_image_input(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_image_input(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -1145,7 +1147,7 @@ async fn compare_chat_image_input(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_stream_image_input(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_stream_image_input(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -1179,7 +1181,7 @@ async fn compare_chat_stream_image_input(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_tool_choice_none(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_tool_choice_none(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -1310,7 +1312,7 @@ async fn enqueue_responses_continuation_scenarios(server: &common::TestServer, m
 async fn post_json_ok(client: &common::ApiClient, path: &str, body: &Value) -> Result<Value> {
     let response = client.post_json_recorded(path, body).await;
     ensure!(
-        response.status == reqwest::StatusCode::OK,
+        response.status == fabro_http::StatusCode::OK,
         "{} returned {}: {}",
         path,
         response.status,
@@ -1326,7 +1328,7 @@ async fn post_sse_ok(
 ) -> Result<common::ParsedSseTranscript> {
     let response = client.post_json_recorded(path, body).await;
     ensure!(
-        response.status == reqwest::StatusCode::OK,
+        response.status == fabro_http::StatusCode::OK,
         "{} returned {}: {}",
         path,
         response.status,
@@ -1360,14 +1362,14 @@ fn classify_live_access_blocker(response: &common::RecordedResponse) -> Option<S
     let message = error.get("message").and_then(Value::as_str).unwrap_or("");
 
     match response.status {
-        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+        fabro_http::StatusCode::UNAUTHORIZED | fabro_http::StatusCode::FORBIDDEN
             if message.contains("Missing scopes:")
                 || message.contains("insufficient permissions")
                 || message.contains("correct role in your organization") =>
         {
             Some("missing required OpenAI API scope or role".to_owned())
         }
-        reqwest::StatusCode::TOO_MANY_REQUESTS if error_type == Some("insufficient_quota") => {
+        fabro_http::StatusCode::TOO_MANY_REQUESTS if error_type == Some("insufficient_quota") => {
             Some("account has insufficient quota for live API calls".to_owned())
         }
         _ => None,
@@ -1389,7 +1391,7 @@ fn ensure_matching_status(
         summarize_recorded_body(live)
     );
     ensure!(
-        local.status == reqwest::StatusCode::OK,
+        local.status == fabro_http::StatusCode::OK,
         "{} returned non-OK responses: local={} body={} live={} body={}",
         label,
         local.status,
@@ -1463,7 +1465,7 @@ fn normalize_chat_stream(
         match choice.get("finish_reason").and_then(Value::as_str) {
             Some("stop") => push_chat_milestone(&mut milestones, ChatStreamMilestone::FinishStop),
             Some("tool_calls") => {
-                push_chat_milestone(&mut milestones, ChatStreamMilestone::FinishToolCalls)
+                push_chat_milestone(&mut milestones, ChatStreamMilestone::FinishToolCalls);
             }
             _ => {}
         }
@@ -1524,7 +1526,7 @@ fn extract_response_tool_call(body: &Value) -> Option<ToolCallObservation> {
         .find(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
         .and_then(|tool_call| {
             Some(ToolCallObservation {
-                name: tool_call.get("name")?.as_str()?.to_owned(),
+                name:      tool_call.get("name")?.as_str()?.to_owned(),
                 arguments: parse_json_object_string(tool_call.get("arguments")?.as_str()?)?,
             })
         })
@@ -1626,7 +1628,7 @@ fn extract_chat_tool_call(body: &Value) -> Option<ToolCallObservation> {
         .iter()
         .find_map(|tool_call| {
             Some(ToolCallObservation {
-                name: tool_call.get("function")?.get("name")?.as_str()?.to_owned(),
+                name:      tool_call.get("function")?.get("name")?.as_str()?.to_owned(),
                 arguments: parse_json_object_string(
                     tool_call.get("function")?.get("arguments")?.as_str()?,
                 )?,
@@ -1816,16 +1818,14 @@ fn truncate_for_display(input: &str, max_chars: usize) -> String {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn ensure_eq<T>(left: Option<T>, right: Option<T>, label: &str) -> Result<()>
 where
     T: PartialEq + std::fmt::Debug,
 {
     ensure!(
         left == right,
-        "{} mismatch: local={:?} live={:?}",
-        label,
-        left,
-        right
+        "{label} mismatch: local={left:?} live={right:?}"
     );
     Ok(())
 }

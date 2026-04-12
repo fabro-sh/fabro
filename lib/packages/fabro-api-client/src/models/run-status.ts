@@ -19,13 +19,14 @@
  */
 
 export const RunStatus = {
+    SUBMITTED: 'submitted',
     QUEUED: 'queued',
     STARTING: 'starting',
     RUNNING: 'running',
     COMPLETED: 'completed',
     FAILED: 'failed',
     CANCELLED: 'cancelled',
-    PAUSED: 'paused',
+    PAUSED: 'paused'
 } as const;
 
 export type RunStatus = typeof RunStatus[keyof typeof RunStatus];

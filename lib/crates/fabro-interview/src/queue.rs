@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::{Answer, Interviewer, Question};
 
-/// Reads answers from a pre-filled queue. Returns Aborted when empty.
+/// Reads answers from a pre-filled queue. Returns Interrupted when empty.
 pub struct QueueInterviewer {
     answers: Mutex<VecDeque<Answer>>,
 }
@@ -23,7 +23,7 @@ impl QueueInterviewer {
 impl Interviewer for QueueInterviewer {
     async fn ask(&self, _question: Question) -> Answer {
         let mut queue = self.answers.lock().expect("queue lock poisoned");
-        queue.pop_front().unwrap_or_else(Answer::aborted)
+        queue.pop_front().unwrap_or_else(Answer::interrupted)
     }
 }
 
@@ -46,21 +46,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn returns_aborted_when_empty() {
+    async fn returns_interrupted_when_empty() {
         let interviewer = QueueInterviewer::new(VecDeque::new());
         let q = Question::new("q", QuestionType::YesNo);
         let answer = interviewer.ask(q).await;
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
     }
 
     #[tokio::test]
-    async fn returns_aborted_after_exhausted() {
+    async fn returns_interrupted_after_exhausted() {
         let answers = VecDeque::from([Answer::yes()]);
         let interviewer = QueueInterviewer::new(answers);
         let q = Question::new("q", QuestionType::YesNo);
 
         let _ = interviewer.ask(q.clone()).await;
         let answer = interviewer.ask(q).await;
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
     }
 }

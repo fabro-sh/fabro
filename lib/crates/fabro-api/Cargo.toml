@@ -1,0 +1,31 @@
+[package]
+name = "fabro-api"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Generated Rust types and HTTP client from the Fabro API OpenAPI spec"
+
+[lib]
+doctest = false
+
+[lints.clippy]
+# Auto-generated crate; only enforce project-specific lints
+wildcard_imports = "warn"
+
+[dependencies]
+chrono = { workspace = true, features = ["serde"] }
+progenitor-client = "0.13"
+regress = "0.10"
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid = { workspace = true, features = ["serde"] }
+
+[build-dependencies]
+openapiv3 = "2"
+progenitor = "0.13"
+serde_json = "1"
+serde_yaml = "0.9"
+prettyplease = "0.2"
+syn = "2"

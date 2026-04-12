@@ -1,14 +1,14 @@
-use fabro_llm::error::SdkError;
+use fabro_llm::Error as LlmError;
 
-/// Why a session was aborted.
+/// Why a session was interrupted.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AbortReason {
+pub enum InterruptReason {
     WallClockTimeout,
     Cancelled,
 }
 
-impl std::fmt::Display for AbortReason {
+impl std::fmt::Display for InterruptReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::WallClockTimeout => write!(f, "wall clock timeout"),
@@ -19,9 +19,9 @@ impl std::fmt::Display for AbortReason {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, thiserror::Error)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub enum AgentError {
+pub enum Error {
     #[error("LLM error: {0}")]
-    Llm(#[from] SdkError),
+    Llm(#[from] LlmError),
 
     #[error("Session is closed")]
     SessionClosed,
@@ -32,116 +32,119 @@ pub enum AgentError {
     #[error("Tool execution error: {0}")]
     ToolExecution(String),
 
-    #[error("Aborted: {0}")]
-    Aborted(AbortReason),
+    #[error("Interrupted: {0}")]
+    Interrupted(InterruptReason),
 }
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 mod tests {
+    use fabro_llm::{ProviderErrorDetail, ProviderErrorKind};
+
     use super::*;
-    use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};
 
     #[test]
     fn agent_error_from_sdk_error() {
-        let sdk_err = SdkError::Network {
+        let sdk_err = LlmError::Network {
             message: "connection refused".into(),
-            source: None,
+            source:  None,
         };
-        let agent_err = AgentError::from(sdk_err);
-        assert!(matches!(agent_err, AgentError::Llm(_)));
+        let agent_err = Error::from(sdk_err);
+        assert!(matches!(agent_err, Error::Llm(_)));
         assert!(agent_err.to_string().contains("connection refused"));
     }
 
     #[test]
     fn session_closed_display() {
-        let err = AgentError::SessionClosed;
+        let err = Error::SessionClosed;
         assert_eq!(err.to_string(), "Session is closed");
     }
 
     #[test]
     fn invalid_state_display() {
-        let err = AgentError::InvalidState("bad state".into());
+        let err = Error::InvalidState("bad state".into());
         assert_eq!(err.to_string(), "Invalid state: bad state");
     }
 
     #[test]
     fn tool_execution_display() {
-        let err = AgentError::ToolExecution("command failed".into());
+        let err = Error::ToolExecution("command failed".into());
         assert_eq!(err.to_string(), "Tool execution error: command failed");
     }
 
     #[test]
-    fn aborted_display() {
-        let err = AgentError::Aborted(AbortReason::Cancelled);
-        assert_eq!(err.to_string(), "Aborted: cancelled");
+    fn interrupted_display() {
+        let err = Error::Interrupted(InterruptReason::Cancelled);
+        assert_eq!(err.to_string(), "Interrupted: cancelled");
     }
 
     #[test]
-    fn aborted_wall_clock_timeout_display() {
-        let err = AgentError::Aborted(AbortReason::WallClockTimeout);
-        assert_eq!(err.to_string(), "Aborted: wall clock timeout");
+    fn interrupted_wall_clock_timeout_display() {
+        let err = Error::Interrupted(InterruptReason::WallClockTimeout);
+        assert_eq!(err.to_string(), "Interrupted: wall clock timeout");
     }
 
     // --- Serde roundtrip tests ---
 
     #[test]
     fn serde_roundtrip_llm_network() {
-        let err = AgentError::Llm(SdkError::Network {
+        let err = Error::Llm(LlmError::Network {
             message: "connection refused".into(),
-            source: None,
+            source:  None,
         });
         let json = serde_json::to_string(&err).unwrap();
-        let deserialized: AgentError = serde_json::from_str(&json).unwrap();
+        let deserialized: Error = serde_json::from_str(&json).unwrap();
         assert_eq!(err.to_string(), deserialized.to_string());
     }
 
     #[test]
     fn serde_roundtrip_llm_provider() {
-        let err = AgentError::Llm(SdkError::Provider {
-            kind: ProviderErrorKind::RateLimit,
+        let err = Error::Llm(LlmError::Provider {
+            kind:   ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail {
-                message: "too fast".into(),
-                provider: "openai".into(),
+                message:     "too fast".into(),
+                provider:    "openai".into(),
                 status_code: Some(429),
-                error_code: None,
+                error_code:  None,
                 retry_after: Some(2.0),
-                raw: None,
+                raw:         None,
             }),
         });
         let json = serde_json::to_string(&err).unwrap();
-        let deserialized: AgentError = serde_json::from_str(&json).unwrap();
+        let deserialized: Error = serde_json::from_str(&json).unwrap();
         assert_eq!(err.to_string(), deserialized.to_string());
     }
 
     #[test]
     fn serde_roundtrip_session_closed() {
-        let err = AgentError::SessionClosed;
+        let err = Error::SessionClosed;
         let json = serde_json::to_string(&err).unwrap();
-        let deserialized: AgentError = serde_json::from_str(&json).unwrap();
+        let deserialized: Error = serde_json::from_str(&json).unwrap();
         assert_eq!(err.to_string(), deserialized.to_string());
     }
 
     #[test]
     fn serde_roundtrip_invalid_state() {
-        let err = AgentError::InvalidState("bad".into());
+        let err = Error::InvalidState("bad".into());
         let json = serde_json::to_string(&err).unwrap();
-        let deserialized: AgentError = serde_json::from_str(&json).unwrap();
+        let deserialized: Error = serde_json::from_str(&json).unwrap();
         assert_eq!(err.to_string(), deserialized.to_string());
     }
 
     #[test]
     fn serde_roundtrip_tool_execution() {
-        let err = AgentError::ToolExecution("cmd failed".into());
+        let err = Error::ToolExecution("cmd failed".into());
         let json = serde_json::to_string(&err).unwrap();
-        let deserialized: AgentError = serde_json::from_str(&json).unwrap();
+        let deserialized: Error = serde_json::from_str(&json).unwrap();
         assert_eq!(err.to_string(), deserialized.to_string());
     }
 
     #[test]
-    fn serde_roundtrip_aborted() {
-        let err = AgentError::Aborted(AbortReason::Cancelled);
+    fn serde_roundtrip_interrupted() {
+        let err = Error::Interrupted(InterruptReason::Cancelled);
         let json = serde_json::to_string(&err).unwrap();
-        let deserialized: AgentError = serde_json::from_str(&json).unwrap();
+        let deserialized: Error = serde_json::from_str(&json).unwrap();
         assert_eq!(err.to_string(), deserialized.to_string());
     }
 
@@ -149,15 +152,15 @@ mod tests {
 
     #[test]
     fn clone_all_variants() {
-        let errors: Vec<AgentError> = vec![
-            AgentError::Llm(SdkError::Network {
+        let errors: Vec<Error> = vec![
+            Error::Llm(LlmError::Network {
                 message: "refused".into(),
-                source: None,
+                source:  None,
             }),
-            AgentError::SessionClosed,
-            AgentError::InvalidState("reason".into()),
-            AgentError::ToolExecution("reason".into()),
-            AgentError::Aborted(AbortReason::Cancelled),
+            Error::SessionClosed,
+            Error::InvalidState("reason".into()),
+            Error::ToolExecution("reason".into()),
+            Error::Interrupted(InterruptReason::Cancelled),
         ];
         for err in &errors {
             assert_eq!(err.to_string(), err.clone().to_string());
@@ -168,9 +171,9 @@ mod tests {
 
     #[test]
     fn serde_tag_format_llm() {
-        let err = AgentError::Llm(SdkError::Network {
+        let err = Error::Llm(LlmError::Network {
             message: "refused".into(),
-            source: None,
+            source:  None,
         });
         let json = serde_json::to_string(&err).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -179,7 +182,7 @@ mod tests {
 
     #[test]
     fn serde_tag_format_session_closed() {
-        let err = AgentError::SessionClosed;
+        let err = Error::SessionClosed;
         let json = serde_json::to_string(&err).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["type"], "session_closed");
@@ -187,7 +190,7 @@ mod tests {
 
     #[test]
     fn serde_tag_format_invalid_state() {
-        let err = AgentError::InvalidState("x".into());
+        let err = Error::InvalidState("x".into());
         let json = serde_json::to_string(&err).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["type"], "invalid_state");
@@ -195,18 +198,18 @@ mod tests {
 
     #[test]
     fn serde_tag_format_tool_execution() {
-        let err = AgentError::ToolExecution("x".into());
+        let err = Error::ToolExecution("x".into());
         let json = serde_json::to_string(&err).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["type"], "tool_execution");
     }
 
     #[test]
-    fn serde_tag_format_aborted() {
-        let err = AgentError::Aborted(AbortReason::WallClockTimeout);
+    fn serde_tag_format_interrupted() {
+        let err = Error::Interrupted(InterruptReason::WallClockTimeout);
         let json = serde_json::to_string(&err).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "aborted");
+        assert_eq!(v["type"], "interrupted");
         assert_eq!(v["data"], "wall_clock_timeout");
     }
 }

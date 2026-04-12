@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "FILE=$(jq -r '.tool_input.file_path') && case \"$FILE\" in *.rs) cargo fmt -- \"$FILE\" ;; esac"
+            "command": "FILE=$(jq -r '.tool_input.file_path') && case \"$FILE\" in *.rs) cargo +nightly fmt -- \"$FILE\" ;; esac"
           }
         ]
       }

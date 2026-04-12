@@ -3,13 +3,15 @@ use std::time::Instant;
 
 use fabro_core::executor::ExecutorBuilder;
 use fabro_core::handler::NodeHandler;
-use fabro_core::state::RunState;
+use fabro_core::state::ExecutionState;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
+use super::types::{Executed, Initialized};
+use crate::artifact;
 use crate::context::{self, Context};
-use crate::error::FabroError;
-use crate::event::WorkflowRunEvent;
+use crate::error::Error;
+use crate::event::Event;
 use crate::graph::WorkflowGraph;
 use crate::handler::EngineServices;
 use crate::lifecycle::WorkflowLifecycle;
@@ -17,8 +19,6 @@ use crate::node_handler::WorkflowNodeHandler;
 use crate::outcome::{Outcome, StageStatus};
 use crate::records::Checkpoint;
 use crate::sandbox_git::GitState;
-
-use super::types::{Executed, Initialized};
 
 fn seed_context_from_checkpoint(checkpoint: Option<&Checkpoint>) -> Context {
     let context = Context::new();
@@ -37,7 +37,10 @@ pub async fn execute(init: Initialized) -> Executed {
     let Initialized {
         graph,
         source: _,
+        inputs,
         run_options,
+        workflow_path,
+        workflow_bundle,
         run_store,
         checkpoint,
         seed_context,
@@ -45,6 +48,8 @@ pub async fn execute(init: Initialized) -> Executed {
         sandbox,
         registry,
         on_node,
+        artifact_sink,
+        run_control,
         hook_runner,
         env,
         dry_run,
@@ -52,6 +57,13 @@ pub async fn execute(init: Initialized) -> Executed {
         model,
         provider,
     } = init;
+
+    let service_inputs = inputs;
+
+    let mut checkpoint = checkpoint;
+    if let Some(cp) = checkpoint.as_mut() {
+        artifact::normalize_checkpoint_for_resume(cp);
+    }
 
     let start = Instant::now();
     let graph_arc = Arc::new(graph.clone());
@@ -64,7 +76,7 @@ pub async fn execute(init: Initialized) -> Executed {
             base_sha,
             run_branch: git.run_branch.clone(),
             meta_branch: git.meta_branch.clone(),
-            checkpoint_exclude_globs: run_options.checkpoint_exclude_globs().to_vec(),
+            checkpoint_exclude_globs: run_options.checkpoint_exclude_globs(),
             git_author: run_options.git_author(),
         }))
     });
@@ -73,17 +85,21 @@ pub async fn execute(init: Initialized) -> Executed {
         registry,
         emitter: Arc::clone(&emitter),
         sandbox: Arc::clone(&sandbox),
-        run_store: Some(Arc::clone(&run_store)),
+        run_store: run_store.clone(),
         git_state: std::sync::RwLock::new(git_state),
         hook_runner: hook_runner.clone(),
         env,
+        inputs: service_inputs,
         dry_run,
+        cancel_requested: run_options.cancel_token.clone(),
+        workflow_path,
+        workflow_bundle,
     });
 
     let handler = Arc::new(WorkflowNodeHandler {
         services: shared_services,
-        run_dir: run_options.run_dir.clone(),
-        graph: Arc::clone(&graph_arc),
+        run_dir:  run_options.run_dir.clone(),
+        graph:    Arc::clone(&graph_arc),
     });
 
     let settings_arc = Arc::new(run_options.clone());
@@ -93,10 +109,12 @@ pub async fn execute(init: Initialized) -> Executed {
         &sandbox,
         graph_arc,
         &run_options.run_dir,
-        Arc::clone(&run_store),
+        &run_store,
+        artifact_sink,
         &settings_arc,
         checkpoint.is_some(),
         on_node,
+        run_control,
     );
 
     if let Some(ref cp) = checkpoint {
@@ -114,7 +132,7 @@ pub async fn execute(init: Initialized) -> Executed {
     }
 
     let state = if let Some(ref cp) = checkpoint {
-        match RunState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
+        match ExecutionState::new(&wf_graph).map_err(|e| Error::engine(e.to_string())) {
             Ok(mut s) => {
                 for (k, v) in &cp.context_values {
                     s.context.set(k.clone(), v.clone());
@@ -162,7 +180,7 @@ pub async fn execute(init: Initialized) -> Executed {
             }
         }
     } else if let Some(seed) = seed_context {
-        match RunState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
+        match ExecutionState::new(&wf_graph).map_err(|e| Error::engine(e.to_string())) {
             Ok(s) => {
                 for (k, v) in seed.snapshot() {
                     s.context.set(k, v);
@@ -187,7 +205,7 @@ pub async fn execute(init: Initialized) -> Executed {
             }
         }
     } else {
-        match RunState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
+        match ExecutionState::new(&wf_graph).map_err(|e| Error::engine(e.to_string())) {
             Ok(s) => s,
             Err(err) => {
                 return Executed {
@@ -292,25 +310,25 @@ pub async fn execute(init: Initialized) -> Executed {
             };
             (Ok(result), ctx)
         }
-        Err(fabro_core::CoreError::StallTimeout { node_id }) => {
+        Err(fabro_core::Error::StallTimeout { node_id }) => {
             let stall_timeout = graph.stall_timeout().unwrap_or_default();
             let idle_secs = stall_timeout.as_secs();
-            emitter.emit(&WorkflowRunEvent::StallWatchdogTimeout {
-                node: node_id.clone(),
+            emitter.emit(&Event::StallWatchdogTimeout {
+                node:         node_id.clone(),
                 idle_seconds: idle_secs,
             });
             (
-                Err(FabroError::engine(format!(
+                Err(Error::engine(format!(
                     "stall watchdog: node \"{node_id}\" had no activity for {idle_secs}s"
                 ))),
                 initial_context,
             )
         }
-        Err(fabro_core::CoreError::Cancelled) => (Err(FabroError::Cancelled), initial_context),
-        Err(fabro_core::CoreError::Blocked { message }) => {
-            (Err(FabroError::engine(message)), initial_context)
+        Err(fabro_core::Error::Cancelled) => (Err(Error::Cancelled), initial_context),
+        Err(fabro_core::Error::Blocked { message }) => {
+            (Err(Error::engine(message)), initial_context)
         }
-        Err(e) => (Err(FabroError::engine(e.to_string())), initial_context),
+        Err(e) => (Err(Error::engine(e.to_string())), initial_context),
     };
 
     let duration_ms = crate::millis_u64(start.elapsed());

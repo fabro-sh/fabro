@@ -1,3 +1,9 @@
+use std::sync::Arc;
+
+use fabro_llm::types::ToolDefinition;
+use fabro_model::{Catalog, Provider};
+use tokio::sync::Mutex;
+
 use crate::profiles::EnvContext;
 use crate::sandbox::Sandbox;
 use crate::skills::Skill;
@@ -6,10 +12,6 @@ use crate::subagent::{
     make_spawn_agent_tool, make_wait_tool,
 };
 use crate::tool_registry::ToolRegistry;
-use fabro_llm::types::ToolDefinition;
-use fabro_model::{Catalog, Provider};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub trait AgentProfile: Send + Sync {
     fn provider(&self) -> Provider;
@@ -63,9 +65,10 @@ pub trait AgentProfile: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    use fabro_model::Provider;
+
     use super::*;
     use crate::test_support::{MockSandbox, TestProfile};
-    use fabro_model::Provider;
 
     #[test]
     fn profile_provider_and_model() {

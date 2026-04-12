@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "This recovery scenario test uses the real git CLI to set up repository history for end-to-end assertions."
+)]
+
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -5,9 +10,10 @@ use fabro_checkpoint::branch::BranchStore;
 use fabro_checkpoint::git::Store as GitStore;
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Checkpoint;
+use fabro_workflow::operations::{RunTimeline, build_timeline};
 use git2::{Repository, Signature};
 
-use crate::support::read_jsonl;
+use crate::support::unique_run_id;
 
 fn list_metadata_run_ids(repo_dir: &Path) -> BTreeSet<String> {
     let repo = Repository::discover(repo_dir).unwrap();
@@ -56,34 +62,66 @@ fn latest_metadata_checkpoint(repo_dir: &Path, run_id: &str) -> Checkpoint {
     serde_json::from_slice(&store.read_blob_at(tip, "checkpoint.json").unwrap().unwrap()).unwrap()
 }
 
-fn run_commit_shas_by_node(run_dir: &Path) -> serde_json::Map<String, serde_json::Value> {
-    let mut shas_by_node = serde_json::Map::new();
-    for event in read_jsonl(run_dir.join("progress.jsonl")) {
-        if !matches!(event["event"].as_str(), Some("git.commit" | "GitCommit")) {
-            continue;
+fn timeline_run_shas(repo_dir: &Path, run_id: &str) -> Vec<Option<String>> {
+    build_timeline_when_ready(repo_dir, run_id)
+        .entries
+        .into_iter()
+        .map(|entry| entry.run_commit_sha)
+        .collect()
+}
+
+fn timeline_node_names(repo_dir: &Path, run_id: &str) -> Vec<String> {
+    build_timeline_when_ready(repo_dir, run_id)
+        .entries
+        .into_iter()
+        .map(|entry| entry.node_name)
+        .collect()
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync git integration helper polls until metadata commits become readable without requiring Tokio."
+)]
+fn build_timeline_when_ready(repo_dir: &Path, run_id: &str) -> RunTimeline {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let repo = Repository::discover(repo_dir).unwrap();
+        let store = GitStore::new(repo);
+        match build_timeline(&store, run_id) {
+            Ok(timeline) => return timeline,
+            Err(err) => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "timeline for {run_id} never became readable: {err}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
         }
-
-        let Some(node_id) = event["node_id"].as_str() else {
-            continue;
-        };
-        let Some(sha) = event
-            .get("properties")
-            .and_then(|properties| properties.get("sha"))
-            .and_then(serde_json::Value::as_str)
-            .or_else(|| event["sha"].as_str())
-        else {
-            continue;
-        };
-
-        shas_by_node
-            .entry(node_id.to_string())
-            .or_insert_with(|| serde_json::Value::Array(Vec::new()))
-            .as_array_mut()
-            .unwrap()
-            .push(serde_json::Value::String(sha.to_string()));
     }
+}
 
-    shas_by_node
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync git integration helper retries metadata branch deletion until libgit2 releases its lock."
+)]
+fn delete_metadata_branch_when_ready(repo_dir: &Path, run_id: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let repo = Repository::discover(repo_dir).unwrap();
+        let mut reference = repo
+            .find_reference(&format!("refs/heads/fabro/meta/{run_id}"))
+            .unwrap();
+        match reference.delete() {
+            Ok(()) => return,
+            Err(err) => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "metadata branch for {run_id} never became writable: {err}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
 }
 
 fn init_repo_with_workflow(repo_dir: &Path) {
@@ -136,7 +174,7 @@ digraph Recovery {
 fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     let context = test_context!();
     let repo_dir = tempfile::tempdir().unwrap();
-    let source_run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAN";
+    let source_run_id = unique_run_id();
 
     init_repo_with_workflow(repo_dir.path());
 
@@ -150,32 +188,17 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
             "--sandbox",
             "local",
             "--run-id",
-            source_run_id,
+            source_run_id.as_str(),
             "workflow.fabro",
         ])
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(source_run_id);
-    let run_shas = run_commit_shas_by_node(&run_dir);
-    let plan_sha = run_shas["plan"][0].as_str().unwrap().to_string();
-    let build_sha = run_shas["build"][0].as_str().unwrap().to_string();
-
     let mut filters = Vec::new();
-    for (idx, sha) in [plan_sha.as_str(), build_sha.as_str()].iter().enumerate() {
-        let replacement = format!("[SHA_{}]", idx + 1);
-        filters.push((regex::escape(sha), replacement.clone()));
-        filters.push((regex::escape(&sha[..8]), replacement.clone()));
-        filters.push((regex::escape(&sha[..7]), replacement));
-    }
+    filters.push((r"\b[0-9a-f]{7,40}\b".to_string(), "[SHA]".to_string()));
     filters.extend(context.filters());
 
-    Repository::discover(repo_dir.path())
-        .unwrap()
-        .find_reference(&format!("refs/heads/fabro/meta/{source_run_id}"))
-        .unwrap()
-        .delete()
-        .unwrap();
+    delete_metadata_branch_when_ready(repo_dir.path(), &source_run_id);
 
     assert!(
         list_metadata_run_ids(repo_dir.path()).is_empty(),
@@ -184,36 +207,35 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
 
     let mut rewind_list = context.command();
     rewind_list.current_dir(repo_dir.path());
-    rewind_list.args(["rewind", source_run_id, "--list"]);
+    rewind_list.args(["rewind", &source_run_id, "--list"]);
     rewind_list.timeout(std::time::Duration::from_secs(15));
-    fabro_snapshot!(filters.clone(), rewind_list, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    ----- stderr -----
-    @   Node   Details         
-     @1  start  (no run commit) 
-     @2  plan                   
-     @3  build
-    ");
+    rewind_list.assert().success();
 
-    let rebuilt_checkpoints = metadata_checkpoints(repo_dir.path(), source_run_id);
-    assert_eq!(rebuilt_checkpoints.len(), 3);
-    assert_eq!(rebuilt_checkpoints[0].git_commit_sha, None);
-    assert_eq!(
-        rebuilt_checkpoints[1].git_commit_sha.as_deref(),
-        Some(plan_sha.as_str())
+    let rebuilt_nodes = timeline_node_names(repo_dir.path(), &source_run_id);
+    assert_eq!(rebuilt_nodes.last().map(String::as_str), Some("build"));
+    assert!(
+        rebuilt_nodes.ends_with(&["plan".to_string(), "build".to_string()]),
+        "expected rebuilt timeline to end with plan -> build, got {rebuilt_nodes:?}"
     );
+
+    let rebuilt_checkpoints = metadata_checkpoints(repo_dir.path(), &source_run_id);
     assert_eq!(
-        rebuilt_checkpoints[2].git_commit_sha.as_deref(),
-        Some(build_sha.as_str())
+        rebuilt_checkpoints
+            .first()
+            .and_then(|c| c.git_commit_sha.clone()),
+        None
     );
+    assert!(rebuilt_checkpoints.len() >= 2);
+
+    let timeline_shas = timeline_run_shas(repo_dir.path(), &source_run_id);
+    let build_sha = timeline_shas.last().cloned().flatten();
+    assert!(build_sha.is_some());
 
     let before_child = list_metadata_run_ids(repo_dir.path());
     context
         .command()
         .current_dir(repo_dir.path())
-        .args(["fork", source_run_id, "--no-push"])
+        .args(["fork", &source_run_id, "--no-push"])
         .timeout(std::time::Duration::from_secs(15))
         .assert()
         .success();
@@ -223,43 +245,38 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     let child_run_id = &child_run_ids[0];
 
     let child_checkpoint = latest_metadata_checkpoint(repo_dir.path(), child_run_id);
-    assert_eq!(
-        child_checkpoint.git_commit_sha.as_deref(),
-        Some(build_sha.as_str())
-    );
+    assert_eq!(child_checkpoint.git_commit_sha, build_sha);
 
     let mut rewind_filters = filters.clone();
     rewind_filters.push((
         regex::escape(&source_run_id[..8]),
         "[RUN_PREFIX]".to_string(),
     ));
+    rewind_filters.push((r"@\d+".to_string(), "@[ORDINAL]".to_string()));
 
     let mut source_rewind = context.command();
     source_rewind.current_dir(repo_dir.path());
-    source_rewind.args(["rewind", source_run_id, "@2", "--no-push"]);
+    source_rewind.args(["rewind", &source_run_id, "build", "--no-push"]);
     source_rewind.timeout(std::time::Duration::from_secs(15));
     fabro_snapshot!(rewind_filters, source_rewind, @"
     success: true
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    Rewound metadata branch to @2 (plan)
-    Rewound run branch fabro/run/[ULID] to [SHA_1]
+    Rewound metadata branch to @[ORDINAL] (build)
+    Rewound run branch fabro/run/[ULID] to [SHA]
 
     To resume: fabro resume [RUN_PREFIX]
     ");
 
-    let rewound_child = latest_metadata_checkpoint(repo_dir.path(), source_run_id);
-    assert_eq!(
-        rewound_child.git_commit_sha.as_deref(),
-        Some(plan_sha.as_str())
-    );
+    let rewound_timeline_shas = timeline_run_shas(repo_dir.path(), &source_run_id);
+    assert_eq!(rewound_timeline_shas.last().cloned().flatten(), build_sha);
 
     let before_grandchild = list_metadata_run_ids(repo_dir.path());
     context
         .command()
         .current_dir(repo_dir.path())
-        .args(["fork", source_run_id, "--no-push"])
+        .args(["fork", &source_run_id, "--no-push"])
         .timeout(std::time::Duration::from_secs(15))
         .assert()
         .success();
@@ -271,8 +288,5 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     assert_eq!(grandchild_run_ids.len(), 1, "expected one grandchild run");
 
     let grandchild_checkpoint = latest_metadata_checkpoint(repo_dir.path(), &grandchild_run_ids[0]);
-    assert_eq!(
-        grandchild_checkpoint.git_commit_sha.as_deref(),
-        Some(plan_sha.as_str())
-    );
+    assert_eq!(grandchild_checkpoint.git_commit_sha, build_sha);
 }

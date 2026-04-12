@@ -2,37 +2,45 @@ import { useEffect } from "react";
 import { ChevronDownIcon, ChevronRightIcon } from "@heroicons/react/20/solid";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { Link, Outlet, useFetcher, useLocation } from "react-router";
-import { columnNames, mapRunListItem, statusColors } from "../data/runs";
-import type { ColumnStatus } from "../data/runs";
-import { apiJson } from "../api-client";
-import type { PaginatedRunList, PreviewUrlResponse } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/run-detail";
+import { columnNames, mapRunSummaryToRunItem, statusColors } from "../data/runs";
+import type { ColumnStatus, RunSummaryResponse } from "../data/runs";
+import { apiJson } from "../api";
+import { useDemoMode } from "../lib/demo-mode";
+import type { PreviewUrlResponse } from "@qltysh/fabro-api-client";
 
-const tabs = [
-  { name: "Overview", path: "", count: null },
-  { name: "Stages", path: "/stages/detect-drift", count: null },
-  { name: "Files Changed", path: "/files", count: null },
-  { name: "Verification", path: "/verification", count: null },
-  { name: "Retro", path: "/retro", count: null },
-  { name: "Usage", path: "/usage", count: null },
+const allTabs = [
+  { name: "Overview", path: "", count: null, demoOnly: false, broken: false },
+  { name: "Stages", path: "/stages/detect-drift", count: null, demoOnly: true, broken: false },
+  { name: "Files Changed", path: "/files", count: null, demoOnly: false, broken: true },
+  { name: "Graph", path: "/graph", count: null, demoOnly: false, broken: false },
+  { name: "Billing", path: "/billing", count: null, demoOnly: false, broken: false },
 ];
 
 export const handle = { hideHeader: true };
 
-export async function loader({ request, params }: Route.LoaderArgs) {
-  const response = await apiJson<PaginatedRunList>("/runs", { request });
-  const apiRun = response.data.find((r) => r.id === params.id);
-  if (!apiRun) return { run: null };
+export async function loader({ request, params }: any) {
+  const response = await fetch(`/api/v1/runs/${params.id}`, {
+    credentials: "include",
+  });
+  if (!response.ok) return { run: null };
+  const summary: RunSummaryResponse = await response.json();
+  const item = mapRunSummaryToRunItem(summary);
+  const statusMap: Record<string, ColumnStatus> = {
+    running: "working",
+    paused: "pending",
+    completed: "merge",
+  };
+  const status = statusMap[summary.status ?? ""] ?? "working";
   return {
     run: {
-      ...mapRunListItem(apiRun),
-      status: apiRun.status as ColumnStatus,
-      statusLabel: columnNames[apiRun.status as ColumnStatus] ?? apiRun.status,
+      ...item,
+      status,
+      statusLabel: columnNames[status] ?? summary.status ?? "Unknown",
     },
   };
 }
 
-export async function action({ params, request }: Route.ActionArgs) {
+export async function action({ params, request }: any) {
   const formData = await request.formData();
   const port = formData.get("port");
   const expiresInSecs = formData.get("expires_in_secs");
@@ -47,16 +55,18 @@ export async function action({ params, request }: Route.ActionArgs) {
   return result;
 }
 
-export function meta({ data }: Route.MetaArgs) {
+export function meta({ data }: any) {
   const run = data?.run;
   return [{ title: run ? `${run.title} — Fabro` : "Run — Fabro" }];
 }
 
-export default function RunDetail({ loaderData, params }: Route.ComponentProps) {
+export default function RunDetail({ loaderData, params }: any) {
   const { run } = loaderData;
   const { pathname } = useLocation();
   const basePath = `/runs/${params.id}`;
   const previewFetcher = useFetcher<PreviewUrlResponse>();
+  const demoMode = useDemoMode();
+  const tabs = allTabs.filter((t) => !t.broken && (!t.demoOnly || demoMode));
 
   useEffect(() => {
     if (previewFetcher.data?.url) {

@@ -4,33 +4,33 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use fabro_agent::Sandbox;
+use fabro_config::RunScratch;
 use fabro_graphviz::graph;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_llm::client::Client;
 use fabro_sandbox::{
-    ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorkdirStrategy, WorktreeConfig,
+    ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorkdirStrategy, WorktreeOptions,
     WorktreeSandbox,
 };
 use shlex::try_quote;
-
-use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
-use crate::error::FabroError;
-use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
-use crate::git::{self, GitSyncStatus, MetadataStore};
-use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
-use crate::handler::{HandlerRegistry, default_registry};
-use crate::run_options::GitCheckpointOptions;
 use tokio::process::Command as TokioCommand;
 use tokio::runtime::Handle;
 use tokio::task::spawn_blocking;
 use tokio::time::timeout as tokio_timeout;
 
 use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec};
+use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
+use crate::error::Error;
+use crate::event::{Emitter, Event, RunNoticeLevel};
+use crate::git::{self, GitSyncStatus, MetadataStore};
+use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
+use crate::handler::{HandlerRegistry, default_registry, sandbox_cancel_token};
+use crate::run_options::GitCheckpointOptions;
 
 struct WorktreePlan {
-    branch_name: String,
-    base_sha: String,
-    worktree_path: PathBuf,
+    branch_name:          String,
+    base_sha:             String,
+    worktree_path:        PathBuf,
     skip_branch_creation: bool,
 }
 
@@ -47,21 +47,19 @@ async fn run_hooks(
 }
 
 fn emit_run_notice(
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     level: RunNoticeLevel,
     code: impl Into<String>,
     message: impl Into<String>,
 ) {
-    emitter.emit(&WorkflowRunEvent::RunNotice {
+    emitter.emit(&Event::RunNotice {
         level,
         code: code.into(),
         message: message.into(),
     });
 }
 
-async fn resolve_worktree_plan(
-    options: &mut InitOptions,
-) -> Result<Option<WorktreePlan>, FabroError> {
+async fn resolve_worktree_plan(options: &mut InitOptions) -> Result<Option<WorktreePlan>, Error> {
     let Some(worktree_mode) = options.worktree_mode else {
         options.run_options.display_base_sha = None;
         return Ok(None);
@@ -72,9 +70,10 @@ async fn resolve_worktree_plan(
             if let (Some(run_branch), Some(base_sha)) = (&git.run_branch, &git.base_sha) {
                 options.run_options.display_base_sha = Some(base_sha.clone());
                 return Ok(Some(WorktreePlan {
-                    branch_name: run_branch.clone(),
-                    base_sha: base_sha.clone(),
-                    worktree_path: options.run_options.run_dir.join("worktree"),
+                    branch_name:          run_branch.clone(),
+                    base_sha:             base_sha.clone(),
+                    worktree_path:        RunScratch::new(&options.run_options.run_dir)
+                        .worktree_dir(),
                     skip_branch_creation: true,
                 }));
             }
@@ -86,11 +85,15 @@ async fn resolve_worktree_plan(
         .host_repo_path
         .clone()
         .or_else(|| options.sandbox.host_repo_path());
-    let git_status = host_repo_path
-        .as_ref()
-        .map_or(GitSyncStatus::Dirty, |path| {
-            git::sync_status(path, "origin", options.run_options.base_branch.as_deref())
-        });
+    let git_status = if let Some(path) = host_repo_path.as_ref() {
+        let path = path.clone();
+        let base_branch = options.run_options.base_branch.clone();
+        spawn_blocking(move || git::sync_status(&path, "origin", base_branch.as_deref()))
+            .await
+            .unwrap_or(GitSyncStatus::Dirty)
+    } else {
+        GitSyncStatus::Dirty
+    };
     let strategy = options.sandbox.workdir_strategy(
         worktree_mode,
         git_status.is_clean(),
@@ -167,13 +170,16 @@ async fn resolve_worktree_plan(
                 options.run_options.display_base_sha = None;
                 return Ok(None);
             };
-            match git::head_sha(&repo_path) {
+            match spawn_blocking(move || git::head_sha(&repo_path))
+                .await
+                .unwrap_or_else(|_| Err(Error::engine("git head_sha task panicked")))
+            {
                 Ok(base_sha) => {
                     options.run_options.display_base_sha = Some(base_sha.clone());
                     Ok(Some(WorktreePlan {
                         branch_name: format!("{}{}", git::RUN_BRANCH_PREFIX, options.run_id),
                         base_sha,
-                        worktree_path: options.run_options.run_dir.join("worktree"),
+                        worktree_path: RunScratch::new(&options.run_options.run_dir).worktree_dir(),
                         skip_branch_creation: false,
                     }))
                 }
@@ -190,9 +196,15 @@ async fn resolve_worktree_plan(
             }
         }
         WorkdirStrategy::Cloud => {
-            options.run_options.display_base_sha = host_repo_path
-                .as_ref()
-                .and_then(|path| git::head_sha(path).ok());
+            options.run_options.display_base_sha = if let Some(path) = host_repo_path.as_ref() {
+                let path = path.clone();
+                spawn_blocking(move || git::head_sha(&path))
+                    .await
+                    .ok()
+                    .and_then(std::result::Result::ok)
+            } else {
+                None
+            };
             Ok(None)
         }
         WorkdirStrategy::LocalDirectory => {
@@ -203,18 +215,24 @@ async fn resolve_worktree_plan(
 }
 
 async fn mint_github_token(
-    creds: &fabro_github::GitHubAppCredentials,
+    creds: &fabro_github::GitHubCredentials,
     origin_url: &str,
     permissions: &HashMap<String, String>,
-) -> Result<String, FabroError> {
+) -> Result<String, Error> {
+    if let fabro_github::GitHubCredentials::Token(token) = creds {
+        return Ok(token.clone());
+    }
+
     let https_url = fabro_github::ssh_url_to_https(origin_url);
-    let (owner, repo) = fabro_github::parse_github_owner_repo(&https_url)
-        .map_err(|e| FabroError::engine(e.clone()))?;
+    let (owner, repo) =
+        fabro_github::parse_github_owner_repo(&https_url).map_err(|e| Error::engine(e.clone()))?;
+    let fabro_github::GitHubCredentials::App(creds) = creds else {
+        unreachable!("token credentials return early");
+    };
     let jwt = fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem)
-        .map_err(|e| FabroError::engine(e.clone()))?;
-    let client = reqwest::Client::new();
-    let perms_json =
-        serde_json::to_value(permissions).map_err(|e| FabroError::engine(e.to_string()))?;
+        .map_err(|e| Error::engine(e.clone()))?;
+    let client = fabro_http::http_client().map_err(|e| Error::engine(e.to_string()))?;
+    let perms_json = serde_json::to_value(permissions).map_err(|e| Error::engine(e.to_string()))?;
     fabro_github::create_installation_access_token_with_permissions(
         &client,
         &jwt,
@@ -224,14 +242,14 @@ async fn mint_github_token(
         perms_json,
     )
     .await
-    .map_err(|e| FabroError::engine(e.clone()))
+    .map_err(|e| Error::engine(e.clone()))
 }
 
 async fn build_sandbox_env(
     spec: &SandboxEnvSpec,
-    github_app: Option<&fabro_github::GitHubAppCredentials>,
-    emitter: &EventEmitter,
-) -> Result<HashMap<String, String>, FabroError> {
+    github_app: Option<&fabro_github::GitHubCredentials>,
+    emitter: &Emitter,
+) -> Result<HashMap<String, String>, Error> {
     let mut env = spec.devcontainer_env.clone();
     env.extend(spec.toml_env.clone());
 
@@ -261,7 +279,7 @@ async fn build_registry(
     interviewer: Arc<dyn fabro_interview::Interviewer>,
     sandbox_env: &HashMap<String, String>,
     graph: &graph::Graph,
-) -> Result<(Arc<HandlerRegistry>, Option<Client>, bool), FabroError> {
+) -> Result<(Arc<HandlerRegistry>, Option<Client>, bool), Error> {
     let build_no_backend = || Arc::new(default_registry(Arc::clone(&interviewer), || None));
 
     if spec.dry_run {
@@ -276,7 +294,7 @@ async fn build_registry(
     match Client::from_env().await {
         Ok(client) if client.provider_names().is_empty() => {
             if graph_needs_llm {
-                return Err(FabroError::Precondition(
+                return Err(Error::Precondition(
                     "No LLM providers configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or pass --dry-run to simulate.".to_string(),
                 ));
             }
@@ -299,7 +317,7 @@ async fn build_registry(
         }
         Err(e) => {
             if graph_needs_llm {
-                return Err(FabroError::Precondition(format!(
+                return Err(Error::Precondition(format!(
                     "Failed to initialize LLM client: {e}. Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or pass --dry-run to simulate.",
                 )));
             }
@@ -308,7 +326,7 @@ async fn build_registry(
     }
 }
 
-async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroError> {
+async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), Error> {
     let Some(devcontainer) = options.devcontainer.clone() else {
         return Ok(());
     };
@@ -318,19 +336,17 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroErro
 
     let config = fabro_devcontainer::DevcontainerResolver::resolve(&devcontainer.resolve_dir)
         .await
-        .map_err(|e| FabroError::engine(format!("Failed to resolve devcontainer: {e}")))?;
+        .map_err(|e| Error::engine(format!("Failed to resolve devcontainer: {e}")))?;
 
     let lifecycle_command_count = config.on_create_commands.len()
         + config.post_create_commands.len()
         + config.post_start_commands.len();
-    options
-        .emitter
-        .emit(&WorkflowRunEvent::DevcontainerResolved {
-            dockerfile_lines: config.dockerfile.lines().count(),
-            environment_count: config.environment.len(),
-            lifecycle_command_count,
-            workspace_folder: config.workspace_folder.clone(),
-        });
+    options.emitter.emit(&Event::DevcontainerResolved {
+        dockerfile_lines: config.dockerfile.lines().count(),
+        environment_count: config.environment.len(),
+        lifecycle_command_count,
+        workspace_folder: config.workspace_folder.clone(),
+    });
 
     options
         .sandbox
@@ -362,12 +378,12 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroErro
             )
             .await
             .map_err(|_| {
-                FabroError::engine(format!(
+                Error::engine(format!(
                     "Devcontainer initializeCommand timed out: {shell_command}"
                 ))
             })?
             .map_err(|e| {
-                FabroError::engine(format!(
+                Error::engine(format!(
                     "Failed to execute devcontainer initializeCommand: {shell_command}: {e}"
                 ))
             })?;
@@ -378,7 +394,7 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroErro
                     .code()
                     .map_or_else(|| "unknown".to_string(), |code| code.to_string());
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(FabroError::engine(format!(
+                return Err(Error::engine(format!(
                     "Devcontainer initializeCommand failed (exit code {code}): {shell_command}\n{stderr}"
                 )));
             }
@@ -404,7 +420,7 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroErro
 pub async fn initialize(
     persisted: Persisted,
     mut options: InitOptions,
-) -> Result<Initialized, FabroError> {
+) -> Result<Initialized, Error> {
     let (graph, source, _diagnostics, run_dir, _run_record) = persisted.into_parts();
     options.run_options.run_dir = run_dir.clone();
     options.run_options.git = options.git.clone();
@@ -420,8 +436,8 @@ pub async fn initialize(
     let worktree_plan = resolve_worktree_plan(&mut options).await?;
     if let Some(plan) = worktree_plan.as_ref() {
         options.run_options.git = Some(GitCheckpointOptions {
-            base_sha: Some(plan.base_sha.clone()),
-            run_branch: Some(plan.branch_name.clone()),
+            base_sha:    Some(plan.base_sha.clone()),
+            run_branch:  Some(plan.branch_name.clone()),
             meta_branch: Some(MetadataStore::branch_name(&options.run_id.to_string())),
         });
     }
@@ -429,7 +445,7 @@ pub async fn initialize(
     let sandbox_event_callback: SandboxEventCallback = {
         let emitter = Arc::clone(&options.emitter);
         Arc::new(move |event| {
-            emitter.emit(&WorkflowRunEvent::Sandbox { event });
+            emitter.emit(&Event::Sandbox { event });
         })
     };
     let mut worktree_created = false;
@@ -438,16 +454,13 @@ pub async fn initialize(
             .sandbox
             .build(Some(Arc::clone(&sandbox_event_callback)))
             .await
-            .map_err(|e| FabroError::engine(e.to_string()))?;
-        let mut worktree = WorktreeSandbox::new(
-            inner,
-            WorktreeConfig {
-                branch_name: plan.branch_name.clone(),
-                base_sha: plan.base_sha.clone(),
-                worktree_path: plan.worktree_path.to_string_lossy().into_owned(),
-                skip_branch_creation: plan.skip_branch_creation,
-            },
-        );
+            .map_err(|e| Error::engine(e.to_string()))?;
+        let mut worktree = WorktreeSandbox::new(inner, WorktreeOptions {
+            branch_name:          plan.branch_name.clone(),
+            base_sha:             plan.base_sha.clone(),
+            worktree_path:        plan.worktree_path.to_string_lossy().into_owned(),
+            skip_branch_creation: plan.skip_branch_creation,
+        });
         worktree.set_event_callback(Arc::clone(&options.emitter).worktree_callback());
         match worktree.initialize().await {
             Ok(()) => {
@@ -466,7 +479,7 @@ pub async fn initialize(
                         .sandbox
                         .build(Some(Arc::clone(&sandbox_event_callback)))
                         .await
-                        .map_err(|e| FabroError::engine(e.to_string()))?,
+                        .map_err(|e| Error::engine(e.to_string()))?,
                 ))
             }
         }
@@ -476,7 +489,7 @@ pub async fn initialize(
                 .sandbox
                 .build(Some(Arc::clone(&sandbox_event_callback)))
                 .await
-                .map_err(|e| FabroError::engine(e.to_string()))?,
+                .map_err(|e| Error::engine(e.to_string()))?,
         ))
     };
     if worktree_plan.is_some() && !worktree_created {
@@ -493,7 +506,7 @@ pub async fn initialize(
     sandbox
         .initialize()
         .await
-        .map_err(|e| FabroError::engine(format!("Failed to initialize sandbox: {e}")))?;
+        .map_err(|e| Error::engine(format!("Failed to initialize sandbox: {e}")))?;
 
     let hook_ctx = HookContext::new(
         HookEvent::SandboxReady,
@@ -509,16 +522,17 @@ pub async fn initialize(
     .await;
     if let HookDecision::Block { reason } = decision {
         let msg = reason.unwrap_or_else(|| "blocked by SandboxReady hook".into());
-        return Err(FabroError::engine(msg));
+        return Err(Error::engine(msg));
     }
 
-    options.emitter.emit(&WorkflowRunEvent::SandboxInitialized {
-        working_directory: sandbox.working_directory().to_string(),
-    });
     let sandbox_record = options.sandbox.to_sandbox_record(&*sandbox);
-    if let Err(err) = options.run_store.put_sandbox(&sandbox_record).await {
-        tracing::warn!(error = %err, "Failed to save sandbox record to store");
-    }
+    options.emitter.emit(&Event::SandboxInitialized {
+        working_directory:      sandbox_record.working_directory.clone(),
+        provider:               sandbox_record.provider.clone(),
+        identifier:             sandbox_record.identifier.clone(),
+        host_working_directory: sandbox_record.host_working_directory.clone(),
+        container_mount_point:  sandbox_record.container_mount_point.clone(),
+    });
 
     let env = build_sandbox_env(
         &options.sandbox_env,
@@ -534,8 +548,16 @@ pub async fn initialize(
             build_registry(&options.llm, Arc::clone(&options.interviewer), &env, &graph).await?
         };
     if effective_dry_run {
+        use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
+
         options.dry_run = true;
-        options.run_options.settings.dry_run = Some(true);
+        let run = options
+            .run_options
+            .settings
+            .run
+            .get_or_insert_with(RunLayer::default);
+        let execution = run.execution.get_or_insert_with(RunExecutionLayer::default);
+        execution.mode = Some(RunMode::DryRun);
     }
 
     let has_run_branch = options
@@ -579,51 +601,54 @@ pub async fn initialize(
     }
 
     if !options.lifecycle.setup_commands.is_empty() {
-        options.emitter.emit(&WorkflowRunEvent::SetupStarted {
+        options.emitter.emit(&Event::SetupStarted {
             command_count: options.lifecycle.setup_commands.len(),
         });
         let setup_start = Instant::now();
         for (index, command) in options.lifecycle.setup_commands.iter().enumerate() {
-            options
-                .emitter
-                .emit(&WorkflowRunEvent::SetupCommandStarted {
-                    command: command.clone(),
-                    index,
-                });
+            options.emitter.emit(&Event::SetupCommandStarted {
+                command: command.clone(),
+                index,
+            });
             let cmd_start = Instant::now();
+            let cancel_token = sandbox_cancel_token(options.run_options.cancel_token.clone());
             let result = sandbox
                 .exec_command(
                     command,
                     options.lifecycle.setup_command_timeout_ms,
                     None,
                     None,
-                    None,
+                    cancel_token.clone(),
                 )
                 .await
-                .map_err(|e| FabroError::engine(format!("Setup command failed: {e}")))?;
+                .map_err(|e| Error::engine(format!("Setup command failed: {e}")))?;
+            if let Some(token) = &cancel_token {
+                if token.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
+                token.cancel();
+            }
             let duration_ms = crate::millis_u64(cmd_start.elapsed());
             if result.exit_code != 0 {
-                options.emitter.emit(&WorkflowRunEvent::SetupFailed {
+                options.emitter.emit(&Event::SetupFailed {
                     command: command.clone(),
                     index,
                     exit_code: result.exit_code,
                     stderr: result.stderr.clone(),
                 });
-                return Err(FabroError::engine(format!(
+                return Err(Error::engine(format!(
                     "Setup command failed (exit code {}): {command}\n{}",
                     result.exit_code, result.stderr,
                 )));
             }
-            options
-                .emitter
-                .emit(&WorkflowRunEvent::SetupCommandCompleted {
-                    command: command.clone(),
-                    index,
-                    exit_code: result.exit_code,
-                    duration_ms,
-                });
+            options.emitter.emit(&Event::SetupCommandCompleted {
+                command: command.clone(),
+                index,
+                exit_code: result.exit_code,
+                duration_ms,
+            });
         }
-        options.emitter.emit(&WorkflowRunEvent::SetupCompleted {
+        options.emitter.emit(&Event::SetupCompleted {
             duration_ms: crate::millis_u64(setup_start.elapsed()),
         });
     }
@@ -635,9 +660,9 @@ pub async fn initialize(
             phase,
             commands,
             options.lifecycle.setup_command_timeout_ms,
+            options.run_options.cancel_token.clone(),
         )
-        .await
-        .map_err(|e| FabroError::engine(e.to_string()))?;
+        .await?;
     }
 
     scopeguard::ScopeGuard::into_inner(cleanup_guard);
@@ -645,7 +670,16 @@ pub async fn initialize(
     Ok(Initialized {
         graph,
         source,
+        inputs: options
+            .run_options
+            .settings
+            .run
+            .as_ref()
+            .and_then(|run| run.inputs.clone())
+            .unwrap_or_default(),
         run_options: options.run_options,
+        workflow_path: options.workflow_path,
+        workflow_bundle: options.workflow_bundle,
         run_store: options.run_store,
         checkpoint: options.checkpoint,
         seed_context: options.seed_context,
@@ -653,6 +687,8 @@ pub async fn initialize(
         sandbox,
         registry,
         on_node: None,
+        artifact_sink: options.artifact_sink,
+        run_control: options.run_control,
         hook_runner,
         env,
         dry_run: options.dry_run,
@@ -666,22 +702,33 @@ pub async fn initialize(
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::time::Duration;
 
-    use chrono::Utc;
-    use fabro_config::FabroSettings;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
-    use fabro_store::InMemoryStore;
+    use fabro_store::Database;
+    use fabro_types::settings::SettingsLayer;
     use fabro_types::{RunId, fixtures};
+    use object_store::memory::InMemory;
 
     use super::*;
+    use crate::event::StoreProgressLogger;
     use crate::pipeline::types::InitOptions;
     use crate::records::RunRecord;
     use crate::run_options::RunOptions;
 
     fn test_run_id() -> RunId {
         fixtures::RUN_1
+    }
+
+    fn memory_store() -> Arc<Database> {
+        Arc::new(Database::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     fn simple_graph() -> (Graph, String) {
@@ -710,17 +757,17 @@ mod tests {
 
     fn test_settings(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings: FabroSettings::default(),
-            run_dir: run_dir.to_path_buf(),
-            cancel_token: None,
-            run_id: test_run_id(),
-            labels: HashMap::new(),
-            workflow_slug: None,
-            github_app: None,
-            host_repo_path: None,
-            base_branch: None,
+            settings:         SettingsLayer::default(),
+            run_dir:          run_dir.to_path_buf(),
+            cancel_token:     None,
+            run_id:           test_run_id(),
+            labels:           HashMap::new(),
+            workflow_slug:    None,
+            github_app:       None,
+            host_repo_path:   None,
+            base_branch:      None,
             display_base_sha: None,
-            git: None,
+            git:              None,
         }
     }
 
@@ -732,14 +779,17 @@ mod tests {
             run_dir.to_path_buf(),
             RunRecord {
                 run_id: test_run_id(),
-                created_at: Utc::now(),
-                settings: FabroSettings::default(),
+                settings: SettingsLayer::default(),
                 graph,
                 workflow_slug: Some("test".to_string()),
                 working_directory: std::env::current_dir().unwrap(),
                 host_repo_path: Some(std::env::current_dir().unwrap().display().to_string()),
+                repo_origin_url: None,
                 base_branch: Some("main".to_string()),
                 labels: HashMap::new(),
+                provenance: None,
+                manifest_blob: None,
+                definition_blob: None,
             },
         )
     }
@@ -751,61 +801,52 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source.clone(), &run_dir);
-        let emitter = Arc::new(crate::event::EventEmitter::default());
+        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
 
-        let initialized = initialize(
-            persisted,
-            InitOptions {
-                run_id: test_run_id(),
-                run_store: {
-                    let store: &dyn fabro_store::Store = &InMemoryStore::default();
-                    let inner = store
-                        .create_run(
-                            &test_run_id(),
-                            chrono::Utc::now(),
-                            Some(run_dir.to_string_lossy().as_ref()),
-                        )
-                        .await
-                        .unwrap();
-                    Arc::new(fabro_store::DiskProjectingRunStore::new(
-                        inner,
-                        run_dir.clone(),
-                    ))
-                },
-                dry_run: false,
-                emitter,
-                sandbox: SandboxSpec::Local {
-                    working_directory: std::env::current_dir().unwrap(),
-                },
-                llm: LlmSpec {
-                    model: "test-model".to_string(),
-                    provider: fabro_llm::Provider::Anthropic,
-                    fallback_chain: Vec::new(),
-                    mcp_servers: Vec::new(),
-                    dry_run: true,
-                },
-                interviewer: Arc::new(AutoApproveInterviewer),
-                lifecycle: crate::run_options::LifecycleOptions {
-                    setup_commands: vec![],
-                    setup_command_timeout_ms: 1_000,
-                    devcontainer_phases: vec![],
-                },
-                run_options: test_settings(&run_dir),
-                hooks: fabro_hooks::HookConfig { hooks: vec![] },
-                sandbox_env: SandboxEnvSpec {
-                    devcontainer_env: HashMap::new(),
-                    toml_env: HashMap::from([("TEST_KEY".to_string(), "value".to_string())]),
-                    github_permissions: None,
-                    origin_url: None,
-                },
-                devcontainer: None,
-                git: None,
-                worktree_mode: None,
-                registry_override: None,
-                checkpoint: None,
-                seed_context: None,
+        let initialized = initialize(persisted, InitOptions {
+            run_id: test_run_id(),
+            run_store: {
+                let store = memory_store();
+                let inner = store.create_run(&test_run_id()).await.unwrap();
+                inner.into()
             },
-        )
+            dry_run: false,
+            emitter,
+            sandbox: SandboxSpec::Local {
+                working_directory: std::env::current_dir().unwrap(),
+            },
+            llm: LlmSpec {
+                model:          "test-model".to_string(),
+                provider:       fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers:    Vec::new(),
+                dry_run:        true,
+            },
+            interviewer: Arc::new(AutoApproveInterviewer),
+            lifecycle: crate::run_options::LifecycleOptions {
+                setup_commands:           vec![],
+                setup_command_timeout_ms: 1_000,
+                devcontainer_phases:      vec![],
+            },
+            run_options: test_settings(&run_dir),
+            workflow_path: None,
+            workflow_bundle: None,
+            hooks: fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env: SandboxEnvSpec {
+                devcontainer_env:   HashMap::new(),
+                toml_env:           HashMap::from([("TEST_KEY".to_string(), "value".to_string())]),
+                github_permissions: None,
+                origin_url:         None,
+            },
+            devcontainer: None,
+            git: None,
+            worktree_mode: None,
+            run_control: None,
+            registry_override: None,
+            artifact_sink: None,
+            checkpoint: None,
+            seed_context: None,
+        })
         .await
         .unwrap();
 
@@ -829,65 +870,189 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source, &run_dir);
-        let emitter = Arc::new(crate::event::EventEmitter::default());
+        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
+        let store = memory_store();
+        let run_store = store.create_run(&test_run_id()).await.unwrap();
+        let store_logger = StoreProgressLogger::new(run_store.clone());
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        emitter.on_event({
+            let seen = Arc::clone(&seen);
+            move |event| seen.lock().unwrap().push(event.event_name().to_string())
+        });
+        store_logger.register(&emitter);
 
-        let initialized = initialize(
-            persisted,
-            InitOptions {
-                run_id: test_run_id(),
-                run_store: {
-                    let store: &dyn fabro_store::Store = &InMemoryStore::default();
-                    let inner = store
-                        .create_run(
-                            &test_run_id(),
-                            chrono::Utc::now(),
-                            Some(run_dir.to_string_lossy().as_ref()),
-                        )
-                        .await
-                        .unwrap();
-                    Arc::new(fabro_store::DiskProjectingRunStore::new(
-                        inner,
-                        run_dir.clone(),
-                    ))
-                },
-                dry_run: false,
-                emitter,
-                sandbox: SandboxSpec::Local {
-                    working_directory: std::env::current_dir().unwrap(),
-                },
-                llm: LlmSpec {
-                    model: "test-model".to_string(),
-                    provider: fabro_llm::Provider::Anthropic,
-                    fallback_chain: Vec::new(),
-                    mcp_servers: Vec::new(),
-                    dry_run: true,
-                },
-                interviewer: Arc::new(AutoApproveInterviewer),
-                lifecycle: crate::run_options::LifecycleOptions {
-                    setup_commands: vec!["true".to_string()],
-                    setup_command_timeout_ms: 1_000,
-                    devcontainer_phases: vec![],
-                },
-                run_options: test_settings(&run_dir),
-                hooks: fabro_hooks::HookConfig { hooks: vec![] },
-                sandbox_env: SandboxEnvSpec {
-                    devcontainer_env: HashMap::new(),
-                    toml_env: HashMap::new(),
-                    github_permissions: None,
-                    origin_url: None,
-                },
-                devcontainer: None,
-                git: None,
-                worktree_mode: None,
-                registry_override: None,
-                checkpoint: None,
-                seed_context: None,
+        let initialized = initialize(persisted, InitOptions {
+            run_id: test_run_id(),
+            run_store: run_store.into(),
+            dry_run: false,
+            emitter,
+            sandbox: SandboxSpec::Local {
+                working_directory: std::env::current_dir().unwrap(),
             },
-        )
+            llm: LlmSpec {
+                model:          "test-model".to_string(),
+                provider:       fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers:    Vec::new(),
+                dry_run:        true,
+            },
+            interviewer: Arc::new(AutoApproveInterviewer),
+            lifecycle: crate::run_options::LifecycleOptions {
+                setup_commands:           vec!["true".to_string()],
+                setup_command_timeout_ms: 1_000,
+                devcontainer_phases:      vec![],
+            },
+            run_options: test_settings(&run_dir),
+            workflow_path: None,
+            workflow_bundle: None,
+            hooks: fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env: SandboxEnvSpec {
+                devcontainer_env:   HashMap::new(),
+                toml_env:           HashMap::new(),
+                github_permissions: None,
+                origin_url:         None,
+            },
+            devcontainer: None,
+            git: None,
+            worktree_mode: None,
+            run_control: None,
+            registry_override: None,
+            artifact_sink: None,
+            checkpoint: None,
+            seed_context: None,
+        })
         .await
         .unwrap();
+        store_logger.flush().await;
 
-        assert!(run_dir.join("sandbox.json").exists());
         assert_eq!(initialized.run_options.run_dir, run_dir);
+        assert!(
+            seen.lock()
+                .unwrap()
+                .iter()
+                .any(|event| event == "sandbox.initialized")
+        );
+    }
+
+    #[tokio::test]
+    async fn initialize_cancelled_setup_command_returns_cancelled() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let (graph, source) = simple_graph();
+        let persisted = test_persisted(graph, source, &run_dir);
+        let cancel_token = Arc::new(AtomicBool::new(true));
+        let mut run_options = test_settings(&run_dir);
+        run_options.cancel_token = Some(cancel_token);
+
+        let result = initialize(persisted, InitOptions {
+            run_id: test_run_id(),
+            run_store: {
+                let store = memory_store();
+                let inner = store.create_run(&test_run_id()).await.unwrap();
+                inner.into()
+            },
+            dry_run: false,
+            emitter: Arc::new(crate::event::Emitter::new(test_run_id())),
+            sandbox: SandboxSpec::Local {
+                working_directory: std::env::current_dir().unwrap(),
+            },
+            llm: LlmSpec {
+                model:          "test-model".to_string(),
+                provider:       fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers:    Vec::new(),
+                dry_run:        true,
+            },
+            interviewer: Arc::new(AutoApproveInterviewer),
+            lifecycle: crate::run_options::LifecycleOptions {
+                setup_commands:           vec!["sleep 5".to_string()],
+                setup_command_timeout_ms: 5_000,
+                devcontainer_phases:      vec![],
+            },
+            run_options,
+            workflow_path: None,
+            workflow_bundle: None,
+            hooks: fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env: SandboxEnvSpec {
+                devcontainer_env:   HashMap::new(),
+                toml_env:           HashMap::new(),
+                github_permissions: None,
+                origin_url:         None,
+            },
+            devcontainer: None,
+            git: None,
+            worktree_mode: None,
+            run_control: None,
+            registry_override: None,
+            artifact_sink: None,
+            checkpoint: None,
+            seed_context: None,
+        })
+        .await;
+
+        assert!(matches!(result, Err(Error::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn initialize_cancelled_devcontainer_phase_returns_cancelled() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let (graph, source) = simple_graph();
+        let persisted = test_persisted(graph, source, &run_dir);
+        let cancel_token = Arc::new(AtomicBool::new(true));
+        let mut run_options = test_settings(&run_dir);
+        run_options.cancel_token = Some(cancel_token);
+
+        let result = initialize(persisted, InitOptions {
+            run_id: test_run_id(),
+            run_store: {
+                let store = memory_store();
+                let inner = store.create_run(&test_run_id()).await.unwrap();
+                inner.into()
+            },
+            dry_run: false,
+            emitter: Arc::new(crate::event::Emitter::new(test_run_id())),
+            sandbox: SandboxSpec::Local {
+                working_directory: std::env::current_dir().unwrap(),
+            },
+            llm: LlmSpec {
+                model:          "test-model".to_string(),
+                provider:       fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers:    Vec::new(),
+                dry_run:        true,
+            },
+            interviewer: Arc::new(AutoApproveInterviewer),
+            lifecycle: crate::run_options::LifecycleOptions {
+                setup_commands:           vec![],
+                setup_command_timeout_ms: 5_000,
+                devcontainer_phases:      vec![("on_create".to_string(), vec![
+                    fabro_devcontainer::Command::Shell("sleep 5".to_string()),
+                ])],
+            },
+            run_options,
+            workflow_path: None,
+            workflow_bundle: None,
+            hooks: fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env: SandboxEnvSpec {
+                devcontainer_env:   HashMap::new(),
+                toml_env:           HashMap::new(),
+                github_permissions: None,
+                origin_url:         None,
+            },
+            devcontainer: None,
+            git: None,
+            worktree_mode: None,
+            run_control: None,
+            registry_override: None,
+            artifact_sink: None,
+            checkpoint: None,
+            seed_context: None,
+        })
+        .await;
+
+        assert!(matches!(result, Err(Error::Cancelled)));
     }
 }

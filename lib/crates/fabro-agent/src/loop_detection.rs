@@ -1,7 +1,8 @@
-use crate::history::History;
-use crate::types::Turn;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+
+use crate::history::History;
+use crate::types::Turn;
 
 fn tool_call_signature(name: &str, arguments: &serde_json::Value) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -23,7 +24,8 @@ fn extract_signatures_from_assistant(turn: &Turn) -> Vec<u64> {
 
 #[must_use]
 pub fn detect_loop(history: &History, window_size: usize) -> bool {
-    // Extract tool call signatures from the last N assistant turns that have tool calls
+    // Extract tool call signatures from the last N assistant turns that have tool
+    // calls
     let turns = history.turns();
     let mut signatures: Vec<u64> = Vec::new();
 
@@ -93,18 +95,20 @@ fn is_repeating_pattern(signatures: &[u64], pattern_len: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use fabro_llm::types::{ToolCall, Usage};
     use std::time::SystemTime;
+
+    use fabro_llm::types::{TokenCounts, ToolCall};
+
+    use super::*;
 
     fn assistant_with_tool(name: &str, args: serde_json::Value) -> Turn {
         Turn::Assistant {
-            content: String::new(),
-            tool_calls: vec![ToolCall::new("call_1", name, args)],
+            content:        String::new(),
+            tool_calls:     vec![ToolCall::new("call_1", name, args)],
             provider_parts: vec![],
-            usage: Box::new(Usage::default()),
-            response_id: "resp".into(),
-            timestamp: SystemTime::now(),
+            usage:          Box::new(TokenCounts::default()),
+            response_id:    "resp".into(),
+            timestamp:      SystemTime::now(),
         }
     }
 
@@ -262,15 +266,15 @@ mod tests {
     fn user_turns_are_ignored() {
         let mut history = History::default();
         history.push(Turn::User {
-            content: "hello".into(),
+            content:   "hello".into(),
             timestamp: SystemTime::now(),
         });
         history.push(Turn::User {
-            content: "hello".into(),
+            content:   "hello".into(),
             timestamp: SystemTime::now(),
         });
         history.push(Turn::User {
-            content: "hello".into(),
+            content:   "hello".into(),
             timestamp: SystemTime::now(),
         });
         assert!(!detect_loop(&history, 10));

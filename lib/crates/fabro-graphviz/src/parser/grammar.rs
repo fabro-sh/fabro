@@ -73,7 +73,7 @@ fn subgraph_stmt(input: &str) -> IResult<&str, Statement> {
     Ok((
         rest,
         Statement::Subgraph(SubgraphStmt {
-            name: name.map(String::from),
+            name:       name.map(String::from),
             statements: stmts,
         }),
     ))
@@ -120,9 +120,10 @@ fn statement(input: &str) -> IResult<&str, Statement> {
             node_defaults,
             edge_defaults,
             subgraph_stmt,
-            // graph_attr_decl must be tried before node_or_edge because both start with an identifier.
-            // graph_attr_decl is `id = value` while node is `id [attrs]?`
-            // We try graph_attr_decl first; if it fails (no `=` after id) we fall through to node_or_edge.
+            // graph_attr_decl must be tried before node_or_edge because both start with an
+            // identifier. graph_attr_decl is `id = value` while node is `id [attrs]?`
+            // We try graph_attr_decl first; if it fails (no `=` after id) we fall through to
+            // node_or_edge.
             graph_attr_decl,
             node_or_edge_stmt,
         )),
@@ -140,13 +141,10 @@ pub fn parse_dot_graph(input: &str) -> IResult<&str, DotGraph> {
     let (rest, _) = preceded(ws, char('{'))(rest)?;
     let (rest, stmts) = many0(statement)(rest)?;
     let (rest, _) = preceded(ws, char('}'))(rest)?;
-    Ok((
-        rest,
-        DotGraph {
-            name: name.to_string(),
-            statements: stmts,
-        },
-    ))
+    Ok((rest, DotGraph {
+        name:       name.to_string(),
+        statements: stmts,
+    }))
 }
 
 // We need arrow to work with explicit error types
@@ -359,7 +357,8 @@ mod tests {
         }"#;
         let (_, graph) = parse_dot_graph(input).unwrap();
         assert_eq!(graph.name, "Branch");
-        // graph [goal=...], rankdir=LR, node [defaults], 6 nodes, 1 chain + 2 edges = 12
+        // graph [goal=...], rankdir=LR, node [defaults], 6 nodes, 1 chain + 2 edges =
+        // 12
         assert!(graph.statements.len() >= 11);
     }
 

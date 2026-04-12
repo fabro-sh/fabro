@@ -13,19 +13,11 @@ pub(crate) struct LoggingClientHandler;
 
 impl ClientHandler for LoggingClientHandler {
     fn get_info(&self) -> ClientInfo {
-        ClientInfo {
-            protocol_version: ProtocolVersion::V_2025_03_26,
-            capabilities: ClientCapabilities::default(),
-            client_info: Implementation {
-                name: "fabro-mcp".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                title: None,
-                description: None,
-                icons: None,
-                website_url: None,
-            },
-            meta: None,
-        }
+        ClientInfo::new(
+            ClientCapabilities::default(),
+            Implementation::new("fabro-mcp", env!("CARGO_PKG_VERSION")),
+        )
+        .with_protocol_version(ProtocolVersion::V_2025_03_26)
     }
 
     async fn on_cancelled(

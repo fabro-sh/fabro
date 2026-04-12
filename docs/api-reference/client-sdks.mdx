@@ -34,31 +34,34 @@ console.log(data);
 
 The generated client includes a typed API class for each endpoint group: `RunsApi`, `WorkflowsApi`, `SessionsApi`, `VerificationsApi`, `InsightsApi`, and others.
 
-## Rust (Types Only)
+## Rust (Types + Client)
 
-The `fabro-api-types` crate generates Rust structs and enums from the OpenAPI component schemas at compile time using [typify](https://github.com/oxidecomputer/typify). This provides type-safe representations of all API models but does not include an HTTP client.
+The `fabro-api` crate generates Rust structs, enums, and a `reqwest`-based HTTP client from the full OpenAPI spec at compile time using [progenitor](https://github.com/oxidecomputer/progenitor). This provides type-safe representations of all API models and a builder-style client for every endpoint.
 
 ### How It Works
 
-A `build.rs` script reads `docs/api-reference/fabro-api.yaml`, extracts `components/schemas`, and feeds them to typify. The generated code is written to `OUT_DIR` and included via:
+A `build.rs` script reads `docs/api-reference/fabro-api.yaml`, patches it from OpenAPI 3.1 to 3.0 for progenitor compatibility, and generates both types and a client. The generated code is written to `OUT_DIR` and included via:
 
 ```rust
-// lib/crates/fabro-api-types/src/lib.rs
-include!(concat!(env!("OUT_DIR"), "/openapi_types.rs"));
+// lib/crates/fabro-api/src/lib.rs
+include!(concat!(env!("OUT_DIR"), "/codegen.rs"));
 ```
 
 ### Regenerating
 
-The types are regenerated automatically on every `cargo build` when the OpenAPI spec changes:
+The types and client are regenerated automatically on every `cargo build` when the OpenAPI spec changes:
 
 ```bash
-cargo build -p fabro-api-types
+cargo build -p fabro-api
 ```
 
 ### Usage
 
 ```rust
-use fabro_api_types::RunListItem;
+use fabro_api::types::RunListItem;
+use fabro_api::Client;
+
+let client = Client::new("http://localhost:3000");
 ```
 
-All generated types derive `serde::Deserialize` and `serde::Serialize`, so they work directly with any Rust HTTP client for request and response parsing.
+All generated types derive `serde::Deserialize` and `serde::Serialize`. The client uses builder-style methods for each endpoint.

@@ -16,9 +16,9 @@ workspace = true
 anyhow.workspace = true
 async-stream = "0.3"
 axum = { workspace = true, features = ["macros"] }
+fabro-http.workspace = true
 futures-util.workspace = true
 http = "1"
-reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

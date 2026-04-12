@@ -9,16 +9,16 @@ Fabro's [`web_search`](/agents/tools#web_search) tool lets agents search the web
 
 1. Get a Brave Search API key from the [Brave Search API dashboard](https://brave.com/search/api/)
 
-2. Add it to your `.env` file:
+2. Store it on the Fabro server:
 
 ```bash
-export BRAVE_SEARCH_API_KEY=BSA...
+fabro secret set BRAVE_SEARCH_API_KEY BSA...
 ```
 
 3. Verify the key is working:
 
 ```bash
-fabro doctor --live
+fabro doctor
 ```
 
 The doctor output should show **Brave Search** as "connected". If the key is missing, web search is reported as a warning — workflows still run, but `web_search` calls return an error.
@@ -64,7 +64,7 @@ digraph Research {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    research  [label="Research", prompt="Use web_search to find recent information about $goal. Save your findings to research.md."]
+    research  [label="Research", prompt="Use web_search to find recent information about {{ goal }}. Save your findings to research.md."]
     summarize [label="Summarize", shape=tab, prompt="Read research.md and write a concise summary of the key findings."]
 
     start -> research -> summarize -> exit
@@ -73,7 +73,7 @@ digraph Research {
 
 ## Troubleshooting
 
-**"BRAVE_SEARCH_API_KEY environment variable is not set"** — Add the key to `.env` or your shell environment. Run `fabro doctor --live` to verify.
+**"BRAVE_SEARCH_API_KEY environment variable is not set"** — Add the key with `fabro secret set` or export it in the server process environment. Run `fabro doctor` to verify.
 
 **"Brave Search API returned status 401"** — The API key is invalid or expired. Generate a new key from the [Brave Search API dashboard](https://brave.com/search/api/).
 

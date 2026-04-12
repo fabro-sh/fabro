@@ -1,10 +1,9 @@
-use insta::assert_snapshot;
-
 use fabro_test::{fabro_snapshot, run_and_format, test_context};
+use insta::assert_snapshot;
 
 use super::support::{
     git_filters, git_stdout, output_stderr as support_stderr, run_branch_commits_since_base,
-    setup_git_backed_changed_run,
+    run_events, run_state, setup_git_backed_changed_run,
 };
 
 #[test]
@@ -25,15 +24,15 @@ fn help() {
       [TARGET]  Target checkpoint: node name, node@visit, or @ordinal (omit with --list)
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --list                       Show the checkpoint timeline instead of rewinding
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-push                    Skip force-pushing rewound refs to the remote
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --list              Show the checkpoint timeline instead of rewinding
+          --no-push           Skip force-pushing rewound refs to the remote
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -100,10 +99,10 @@ fn rewind_target_updates_metadata_and_resume_hint() {
     ");
     assert!(output.status.success(), "rewind should succeed");
 
-    let run_head = git_stdout(
-        &setup.repo_dir,
-        &["rev-parse", &format!("fabro/run/{}", setup.run.run_id)],
-    );
+    let run_head = git_stdout(&setup.repo_dir, &[
+        "rev-parse",
+        &format!("fabro/run/{}", setup.run.run_id),
+    ]);
     assert_eq!(run_head.trim(), expected_run_head);
 
     let mut list_cmd = context.command();
@@ -119,5 +118,83 @@ fn rewind_target_updates_metadata_and_resume_hint() {
     assert!(
         !list.contains("@2"),
         "rewound timeline should drop @2: {list}"
+    );
+}
+
+#[test]
+fn rewind_preserves_event_history_and_clears_terminal_snapshot_state() {
+    let context = test_context!();
+    let setup = setup_git_backed_changed_run(&context);
+    let before_events = run_events(&setup.run.run_dir);
+    assert!(
+        before_events
+            .iter()
+            .any(|event| event.payload.as_value()["event"] == "run.completed"),
+        "setup run should be completed before rewind"
+    );
+
+    let mut cmd = context.command();
+    cmd.current_dir(&setup.repo_dir);
+    cmd.args(["rewind", &setup.run.run_id, "@1", "--no-push"]);
+    let output = cmd.output().expect("rewind should execute");
+    assert!(
+        output.status.success(),
+        "rewind should succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        support_stderr(&output),
+    );
+
+    let after_events = run_events(&setup.run.run_dir);
+    assert_eq!(
+        after_events.len(),
+        before_events.len() + 3,
+        "rewind should append run.rewound, checkpoint.completed, and run.submitted"
+    );
+    assert_eq!(
+        after_events[..before_events.len()]
+            .iter()
+            .map(|event| event.payload.as_value()["event"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        before_events
+            .iter()
+            .map(|event| event.payload.as_value()["event"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        "rewind should preserve the prior event prefix"
+    );
+    assert_eq!(
+        after_events[before_events.len()].payload.as_value()["event"],
+        "run.rewound"
+    );
+    assert_eq!(
+        after_events[before_events.len() + 1].payload.as_value()["event"],
+        "checkpoint.completed"
+    );
+    assert_eq!(
+        after_events[before_events.len() + 2].payload.as_value()["event"],
+        "run.submitted"
+    );
+    assert!(
+        after_events[before_events.len() + 2].payload.as_value()["properties"]["definition_blob"]
+            .is_string(),
+        "rewind should re-emit run.submitted with the definition_blob"
+    );
+
+    let state = run_state(&setup.run.run_dir);
+    assert_eq!(
+        state.status.as_ref().map(|status| &status.status),
+        Some(&fabro_types::RunStatus::Submitted)
+    );
+    assert!(state.conclusion.is_none(), "rewind should clear conclusion");
+    assert!(
+        state.final_patch.is_none(),
+        "rewind should clear final patch"
+    );
+    assert!(
+        state.pull_request.is_none(),
+        "rewind should clear pull request"
+    );
+    assert!(
+        state.is_empty(),
+        "rewind should clear node state that belonged to the prior execution"
     );
 }

@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use fabro_retro::retro::CompletedStage;
 use fabro_store::EventEnvelope;
-use serde::de::DeserializeOwned;
 
 /// Callback invoked when a workflow node starts executing.
 pub type OnNodeCallback = Option<Arc<dyn Fn(&str) + Send + Sync>>;
@@ -27,28 +26,6 @@ pub type OnNodeCallback = Option<Arc<dyn Fn(&str) + Send + Sync>>;
 /// Convert a Duration's milliseconds to u64, saturating on overflow.
 pub(crate) fn millis_u64(d: std::time::Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
-}
-
-/// Save a value as pretty-printed JSON to a file.
-pub(crate) fn save_json<T: serde::Serialize>(
-    value: &T,
-    path: &std::path::Path,
-    label: &str,
-) -> error::Result<()> {
-    let json = serde_json::to_string_pretty(value)
-        .map_err(|e| error::FabroError::Checkpoint(format!("{label} serialize failed: {e}")))?;
-    std::fs::write(path, json)?;
-    Ok(())
-}
-
-/// Load a value from a JSON file.
-pub(crate) fn load_json<T: DeserializeOwned>(
-    path: &std::path::Path,
-    label: &str,
-) -> error::Result<T> {
-    let data = std::fs::read_to_string(path)?;
-    serde_json::from_str(&data)
-        .map_err(|e| error::FabroError::Checkpoint(format!("{label} deserialize failed: {e}")))
 }
 
 /// Build `Vec<CompletedStage>` from a `Checkpoint`, mapping workflow-engine
@@ -80,7 +57,9 @@ pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec
             succeeded,
             failed,
             retries,
-            cost: outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost),
+            billing_usd_micros: outcome
+                .and_then(|o| o.usage.as_ref())
+                .and_then(|usage| usage.total_usd_micros),
             notes: outcome.and_then(|o| o.notes.clone()),
             failure_reason: outcome.and_then(|o| o.failure_reason().map(String::from)),
             files_touched: outcome.map(|o| o.files_touched.clone()).unwrap_or_default(),
@@ -93,15 +72,15 @@ pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec
             last.failed = true;
         } else {
             stages.push(CompletedStage {
-                node_id: "unknown".to_string(),
-                status: "fail".to_string(),
-                succeeded: false,
-                failed: true,
-                retries: 0,
-                cost: None,
-                notes: None,
-                failure_reason: None,
-                files_touched: vec![],
+                node_id:            "unknown".to_string(),
+                status:             "fail".to_string(),
+                succeeded:          false,
+                failed:             true,
+                retries:            0,
+                billing_usd_micros: None,
+                notes:              None,
+                failure_reason:     None,
+                files_touched:      vec![],
             });
         }
     }
@@ -134,13 +113,14 @@ pub fn extract_stage_durations_from_events(events: &[EventEnvelope]) -> HashMap<
 
 #[doc(hidden)]
 pub mod artifact;
-pub mod asset_snapshot;
-pub mod assets;
+pub mod artifact_snapshot;
+pub mod artifact_upload;
 pub(crate) mod condition;
 pub mod context;
 pub mod devcontainer_bridge;
 pub mod error;
 pub mod event;
+pub mod file_resolver;
 pub mod git;
 pub(crate) mod graph;
 pub mod handler;
@@ -154,24 +134,19 @@ pub mod pipeline;
 pub mod pull_request;
 pub mod records;
 mod retry;
+pub mod run_control;
 pub(crate) mod run_dir;
+pub mod run_dump;
 pub mod run_lookup;
+
+pub use error::{Error, FailureCategory, FailureSignature, FailureSignatureExt, Result};
+pub mod run_materialization;
 pub mod run_options;
 pub mod run_status;
+pub mod runtime_store;
 pub mod sandbox_git;
 #[doc(hidden)]
 pub mod test_support;
 #[doc(hidden)]
 pub mod transforms;
-
-// Re-export aliases (back-compat with `fabro_workflow::transform::*` imports)
-#[doc(hidden)]
-pub mod transform {
-    pub use crate::transforms::*;
-}
-#[doc(hidden)]
-pub mod vars {
-    pub use crate::transforms::variable_expansion::*;
-}
-#[doc(hidden)]
-pub use transforms::stylesheet;
+pub mod workflow_bundle;

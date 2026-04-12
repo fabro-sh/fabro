@@ -27,15 +27,11 @@ rand.workspace = true
 futures.workspace = true
 tokio-stream.workspace = true
 async-trait.workspace = true
-reqwest.workspace = true
 base64.workspace = true
 bytes.workspace = true
 tokio-util.workspace = true
-cli-table.workspace = true
-indicatif.workspace = true
-clap.workspace = true
-dialoguer.workspace = true
 tracing.workspace = true
+fabro-http.workspace = true
 fabro-model = { path = "../fabro-model" }
 fabro-util = { path = "../fabro-util" }
 

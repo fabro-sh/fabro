@@ -1,27 +1,27 @@
-use std::path::Path;
 use std::sync::Arc;
 
-use crate::error::FabroError;
-use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
-use crate::git::{MetadataStore, scan_node_files};
-use crate::outcome::{Outcome, OutcomeExt, StageStatus};
-use crate::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt, StageSummary};
-use crate::run_options::RunOptions;
-use crate::run_status::{RunStatus, StatusReason, write_run_status};
-use crate::sandbox_git::git_push_host;
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
-use fabro_retro::retro::extract_stage_durations;
-use fabro_store::RunStore;
+use fabro_types::BilledTokenCounts;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
+use crate::error::Error;
+use crate::event::{Emitter, Event, RunNoticeLevel};
+use crate::git::MetadataStore;
+use crate::outcome::{Outcome, OutcomeExt, StageStatus};
+use crate::records::{Checkpoint, Conclusion, StageSummary};
+use crate::run_dump::RunDump;
+use crate::run_options::RunOptions;
+use crate::run_status::{RunStatus, StatusReason};
+use crate::runtime_store::RunStoreHandle;
+use crate::sandbox_git::git_push_host;
 
 fn emit_run_notice(
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     level: RunNoticeLevel,
     code: impl Into<String>,
     message: impl Into<String>,
 ) {
-    emitter.emit(&WorkflowRunEvent::RunNotice {
+    emitter.emit(&Event::RunNotice {
         level,
         code: code.into(),
         message: message.into(),
@@ -29,7 +29,7 @@ fn emit_run_notice(
 }
 
 pub fn classify_engine_result(
-    engine_result: &Result<Outcome, FabroError>,
+    engine_result: &Result<Outcome, Error>,
 ) -> (StageStatus, Option<String>, RunStatus, Option<StatusReason>) {
     match engine_result {
         Ok(outcome) => {
@@ -48,7 +48,7 @@ pub fn classify_engine_result(
             };
             (status, failure_reason, run_status, status_reason)
         }
-        Err(FabroError::Cancelled) => (
+        Err(Error::Cancelled) => (
             StageStatus::Fail,
             Some("Cancelled".to_string()),
             RunStatus::Failed,
@@ -63,105 +63,23 @@ pub fn classify_engine_result(
     }
 }
 
-pub fn build_conclusion(
-    run_dir: &Path,
-    status: StageStatus,
-    failure_reason: Option<String>,
-    run_duration_ms: u64,
-    final_git_commit_sha: Option<String>,
-) -> Conclusion {
-    let checkpoint = Checkpoint::load(&run_dir.join("checkpoint.json")).ok();
-    let stage_durations = extract_stage_durations(run_dir);
-
-    let mut total_input_tokens: i64 = 0;
-    let mut total_output_tokens: i64 = 0;
-    let mut total_cache_read_tokens: i64 = 0;
-    let mut total_cache_write_tokens: i64 = 0;
-    let mut total_reasoning_tokens: i64 = 0;
-    let mut has_pricing = false;
-
-    let (stages, total_cost, total_retries) = if let Some(ref cp) = checkpoint {
-        let mut stages = Vec::new();
-        let mut cost_sum: Option<f64> = None;
-        let mut retries_sum: u32 = 0;
-
-        for node_id in &cp.completed_nodes {
-            let outcome = cp.node_outcomes.get(node_id);
-            let retries = cp
-                .node_retries
-                .get(node_id)
-                .copied()
-                .unwrap_or(1)
-                .saturating_sub(1);
-            retries_sum += retries;
-
-            let cost = outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost);
-            if let Some(c) = cost {
-                *cost_sum.get_or_insert(0.0) += c;
-                has_pricing = true;
-            }
-
-            if let Some(usage) = outcome.and_then(|o| o.usage.as_ref()) {
-                total_input_tokens += usage.input_tokens;
-                total_output_tokens += usage.output_tokens;
-                total_cache_read_tokens += usage.cache_read_tokens.unwrap_or(0);
-                total_cache_write_tokens += usage.cache_write_tokens.unwrap_or(0);
-                total_reasoning_tokens += usage.reasoning_tokens.unwrap_or(0);
-            }
-
-            stages.push(StageSummary {
-                stage_id: node_id.clone(),
-                stage_label: node_id.clone(),
-                duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
-                cost,
-                retries,
-            });
-        }
-        (stages, cost_sum, retries_sum)
-    } else {
-        (vec![], None, 0)
-    };
-
-    Conclusion {
-        timestamp: chrono::Utc::now(),
-        status,
-        duration_ms: run_duration_ms,
-        failure_reason,
-        final_git_commit_sha,
-        stages,
-        total_cost,
-        total_retries,
-        total_input_tokens,
-        total_output_tokens,
-        total_cache_read_tokens,
-        total_cache_write_tokens,
-        total_reasoning_tokens,
-        has_pricing,
-    }
-}
-
 pub(crate) async fn build_conclusion_from_store(
-    run_store: &dyn RunStore,
-    run_dir: &Path,
+    run_store: &RunStoreHandle,
     status: StageStatus,
     failure_reason: Option<String>,
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
-    let checkpoint = match run_store.get_checkpoint().await {
-        Ok(checkpoint) => checkpoint,
-        Err(err) => {
-            tracing::warn!(error = %err, "Failed to load checkpoint from store while building conclusion");
-            Checkpoint::load(&run_dir.join("checkpoint.json")).ok()
-        }
-    };
-    let stage_durations = match run_store.list_events().await {
-        Ok(events) => crate::extract_stage_durations_from_events(&events),
-        Err(err) => {
-            tracing::warn!(error = %err, "Failed to load events from store while building conclusion");
-            extract_stage_durations(run_dir)
-        }
-    };
+    let checkpoint = run_store
+        .state()
+        .await
+        .ok()
+        .and_then(|state| state.checkpoint);
+    let stage_durations = run_store
+        .list_events()
+        .await
+        .map(|events| crate::extract_stage_durations_from_events(&events))
+        .unwrap_or_default();
 
     build_conclusion_from_parts(
         checkpoint.as_ref(),
@@ -181,17 +99,10 @@ fn build_conclusion_from_parts(
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
-    let mut total_input_tokens: i64 = 0;
-    let mut total_output_tokens: i64 = 0;
-    let mut total_cache_read_tokens: i64 = 0;
-    let mut total_cache_write_tokens: i64 = 0;
-    let mut total_reasoning_tokens: i64 = 0;
-    let mut has_pricing = false;
-
-    let (stages, total_cost, total_retries) = if let Some(cp) = checkpoint {
+    let (stages, billing, total_retries) = if let Some(cp) = checkpoint {
         let mut stages = Vec::new();
-        let mut cost_sum: Option<f64> = None;
         let mut retries_sum: u32 = 0;
+        let mut billed_usage = Vec::new();
 
         for node_id in &cp.completed_nodes {
             let outcome = cp.node_outcomes.get(node_id);
@@ -203,29 +114,25 @@ fn build_conclusion_from_parts(
                 .saturating_sub(1);
             retries_sum += retries;
 
-            let cost = outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost);
-            if let Some(c) = cost {
-                *cost_sum.get_or_insert(0.0) += c;
-                has_pricing = true;
-            }
-
             if let Some(usage) = outcome.and_then(|o| o.usage.as_ref()) {
-                total_input_tokens += usage.input_tokens;
-                total_output_tokens += usage.output_tokens;
-                total_cache_read_tokens += usage.cache_read_tokens.unwrap_or(0);
-                total_cache_write_tokens += usage.cache_write_tokens.unwrap_or(0);
-                total_reasoning_tokens += usage.reasoning_tokens.unwrap_or(0);
+                billed_usage.push(usage.clone());
             }
 
             stages.push(StageSummary {
                 stage_id: node_id.clone(),
                 stage_label: node_id.clone(),
                 duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
-                cost,
+                billing_usd_micros: outcome
+                    .and_then(|o| o.usage.as_ref())
+                    .and_then(|usage| usage.total_usd_micros),
                 retries,
             });
         }
-        (stages, cost_sum, retries_sum)
+        (
+            stages,
+            (!billed_usage.is_empty()).then(|| BilledTokenCounts::from_billed_usage(&billed_usage)),
+            retries_sum,
+        )
     } else {
         (vec![], None, 0)
     };
@@ -237,36 +144,17 @@ fn build_conclusion_from_parts(
         failure_reason,
         final_git_commit_sha,
         stages,
-        total_cost,
+        billing,
         total_retries,
-        total_input_tokens,
-        total_output_tokens,
-        total_cache_read_tokens,
-        total_cache_write_tokens,
-        total_reasoning_tokens,
-        has_pricing,
     }
 }
 
-pub fn persist_terminal_outcome(
-    run_dir: &Path,
-    conclusion: &Conclusion,
-    run_status: RunStatus,
-    status_reason: Option<StatusReason>,
-) {
-    let _ = conclusion.save(&run_dir.join("conclusion.json"));
-    write_run_status(run_dir, run_status, status_reason);
-}
-
-/// Write a finalize commit to the shadow branch with retro.json and final node files.
+/// Write a finalize commit to the shadow branch with retro.json and final node
+/// files.
 ///
-/// This captures the last diff.patch (written after the final checkpoint) and retro.json.
-/// Best-effort: errors are logged as warnings.
-pub async fn write_finalize_commit(
-    run_options: &RunOptions,
-    run_dir: &Path,
-    run_store: &dyn RunStore,
-) {
+/// This captures the last diff.patch (written after the final checkpoint) and
+/// retro.json. Best-effort: errors are logged as warnings.
+pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &RunStoreHandle) {
     let (Some(meta_branch), Some(repo_path)) = (
         run_options
             .git
@@ -279,19 +167,13 @@ pub async fn write_finalize_commit(
 
     let git_author = run_options.git_author();
     let store = MetadataStore::new(repo_path, &git_author);
-    let mut entries = scan_node_files(run_dir);
-    let retro_bytes = match run_store.get_retro().await {
-        Ok(Some(retro)) => serde_json::to_vec_pretty(&retro).ok(),
-        _ => std::fs::read(run_dir.join("retro.json")).ok(),
+    let Ok(store_state) = run_store.state().await else {
+        return;
     };
-    if let Some(bytes) = retro_bytes {
-        entries.push(("retro.json".to_string(), bytes));
-    }
-    let refs: Vec<(&str, &[u8])> = entries
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_slice()))
-        .collect();
-    if let Err(e) = store.write_files(&run_options.run_id.to_string(), &refs, "finalize run") {
+    let dump = RunDump::metadata_finalize(&store_state);
+    if let Err(e) =
+        dump.write_to_metadata_store(&store, &run_options.run_id.to_string(), "finalize run")
+    {
         tracing::warn!(error = %e, "Failed to write finalize commit to metadata branch");
         return;
     }
@@ -340,11 +222,8 @@ async fn cleanup_sandbox(
 ///
 /// # Errors
 ///
-/// Returns `FabroError` if persisting terminal state fails.
-pub async fn finalize(
-    retroed: Retroed,
-    options: &FinalizeOptions,
-) -> Result<Concluded, FabroError> {
+/// Returns `Error` if persisting terminal state fails.
+pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Concluded, Error> {
     let Retroed {
         graph,
         outcome,
@@ -357,11 +236,10 @@ pub async fn finalize(
         retro: _,
     } = retroed;
 
-    let (final_status, failure_reason, run_status, status_reason) =
+    let (final_status, failure_reason, _run_status, _status_reason) =
         classify_engine_result(&outcome);
     let conclusion = build_conclusion_from_store(
-        options.run_store.as_ref(),
-        &options.run_dir,
+        &options.run_store,
         final_status,
         failure_reason,
         duration_ms,
@@ -369,7 +247,7 @@ pub async fn finalize(
     )
     .await;
 
-    write_finalize_commit(&run_options, &options.run_dir, options.run_store.as_ref()).await;
+    write_finalize_commit(&run_options, &options.run_store).await;
 
     if options.preserve_sandbox {
         let info = sandbox.sandbox_info();
@@ -407,20 +285,6 @@ pub async fn finalize(
         );
     }
 
-    if let Err(err) = options.run_store.put_conclusion(&conclusion).await {
-        tracing::warn!(error = %err, "Failed to save conclusion to store");
-    }
-    if let Err(err) = options
-        .run_store
-        .put_status(&fabro_types::RunStatusRecord::new(
-            run_status,
-            status_reason,
-        ))
-        .await
-    {
-        tracing::warn!(error = %err, "Failed to save terminal status to store");
-    }
-
     Ok(Concluded {
         run_id: run_options.run_id,
         outcome,
@@ -436,14 +300,16 @@ pub async fn finalize(
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::Duration;
 
-    use chrono::Utc;
-    use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
-    use fabro_store::{InMemoryStore, Store};
+    use fabro_store::Database;
+    use fabro_types::settings::SettingsLayer;
     use fabro_types::{RunId, fixtures};
+    use object_store::memory::InMemory;
 
     use super::*;
+    use crate::event::StoreProgressLogger;
     use crate::pipeline::types::Retroed;
     use crate::run_options::RunOptions;
 
@@ -453,18 +319,26 @@ mod tests {
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings: FabroSettings::default(),
-            run_dir: run_dir.to_path_buf(),
-            cancel_token: None,
-            run_id: test_run_id(),
-            labels: HashMap::new(),
-            workflow_slug: None,
-            github_app: None,
-            host_repo_path: None,
-            base_branch: None,
+            settings:         SettingsLayer::default(),
+            run_dir:          run_dir.to_path_buf(),
+            cancel_token:     None,
+            run_id:           test_run_id(),
+            labels:           HashMap::new(),
+            workflow_slug:    None,
+            github_app:       None,
+            host_repo_path:   None,
+            base_branch:      None,
             display_base_sha: None,
-            git: None,
+            git:              None,
         }
+    }
+
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     #[tokio::test]
@@ -472,24 +346,18 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
-        let inner_store = InMemoryStore::default()
-            .create_run(
-                &test_run_id(),
-                Utc::now(),
-                Some(run_dir.to_string_lossy().as_ref()),
-            )
-            .await
-            .unwrap();
-        let run_store: Arc<dyn fabro_store::RunStore> = Arc::new(
-            fabro_store::DiskProjectingRunStore::new(inner_store, run_dir.clone()),
-        );
+        let inner_store = test_store().create_run(&test_run_id()).await.unwrap();
+        let run_store = inner_store;
+        let emitter = Arc::new(Emitter::new(test_run_id()));
+        let store_logger = StoreProgressLogger::new(run_store.clone());
+        store_logger.register(&emitter);
         let retroed = Retroed {
             graph: Graph::new("test"),
             outcome: Ok(Outcome::success()),
             run_options: test_run_options(&run_dir),
-            run_store: Arc::clone(&run_store),
+            run_store: run_store.clone().into(),
             hook_runner: None,
-            emitter: Arc::new(EventEmitter::default()),
+            emitter,
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(
                 std::env::current_dir().unwrap(),
             )),
@@ -497,22 +365,19 @@ mod tests {
             retro: None,
         };
 
-        let concluded = finalize(
-            retroed,
-            &FinalizeOptions {
-                run_dir: run_dir.clone(),
-                run_id: test_run_id(),
-                run_store: Arc::clone(&run_store),
-                workflow_name: "test".to_string(),
-                hook_runner: None,
-                preserve_sandbox: true,
-                last_git_sha: None,
-            },
-        )
+        let concluded = finalize(retroed, &FinalizeOptions {
+            run_dir:          run_dir.clone(),
+            run_id:           test_run_id(),
+            run_store:        run_store.clone().into(),
+            workflow_name:    "test".to_string(),
+            hook_runner:      None,
+            preserve_sandbox: true,
+            last_git_sha:     None,
+        })
         .await
         .unwrap();
+        store_logger.flush().await;
 
-        assert!(run_dir.join("conclusion.json").exists());
         assert_eq!(concluded.conclusion.status, StageStatus::Success);
     }
 }

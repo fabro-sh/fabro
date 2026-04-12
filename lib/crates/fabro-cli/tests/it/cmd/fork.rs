@@ -1,6 +1,5 @@
-use insta::assert_snapshot;
-
 use fabro_test::{fabro_snapshot, run_and_format, test_context};
+use insta::assert_snapshot;
 
 use super::support::{
     git_filters, git_show_json, git_stdout, metadata_run_ids, run_branch_commits,
@@ -25,15 +24,15 @@ fn help() {
       [TARGET]  Target checkpoint: node name, node@visit, or @ordinal (omit to fork from latest)
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --list                       Show the checkpoint timeline instead of forking
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-push                    Skip pushing new branches to the remote
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --list              Show the checkpoint timeline instead of forking
+          --no-push           Skip pushing new branches to the remote
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -85,10 +84,10 @@ fn fork_latest_prints_new_run_and_resume_hint() {
     );
     let new_run_id = &new_run_ids[0];
 
-    let new_head = git_stdout(
-        &setup.repo_dir,
-        &["rev-parse", &format!("fabro/run/{new_run_id}")],
-    );
+    let new_head = git_stdout(&setup.repo_dir, &[
+        "rev-parse",
+        &format!("fabro/run/{new_run_id}"),
+    ]);
     let expected_head = run_branch_commits(&setup.repo_dir, &setup.run.run_id)
         .into_iter()
         .last()
@@ -129,10 +128,10 @@ fn fork_from_earlier_checkpoint_uses_expected_sha() {
     );
     let new_run_id = &new_run_ids[0];
 
-    let new_head = git_stdout(
-        &setup.repo_dir,
-        &["rev-parse", &format!("fabro/run/{new_run_id}")],
-    );
+    let new_head = git_stdout(&setup.repo_dir, &[
+        "rev-parse",
+        &format!("fabro/run/{new_run_id}"),
+    ]);
     assert_eq!(new_head.trim(), expected_head);
 
     let checkpoint = git_show_json(

@@ -9,7 +9,7 @@ use crate::outcome::{Outcome, StageStatus};
 
 /// Result of edge selection: the chosen edge and the reason it was selected.
 pub(crate) struct SelectedGraphEdge<'a> {
-    pub(crate) edge: &'a GvEdge,
+    pub(crate) edge:   &'a GvEdge,
     pub(crate) reason: &'static str,
 }
 
@@ -139,8 +139,8 @@ pub(crate) fn get_retry_target(failed_node_id: &str, graph: &GvGraph) -> Option<
     None
 }
 
-/// Normalize a label for comparison: lowercase, trim, strip accelerator prefixes.
-/// Patterns: "[Y] ", "Y) ", "Y - "
+/// Normalize a label for comparison: lowercase, trim, strip accelerator
+/// prefixes. Patterns: "[Y] ", "Y) ", "Y - "
 fn normalize_label(label: &str) -> String {
     let s = label.trim().to_lowercase();
     if s.starts_with('[') {
@@ -180,7 +180,8 @@ fn best_by_weight_then_lexical<'a>(edges: &[&'a GvEdge]) -> Option<&'a GvEdge> {
 }
 
 /// Pick a random edge using weighted-random selection.
-/// Edges with `weight <= 0` are treated as weight 1 for probability calculation.
+/// Edges with `weight <= 0` are treated as weight 1 for probability
+/// calculation.
 fn weighted_random<'a>(edges: &[&'a GvEdge]) -> Option<&'a GvEdge> {
     if edges.is_empty() {
         return None;
@@ -517,8 +518,9 @@ mod tests {
             "shape".to_string(),
             AttrValue::String("hexagon".to_string()),
         );
-        let outcome =
-            Outcome::fail_deterministic("human interaction aborted before an answer was provided");
+        let outcome = Outcome::fail_deterministic(
+            "human interaction interrupted before an answer was provided",
+        );
         let context = Context::new();
 
         assert!(select_edge(&node, &outcome, &context, &g, "deterministic").is_none());
@@ -538,8 +540,9 @@ mod tests {
             "shape".to_string(),
             AttrValue::String("hexagon".to_string()),
         );
-        let outcome =
-            Outcome::fail_deterministic("human interaction aborted before an answer was provided");
+        let outcome = Outcome::fail_deterministic(
+            "human interaction interrupted before an answer was provided",
+        );
         let context = Context::new();
 
         let sel = select_edge(&node, &outcome, &context, &g, "deterministic").unwrap();

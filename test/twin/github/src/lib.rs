@@ -10,6 +10,8 @@ pub mod fixtures;
 pub mod handlers;
 pub mod server;
 pub mod state;
+#[cfg(test)]
+pub mod test_support;
 
 pub use server::TestServer;
 pub use state::AppState;

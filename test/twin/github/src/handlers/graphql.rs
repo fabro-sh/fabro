@@ -160,7 +160,7 @@ async fn handle_enable_auto_merge(
                         }
                     }
                     pr.auto_merge = Some(AutoMerge {
-                        enabled_at: now.clone(),
+                        enabled_at:   now.clone(),
                         merge_method: method.clone(),
                     });
                     return (
@@ -282,7 +282,8 @@ async fn handle_org_project_query(
         }
     }
 
-    // Return null projectV2 (not an error — the caller handles the fallback to user query)
+    // Return null projectV2 (not an error — the caller handles the fallback to user
+    // query)
     (
         StatusCode::OK,
         Json(serde_json::json!({
@@ -582,7 +583,8 @@ async fn handle_update_project_item(
         .into_response()
 }
 
-/// Extract a quoted value after a key in a string, e.g. `pullRequestId: "PR_123"` -> `PR_123`
+/// Extract a quoted value after a key in a string, e.g. `pullRequestId:
+/// "PR_123"` -> `PR_123`
 fn extract_quoted_value(s: &str, key: &str) -> Option<String> {
     let idx = s.find(key)?;
     let rest = &s[idx + key.len()..];
@@ -595,7 +597,8 @@ fn extract_quoted_value(s: &str, key: &str) -> Option<String> {
     }
 }
 
-/// Extract an unquoted value after a key, e.g. `mergeMethod: SQUASH` -> `SQUASH`
+/// Extract an unquoted value after a key, e.g. `mergeMethod: SQUASH` ->
+/// `SQUASH`
 fn extract_unquoted_value(s: &str, key: &str) -> Option<String> {
     let idx = s.find(key)?;
     let rest = &s[idx + key.len()..];
@@ -613,47 +616,11 @@ fn extract_unquoted_value(s: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use crate::server::TestServer;
-    use crate::state::{AppConfig, AppState, PullRequest};
-
-    fn test_rsa_key() -> String {
-        use std::process::Command;
-        let output = Command::new("openssl")
-            .args([
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-            ])
-            .output()
-            .expect("openssl should be available");
-        assert!(output.status.success());
-        String::from_utf8(output.stdout).unwrap()
-    }
-
-    fn sign_test_jwt(app_id: &str, private_key_pem: &str) -> String {
-        use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-        use serde::Serialize;
-
-        #[derive(Serialize)]
-        struct Claims {
-            iss: String,
-            iat: i64,
-            exp: i64,
-        }
-
-        let now = chrono::Utc::now().timestamp();
-        let claims = Claims {
-            iss: app_id.to_string(),
-            iat: now - 60,
-            exp: now + 600,
-        };
-        let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).unwrap();
-        encode(&Header::new(Algorithm::RS256), &claims, &key).unwrap()
-    }
+    use crate::state::{AppOptions, AppState, PullRequest};
+    use crate::test_support::{sign_test_jwt, test_http_client, test_rsa_private_key};
 
     async fn get_installation_token(
-        client: &reqwest::Client,
+        client: &fabro_http::HttpClient,
         jwt: &str,
         owner: &str,
         repo: &str,
@@ -661,7 +628,7 @@ mod tests {
     ) -> String {
         // Step 1: GET /repos/{owner}/{repo}/installation to get installation ID
         let resp = client
-            .get(&format!("{base_url}/repos/{owner}/{repo}/installation"))
+            .get(format!("{base_url}/repos/{owner}/{repo}/installation"))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -672,7 +639,7 @@ mod tests {
 
         // Step 2: POST /app/installations/{id}/access_tokens
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{base_url}/app/installations/{install_id}/access_tokens"
             ))
             .header("Authorization", format!("Bearer {jwt}"))
@@ -696,21 +663,21 @@ mod tests {
     async fn setup_with_token(
         state: &mut AppState,
         pem: &str,
-    ) -> (TestServer, reqwest::Client, String) {
-        state.register_app(AppConfig {
-            app_id: "100".to_string(),
-            slug: "test-app".to_string(),
-            owner_login: "owner".to_string(),
-            public: true,
+    ) -> (TestServer, fabro_http::HttpClient, String) {
+        state.register_app(AppOptions {
+            app_id:          "100".to_string(),
+            slug:            "test-app".to_string(),
+            owner_login:     "owner".to_string(),
+            public:          true,
             private_key_pem: pem.to_string(),
-            webhook_secret: None,
+            webhook_secret:  None,
         });
         state.add_installation("100", "owner", vec!["repo".to_string()], false);
         state.add_repository("owner", "repo", vec!["main".to_string()], false);
         let server = TestServer::start(state.clone()).await;
 
         let jwt = sign_test_jwt("100", pem);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let token = get_installation_token(&client, &jwt, "owner", "repo", server.url()).await;
 
         (server, client, token)
@@ -718,13 +685,13 @@ mod tests {
 
     #[tokio::test]
     async fn viewer_query_returns_id() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.viewer_id = "U_testviewer".to_string();
-        let (server, client, token) = setup_with_token(&mut state, &pem).await;
+        let (server, client, token) = setup_with_token(&mut state, pem).await;
 
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "query": "query { viewer { id } }",
@@ -742,7 +709,7 @@ mod tests {
 
     #[tokio::test]
     async fn enable_auto_merge_mutation() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         // Pre-seed a PR
         state
@@ -750,25 +717,25 @@ mod tests {
             .entry(("owner".to_string(), "repo".to_string()))
             .or_default()
             .push(PullRequest {
-                number: 1,
-                node_id: "PR_test123".to_string(),
-                title: "Test".to_string(),
-                body: "".to_string(),
-                state: "open".to_string(),
-                draft: false,
-                mergeable: true,
-                additions: 10,
-                deletions: 5,
+                number:        1,
+                node_id:       "PR_test123".to_string(),
+                title:         "Test".to_string(),
+                body:          String::new(),
+                state:         "open".to_string(),
+                draft:         false,
+                mergeable:     true,
+                additions:     10,
+                deletions:     5,
                 changed_files: 2,
-                html_url: "https://github.com/owner/repo/pull/1".to_string(),
-                user_login: "test-bot[bot]".to_string(),
-                head_ref: "feature".to_string(),
-                base_ref: "main".to_string(),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-                auto_merge: None,
+                html_url:      "https://github.com/owner/repo/pull/1".to_string(),
+                user_login:    "test-bot[bot]".to_string(),
+                head_ref:      "feature".to_string(),
+                base_ref:      "main".to_string(),
+                created_at:    "2026-01-01T00:00:00Z".to_string(),
+                updated_at:    "2026-01-01T00:00:00Z".to_string(),
+                auto_merge:    None,
             });
-        let (server, client, token) = setup_with_token(&mut state, &pem).await;
+        let (server, client, token) = setup_with_token(&mut state, pem).await;
 
         let query = r#"mutation {
             enablePullRequestAutoMerge(input: {pullRequestId: "PR_test123", mergeMethod: SQUASH}) {
@@ -782,7 +749,7 @@ mod tests {
         }"#;
 
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({ "query": query }))
             .send()
@@ -806,9 +773,9 @@ mod tests {
         let state = AppState::new();
         let server = TestServer::start(state).await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", "Bearer invalid-token")
             .json(&serde_json::json!({
                 "query": "query { viewer { id } }",
@@ -824,56 +791,56 @@ mod tests {
 
     #[tokio::test]
     async fn org_project_query_returns_node_id() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.projects.push(crate::state::Project {
-            node_id: "PVT_org123".to_string(),
-            number: 1,
-            owner: "owner".to_string(),
-            owner_type: crate::state::OwnerType::Organization,
+            node_id:         "PVT_org123".to_string(),
+            number:          1,
+            owner:           "owner".to_string(),
+            owner_type:      crate::state::OwnerType::Organization,
             status_field_id: "PVTSSF_status1".to_string(),
-            status_options: vec![
+            status_options:  vec![
                 crate::state::StatusOption {
-                    id: "opt1".to_string(),
+                    id:   "opt1".to_string(),
                     name: "Todo".to_string(),
                 },
                 crate::state::StatusOption {
-                    id: "opt2".to_string(),
+                    id:   "opt2".to_string(),
                     name: "In Progress".to_string(),
                 },
                 crate::state::StatusOption {
-                    id: "opt3".to_string(),
+                    id:   "opt3".to_string(),
                     name: "Done".to_string(),
                 },
             ],
-            items: vec![crate::state::ProjectItem {
-                id: "PVTI_item1".to_string(),
-                status: "Todo".to_string(),
+            items:           vec![crate::state::ProjectItem {
+                id:      "PVTI_item1".to_string(),
+                status:  "Todo".to_string(),
                 content: crate::state::IssueContent {
-                    id: "I_issue1".to_string(),
-                    number: 42,
-                    title: "Fix bug".to_string(),
-                    body: "Description".to_string(),
-                    url: "https://github.com/owner/repo/issues/42".to_string(),
-                    created_at: "2026-01-01T00:00:00Z".to_string(),
-                    updated_at: "2026-01-02T00:00:00Z".to_string(),
+                    id:           "I_issue1".to_string(),
+                    number:       42,
+                    title:        "Fix bug".to_string(),
+                    body:         "Description".to_string(),
+                    url:          "https://github.com/owner/repo/issues/42".to_string(),
+                    created_at:   "2026-01-01T00:00:00Z".to_string(),
+                    updated_at:   "2026-01-02T00:00:00Z".to_string(),
                     assignee_ids: vec![],
-                    labels: vec!["bug".to_string()],
+                    labels:       vec!["bug".to_string()],
                 },
             }],
         });
-        let (server, client, token) = setup_with_token(&mut state, &pem).await;
+        let (server, client, token) = setup_with_token(&mut state, pem).await;
 
         // Query org project
-        let query = r#"
+        let query = r"
             query($owner: String!, $number: Int!) {
                 organization(login: $owner) {
                     projectV2(number: $number) { id }
                 }
             }
-        "#;
+        ";
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "query": query,
@@ -894,32 +861,32 @@ mod tests {
 
     #[tokio::test]
     async fn project_items_query_returns_paginated() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.projects.push(crate::state::Project {
-            node_id: "PVT_test".to_string(),
-            number: 1,
-            owner: "owner".to_string(),
-            owner_type: crate::state::OwnerType::Organization,
+            node_id:         "PVT_test".to_string(),
+            number:          1,
+            owner:           "owner".to_string(),
+            owner_type:      crate::state::OwnerType::Organization,
             status_field_id: "PVTSSF_s".to_string(),
-            status_options: vec![],
-            items: vec![crate::state::ProjectItem {
-                id: "PVTI_1".to_string(),
-                status: "Todo".to_string(),
+            status_options:  vec![],
+            items:           vec![crate::state::ProjectItem {
+                id:      "PVTI_1".to_string(),
+                status:  "Todo".to_string(),
                 content: crate::state::IssueContent {
-                    id: "I_1".to_string(),
-                    number: 1,
-                    title: "Issue 1".to_string(),
-                    body: "Body".to_string(),
-                    url: "https://github.com/owner/repo/issues/1".to_string(),
-                    created_at: "2026-01-01T00:00:00Z".to_string(),
-                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                    id:           "I_1".to_string(),
+                    number:       1,
+                    title:        "Issue 1".to_string(),
+                    body:         "Body".to_string(),
+                    url:          "https://github.com/owner/repo/issues/1".to_string(),
+                    created_at:   "2026-01-01T00:00:00Z".to_string(),
+                    updated_at:   "2026-01-01T00:00:00Z".to_string(),
                     assignee_ids: vec!["U_user1".to_string()],
-                    labels: vec!["bug".to_string(), "urgent".to_string()],
+                    labels:       vec!["bug".to_string(), "urgent".to_string()],
                 },
             }],
         });
-        let (server, client, token) = setup_with_token(&mut state, &pem).await;
+        let (server, client, token) = setup_with_token(&mut state, pem).await;
 
         let query = r#"
             query($projectId: ID!, $cursor: String) {
@@ -946,7 +913,7 @@ mod tests {
             }
         "#;
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "query": query,
@@ -978,43 +945,43 @@ mod tests {
 
     #[tokio::test]
     async fn update_project_item_field_value() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.projects.push(crate::state::Project {
-            node_id: "PVT_test".to_string(),
-            number: 1,
-            owner: "owner".to_string(),
-            owner_type: crate::state::OwnerType::Organization,
+            node_id:         "PVT_test".to_string(),
+            number:          1,
+            owner:           "owner".to_string(),
+            owner_type:      crate::state::OwnerType::Organization,
             status_field_id: "PVTSSF_s".to_string(),
-            status_options: vec![
+            status_options:  vec![
                 crate::state::StatusOption {
-                    id: "opt1".to_string(),
+                    id:   "opt1".to_string(),
                     name: "Todo".to_string(),
                 },
                 crate::state::StatusOption {
-                    id: "opt2".to_string(),
+                    id:   "opt2".to_string(),
                     name: "Done".to_string(),
                 },
             ],
-            items: vec![crate::state::ProjectItem {
-                id: "PVTI_1".to_string(),
-                status: "Todo".to_string(),
+            items:           vec![crate::state::ProjectItem {
+                id:      "PVTI_1".to_string(),
+                status:  "Todo".to_string(),
                 content: crate::state::IssueContent {
-                    id: "I_1".to_string(),
-                    number: 1,
-                    title: "Issue 1".to_string(),
-                    body: "".to_string(),
-                    url: "https://github.com/owner/repo/issues/1".to_string(),
-                    created_at: "2026-01-01T00:00:00Z".to_string(),
-                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                    id:           "I_1".to_string(),
+                    number:       1,
+                    title:        "Issue 1".to_string(),
+                    body:         String::new(),
+                    url:          "https://github.com/owner/repo/issues/1".to_string(),
+                    created_at:   "2026-01-01T00:00:00Z".to_string(),
+                    updated_at:   "2026-01-01T00:00:00Z".to_string(),
                     assignee_ids: vec![],
-                    labels: vec![],
+                    labels:       vec![],
                 },
             }],
         });
-        let (server, client, token) = setup_with_token(&mut state, &pem).await;
+        let (server, client, token) = setup_with_token(&mut state, pem).await;
 
-        let query = r#"
+        let query = r"
             mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
                 updateProjectV2ItemFieldValue(input: {
                     projectId: $projectId
@@ -1025,9 +992,9 @@ mod tests {
                     projectV2Item { id }
                 }
             }
-        "#;
+        ";
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "query": query,

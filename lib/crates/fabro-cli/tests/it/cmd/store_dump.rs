@@ -1,8 +1,11 @@
-use insta::assert_snapshot;
+use std::fs;
+use std::time::Duration;
 
 use fabro_test::{fabro_snapshot, test_context};
+use insta::assert_snapshot;
 
 use super::support::setup_completed_dry_run;
+use crate::support::unique_run_id;
 
 #[test]
 fn help() {
@@ -22,15 +25,202 @@ fn help() {
 
     Options:
           --json                       Output as JSON [env: FABRO_JSON=]
-      -o, --output <OUTPUT>            Output directory (must not exist or be empty)
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+      -o, --output <OUTPUT>            Output directory (must not exist or be empty)
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -h, --help                       Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn store_dump_exports_large_command_output_backed_by_blob_refs() {
+    let context = test_context!();
+    let workflow = context.temp_dir.join("large-output.fabro");
+    fs::write(
+        &workflow,
+        r#"digraph LargeOutput {
+    graph [goal="Generate oversized command output"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+    big   [shape=parallelogram, label="Big", script="printf '%*s' 120000 '' | tr ' ' x"]
+
+    start -> big -> exit
+}
+"#,
+    )
+    .unwrap();
+
+    let run_id = unique_run_id();
+    let mut run_cmd = context.run_cmd();
+    run_cmd.current_dir(&context.temp_dir);
+    run_cmd.timeout(Duration::from_secs(30));
+    run_cmd.args([
+        "--run-id",
+        run_id.as_str(),
+        "--no-retro",
+        "--sandbox",
+        "local",
+    ]);
+    run_cmd.arg(&workflow);
+    let run_output = run_cmd.output().expect("command should execute");
+    assert!(
+        run_output.status.success(),
+        "workflow run failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&run_output.stdout),
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let mut inspect_cmd = context.command();
+    inspect_cmd.args(["inspect", "--json", &run_id]);
+    let inspect_output = inspect_cmd.output().expect("inspect should execute");
+    assert!(
+        inspect_output.status.success(),
+        "inspect failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&inspect_output.stdout),
+        String::from_utf8_lossy(&inspect_output.stderr)
+    );
+    let inspect_json = String::from_utf8(inspect_output.stdout).unwrap();
+    assert!(
+        inspect_json.contains("blob://sha256/"),
+        "inspect output should contain blob refs to exercise hydration\n{inspect_json}"
+    );
+
+    let output_dir = context.temp_dir.join("export");
+    let mut dump_cmd = context.command();
+    dump_cmd.args([
+        "store",
+        "dump",
+        "--output",
+        output_dir.to_str().unwrap(),
+        &run_id,
+    ]);
+    let dump_output = dump_cmd.output().expect("store dump should execute");
+    assert!(
+        dump_output.status.success(),
+        "store dump failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&dump_output.stdout),
+        String::from_utf8_lossy(&dump_output.stderr)
+    );
+
+    let checkpoint = fs::read_to_string(output_dir.join("checkpoint.json")).unwrap();
+    assert!(
+        !checkpoint.contains("blob://sha256/"),
+        "checkpoint export should hydrate blob refs\n{checkpoint}"
+    );
+}
+
+#[test]
+fn store_dump_exports_blob_refs_and_artifacts_together() {
+    let context = test_context!();
+    let workspace_dir = context.temp_dir.join("mixed-export");
+    fs::create_dir_all(&workspace_dir).unwrap();
+
+    fs::write(
+        workspace_dir.join("mixed-export.fabro"),
+        r#"digraph MixedExport {
+    graph [goal="Generate oversized command output and artifacts"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+    big   [shape=parallelogram, label="Big", script="mkdir -p assets/shared && printf exported > assets/shared/report.txt && printf '%*s' 120000 '' | tr ' ' x"]
+
+    start -> big -> exit
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        workspace_dir.join("run.toml"),
+        r#"_version = 1
+
+[workflow]
+graph = "mixed-export.fabro"
+
+[run]
+goal = "Generate oversized command output and artifacts"
+
+[run.sandbox]
+provider = "local"
+preserve = true
+
+[run.sandbox.local]
+worktree_mode = "never"
+
+[run.artifacts]
+include = ["assets/**"]
+"#,
+    )
+    .unwrap();
+
+    let run_id = unique_run_id();
+    let mut run_cmd = context.run_cmd();
+    run_cmd.current_dir(&workspace_dir);
+    run_cmd.timeout(Duration::from_secs(30));
+    run_cmd.args([
+        "--run-id",
+        run_id.as_str(),
+        "--no-retro",
+        "--sandbox",
+        "local",
+        "run.toml",
+    ]);
+    let run_output = run_cmd.output().expect("command should execute");
+    assert!(
+        run_output.status.success(),
+        "workflow run failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&run_output.stdout),
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let mut inspect_cmd = context.command();
+    inspect_cmd.args(["inspect", "--json", &run_id]);
+    let inspect_output = inspect_cmd.output().expect("inspect should execute");
+    assert!(
+        inspect_output.status.success(),
+        "inspect failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&inspect_output.stdout),
+        String::from_utf8_lossy(&inspect_output.stderr)
+    );
+    let inspect_json = String::from_utf8(inspect_output.stdout).unwrap();
+    assert!(
+        inspect_json.contains("blob://sha256/"),
+        "inspect output should contain blob refs to exercise hydration\n{inspect_json}"
+    );
+
+    let output_dir = context.temp_dir.join("export-mixed");
+    let mut dump_cmd = context.command();
+    dump_cmd.args([
+        "store",
+        "dump",
+        "--output",
+        output_dir.to_str().unwrap(),
+        &run_id,
+    ]);
+    let dump_output = dump_cmd.output().expect("store dump should execute");
+    assert!(
+        dump_output.status.success(),
+        "store dump failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&dump_output.stdout),
+        String::from_utf8_lossy(&dump_output.stderr)
+    );
+
+    let checkpoint = fs::read_to_string(output_dir.join("checkpoint.json")).unwrap();
+    assert!(
+        !checkpoint.contains("blob://sha256/"),
+        "checkpoint export should hydrate blob refs\n{checkpoint}"
+    );
+    assert_eq!(
+        fs::read_to_string(output_dir.join("artifacts/nodes/big/visit-1/assets/shared/report.txt"))
+            .unwrap(),
+        "exported"
+    );
 }
 
 #[test]
@@ -51,26 +241,29 @@ fn store_dump_exports_completed_run_snapshot() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Exported 14 files for run [ULID] to [TEMP_DIR]/export
+    Exported 17 files for run [ULID] to [TEMP_DIR]/export
     ----- stderr -----
     ");
 
-    assert_snapshot!(dump_file_summary(&output_dir), @r###"
+    assert_snapshot!(dump_file_summary(&output_dir), @"
     checkpoint.json
-    checkpoints/0001.json
-    checkpoints/0002.json
-    checkpoints/0003.json
+    checkpoints/0012.json
+    checkpoints/0016.json
+    checkpoints/0020.json
     conclusion.json
     events.jsonl
     graph.fabro
+    nodes/exit/visit-1/status.json
+    nodes/report/visit-1/response.md
     nodes/report/visit-1/status.json
+    nodes/run_tests/visit-1/response.md
     nodes/run_tests/visit-1/status.json
     nodes/start/visit-1/status.json
     run.json
     sandbox.json
     start.json
     status.json
-    "###);
+    ");
 }
 
 #[test]

@@ -1,66 +1,39 @@
-use anyhow::{Context, Result, bail};
-use fabro_config::FabroSettingsExt;
-use fabro_sandbox::SandboxRecordExt;
-use fabro_sandbox::daytona::DaytonaSandbox;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use anyhow::{Result, bail};
+use fabro_util::printer::Printer;
 use tracing::info;
 
 use crate::args::{GlobalArgs, SshArgs};
-use crate::shared::{print_json_pretty, validate_daytona_provider};
-use crate::store;
-use crate::user_config::load_user_settings_with_globals;
+use crate::command_context::CommandContext;
+use crate::server_runs::ServerSummaryLookup;
+use crate::shared::print_json_pretty;
 
-pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs, printer: Printer) -> Result<()> {
     if globals.json && !args.print {
         globals.require_no_json()?;
     }
 
-    let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let sandbox_json = run.path.join("sandbox.json");
-    let record = match store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await? {
-        Some(run_store) => run_store
-            .get_sandbox()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| fabro_sandbox::SandboxRecord::load(&sandbox_json).ok())
-            .context(
-                "Failed to load sandbox.json — was this run started with a recent version of arc?",
-            )?,
-        None => fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
-            "Failed to load sandbox.json — was this run started with a recent version of arc?",
-        )?,
-    };
-
-    validate_daytona_provider(&record, "SSH access")?;
-
-    let name = record
-        .identifier
-        .as_deref()
-        .context("Daytona sandbox record missing identifier (sandbox name)")?;
+    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
+    let run = lookup.resolve(&args.run)?;
+    let run_id = run.run_id();
+    let ssh = lookup
+        .client()
+        .create_run_ssh_access(&run_id, args.ttl)
+        .await?;
 
     info!(run_id = %args.run, ttl_minutes = args.ttl, "Creating SSH access");
 
-    let daytona = DaytonaSandbox::reconnect(name)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let ssh_cmd = daytona
-        .create_ssh_access(Some(args.ttl))
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
     if args.print {
         if globals.json {
-            print_json_pretty(&serde_json::json!({ "command": ssh_cmd }))?;
+            print_json_pretty(&serde_json::json!({ "command": ssh.command }))?;
         } else {
-            print!("{}", format_output(&ssh_cmd));
+            {
+                use std::fmt::Write as _;
+                let _ = write!(printer.stdout(), "{}", format_output(&ssh.command));
+            }
         }
     } else {
-        exec_ssh(&ssh_cmd)?;
+        exec_ssh(&ssh.command)?;
     }
 
     Ok(())
@@ -71,12 +44,16 @@ fn format_output(ssh_command: &str) -> String {
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This path replaces the current process via CommandExt::exec; Tokio child APIs are not a substitute."
+)]
 fn exec_ssh(ssh_cmd: &str) -> Result<()> {
     use std::os::unix::process::CommandExt;
 
     let parts: Vec<&str> = ssh_cmd.split_whitespace().collect();
     if parts.is_empty() {
-        bail!("Empty SSH command returned from Daytona");
+        bail!("Empty SSH command returned from server");
     }
     let err = std::process::Command::new(parts[0])
         .args(&parts[1..])
@@ -86,5 +63,5 @@ fn exec_ssh(ssh_cmd: &str) -> Result<()> {
 
 #[cfg(not(unix))]
 fn exec_ssh(_ssh_cmd: &str) -> Result<()> {
-    bail!("Direct SSH connection is only supported on Unix systems; use --print instead");
+    bail!("Direct SSH connection is only supported on Unix systems; use --print instead")
 }

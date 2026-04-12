@@ -27,12 +27,12 @@ pub mod types;
 pub mod v4a_patch;
 
 pub use agent_profile::AgentProfile;
-pub use config::{SessionConfig, ToolApprovalAdapter, ToolHookCallback, ToolHookDecision};
+pub use config::{SessionOptions, ToolApprovalAdapter, ToolHookCallback, ToolHookDecision};
 #[cfg(feature = "docker")]
-pub use docker_sandbox::{DockerSandbox, DockerSandboxConfig};
-pub use error::{AbortReason, AgentError};
-pub use event::EventEmitter;
-pub use fabro_mcp::config::McpServerConfig;
+pub use docker_sandbox::{DockerSandbox, DockerSandboxOptions};
+pub use error::{Error, InterruptReason, Result};
+pub use event::Emitter;
+pub use fabro_mcp::config::McpServerSettings;
 pub use history::History;
 pub use local_sandbox::LocalSandbox;
 pub use loop_detection::detect_loop;
@@ -40,8 +40,8 @@ pub use memory::discover_memory;
 pub use profiles::{AnthropicProfile, EnvContext, GeminiProfile, OpenAiProfile};
 pub use read_before_write_sandbox::ReadBeforeWriteSandbox;
 pub use sandbox::{
-    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, WorktreeConfig,
-    WorktreeEvent, WorktreeEventCallback, WorktreeSandbox, format_lines_numbered, shell_quote,
+    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, WorktreeEvent,
+    WorktreeEventCallback, WorktreeOptions, WorktreeSandbox, format_lines_numbered, shell_quote,
 };
 pub use session::Session;
 pub use skills::Skill;

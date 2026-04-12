@@ -1,8 +1,28 @@
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+
+use fabro_llm::client::Client;
+use fabro_llm::error::ProviderErrorKind;
+use fabro_llm::generate::StreamAccumulator;
+use fabro_llm::provider::StreamEventStream;
+use fabro_llm::types::{
+    ContentPart, Message, ReasoningEffort, Request, RetryPolicy, StreamEvent, ToolChoice,
+};
+use fabro_llm::{Error as LlmError, retry};
+use fabro_mcp::config::{McpServerSettings, McpTransport};
+use fabro_mcp::connection_manager::McpConnectionManager;
+use futures::StreamExt;
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
+use tokio::time;
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, info, warn};
+
 use crate::agent_profile::AgentProfile;
 use crate::compaction::{check_context_usage, compact_context};
-use crate::config::SessionConfig;
-use crate::error::{AbortReason, AgentError};
-use crate::event::EventEmitter;
+use crate::config::SessionOptions;
+use crate::error::{Error, InterruptReason};
+use crate::event::Emitter;
 use crate::file_tracker::FileTracker;
 use crate::history::History;
 use crate::loop_detection::detect_loop;
@@ -16,44 +36,26 @@ use crate::skills::{
 use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentManager};
 use crate::tool_execution::execute_tool_calls;
 use crate::types::{AgentEvent, SessionEvent, SessionState, Turn};
-use fabro_llm::client::Client;
-use fabro_llm::error::{ProviderErrorKind, SdkError};
-use fabro_llm::generate::StreamAccumulator;
-use fabro_llm::provider::StreamEventStream;
-use fabro_llm::retry;
-use fabro_llm::types::{
-    ContentPart, Message, ReasoningEffort, Request, RetryPolicy, StreamEvent, ToolChoice,
-};
-use fabro_mcp::config::{McpServerConfig, McpTransport};
-use fabro_mcp::connection_manager::McpConnectionManager;
-use futures::StreamExt;
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
-use tokio::sync::{Mutex as AsyncMutex, broadcast};
-use tokio::time;
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
 
 pub struct Session {
-    id: String,
-    config: SessionConfig,
-    history: History,
-    event_emitter: EventEmitter,
-    state: SessionState,
-    llm_client: Client,
+    id:               String,
+    config:           SessionOptions,
+    history:          History,
+    event_emitter:    Emitter,
+    state:            SessionState,
+    llm_client:       Client,
     provider_profile: Arc<dyn AgentProfile>,
-    sandbox: Arc<dyn Sandbox>,
-    steering_queue: Arc<Mutex<VecDeque<String>>>,
-    followup_queue: Arc<Mutex<VecDeque<String>>>,
-    cancel_token: CancellationToken,
-    abort_reason: Arc<Mutex<Option<AbortReason>>>,
-    memory: Vec<String>,
-    env_context: EnvContext,
-    skills: Vec<Skill>,
-    system_prompt: String,
-    file_tracker: FileTracker,
-    tool_env: Option<HashMap<String, String>>,
+    sandbox:          Arc<dyn Sandbox>,
+    steering_queue:   Arc<Mutex<VecDeque<String>>>,
+    followup_queue:   Arc<Mutex<VecDeque<String>>>,
+    cancel_token:     CancellationToken,
+    interrupt_reason: Arc<Mutex<Option<InterruptReason>>>,
+    memory:           Vec<String>,
+    env_context:      EnvContext,
+    skills:           Vec<Skill>,
+    system_prompt:    String,
+    file_tracker:     FileTracker,
+    tool_env:         Option<HashMap<String, String>>,
     subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
 }
 
@@ -63,14 +65,14 @@ impl Session {
         llm_client: Client,
         provider_profile: Arc<dyn AgentProfile>,
         sandbox: Arc<dyn Sandbox>,
-        config: SessionConfig,
+        config: SessionOptions,
         subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             config,
             history: History::default(),
-            event_emitter: EventEmitter::new(),
+            event_emitter: Emitter::new(),
             state: SessionState::Idle,
             llm_client,
             provider_profile,
@@ -78,7 +80,7 @@ impl Session {
             steering_queue: Arc::new(Mutex::new(VecDeque::new())),
             followup_queue: Arc::new(Mutex::new(VecDeque::new())),
             cancel_token: CancellationToken::new(),
-            abort_reason: Arc::new(Mutex::new(None)),
+            interrupt_reason: Arc::new(Mutex::new(None)),
             memory: Vec::new(),
             env_context: EnvContext::default(),
             skills: Vec::new(),
@@ -98,11 +100,14 @@ impl Session {
         &self.id
     }
 
-    /// Initialize session by discovering project docs and capturing environment context.
-    /// Call before `process_input`.
+    /// Initialize session by discovering project docs and capturing environment
+    /// context. Call before `process_input`.
     pub async fn initialize(&mut self) {
         self.event_emitter
-            .emit(self.id.clone(), AgentEvent::SessionStarted);
+            .emit(self.id.clone(), AgentEvent::SessionStarted {
+                provider: Some(self.provider_profile.provider().to_string()),
+                model:    Some(self.provider_profile.model().to_string()),
+            });
 
         let doc_root = self
             .config
@@ -121,8 +126,9 @@ impl Session {
         let skill_dirs = if let Some(dirs) = &self.config.skill_dirs {
             dirs.clone()
         } else {
-            let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string());
-            default_skill_dirs(home.as_deref(), self.config.git_root.as_deref())
+            let skills_dir = fabro_util::Home::from_env().skills_dir();
+            let skills_str = skills_dir.to_string_lossy().to_string();
+            default_skill_dirs(Some(&skills_str), self.config.git_root.as_deref())
         };
         self.skills = discover_skills(self.sandbox.as_ref(), &skill_dirs).await;
         debug!(skill_count = self.skills.len(), "Skills discovered");
@@ -149,22 +155,18 @@ impl Session {
             for (server_name, result) in &results {
                 match result {
                     Ok(tool_count) => {
-                        self.event_emitter.emit(
-                            self.id.clone(),
-                            AgentEvent::McpServerReady {
+                        self.event_emitter
+                            .emit(self.id.clone(), AgentEvent::McpServerReady {
                                 server_name: server_name.clone(),
-                                tool_count: *tool_count,
-                            },
-                        );
+                                tool_count:  *tool_count,
+                            });
                     }
                     Err(e) => {
-                        self.event_emitter.emit(
-                            self.id.clone(),
-                            AgentEvent::McpServerFailed {
+                        self.event_emitter
+                            .emit(self.id.clone(), AgentEvent::McpServerFailed {
                                 server_name: server_name.clone(),
-                                error: e.to_string(),
-                            },
-                        );
+                                error:       e.to_string(),
+                            });
                     }
                 }
             }
@@ -196,9 +198,10 @@ impl Session {
         );
     }
 
-    /// Resolve `McpTransport::Sandbox` configs by starting the MCP server inside the
-    /// sandbox and rewriting the transport to `Http` with the sandbox's preview URL.
-    async fn resolve_sandbox_mcp_servers(&self) -> Vec<McpServerConfig> {
+    /// Resolve `McpTransport::Sandbox` configs by starting the MCP server
+    /// inside the sandbox and rewriting the transport to `Http` with the
+    /// sandbox's preview URL.
+    async fn resolve_sandbox_mcp_servers(&self) -> Vec<McpServerSettings> {
         let mut resolved = Vec::with_capacity(self.config.mcp_servers.len());
 
         for config in &self.config.mcp_servers {
@@ -212,11 +215,11 @@ impl Session {
                                 url = %url,
                                 "Sandbox MCP server started, connecting via HTTP"
                             );
-                            resolved.push(McpServerConfig {
-                                name: config.name.clone(),
-                                transport: McpTransport::Http { url, headers },
+                            resolved.push(McpServerSettings {
+                                name:                 config.name.clone(),
+                                transport:            McpTransport::Http { url, headers },
                                 startup_timeout_secs: config.startup_timeout_secs,
-                                tool_timeout_secs: config.tool_timeout_secs,
+                                tool_timeout_secs:    config.tool_timeout_secs,
                             });
                         }
                         Err(e) => {
@@ -225,13 +228,11 @@ impl Session {
                                 error = %e,
                                 "Failed to start sandbox MCP server"
                             );
-                            self.event_emitter.emit(
-                                self.id.clone(),
-                                AgentEvent::McpServerFailed {
+                            self.event_emitter
+                                .emit(self.id.clone(), AgentEvent::McpServerFailed {
                                     server_name: config.name.clone(),
-                                    error: e,
-                                },
-                            );
+                                    error:       e,
+                                });
                         }
                     }
                 }
@@ -242,7 +243,8 @@ impl Session {
         resolved
     }
 
-    /// Start an MCP server inside the sandbox and return (url, headers) for HTTP connection.
+    /// Start an MCP server inside the sandbox and return (url, headers) for
+    /// HTTP connection.
     async fn start_sandbox_mcp_server(
         &self,
         command: &[String],
@@ -294,7 +296,8 @@ impl Session {
             ));
         }
 
-        // Get the preview URL for the port, or fall back to localhost for local sandboxes
+        // Get the preview URL for the port, or fall back to localhost for local
+        // sandboxes
         if let Some(url_and_headers) = sandbox.get_preview_url(port).await? {
             Ok(url_and_headers)
         } else {
@@ -380,20 +383,20 @@ impl Session {
             .push_back(message);
     }
 
-    pub fn abort(&self) {
-        self.set_abort_reason(AbortReason::Cancelled);
+    pub fn interrupt(&self) {
+        self.set_interrupt_reason(InterruptReason::Cancelled);
         self.cancel_token.cancel();
     }
 
-    /// Returns a handle that can set the abort reason from another task.
+    /// Returns a handle that can set the interrupt reason from another task.
     #[must_use]
-    pub fn abort_reason_handle(&self) -> Arc<Mutex<Option<AbortReason>>> {
-        self.abort_reason.clone()
+    pub fn interrupt_reason_handle(&self) -> Arc<Mutex<Option<InterruptReason>>> {
+        self.interrupt_reason.clone()
     }
 
-    fn set_abort_reason(&self, reason: AbortReason) {
+    fn set_interrupt_reason(&self, reason: InterruptReason) {
         let mut guard = self
-            .abort_reason
+            .interrupt_reason
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if guard.is_none() {
@@ -401,27 +404,24 @@ impl Session {
         }
     }
 
-    fn aborted_error(&self) -> AgentError {
+    fn interrupted_error(&self) -> Error {
         let reason = self
-            .abort_reason
+            .interrupt_reason
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-            .unwrap_or(AbortReason::Cancelled);
-        AgentError::Aborted(reason)
+            .unwrap_or(InterruptReason::Cancelled);
+        Error::Interrupted(reason)
     }
 
-    fn emit_llm_error(&mut self, err: SdkError) -> AgentError {
-        self.event_emitter.emit(
-            self.id.clone(),
-            AgentEvent::Error {
-                error: AgentError::Llm(err.clone()),
-            },
-        );
+    fn emit_llm_error(&mut self, err: LlmError) -> Error {
+        self.event_emitter.emit(self.id.clone(), AgentEvent::Error {
+            error: Error::Llm(err.clone()),
+        });
         if is_auth_error(&err) {
             self.transition(SessionState::Closed);
         }
-        AgentError::Llm(err)
+        Error::Llm(err)
     }
 
     async fn open_stream_with_retry(
@@ -429,7 +429,7 @@ impl Session {
         client: &Client,
         request: &Request,
         retry_policy: &RetryPolicy,
-    ) -> Result<StreamEventStream, AgentError> {
+    ) -> Result<StreamEventStream, Error> {
         let stream_result = retry::retry(retry_policy, || {
             let client = client.clone();
             let request = request.clone();
@@ -458,8 +458,8 @@ impl Session {
         self.cancel_token.clone()
     }
 
-    /// Build a callback that forwards sub-agent lifecycle and child session events
-    /// through this session's emitter.
+    /// Build a callback that forwards sub-agent lifecycle and child session
+    /// events through this session's emitter.
     #[must_use]
     pub fn sub_agent_event_callback(&self) -> SubAgentEventCallback {
         let emitter = self.event_emitter.clone();
@@ -488,7 +488,7 @@ impl Session {
     /// - Thinking → Closed (emits SessionEnded)
     /// - Executing → Closed (emits SessionEnded)
     /// - Idle → Closed (emits SessionEnded)
-    /// - any → Closed (abort/error — emits SessionEnded)
+    /// - any → Closed (interrupt/error — emits SessionEnded)
     fn transition(&mut self, to: SessionState) {
         let from = self.state;
         if from == to {
@@ -556,15 +556,15 @@ impl Session {
         &self.file_tracker
     }
 
-    pub async fn process_input(&mut self, input: &str) -> Result<(), AgentError> {
+    pub async fn process_input(&mut self, input: &str) -> Result<(), Error> {
         if self.state == SessionState::Closed {
-            return Err(AgentError::SessionClosed);
+            return Err(Error::SessionClosed);
         }
 
         // Spawn wall-clock timeout task if configured
         let timer_handle = self.config.wall_clock_timeout.map(|duration| {
             let token = self.cancel_token.clone();
-            let reason_handle = self.abort_reason.clone();
+            let reason_handle = self.interrupt_reason.clone();
             tokio::spawn(async move {
                 time::sleep(duration).await;
                 {
@@ -572,7 +572,7 @@ impl Session {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     if guard.is_none() {
-                        *guard = Some(AbortReason::WallClockTimeout);
+                        *guard = Some(InterruptReason::WallClockTimeout);
                     }
                 }
                 token.cancel();
@@ -597,7 +597,7 @@ impl Session {
             }
         }
 
-        // Abort the timer so it doesn't fire after we're done
+        // Stop the timer so it doesn't fire after we're done.
         if let Some(handle) = timer_handle {
             handle.abort();
         }
@@ -610,11 +610,11 @@ impl Session {
         result
     }
 
-    async fn run_single_input(&mut self, input: &str) -> Result<(), AgentError> {
+    async fn run_single_input(&mut self, input: &str) -> Result<(), Error> {
         const STREAM_CONSUME_RETRIES: usize = 3;
 
         if self.state == SessionState::Closed {
-            return Err(AgentError::SessionClosed);
+            return Err(Error::SessionClosed);
         }
 
         self.transition(SessionState::Thinking);
@@ -622,33 +622,29 @@ impl Session {
         // Expand skill references in input
         let expanded = if self.skills.is_empty() {
             ExpandedInput {
-                text: input.to_string(),
+                text:       input.to_string(),
                 skill_name: None,
             }
         } else {
-            expand_skill(&self.skills, input).map_err(AgentError::InvalidState)?
+            expand_skill(&self.skills, input).map_err(Error::InvalidState)?
         };
         if let Some(ref name) = expanded.skill_name {
-            self.event_emitter.emit(
-                self.id.clone(),
-                AgentEvent::SkillExpanded {
+            self.event_emitter
+                .emit(self.id.clone(), AgentEvent::SkillExpanded {
                     skill_name: name.clone(),
-                },
-            );
+                });
         }
         let expanded_input = expanded.text;
 
         // Append user turn and emit event
         self.history.push(Turn::User {
-            content: expanded_input.clone(),
+            content:   expanded_input.clone(),
             timestamp: SystemTime::now(),
         });
-        self.event_emitter.emit(
-            self.id.clone(),
-            AgentEvent::UserInput {
+        self.event_emitter
+            .emit(self.id.clone(), AgentEvent::UserInput {
                 text: expanded_input.clone(),
-            },
-        );
+            });
 
         // Drain steering queue before first LLM call
         self.drain_steering();
@@ -660,30 +656,26 @@ impl Session {
             if self.config.max_tool_rounds_per_input > 0
                 && round_count >= self.config.max_tool_rounds_per_input
             {
-                self.event_emitter.emit(
-                    self.id.clone(),
-                    AgentEvent::TurnLimitReached {
+                self.event_emitter
+                    .emit(self.id.clone(), AgentEvent::TurnLimitReached {
                         max_turns: self.config.max_tool_rounds_per_input,
-                    },
-                );
+                    });
                 break;
             }
 
             // Check max_turns
             if self.config.max_turns > 0 && self.history.turns().len() >= self.config.max_turns {
-                self.event_emitter.emit(
-                    self.id.clone(),
-                    AgentEvent::TurnLimitReached {
+                self.event_emitter
+                    .emit(self.id.clone(), AgentEvent::TurnLimitReached {
                         max_turns: self.config.max_turns,
-                    },
-                );
+                    });
                 break;
             }
 
             // Check cancellation
             if self.cancel_token.is_cancelled() {
                 self.close();
-                return Err(self.aborted_error());
+                return Err(self.interrupted_error());
             }
 
             // Pre-turn compaction: trim context before building the request
@@ -704,16 +696,13 @@ impl Session {
             let retry_policy = RetryPolicy {
                 max_retries: 3,
                 on_retry: Some(std::sync::Arc::new(move |err, attempt, delay| {
-                    retry_emitter.emit(
-                        retry_session_id.clone(),
-                        AgentEvent::LlmRetry {
-                            provider: retry_provider.clone(),
-                            model: retry_model.clone(),
-                            attempt: attempt as usize,
-                            delay_secs: delay.as_secs_f64(),
-                            error: err.clone(),
-                        },
-                    );
+                    retry_emitter.emit(retry_session_id.clone(), AgentEvent::LlmRetry {
+                        provider:   retry_provider.clone(),
+                        model:      retry_model.clone(),
+                        attempt:    attempt as usize,
+                        delay_secs: delay.as_secs_f64(),
+                        error:      err.clone(),
+                    });
                 })),
                 ..Default::default()
             };
@@ -769,12 +758,12 @@ impl Session {
                     }
                 }
 
-                // If aborted during streaming, drop the stream to cancel the HTTP
+                // If interrupted during streaming, drop the stream to cancel the HTTP
                 // connection, then close the session before returning.
                 if self.cancel_token.is_cancelled() {
                     drop(event_stream);
                     self.close();
-                    return Err(self.aborted_error());
+                    return Err(self.interrupted_error());
                 }
 
                 if let Some(resp) = accumulator.response().cloned() {
@@ -793,7 +782,7 @@ impl Session {
                         self.event_emitter.emit(
                             self.id.clone(),
                             AgentEvent::AssistantOutputReplace {
-                                text: String::new(),
+                                text:      String::new(),
                                 reasoning: None,
                             },
                         );
@@ -805,9 +794,9 @@ impl Session {
             }
 
             let Some(response) = response else {
-                return Err(self.emit_llm_error(SdkError::Stream {
+                return Err(self.emit_llm_error(LlmError::Stream {
                     message: "Stream ended without a Finish event (after retries)".into(),
-                    source: None,
+                    source:  None,
                 }));
             };
 
@@ -833,15 +822,13 @@ impl Session {
             });
 
             // Emit AssistantMessage with enriched data from the response
-            self.event_emitter.emit(
-                self.id.clone(),
-                AgentEvent::AssistantMessage {
-                    text: text.clone(),
-                    model: response.model.clone(),
-                    usage: response.usage.clone(),
+            self.event_emitter
+                .emit(self.id.clone(), AgentEvent::AssistantMessage {
+                    text:            text.clone(),
+                    model:           response.model.clone(),
+                    usage:           response.usage.clone(),
                     tool_call_count: tool_calls.len(),
-                },
-            );
+                });
 
             // Post-response compaction: trim context after appending assistant turn
             self.compact_if_needed().await;
@@ -880,7 +867,7 @@ impl Session {
                     timestamp: SystemTime::now(),
                 });
                 self.close();
-                return Err(self.aborted_error());
+                return Err(self.interrupted_error());
             }
 
             // Record tool results turn
@@ -931,12 +918,9 @@ impl Session {
             )
             .await
             {
-                self.event_emitter.emit(
-                    self.id.clone(),
-                    AgentEvent::Error {
-                        error: AgentError::InvalidState(format!("Context compaction failed: {e}")),
-                    },
-                );
+                self.event_emitter.emit(self.id.clone(), AgentEvent::Error {
+                    error: Error::InvalidState(format!("Context compaction failed: {e}")),
+                });
             }
         }
     }
@@ -951,7 +935,7 @@ impl Session {
         for msg in messages {
             let text = msg.clone();
             self.history.push(Turn::Steering {
-                content: msg,
+                content:   msg,
                 timestamp: SystemTime::now(),
             });
             self.event_emitter
@@ -996,7 +980,7 @@ impl Session {
     }
 }
 
-const fn is_auth_error(err: &SdkError) -> bool {
+const fn is_auth_error(err: &LlmError) -> bool {
     matches!(
         err.provider_kind(),
         Some(ProviderErrorKind::Authentication | ProviderErrorKind::AccessDenied)
@@ -1005,29 +989,31 @@ const fn is_auth_error(err: &SdkError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::config::ToolApprovalAdapter;
-    use crate::subagent::SubAgentStatus;
-    use crate::test_support::*;
-    use crate::tool_registry::{RegisteredTool, ToolRegistry};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::types::{
         ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, ToolDefinition,
     };
     use futures::stream;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::config::ToolApprovalAdapter;
+    use crate::subagent::SubAgentStatus;
+    use crate::test_support::*;
+    use crate::tool_registry::{RegisteredTool, ToolRegistry};
 
     #[derive(Clone)]
     enum ScriptedStreamCall {
         Response(Box<Response>),
-        Events(Vec<Result<StreamEvent, SdkError>>),
-        Error(SdkError),
+        Events(Vec<Result<StreamEvent, LlmError>>),
+        Error(LlmError),
     }
 
     struct ScriptedStreamProvider {
-        calls: Vec<ScriptedStreamCall>,
+        calls:      Vec<ScriptedStreamCall>,
         call_index: AtomicUsize,
     }
 
@@ -1043,7 +1029,7 @@ mod tests {
             }
         }
 
-        fn events_for_response(response: Response) -> Vec<Result<StreamEvent, SdkError>> {
+        fn events_for_response(response: Response) -> Vec<Result<StreamEvent, LlmError>> {
             let mut events = Vec::new();
             let text = response.text();
             if !text.is_empty() {
@@ -1073,14 +1059,14 @@ mod tests {
             "mock"
         }
 
-        async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
-            Err(SdkError::Configuration {
+        async fn complete(&self, _request: &Request) -> Result<Response, LlmError> {
+            Err(LlmError::Configuration {
                 message: "ScriptedStreamProvider does not implement complete()".into(),
-                source: None,
+                source:  None,
             })
         }
 
-        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
             let idx = self.call_index.fetch_add(1, Ordering::SeqCst);
             let scripted = if idx < self.calls.len() {
                 self.calls[idx].clone()
@@ -1113,7 +1099,7 @@ mod tests {
             client,
             profile,
             env,
-            SessionConfig::default(),
+            SessionOptions::default(),
             subagent_manager,
         )
     }
@@ -1180,7 +1166,7 @@ mod tests {
             tool_call_response("echo", "call_3", serde_json::json!({"text": "c"})),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             max_tool_rounds_per_input: 2,
             enable_loop_detection: false,
             ..Default::default()
@@ -1203,7 +1189,7 @@ mod tests {
             text_response("should not reach"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             max_turns: 3,
             ..Default::default()
         };
@@ -1280,7 +1266,7 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e.event, AgentEvent::SessionStarted))
+                .any(|e| matches!(e.event, AgentEvent::SessionStarted { .. }))
         );
         assert!(
             events
@@ -1393,7 +1379,7 @@ mod tests {
             text_response("Done"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_loop_detection: true,
             loop_detection_window: 3,
             ..Default::default()
@@ -1430,18 +1416,18 @@ mod tests {
             tool_call_response("echo", "call_2", serde_json::json!({"text": "b"})),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_loop_detection: false,
             ..Default::default()
         };
 
         let mut session = make_session_with_tools_and_config(responses, registry, config).await;
-        // Set abort before processing
-        session.abort();
+        // Set interrupt before processing
+        session.interrupt();
         let result = session.process_input("Do something").await;
 
-        // Should return Aborted error and transition to Closed
-        assert!(matches!(result, Err(AgentError::Aborted(_))));
+        // Should return Interrupted error and transition to Closed
+        assert!(matches!(result, Err(Error::Interrupted(_))));
         assert_eq!(session.state(), SessionState::Closed);
 
         // Should have stopped immediately: User turn only, no LLM call
@@ -1458,11 +1444,11 @@ mod tests {
         // Tool that cancels the token when executed
         let abort_tool = RegisteredTool {
             definition: ToolDefinition {
-                name: "set_abort".into(),
-                description: "Sets abort flag".into(),
-                parameters: serde_json::json!({"type": "object"}),
+                name:        "set_abort".into(),
+                description: "Sets interrupt flag".into(),
+                parameters:  serde_json::json!({"type": "object"}),
             },
-            executor: Arc::new(move |_args, _ctx| {
+            executor:   Arc::new(move |_args, _ctx| {
                 let token = cancel_token_for_tool.clone();
                 Box::pin(async move {
                     token.cancel();
@@ -1483,7 +1469,7 @@ mod tests {
         let client = make_client(provider).await;
         let profile = Arc::new(TestProfile::with_tools(registry));
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_loop_detection: false,
             ..Default::default()
         };
@@ -1494,8 +1480,8 @@ mod tests {
 
         let result = session.process_input("Do something").await;
 
-        // Should return Aborted error and transition to Closed
-        assert!(matches!(result, Err(AgentError::Aborted(_))));
+        // Should return Interrupted error and transition to Closed
+        assert!(matches!(result, Err(Error::Interrupted(_))));
         assert_eq!(session.state(), SessionState::Closed);
 
         // Should have processed: User + Assistant(tool_call) + ToolResults = 3 turns
@@ -1510,19 +1496,19 @@ mod tests {
     #[tokio::test]
     async fn auth_error_closes_session() {
         let error_provider = Arc::new(MockErrorProvider {
-            error: SdkError::Provider {
-                kind: ProviderErrorKind::Authentication,
+            error: LlmError::Provider {
+                kind:   ProviderErrorKind::Authentication,
                 detail: Box::new(ProviderErrorDetail::new("invalid api key", "mock")),
             },
         });
         let client = make_client(error_provider).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
 
         let result = session.process_input("Hello").await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), AgentError::Llm(_)));
+        assert!(matches!(result.unwrap_err(), Error::Llm(_)));
         assert_eq!(session.state(), SessionState::Closed);
     }
 
@@ -1554,7 +1540,7 @@ mod tests {
 
         let result = session.process_input("Hello").await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), AgentError::SessionClosed));
+        assert!(matches!(result.unwrap_err(), Error::SessionClosed));
     }
 
     #[tokio::test]
@@ -1564,7 +1550,7 @@ mod tests {
 
         let mut rx = session.subscribe();
         let result = session.process_input("Hello").await;
-        assert!(matches!(result, Err(AgentError::SessionClosed)));
+        assert!(matches!(result, Err(Error::SessionClosed)));
 
         // No SessionStarted event should have been emitted
         let mut events = Vec::new();
@@ -1574,7 +1560,7 @@ mod tests {
         assert!(
             !events
                 .iter()
-                .any(|e| matches!(e.event, AgentEvent::SessionStarted)),
+                .any(|e| matches!(e.event, AgentEvent::SessionStarted { .. })),
             "SessionStarted should not be emitted for a closed session"
         );
     }
@@ -1597,7 +1583,7 @@ mod tests {
         let client = make_client(provider).await;
         let profile = Arc::new(TestProfile::with_tools(registry));
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
         let mut rx = session.subscribe();
 
         session.process_input("Use echo three times").await.unwrap();
@@ -1648,7 +1634,7 @@ mod tests {
         let registry = ToolRegistry::new();
         let profile = Arc::new(TestProfile::with_context_window(registry, 100));
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
         let mut rx = session.subscribe();
 
         session.process_input(&large_input).await.unwrap();
@@ -1670,7 +1656,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
 
         // Default reasoning_effort is None
         session.set_reasoning_effort(Some(ReasoningEffort::High));
@@ -1693,7 +1679,7 @@ mod tests {
         // Large context window so short input stays well under 80%
         let profile = Arc::new(TestProfile::with_context_window(registry, 200_000));
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
         let mut rx = session.subscribe();
 
         session.process_input("Hi").await.unwrap();
@@ -1712,9 +1698,9 @@ mod tests {
         let mut registry = ToolRegistry::new();
         registry.register(RegisteredTool {
             definition: ToolDefinition {
-                name: "strict_tool".into(),
+                name:        "strict_tool".into(),
                 description: "Tool with required params".into(),
-                parameters: serde_json::json!({
+                parameters:  serde_json::json!({
                     "type": "object",
                     "properties": {
                         "text": {"type": "string"}
@@ -1722,7 +1708,7 @@ mod tests {
                     "required": ["text"]
                 }),
             },
-            executor: Arc::new(|_args, _ctx| {
+            executor:   Arc::new(|_args, _ctx| {
                 Box::pin(async move { Ok("should not reach".to_string()) })
             }),
         });
@@ -1753,9 +1739,9 @@ mod tests {
         let mut registry = ToolRegistry::new();
         registry.register(RegisteredTool {
             definition: ToolDefinition {
-                name: "strict_tool".into(),
+                name:        "strict_tool".into(),
                 description: "Tool with required params".into(),
-                parameters: serde_json::json!({
+                parameters:  serde_json::json!({
                     "type": "object",
                     "properties": {
                         "text": {"type": "string"}
@@ -1763,7 +1749,7 @@ mod tests {
                     "required": ["text"]
                 }),
             },
-            executor: Arc::new(|_args, _ctx| {
+            executor:   Arc::new(|_args, _ctx| {
                 Box::pin(async move { Ok("tool executed".to_string()) })
             }),
         });
@@ -1803,14 +1789,15 @@ mod tests {
         let mut session_start_count = 0;
         let mut session_end_count = 0;
         while let Ok(event) = rx.try_recv() {
-            if matches!(event.event, AgentEvent::SessionStarted) {
+            if matches!(event.event, AgentEvent::SessionStarted { .. }) {
                 session_start_count += 1;
             }
             if matches!(event.event, AgentEvent::SessionEnded) {
                 session_end_count += 1;
             }
         }
-        // SessionStarted is emitted once during initialize(), SessionEnded once during close()
+        // SessionStarted is emitted once during initialize(), SessionEnded once during
+        // close()
         assert_eq!(session_start_count, 1);
         assert_eq!(session_end_count, 1);
     }
@@ -1822,7 +1809,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             user_instructions: Some("Always use TDD".into()),
             ..Default::default()
         };
@@ -1850,7 +1837,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
 
         // Intentionally skip initialize(): system prompt remains empty.
         session.process_input("test").await.unwrap();
@@ -1882,7 +1869,7 @@ mod tests {
             text_response("OK after denial"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(|_name, _args| {
                 Err("denied by policy".to_string())
             })))),
@@ -1923,7 +1910,7 @@ mod tests {
             text_response("Done"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(|_name, _args| {
                 Ok(())
             })))),
@@ -1959,7 +1946,7 @@ mod tests {
             text_response("Done"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(
                 move |name, args| {
                     *captured_clone.lock().unwrap() = Some((name.to_string(), args.clone()));
@@ -1990,7 +1977,7 @@ mod tests {
             text_response("Done"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             tool_hooks: None,
             ..Default::default()
         };
@@ -2021,7 +2008,7 @@ mod tests {
             text_response("Done"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(|_name, _args| {
                 Err("not allowed".to_string())
             })))),
@@ -2074,21 +2061,18 @@ mod tests {
     async fn stream_mid_stream_error() {
         let provider = Arc::new(MockMidStreamErrorProvider {
             partial_text: "partial".into(),
-            error: SdkError::Stream {
+            error:        LlmError::Stream {
                 message: "connection reset".into(),
-                source: None,
+                source:  None,
             },
         });
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
 
         let result = session.process_input("Hello").await;
-        assert!(matches!(
-            result,
-            Err(AgentError::Llm(SdkError::Stream { .. }))
-        ));
+        assert!(matches!(result, Err(Error::Llm(LlmError::Stream { .. }))));
     }
 
     #[tokio::test]
@@ -2162,22 +2146,19 @@ mod tests {
             }
         }
 
-        assert_eq!(
-            observed,
-            vec![
-                "start".to_string(),
-                "delta:Hel".to_string(),
-                "replace::None".to_string(),
-                "delta:Hello".to_string(),
-                "message:Hello".to_string(),
-            ]
-        );
+        assert_eq!(observed, vec![
+            "start".to_string(),
+            "delta:Hel".to_string(),
+            "replace::None".to_string(),
+            "delta:Hello".to_string(),
+            "message:Hello".to_string(),
+        ]);
     }
 
     #[tokio::test]
     async fn retry_open_auth_error_emits_error_and_closes_session() {
-        let auth_error = SdkError::Provider {
-            kind: ProviderErrorKind::Authentication,
+        let auth_error = LlmError::Provider {
+            kind:   ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail {
                 status_code: Some(401),
                 ..ProviderErrorDetail::new("bad key", "mock")
@@ -2193,7 +2174,7 @@ mod tests {
         let result = session.process_input("Hello").await;
         assert!(matches!(
             result,
-            Err(AgentError::Llm(SdkError::Provider {
+            Err(Error::Llm(LlmError::Provider {
                 kind: ProviderErrorKind::Authentication,
                 ..
             }))
@@ -2215,7 +2196,7 @@ mod tests {
                     observed.push("error".to_string());
                     found_auth_error_event = matches!(
                         error,
-                        AgentError::Llm(SdkError::Provider {
+                        Error::Llm(LlmError::Provider {
                             kind: ProviderErrorKind::Authentication,
                             ..
                         })
@@ -2226,22 +2207,20 @@ mod tests {
             }
         }
 
-        assert_eq!(
-            observed,
-            vec![
-                "start".to_string(),
-                "delta:Hel".to_string(),
-                "replace::None".to_string(),
-                "error".to_string(),
-            ]
-        );
+        assert_eq!(observed, vec![
+            "start".to_string(),
+            "delta:Hel".to_string(),
+            "replace::None".to_string(),
+            "error".to_string(),
+        ]);
         assert!(found_auth_error_event, "expected auth error event");
     }
 
     #[tokio::test]
     async fn compaction_triggered_when_over_threshold() {
         // Tiny context window to trigger compaction
-        // Responses: [0] conversation response (stream), [1] summarization (complete), [2] unused fallback
+        // Responses: [0] conversation response (stream), [1] summarization (complete),
+        // [2] unused fallback
         let responses = vec![
             text_response("OK"),
             text_response("Here is the summary of the conversation so far."),
@@ -2255,7 +2234,7 @@ mod tests {
         let registry = ToolRegistry::new();
         let profile = Arc::new(TestProfile::with_context_window(registry, 100));
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_context_compaction: true,
             compaction_preserve_turns: 1,
             ..Default::default()
@@ -2298,7 +2277,7 @@ mod tests {
         let registry = ToolRegistry::new();
         let profile = Arc::new(TestProfile::with_context_window(registry, 100));
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_context_compaction: false,
             ..Default::default()
         };
@@ -2321,11 +2300,12 @@ mod tests {
 
     #[tokio::test]
     async fn compaction_failure_is_non_fatal() {
-        // Response [0] = conversation response (stream), [1] will be used for summarization (complete) but we
-        // need it to error. We'll use a special provider that errors on complete() but succeeds on stream().
+        // Response [0] = conversation response (stream), [1] will be used for
+        // summarization (complete) but we need it to error. We'll use a special
+        // provider that errors on complete() but succeeds on stream().
 
         struct StreamOnlyProvider {
-            responses: Vec<Response>,
+            responses:  Vec<Response>,
             call_index: AtomicUsize,
         }
 
@@ -2335,14 +2315,14 @@ mod tests {
                 "mock"
             }
 
-            async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
-                Err(SdkError::Stream {
+            async fn complete(&self, _request: &Request) -> Result<Response, LlmError> {
+                Err(LlmError::Stream {
                     message: "summarization failed".into(),
-                    source: None,
+                    source:  None,
                 })
             }
 
-            async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+            async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
                 let idx = self.call_index.fetch_add(1, Ordering::SeqCst);
                 let response = if idx < self.responses.len() {
                     self.responses[idx].clone()
@@ -2350,7 +2330,7 @@ mod tests {
                     self.responses[self.responses.len() - 1].clone()
                 };
                 // Reuse response_to_stream helper from test_support
-                let mut events: Vec<Result<StreamEvent, SdkError>> = Vec::new();
+                let mut events: Vec<Result<StreamEvent, LlmError>> = Vec::new();
                 let text = response.text();
                 if !text.is_empty() {
                     events.push(Ok(StreamEvent::text_delta(text, None)));
@@ -2382,7 +2362,7 @@ mod tests {
         let registry = ToolRegistry::new();
         let profile = Arc::new(TestProfile::with_context_window(registry, 100));
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_context_compaction: true,
             compaction_preserve_turns: 1,
             ..Default::default()
@@ -2412,14 +2392,15 @@ mod tests {
 
     #[tokio::test]
     async fn compaction_includes_structured_prompt_and_file_tracking() {
-        use crate::tool_registry::RegisteredTool;
         use fabro_llm::types::ToolDefinition;
+
+        use crate::tool_registry::RegisteredTool;
 
         // Provider that captures complete() requests (compaction) while returning
         // canned responses for stream() calls.
         struct CompactionCapturingProvider {
-            stream_responses: Vec<Response>,
-            stream_index: AtomicUsize,
+            stream_responses:  Vec<Response>,
+            stream_index:      AtomicUsize,
             captured_complete: Mutex<Option<Request>>,
         }
 
@@ -2429,12 +2410,12 @@ mod tests {
                 "mock"
             }
 
-            async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+            async fn complete(&self, request: &Request) -> Result<Response, LlmError> {
                 *self.captured_complete.lock().unwrap() = Some(request.clone());
                 Ok(text_response("## Goal\nSummary goes here."))
             }
 
-            async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+            async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
                 let idx = self.stream_index.fetch_add(1, Ordering::SeqCst);
                 let response = if idx < self.stream_responses.len() {
                     self.stream_responses[idx].clone()
@@ -2448,11 +2429,11 @@ mod tests {
         // read_file tool that always succeeds
         let read_tool = RegisteredTool {
             definition: ToolDefinition {
-                name: "read_file".into(),
+                name:        "read_file".into(),
                 description: "Read a file".into(),
-                parameters: serde_json::json!({"type": "object", "properties": {"file_path": {"type": "string"}}}),
+                parameters:  serde_json::json!({"type": "object", "properties": {"file_path": {"type": "string"}}}),
             },
-            executor: Arc::new(|_args, _ctx| {
+            executor:   Arc::new(|_args, _ctx| {
                 Box::pin(async move { Ok("file contents".to_string()) })
             }),
         };
@@ -2486,7 +2467,7 @@ mod tests {
         // Tiny context window to force compaction
         let profile = Arc::new(TestProfile::with_context_window(registry, 100));
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_context_compaction: true,
             compaction_preserve_turns: 1,
             ..Default::default()
@@ -2504,7 +2485,8 @@ mod tests {
             "read_file should be tracked"
         );
 
-        // Second call with large input: context is well over threshold, compaction triggers
+        // Second call with large input: context is well over threshold, compaction
+        // triggers
         let large_input = "x".repeat(400);
         session.process_input(&large_input).await.unwrap();
 
@@ -2550,22 +2532,23 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_end_to_end_tool_call() {
-        use fabro_mcp::config::{McpServerConfig, McpTransport};
         use std::collections::HashMap;
+
+        use fabro_mcp::config::{McpServerSettings, McpTransport};
 
         let test_server = format!(
             "{}/../fabro-mcp/tests/test_mcp_server.py",
             env!("CARGO_MANIFEST_DIR")
         );
-        let config = SessionConfig {
-            mcp_servers: vec![McpServerConfig {
-                name: "test-echo".into(),
-                transport: McpTransport::Stdio {
+        let config = SessionOptions {
+            mcp_servers: vec![McpServerSettings {
+                name:                 "test-echo".into(),
+                transport:            McpTransport::Stdio {
                     command: vec!["python3".into(), test_server],
-                    env: HashMap::new(),
+                    env:     HashMap::new(),
                 },
                 startup_timeout_secs: 10,
-                tool_timeout_secs: 30,
+                tool_timeout_secs:    30,
             }],
             enable_loop_detection: false,
             ..Default::default()
@@ -2671,11 +2654,11 @@ mod tests {
         // Register a tool that loops until the cancel token fires
         let slow_tool = RegisteredTool {
             definition: ToolDefinition {
-                name: "slow_tool".into(),
+                name:        "slow_tool".into(),
                 description: "Waits until cancelled".into(),
-                parameters: serde_json::json!({"type": "object"}),
+                parameters:  serde_json::json!({"type": "object"}),
             },
-            executor: Arc::new(|_args, ctx| {
+            executor:   Arc::new(|_args, ctx| {
                 Box::pin(async move {
                     ctx.cancel.cancelled().await;
                     Ok("cancelled".to_string())
@@ -2691,7 +2674,7 @@ mod tests {
             text_response("Should not reach this"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             wall_clock_timeout: Some(std::time::Duration::from_millis(10)),
             enable_loop_detection: false,
             ..Default::default()
@@ -2703,9 +2686,9 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(AgentError::Aborted(AbortReason::WallClockTimeout))
+                Err(Error::Interrupted(InterruptReason::WallClockTimeout))
             ),
-            "expected Aborted(WallClockTimeout), got {result:?}"
+            "expected Interrupted(WallClockTimeout), got {result:?}"
         );
         assert_eq!(session.state(), SessionState::Closed);
     }
@@ -2714,7 +2697,7 @@ mod tests {
     async fn wall_clock_timeout_does_not_fire_when_session_completes_in_time() {
         let responses = vec![text_response("Fast response")];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             wall_clock_timeout: Some(std::time::Duration::from_secs(10)),
             ..Default::default()
         };

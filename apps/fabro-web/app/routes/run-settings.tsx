@@ -2,10 +2,10 @@ import { Link, useParams } from "react-router";
 import { CheckCircleIcon, ArrowPathIcon, PauseCircleIcon, XCircleIcon } from "@heroicons/react/24/solid";
 import { DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { CollapsibleFile } from "../components/collapsible-file";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import { formatDurationSecs } from "../lib/format";
-import type { PaginatedRunStageList, RunSettings } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/run-settings";
+import type { PaginatedRunStageList } from "@qltysh/fabro-api-client";
+import type { RunSettings } from "../lib/workflow-api";
 
 export const handle = { wide: true };
 
@@ -26,7 +26,7 @@ const statusConfig: Record<StageStatus, { icon: typeof CheckCircleIcon; color: s
   cancelled: { icon: XCircleIcon, color: "text-fg-muted" },
 };
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const [{ data: apiStages }, settings] = await Promise.all([
     apiJson<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
     apiJson<RunSettings>(`/runs/${params.id}/settings`, { request }),
@@ -40,7 +40,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   return { stages, settings };
 }
 
-export default function RunSettingsPage({ loaderData }: Route.ComponentProps) {
+export default function RunSettingsPage({ loaderData }: any) {
   const { id } = useParams();
   const { stages, settings } = loaderData;
 
@@ -96,7 +96,7 @@ export default function RunSettingsPage({ loaderData }: Route.ComponentProps) {
 
       <div className="min-w-0 flex-1">
         <CollapsibleFile
-          file={{ name: "run.json", contents: JSON.stringify(settings, null, 2), lang: "json" }}
+          file={{ name: "settings.json", contents: JSON.stringify(settings, null, 2), lang: "json" }}
         />
       </div>
     </div>

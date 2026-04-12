@@ -1,9 +1,11 @@
 use fabro_graphviz::graph::Graph;
 
-/// A transform that modifies the pipeline graph after parsing and before validation.
+use crate::error::Error;
+
+/// A transform that modifies the pipeline graph after parsing and before
+/// validation.
 pub trait Transform {
-    #[must_use]
-    fn apply(&self, graph: Graph) -> Graph;
+    fn apply(&self, graph: Graph) -> Result<Graph, Error>;
 }
 
 mod file_inlining;
@@ -19,4 +21,4 @@ pub use import::ImportTransform;
 pub use model_resolution::ModelResolutionTransform;
 pub use preamble::PreambleTransform;
 pub use stylesheet_application::StylesheetApplicationTransform;
-pub use variable_expansion::{VariableExpansionTransform, expand_vars};
+pub use variable_expansion::TemplateTransform;

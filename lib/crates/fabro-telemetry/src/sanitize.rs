@@ -6,7 +6,8 @@ use regex::Regex;
 static NUMERIC_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\d+(\.\d+)*$").expect("valid regex"));
 
-/// Sanitize CLI arguments for telemetry, redacting potentially sensitive values.
+/// Sanitize CLI arguments for telemetry, redacting potentially sensitive
+/// values.
 ///
 /// Program path is reduced to its basename. Subcommand tokens are kept as-is.
 /// Flags (`-*`) are kept, boolean literals and numeric patterns are kept,

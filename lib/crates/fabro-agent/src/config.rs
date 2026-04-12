@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fabro_llm::types::ReasoningEffort;
-use fabro_mcp::config::McpServerConfig;
+use fabro_mcp::config::McpServerSettings;
 
 /// Callback invoked before each tool execution. Return `Ok(())` to allow,
 /// `Err(message)` to deny with the given message.
@@ -59,7 +59,7 @@ impl ToolHookCallback for ToolApprovalAdapter {
 }
 
 #[derive(Clone)]
-pub struct SessionConfig {
+pub struct SessionOptions {
     pub max_turns: usize,
     pub max_tool_rounds_per_input: usize,
     pub default_command_timeout_ms: u64,
@@ -81,18 +81,19 @@ pub struct SessionConfig {
     pub enable_context_compaction: bool,
     pub compaction_threshold_percent: usize,
     pub compaction_preserve_turns: usize,
-    /// Skill directories. `None` = use convention defaults, `Some(dirs)` = use these instead.
+    /// Skill directories. `None` = use convention defaults, `Some(dirs)` = use
+    /// these instead.
     pub skill_dirs: Option<Vec<String>>,
     /// MCP server configurations to connect to on session startup.
-    pub mcp_servers: Vec<McpServerConfig>,
+    pub mcp_servers: Vec<McpServerSettings>,
     /// Wall-clock timeout for the entire `process_input` call.
     /// When set, the session's cancel token is triggered after this duration.
     pub wall_clock_timeout: Option<Duration>,
 }
 
-impl std::fmt::Debug for SessionConfig {
+impl std::fmt::Debug for SessionOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SessionConfig")
+        f.debug_struct("SessionOptions")
             .field("max_turns", &self.max_turns)
             .field("max_tool_rounds_per_input", &self.max_tool_rounds_per_input)
             .field(
@@ -127,7 +128,7 @@ impl std::fmt::Debug for SessionConfig {
     }
 }
 
-impl Default for SessionConfig {
+impl Default for SessionOptions {
     fn default() -> Self {
         Self {
             max_turns: 0,
@@ -161,7 +162,7 @@ mod tests {
 
     #[test]
     fn default_config_values() {
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
         assert_eq!(config.max_turns, 0);
         assert_eq!(config.max_tool_rounds_per_input, 0);
         assert_eq!(config.default_command_timeout_ms, 10_000);
@@ -179,7 +180,7 @@ mod tests {
 
     #[test]
     fn default_config_has_compaction_enabled() {
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
         assert!(config.enable_context_compaction);
         assert_eq!(config.compaction_threshold_percent, 80);
         assert_eq!(config.compaction_preserve_turns, 6);
@@ -187,7 +188,7 @@ mod tests {
 
     #[test]
     fn config_with_custom_values() {
-        let config = SessionConfig {
+        let config = SessionOptions {
             max_turns: 50,
             reasoning_effort: Some(ReasoningEffort::High),
             ..Default::default()
@@ -215,12 +216,9 @@ mod tests {
         let approval: ToolApprovalFn = Arc::new(|_name, _args| Err("denied".to_string()));
         let adapter = ToolApprovalAdapter(approval);
         let decision = adapter.pre_tool_use("shell", &serde_json::json!({})).await;
-        assert_eq!(
-            decision,
-            ToolHookDecision::Block {
-                reason: "denied".to_string()
-            }
-        );
+        assert_eq!(decision, ToolHookDecision::Block {
+            reason: "denied".to_string(),
+        });
     }
 
     #[tokio::test]

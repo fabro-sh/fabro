@@ -1,0 +1,22 @@
+[package]
+name = "fabro-vault"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Workflow-visible secret vault for Fabro"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ulid.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

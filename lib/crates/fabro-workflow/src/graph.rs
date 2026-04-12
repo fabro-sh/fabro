@@ -3,12 +3,12 @@ mod routing;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fabro_core::error::{CoreError, Result as CoreResult};
+use fabro_core::error::{Error as CoreError, Result as CoreResult};
 use fabro_core::graph::{EdgeSelection as CoreEdgeSelection, EdgeSpec, Graph, NodeSpec};
 use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvNode};
 
 use crate::context::Context;
-use crate::outcome::{Outcome, StageUsage};
+use crate::outcome::{BilledModelUsage, Outcome};
 
 // ---- WorkflowNode ----
 
@@ -76,7 +76,7 @@ impl WorkflowGraph {
 impl Graph for WorkflowGraph {
     type Node = WorkflowNode;
     type Edge = WorkflowEdge;
-    type Meta = Option<StageUsage>;
+    type Meta = Option<BilledModelUsage>;
 
     fn get_node(&self, id: &str) -> Option<Self::Node> {
         self.0
@@ -114,7 +114,7 @@ impl Graph for WorkflowGraph {
             node.inner().selection(),
         );
         selection.map(|sel| CoreEdgeSelection {
-            edge: WorkflowEdge(Arc::new(sel.edge.clone())),
+            edge:   WorkflowEdge(Arc::new(sel.edge.clone())),
             reason: sel.reason,
         })
     }

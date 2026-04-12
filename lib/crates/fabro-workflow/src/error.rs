@@ -1,19 +1,18 @@
-use fabro_graphviz::error::GraphvizError;
-use fabro_llm::error::{ProviderErrorKind, SdkError};
-use fabro_validate::Diagnostic;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
+use fabro_graphviz::Error as GraphvizError;
+use fabro_llm::{Error as LlmError, ProviderErrorKind};
 pub use fabro_types::failure_signature::FailureSignature;
 pub use fabro_types::outcome::FailureCategory;
+use fabro_validate::Diagnostic;
+use serde::{Deserialize, Serialize};
+use thiserror::Error as ThisError;
 
 use crate::outcome::{FailureDetail, Outcome, StageStatus};
 
-/// Classify an `SdkError` into a `FailureCategory` based on its structure.
+/// Classify an LLM error into a `FailureCategory` based on its structure.
 #[must_use]
-pub fn classify_sdk_error(err: &SdkError) -> FailureCategory {
+pub fn classify_sdk_error(err: &LlmError) -> FailureCategory {
     match err {
-        SdkError::Provider { kind, .. } => match kind {
+        LlmError::Provider { kind, .. } => match kind {
             ProviderErrorKind::RateLimit | ProviderErrorKind::Server => {
                 FailureCategory::TransientInfra
             }
@@ -26,14 +25,14 @@ pub fn classify_sdk_error(err: &SdkError) -> FailureCategory {
             | ProviderErrorKind::InvalidRequest
             | ProviderErrorKind::ContentFilter => FailureCategory::Deterministic,
         },
-        SdkError::RequestTimeout { .. } | SdkError::Network { .. } | SdkError::Stream { .. } => {
+        LlmError::RequestTimeout { .. } | LlmError::Network { .. } | LlmError::Stream { .. } => {
             FailureCategory::TransientInfra
         }
-        SdkError::Abort { .. } => FailureCategory::Canceled,
-        SdkError::InvalidToolCall { .. }
-        | SdkError::NoObjectGenerated { .. }
-        | SdkError::Configuration { .. }
-        | SdkError::UnsupportedToolChoice { .. } => FailureCategory::Deterministic,
+        LlmError::Interrupt { .. } => FailureCategory::Canceled,
+        LlmError::InvalidToolCall { .. }
+        | LlmError::NoObjectGenerated { .. }
+        | LlmError::Configuration { .. }
+        | LlmError::UnsupportedToolChoice { .. } => FailureCategory::Deterministic,
     }
 }
 
@@ -107,7 +106,7 @@ const STRUCTURAL_HINTS: &[&str] = &[
 pub fn classify_failure_reason(reason: &str) -> FailureCategory {
     let lower = reason.to_lowercase();
 
-    if lower.contains("cancel") || lower.contains("abort") {
+    if lower.contains("cancel") || lower.contains("interrupt") {
         return FailureCategory::Canceled;
     }
 
@@ -138,8 +137,9 @@ pub fn classify_failure_reason(reason: &str) -> FailureCategory {
 /// semantically identical errors produce the same signature regardless of
 /// line numbers, commit hashes, or timestamps.
 pub fn normalize_failure_reason(reason: &str) -> String {
-    use regex::Regex;
     use std::sync::LazyLock;
+
+    use regex::Regex;
 
     static HEX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[0-9a-f]{7,64}\b").unwrap());
     static DIGITS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d+\b").unwrap());
@@ -188,9 +188,9 @@ impl FailureSignatureExt for FailureSignature {
     }
 }
 
-#[derive(Error, Debug, Clone, Serialize, Deserialize)]
+#[derive(ThisError, Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub enum FabroError {
+pub enum Error {
     #[error("Parse error: {0}")]
     Parse(String),
 
@@ -202,18 +202,18 @@ pub enum FabroError {
 
     #[error("Engine error: {message}")]
     Engine {
-        message: String,
+        message:       String,
         failure_class: FailureCategory,
     },
 
     #[error("Handler error: {message}")]
     Handler {
-        message: String,
+        message:       String,
         failure_class: FailureCategory,
     },
 
     #[error("LLM error: {0}")]
-    Llm(SdkError),
+    Llm(LlmError),
 
     #[error("Checkpoint error: {0}")]
     Checkpoint(String),
@@ -231,8 +231,9 @@ pub enum FabroError {
     Cancelled,
 }
 
-impl FabroError {
-    /// Smart constructor for Handler errors. Classifies the failure reason eagerly.
+impl Error {
+    /// Smart constructor for Handler errors. Classifies the failure reason
+    /// eagerly.
     pub fn handler(message: impl Into<String>) -> Self {
         let message = message.into();
         let failure_class = classify_failure_reason(&message);
@@ -242,7 +243,8 @@ impl FabroError {
         }
     }
 
-    /// Smart constructor for Engine errors. Classifies the failure reason eagerly.
+    /// Smart constructor for Engine errors. Classifies the failure reason
+    /// eagerly.
     pub fn engine(message: impl Into<String>) -> Self {
         let message = message.into();
         let failure_class = classify_failure_reason(&message);
@@ -254,10 +256,11 @@ impl FabroError {
 
     /// Whether this error category is retryable (transient) or terminal.
     ///
-    /// Retryable: Handler (transient handler failures), Engine (could be transient),
-    ///            Io (network/disk issues are often transient), Llm (delegates to SdkError).
-    /// Terminal:  Parse, Validation, Stylesheet (configuration errors),
-    ///            Checkpoint (storage integrity), Cancelled (explicit cancellation).
+    /// Retryable: Handler (transient handler failures), Engine (could be
+    /// transient),            Io (network/disk issues are often transient),
+    /// Llm (delegates to SdkError). Terminal:  Parse, Validation,
+    /// Stylesheet (configuration errors),            Checkpoint (storage
+    /// integrity), Cancelled (explicit cancellation).
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match self {
@@ -292,7 +295,8 @@ impl FabroError {
         }
     }
 
-    /// Return a stable failure signature hint when structured error info is available.
+    /// Return a stable failure signature hint when structured error info is
+    /// available.
     #[must_use]
     pub fn failure_signature_hint(&self) -> Option<String> {
         match self {
@@ -304,8 +308,8 @@ impl FabroError {
     /// Build a fail `Outcome` with structured `FailureDetail`.
     pub fn to_fail_outcome(&self) -> Outcome {
         let failure = FailureDetail {
-            message: self.to_string(),
-            category: self.failure_category(),
+            message:   self.to_string(),
+            category:  self.failure_category(),
             signature: self.failure_signature_hint(),
         };
         Outcome {
@@ -316,19 +320,19 @@ impl FabroError {
     }
 }
 
-impl From<std::io::Error> for FabroError {
+impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Self::Io(err.to_string())
     }
 }
 
-impl From<SdkError> for FabroError {
-    fn from(err: SdkError) -> Self {
+impl From<LlmError> for Error {
+    fn from(err: LlmError) -> Self {
         Self::Llm(err)
     }
 }
 
-impl From<GraphvizError> for FabroError {
+impl From<GraphvizError> for Error {
     fn from(e: GraphvizError) -> Self {
         match e {
             GraphvizError::Parse(msg) => Self::Parse(msg),
@@ -337,13 +341,19 @@ impl From<GraphvizError> for FabroError {
     }
 }
 
-impl From<fabro_validate::ValidationError> for FabroError {
+impl From<fabro_template::TemplateError> for Error {
+    fn from(err: fabro_template::TemplateError) -> Self {
+        Self::Validation(err.to_string())
+    }
+}
+
+impl From<fabro_validate::ValidationError> for Error {
     fn from(e: fabro_validate::ValidationError) -> Self {
         Self::Validation(e.0)
     }
 }
 
-impl From<fabro_checkpoint::MetadataError> for FabroError {
+impl From<fabro_checkpoint::MetadataError> for Error {
     fn from(err: fabro_checkpoint::MetadataError) -> Self {
         let message = err.to_string();
         match err {
@@ -356,37 +366,38 @@ impl From<fabro_checkpoint::MetadataError> for FabroError {
     }
 }
 
-pub type Result<T> = std::result::Result<T, FabroError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 mod tests {
+    use fabro_checkpoint::MetadataError;
+    use fabro_llm::{Error as SdkError, ProviderErrorDetail};
+
     use super::*;
     use crate::outcome::OutcomeExt;
-    use fabro_checkpoint::MetadataError;
-    use fabro_llm::error::ProviderErrorDetail;
 
     #[test]
     fn parse_error_display() {
-        let err = FabroError::Parse("unexpected token".to_string());
+        let err = Error::Parse("unexpected token".to_string());
         assert_eq!(err.to_string(), "Parse error: unexpected token");
     }
 
     #[test]
     fn validation_error_display() {
-        let err = FabroError::Validation("missing start node".to_string());
+        let err = Error::Validation("missing start node".to_string());
         assert_eq!(err.to_string(), "Validation error: missing start node");
     }
 
     #[test]
     fn validation_failed_display() {
-        let err = FabroError::ValidationFailed {
+        let err = Error::ValidationFailed {
             diagnostics: vec![Diagnostic {
-                rule: "test".to_string(),
+                rule:     "test".to_string(),
                 severity: fabro_validate::Severity::Error,
-                message: "missing start node".to_string(),
-                node_id: None,
-                edge: None,
-                fix: None,
+                message:  "missing start node".to_string(),
+                node_id:  None,
+                edge:     None,
+                fix:      None,
             }],
         };
         assert_eq!(err.to_string(), "Validation failed");
@@ -394,33 +405,33 @@ mod tests {
 
     #[test]
     fn engine_error_display() {
-        let err = FabroError::engine("no outgoing edge");
+        let err = Error::engine("no outgoing edge");
         assert_eq!(err.to_string(), "Engine error: no outgoing edge");
     }
 
     #[test]
     fn handler_error_display() {
-        let err = FabroError::handler("LLM call failed");
+        let err = Error::handler("LLM call failed");
         assert_eq!(err.to_string(), "Handler error: LLM call failed");
     }
 
     #[test]
     fn checkpoint_error_display() {
-        let err = FabroError::Checkpoint("file not found".to_string());
+        let err = Error::Checkpoint("file not found".to_string());
         assert_eq!(err.to_string(), "Checkpoint error: file not found");
     }
 
     #[test]
     fn io_error_display() {
-        let err = FabroError::Io("permission denied".to_string());
+        let err = Error::Io("permission denied".to_string());
         assert_eq!(err.to_string(), "I/O error: permission denied");
     }
 
     #[test]
     fn io_error_from_std() {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "not found");
-        let err = FabroError::from(io_err);
-        assert!(matches!(err, FabroError::Io(_)));
+        let err = Error::from(io_err);
+        assert!(matches!(err, Error::Io(_)));
         assert!(err.to_string().contains("not found"));
     }
 
@@ -429,7 +440,7 @@ mod tests {
         let ok: Result<i32> = Ok(42);
         assert!(ok.is_ok());
 
-        let err: Result<i32> = Err(FabroError::Parse("bad".to_string()));
+        let err: Result<i32> = Err(Error::Parse("bad".to_string()));
         assert!(err.is_err());
     }
 
@@ -437,13 +448,13 @@ mod tests {
     fn metadata_checkpoint_deserialize_error_preserves_source_detail() {
         let source = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
         let source_message = source.to_string();
-        let fabro_error = FabroError::from(MetadataError::Deserialize {
+        let fabro_error = Error::from(MetadataError::Deserialize {
             entity: "checkpoint",
             branch: "fabro/meta/run-1".to_string(),
             source,
         });
 
-        assert!(matches!(fabro_error, FabroError::Checkpoint(_)));
+        assert!(matches!(fabro_error, Error::Checkpoint(_)));
         let message = fabro_error.to_string();
         assert!(message.contains("deserialize checkpoint on branch fabro/meta/run-1"));
         assert!(message.contains(&source_message));
@@ -453,13 +464,13 @@ mod tests {
     fn metadata_non_checkpoint_deserialize_error_maps_to_engine_with_source_detail() {
         let source = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
         let source_message = source.to_string();
-        let fabro_error = FabroError::from(MetadataError::Deserialize {
+        let fabro_error = Error::from(MetadataError::Deserialize {
             entity: "run record",
             branch: "fabro/meta/run-1".to_string(),
             source,
         });
 
-        assert!(matches!(fabro_error, FabroError::Engine { .. }));
+        assert!(matches!(fabro_error, Error::Engine { .. }));
         let message = fabro_error.to_string();
         assert!(message.contains("deserialize run record on branch fabro/meta/run-1"));
         assert!(message.contains(&source_message));
@@ -467,34 +478,34 @@ mod tests {
 
     #[test]
     fn cancelled_error_display() {
-        let err = FabroError::Cancelled;
+        let err = Error::Cancelled;
         assert_eq!(err.to_string(), "Pipeline cancelled");
     }
 
     #[test]
     fn cancelled_is_not_retryable() {
-        assert!(!FabroError::Cancelled.is_retryable());
+        assert!(!Error::Cancelled.is_retryable());
     }
 
     #[test]
     fn is_retryable_terminal_errors() {
-        assert!(!FabroError::Parse("bad".to_string()).is_retryable());
-        assert!(!FabroError::Validation("bad".to_string()).is_retryable());
+        assert!(!Error::Parse("bad".to_string()).is_retryable());
+        assert!(!Error::Validation("bad".to_string()).is_retryable());
         assert!(
-            !FabroError::ValidationFailed {
-                diagnostics: vec![]
+            !Error::ValidationFailed {
+                diagnostics: vec![],
             }
             .is_retryable()
         );
-        assert!(!FabroError::Stylesheet("bad".to_string()).is_retryable());
-        assert!(!FabroError::Checkpoint("bad".to_string()).is_retryable());
+        assert!(!Error::Stylesheet("bad".to_string()).is_retryable());
+        assert!(!Error::Checkpoint("bad".to_string()).is_retryable());
     }
 
     #[test]
     fn is_retryable_transient_errors() {
-        assert!(FabroError::handler("timeout").is_retryable());
-        assert!(FabroError::engine("transient").is_retryable());
-        assert!(FabroError::Io("connection reset".to_string()).is_retryable());
+        assert!(Error::handler("timeout").is_retryable());
+        assert!(Error::engine("transient").is_retryable());
+        assert!(Error::Io("connection reset".to_string()).is_retryable());
     }
 
     // --- FailureCategory Display/FromStr/serde tests ---
@@ -665,9 +676,9 @@ mod tests {
     fn llm_error_display() {
         let sdk_err = SdkError::Network {
             message: "connection refused".into(),
-            source: None,
+            source:  None,
         };
-        let err = FabroError::Llm(sdk_err);
+        let err = Error::Llm(sdk_err);
         assert_eq!(
             err.to_string(),
             "LLM error: Network error: connection refused"
@@ -676,15 +687,15 @@ mod tests {
 
     #[test]
     fn llm_error_retryable_delegates_to_sdk() {
-        let retryable = FabroError::Llm(SdkError::Network {
+        let retryable = Error::Llm(SdkError::Network {
             message: "timeout".into(),
-            source: None,
+            source:  None,
         });
         assert!(retryable.is_retryable());
 
-        let non_retryable = FabroError::Llm(SdkError::Configuration {
+        let non_retryable = Error::Llm(SdkError::Configuration {
             message: "bad config".into(),
-            source: None,
+            source:  None,
         });
         assert!(!non_retryable.is_retryable());
     }
@@ -693,10 +704,10 @@ mod tests {
     fn llm_error_from_sdk_error() {
         let sdk_err = SdkError::Stream {
             message: "broken pipe".into(),
-            source: None,
+            source:  None,
         };
-        let err = FabroError::from(sdk_err);
-        assert!(matches!(err, FabroError::Llm(_)));
+        let err = Error::from(sdk_err);
+        assert!(matches!(err, Error::Llm(_)));
     }
 
     // --- failure_class() method tests ---
@@ -704,7 +715,7 @@ mod tests {
     #[test]
     fn failure_class_cancelled() {
         assert_eq!(
-            FabroError::Cancelled.failure_category(),
+            Error::Cancelled.failure_category(),
             FailureCategory::Canceled
         );
     }
@@ -712,7 +723,7 @@ mod tests {
     #[test]
     fn failure_class_io() {
         assert_eq!(
-            FabroError::Io("disk full".into()).failure_category(),
+            Error::Io("disk full".into()).failure_category(),
             FailureCategory::TransientInfra
         );
     }
@@ -720,7 +731,7 @@ mod tests {
     #[test]
     fn failure_class_parse() {
         assert_eq!(
-            FabroError::Parse("bad syntax".into()).failure_category(),
+            Error::Parse("bad syntax".into()).failure_category(),
             FailureCategory::Deterministic
         );
     }
@@ -728,7 +739,7 @@ mod tests {
     #[test]
     fn failure_class_handler_with_timeout() {
         assert_eq!(
-            FabroError::handler("request timed out").failure_category(),
+            Error::handler("request timed out").failure_category(),
             FailureCategory::TransientInfra
         );
     }
@@ -736,15 +747,15 @@ mod tests {
     #[test]
     fn failure_class_handler_deterministic() {
         assert_eq!(
-            FabroError::handler("invalid configuration").failure_category(),
+            Error::handler("invalid configuration").failure_category(),
             FailureCategory::Deterministic
         );
     }
 
     #[test]
     fn failure_class_llm_rate_limit() {
-        let err = FabroError::Llm(SdkError::Provider {
-            kind: ProviderErrorKind::RateLimit,
+        let err = Error::Llm(SdkError::Provider {
+            kind:   ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         });
         assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
@@ -752,8 +763,8 @@ mod tests {
 
     #[test]
     fn failure_class_llm_context_length() {
-        let err = FabroError::Llm(SdkError::Provider {
-            kind: ProviderErrorKind::ContextLength,
+        let err = Error::Llm(SdkError::Provider {
+            kind:   ProviderErrorKind::ContextLength,
             detail: Box::new(ProviderErrorDetail::new("too long", "openai")),
         });
         assert_eq!(err.failure_category(), FailureCategory::BudgetExhausted);
@@ -761,8 +772,8 @@ mod tests {
 
     #[test]
     fn failure_class_llm_auth() {
-        let err = FabroError::Llm(SdkError::Provider {
-            kind: ProviderErrorKind::Authentication,
+        let err = Error::Llm(SdkError::Provider {
+            kind:   ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         });
         assert_eq!(err.failure_category(), FailureCategory::Deterministic);
@@ -770,7 +781,7 @@ mod tests {
 
     #[test]
     fn failure_class_llm_abort() {
-        let err = FabroError::Llm(SdkError::Abort {
+        let err = Error::Llm(SdkError::Interrupt {
             message: "user cancelled".into(),
         });
         assert_eq!(err.failure_category(), FailureCategory::Canceled);
@@ -778,9 +789,9 @@ mod tests {
 
     #[test]
     fn failure_class_llm_timeout() {
-        let err = FabroError::Llm(SdkError::RequestTimeout {
+        let err = Error::Llm(SdkError::RequestTimeout {
             message: "timed out".into(),
-            source: None,
+            source:  None,
         });
         assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
     }
@@ -790,7 +801,7 @@ mod tests {
     #[test]
     fn classify_sdk_rate_limit() {
         let err = SdkError::Provider {
-            kind: ProviderErrorKind::RateLimit,
+            kind:   ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::TransientInfra);
@@ -799,7 +810,7 @@ mod tests {
     #[test]
     fn classify_sdk_server() {
         let err = SdkError::Provider {
-            kind: ProviderErrorKind::Server,
+            kind:   ProviderErrorKind::Server,
             detail: Box::new(ProviderErrorDetail::new("500", "openai")),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::TransientInfra);
@@ -808,7 +819,7 @@ mod tests {
     #[test]
     fn classify_sdk_context_length() {
         let err = SdkError::Provider {
-            kind: ProviderErrorKind::ContextLength,
+            kind:   ProviderErrorKind::ContextLength,
             detail: Box::new(ProviderErrorDetail::new("too long", "openai")),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::BudgetExhausted);
@@ -817,7 +828,7 @@ mod tests {
     #[test]
     fn classify_sdk_quota_exceeded() {
         let err = SdkError::Provider {
-            kind: ProviderErrorKind::QuotaExceeded,
+            kind:   ProviderErrorKind::QuotaExceeded,
             detail: Box::new(ProviderErrorDetail::new("out of quota", "openai")),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::BudgetExhausted);
@@ -826,7 +837,7 @@ mod tests {
     #[test]
     fn classify_sdk_auth() {
         let err = SdkError::Provider {
-            kind: ProviderErrorKind::Authentication,
+            kind:   ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::Deterministic);
@@ -836,14 +847,14 @@ mod tests {
     fn classify_sdk_request_timeout() {
         let err = SdkError::RequestTimeout {
             message: "timed out".into(),
-            source: None,
+            source:  None,
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::TransientInfra);
     }
 
     #[test]
     fn classify_sdk_abort() {
-        let err = SdkError::Abort {
+        let err = SdkError::Interrupt {
             message: "cancelled".into(),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::Canceled);
@@ -889,7 +900,7 @@ mod tests {
     #[test]
     fn classify_reason_abort() {
         assert_eq!(
-            classify_failure_reason("aborted by signal"),
+            classify_failure_reason("interrupted by signal"),
             FailureCategory::Canceled
         );
     }
@@ -1480,8 +1491,8 @@ mod tests {
 
     #[test]
     fn failure_signature_hint_llm_returns_some() {
-        let err = FabroError::Llm(SdkError::Provider {
-            kind: ProviderErrorKind::Authentication,
+        let err = Error::Llm(SdkError::Provider {
+            kind:   ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         });
         assert_eq!(
@@ -1492,13 +1503,13 @@ mod tests {
 
     #[test]
     fn failure_signature_hint_handler_returns_none() {
-        let err = FabroError::handler("something failed");
+        let err = Error::handler("something failed");
         assert_eq!(err.failure_signature_hint(), None);
     }
 
     #[test]
     fn failure_signature_hint_engine_returns_none() {
-        let err = FabroError::engine("engine error");
+        let err = Error::engine("engine error");
         assert_eq!(err.failure_signature_hint(), None);
     }
 
@@ -1506,8 +1517,8 @@ mod tests {
 
     #[test]
     fn to_fail_outcome_llm_has_class_and_signature() {
-        let err = FabroError::Llm(SdkError::Provider {
-            kind: ProviderErrorKind::Authentication,
+        let err = Error::Llm(SdkError::Provider {
+            kind:   ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         });
         let outcome = err.to_fail_outcome();
@@ -1522,7 +1533,7 @@ mod tests {
 
     #[test]
     fn to_fail_outcome_handler_has_class_but_no_signature() {
-        let err = FabroError::handler("connection refused");
+        let err = Error::handler("connection refused");
         let outcome = err.to_fail_outcome();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
         let failure = outcome.failure.as_ref().unwrap();
@@ -1532,9 +1543,9 @@ mod tests {
 
     #[test]
     fn to_fail_outcome_includes_error_message_as_reason() {
-        let err = FabroError::Llm(SdkError::Network {
+        let err = Error::Llm(SdkError::Network {
             message: "connection refused".into(),
-            source: None,
+            source:  None,
         });
         let outcome = err.to_fail_outcome();
         assert!(
@@ -1547,9 +1558,9 @@ mod tests {
 
     #[test]
     fn to_fail_outcome_no_context_updates() {
-        let err = FabroError::Llm(SdkError::Network {
+        let err = Error::Llm(SdkError::Network {
             message: "refused".into(),
-            source: None,
+            source:  None,
         });
         let outcome = err.to_fail_outcome();
         assert!(outcome.context_updates.is_empty());
@@ -1559,15 +1570,15 @@ mod tests {
 
     #[test]
     fn handler_eager_classification() {
-        let err = FabroError::handler("connection refused");
+        let err = Error::handler("connection refused");
         assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
     }
 
     #[test]
     fn handler_eager_classification_roundtrip() {
-        let err = FabroError::handler("connection refused");
+        let err = Error::handler("connection refused");
         let json = serde_json::to_string(&err).unwrap();
-        let deserialized: FabroError = serde_json::from_str(&json).unwrap();
+        let deserialized: Error = serde_json::from_str(&json).unwrap();
         assert_eq!(
             deserialized.failure_category(),
             FailureCategory::TransientInfra
@@ -1576,45 +1587,45 @@ mod tests {
 
     #[test]
     fn handler_smart_constructor_preserves_message() {
-        let err = FabroError::handler("some error");
+        let err = Error::handler("some error");
         assert!(err.to_string().contains("some error"));
     }
 
     #[test]
     fn engine_eager_classification() {
-        let err = FabroError::engine("rate limit exceeded");
+        let err = Error::engine("rate limit exceeded");
         assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
     }
 
     #[test]
     fn arc_error_serde_roundtrip_all_variants() {
-        let errors: Vec<FabroError> = vec![
-            FabroError::Parse("bad".into()),
-            FabroError::Validation("bad".into()),
-            FabroError::ValidationFailed {
+        let errors: Vec<Error> = vec![
+            Error::Parse("bad".into()),
+            Error::Validation("bad".into()),
+            Error::ValidationFailed {
                 diagnostics: vec![Diagnostic {
-                    rule: "test".into(),
+                    rule:     "test".into(),
                     severity: fabro_validate::Severity::Error,
-                    message: "bad".into(),
-                    node_id: None,
-                    edge: None,
-                    fix: None,
+                    message:  "bad".into(),
+                    node_id:  None,
+                    edge:     None,
+                    fix:      None,
                 }],
             },
-            FabroError::engine("engine err"),
-            FabroError::handler("handler err"),
-            FabroError::Llm(SdkError::Network {
+            Error::engine("engine err"),
+            Error::handler("handler err"),
+            Error::Llm(SdkError::Network {
                 message: "refused".into(),
-                source: None,
+                source:  None,
             }),
-            FabroError::Checkpoint("cp err".into()),
-            FabroError::Stylesheet("style err".into()),
-            FabroError::Io("io err".into()),
-            FabroError::Cancelled,
+            Error::Checkpoint("cp err".into()),
+            Error::Stylesheet("style err".into()),
+            Error::Io("io err".into()),
+            Error::Cancelled,
         ];
         for err in &errors {
             let json = serde_json::to_string(err).unwrap();
-            let deserialized: FabroError = serde_json::from_str(&json).unwrap();
+            let deserialized: Error = serde_json::from_str(&json).unwrap();
             assert_eq!(err.to_string(), deserialized.to_string());
         }
     }
@@ -1622,7 +1633,7 @@ mod tests {
     #[test]
     fn handler_display_unchanged() {
         assert_eq!(
-            FabroError::handler("LLM call failed").to_string(),
+            Error::handler("LLM call failed").to_string(),
             "Handler error: LLM call failed"
         );
     }
@@ -1630,7 +1641,7 @@ mod tests {
     #[test]
     fn engine_display_unchanged() {
         assert_eq!(
-            FabroError::engine("no outgoing edge").to_string(),
+            Error::engine("no outgoing edge").to_string(),
             "Engine error: no outgoing edge"
         );
     }
@@ -1648,7 +1659,7 @@ mod tests {
         ];
         for msg in messages {
             assert_eq!(
-                FabroError::handler(msg).failure_category(),
+                Error::handler(msg).failure_category(),
                 classify_failure_reason(msg),
                 "mismatch for message: {msg}"
             );
@@ -1657,7 +1668,7 @@ mod tests {
 
     #[test]
     fn to_fail_outcome_preserves_class() {
-        let err = FabroError::handler("timeout");
+        let err = Error::handler("timeout");
         let outcome = err.to_fail_outcome();
         assert_eq!(
             outcome.failure_category(),
@@ -1669,17 +1680,17 @@ mod tests {
 
     #[test]
     fn e2e_llm_error_to_outcome_to_event_preserves_classification() {
-        use crate::event::WorkflowRunEvent;
+        use crate::event::Event;
 
-        // 1. Create SdkError → FabroError
+        // 1. Create SdkError → Error
         let sdk_err = SdkError::Provider {
-            kind: ProviderErrorKind::RateLimit,
+            kind:   ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         };
-        let arc_err = FabroError::Llm(sdk_err);
+        let arc_err = Error::Llm(sdk_err);
         assert_eq!(arc_err.failure_category(), FailureCategory::TransientInfra);
 
-        // 2. FabroError → Outcome
+        // 2. Error → Outcome
         let outcome = arc_err.to_fail_outcome();
         assert_eq!(
             outcome.failure_category(),
@@ -1688,17 +1699,17 @@ mod tests {
 
         // 3. Outcome → StageFailed event
         let failure = outcome.failure.clone().unwrap();
-        let event = WorkflowRunEvent::StageFailed {
-            node_id: "code".into(),
-            name: "code".into(),
-            index: 0,
-            failure: failure.clone(),
+        let event = Event::StageFailed {
+            node_id:    "code".into(),
+            name:       "code".into(),
+            index:      0,
+            failure:    failure.clone(),
             will_retry: false,
         };
 
         // 4. Verify classification survived all the way through
         match &event {
-            WorkflowRunEvent::StageFailed { failure, .. } => {
+            Event::StageFailed { failure, .. } => {
                 assert_eq!(failure.category, FailureCategory::TransientInfra);
             }
             _ => panic!("expected StageFailed"),
@@ -1708,7 +1719,7 @@ mod tests {
     #[test]
     fn e2e_handler_error_classified_at_edge() {
         // handler smart constructor classifies eagerly
-        let err = FabroError::handler("connection refused");
+        let err = Error::handler("connection refused");
         assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
 
         // to_fail_outcome preserves
@@ -1725,13 +1736,13 @@ mod tests {
 
     #[test]
     fn e2e_handler_retryable_checks() {
-        assert!(FabroError::handler("timeout").is_retryable());
-        assert!(FabroError::handler("auth error").is_retryable());
+        assert!(Error::handler("timeout").is_retryable());
+        assert!(Error::handler("auth error").is_retryable());
     }
 
     #[test]
     fn e2e_serde_stability_arc_error() {
-        let err = FabroError::handler("connection refused");
+        let err = Error::handler("connection refused");
         let json = serde_json::to_string(&err).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
@@ -1746,7 +1757,7 @@ mod tests {
         assert_eq!(v["data"]["failure_class"], "transient_infra");
 
         // Round-trip
-        let deserialized: FabroError = serde_json::from_str(&json).unwrap();
+        let deserialized: Error = serde_json::from_str(&json).unwrap();
         assert_eq!(
             deserialized.failure_category(),
             FailureCategory::TransientInfra
@@ -1755,10 +1766,10 @@ mod tests {
 
     #[test]
     fn e2e_serde_stability_agent_error() {
-        use fabro_agent::error::AgentError;
+        use fabro_agent::Error as AgentError;
 
         let err = AgentError::Llm(SdkError::Provider {
-            kind: ProviderErrorKind::RateLimit,
+            kind:   ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         });
         let json = serde_json::to_string(&err).unwrap();

@@ -1,8 +1,7 @@
 pub mod rules;
 
-use serde::{Deserialize, Serialize};
-
 use fabro_graphviz::graph::Graph;
+use serde::{Deserialize, Serialize};
 
 /// Severity level for validation diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,12 +14,12 @@ pub enum Severity {
 /// A validation diagnostic produced by a lint rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Diagnostic {
-    pub rule: String,
+    pub rule:     String,
     pub severity: Severity,
-    pub message: String,
-    pub node_id: Option<String>,
-    pub edge: Option<(String, String)>,
-    pub fix: Option<String>,
+    pub message:  String,
+    pub node_id:  Option<String>,
+    pub edge:     Option<(String, String)>,
+    pub fix:      Option<String>,
 }
 
 /// A lint rule that validates a graph.
@@ -67,8 +66,8 @@ pub fn raise_on_errors(diagnostics: &[Diagnostic]) -> Result<(), ValidationError
     Ok(())
 }
 
-/// Run all built-in lint rules (and any extra rules). Returns Err if any Error-severity
-/// diagnostics are found.
+/// Run all built-in lint rules (and any extra rules). Returns Err if any
+/// Error-severity diagnostics are found.
 ///
 /// # Errors
 /// Returns `ValidationError` if any Error-severity diagnostics are found.
@@ -83,8 +82,9 @@ pub fn validate_or_raise(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
+
+    use super::*;
 
     fn minimal_valid_graph() -> Graph {
         let mut g = Graph::new("test");
@@ -159,12 +159,12 @@ mod tests {
             }
             fn apply(&self, _graph: &Graph) -> Vec<Diagnostic> {
                 vec![Diagnostic {
-                    rule: "always_warn".to_string(),
+                    rule:     "always_warn".to_string(),
                     severity: Severity::Warning,
-                    message: "custom warning".to_string(),
-                    node_id: None,
-                    edge: None,
-                    fix: None,
+                    message:  "custom warning".to_string(),
+                    node_id:  None,
+                    edge:     None,
+                    fix:      None,
                 }]
             }
         }

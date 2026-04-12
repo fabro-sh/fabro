@@ -4,23 +4,34 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
-use fabro_config::FabroSettings;
-use fabro_config::sandbox::WorktreeMode;
-use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
+use fabro_config::project as project_config;
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
+use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_model::{Catalog, FallbackTarget, Provider};
+use fabro_retro::retro::Retro;
+use fabro_sandbox::config::{
+    self as sandbox_config, DaytonaNetwork, DaytonaSnapshotSettings,
+    DockerfileSource as SandboxDockerfileSource, WorktreeMode, bridge_worktree_mode,
+};
+use fabro_sandbox::daytona::{DaytonaConfig, detect_repo_info};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
-use fabro_store::{DiskProjectingRunStore, ProjectionError, RunStore};
 use fabro_types::RunId;
-use serde::Serialize;
+use fabro_types::settings::InterpString;
+use fabro_types::settings::run::{
+    ApprovalMode, DaytonaNetworkLayer, DaytonaSettings,
+    DockerfileSource as ResolvedDockerfileSource, HookDefinition as ResolvedHookDefinition,
+    HookEvent as ResolvedHookEvent, HookType as ResolvedHookType,
+    McpServerSettings as ResolvedMcpServerSettings, McpTransport as ResolvedMcpTransport,
+    PullRequestSettings, RunMode, RunModelSettings as ResolvedRunModelSettings,
+    RunSettings as ResolvedRunSettings, TlsMode as ResolvedTlsMode,
+};
+use tokio::runtime::Handle;
 
+use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::event::{
-    EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent, append_progress_event,
-    append_progress_event_with_line, canonicalize_event, event_payload_from_redacted_json,
-    redacted_event_json,
+    Emitter, Event, EventBody, RunEventLogger, RunEventSink, RunNoticeLevel, append_event_to_sink,
 };
 use crate::git::MetadataStore;
 use crate::handler::HandlerRegistry;
@@ -30,79 +41,82 @@ use crate::pipeline::{
     PullRequestOptions, RetroOptions, SandboxEnvSpec, build_conclusion_from_store,
     classify_engine_result,
 };
-use crate::records::{Checkpoint, Conclusion, ConclusionExt, RunRecord, RunRecordExt};
+use crate::records::Checkpoint;
+use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
-use crate::run_status::{self, RunStatus, StatusReason};
-use fabro_config::run::PullRequestSettings;
-use fabro_retro::retro::Retro;
-use fabro_sandbox::daytona::DaytonaConfig;
-use fabro_sandbox::daytona::detect_repo_info;
-use tokio::runtime::Handle;
+use crate::run_status::{RunStatus, StatusReason};
+use crate::runtime_store::RunStoreHandle;
+use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 
 struct RunSession {
-    cancel_token: Option<Arc<AtomicBool>>,
-    emitter: Arc<EventEmitter>,
-    sandbox: SandboxSpec,
-    llm: LlmSpec,
-    interviewer: Arc<dyn Interviewer>,
-    on_node: crate::OnNodeCallback,
-    lifecycle: LifecycleOptions,
-    hooks: fabro_hooks::HookConfig,
-    sandbox_env: SandboxEnvSpec,
-    devcontainer: Option<DevcontainerSpec>,
-    seed_context: Option<Context>,
-    run_store: Arc<dyn RunStore>,
-    git: Option<GitCheckpointOptions>,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
-    worktree_mode: Option<WorktreeMode>,
+    cancel_token:      Option<Arc<AtomicBool>>,
+    emitter:           Arc<Emitter>,
+    sandbox:           SandboxSpec,
+    llm:               LlmSpec,
+    interviewer:       Arc<dyn Interviewer>,
+    on_node:           crate::OnNodeCallback,
+    lifecycle:         LifecycleOptions,
+    hooks:             fabro_hooks::HookSettings,
+    sandbox_env:       SandboxEnvSpec,
+    devcontainer:      Option<DevcontainerSpec>,
+    seed_context:      Option<Context>,
+    run_store:         RunStoreHandle,
+    event_sink:        RunEventSink,
+    artifact_sink:     Option<ArtifactSink>,
+    git:               Option<GitCheckpointOptions>,
+    github_app:        Option<fabro_github::GitHubCredentials>,
+    worktree_mode:     Option<WorktreeMode>,
     registry_override: Option<Arc<HandlerRegistry>>,
-    retro_enabled: bool,
-    preserve_sandbox: bool,
-    pr_config: Option<PullRequestSettings>,
-    pr_github_app: Option<fabro_github::GitHubAppCredentials>,
-    pr_origin_url: Option<String>,
-    pr_model: String,
+    retro_enabled:     bool,
+    preserve_sandbox:  bool,
+    pr_config:         Option<PullRequestSettings>,
+    pr_github_app:     Option<fabro_github::GitHubCredentials>,
+    pr_origin_url:     Option<String>,
+    pr_model:          String,
+    workflow_path:     Option<PathBuf>,
+    workflow_bundle:   Option<Arc<WorkflowBundle>>,
+    run_control:       Option<Arc<RunControlState>>,
 }
 
 pub struct StartServices {
-    pub cancel_token: Option<Arc<AtomicBool>>,
-    pub emitter: Arc<EventEmitter>,
-    pub interviewer: Arc<dyn Interviewer>,
-    pub run_store: Arc<dyn RunStore>,
-    pub github_app: Option<fabro_github::GitHubAppCredentials>,
-    pub on_node: crate::OnNodeCallback,
+    pub run_id:            RunId,
+    pub cancel_token:      Option<Arc<AtomicBool>>,
+    pub emitter:           Arc<Emitter>,
+    pub interviewer:       Arc<dyn Interviewer>,
+    pub run_store:         RunStoreHandle,
+    pub event_sink:        RunEventSink,
+    pub artifact_sink:     Option<ArtifactSink>,
+    pub run_control:       Option<Arc<RunControlState>>,
+    pub github_app:        Option<fabro_github::GitHubCredentials>,
+    pub on_node:           crate::OnNodeCallback,
     pub registry_override: Option<Arc<HandlerRegistry>>,
 }
 
 pub struct Started {
-    pub finalized: Finalized,
-    pub final_context: Option<Context>,
-    pub retro: Option<Retro>,
+    pub finalized:      Finalized,
+    pub final_context:  Option<Context>,
+    pub retro:          Option<Retro>,
     pub retro_duration: Duration,
 }
 
-/// Start a fresh workflow run. Errors if a checkpoint already exists (use `resume()` instead).
-pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, FabroError> {
-    if services
+/// Start a fresh workflow run. Errors if a checkpoint already exists (use
+/// `resume()` instead).
+pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, Error> {
+    std::fs::create_dir_all(run_dir).map_err(|err| Error::Io(err.to_string()))?;
+    let state = services
         .run_store
-        .get_checkpoint()
+        .state()
         .await
-        .map_err(|err| FabroError::engine(err.to_string()))?
-        .is_some()
-    {
-        return Err(FabroError::Precondition(
-            "checkpoint.json exists in run directory — did you mean to resume?".to_string(),
+        .map_err(|err| Error::engine(err.to_string()))?;
+    if state.checkpoint.is_some() {
+        return Err(Error::Precondition(
+            "checkpoint already exists in the run store — did you mean to resume?".to_string(),
         ));
     }
 
-    if let Some(record) = services
-        .run_store
-        .get_status()
-        .await
-        .map_err(|err| FabroError::engine(err.to_string()))?
-    {
+    if let Some(record) = state.status {
         if !matches!(record.status, RunStatus::Submitted | RunStatus::Starting) {
-            return Err(FabroError::Precondition(format!(
+            return Err(Error::Precondition(format!(
                 "cannot start run: status is {:?}, expected submitted",
                 record.status
             )));
@@ -115,52 +129,34 @@ pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, F
 pub(super) async fn execute_persisted_run(
     run_dir: &Path,
     checkpoint: Option<Checkpoint>,
-    mut services: StartServices,
-) -> Result<Started, FabroError> {
+    services: StartServices,
+) -> Result<Started, Error> {
     let cancel_token = services.cancel_token.clone();
-    let inner_store = Arc::clone(&services.run_store);
-    let projection_run_dir = run_dir.to_path_buf();
-    services.run_store = Arc::new(
-        DiskProjectingRunStore::new(inner_store, run_dir.to_path_buf()).on_projection_error(
-            Arc::new(move |projection_error: ProjectionError| {
-                let Some(run_id) = load_run_id(&projection_run_dir) else {
-                    return;
-                };
-
-                // Write directly to progress.jsonl/live.json so projection failures do not
-                // recurse back through the decorated store.append_event() path.
-                let envelope = canonicalize_event(
-                    &run_id,
-                    &WorkflowRunEvent::RunNotice {
-                        level: RunNoticeLevel::Warn,
-                        code: "disk_projection_failed".to_string(),
-                        message: format!(
-                            "{}disk projection failed for {}: {}",
-                            if projection_error.critical {
-                                "critical "
-                            } else {
-                                ""
-                            },
-                            projection_error.path.display(),
-                            projection_error.error
-                        ),
-                    },
-                );
-                let _ = append_progress_event(&projection_run_dir, &envelope);
-            }),
-        ),
-    );
-    let run_store = Arc::clone(&services.run_store);
-    if let Err(err) = run_store
-        .put_status(&run_status::RunStatusRecord::new(
-            RunStatus::Starting,
-            Some(StatusReason::SandboxInitializing),
-        ))
-        .await
-    {
-        let error = FabroError::engine(err.to_string());
+    let run_id = services.run_id;
+    let run_store = services.run_store.clone();
+    let event_sink = services.event_sink.clone();
+    if let Err(err) = run_store.state().await {
+        let error = Error::engine(err.to_string());
         let _ = persist_detached_failure(
-            run_store.as_ref(),
+            run_id,
+            &event_sink,
+            run_dir,
+            "bootstrap",
+            StatusReason::BootstrapFailed,
+            &error,
+        )
+        .await;
+        return Err(error);
+    }
+    if let Err(err) = append_event_to_sink(&event_sink, &run_id, &Event::RunStarting {
+        reason: Some(StatusReason::SandboxInitializing),
+    })
+    .await
+    {
+        let error = Error::engine(err.to_string());
+        let _ = persist_detached_failure(
+            run_id,
+            &event_sink,
             run_dir,
             "bootstrap",
             StatusReason::BootstrapFailed,
@@ -171,13 +167,14 @@ pub(super) async fn execute_persisted_run(
     }
 
     let mut bootstrap_guard =
-        DetachedRunBootstrapGuard::arm(run_dir, Arc::clone(&run_store), cancel_token.clone());
+        DetachedRunBootstrapGuard::arm(run_id, run_dir, event_sink.clone(), cancel_token.clone());
 
-    let persisted = match Persisted::load_from_store(services.run_store.as_ref(), run_dir).await {
+    let persisted = match Persisted::load_from_store(&services.run_store, run_dir).await {
         Ok(persisted) => persisted,
         Err(err) => {
             let _ = persist_detached_failure(
-                run_store.as_ref(),
+                run_id,
+                &event_sink,
                 run_dir,
                 "bootstrap",
                 StatusReason::BootstrapFailed,
@@ -193,7 +190,8 @@ pub(super) async fn execute_persisted_run(
         Ok(session) => session,
         Err(err) => {
             let _ = persist_detached_failure(
-                run_store.as_ref(),
+                run_id,
+                &event_sink,
                 run_dir,
                 "bootstrap",
                 StatusReason::BootstrapFailed,
@@ -207,7 +205,7 @@ pub(super) async fn execute_persisted_run(
 
     bootstrap_guard.defuse();
     let mut completion_guard =
-        DetachedRunCompletionGuard::arm(run_dir, Arc::clone(&run_store), cancel_token);
+        DetachedRunCompletionGuard::arm(run_id, event_sink.clone(), cancel_token);
     let run_start = Instant::now();
     let started = Box::pin(session.run(persisted, checkpoint)).await;
 
@@ -217,8 +215,15 @@ pub(super) async fn execute_persisted_run(
             Ok(started)
         }
         Err(err) => {
-            persist_terminal_engine_failure(run_store.as_ref(), run_dir, &err, run_start.elapsed())
-                .await;
+            persist_terminal_engine_failure(
+                run_id,
+                &run_store,
+                &event_sink,
+                run_dir,
+                &err,
+                run_start.elapsed(),
+            )
+            .await;
             completion_guard.defuse();
             Err(err)
         }
@@ -226,95 +231,104 @@ pub(super) async fn execute_persisted_run(
 }
 
 async fn persist_terminal_engine_failure(
-    run_store: &dyn RunStore,
-    run_dir: &Path,
-    error: &FabroError,
+    run_id: RunId,
+    run_store: &RunStoreHandle,
+    event_sink: &RunEventSink,
+    _run_dir: &Path,
+    error: &Error,
     duration: Duration,
 ) {
-    let engine_result: Result<Outcome, FabroError> = Err(error.clone());
-    let (final_status, failure_reason, run_status, status_reason) =
+    let engine_result: Result<Outcome, Error> = Err(error.clone());
+    let (final_status, failure_reason, _run_status, status_reason) =
         classify_engine_result(&engine_result);
-    let conclusion = build_conclusion_from_store(
+    let _conclusion = build_conclusion_from_store(
         run_store,
-        run_dir,
         final_status,
         failure_reason,
         u64::try_from(duration.as_millis()).unwrap(),
         None,
     )
     .await;
-    if let Err(err) = run_store.put_conclusion(&conclusion).await {
-        tracing::warn!(error = %err, "Failed to save terminal engine failure conclusion to store");
-    }
-    if let Err(err) = run_store
-        .put_status(&run_status::RunStatusRecord::new(run_status, status_reason))
-        .await
+    if let Err(err) = append_event_to_sink(event_sink, &run_id, &Event::WorkflowRunFailed {
+        error:          error.clone(),
+        duration_ms:    u64::try_from(duration.as_millis()).unwrap(),
+        reason:         status_reason,
+        git_commit_sha: None,
+    })
+    .await
     {
-        tracing::warn!(error = %err, "Failed to save terminal engine failure status to store");
+        tracing::warn!(error = %err, "Failed to append terminal engine failure event");
     }
 }
 
 impl RunSession {
-    async fn new(persisted: &Persisted, services: StartServices) -> Result<Self, FabroError> {
+    async fn new(persisted: &Persisted, services: StartServices) -> Result<Self, Error> {
         let record = persisted.run_record();
-        let mut settings = record.settings.clone();
+        let settings = &record.settings;
         let working_directory = record.working_directory.clone();
-        let git = services
+        let state = services
             .run_store
-            .get_start()
+            .state()
             .await
-            .map_err(|err| FabroError::engine(err.to_string()))?
-            .and_then(|start| {
-                start.run_branch.as_ref().map(|_| GitCheckpointOptions {
-                    base_sha: start.base_sha.clone(),
-                    run_branch: start.run_branch.clone(),
-                    meta_branch: Some(MetadataStore::branch_name(&record.run_id.to_string())),
-                })
-            });
-
-        if let Some(env) = settings
-            .sandbox
-            .as_mut()
-            .and_then(|sandbox| sandbox.env.as_mut())
-        {
-            run_config::resolve_env_refs(env)
-                .map_err(|err| FabroError::Precondition(err.to_string()))?;
-        }
+            .map_err(|err| Error::engine(err.to_string()))?;
+        let git = state.start.and_then(|start| {
+            start.run_branch.as_ref().map(|_| GitCheckpointOptions {
+                base_sha:    start.base_sha.clone(),
+                run_branch:  start.run_branch.clone(),
+                meta_branch: Some(MetadataStore::branch_name(&record.run_id.to_string())),
+            })
+        });
+        let definition_blob = state.run.as_ref().and_then(|run| run.definition_blob);
+        let accepted_definition = match definition_blob {
+            Some(blob_id) => {
+                Some(load_accepted_run_definition(&services.run_store, blob_id).await?)
+            }
+            None => None,
+        };
+        let workflow_path = accepted_definition
+            .as_ref()
+            .map(|definition| definition.workflow_path.clone());
+        let workflow_bundle =
+            accepted_definition.map(|definition| Arc::new(definition.workflow_bundle()));
 
         let (origin_url, detected_base_branch) = detect_repo_info(&working_directory)
             .map(|(url, branch)| (Some(url), branch))
             .unwrap_or((None, None));
 
-        let sandbox_provider = resolve_sandbox_provider(&settings)?;
-        let sandbox_provider = if settings.dry_run_enabled() && !sandbox_provider.is_local() {
-            SandboxProvider::Local
-        } else {
-            sandbox_provider
-        };
-        let model = settings
-            .llm
+        let resolved = fabro_config::resolve_run_from_file(settings)
+            .map_err(|errors| Error::Precondition(render_resolve_errors(&errors)))?;
+
+        let sandbox_provider = resolve_sandbox_provider(&resolved)?;
+        let sandbox_provider =
+            if resolved.execution.mode == RunMode::DryRun && !sandbox_provider.is_local() {
+                SandboxProvider::Local
+            } else {
+                sandbox_provider
+            };
+        let model = resolved.model.name.as_ref().map_or_else(
+            || Catalog::builtin().default_from_env().id.clone(),
+            InterpString::as_source,
+        );
+        let provider = resolved
+            .model
+            .provider
             .as_ref()
-            .and_then(|llm| llm.model.clone())
-            .unwrap_or_else(|| Catalog::builtin().default_from_env().id.clone());
-        let provider = settings
-            .llm
-            .as_ref()
-            .and_then(|llm| llm.provider.clone())
+            .map(InterpString::as_source)
             .filter(|value| !value.is_empty());
 
         let provider_enum: Provider = provider
             .as_deref()
             .map(str::parse::<Provider>)
             .transpose()
-            .map_err(|err| FabroError::Precondition(err.clone()))?
+            .map_err(|err| Error::Precondition(err.clone()))?
             .unwrap_or_else(Provider::default_from_env);
 
-        let fallback_chain = resolve_fallback_chain(provider_enum, &model, &settings);
-        let mcp_servers = settings
-            .mcp_server_entries()
-            .clone()
-            .into_iter()
-            .map(|(name, entry)| entry.into_config(name))
+        let fallback_chain = resolve_fallback_chain(provider_enum, &model, &resolved.model);
+        let mcp_servers = resolved
+            .agent
+            .mcps
+            .values()
+            .map(runtime_mcp_server)
             .collect();
 
         let sandbox = match sandbox_provider {
@@ -322,121 +336,299 @@ impl RunSession {
                 working_directory: working_directory.clone(),
             },
             SandboxProvider::Docker => SandboxSpec::Docker {
-                config: fabro_agent::DockerSandboxConfig {
+                config: fabro_agent::DockerSandboxOptions {
                     host_working_directory: working_directory.to_string_lossy().to_string(),
                     ..Default::default()
                 },
             },
             SandboxProvider::Daytona => SandboxSpec::Daytona {
-                config: resolve_daytona_config(&settings).unwrap_or_default(),
-                github_app: services.github_app.clone(),
-                run_id: Some(record.run_id),
+                config:       resolve_daytona_config(&resolved).unwrap_or_default(),
+                github_app:   services.github_app.clone(),
+                run_id:       Some(record.run_id),
                 clone_branch: detected_base_branch.or_else(|| record.base_branch.clone()),
             },
         };
 
+        let toml_env: HashMap<String, String> = resolved
+            .sandbox
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), resolve_interp(v)))
+            .collect();
+        let resolved_server = fabro_config::resolve_server_from_file(settings)
+            .map_err(|errors| Error::Precondition(render_resolve_errors(&errors)))?;
+        let github_permissions: Option<HashMap<String, String>> =
+            (!resolved_server.integrations.github.permissions.is_empty()).then(|| {
+                resolved_server
+                    .integrations
+                    .github
+                    .permissions
+                    .iter()
+                    .map(|(k, v)| (k.clone(), resolve_interp(v)))
+                    .collect()
+            });
         let sandbox_env = SandboxEnvSpec {
             devcontainer_env: HashMap::new(),
-            toml_env: settings
-                .sandbox_settings()
-                .and_then(|sandbox| sandbox.env.clone())
-                .unwrap_or_default(),
-            github_permissions: settings.github_permissions().cloned(),
+            toml_env,
+            github_permissions,
             origin_url: origin_url.clone(),
         };
 
-        let devcontainer = settings
-            .sandbox_settings()
-            .and_then(|sandbox| sandbox.devcontainer)
-            .unwrap_or(false)
-            .then(|| DevcontainerSpec {
-                enabled: true,
-                resolve_dir: working_directory.clone(),
-            });
+        let devcontainer = resolved.sandbox.devcontainer.then(|| DevcontainerSpec {
+            enabled:     true,
+            resolve_dir: working_directory.clone(),
+        });
 
-        let interviewer: Arc<dyn Interviewer> = if settings.auto_approve_enabled() {
+        let interviewer: Arc<dyn Interviewer> = if resolved.execution.approval == ApprovalMode::Auto
+        {
             Arc::new(AutoApproveInterviewer)
         } else {
             services.interviewer
         };
 
+        let pr_config = resolved.pull_request.clone();
+
         Ok(Self {
             cancel_token: services.cancel_token,
             emitter: services.emitter,
+            event_sink: services.event_sink,
+            run_control: services.run_control,
             sandbox,
             llm: LlmSpec {
                 model: model.clone(),
                 provider: provider_enum,
                 fallback_chain,
                 mcp_servers,
-                dry_run: settings.dry_run_enabled(),
+                dry_run: resolved.execution.mode == RunMode::DryRun,
             },
             interviewer,
             on_node: services.on_node,
             lifecycle: LifecycleOptions {
-                setup_commands: settings.setup_commands().to_vec(),
-                setup_command_timeout_ms: settings.setup_timeout_ms().unwrap_or(300_000),
-                devcontainer_phases: Vec::new(),
+                setup_commands:           resolved.prepare.commands.clone(),
+                setup_command_timeout_ms: resolved.prepare.timeout_ms,
+                devcontainer_phases:      Vec::new(),
             },
-            hooks: fabro_hooks::HookConfig {
-                hooks: settings.hooks.clone(),
+            hooks: fabro_hooks::HookSettings {
+                hooks: resolved.hooks.iter().map(runtime_hook_definition).collect(),
             },
             sandbox_env,
             devcontainer,
             seed_context: None,
             run_store: services.run_store,
+            artifact_sink: services.artifact_sink,
             git,
             github_app: services.github_app.clone(),
-            worktree_mode: Some(resolve_worktree_mode(&settings)),
+            worktree_mode: Some(resolve_worktree_mode(&resolved)),
             registry_override: services.registry_override,
-            retro_enabled: !settings.no_retro_enabled() && project_config::is_retro_enabled(),
-            preserve_sandbox: resolve_preserve_sandbox(&settings),
-            pr_config: settings.pull_request.clone(),
+            retro_enabled: resolved.execution.retros && project_config::is_retro_enabled(),
+            preserve_sandbox: resolved.sandbox.preserve,
+            pr_config,
             pr_github_app: services.github_app,
             pr_origin_url: origin_url,
             pr_model: model,
+            workflow_path,
+            workflow_bundle,
         })
     }
 }
 
-fn resolve_sandbox_provider(settings: &FabroSettings) -> Result<SandboxProvider, FabroError> {
-    settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.provider.as_deref())
-        .map(str::parse::<SandboxProvider>)
-        .transpose()
-        .map_err(|err| FabroError::Precondition(format!("Invalid sandbox provider: {err}")))?
-        .map_or_else(|| Ok(SandboxProvider::default()), Ok)
+fn resolve_interp(value: &InterpString) -> String {
+    value
+        .resolve(|name| std::env::var(name).ok())
+        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
 }
 
-fn resolve_preserve_sandbox(settings: &FabroSettings) -> bool {
-    settings.preserve_sandbox_enabled()
+async fn load_accepted_run_definition(
+    run_store: &RunStoreHandle,
+    blob_id: fabro_types::RunBlobId,
+) -> Result<RunDefinition, Error> {
+    let bytes = run_store
+        .read_blob(&blob_id)
+        .await
+        .map_err(|err| Error::engine(err.to_string()))?
+        .ok_or_else(|| {
+            Error::engine(format!(
+                "run definition blob is missing from the run store: {blob_id}"
+            ))
+        })?;
+    serde_json::from_slice(&bytes).map_err(|err| Error::Parse(err.to_string()))
 }
 
-fn resolve_worktree_mode(settings: &FabroSettings) -> sandbox_config::WorktreeMode {
-    settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.local.as_ref())
-        .map(|local| local.worktree_mode)
-        .unwrap_or_default()
+fn resolve_sandbox_provider(settings: &ResolvedRunSettings) -> Result<SandboxProvider, Error> {
+    Some(str::parse::<SandboxProvider>(
+        settings.sandbox.provider.as_str(),
+    ))
+    .transpose()
+    .map_err(|err| Error::Precondition(format!("Invalid sandbox provider: {err}")))?
+    .map_or_else(|| Ok(SandboxProvider::default()), Ok)
 }
 
-fn resolve_daytona_config(settings: &FabroSettings) -> Option<DaytonaConfig> {
+fn resolve_worktree_mode(settings: &ResolvedRunSettings) -> sandbox_config::WorktreeMode {
+    bridge_worktree_mode(settings.sandbox.local.worktree_mode)
+}
+
+fn resolve_daytona_config(settings: &ResolvedRunSettings) -> Option<DaytonaConfig> {
     settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.daytona.clone())
+        .sandbox
+        .daytona
+        .as_ref()
+        .map(runtime_daytona_config)
 }
 
 fn resolve_fallback_chain(
     provider: Provider,
     model: &str,
-    settings: &FabroSettings,
+    settings: &ResolvedRunModelSettings,
 ) -> Vec<FallbackTarget> {
-    let fallbacks = settings.llm.as_ref().and_then(|llm| llm.fallbacks.as_ref());
+    if settings.fallbacks.is_empty() {
+        return Vec::new();
+    }
+    // Group v2 ModelRef entries by provider name, preserving the legacy
+    // shape expected by `Catalog::build_fallback_chain`. The historical
+    // bridge grouped all fallback tokens under the empty-string key; we
+    // preserve that behavior here so `Catalog::build_fallback_chain`
+    // returns an empty chain unless a consumer has explicitly wired
+    // provider-keyed fallbacks. A proper provider-aware fallback chain
+    // is a follow-up along with the model registry work.
+    let mut by_provider: HashMap<String, Vec<String>> = HashMap::new();
+    for model_ref in &settings.fallbacks {
+        by_provider
+            .entry(String::new())
+            .or_default()
+            .push(model_ref.to_string());
+    }
+    Catalog::builtin().build_fallback_chain(provider, model, &by_provider)
+}
 
-    match fallbacks {
-        Some(map) => Catalog::builtin().build_fallback_chain(provider, model, map),
-        None => Vec::new(),
+fn render_resolve_errors(errors: &[fabro_config::ResolveError]) -> String {
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn runtime_mcp_server(settings: &ResolvedMcpServerSettings) -> McpServerSettings {
+    McpServerSettings {
+        name:                 settings.name.clone(),
+        transport:            match &settings.transport {
+            ResolvedMcpTransport::Stdio { command, env } => McpTransport::Stdio {
+                command: command.clone(),
+                env:     env.clone(),
+            },
+            ResolvedMcpTransport::Http { url, headers } => McpTransport::Http {
+                url:     url.clone(),
+                headers: headers.clone(),
+            },
+            ResolvedMcpTransport::Sandbox { command, port, env } => McpTransport::Sandbox {
+                command: command.clone(),
+                port:    *port,
+                env:     env.clone(),
+            },
+        },
+        startup_timeout_secs: settings.startup_timeout_secs,
+        tool_timeout_secs:    settings.tool_timeout_secs,
+    }
+}
+
+fn runtime_daytona_config(settings: &DaytonaSettings) -> DaytonaConfig {
+    DaytonaConfig {
+        auto_stop_interval: settings.auto_stop_interval,
+        labels:             (!settings.labels.is_empty()).then_some(settings.labels.clone()),
+        snapshot:           settings
+            .snapshot
+            .as_ref()
+            .map(|snapshot| DaytonaSnapshotSettings {
+                name:       snapshot.name.clone(),
+                cpu:        snapshot.cpu,
+                memory:     snapshot.memory_gb,
+                disk:       snapshot.disk_gb,
+                dockerfile: snapshot
+                    .dockerfile
+                    .as_ref()
+                    .map(|dockerfile| match dockerfile {
+                        ResolvedDockerfileSource::Inline(text) => {
+                            SandboxDockerfileSource::Inline(text.clone())
+                        }
+                        ResolvedDockerfileSource::Path { path } => {
+                            SandboxDockerfileSource::Path { path: path.clone() }
+                        }
+                    }),
+            }),
+        network:            settings.network.as_ref().map(|network| match network {
+            DaytonaNetworkLayer::Block => DaytonaNetwork::Block,
+            DaytonaNetworkLayer::AllowAll => DaytonaNetwork::AllowAll,
+            DaytonaNetworkLayer::AllowList { allow_list } => {
+                DaytonaNetwork::AllowList(allow_list.clone())
+            }
+        }),
+        skip_clone:         settings.skip_clone,
+    }
+}
+
+fn runtime_hook_definition(definition: &ResolvedHookDefinition) -> fabro_hooks::HookDefinition {
+    fabro_hooks::HookDefinition {
+        name:       definition.name.clone(),
+        event:      match definition.event {
+            ResolvedHookEvent::RunStart => fabro_hooks::HookEvent::RunStart,
+            ResolvedHookEvent::RunComplete => fabro_hooks::HookEvent::RunComplete,
+            ResolvedHookEvent::RunFailed => fabro_hooks::HookEvent::RunFailed,
+            ResolvedHookEvent::StageStart => fabro_hooks::HookEvent::StageStart,
+            ResolvedHookEvent::StageComplete => fabro_hooks::HookEvent::StageComplete,
+            ResolvedHookEvent::StageFailed => fabro_hooks::HookEvent::StageFailed,
+            ResolvedHookEvent::StageRetrying => fabro_hooks::HookEvent::StageRetrying,
+            ResolvedHookEvent::EdgeSelected => fabro_hooks::HookEvent::EdgeSelected,
+            ResolvedHookEvent::ParallelStart => fabro_hooks::HookEvent::ParallelStart,
+            ResolvedHookEvent::ParallelComplete => fabro_hooks::HookEvent::ParallelComplete,
+            ResolvedHookEvent::SandboxReady => fabro_hooks::HookEvent::SandboxReady,
+            ResolvedHookEvent::SandboxCleanup => fabro_hooks::HookEvent::SandboxCleanup,
+            ResolvedHookEvent::CheckpointSaved => fabro_hooks::HookEvent::CheckpointSaved,
+            ResolvedHookEvent::PreToolUse => fabro_hooks::HookEvent::PreToolUse,
+            ResolvedHookEvent::PostToolUse => fabro_hooks::HookEvent::PostToolUse,
+            ResolvedHookEvent::PostToolUseFailure => fabro_hooks::HookEvent::PostToolUseFailure,
+        },
+        command:    definition.command.clone(),
+        hook_type:  definition.hook_type.as_ref().map(runtime_hook_type),
+        matcher:    definition.matcher.clone(),
+        blocking:   definition.blocking,
+        timeout_ms: definition.timeout_ms,
+        sandbox:    definition.sandbox,
+    }
+}
+
+fn runtime_hook_type(hook_type: &ResolvedHookType) -> fabro_hooks::HookType {
+    match hook_type {
+        ResolvedHookType::Command { command } => fabro_hooks::HookType::Command {
+            command: command.clone(),
+        },
+        ResolvedHookType::Http {
+            url,
+            headers,
+            allowed_env_vars,
+            tls,
+        } => fabro_hooks::HookType::Http {
+            url:              url.clone(),
+            headers:          headers.clone(),
+            allowed_env_vars: allowed_env_vars.clone(),
+            tls:              match tls {
+                ResolvedTlsMode::Verify => fabro_hooks::TlsMode::Verify,
+                ResolvedTlsMode::NoVerify => fabro_hooks::TlsMode::NoVerify,
+                ResolvedTlsMode::Off => fabro_hooks::TlsMode::Off,
+            },
+        },
+        ResolvedHookType::Prompt { prompt, model } => fabro_hooks::HookType::Prompt {
+            prompt: prompt.clone(),
+            model:  model.clone(),
+        },
+        ResolvedHookType::Agent {
+            prompt,
+            model,
+            max_tool_rounds,
+        } => fabro_hooks::HookType::Agent {
+            prompt:          prompt.clone(),
+            model:           model.clone(),
+            max_tool_rounds: *max_tool_rounds,
+        },
     }
 }
 
@@ -446,66 +638,58 @@ impl RunSession {
         self,
         persisted: Persisted,
         checkpoint: Option<Checkpoint>,
-    ) -> Result<Started, FabroError> {
+    ) -> Result<Started, Error> {
         let preserve_sandbox = self.preserve_sandbox;
         let on_node = self.on_node.clone();
 
         let record = persisted.run_record();
         let run_options = RunOptions {
-            settings: record.settings.clone(),
-            run_dir: persisted.run_dir().to_path_buf(),
-            cancel_token: self.cancel_token,
-            run_id: record.run_id,
-            labels: record.labels.clone(),
-            workflow_slug: record.workflow_slug.clone(),
-            github_app: self.github_app.clone(),
-            host_repo_path: record.host_repo_path.as_deref().map(PathBuf::from),
-            base_branch: record.base_branch.clone(),
+            settings:         record.settings.clone(),
+            run_dir:          persisted.run_dir().to_path_buf(),
+            cancel_token:     self.cancel_token,
+            run_id:           record.run_id,
+            labels:           record.labels.clone(),
+            workflow_slug:    record.workflow_slug.clone(),
+            github_app:       self.github_app.clone(),
+            host_repo_path:   record.host_repo_path.as_deref().map(PathBuf::from),
+            base_branch:      record.base_branch.clone(),
             display_base_sha: None,
-            git: self.git.clone(),
+            git:              self.git.clone(),
         };
 
         let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         {
             let sha_clone = Arc::clone(&last_git_sha);
             self.emitter.on_event(move |event| match event {
-                envelope if envelope.event == "checkpoint.completed" => {
-                    if let Some(sha) = envelope
-                        .properties
-                        .get("git_commit_sha")
-                        .and_then(serde_json::Value::as_str)
-                    {
-                        *sha_clone.lock().unwrap() = Some(sha.to_string());
+                event if matches!(&event.body, EventBody::CheckpointCompleted(_)) => {
+                    if let EventBody::CheckpointCompleted(props) = &event.body {
+                        if let Some(sha) = props.git_commit_sha.as_ref() {
+                            *sha_clone.lock().unwrap() = Some(sha.clone());
+                        }
                     }
                 }
-                envelope if envelope.event == "run.completed" => {
-                    if let Some(sha) = envelope
-                        .properties
-                        .get("final_git_commit_sha")
-                        .and_then(serde_json::Value::as_str)
-                    {
-                        *sha_clone.lock().unwrap() = Some(sha.to_string());
+                event if matches!(&event.body, EventBody::RunCompleted(_)) => {
+                    if let EventBody::RunCompleted(props) = &event.body {
+                        if let Some(sha) = props.final_git_commit_sha.as_ref() {
+                            *sha_clone.lock().unwrap() = Some(sha.clone());
+                        }
                     }
                 }
-                envelope if envelope.event == "git.commit" => {
-                    if let Some(sha) = envelope
-                        .properties
-                        .get("sha")
-                        .and_then(serde_json::Value::as_str)
-                    {
-                        *sha_clone.lock().unwrap() = Some(sha.to_string());
+                event if matches!(&event.body, EventBody::GitCommit(_)) => {
+                    if let EventBody::GitCommit(props) = &event.body {
+                        *sha_clone.lock().unwrap() = Some(props.sha.clone());
                     }
                 }
                 _ => {}
             });
         }
 
-        let store_progress_logger = StoreProgressLogger::new(Arc::clone(&self.run_store));
+        let store_progress_logger = RunEventLogger::new(self.event_sink.clone());
         store_progress_logger.register(self.emitter.as_ref());
 
         let init_options = InitOptions {
             run_id: record.run_id,
-            run_store: Arc::clone(&self.run_store),
+            run_store: self.run_store.clone(),
             dry_run: run_options.dry_run_enabled(),
             emitter: self.emitter,
             sandbox: self.sandbox,
@@ -513,16 +697,20 @@ impl RunSession {
             interviewer: self.interviewer,
             lifecycle: self.lifecycle,
             run_options,
+            workflow_path: self.workflow_path,
+            workflow_bundle: self.workflow_bundle,
             hooks: self.hooks,
             sandbox_env: self.sandbox_env,
             devcontainer: self.devcontainer,
             git: self.git,
             worktree_mode: self.worktree_mode,
             registry_override: self.registry_override,
+            artifact_sink: self.artifact_sink,
+            run_control: self.run_control,
             checkpoint,
             seed_context: self.seed_context,
         };
-        let mut initialized = pipeline::initialize(persisted, init_options).await?;
+        let mut initialized = Box::pin(pipeline::initialize(persisted, init_options)).await?;
         initialized.on_node = on_node;
 
         let sandbox_for_cleanup = Arc::clone(&initialized.sandbox);
@@ -547,7 +735,7 @@ impl RunSession {
 
         let retro_opts = RetroOptions {
             run_id: executed.run_options.run_id,
-            run_store: Arc::clone(&executed.run_store),
+            run_store: executed.run_store.clone(),
             workflow_name: executed.graph.name.clone(),
             goal: executed.graph.goal().to_string(),
             run_dir: executed.run_options.run_dir.clone(),
@@ -562,30 +750,30 @@ impl RunSession {
         };
 
         let retro_start = Instant::now();
-        let retroed = pipeline::retro(executed, &retro_opts).await;
+        let retroed = Box::pin(pipeline::retro(executed, &retro_opts)).await;
         let retro_duration = retro_start.elapsed();
 
         let finalize_opts = FinalizeOptions {
-            run_dir: retroed.run_options.run_dir.clone(),
-            run_id: retroed.run_options.run_id,
-            run_store: Arc::clone(&retroed.run_store),
-            workflow_name: retroed.graph.name.clone(),
-            hook_runner: retroed.hook_runner.clone(),
+            run_dir:          retroed.run_options.run_dir.clone(),
+            run_id:           retroed.run_options.run_id,
+            run_store:        retroed.run_store.clone(),
+            workflow_name:    retroed.graph.name.clone(),
+            hook_runner:      retroed.hook_runner.clone(),
             preserve_sandbox: self.preserve_sandbox,
-            last_git_sha: last_git_sha.lock().unwrap().clone(),
+            last_git_sha:     last_git_sha.lock().unwrap().clone(),
         };
         let pr_opts = PullRequestOptions {
-            run_dir: retroed.run_options.run_dir.clone(),
-            run_store: Some(Arc::clone(&retroed.run_store)),
-            pr_config: self.pr_config,
+            run_dir:    retroed.run_options.run_dir.clone(),
+            run_store:  retroed.run_store.clone(),
+            pr_config:  self.pr_config,
             github_app: self.pr_github_app,
             origin_url: self.pr_origin_url,
-            model: self.pr_model,
+            model:      self.pr_model,
         };
 
         let retro = retroed.retro.clone();
-        let concluded = pipeline::finalize(retroed, &finalize_opts).await?;
-        let finalized = pipeline::pull_request(concluded, &pr_opts).await;
+        let concluded = Box::pin(pipeline::finalize(retroed, &finalize_opts)).await?;
+        let finalized = Box::pin(pipeline::pull_request(concluded, &pr_opts)).await;
         store_progress_logger.flush().await;
 
         scopeguard::ScopeGuard::into_inner(cleanup_guard);
@@ -600,26 +788,22 @@ impl RunSession {
 }
 
 struct DetachedRunBootstrapGuard {
-    run_dir: PathBuf,
-    run_store: Arc<dyn RunStore>,
+    run_id:       RunId,
+    event_sink:   RunEventSink,
     cancel_token: Option<Arc<AtomicBool>>,
-    active: bool,
+    active:       bool,
 }
 
 impl DetachedRunBootstrapGuard {
     fn arm(
-        run_dir: &Path,
-        run_store: Arc<dyn RunStore>,
+        run_id: RunId,
+        _run_dir: &Path,
+        event_sink: RunEventSink,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Self {
-        run_status::write_run_status(
-            run_dir,
-            RunStatus::Starting,
-            Some(StatusReason::SandboxInitializing),
-        );
         Self {
-            run_dir: run_dir.to_path_buf(),
-            run_store,
+            run_id,
+            event_sink,
             cancel_token,
             active: true,
         }
@@ -642,43 +826,38 @@ impl Drop for DetachedRunBootstrapGuard {
             } else {
                 StatusReason::SandboxInitFailed
             };
-            run_status::write_run_status(&self.run_dir, RunStatus::Failed, Some(reason));
-            let run_store = Arc::clone(&self.run_store);
+            let run_id = self.run_id;
+            let event_sink = self.event_sink.clone();
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
-                    let _ = run_store
-                        .put_status(&run_status::RunStatusRecord::new(
-                            RunStatus::Failed,
-                            Some(reason),
-                        ))
-                        .await;
+                    let _ = append_event_to_sink(&event_sink, &run_id, &Event::WorkflowRunFailed {
+                        error:          Error::engine(format!("{reason:?}")),
+                        duration_ms:    0,
+                        reason:         Some(reason),
+                        git_commit_sha: None,
+                    })
+                    .await;
                 });
             }
         }
     }
 }
 
-const POSTRUN_ABORTED_MESSAGE: &str = "Run aborted before post-run finalization completed.";
+const POSTRUN_INTERRUPTED_MESSAGE: &str = "Run interrupted before post-run finalization completed.";
 const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalization completed.";
 
 struct DetachedRunCompletionGuard {
-    run_dir: PathBuf,
-    run_store: Arc<dyn RunStore>,
-    run_id: Option<RunId>,
+    event_sink:   RunEventSink,
+    run_id:       RunId,
     cancel_token: Option<Arc<AtomicBool>>,
-    active: bool,
+    active:       bool,
 }
 
 impl DetachedRunCompletionGuard {
-    fn arm(
-        run_dir: &Path,
-        run_store: Arc<dyn RunStore>,
-        cancel_token: Option<Arc<AtomicBool>>,
-    ) -> Self {
+    fn arm(run_id: RunId, event_sink: RunEventSink, cancel_token: Option<Arc<AtomicBool>>) -> Self {
         Self {
-            run_dir: run_dir.to_path_buf(),
-            run_store,
-            run_id: load_run_id(run_dir),
+            event_sink,
+            run_id,
             cancel_token,
             active: true,
         }
@@ -707,222 +886,92 @@ impl Drop for DetachedRunCompletionGuard {
         let message = if cancelled {
             POSTRUN_CANCELLED_MESSAGE
         } else {
-            POSTRUN_ABORTED_MESSAGE
+            POSTRUN_INTERRUPTED_MESSAGE
         };
         let code = if cancelled {
             "postrun_cancelled"
         } else {
-            "postrun_aborted"
+            "postrun_interrupted"
         };
-
-        run_status::write_run_status(&self.run_dir, RunStatus::Failed, Some(reason));
-        if !self.run_dir.join("conclusion.json").exists() {
-            let _ = write_failure_conclusion(&self.run_dir, message, Some(reason));
-        }
-        let serialized_notice = load_run_id(&self.run_dir).and_then(|run_id| {
-            let envelope = canonicalize_event(
-                &run_id,
-                &WorkflowRunEvent::RunNotice {
-                    level: RunNoticeLevel::Error,
-                    code: code.to_string(),
-                    message: message.to_string(),
-                },
-            );
-            let line = match redacted_event_json(&envelope) {
-                Ok(line) => line,
-                Err(err) => {
-                    tracing::warn!(error = %err, "Failed to serialize post-run abort event");
-                    return None;
-                }
-            };
-            if let Err(err) = append_progress_event_with_line(&self.run_dir, &envelope, &line) {
-                tracing::warn!(error = %err, "Failed to append post-run abort event");
-                return None;
-            }
-            Some((run_id, line))
-        });
-        let run_store = Arc::clone(&self.run_store);
+        let event_sink = self.event_sink.clone();
         let run_id = self.run_id;
         if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
-                let _ = run_store
-                    .put_status(&run_status::RunStatusRecord::new(
-                        RunStatus::Failed,
-                        Some(reason),
-                    ))
-                    .await;
-                if let Err(err) = run_store
-                    .put_conclusion(&build_failure_conclusion(message))
-                    .await
-                {
-                    tracing::warn!(
-                        error = %err,
-                        "Failed to save post-run abort conclusion to store"
-                    );
-                }
-                if let Some((run_id, line)) = serialized_notice.or(run_id.and_then(|run_id| {
-                    let envelope = canonicalize_event(
-                        &run_id,
-                        &WorkflowRunEvent::RunNotice {
-                            level: RunNoticeLevel::Error,
-                            code: code.to_string(),
-                            message: message.to_string(),
-                        },
-                    );
-                    redacted_event_json(&envelope)
-                        .ok()
-                        .map(|line| (run_id, line))
-                })) {
-                    match event_payload_from_redacted_json(&line, &run_id) {
-                        Ok(payload) => {
-                            let _ = run_store.append_event(&payload).await;
-                        }
-                        Err(err) => {
-                            tracing::warn!(
-                                error = %err,
-                                "Failed to build post-run abort event payload"
-                            );
-                        }
-                    }
-                }
+                let _ = append_event_to_sink(&event_sink, &run_id, &Event::WorkflowRunFailed {
+                    error:          Error::engine(message.to_string()),
+                    duration_ms:    0,
+                    reason:         Some(reason),
+                    git_commit_sha: None,
+                })
+                .await;
+                let _ = append_event_to_sink(&event_sink, &run_id, &Event::RunNotice {
+                    level:   RunNoticeLevel::Error,
+                    code:    code.to_string(),
+                    message: message.to_string(),
+                })
+                .await;
             });
         }
     }
 }
 
-fn load_run_id(run_dir: &Path) -> Option<RunId> {
-    RunRecord::load(run_dir)
-        .ok()
-        .map(|record| record.run_id)
-        .or_else(|| {
-            std::fs::read_to_string(run_dir.join("id.txt"))
-                .ok()
-                .map(|run_id| run_id.trim().to_string())
-                .filter(|run_id| !run_id.is_empty())
-                .and_then(|run_id| run_id.parse().ok())
-        })
-}
-
 async fn persist_detached_failure(
-    run_store: &dyn RunStore,
-    run_dir: &Path,
+    run_id: RunId,
+    event_sink: &RunEventSink,
+    _run_dir: &Path,
     phase: &'static str,
     reason: StatusReason,
-    error: &FabroError,
-) -> Result<(), FabroError> {
-    #[derive(Serialize)]
-    struct DetachedFailureRecord<'a> {
-        timestamp: chrono::DateTime<Utc>,
-        phase: &'a str,
-        reason: StatusReason,
-        error: String,
-    }
-
+    error: &Error,
+) -> Result<(), Error> {
     let message = error.to_string();
-    let record = DetachedFailureRecord {
-        timestamp: Utc::now(),
-        phase,
-        reason,
-        error: message.clone(),
-    };
 
-    std::fs::write(
-        run_dir.join("detached_failure.json"),
-        serde_json::to_string_pretty(&record).map_err(|err| FabroError::Io(err.to_string()))?,
-    )
-    .map_err(|err| FabroError::Io(err.to_string()))?;
-
-    let conclusion = write_failure_conclusion(run_dir, &message, Some(reason))?;
-    run_status::write_run_status(run_dir, RunStatus::Failed, Some(reason));
-    if let Err(err) = run_store.put_conclusion(&conclusion).await {
-        tracing::warn!(error = %err, "Failed to save detached failure conclusion to store");
-    }
-    if let Err(err) = run_store
-        .put_status(&run_status::RunStatusRecord::new(
-            RunStatus::Failed,
-            Some(reason),
-        ))
-        .await
+    if let Err(err) = append_event_to_sink(event_sink, &run_id, &Event::WorkflowRunFailed {
+        error:          error.clone(),
+        duration_ms:    0,
+        reason:         Some(reason),
+        git_commit_sha: None,
+    })
+    .await
     {
-        tracing::warn!(error = %err, "Failed to save detached failure status to store");
+        tracing::warn!(error = %err, "Failed to append detached failure event");
     }
 
-    if let Some(run_id) = load_run_id(run_dir) {
-        let event = WorkflowRunEvent::RunNotice {
-            level: RunNoticeLevel::Error,
-            code: format!("{phase}_failed"),
-            message: message.clone(),
-        };
-        let envelope = canonicalize_event(&run_id, &event);
-        let line = redacted_event_json(&envelope).map_err(|err| FabroError::Io(err.to_string()))?;
-        append_progress_event_with_line(run_dir, &envelope, &line)
-            .map_err(|err| FabroError::Io(err.to_string()))?;
-        match event_payload_from_redacted_json(&line, &run_id) {
-            Ok(payload) => {
-                if let Err(err) = run_store.append_event(&payload).await {
-                    tracing::warn!(error = %err, "Failed to append detached failure event to store");
-                }
-            }
-            Err(err) => {
-                tracing::warn!(error = %err, "Failed to build detached failure event payload");
-            }
-        }
+    let event = Event::RunNotice {
+        level:   RunNoticeLevel::Error,
+        code:    format!("{phase}_failed"),
+        message: message.clone(),
+    };
+    if let Err(err) = append_event_to_sink(event_sink, &run_id, &event).await {
+        tracing::warn!(error = %err, "Failed to append detached failure notice");
     }
 
     Ok(())
 }
 
-fn write_failure_conclusion(
-    run_dir: &Path,
-    message: &str,
-    _reason: Option<StatusReason>,
-) -> Result<Conclusion, FabroError> {
-    if run_dir.join("conclusion.json").exists() {
-        return Conclusion::load(&run_dir.join("conclusion.json"));
-    }
-
-    let conclusion = build_failure_conclusion(message);
-    conclusion.save(&run_dir.join("conclusion.json"))?;
-    Ok(conclusion)
-}
-
-fn build_failure_conclusion(message: &str) -> Conclusion {
-    Conclusion {
-        timestamp: Utc::now(),
-        status: StageStatus::Fail,
-        duration_ms: 0,
-        failure_reason: Some(message.to_string()),
-        final_git_commit_sha: None,
-        stages: vec![],
-        total_cost: None,
-        total_retries: 0,
-        total_input_tokens: 0,
-        total_output_tokens: 0,
-        total_cache_read_tokens: 0,
-        total_cache_write_tokens: 0,
-        total_reasoning_tokens: 0,
-        has_pricing: false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
 
     use chrono::Utc;
-    use fabro_config::FabroSettings;
-    use fabro_store::InMemoryStore;
+    use fabro_store::Database;
     use fabro_types::fixtures;
+    use fabro_types::settings::SettingsLayer;
+    use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
+    use object_store::memory::InMemory;
 
     use super::*;
     use crate::context::Context;
-    use crate::event::EventEmitter;
+    use crate::event::Emitter;
     use crate::handler::HandlerRegistry;
     use crate::handler::exit::ExitHandler;
+    use crate::handler::manager_loop::SubWorkflowHandler;
     use crate::handler::start::StartHandler;
     use crate::operations::resume;
     use crate::records::CheckpointExt;
+    use crate::workflow_bundle::{BundledWorkflow, WorkflowBundle};
 
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Build feature"]
@@ -931,49 +980,73 @@ mod tests {
         start -> exit
     }"#;
 
-    fn persisted_workflow(dot: &str, run_dir: &Path) -> Persisted {
-        crate::operations::create(crate::operations::CreateRunInput {
+    fn memory_store() -> Arc<Database> {
+        Arc::new(Database::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
+    }
+
+    async fn persisted_workflow(dot: &str, run_dir: &Path) -> (Persisted, Arc<Database>) {
+        let store = memory_store();
+        let created = crate::operations::create(&store, crate::operations::CreateRunInput {
             workflow: crate::operations::WorkflowInput::DotSource {
-                source: dot.to_string(),
+                source:   dot.to_string(),
                 base_dir: None,
             },
-            settings: FabroSettings {
-                dry_run: Some(true),
-                ..Default::default()
+            settings: SettingsLayer {
+                run: Some(RunLayer {
+                    execution: Some(RunExecutionLayer {
+                        mode: Some(RunMode::DryRun),
+                        ..RunExecutionLayer::default()
+                    }),
+                    ..RunLayer::default()
+                }),
+                ..SettingsLayer::default()
             },
             cwd: run_dir
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf(),
             workflow_slug: Some("test".to_string()),
-            run_dir: Some(run_dir.to_path_buf()),
+            workflow_path: None,
+            workflow_bundle: None,
+            submitted_manifest_bytes: None,
             run_id: Some(fixtures::RUN_1),
             host_repo_path: None,
+            repo_origin_url: None,
             base_branch: None,
+            provenance: None,
         })
-        .unwrap()
-        .persisted
+        .await
+        .unwrap();
+        (created.persisted, store)
     }
 
     fn test_registry() -> HandlerRegistry {
         let mut registry = HandlerRegistry::new(Box::new(StartHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
+        registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
         registry
     }
 
     async fn test_start_services(
-        run_dir: &Path,
-        emitter: Arc<EventEmitter>,
+        store: &Database,
+        _run_dir: &Path,
+        emitter: Arc<Emitter>,
         registry: Arc<HandlerRegistry>,
     ) -> StartServices {
         StartServices {
+            run_id: fixtures::RUN_1,
             cancel_token: None,
             emitter,
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
-            run_store: crate::operations::open_or_hydrate_run(&InMemoryStore::default(), run_dir)
-                .await
-                .unwrap(),
+            run_store: store.open_run(&fixtures::RUN_1).await.unwrap().into(),
+            event_sink: RunEventSink::store(store.open_run(&fixtures::RUN_1).await.unwrap()),
+            artifact_sink: None,
+            run_control: None,
             github_app: None,
             on_node: None,
             registry_override: Some(registry),
@@ -984,7 +1057,7 @@ mod tests {
     async fn start_captures_checkpoint_git_sha_in_conclusion() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
         let injected = Arc::new(AtomicBool::new(false));
 
@@ -995,21 +1068,33 @@ mod tests {
                 if injected.load(Ordering::SeqCst) {
                     return;
                 }
-                if event.event == "stage.started" && event.node_id.as_deref() == Some("start") {
+                if matches!(&event.body, EventBody::StageStarted(_))
+                    && event.node_id.as_deref() == Some("start")
+                {
                     injected.store(true, Ordering::SeqCst);
-                    emitter_for_injection.emit(&WorkflowRunEvent::CheckpointCompleted {
+                    emitter_for_injection.emit(&Event::CheckpointCompleted {
                         node_id: "start".to_string(),
                         status: "success".to_string(),
+                        current_node: "start".to_string(),
+                        completed_nodes: Vec::new(),
+                        node_retries: HashMap::new().into_iter().collect(),
+                        context_values: HashMap::new().into_iter().collect(),
+                        node_outcomes: HashMap::new().into_iter().collect(),
+                        next_node_id: None,
                         git_commit_sha: Some("sha-test".to_string()),
+                        loop_failure_signatures: HashMap::new().into_iter().collect(),
+                        restart_failure_signatures: HashMap::new().into_iter().collect(),
+                        node_visits: HashMap::new().into_iter().collect(),
+                        diff: None,
                     });
                 }
             });
         }
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
         let started = start(
             &run_dir,
-            test_start_services(&run_dir, emitter, registry).await,
+            test_start_services(&store, &run_dir, emitter, registry).await,
         )
         .await
         .unwrap();
@@ -1026,44 +1111,120 @@ mod tests {
     async fn start_loads_persisted_from_run_dir() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
         let started = start(
             &run_dir,
-            test_start_services(&run_dir, emitter, registry).await,
+            test_start_services(&store, &run_dir, emitter, registry).await,
         )
         .await
         .unwrap();
 
         assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
-        assert!(run_dir.join("conclusion.json").exists());
+        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
+        assert!(run_store.state().await.unwrap().conclusion.is_some());
+    }
+
+    #[tokio::test]
+    async fn start_can_run_bundle_backed_child_workflow_without_workflow_bundle_json() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
+        let registry = Arc::new(test_registry());
+        let store = memory_store();
+        let workflow_bundle = WorkflowBundle::new(HashMap::from([
+            (PathBuf::from("workflow.fabro"), BundledWorkflow {
+                logical_path: PathBuf::from("workflow.fabro"),
+                source:       r#"digraph Root {
+                        graph [goal="Bundle child"]
+                        start [shape=Mdiamond]
+                        manager [
+                            type="stack.manager_loop",
+                            stack.child_workflow="./children/review.fabro",
+                            manager.max_cycles=100,
+                            manager.poll_interval="10ms"
+                        ]
+                        exit [shape=Msquare]
+                        start -> manager -> exit
+                    }"#
+                .to_string(),
+                files:        HashMap::new(),
+            }),
+            (PathBuf::from("children/review.fabro"), BundledWorkflow {
+                logical_path: PathBuf::from("children/review.fabro"),
+                source:       r"digraph Review {
+                        start [shape=Mdiamond]
+                        exit [shape=Msquare]
+                        start -> exit
+                    }"
+                .to_string(),
+                files:        HashMap::new(),
+            }),
+        ]));
+
+        crate::operations::create(&store, crate::operations::CreateRunInput {
+            workflow: crate::operations::WorkflowInput::Bundled(
+                workflow_bundle
+                    .workflow(Path::new("workflow.fabro"))
+                    .unwrap()
+                    .clone(),
+            ),
+            settings: SettingsLayer {
+                run: Some(RunLayer {
+                    execution: Some(RunExecutionLayer {
+                        mode: Some(RunMode::DryRun),
+                        ..RunExecutionLayer::default()
+                    }),
+                    ..RunLayer::default()
+                }),
+                ..SettingsLayer::default()
+            },
+            cwd: temp.path().to_path_buf(),
+            workflow_slug: Some("bundle-child".to_string()),
+            workflow_path: Some(PathBuf::from("workflow.fabro")),
+            workflow_bundle: Some(workflow_bundle),
+            submitted_manifest_bytes: None,
+            run_id: Some(fixtures::RUN_1),
+            host_repo_path: None,
+            repo_origin_url: None,
+            base_branch: None,
+            provenance: None,
+        })
+        .await
+        .unwrap();
+
+        let started = start(
+            &run_dir,
+            test_start_services(&store, &run_dir, emitter, registry).await,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
     }
 
     #[tokio::test]
     async fn start_invokes_on_node_callback_before_execution() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
         let visited = Arc::new(Mutex::new(Vec::new()));
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
-        let started = start(
-            &run_dir,
-            StartServices {
-                on_node: Some(Arc::new({
-                    let visited = Arc::clone(&visited);
-                    move |node_id: &str| {
-                        visited.lock().unwrap().push(node_id.to_string());
-                    }
-                })),
-                ..test_start_services(&run_dir, emitter, registry).await
-            },
-        )
+        let started = start(&run_dir, StartServices {
+            on_node: Some(Arc::new({
+                let visited = Arc::clone(&visited);
+                move |node_id: &str| {
+                    visited.lock().unwrap().push(node_id.to_string());
+                }
+            })),
+            ..test_start_services(&store, &run_dir, emitter, registry).await
+        })
         .await
         .unwrap();
 
@@ -1075,34 +1236,66 @@ mod tests {
     async fn start_errors_when_checkpoint_exists() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
-        let services = test_start_services(&run_dir, emitter, registry).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let services = test_start_services(&store, &run_dir, emitter, registry).await;
 
-        // Write a checkpoint to the store (not disk) so start() sees it
-        let checkpoint = Checkpoint::from_context(
-            &Context::new(),
-            "start",
-            vec!["start".to_string()],
-            HashMap::new(),
-            HashMap::new(),
-            Some("exit".to_string()),
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-        );
-        services
-            .run_store
-            .put_checkpoint(&checkpoint)
-            .await
-            .unwrap();
+        // Seed an authoritative checkpoint event so start() sees it
+        let checkpoint = Checkpoint {
+            timestamp:                  chrono::Utc::now(),
+            current_node:               "start".into(),
+            completed_nodes:            vec!["start".to_string()],
+            node_retries:               HashMap::new(),
+            context_values:             Context::new().snapshot(),
+            node_outcomes:              HashMap::new(),
+            next_node_id:               Some("exit".to_string()),
+            git_commit_sha:             None,
+            loop_failure_signatures:    HashMap::new(),
+            restart_failure_signatures: HashMap::new(),
+            node_visits:                HashMap::new(),
+        };
+        crate::event::append_event(
+            &store.open_run(&fixtures::RUN_1).await.unwrap(),
+            &services.run_id,
+            &Event::CheckpointCompleted {
+                node_id: checkpoint.current_node.clone(),
+                status: checkpoint
+                    .node_outcomes
+                    .get(&checkpoint.current_node)
+                    .map_or_else(
+                        || "success".to_string(),
+                        |outcome| outcome.status.to_string(),
+                    ),
+                current_node: checkpoint.current_node.clone(),
+                completed_nodes: checkpoint.completed_nodes.clone(),
+                node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+                context_values: checkpoint.context_values.clone().into_iter().collect(),
+                node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+                next_node_id: checkpoint.next_node_id.clone(),
+                git_commit_sha: checkpoint.git_commit_sha.clone(),
+                loop_failure_signatures: checkpoint
+                    .loop_failure_signatures
+                    .iter()
+                    .map(|(sig, count)| (sig.to_string(), *count))
+                    .collect(),
+                restart_failure_signatures: checkpoint
+                    .restart_failure_signatures
+                    .iter()
+                    .map(|(sig, count)| (sig.to_string(), *count))
+                    .collect(),
+                node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+                diff: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let result = start(&run_dir, services).await;
 
         assert!(
-            matches!(&result, Err(crate::error::FabroError::Precondition(_))),
+            matches!(&result, Err(crate::error::Error::Precondition(_))),
             "expected Precondition error, got: {result:?}",
             result = result.as_ref().map(|_| "Ok"),
         );
@@ -1112,19 +1305,19 @@ mod tests {
     async fn resume_errors_when_checkpoint_missing() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
         let result = resume(
             &run_dir,
-            test_start_services(&run_dir, emitter, registry).await,
+            test_start_services(&store, &run_dir, emitter, registry).await,
         )
         .await;
 
         assert!(
-            matches!(&result, Err(crate::error::FabroError::Precondition(_))),
+            matches!(&result, Err(crate::error::Error::Precondition(_))),
             "expected Precondition error, got: {result:?}",
             result = result.as_ref().map(|_| "Ok"),
         );
@@ -1134,10 +1327,11 @@ mod tests {
     async fn resume_errors_when_run_already_finished_successfully() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
         let checkpoint = Checkpoint::from_context(
             &Context::new(),
@@ -1150,35 +1344,63 @@ mod tests {
             HashMap::new(),
             HashMap::new(),
         );
-        checkpoint.save(&run_dir.join("checkpoint.json")).unwrap();
-
-        crate::records::Conclusion {
-            timestamp: Utc::now(),
-            status: StageStatus::Success,
-            duration_ms: 1,
-            failure_reason: None,
+        let conclusion = crate::records::Conclusion {
+            timestamp:            Utc::now(),
+            status:               StageStatus::Success,
+            duration_ms:          1,
+            failure_reason:       None,
             final_git_commit_sha: None,
-            stages: vec![],
-            total_cost: None,
-            total_retries: 0,
-            total_input_tokens: 0,
-            total_output_tokens: 0,
-            total_cache_read_tokens: 0,
-            total_cache_write_tokens: 0,
-            total_reasoning_tokens: 0,
-            has_pricing: false,
-        }
-        .save(&run_dir.join("conclusion.json"))
+            stages:               vec![],
+            billing:              None,
+            total_retries:        0,
+        };
+        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
+        crate::event::append_event(&run_store, &fixtures::RUN_1, &Event::CheckpointCompleted {
+            node_id: checkpoint.current_node.clone(),
+            status: "success".to_string(),
+            current_node: checkpoint.current_node.clone(),
+            completed_nodes: checkpoint.completed_nodes.clone(),
+            node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+            context_values: checkpoint.context_values.clone().into_iter().collect(),
+            node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+            next_node_id: checkpoint.next_node_id.clone(),
+            git_commit_sha: checkpoint.git_commit_sha.clone(),
+            loop_failure_signatures: checkpoint
+                .loop_failure_signatures
+                .iter()
+                .map(|(sig, count)| (sig.to_string(), *count))
+                .collect(),
+            restart_failure_signatures: checkpoint
+                .restart_failure_signatures
+                .iter()
+                .map(|(sig, count)| (sig.to_string(), *count))
+                .collect(),
+            node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+            diff: None,
+        })
+        .await
+        .unwrap();
+        crate::event::append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
+            duration_ms:          conclusion.duration_ms,
+            artifact_count:       0,
+            status:               "success".to_string(),
+            reason:               None,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            billing:              None,
+        })
+        .await
         .unwrap();
 
         let result = resume(
             &run_dir,
-            test_start_services(&run_dir, emitter, registry).await,
+            test_start_services(&store, &run_dir, emitter, registry).await,
         )
         .await;
 
         assert!(
-            matches!(&result, Err(crate::error::FabroError::Precondition(_))),
+            matches!(&result, Err(crate::error::Error::Precondition(_))),
             "expected Precondition error, got: {result:?}",
             result = result.as_ref().map(|_| "Ok"),
         );

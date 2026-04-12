@@ -1,6 +1,9 @@
 use fabro_test::test_context;
 
-use super::{completed_nodes, find_run_dir, fixture, read_conclusion, sandbox_tests, timeout_for};
+use super::{
+    completed_nodes, find_run_dir, fixture, read_conclusion, run_id_for, sandbox_tests,
+    store_dump_export, timeout_for,
+};
 
 sandbox_tests!(command_agent_mixed, keys = ["ANTHROPIC_API_KEY"]);
 
@@ -22,7 +25,7 @@ fn scenario_command_agent_mixed(sandbox: &str) {
         .assert()
         .success();
 
-    let run_dir = find_run_dir(&context.storage_dir);
+    let run_dir = find_run_dir(&context);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(conclusion["status"].as_str(), Some("success"));
 
@@ -40,7 +43,8 @@ fn scenario_command_agent_mixed(sandbox: &str) {
         "verify should be completed"
     );
 
-    let stdout = std::fs::read_to_string(run_dir.join("nodes/verify/stdout.log"))
+    let export_dir = store_dump_export(&context, &run_id_for(&run_dir));
+    let stdout = std::fs::read_to_string(export_dir.join("nodes/verify/visit-1/stdout.log"))
         .expect("verify stdout.log should exist");
     assert!(
         stdout.contains("SCENARIO_FLAG_42"),

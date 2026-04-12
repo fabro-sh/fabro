@@ -3,7 +3,8 @@ pub mod chat_completions;
 pub mod models;
 pub mod responses;
 
-use axum::{Router, middleware, routing::post};
+use axum::routing::post;
+use axum::{Router, middleware};
 
 use crate::state::AppState;
 

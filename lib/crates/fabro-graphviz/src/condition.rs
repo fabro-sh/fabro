@@ -12,7 +12,7 @@
 /// Literal     ::= String | Integer | Boolean | BareLiteral
 /// BareLiteral ::= [A-Za-z_][A-Za-z0-9_.:-]*
 /// ```
-use crate::error::GraphvizError;
+use crate::error::Error;
 
 // ---------------------------------------------------------------------------
 // AST
@@ -28,8 +28,8 @@ pub enum ConditionExpr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Clause {
-    pub key: String,
-    pub op: Op,
+    pub key:   String,
+    pub op:    Op,
     pub value: String,
 }
 
@@ -66,7 +66,7 @@ enum Token {
     Matches,  // matches
 }
 
-fn tokenize(input: &str) -> Result<Vec<Token>, GraphvizError> {
+fn tokenize(input: &str) -> Result<Vec<Token>, Error> {
     let input = input.trim();
     if input.is_empty() {
         return Ok(Vec::new());
@@ -166,7 +166,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, GraphvizError> {
             i += 1;
         }
         if i == start {
-            return Err(GraphvizError::Parse(format!(
+            return Err(Error::Parse(format!(
                 "unexpected character '{}' in condition expression",
                 chars[i]
             )));
@@ -195,7 +195,8 @@ fn is_op_char(c: char) -> bool {
     matches!(c, '=' | '!' | '>' | '<' | '&' | '|')
 }
 
-/// Word operators (`contains`, `matches`) are recognized when preceded by a Word token.
+/// Word operators (`contains`, `matches`) are recognized when preceded by a
+/// Word token.
 fn is_word_operator_context(tokens: &[Token]) -> bool {
     matches!(tokens.last(), Some(Token::Word(_)))
 }
@@ -206,7 +207,7 @@ fn is_word_operator_context(tokens: &[Token]) -> bool {
 
 struct Parser {
     tokens: Vec<Token>,
-    pos: usize,
+    pos:    usize,
 }
 
 impl Parser {
@@ -226,11 +227,11 @@ impl Parser {
         tok
     }
 
-    fn parse_expr(&mut self) -> Result<ConditionExpr, GraphvizError> {
+    fn parse_expr(&mut self) -> Result<ConditionExpr, Error> {
         self.parse_or()
     }
 
-    fn parse_or(&mut self) -> Result<ConditionExpr, GraphvizError> {
+    fn parse_or(&mut self) -> Result<ConditionExpr, Error> {
         let mut children = vec![self.parse_and()?];
         while self.peek() == Some(&Token::Or) {
             self.advance();
@@ -243,7 +244,7 @@ impl Parser {
         }
     }
 
-    fn parse_and(&mut self) -> Result<ConditionExpr, GraphvizError> {
+    fn parse_and(&mut self) -> Result<ConditionExpr, Error> {
         let mut children = vec![self.parse_unary()?];
         while self.peek() == Some(&Token::And) {
             self.advance();
@@ -256,7 +257,7 @@ impl Parser {
         }
     }
 
-    fn parse_unary(&mut self) -> Result<ConditionExpr, GraphvizError> {
+    fn parse_unary(&mut self) -> Result<ConditionExpr, Error> {
         if self.peek() == Some(&Token::Not) {
             self.advance();
             let inner = self.parse_unary()?;
@@ -265,16 +266,16 @@ impl Parser {
         self.parse_clause()
     }
 
-    fn parse_clause(&mut self) -> Result<ConditionExpr, GraphvizError> {
+    fn parse_clause(&mut self) -> Result<ConditionExpr, Error> {
         let key = match self.advance() {
             Some(Token::Word(w)) => w,
             Some(other) => {
-                return Err(GraphvizError::Parse(format!(
+                return Err(Error::Parse(format!(
                     "expected key, got {other:?} in condition expression"
                 )));
             }
             None => {
-                return Err(GraphvizError::Parse(
+                return Err(Error::Parse(
                     "unexpected end of condition expression".to_string(),
                 ));
             }
@@ -308,7 +309,7 @@ impl Parser {
         let value = match self.advance() {
             Some(Token::Word(w)) => parse_literal(&w),
             Some(other) => {
-                return Err(GraphvizError::Parse(format!(
+                return Err(Error::Parse(format!(
                     "expected value after operator, got {other:?}"
                 )));
             }
@@ -317,18 +318,15 @@ impl Parser {
                 if op == Op::Eq || op == Op::NotEq {
                     String::new()
                 } else {
-                    return Err(GraphvizError::Parse(
-                        "expected value after operator".to_string(),
-                    ));
+                    return Err(Error::Parse("expected value after operator".to_string()));
                 }
             }
         };
 
         // Validate regex at parse time
         if op == Op::Matches {
-            regex::Regex::new(&value).map_err(|e| {
-                GraphvizError::Parse(format!("invalid regex pattern '{value}': {e}"))
-            })?;
+            regex::Regex::new(&value)
+                .map_err(|e| Error::Parse(format!("invalid regex pattern '{value}': {e}")))?;
         }
 
         Ok(ConditionExpr::Clause(Clause { key, op, value }))
@@ -348,7 +346,7 @@ fn parse_literal(raw: &str) -> String {
     }
 }
 
-fn parse_expression(expr: &str) -> Result<ConditionExpr, GraphvizError> {
+fn parse_expression(expr: &str) -> Result<ConditionExpr, Error> {
     let tokens = tokenize(expr)?;
     if tokens.is_empty() {
         return Ok(ConditionExpr::And(Vec::new()));
@@ -356,7 +354,7 @@ fn parse_expression(expr: &str) -> Result<ConditionExpr, GraphvizError> {
     let mut parser = Parser::new(tokens);
     let result = parser.parse_expr()?;
     if parser.pos < parser.tokens.len() {
-        return Err(GraphvizError::Parse(format!(
+        return Err(Error::Parse(format!(
             "unexpected token {:?} in condition expression",
             parser.tokens[parser.pos]
         )));
@@ -369,7 +367,7 @@ fn parse_expression(expr: &str) -> Result<ConditionExpr, GraphvizError> {
 /// # Errors
 ///
 /// Returns an error if the expression contains invalid syntax.
-pub fn parse_condition(expr: &str) -> Result<(), GraphvizError> {
+pub fn parse_condition(expr: &str) -> Result<(), Error> {
     parse_expression(expr)?;
     Ok(())
 }
@@ -379,7 +377,7 @@ pub fn parse_condition(expr: &str) -> Result<(), GraphvizError> {
 /// # Errors
 ///
 /// Returns an error if the expression contains invalid syntax.
-pub fn parse_condition_expr(expr: &str) -> Result<ConditionExpr, GraphvizError> {
+pub fn parse_condition_expr(expr: &str) -> Result<ConditionExpr, Error> {
     parse_expression(expr)
 }
 
@@ -405,8 +403,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key: "outcome".to_string(),
-                op: Op::Eq,
+                key:   "outcome".to_string(),
+                op:    Op::Eq,
                 value: "success".to_string(),
             })
         );
@@ -419,13 +417,13 @@ mod tests {
             expr,
             ConditionExpr::And(vec![
                 ConditionExpr::Clause(Clause {
-                    key: "a".to_string(),
-                    op: Op::Eq,
+                    key:   "a".to_string(),
+                    op:    Op::Eq,
                     value: "1".to_string(),
                 }),
                 ConditionExpr::Clause(Clause {
-                    key: "b".to_string(),
-                    op: Op::Eq,
+                    key:   "b".to_string(),
+                    op:    Op::Eq,
                     value: "2".to_string(),
                 }),
             ])
@@ -438,8 +436,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key: "some_flag".to_string(),
-                op: Op::Truthy,
+                key:   "some_flag".to_string(),
+                op:    Op::Truthy,
                 value: String::new(),
             })
         );
@@ -451,8 +449,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key: "outcome".to_string(),
-                op: Op::NotEq,
+                key:   "outcome".to_string(),
+                op:    Op::NotEq,
                 value: "fail".to_string(),
             })
         );
@@ -531,8 +529,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key: "outcome".to_string(),
-                op: Op::Eq,
+                key:   "outcome".to_string(),
+                op:    Op::Eq,
                 value: "success".to_string(),
             })
         );
@@ -551,8 +549,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key: "outcome".to_string(),
-                op: Op::NotEq,
+                key:   "outcome".to_string(),
+                op:    Op::NotEq,
                 value: "fail".to_string(),
             })
         );
@@ -564,8 +562,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key: "context.msg".to_string(),
-                op: Op::Eq,
+                key:   "context.msg".to_string(),
+                op:    Op::Eq,
                 value: "hello world".to_string(),
             })
         );

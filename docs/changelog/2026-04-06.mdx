@@ -1,0 +1,28 @@
+---
+title: "System management API"
+date: "2026-04-06"
+---
+
+## System management API
+
+New server-backed system commands give you visibility into Fabro's operational state through both the CLI and the REST API. `fabro system info` reports server version, uptime, and run counts. `fabro system events` streams the global event log. `fabro system df` and `fabro system prune` now route through the server for consistent behavior across local and remote setups.
+
+```bash
+fabro system info           # server version, uptime, run counts
+fabro system info --json    # machine-readable
+fabro system events         # global event stream
+fabro system prune          # clean up completed runs
+```
+
+## More
+
+<Accordion title="API">
+- New `GET /api/v1/system/info` endpoint returns server version, uptime, and run statistics
+- New `GET /api/v1/system/events` endpoint streams the global event log via SSE
+- New `GET /api/v1/system/df` endpoint returns disk usage by run
+- New `POST /api/v1/system/prune` endpoint removes completed run data
+</Accordion>
+
+<Accordion title="Improvements">
+- Settings and model commands now route through the server daemon for consistency
+</Accordion>

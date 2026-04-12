@@ -1,0 +1,24 @@
+---
+title: "Server-backed web dashboard and event-sourced run state"
+date: "2026-04-01"
+---
+
+## Server-backed web dashboard
+
+The Fabro web app is now a single-page application served directly by the Fabro server. Previously, the frontend required a separate Node.js server with server-side rendering. Now `fabro server start` serves both the API and the web dashboard from the same origin, simplifying deployment and eliminating the need for a separate frontend process.
+
+## Event-sourced run state
+
+Run state is now fully derived from events rather than written to disk as independent files. This means runs are more reliable, resumable, and inspectable — every piece of run metadata (status, provider info, checkpoints, PR data) is reconstructed from the event stream. The legacy SQLite metadata store and file-based projections have been retired.
+
+## More
+
+<Accordion title="Improvements">
+- `unsafe_code` is now denied workspace-wide for security hardening
+- Dry-run mode no longer activates automatically when LLM providers are missing — runs now fail explicitly, making misconfiguration easier to diagnose
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed `attach` hanging on Linux when the workflow engine exits before the attach process starts
+- Fixed login route collision after the SPA cutover
+</Accordion>

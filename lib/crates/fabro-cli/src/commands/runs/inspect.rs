@@ -1,105 +1,57 @@
-use std::path::{Path, PathBuf};
-
 use anyhow::Result;
-use fabro_config::FabroSettingsExt;
-use fabro_sandbox::SandboxRecordExt;
-use fabro_types::RunId;
-use fabro_workflow::records::{CheckpointExt, ConclusionExt, RunRecordExt, StartRecordExt};
+use fabro_util::printer::Printer;
+use fabro_workflow::run_status::RunStatus;
 use serde::Serialize;
 
-use fabro_workflow::records::{Checkpoint, Conclusion, RunRecord, StartRecord};
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
-use fabro_workflow::run_status::RunStatus;
-
 use crate::args::{GlobalArgs, InspectArgs};
-use crate::store;
-use crate::user_config::load_user_settings_with_globals;
+use crate::command_context::CommandContext;
+use crate::server_client::RunProjection;
+use crate::server_runs::{ServerRunSummaryInfo, ServerSummaryLookup};
 
 #[derive(Debug, Serialize)]
 pub(crate) struct InspectOutput {
-    pub run_id: String,
-    pub run_dir: PathBuf,
-    pub status: RunStatus,
-    pub run_record: Option<serde_json::Value>,
+    pub run_id:       String,
+    pub status:       RunStatus,
+    pub run_record:   Option<serde_json::Value>,
     pub start_record: Option<serde_json::Value>,
-    pub conclusion: Option<serde_json::Value>,
-    pub checkpoint: Option<serde_json::Value>,
-    pub sandbox: Option<serde_json::Value>,
+    pub conclusion:   Option<serde_json::Value>,
+    pub checkpoint:   Option<serde_json::Value>,
+    pub sandbox:      Option<serde_json::Value>,
 }
 
-pub(crate) async fn run(args: &InspectArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let output = match store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await? {
-        Some(run_store) => {
-            inspect_run_store(&run.run_id, &run.path, run.status, run_store.as_ref()).await
-        }
-        None => inspect_run_dir(&run.run_id, &run.path, run.status),
-    };
+pub(crate) async fn run(args: &InspectArgs, _globals: &GlobalArgs, printer: Printer) -> Result<()> {
+    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
+    let run = lookup.resolve(&args.run)?;
+    let run_id = run.run_id();
+    let state = lookup.client().get_run_state(&run_id).await?;
+    let output = inspect_run_state(&run, state);
     let json = serde_json::to_string_pretty(&[output])?;
-    println!("{json}");
+    fabro_util::printout!(printer, "{json}");
     Ok(())
 }
 
-async fn inspect_run_store(
-    run_id: &RunId,
-    run_dir: &Path,
-    status: RunStatus,
-    run_store: &dyn fabro_store::RunStore,
-) -> InspectOutput {
-    match run_store.get_snapshot().await {
-        Ok(Some(snapshot)) => InspectOutput {
-            run_id: run_id.to_string(),
-            run_dir: run_dir.to_path_buf(),
-            status: snapshot
-                .status
-                .as_ref()
-                .map_or(status, |record| record.status),
-            run_record: serde_json::to_value(snapshot.run).ok(),
-            start_record: snapshot
-                .start
-                .and_then(|record| serde_json::to_value(record).ok()),
-            conclusion: snapshot
-                .conclusion
-                .and_then(|record| serde_json::to_value(record).ok()),
-            checkpoint: snapshot
-                .checkpoint
-                .and_then(|record| serde_json::to_value(record).ok()),
-            sandbox: snapshot
-                .sandbox
-                .and_then(|record| serde_json::to_value(record).ok()),
-        },
-        _ => inspect_run_dir(run_id, run_dir, status),
-    }
-}
-
-fn inspect_run_dir(run_id: &RunId, run_dir: &Path, status: RunStatus) -> InspectOutput {
-    let run_record = RunRecord::load(run_dir)
-        .ok()
-        .and_then(|v| serde_json::to_value(v).ok());
-    let start_record = StartRecord::load(run_dir)
-        .ok()
-        .and_then(|v| serde_json::to_value(v).ok());
-    let conclusion = Conclusion::load(&run_dir.join("conclusion.json"))
-        .ok()
-        .and_then(|v| serde_json::to_value(v).ok());
-    let checkpoint = Checkpoint::load(&run_dir.join("checkpoint.json"))
-        .ok()
-        .and_then(|v| serde_json::to_value(v).ok());
-    let sandbox = fabro_sandbox::SandboxRecord::load(&run_dir.join("sandbox.json"))
-        .ok()
-        .and_then(|v| serde_json::to_value(v).ok());
-
+fn inspect_run_state(run: &ServerRunSummaryInfo, state: RunProjection) -> InspectOutput {
     InspectOutput {
-        run_id: run_id.to_string(),
-        run_dir: run_dir.to_path_buf(),
-        status,
-        run_record,
-        start_record,
-        conclusion,
-        checkpoint,
-        sandbox,
+        run_id:       run.run_id().to_string(),
+        status:       state
+            .status
+            .as_ref()
+            .map_or(run.status(), |record| record.status),
+        run_record:   state
+            .run
+            .and_then(|record| serde_json::to_value(record).ok()),
+        start_record: state
+            .start
+            .and_then(|record| serde_json::to_value(record).ok()),
+        conclusion:   state
+            .conclusion
+            .and_then(|record| serde_json::to_value(record).ok()),
+        checkpoint:   state
+            .checkpoint
+            .and_then(|record| serde_json::to_value(record).ok()),
+        sandbox:      state
+            .sandbox
+            .and_then(|record| serde_json::to_value(record).ok()),
     }
 }

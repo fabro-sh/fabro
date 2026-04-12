@@ -1,10 +1,8 @@
-#[cfg(feature = "server")]
-use std::io::Write as _;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use axum::extract::Query;
 use axum::response::Html;
 use axum::routing::get;
@@ -13,31 +11,40 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
-use fabro_config::user::USER_CONFIG_FILENAME;
+use fabro_api::types::{CreateSecretRequest, SecretType as ApiSecretType};
+use fabro_config::user::SETTINGS_CONFIG_FILENAME;
+use fabro_config::{Storage, envfile, legacy_env};
 use fabro_model::Provider;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
+// Bootstrap-only direct vault writes for `fabro install` when no local server is running.
+use fabro_vault::{SecretType, Vault};
 use rand::Rng;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tokio::process::Command as TokioCommand;
 use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
 
 use super::doctor;
-use crate::args::GlobalArgs;
+use crate::args::{DoctorArgs, GlobalArgs, InstallArgs, ServerTargetArgs};
+use crate::commands::server::record;
+use crate::gh::GhCli;
 use crate::shared::provider_auth::{
     prompt_and_validate_key, prompt_confirm, provider_display_name, run_openai_oauth_or_api_key,
-    write_env_file,
 };
+use crate::{server_client, user_config};
 
 // ---------------------------------------------------------------------------
-// OpenSSL helpers (server mode only)
+// OpenSSL helpers
 // ---------------------------------------------------------------------------
 
 /// Run an openssl subcommand and return stdout on success.
-#[cfg(feature = "server")]
-fn run_openssl(args: &[&str], description: &str) -> Result<Vec<u8>> {
-    let output = Command::new("openssl")
+async fn run_openssl(args: &[&str], description: &str) -> Result<Vec<u8>> {
+    let output = TokioCommand::new("openssl")
         .args(args)
         .output()
+        .await
         .with_context(|| format!("failed to run openssl for: {description}"))?;
     if !output.status.success() {
         bail!(
@@ -49,23 +56,30 @@ fn run_openssl(args: &[&str], description: &str) -> Result<Vec<u8>> {
 }
 
 /// Run an openssl subcommand that reads key material from stdin.
-#[cfg(feature = "server")]
-fn run_openssl_with_stdin(args: &[&str], stdin_data: &[u8], description: &str) -> Result<Vec<u8>> {
-    let mut child = Command::new("openssl")
+async fn run_openssl_with_stdin(
+    args: &[&str],
+    stdin_data: &[u8],
+    description: &str,
+) -> Result<Vec<u8>> {
+    let mut child = TokioCommand::new("openssl")
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("failed to spawn openssl for: {description}"))?;
-    child
+    let mut stdin = child
         .stdin
         .take()
-        .context("openssl process missing stdin")?
+        .context("openssl process missing stdin")?;
+    stdin
         .write_all(stdin_data)
+        .await
         .with_context(|| format!("failed to write to openssl stdin for: {description}"))?;
+    drop(stdin);
     let output = child
         .wait_with_output()
+        .await
         .with_context(|| format!("failed to read openssl output for: {description}"))?;
     if !output.status.success() {
         bail!(
@@ -77,10 +91,9 @@ fn run_openssl_with_stdin(args: &[&str], stdin_data: &[u8], description: &str) -
 }
 
 // ---------------------------------------------------------------------------
-// Session secret (server mode only)
+// Session secret
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
 fn generate_session_secret() -> String {
     let mut rng = rand::thread_rng();
     let bytes: [u8; 32] = rng.gen();
@@ -88,14 +101,14 @@ fn generate_session_secret() -> String {
 }
 
 // ---------------------------------------------------------------------------
-// JWT keypair generation (server mode only)
+// JWT keypair generation
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
-fn generate_jwt_keypair() -> Result<(String, String)> {
-    let private_pem = run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate keypair")?;
+async fn generate_jwt_keypair() -> Result<(String, String)> {
+    let private_pem =
+        run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate keypair").await?;
     let public_pem =
-        run_openssl_with_stdin(&["pkey", "-pubout"], &private_pem, "extract public key")?;
+        run_openssl_with_stdin(&["pkey", "-pubout"], &private_pem, "extract public key").await?;
 
     let private_str = String::from_utf8(private_pem).context("private key is not valid UTF-8")?;
     let public_str = String::from_utf8(public_pem).context("public key is not valid UTF-8")?;
@@ -103,15 +116,14 @@ fn generate_jwt_keypair() -> Result<(String, String)> {
 }
 
 // ---------------------------------------------------------------------------
-// mTLS certificate generation (server mode only)
+// mTLS certificate generation
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
-fn generate_mtls_certs(dir: &Path) -> Result<()> {
+async fn generate_mtls_certs(dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir).context("failed to create certs directory")?;
 
     // 1. CA key + self-signed cert
-    let ca_key = run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate CA key")?;
+    let ca_key = run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate CA key").await?;
     let ca_key_path = dir.join("ca.key");
     std::fs::write(&ca_key_path, &ca_key)?;
 
@@ -130,27 +142,31 @@ fn generate_mtls_certs(dir: &Path) -> Result<()> {
             "/CN=Fabro CA",
         ],
         "generate CA cert",
-    )?;
+    )
+    .await?;
     let ca_cert_path = dir.join("ca.crt");
     std::fs::write(&ca_cert_path, &ca_cert)?;
 
     // 2. Server key + CSR signed by CA
-    let server_key = run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate server key")?;
+    let server_key =
+        run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate server key").await?;
     let server_key_path = dir.join("server.key");
     std::fs::write(&server_key_path, &server_key)?;
 
-    let csr = run_openssl_with_stdin(
+    let csr = run_openssl(
         &[
             "req",
             "-new",
             "-key",
-            "/dev/stdin",
+            server_key_path
+                .to_str()
+                .context("server key path is not valid UTF-8")?,
             "-subj",
             "/CN=localhost",
         ],
-        &server_key,
         "generate server CSR",
-    )?;
+    )
+    .await?;
 
     let csr_path = dir.join("server.csr");
     std::fs::write(&csr_path, &csr)?;
@@ -174,7 +190,8 @@ fn generate_mtls_certs(dir: &Path) -> Result<()> {
             "3650",
         ],
         "sign server cert",
-    )?;
+    )
+    .await?;
     std::fs::write(dir.join("server.crt"), &server_cert)?;
 
     // Clean up temporary files
@@ -185,29 +202,129 @@ fn generate_mtls_certs(dir: &Path) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Config TOML generation (server mode only)
+// Config TOML generation
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
+fn root_table_mut(doc: &mut toml::Value) -> Result<&mut toml::Table> {
+    doc.as_table_mut()
+        .context("settings.toml root is not a table")
+}
+
+fn ensure_table<'a>(table: &'a mut toml::Table, key: &str) -> Result<&'a mut toml::Table> {
+    table
+        .entry(key.to_string())
+        .or_insert_with(|| toml::Value::Table(toml::Table::default()))
+        .as_table_mut()
+        .with_context(|| format!("settings.toml [{key}] is not a table"))
+}
+
+fn merge_server_settings(doc: &mut toml::Value, username: &str) -> Result<()> {
+    let root = root_table_mut(doc)?;
+    root.insert("_version".to_string(), toml::Value::Integer(1));
+
+    let server = ensure_table(root, "server")?;
+
+    let api = ensure_table(server, "api")?;
+    api.insert(
+        "url".to_string(),
+        toml::Value::String("https://localhost:3000/api/v1".to_string()),
+    );
+
+    let listen = ensure_table(server, "listen")?;
+    listen.insert("type".to_string(), toml::Value::String("tcp".to_string()));
+    let listen_tls = ensure_table(listen, "tls")?;
+    let certs_dir = fabro_util::Home::from_env().certs_dir();
+    listen_tls.insert(
+        "cert".to_string(),
+        toml::Value::String(certs_dir.join("server.crt").to_string_lossy().to_string()),
+    );
+    listen_tls.insert(
+        "key".to_string(),
+        toml::Value::String(certs_dir.join("server.key").to_string_lossy().to_string()),
+    );
+    listen_tls.insert(
+        "ca".to_string(),
+        toml::Value::String(certs_dir.join("ca.crt").to_string_lossy().to_string()),
+    );
+
+    let web = ensure_table(server, "web")?;
+    web.insert("enabled".to_string(), toml::Value::Boolean(true));
+    web.insert(
+        "url".to_string(),
+        toml::Value::String("http://localhost:3000".to_string()),
+    );
+
+    let auth = ensure_table(server, "auth")?;
+    let auth_api = ensure_table(auth, "api")?;
+    let jwt = ensure_table(auth_api, "jwt")?;
+    jwt.insert("enabled".to_string(), toml::Value::Boolean(true));
+    let mtls = ensure_table(auth_api, "mtls")?;
+    mtls.insert("enabled".to_string(), toml::Value::Boolean(true));
+
+    let auth_web = ensure_table(auth, "web")?;
+    auth_web.insert(
+        "allowed_usernames".to_string(),
+        toml::Value::Array(vec![toml::Value::String(username.to_string())]),
+    );
+
+    Ok(())
+}
+
+fn github_integration_table(doc: &mut toml::Value) -> Result<&mut toml::Table> {
+    let root = doc
+        .as_table_mut()
+        .context("settings.toml root is not a table")?;
+    let server = root
+        .entry("server")
+        .or_insert(toml::Value::Table(toml::Table::default()));
+    let server_table = server
+        .as_table_mut()
+        .context("settings.toml [server] is not a table")?;
+    let integrations = server_table
+        .entry("integrations")
+        .or_insert(toml::Value::Table(toml::Table::default()));
+    let integrations_table = integrations
+        .as_table_mut()
+        .context("settings.toml [server.integrations] is not a table")?;
+    let github = integrations_table
+        .entry("github")
+        .or_insert(toml::Value::Table(toml::Table::default()));
+    github
+        .as_table_mut()
+        .context("settings.toml [server.integrations.github] is not a table")
+}
+
+fn write_github_cli_settings(doc: &mut toml::Value) -> Result<()> {
+    let github = github_integration_table(doc)?;
+    github.insert("strategy".into(), toml::Value::String("gh_cli".to_string()));
+    github.remove("app_id");
+    github.remove("slug");
+    github.remove("client_id");
+    Ok(())
+}
+
+fn write_github_app_settings(
+    doc: &mut toml::Value,
+    app_id: &str,
+    slug: &str,
+    client_id: &str,
+) -> Result<()> {
+    let github = github_integration_table(doc)?;
+    github.insert("strategy".into(), toml::Value::String("app".to_string()));
+    github.insert("app_id".into(), toml::Value::String(app_id.to_string()));
+    github.insert("slug".into(), toml::Value::String(slug.to_string()));
+    github.insert(
+        "client_id".into(),
+        toml::Value::String(client_id.to_string()),
+    );
+    Ok(())
+}
+
+#[cfg(test)]
 fn format_config_toml(username: &str) -> String {
-    format!(
-        r#"[web]
-url = "http://localhost:5173"
-
-[web.auth]
-provider = "github"
-allowed_usernames = ["{username}"]
-
-[api]
-base_url = "https://localhost:3000/api/v1"
-authentication_strategies = ["jwt", "mtls"]
-
-[api.tls]
-cert = "~/.fabro/certs/server.crt"
-key = "~/.fabro/certs/server.key"
-ca = "~/.fabro/certs/ca.crt"
-"#
-    )
+    let mut doc = toml::Value::Table(toml::Table::default());
+    merge_server_settings(&mut doc, username).expect("default server config should be valid");
+    toml::to_string_pretty(&doc).expect("default server config should serialize")
 }
 
 // ---------------------------------------------------------------------------
@@ -215,12 +332,13 @@ ca = "~/.fabro/certs/ca.crt"
 // ---------------------------------------------------------------------------
 
 /// Check if a binary exists on PATH using the doctor.rs pattern.
-fn detect_binary_on_path(binary: &str) -> bool {
-    Command::new(binary)
+async fn detect_binary_on_path(binary: &str) -> bool {
+    TokioCommand::new(binary)
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
+        .await
         .map(|s| s.success())
         .unwrap_or(false)
 }
@@ -229,7 +347,6 @@ fn detect_binary_on_path(binary: &str) -> bool {
 // Interactive setup
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
 fn prompt_input(prompt: &str) -> Result<String> {
     Ok(dialoguer::Input::with_theme(&ColorfulTheme::default())
         .with_prompt(prompt)
@@ -248,6 +365,100 @@ fn prompt_multiselect(prompt: &str, items: &[String]) -> Result<Vec<usize>> {
         .with_prompt(prompt)
         .items(items)
         .interact_on(&Term::stderr())?)
+}
+
+// ---------------------------------------------------------------------------
+// GitHub App owner selection
+// ---------------------------------------------------------------------------
+
+enum GitHubAppOwner {
+    Personal,
+    Organization(String),
+}
+
+impl GitHubAppOwner {
+    fn manifest_form_action(&self) -> String {
+        match self {
+            Self::Personal => "https://github.com/settings/apps/new".to_string(),
+            Self::Organization(org) => {
+                format!("https://github.com/organizations/{org}/settings/apps/new")
+            }
+        }
+    }
+
+    fn app_name(&self, username: Option<&str>) -> String {
+        match self {
+            Self::Organization(org) => format!("{org}-fabro"),
+            Self::Personal => {
+                if let Some(user) = username {
+                    format!("{user}-fabro")
+                } else {
+                    let mut rng = rand::thread_rng();
+                    let suffix: String = (0..6).fold(String::with_capacity(6), |mut s, _| {
+                        use std::fmt::Write;
+                        let _ = write!(s, "{:x}", rng.gen::<u8>() % 16);
+                        s
+                    });
+                    format!("Fabro-{suffix}")
+                }
+            }
+        }
+    }
+}
+
+/// Ask the user where to create the GitHub App.
+///
+/// Uses the `gh` CLI to discover the username and admin orgs. If `gh` is
+/// unavailable or the user has no admin orgs, falls back gracefully.
+/// Always offers a manual "Other" option so org app managers can enter a slug.
+///
+/// Returns `(owner, username)`.
+async fn prompt_github_app_owner(_s: &Styles) -> Result<(GitHubAppOwner, Option<String>)> {
+    let spinner = indicatif::ProgressBar::new_spinner();
+    spinner.set_style(
+        indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}")
+            .expect("valid template")
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]),
+    );
+    spinner.set_message("Checking GitHub CLI...");
+    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+
+    let Some(gh) = GhCli::detect().await else {
+        spinner.finish_and_clear();
+        return Ok((GitHubAppOwner::Personal, None));
+    };
+
+    let (username, orgs) = tokio::join!(gh.authenticated_user(), gh.list_admin_orgs());
+    spinner.finish_and_clear();
+
+    // Build the selection menu
+    let personal_label = match &username {
+        Some(user) => format!("Personal account ({user})"),
+        None => "Personal account".to_string(),
+    };
+    let mut items = vec![personal_label];
+    for org in &orgs {
+        items.push(format!("Organization: {org}"));
+    }
+    items.push("Other (enter organization name)".to_string());
+
+    let selected: usize = spawn_blocking({
+        let items = items.clone();
+        move || prompt_select("Where should the GitHub App be created?", &items)
+    })
+    .await??;
+
+    let other_index = 1 + orgs.len();
+    let owner = if selected == 0 {
+        GitHubAppOwner::Personal
+    } else if selected == other_index {
+        let org_slug: String = spawn_blocking(|| prompt_input("Organization name")).await??;
+        GitHubAppOwner::Organization(org_slug)
+    } else {
+        GitHubAppOwner::Organization(orgs[selected - 1].clone())
+    };
+
+    Ok((owner, username))
 }
 
 // ---------------------------------------------------------------------------
@@ -280,20 +491,16 @@ fn build_github_app_manifest(app_name: &str, port: u16, web_url: &str) -> serde_
 }
 
 /// Run the GitHub App manifest registration flow via a temporary local server.
-/// Returns env var pairs (key, value) for secrets to merge into `.env`.
+/// Returns secret pairs `(key, value)` to persist for the local server.
 async fn setup_github_app(
-    arc_dir: &Path,
+    fabro_dir: &Path,
     s: &Styles,
     web_url: &str,
+    owner: &GitHubAppOwner,
+    username: Option<&str>,
+    printer: Printer,
 ) -> Result<Vec<(String, String)>> {
-    // Random suffix so app names don't collide
-    let mut rng = rand::thread_rng();
-    let suffix: String = (0..6).fold(String::with_capacity(6), |mut s, _| {
-        use std::fmt::Write;
-        let _ = write!(s, "{:x}", rng.gen::<u8>() % 16);
-        s
-    });
-    let app_name = format!("Arc-{suffix}");
+    let app_name = owner.app_name(username);
 
     // Bind to random port
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -319,12 +526,13 @@ async fn setup_github_app(
     let code_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(code_tx)));
     let shutdown_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(shutdown_tx)));
 
+    let form_action = owner.manifest_form_action();
     let index_html = format!(
         r#"<!DOCTYPE html>
 <html>
 <body>
   <p>Redirecting to GitHub...</p>
-  <form id="f" method="post" action="https://github.com/settings/apps/new">
+  <form id="f" method="post" action="{form_action}">
     <input type="hidden" name="manifest" value="{escaped_manifest}">
   </form>
   <script>document.getElementById('f').submit();</script>
@@ -382,13 +590,14 @@ async fn setup_github_app(
 
     // Open browser
     let url = format!("http://127.0.0.1:{port}/");
-    eprintln!("  {}", s.dim.apply_to("Opening browser..."));
+    fabro_util::printerr!(printer, "  {}", s.dim.apply_to("Opening browser..."));
     if let Err(e) = open::that(&url) {
-        eprintln!("  Could not open browser automatically: {e}");
-        eprintln!("  Please open this URL manually: {url}");
+        fabro_util::printerr!(printer, "  Could not open browser automatically: {e}");
+        fabro_util::printerr!(printer, "  Please open this URL manually: {url}");
     }
 
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  {}",
         s.dim.apply_to("Waiting for GitHub... (Ctrl+C to cancel)")
     );
@@ -399,8 +608,12 @@ async fn setup_github_app(
         .context("did not receive callback from GitHub (was the browser flow completed?)")?;
 
     // Exchange code for app credentials
-    eprintln!("  {}", s.dim.apply_to("Exchanging code with GitHub..."));
-    let client = reqwest::Client::new();
+    fabro_util::printerr!(
+        printer,
+        "  {}",
+        s.dim.apply_to("Exchanging code with GitHub...")
+    );
+    let client = fabro_http::http_client()?;
     let resp = client
         .post(format!(
             "https://api.github.com/app-manifests/{code}/conversions"
@@ -441,39 +654,30 @@ async fn setup_github_app(
         .context("missing 'pem' in GitHub response")?
         .to_string();
 
-    // Write non-secret config to user.toml
-    let user_toml_path = arc_dir.join(USER_CONFIG_FILENAME);
+    // Write non-secret config to settings.toml
+    let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
     let existing = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
     let mut doc: toml::Value = if existing.is_empty() {
         toml::Value::Table(toml::Table::default())
     } else {
-        toml::from_str(&existing).context("failed to parse existing user.toml")?
+        toml::from_str(&existing).context("failed to parse existing settings.toml")?
     };
-    let table = doc
-        .as_table_mut()
-        .context("user.toml root is not a table")?;
-    let git = table
-        .entry("git")
-        .or_insert(toml::Value::Table(toml::Table::default()));
-    let git_table = git
-        .as_table_mut()
-        .context("user.toml [git] is not a table")?;
-    git_table.insert("app_id".into(), toml::Value::String(app_id));
-    git_table.insert("slug".into(), toml::Value::String(slug.clone()));
-    git_table.insert("client_id".into(), toml::Value::String(client_id));
+    write_github_app_settings(&mut doc, &app_id, &slug, &client_id)?;
     std::fs::write(&user_toml_path, toml::to_string_pretty(&doc)?)?;
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  {}",
         s.dim
             .apply_to(format!("Wrote {}", user_toml_path.display()))
     );
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  {}",
         s.dim
             .apply_to(format!("App: https://github.com/apps/{slug}"))
     );
 
-    // Return secrets as env pairs
+    // Return secret pairs
     let pem_b64 = BASE64_STANDARD.encode(pem.as_bytes());
 
     let mut env_pairs = vec![
@@ -487,41 +691,119 @@ async fn setup_github_app(
     Ok(env_pairs)
 }
 
-pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<()> {
+async fn persist_vault_secrets(
+    storage_dir: &Path,
+    secrets: &[(String, String)],
+    server_was_running: bool,
+) -> Result<()> {
+    if secrets.is_empty() {
+        return Ok(());
+    }
+
+    if server_was_running {
+        let client = server_client::connect_api_client(storage_dir).await?;
+        for (name, value) in secrets {
+            client
+                .create_secret()
+                .body(CreateSecretRequest {
+                    name:        name.clone(),
+                    value:       value.clone(),
+                    type_:       ApiSecretType::Environment,
+                    description: None,
+                })
+                .send()
+                .await?;
+        }
+        return Ok(());
+    }
+
+    let mut store = Vault::load(Storage::new(storage_dir).secrets_path())?;
+    for (name, value) in secrets {
+        store.set(name, value, SecretType::Environment, None)?;
+    }
+    Ok(())
+}
+
+fn persist_server_env_secrets(storage_dir: &Path, secrets: &[(String, String)]) -> Result<()> {
+    if secrets.is_empty() {
+        return Ok(());
+    }
+
+    envfile::merge_env_file(
+        &Storage::new(storage_dir).server_state().env_path(),
+        secrets.iter().cloned(),
+    )?;
+    Ok(())
+}
+
+async fn persist_install_outputs(
+    storage_dir: &Path,
+    server_env_secrets: &[(String, String)],
+    vault_secrets: &[(String, String)],
+    server_was_running: bool,
+) -> Result<()> {
+    persist_server_env_secrets(storage_dir, server_env_secrets)?;
+    persist_vault_secrets(storage_dir, vault_secrets, server_was_running).await
+}
+
+pub(crate) async fn run_install(
+    args: &InstallArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     globals.require_no_json()?;
+    let web_url = &args.web_url;
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
+    let cli_settings = user_config::load_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let storage_dir = user_config::storage_dir(&cli_settings)?;
+    let server_was_running = record::active_server_record(&storage_dir).is_some();
 
-    eprintln!();
-    eprintln!("  {}{}", emoji, s.bold.apply_to("Fabro Install"));
-    eprintln!();
-    eprintln!(
+    fabro_util::printerr!(printer, "");
+    fabro_util::printerr!(printer, "  {}{}", emoji, s.bold.apply_to("Fabro Install"));
+    fabro_util::printerr!(printer, "");
+    fabro_util::printerr!(
+        printer,
         "  {}",
         s.dim
             .apply_to("Let's get Fabro set up. This will configure your")
     );
-    eprintln!("  {}", s.dim.apply_to("LLM providers and GitHub App."));
-    eprintln!();
+    fabro_util::printerr!(
+        printer,
+        "  {}",
+        s.dim.apply_to("LLM providers and GitHub access.")
+    );
+    fabro_util::printerr!(printer, "");
 
-    let arc_dir = dirs::home_dir()
-        .context("could not determine home directory")?
-        .join(".fabro");
-    std::fs::create_dir_all(&arc_dir)?;
+    let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
+    std::fs::create_dir_all(&fabro_dir)?;
 
-    // Pre-flight checks (server mode only — standalone doesn't need openssl/node/dot)
-    #[cfg(feature = "server")]
     {
-        eprintln!(
+        let env_path = legacy_env::legacy_env_file_path();
+        if env_path.exists() {
+            fabro_util::printerr!(
+                printer,
+                "  Warning: {} is no longer read by fabro server. This install will persist runtime secrets in server.env and workflow-visible credentials in the vault instead.",
+                env_path.display()
+            );
+            fabro_util::printerr!(printer, "");
+        }
+    }
+
+    // Pre-flight checks
+    {
+        fabro_util::printerr!(
+            printer,
             "  {}",
             s.dim.apply_to("[Pre-flight] System dependency checks")
         );
-        let dep_outcomes = doctor::probe_system_deps();
+        let dep_outcomes = doctor::probe_system_deps().await;
         let dep_check = doctor::check_system_deps(doctor::DEP_SPECS, &dep_outcomes);
 
         if dep_check.status == doctor::CheckStatus::Error {
-            eprintln!("  Missing required system dependencies:");
+            fabro_util::printerr!(printer, "  Missing required system dependencies:");
             for detail in &dep_check.details {
-                eprintln!("    {}", detail.text);
+                fabro_util::printerr!(printer, "    {}", detail.text);
             }
             bail!("Install missing required tools before running setup");
         }
@@ -536,32 +818,34 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
                 .await??;
 
                 if install {
-                    let status = Command::new("brew")
+                    let status = TokioCommand::new("brew")
                         .args(["install", "graphviz"])
                         .status()
+                        .await
                         .context("failed to run brew install graphviz")?;
                     if !status.success() {
-                        eprintln!("  Warning: brew install graphviz failed");
+                        fabro_util::printerr!(printer, "  Warning: brew install graphviz failed");
                     }
                 }
             }
         }
 
         for detail in &dep_check.details {
-            eprintln!("  {}", detail.text);
+            fabro_util::printerr!(printer, "  {}", detail.text);
         }
-        eprintln!();
+        fabro_util::printerr!(printer, "");
     }
 
     // Step 1: LLM Providers
-    eprintln!("  {}", s.bold.apply_to("Step 1 · LLM Providers"));
-    eprintln!("  {}", s.dim.apply_to("──────────────────────"));
-    eprintln!();
+    fabro_util::printerr!(printer, "  {}", s.bold.apply_to("Step 1 · LLM Providers"));
+    fabro_util::printerr!(printer, "  {}", s.dim.apply_to("──────────────────────"));
+    fabro_util::printerr!(printer, "");
 
-    let mut env_pairs: Vec<(String, String)> = Vec::new();
+    let mut vault_pairs: Vec<(String, String)> = Vec::new();
+    let mut server_env_pairs: Vec<(String, String)> = Vec::new();
     let mut configured_providers: Vec<Provider> = Vec::new();
 
-    let codex_detected = detect_binary_on_path("codex");
+    let codex_detected = detect_binary_on_path("codex").await;
     let mut openai_via_oauth = false;
 
     if codex_detected {
@@ -575,8 +859,8 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
         .await??;
 
         if use_oauth {
-            let pairs = run_openai_oauth_or_api_key(&s).await?;
-            env_pairs.extend(pairs);
+            let pairs = run_openai_oauth_or_api_key(&s, printer).await?;
+            vault_pairs.extend(pairs);
             configured_providers.push(Provider::OpenAi);
             openai_via_oauth = true;
         }
@@ -598,14 +882,14 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
 
         let first_provider = primary_providers[primary_idx];
         {
-            let (env_var, key) = prompt_and_validate_key(first_provider, &s).await?;
-            env_pairs.push((env_var, key));
+            let (env_var, key) = prompt_and_validate_key(first_provider, &s, printer).await?;
+            vault_pairs.push((env_var, key));
             configured_providers.push(first_provider);
         }
     }
 
     // Additional providers
-    eprintln!();
+    fabro_util::printerr!(printer, "");
     let add_more =
         spawn_blocking(|| prompt_confirm("Set up additional LLM providers?", false)).await??;
 
@@ -632,65 +916,92 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
 
         for idx in selected_indices {
             let provider = remaining_providers[idx];
-            let (env_var, key) = prompt_and_validate_key(provider, &s).await?;
-            env_pairs.push((env_var, key));
+            let (env_var, key) = prompt_and_validate_key(provider, &s, printer).await?;
+            vault_pairs.push((env_var, key));
         }
     }
+    fabro_util::printerr!(printer, "");
 
-    // Write LLM provider env vars immediately
-    if !env_pairs.is_empty() {
-        write_env_file(&arc_dir, &env_pairs, &s)?;
-    }
-    eprintln!();
-
-    // Step 2: GitHub App
-    eprintln!("  {}", s.bold.apply_to("Step 2 · GitHub App"));
-    eprintln!("  {}", s.dim.apply_to("───────────────────"));
-    eprintln!();
+    // Step 2: GitHub
+    fabro_util::printerr!(printer, "  {}", s.bold.apply_to("Step 2 · GitHub"));
+    fabro_util::printerr!(printer, "  {}", s.dim.apply_to("───────────────"));
+    fabro_util::printerr!(printer, "");
 
     {
-        let setup_github =
-            spawn_blocking(|| prompt_confirm("Set up a GitHub App? (Recommended)", true)).await??;
+        let strategy_options = vec![
+            "GitHub CLI — use your existing `gh` login".to_string(),
+            "GitHub App — recommended for teams".to_string(),
+        ];
+        let strategy = spawn_blocking({
+            let options = strategy_options.clone();
+            move || prompt_select("How should Fabro authenticate with GitHub?", &options)
+        })
+        .await??;
 
-        if setup_github {
-            let github_env_pairs = setup_github_app(&arc_dir, &s, web_url).await?;
-            let slug = {
-                let user_toml_path = arc_dir.join(USER_CONFIG_FILENAME);
-                let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
-                let doc: toml::Value = toml::from_str(&toml_content)
-                    .unwrap_or(toml::Value::Table(toml::Table::default()));
-                doc.get("git")
-                    .and_then(|g| g.get("slug"))
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("unknown")
-                    .to_string()
-            };
-            eprintln!(
-                "  {} GitHub App registered ({})",
-                s.green.apply_to("✔"),
-                slug
-            );
-            // Merge GitHub env vars into .env
-            if !github_env_pairs.is_empty() {
-                write_env_file(&arc_dir, &github_env_pairs, &s)?;
+        match strategy {
+            0 => {
+                let token = fabro_github::gh_auth_token().await.map_err(|err| {
+                    anyhow!("{err}. Run `gh auth login` and rerun `fabro install`.")
+                })?;
+                let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
+                let existing = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
+                let mut doc: toml::Value = if existing.is_empty() {
+                    toml::Value::Table(toml::Table::default())
+                } else {
+                    toml::from_str(&existing).context("failed to parse existing settings.toml")?
+                };
+                write_github_cli_settings(&mut doc)?;
+                std::fs::write(&user_toml_path, toml::to_string_pretty(&doc)?)?;
+                fabro_util::printerr!(printer, "  {} GitHub CLI configured", s.green.apply_to("✔"));
+                vault_pairs.push(("GITHUB_CLI_TOKEN".to_string(), token));
             }
-        } else {
-            eprintln!("  Skipped");
+            1 => {
+                let (owner, username) = prompt_github_app_owner(&s).await?;
+                let github_env_pairs = setup_github_app(
+                    &fabro_dir,
+                    &s,
+                    web_url,
+                    &owner,
+                    username.as_deref(),
+                    printer,
+                )
+                .await?;
+                let slug = {
+                    let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
+                    let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
+                    let doc: toml::Value = toml::from_str(&toml_content)
+                        .unwrap_or(toml::Value::Table(toml::Table::default()));
+                    doc.get("server")
+                        .and_then(|server| server.get("integrations"))
+                        .and_then(|integrations| integrations.get("github"))
+                        .and_then(|github| github.get("slug"))
+                        .and_then(|slug| slug.as_str())
+                        .unwrap_or("unknown")
+                        .to_string()
+                };
+                fabro_util::printerr!(
+                    printer,
+                    "  {} GitHub App registered ({})",
+                    s.green.apply_to("✔"),
+                    slug
+                );
+                server_env_pairs.extend(github_env_pairs);
+            }
+            _ => unreachable!("prompt_select returned an out-of-range index"),
         }
     }
-    eprintln!();
+    fabro_util::printerr!(printer, "");
 
-    // Server configuration (server mode only)
-    #[cfg(feature = "server")]
+    // Server configuration
     {
-        eprintln!("  {}", s.bold.apply_to("Server · Configuration"));
-        eprintln!("  {}", s.dim.apply_to("─────────────────────"));
-        eprintln!();
+        fabro_util::printerr!(printer, "  {}", s.bold.apply_to("Server · Configuration"));
+        fabro_util::printerr!(printer, "  {}", s.dim.apply_to("─────────────────────"));
+        fabro_util::printerr!(printer, "");
 
-        let config_path = arc_dir.join("server.toml");
+        let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
         let write_config = if config_path.exists() {
             spawn_blocking(|| {
-                prompt_confirm("~/.fabro/server.toml already exists. Overwrite?", false)
+                prompt_confirm("~/.fabro/settings.toml already exists. Overwrite?", false)
             })
             .await??
         } else {
@@ -701,35 +1012,55 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
             let username: String =
                 spawn_blocking(|| prompt_input("GitHub username for allowed access")).await??;
 
-            let toml_content = format_config_toml(&username);
-            std::fs::write(&config_path, &toml_content)?;
-            eprintln!(
+            let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+            let mut doc: toml::Value = if existing.is_empty() {
+                toml::Value::Table(toml::Table::default())
+            } else {
+                toml::from_str(&existing).context("failed to parse existing settings.toml")?
+            };
+            merge_server_settings(&mut doc, &username)?;
+            std::fs::write(&config_path, toml::to_string_pretty(&doc)?)?;
+            fabro_util::printerr!(
+                printer,
                 "  {}",
                 s.dim.apply_to(format!("Wrote {}", config_path.display()))
             );
         } else {
-            eprintln!("  {}", s.dim.apply_to("Keeping existing server.toml"));
+            fabro_util::printerr!(
+                printer,
+                "  {}",
+                s.dim.apply_to("Keeping existing settings.toml")
+            );
         }
-        eprintln!();
+        fabro_util::printerr!(printer, "");
     }
 
-    // Secrets and certificates (server mode only)
-    #[cfg(feature = "server")]
+    // Secrets and certificates
     {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "  {}",
             s.dim.apply_to("Generating secrets and certificates...")
         );
 
         let session_secret = generate_session_secret();
-        eprintln!("  {} Session secret generated", s.green.apply_to("✔"));
+        fabro_util::printerr!(
+            printer,
+            "  {} Session secret generated",
+            s.green.apply_to("✔")
+        );
 
-        let (jwt_private_pem, jwt_public_pem) = generate_jwt_keypair()?;
-        eprintln!("  {} Ed25519 JWT keypair generated", s.green.apply_to("✔"));
+        let (jwt_private_pem, jwt_public_pem) = generate_jwt_keypair().await?;
+        fabro_util::printerr!(
+            printer,
+            "  {} Ed25519 JWT keypair generated",
+            s.green.apply_to("✔")
+        );
 
-        let certs_dir = arc_dir.join("certs");
-        generate_mtls_certs(&certs_dir)?;
-        eprintln!(
+        let certs_dir = fabro_dir.join("certs");
+        generate_mtls_certs(&certs_dir).await?;
+        fabro_util::printerr!(
+            printer,
             "  {} mTLS CA + server certificates generated",
             s.green.apply_to("✔")
         );
@@ -737,35 +1068,68 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
         let jwt_private_b64 = BASE64_STANDARD.encode(jwt_private_pem.as_bytes());
         let jwt_public_b64 = BASE64_STANDARD.encode(jwt_public_pem.as_bytes());
 
-        let server_env_pairs = vec![
+        let generated_server_env_pairs = vec![
             ("FABRO_JWT_PRIVATE_KEY".to_string(), jwt_private_b64),
             ("FABRO_JWT_PUBLIC_KEY".to_string(), jwt_public_b64),
             ("SESSION_SECRET".to_string(), session_secret),
         ];
-        write_env_file(&arc_dir, &server_env_pairs, &s)?;
-        eprintln!();
+        server_env_pairs.extend(generated_server_env_pairs);
+        fabro_util::printerr!(printer, "");
 
-        eprintln!("  To start Arc, run these commands:");
-        eprintln!();
-        eprintln!("    fabro server start");
-        eprintln!("    cd apps/fabro-web && npx react-router dev");
-        eprintln!();
+        fabro_util::printerr!(printer, "  To start Fabro, run these commands:");
+        fabro_util::printerr!(printer, "");
+        fabro_util::printerr!(printer, "    fabro server start");
+        fabro_util::printerr!(printer, "");
     }
 
+    persist_install_outputs(
+        &storage_dir,
+        &server_env_pairs,
+        &vault_pairs,
+        server_was_running,
+    )
+    .await?;
+    fabro_util::printerr!(
+        printer,
+        "  {} Saved {} runtime secrets to {}",
+        s.green.apply_to("✔"),
+        server_env_pairs.len(),
+        Storage::new(&storage_dir)
+            .server_state()
+            .env_path()
+            .display()
+    );
+    fabro_util::printerr!(
+        printer,
+        "  {} Saved {} workflow-visible secrets to {}",
+        s.green.apply_to("✔"),
+        vault_pairs.len(),
+        Storage::new(&storage_dir).secrets_path().display()
+    );
+    if server_was_running {
+        fabro_util::printerr!(
+            printer,
+            "  Warning: the local fabro server was already running. Restart it to pick up the new server.env values."
+        );
+    }
+    fabro_util::printerr!(printer, "");
+
     // Verify setup
-    let env_path = arc_dir.join(".env");
     let run_doctor =
         spawn_blocking(|| prompt_confirm("Run fabro doctor to verify?", true)).await??;
 
     if run_doctor {
-        // Reload .env so doctor sees the values we just wrote
-        let _ = dotenvy::from_path(&env_path);
-        eprintln!();
-        let _ = doctor::run_doctor(true, true, globals).await?;
+        fabro_util::printerr!(printer, "");
+        let doctor_args = DoctorArgs {
+            target:  ServerTargetArgs::default(),
+            verbose: true,
+        };
+        let _ = doctor::run_doctor(&doctor_args, true, globals, printer).await?;
     }
 
-    eprintln!();
-    eprintln!(
+    fabro_util::printerr!(printer, "");
+    fabro_util::printerr!(
+        printer,
         "  Setup complete! Go to your project and run {} to get started.",
         s.bold_cyan.apply_to("fabro repo init")
     );
@@ -773,13 +1137,18 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
 }
 
 // ---------------------------------------------------------------------------
-// Hex encoding (server mode only — used by generate_session_secret)
+// Hex encoding (used by generate_session_secret)
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
 mod hex {
-    pub fn encode(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+
+    pub(super) fn encode(bytes: &[u8]) -> String {
+        let mut encoded = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            write!(&mut encoded, "{byte:02x}").expect("writing to String should not fail");
+        }
+        encoded
     }
 }
 
@@ -789,80 +1158,75 @@ mod hex {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::absolute_paths)]
+
     use super::*;
 
     // -- Binary detection --
 
-    #[test]
-    fn detect_binary_finds_existing_command() {
-        assert!(detect_binary_on_path("git"));
+    #[tokio::test]
+    async fn detect_binary_finds_existing_command() {
+        assert!(detect_binary_on_path("git").await);
     }
 
-    #[test]
-    fn detect_binary_returns_false_for_nonexistent() {
-        assert!(!detect_binary_on_path("arc_nonexistent_xyz"));
+    #[tokio::test]
+    async fn detect_binary_returns_false_for_nonexistent() {
+        assert!(!detect_binary_on_path("arc_nonexistent_xyz").await);
     }
 
-    // -- Session secret (server only) --
+    // -- Session secret --
 
     #[test]
-    #[cfg(feature = "server")]
     fn session_secret_length() {
         let secret = generate_session_secret();
         assert_eq!(secret.len(), 64);
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn session_secret_is_hex() {
         let secret = generate_session_secret();
         assert!(secret.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn session_secret_is_lowercase() {
         let secret = generate_session_secret();
         assert!(secret.chars().all(|c| !c.is_ascii_uppercase()));
     }
 
-    // -- JWT keypair (server only) --
+    // -- JWT keypair --
 
-    #[test]
-    #[cfg(feature = "server")]
-    fn jwt_keypair_private_pem_header() {
-        let (private, _) = generate_jwt_keypair().unwrap();
+    #[tokio::test]
+    async fn jwt_keypair_private_pem_header() {
+        let (private, _) = generate_jwt_keypair().await.unwrap();
         assert!(
             private.starts_with("-----BEGIN PRIVATE KEY-----"),
             "private PEM: {private}"
         );
     }
 
-    #[test]
-    #[cfg(feature = "server")]
-    fn jwt_keypair_public_pem_header() {
-        let (_, public) = generate_jwt_keypair().unwrap();
+    #[tokio::test]
+    async fn jwt_keypair_public_pem_header() {
+        let (_, public) = generate_jwt_keypair().await.unwrap();
         assert!(
             public.starts_with("-----BEGIN PUBLIC KEY-----"),
             "public PEM: {public}"
         );
     }
 
-    #[test]
-    #[cfg(feature = "server")]
-    fn jwt_keypair_public_parses() {
-        let (_, public) = generate_jwt_keypair().unwrap();
+    #[tokio::test]
+    async fn jwt_keypair_public_parses() {
+        let (_, public) = generate_jwt_keypair().await.unwrap();
         jsonwebtoken::DecodingKey::from_ed_pem(public.as_bytes()).expect("public key should parse");
     }
 
-    // -- mTLS cert generation (server only) --
+    // -- mTLS cert generation --
 
-    #[test]
-    #[cfg(feature = "server")]
-    fn mtls_certs_creates_files() {
+    #[tokio::test]
+    async fn mtls_certs_creates_files() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
-        generate_mtls_certs(&certs_dir).unwrap();
+        generate_mtls_certs(&certs_dir).await.unwrap();
 
         assert!(certs_dir.join("ca.key").exists());
         assert!(certs_dir.join("ca.crt").exists());
@@ -870,12 +1234,11 @@ mod tests {
         assert!(certs_dir.join("server.crt").exists());
     }
 
-    #[test]
-    #[cfg(feature = "server")]
-    fn mtls_ca_cert_is_pem() {
+    #[tokio::test]
+    async fn mtls_ca_cert_is_pem() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
-        generate_mtls_certs(&certs_dir).unwrap();
+        generate_mtls_certs(&certs_dir).await.unwrap();
 
         let ca_crt = std::fs::read_to_string(certs_dir.join("ca.crt")).unwrap();
         assert!(
@@ -884,12 +1247,11 @@ mod tests {
         );
     }
 
-    #[test]
-    #[cfg(feature = "server")]
-    fn mtls_server_cert_is_pem() {
+    #[tokio::test]
+    async fn mtls_server_cert_is_pem() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
-        generate_mtls_certs(&certs_dir).unwrap();
+        generate_mtls_certs(&certs_dir).await.unwrap();
 
         let server_crt = std::fs::read_to_string(certs_dir.join("server.crt")).unwrap();
         assert!(
@@ -898,12 +1260,11 @@ mod tests {
         );
     }
 
-    #[test]
-    #[cfg(feature = "server")]
-    fn mtls_certs_parse_via_rustls() {
+    #[tokio::test]
+    async fn mtls_certs_parse_via_rustls() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
-        generate_mtls_certs(&certs_dir).unwrap();
+        generate_mtls_certs(&certs_dir).await.unwrap();
 
         let ca_pem = std::fs::read(certs_dir.join("ca.crt")).unwrap();
         let mut reader = std::io::Cursor::new(&ca_pem);
@@ -920,44 +1281,229 @@ mod tests {
         assert_eq!(server_certs.len(), 1);
     }
 
-    // -- Config TOML generation (server only) --
+    // -- Config TOML generation --
 
     #[test]
-    #[cfg(feature = "server")]
     fn config_toml_roundtrips() {
+        use fabro_types::settings::SettingsLayer;
         let toml_str = format_config_toml("brynary");
-        let settings: fabro_config::FabroSettings =
-            toml::from_str(&toml_str).expect("config should parse");
-        assert_eq!(
-            settings.web.unwrap().auth.allowed_usernames,
-            vec!["brynary"]
-        );
+        let cfg: SettingsLayer = fabro_config::parse_settings_layer(&toml_str)
+            .expect("generated config should parse as v2");
+        let allowed = cfg
+            .server
+            .as_ref()
+            .and_then(|s| s.auth.as_ref())
+            .and_then(|a| a.web.as_ref())
+            .map(|w| w.allowed_usernames.clone())
+            .expect("server.auth.web.allowed_usernames should be set");
+        assert_eq!(allowed, vec!["brynary".to_string()]);
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn config_toml_has_auth_strategies() {
+        use fabro_types::settings::SettingsLayer;
         let toml_str = format_config_toml("alice");
-        let settings: fabro_config::FabroSettings = toml::from_str(&toml_str).unwrap();
-        assert_eq!(
-            settings.api.unwrap().authentication_strategies,
-            vec![
-                fabro_config::server::ApiAuthStrategy::Jwt,
-                fabro_config::server::ApiAuthStrategy::Mtls,
-            ]
+        let cfg: SettingsLayer = fabro_config::parse_settings_layer(&toml_str).unwrap();
+        let auth_api = cfg
+            .server
+            .as_ref()
+            .and_then(|s| s.auth.as_ref())
+            .and_then(|a| a.api.as_ref())
+            .expect("server.auth.api should be set");
+        assert!(
+            auth_api
+                .jwt
+                .as_ref()
+                .is_some_and(|jwt| jwt.enabled.unwrap_or(false))
+        );
+        assert!(
+            auth_api
+                .mtls
+                .as_ref()
+                .is_some_and(|mtls| mtls.enabled.unwrap_or(false))
         );
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn config_toml_has_tls_paths() {
-        use std::path::PathBuf;
+        use fabro_types::settings::SettingsLayer;
+        use fabro_types::settings::server::ServerListenLayer;
         let toml_str = format_config_toml("bob");
-        let settings: fabro_config::FabroSettings = toml::from_str(&toml_str).unwrap();
-        let tls = settings.api.unwrap().tls.expect("tls should be set");
-        assert_eq!(tls.cert, PathBuf::from("~/.fabro/certs/server.crt"));
-        assert_eq!(tls.key, PathBuf::from("~/.fabro/certs/server.key"));
-        assert_eq!(tls.ca, PathBuf::from("~/.fabro/certs/ca.crt"));
+        let cfg: SettingsLayer = fabro_config::parse_settings_layer(&toml_str).unwrap();
+        let listen = cfg
+            .server
+            .as_ref()
+            .and_then(|s| s.listen.as_ref())
+            .expect("server.listen should be set");
+        let tls = match listen {
+            ServerListenLayer::Tcp { tls, .. } => tls.as_ref().expect("server.listen.tls"),
+            ServerListenLayer::Unix { .. } => panic!("expected tcp listen"),
+        };
+        let certs_dir = fabro_util::Home::from_env().certs_dir();
+        assert_eq!(
+            tls.cert
+                .as_ref()
+                .map(fabro_types::settings::InterpString::as_source),
+            Some(certs_dir.join("server.crt").to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            tls.key
+                .as_ref()
+                .map(fabro_types::settings::InterpString::as_source),
+            Some(certs_dir.join("server.key").to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            tls.ca
+                .as_ref()
+                .map(fabro_types::settings::InterpString::as_source),
+            Some(certs_dir.join("ca.crt").to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn merge_server_settings_preserves_existing_top_level_sections() {
+        let mut doc: toml::Value = toml::from_str(
+            r#"
+_version = 1
+
+[project]
+name = "custom"
+"#,
+        )
+        .unwrap();
+
+        merge_server_settings(&mut doc, "alice").unwrap();
+
+        // Existing top-level [project] stays.
+        assert_eq!(
+            doc.get("project")
+                .and_then(toml::Value::as_table)
+                .and_then(|p| p.get("name"))
+                .and_then(toml::Value::as_str),
+            Some("custom")
+        );
+        // New server.auth.web.allowed_usernames is added.
+        assert_eq!(
+            doc.get("server")
+                .and_then(toml::Value::as_table)
+                .and_then(|s| s.get("auth"))
+                .and_then(toml::Value::as_table)
+                .and_then(|a| a.get("web"))
+                .and_then(toml::Value::as_table)
+                .and_then(|w| w.get("allowed_usernames"))
+                .and_then(toml::Value::as_array)
+                .and_then(|u| u.first())
+                .and_then(toml::Value::as_str),
+            Some("alice")
+        );
+    }
+
+    #[test]
+    fn write_github_cli_settings_uses_server_integrations_github() {
+        let mut doc: toml::Value = toml::from_str(
+            r#"
+_version = 1
+
+[server.integrations.github]
+strategy = "app"
+app_id = "123"
+slug = "fabro-app"
+client_id = "client-id"
+"#,
+        )
+        .unwrap();
+
+        write_github_cli_settings(&mut doc).unwrap();
+
+        let github = doc
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .and_then(|server| server.get("integrations"))
+            .and_then(toml::Value::as_table)
+            .and_then(|integrations| integrations.get("github"))
+            .and_then(toml::Value::as_table)
+            .expect("server.integrations.github should exist");
+
+        assert_eq!(
+            github.get("strategy").and_then(toml::Value::as_str),
+            Some("gh_cli")
+        );
+        assert!(!github.contains_key("app_id"));
+        assert!(!github.contains_key("slug"));
+        assert!(!github.contains_key("client_id"));
+    }
+
+    #[test]
+    fn write_github_app_settings_uses_server_integrations_github() {
+        let mut doc = toml::Value::Table(toml::Table::default());
+
+        write_github_app_settings(&mut doc, "123", "fabro-app", "client-id").unwrap();
+
+        let github = doc
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .and_then(|server| server.get("integrations"))
+            .and_then(toml::Value::as_table)
+            .and_then(|integrations| integrations.get("github"))
+            .and_then(toml::Value::as_table)
+            .expect("server.integrations.github should exist");
+
+        assert_eq!(
+            github.get("strategy").and_then(toml::Value::as_str),
+            Some("app")
+        );
+        assert_eq!(
+            github.get("app_id").and_then(toml::Value::as_str),
+            Some("123")
+        );
+        assert_eq!(
+            github.get("slug").and_then(toml::Value::as_str),
+            Some("fabro-app")
+        );
+        assert_eq!(
+            github.get("client_id").and_then(toml::Value::as_str),
+            Some("client-id")
+        );
+    }
+
+    // -- GitHub App owner --
+
+    #[test]
+    fn github_app_owner_personal_url() {
+        let owner = GitHubAppOwner::Personal;
+        assert_eq!(
+            owner.manifest_form_action(),
+            "https://github.com/settings/apps/new"
+        );
+    }
+
+    #[test]
+    fn github_app_owner_org_url() {
+        let owner = GitHubAppOwner::Organization("my-org".to_string());
+        assert_eq!(
+            owner.manifest_form_action(),
+            "https://github.com/organizations/my-org/settings/apps/new"
+        );
+    }
+
+    #[test]
+    fn github_app_owner_app_name_with_org() {
+        let owner = GitHubAppOwner::Organization("acme-corp".to_string());
+        assert_eq!(owner.app_name(Some("alice")), "acme-corp-fabro");
+    }
+
+    #[test]
+    fn github_app_owner_app_name_personal_with_username() {
+        let owner = GitHubAppOwner::Personal;
+        assert_eq!(owner.app_name(Some("brynary")), "brynary-fabro");
+    }
+
+    #[test]
+    fn github_app_owner_app_name_personal_without_username() {
+        let owner = GitHubAppOwner::Personal;
+        let name = owner.app_name(None);
+        assert!(name.starts_with("Fabro-"), "expected Fabro- prefix: {name}");
+        assert_eq!(name.len(), 12); // "Fabro-" (6) + 6 hex chars
     }
 
     // -- GitHub App manifest --
@@ -965,7 +1511,7 @@ mod tests {
     #[test]
     fn manifest_includes_callback_urls_and_setup_url() {
         let web_url = "https://app.example.com";
-        let manifest = build_github_app_manifest("Arc-test", 12345, web_url);
+        let manifest = build_github_app_manifest("Fabro-test", 12345, web_url);
 
         assert_eq!(
             manifest["callback_urls"],
@@ -975,5 +1521,28 @@ mod tests {
             manifest["setup_url"],
             serde_json::json!("https://app.example.com/setup/callback"),
         );
+    }
+
+    #[tokio::test]
+    async fn persist_install_outputs_offline_splits_server_env_and_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let server_env_pairs = vec![
+            ("SESSION_SECRET".to_string(), "session".to_string()),
+            ("FABRO_JWT_PUBLIC_KEY".to_string(), "public-key".to_string()),
+        ];
+        let vault_pairs = vec![("OPENAI_API_KEY".to_string(), "openai-key".to_string())];
+
+        persist_install_outputs(dir.path(), &server_env_pairs, &vault_pairs, false)
+            .await
+            .unwrap();
+
+        let server_env =
+            std::fs::read_to_string(Storage::new(dir.path()).server_state().env_path()).unwrap();
+        assert!(server_env.contains("SESSION_SECRET=session"));
+        assert!(server_env.contains("FABRO_JWT_PUBLIC_KEY=public-key"));
+
+        let vault = Vault::load(Storage::new(dir.path()).secrets_path()).unwrap();
+        assert_eq!(vault.get("OPENAI_API_KEY"), Some("openai-key"));
+        assert_eq!(vault.get("SESSION_SECRET"), None);
     }
 }

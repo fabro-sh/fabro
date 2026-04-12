@@ -1,9 +1,10 @@
+use std::path::PathBuf;
+use std::process::Stdio;
+
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use std::path::PathBuf;
-use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
@@ -11,6 +12,10 @@ use crate::server::SharedState;
 use crate::state::{PermissionLevel, TokenPermission};
 
 /// Find the git-http-backend binary by querying `git --exec-path`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This synchronous test harness helper resolves the git-http-backend path before launching the CGI subprocess."
+)]
 fn find_git_http_backend() -> Result<PathBuf, String> {
     let output = std::process::Command::new("git")
         .arg("--exec-path")
@@ -285,7 +290,8 @@ pub struct ServiceQuery {
     service: Option<String>,
 }
 
-/// Handler for GET /{owner}/{repo}/info/refs (works with and without .git suffix)
+/// Handler for GET /{owner}/{repo}/info/refs (works with and without .git
+/// suffix)
 pub async fn git_info_refs(
     State(state): State<SharedState>,
     Path((owner, repo_with_suffix)): Path<(String, String)>,
@@ -314,7 +320,8 @@ pub async fn git_info_refs(
     .await
 }
 
-/// Handler for POST /{owner}/{repo}/git-upload-pack (works with and without .git suffix)
+/// Handler for POST /{owner}/{repo}/git-upload-pack (works with and without
+/// .git suffix)
 pub async fn git_upload_pack(
     State(state): State<SharedState>,
     Path((owner, repo_with_suffix)): Path<(String, String)>,
@@ -343,7 +350,8 @@ pub async fn git_upload_pack(
     .await
 }
 
-/// Handler for POST /{owner}/{repo}/git-receive-pack (works with and without .git suffix)
+/// Handler for POST /{owner}/{repo}/git-receive-pack (works with and without
+/// .git suffix)
 pub async fn git_receive_pack(
     State(state): State<SharedState>,
     Path((owner, repo_with_suffix)): Path<(String, String)>,
@@ -383,7 +391,7 @@ mod tests {
         state.add_repository("owner", "repo", vec!["main".to_string()], false);
         let server = TestServer::start(state).await;
 
-        let client = reqwest::Client::new();
+        let client = crate::test_support::test_http_client();
         let resp = client
             .get(format!(
                 "{}/owner/repo.git/info/refs?service=git-upload-pack",

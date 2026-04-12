@@ -1,3 +1,7 @@
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Build scripts run outside Tokio and need a synchronous git probe for the embedded build SHA."
+)]
 fn main() {
     println!("cargo:rerun-if-changed=../../../.git/HEAD");
 

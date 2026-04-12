@@ -1,7 +1,9 @@
-use super::Region;
+use std::sync::{LazyLock, OnceLock};
+
 use aho_corasick::AhoCorasick;
 use regex::Regex;
-use std::sync::{LazyLock, OnceLock};
+
+use super::Region;
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/rules_generated.rs"));
@@ -213,7 +215,7 @@ impl GitleaksEngine {
 
                 regions.push(Region {
                     start: secret_match.start(),
-                    end: secret_match.end(),
+                    end:   secret_match.end(),
                 });
             }
         }

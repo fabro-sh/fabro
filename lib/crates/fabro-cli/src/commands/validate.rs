@@ -1,65 +1,79 @@
 use anyhow::bail;
-use fabro_config::ConfigLayer;
-use fabro_config::project::resolve_workflow_path;
+use fabro_config::load::load_settings_user;
+use fabro_config::user::active_settings_path;
+use fabro_types::settings::SettingsLayer;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
-use fabro_validate::Severity;
-use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
 
 use crate::args::{GlobalArgs, ValidateArgs};
+use crate::command_context::CommandContext;
+use crate::commands::run::output::api_diagnostics_to_local;
+use crate::manifest_builder::{ManifestBuildInput, build_run_manifest};
 use crate::shared::{print_diagnostics, print_json_pretty, relative_path};
 
-pub(crate) fn run(
+pub(crate) async fn run(
     args: &ValidateArgs,
     styles: &Styles,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> anyhow::Result<()> {
-    let cwd = std::env::current_dir()?;
-    let settings = ConfigLayer::for_workflow(&args.workflow, &cwd)?
-        .combine(ConfigLayer::user()?)
-        .resolve()?;
-    let resolution = resolve_workflow_path(&args.workflow, &cwd)?;
-    let validated = validate(ValidateInput {
-        workflow: WorkflowInput::Path(args.workflow.clone()),
-        settings,
-        cwd,
-        custom_transforms: Vec::new(),
+    let ctx = CommandContext::for_target(&args.target, printer)?;
+    let built = build_run_manifest(ManifestBuildInput {
+        workflow:           args.workflow.clone(),
+        cwd:                ctx.cwd().to_path_buf(),
+        args_layer:         SettingsLayer::default(),
+        args:               None,
+        run_id:             None,
+        user_layer:         load_settings_user()?,
+        user_settings_path: Some(active_settings_path(None)),
     })?;
-    let graph = validated.graph();
-    let diagnostics = validated.diagnostics();
+    let client = ctx.server().await?;
+    let response = client.run_preflight(built.manifest).await?;
+    let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);
 
     if globals.json {
         print_json_pretty(&serde_json::json!({
-            "workflow_name": graph.name,
-            "nodes": graph.nodes.len(),
-            "edges": graph.edges.len(),
-            "valid": !diagnostics.iter().any(|d| d.severity == Severity::Error),
+            "workflow_name": response.workflow.name,
+            "nodes": response.workflow.nodes,
+            "edges": response.workflow.edges,
+            "valid": !diagnostics.iter().any(|d| d.severity == fabro_validate::Severity::Error),
             "diagnostics": diagnostics,
         }))?;
 
-        if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+        if diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
+        {
             bail!("Validation failed");
         }
         return Ok(());
     }
 
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "{} ({} nodes, {} edges)",
-        styles.bold.apply_to(format!("Workflow: {}", graph.name)),
-        graph.nodes.len(),
-        graph.edges.len(),
+        styles
+            .bold
+            .apply_to(format!("Workflow: {}", response.workflow.name)),
+        response.workflow.nodes,
+        response.workflow.edges,
     );
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "{} {}",
         styles.dim.apply_to("Graph:"),
-        styles.dim.apply_to(relative_path(&resolution.dot_path)),
+        styles.dim.apply_to(relative_path(&built.target_path)),
     );
 
-    print_diagnostics(diagnostics, styles);
+    print_diagnostics(&diagnostics, styles, printer);
 
-    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
+    {
         bail!("Validation failed");
     }
 
-    eprintln!("Validation: {}", styles.green.apply_to("OK"));
+    fabro_util::printerr!(printer, "Validation: {}", styles.green.apply_to("OK"));
     Ok(())
 }

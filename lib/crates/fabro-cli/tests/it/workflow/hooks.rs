@@ -1,3 +1,9 @@
+#![allow(
+    clippy::absolute_paths,
+    clippy::needless_borrow,
+    clippy::needless_borrows_for_generic_args
+)]
+
 use std::process::Output;
 
 use fabro_test::{TestMode, TwinScenario, TwinScenarios, TwinToolCall, test_context, twin_openai};
@@ -60,7 +66,7 @@ fn configure_hook_env(cmd: &mut assert_cmd::Command, hook_model: &str) {
 }
 
 fn conclusion_status(context: &fabro_test::TestContext) -> String {
-    let run_dir = find_run_dir(&context.storage_dir);
+    let run_dir = find_run_dir(&context);
     read_conclusion(&run_dir)["status"]
         .as_str()
         .unwrap()
@@ -71,7 +77,7 @@ fn conclusion_status(context: &fabro_test::TestContext) -> String {
 async fn hook_prompt_proceed_allows_run() {
     let context = test_context!();
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         &format!(
             r#"
 [[hooks]]
@@ -87,11 +93,11 @@ model = "{model}"
     let workflow = write_workflow(
         &context,
         "hook_prompt_proceed.fabro",
-        r#"digraph HookTest {
+        r"digraph HookTest {
             start [shape=Mdiamond]
             exit [shape=Msquare]
             start -> exit
-        }"#,
+        }",
     );
 
     if TestMode::from_env().is_twin() {
@@ -120,7 +126,7 @@ model = "{model}"
 async fn hook_prompt_block_prevents_run() {
     let context = test_context!();
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         &format!(
             r#"
 [[hooks]]
@@ -136,11 +142,11 @@ model = "{model}"
     let workflow = write_workflow(
         &context,
         "hook_prompt_block.fabro",
-        r#"digraph HookTest {
+        r"digraph HookTest {
             start [shape=Mdiamond]
             exit [shape=Msquare]
             start -> exit
-        }"#,
+        }",
     );
 
     let output = if TestMode::from_env().is_twin() {
@@ -176,7 +182,7 @@ model = "{model}"
 async fn hook_agent_proceed_allows_run() {
     let context = test_context!();
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         &format!(
             r#"
 [[hooks]]
@@ -193,11 +199,11 @@ max_tool_rounds = 1
     let workflow = write_workflow(
         &context,
         "hook_agent_proceed.fabro",
-        r#"digraph HookTest {
+        r"digraph HookTest {
             start [shape=Mdiamond]
             exit [shape=Msquare]
             start -> exit
-        }"#,
+        }",
     );
 
     if TestMode::from_env().is_twin() {
@@ -228,7 +234,7 @@ async fn hook_agent_with_tool_use() {
     let marker = context.temp_dir.join("hook_check.txt");
     std::fs::write(&marker, "READY").unwrap();
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         &format!(
             r#"
 [[hooks]]
@@ -246,11 +252,11 @@ max_tool_rounds = 5
     let workflow = write_workflow(
         &context,
         "hook_agent_tools.fabro",
-        r#"digraph HookTest {
+        r"digraph HookTest {
             start [shape=Mdiamond]
             exit [shape=Msquare]
             start -> exit
-        }"#,
+        }",
     );
 
     if TestMode::from_env().is_twin() {

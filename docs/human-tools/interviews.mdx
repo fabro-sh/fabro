@@ -44,7 +44,7 @@ Answers are one of seven variants:
 | `No` | Negative response |
 | `Selected(key)` | A specific option was chosen (carries the option key) |
 | `Text(string)` | Free-text input |
-| `Aborted` | No answer was obtained because the prompt ended early (EOF, cancel, disconnected session, exhausted replay/queue) |
+| `Interrupted` | No answer was obtained because the prompt ended early (EOF, cancel, disconnected session, exhausted replay/queue) |
 | `Skipped` | Legacy skip-style answer; not treated as approval by human gates |
 | `Timeout` | The question's timeout elapsed without a response |
 
@@ -77,7 +77,7 @@ fabro run workflow.fabro
 # Select:
 ```
 
-If the console prompt is canceled or stdin is already closed, the interviewer returns `Aborted`. That does not count as approval.
+If the console prompt is canceled or stdin is already closed, the interviewer returns `Interrupted`. That does not count as approval.
 
 ### Web
 
@@ -85,7 +85,7 @@ The default for API server runs. The web interviewer holds questions in a queue 
 
 This decoupling means the workflow engine and the user interface can run in different processes. The web UI polls for pending questions and posts answers back to the API.
 
-If the pending session disappears before an answer is submitted, the waiting question resolves as `Aborted`.
+If the pending session disappears before an answer is submitted, the waiting question resolves as `Interrupted`.
 
 ### Slack
 
@@ -121,4 +121,4 @@ The human handler then checks the node's `human.default_choice` attribute. If se
 approve [shape=hexagon, label="Approve?", human.default_choice="deploy"]
 ```
 
-Outside of timeout defaults, human gates fail closed: `Aborted` and `Skipped` answers do not fall through to ordinary approval edges. To model an explicit unanswered path, add an edge such as `condition="outcome=fail"` or configure a `retry_target`.
+Outside of timeout defaults, human gates fail closed: `Interrupted` and `Skipped` answers do not fall through to ordinary approval edges. To model an explicit unanswered path, add an edge such as `condition="outcome=fail"` or configure a `retry_target`.

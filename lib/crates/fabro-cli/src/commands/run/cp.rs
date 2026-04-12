@@ -1,35 +1,32 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_agent::sandbox::Sandbox;
-use fabro_config::FabroSettingsExt;
-use fabro_sandbox::SandboxRecordExt;
-use fabro_sandbox::reconnect::reconnect;
-use fabro_workflow::run_lookup::{resolve_run, runs_base};
+use fabro_util::printer::Printer;
 use tokio::fs;
 use tracing::{debug, info};
 
-use crate::args::{CpArgs, GlobalArgs};
+use crate::args::{CpArgs, GlobalArgs, ServerTargetArgs};
+use crate::command_context::CommandContext;
+use crate::server_client::ServerStoreClient;
+use crate::server_runs::ServerSummaryLookup;
 use crate::shared::{print_json_pretty, split_run_path};
-use crate::user_config::load_user_settings_with_globals;
 
+#[derive(Debug)]
 enum CopyDirection {
     Download {
-        run_prefix: String,
+        run_prefix:  String,
         remote_path: String,
-        local_path: PathBuf,
+        local_path:  PathBuf,
     },
     Upload {
-        local_path: PathBuf,
-        run_prefix: String,
+        local_path:  PathBuf,
+        run_prefix:  String,
         remote_path: String,
     },
 }
 
-pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs, printer: Printer) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
-    let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
 
     match direction {
         CopyDirection::Download {
@@ -37,16 +34,14 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
             remote_path,
             local_path,
         } => {
-            let sandbox = load_sandbox(&base, &run_prefix).await?;
+            let (client, run_id) =
+                resolve_client_and_run_id(&args.server, &run_prefix, printer).await?;
 
             let file_count = if args.recursive {
-                Some(download_recursive(&*sandbox, &remote_path, &local_path).await?)
+                Some(download_recursive(&client, &run_id, &remote_path, &local_path).await?)
             } else {
                 debug!(path = %remote_path, "Downloading file from sandbox");
-                sandbox
-                    .download_file_to_local(&remote_path, &local_path)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("{err}"))?;
+                write_sandbox_file(&client, &run_id, &remote_path, &local_path).await?;
                 None
             };
 
@@ -70,16 +65,14 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
             run_prefix,
             remote_path,
         } => {
-            let sandbox = load_sandbox(&base, &run_prefix).await?;
+            let (client, run_id) =
+                resolve_client_and_run_id(&args.server, &run_prefix, printer).await?;
 
             let file_count = if args.recursive {
-                Some(upload_recursive(&*sandbox, &local_path, &remote_path).await?)
+                Some(upload_recursive(&client, &run_id, &local_path, &remote_path).await?)
             } else {
                 debug!(path = %remote_path, "Uploading file to sandbox");
-                sandbox
-                    .upload_file_from_local(&local_path, &remote_path)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("{err}"))?;
+                upload_sandbox_file(&client, &run_id, &local_path, &remote_path).await?;
                 None
             };
 
@@ -108,13 +101,13 @@ fn parse_direction(src: &str, dst: &str) -> Result<CopyDirection> {
 
     match (src_parts, dst_parts) {
         (Some((run_prefix, remote_path)), None) => Ok(CopyDirection::Download {
-            run_prefix: run_prefix.to_string(),
+            run_prefix:  run_prefix.to_string(),
             remote_path: remote_path.to_string(),
-            local_path: PathBuf::from(dst),
+            local_path:  PathBuf::from(dst),
         }),
         (None, Some((run_prefix, remote_path))) => Ok(CopyDirection::Upload {
-            local_path: PathBuf::from(src),
-            run_prefix: run_prefix.to_string(),
+            local_path:  PathBuf::from(src),
+            run_prefix:  run_prefix.to_string(),
             remote_path: remote_path.to_string(),
         }),
         (Some(_), Some(_)) => {
@@ -124,27 +117,56 @@ fn parse_direction(src: &str, dst: &str) -> Result<CopyDirection> {
     }
 }
 
-async fn load_sandbox(base: &Path, run_prefix: &str) -> Result<Box<dyn Sandbox>> {
-    let run_dir = resolve_run(base, run_prefix)?.path;
-    let sandbox_json = run_dir.join("sandbox.json");
-    debug!(path = %sandbox_json.display(), "Loading sandbox record");
-    let record = fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
-        "Failed to load sandbox.json — was this run started with a recent version of arc?",
-    )?;
+async fn resolve_client_and_run_id(
+    server: &ServerTargetArgs,
+    run_prefix: &str,
+    printer: Printer,
+) -> Result<(ServerStoreClient, fabro_types::RunId)> {
+    let ctx = CommandContext::for_target(server, printer)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
+    let run = lookup.resolve(run_prefix)?;
+    Ok((lookup.client().clone_for_reuse(), run.run_id()))
+}
 
-    info!(run_id = %run_prefix, provider = %record.provider, "Connecting to sandbox");
-    reconnect(&record).await
+async fn write_sandbox_file(
+    client: &ServerStoreClient,
+    run_id: &fabro_types::RunId,
+    remote_path: &str,
+    local_path: &Path,
+) -> Result<()> {
+    if let Some(parent) = local_path.parent() {
+        fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+    let bytes = client.get_sandbox_file(run_id, remote_path).await?;
+    fs::write(local_path, bytes)
+        .await
+        .with_context(|| format!("Failed to write {}", local_path.display()))?;
+    Ok(())
+}
+
+async fn upload_sandbox_file(
+    client: &ServerStoreClient,
+    run_id: &fabro_types::RunId,
+    local_path: &Path,
+    remote_path: &str,
+) -> Result<()> {
+    let bytes = fs::read(local_path)
+        .await
+        .with_context(|| format!("Failed to read {}", local_path.display()))?;
+    client.put_sandbox_file(run_id, remote_path, bytes).await
 }
 
 async fn download_recursive(
-    sandbox: &dyn Sandbox,
+    client: &ServerStoreClient,
+    run_id: &fabro_types::RunId,
     remote_path: &str,
     local_path: &Path,
 ) -> Result<usize> {
-    let entries = sandbox
-        .list_directory(remote_path, Some(100))
-        .await
-        .map_err(|err| anyhow::anyhow!("Failed to list directory {remote_path}: {err}"))?;
+    let entries = client
+        .list_sandbox_files(run_id, remote_path, Some(100))
+        .await?;
 
     let mut file_count = 0usize;
     for entry in &entries {
@@ -153,16 +175,8 @@ async fn download_recursive(
         }
         let remote_file = format!("{remote_path}/{}", entry.name);
         let local_file = local_path.join(&entry.name);
-        if let Some(parent) = local_file.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-        }
         debug!(path = %remote_file, "Downloading file from sandbox");
-        sandbox
-            .download_file_to_local(&remote_file, &local_file)
-            .await
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        write_sandbox_file(client, run_id, &remote_file, &local_file).await?;
         file_count += 1;
     }
     debug!(count = file_count, "Recursive download complete");
@@ -170,7 +184,8 @@ async fn download_recursive(
 }
 
 async fn upload_recursive(
-    sandbox: &dyn Sandbox,
+    client: &ServerStoreClient,
+    run_id: &fabro_types::RunId,
     local_path: &Path,
     remote_path: &str,
 ) -> Result<usize> {
@@ -191,10 +206,7 @@ async fn upload_recursive(
                 stack.push((entry_path, remote_file));
             } else {
                 debug!(path = %remote_file, "Uploading file to sandbox");
-                sandbox
-                    .upload_file_from_local(&entry_path, &remote_file)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("{err}"))?;
+                upload_sandbox_file(client, run_id, &entry_path, &remote_file).await?;
                 file_count += 1;
             }
         }
@@ -242,9 +254,11 @@ mod tests {
     }
 
     #[test]
-    fn split_run_path_ignores_local_paths() {
-        assert_eq!(split_run_path("/tmp/file"), None);
-        assert_eq!(split_run_path("./file"), None);
-        assert_eq!(split_run_path("../file"), None);
+    fn parse_direction_rejects_sandbox_to_sandbox_copy() {
+        let err = parse_direction("abc123:/in.txt", "def456:/out.txt").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Cannot copy between two sandboxes")
+        );
     }
 }

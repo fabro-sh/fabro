@@ -1,6 +1,13 @@
 use fabro_interview::{Question, QuestionType};
 use serde_json::{Value, json};
 
+use crate::payload::{SlackActionPayload, encode_action_value};
+
+const ANSWER_ACTION_ID: &str = "interview.answer";
+const MULTI_SELECT_BLOCK_ID: &str = "interview.checkboxes";
+const MULTI_SELECT_ACTION_ID: &str = "interview.select";
+const MULTI_SELECT_SUBMIT_ACTION_ID: &str = "interview.submit";
+
 fn text_block(text: &str) -> Value {
     json!({
         "type": "section",
@@ -29,7 +36,7 @@ pub fn answered_blocks(question_text: &str, answer_text: &str) -> Vec<Value> {
     ))]
 }
 
-pub fn question_to_blocks(question_id: &str, question: &Question) -> Vec<Value> {
+pub fn question_to_blocks(run_id: &str, question_id: &str, question: &Question) -> Vec<Value> {
     let section = text_block(&question.text);
 
     match question.question_type {
@@ -37,8 +44,14 @@ pub fn question_to_blocks(question_id: &str, question: &Question) -> Vec<Value> 
             let actions = json!({
                 "type": "actions",
                 "elements": [
-                    button("Yes", "yes", &format!("{question_id}:yes")),
-                    button("No", "no", &format!("{question_id}:no")),
+                    button("Yes", &encode_action_value(&SlackActionPayload::Yes {
+                        run_id: run_id.to_string(),
+                        qid: question_id.to_string(),
+                    }), ANSWER_ACTION_ID),
+                    button("No", &encode_action_value(&SlackActionPayload::No {
+                        run_id: run_id.to_string(),
+                        qid: question_id.to_string(),
+                    }), ANSWER_ACTION_ID),
                 ]
             });
             vec![section, actions]
@@ -47,7 +60,17 @@ pub fn question_to_blocks(question_id: &str, question: &Question) -> Vec<Value> 
             let elements: Vec<Value> = question
                 .options
                 .iter()
-                .map(|opt| button(&opt.label, &opt.key, &format!("{question_id}:{}", opt.key)))
+                .map(|opt| {
+                    button(
+                        &opt.label,
+                        &encode_action_value(&SlackActionPayload::Selected {
+                            run_id: run_id.to_string(),
+                            qid:    question_id.to_string(),
+                            key:    opt.key.clone(),
+                        }),
+                        ANSWER_ACTION_ID,
+                    )
+                })
                 .collect();
             let actions = json!({
                 "type": "actions",
@@ -68,17 +91,20 @@ pub fn question_to_blocks(question_id: &str, question: &Question) -> Vec<Value> 
                 .collect();
             let checkboxes = json!({
                 "type": "actions",
-                "block_id": format!("{question_id}:checkboxes"),
+                "block_id": MULTI_SELECT_BLOCK_ID,
                 "elements": [{
                     "type": "checkboxes",
-                    "action_id": format!("{question_id}:select"),
+                    "action_id": MULTI_SELECT_ACTION_ID,
                     "options": options
                 }]
             });
             let submit = json!({
                 "type": "actions",
                 "elements": [
-                    button("Submit", "submit", &format!("{question_id}:submit")),
+                    button("Submit", &encode_action_value(&SlackActionPayload::SubmitMulti {
+                        run_id: run_id.to_string(),
+                        qid: question_id.to_string(),
+                    }), MULTI_SELECT_SUBMIT_ACTION_ID),
                 ]
             });
             vec![section, checkboxes, submit]
@@ -94,13 +120,14 @@ pub fn question_to_blocks(question_id: &str, question: &Question) -> Vec<Value> 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_interview::QuestionOption;
+
+    use super::*;
 
     #[test]
     fn yes_no_produces_two_buttons() {
         let q = Question::new("Approve this PR?", QuestionType::YesNo);
-        let blocks = question_to_blocks("q-1", &q);
+        let blocks = question_to_blocks("run-1", "q-1", &q);
         let blocks_json: Value = serde_json::to_value(&blocks).unwrap();
 
         let section = &blocks_json[0];
@@ -123,7 +150,7 @@ mod tests {
     #[test]
     fn confirmation_produces_two_buttons() {
         let q = Question::new("Continue?", QuestionType::Confirmation);
-        let blocks = question_to_blocks("q-2", &q);
+        let blocks = question_to_blocks("run-1", "q-2", &q);
         let blocks_json: Value = serde_json::to_value(&blocks).unwrap();
 
         let actions = &blocks_json[1];
@@ -138,26 +165,32 @@ mod tests {
         let mut q = Question::new("Pick a language:", QuestionType::MultipleChoice);
         q.options = vec![
             QuestionOption {
-                key: "rs".to_string(),
+                key:   "rs".to_string(),
                 label: "Rust".to_string(),
             },
             QuestionOption {
-                key: "ts".to_string(),
+                key:   "ts".to_string(),
                 label: "TypeScript".to_string(),
             },
             QuestionOption {
-                key: "py".to_string(),
+                key:   "py".to_string(),
                 label: "Python".to_string(),
             },
         ];
-        let blocks = question_to_blocks("q-3", &q);
+        let blocks = question_to_blocks("run-1", "q-3", &q);
         let blocks_json: Value = serde_json::to_value(&blocks).unwrap();
 
         let actions = &blocks_json[1];
         let elements = actions["elements"].as_array().unwrap();
         assert_eq!(elements.len(), 3);
         assert_eq!(elements[0]["text"]["text"], "Rust");
-        assert_eq!(elements[0]["value"], "rs");
+        assert_eq!(elements[0]["action_id"], ANSWER_ACTION_ID);
+        assert!(
+            elements[0]["value"]
+                .as_str()
+                .unwrap()
+                .contains("\"run_id\":\"run-1\"")
+        );
         assert_eq!(elements[1]["text"]["text"], "TypeScript");
         assert_eq!(elements[2]["text"]["text"], "Python");
     }
@@ -165,7 +198,7 @@ mod tests {
     #[test]
     fn freeform_produces_section_prompting_thread_reply() {
         let q = Question::new("What's the repo URL?", QuestionType::Freeform);
-        let blocks = question_to_blocks("q-4", &q);
+        let blocks = question_to_blocks("run-1", "q-4", &q);
         let blocks_json: Value = serde_json::to_value(&blocks).unwrap();
 
         assert_eq!(blocks_json.as_array().unwrap().len(), 1);
@@ -176,14 +209,17 @@ mod tests {
     }
 
     #[test]
-    fn question_id_embedded_in_action_ids() {
+    fn action_values_include_run_id_and_question_id() {
         let q = Question::new("Approve?", QuestionType::YesNo);
-        let blocks = question_to_blocks("q-7", &q);
+        let blocks = question_to_blocks("run-7", "q-7", &q);
         let blocks_json: Value = serde_json::to_value(&blocks).unwrap();
 
         let actions = &blocks_json[1];
         let elements = actions["elements"].as_array().unwrap();
-        assert!(elements[0]["action_id"].as_str().unwrap().contains("q-7"));
+        assert_eq!(elements[0]["action_id"], ANSWER_ACTION_ID);
+        let value = elements[0]["value"].as_str().unwrap();
+        assert!(value.contains("\"run_id\":\"run-7\""));
+        assert!(value.contains("\"qid\":\"q-7\""));
     }
 
     #[test]
@@ -215,23 +251,24 @@ mod tests {
         let mut q = Question::new("Select features:", QuestionType::MultiSelect);
         q.options = vec![
             QuestionOption {
-                key: "a".to_string(),
+                key:   "a".to_string(),
                 label: "Auth".to_string(),
             },
             QuestionOption {
-                key: "b".to_string(),
+                key:   "b".to_string(),
                 label: "Billing".to_string(),
             },
         ];
-        let blocks = question_to_blocks("q-5", &q);
+        let blocks = question_to_blocks("run-1", "q-5", &q);
         let blocks_json: Value = serde_json::to_value(&blocks).unwrap();
 
         // Checkboxes in their own block with a block_id
         let checkbox_block = &blocks_json[1];
         assert_eq!(checkbox_block["type"], "actions");
-        assert!(checkbox_block["block_id"].as_str().unwrap().contains("q-5"));
+        assert_eq!(checkbox_block["block_id"], MULTI_SELECT_BLOCK_ID);
         let cb_elements = checkbox_block["elements"].as_array().unwrap();
         assert_eq!(cb_elements[0]["type"], "checkboxes");
+        assert_eq!(cb_elements[0]["action_id"], MULTI_SELECT_ACTION_ID);
 
         // Submit button in a separate actions block
         let submit_block = &blocks_json[2];
@@ -239,11 +276,15 @@ mod tests {
         let submit_elements = submit_block["elements"].as_array().unwrap();
         assert_eq!(submit_elements[0]["type"], "button");
         assert_eq!(submit_elements[0]["text"]["text"], "Submit");
+        assert_eq!(
+            submit_elements[0]["action_id"],
+            MULTI_SELECT_SUBMIT_ACTION_ID
+        );
         assert!(
-            submit_elements[0]["action_id"]
+            submit_elements[0]["value"]
                 .as_str()
                 .unwrap()
-                .contains("q-5")
+                .contains("\"qid\":\"q-5\"")
         );
     }
 }

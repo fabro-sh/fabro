@@ -15,7 +15,8 @@ enum PromptRead {
     Error,
 }
 
-/// Reads from stdin to collect answers. Displays formatted prompts per spec 6.4.
+/// Reads from stdin to collect answers. Displays formatted prompts per spec
+/// 6.4.
 pub struct ConsoleInterviewer {
     styles: &'static Styles,
 }
@@ -33,9 +34,9 @@ fn find_matching_option(response: &str, options: &[QuestionOption]) -> Option<An
     for opt in options {
         if opt.key.eq_ignore_ascii_case(trimmed) {
             return Some(Answer {
-                value: AnswerValue::Selected(opt.key.clone()),
+                value:           AnswerValue::Selected(opt.key.clone()),
                 selected_option: Some(opt.clone()),
-                text: None,
+                text:            None,
             });
         }
     }
@@ -44,9 +45,9 @@ fn find_matching_option(response: &str, options: &[QuestionOption]) -> Option<An
         if idx >= 1 && idx <= options.len() {
             let opt = &options[idx - 1];
             return Some(Answer {
-                value: AnswerValue::Selected(opt.key.clone()),
+                value:           AnswerValue::Selected(opt.key.clone()),
                 selected_option: Some(opt.clone()),
-                text: None,
+                text:            None,
             });
         }
     }
@@ -69,10 +70,10 @@ async fn read_line(prompt: &str) -> PromptRead {
 
 fn parse_non_tty_choice_response(question: &Question, prompt_read: PromptRead) -> Answer {
     let PromptRead::Line(response) = prompt_read else {
-        return Answer::aborted();
+        return Answer::interrupted();
     };
     if response.trim().is_empty() {
-        return Answer::aborted();
+        return Answer::interrupted();
     }
     if let Some(answer) = find_matching_option(&response, &question.options) {
         return answer;
@@ -80,26 +81,26 @@ fn parse_non_tty_choice_response(question: &Question, prompt_read: PromptRead) -
     if question.allow_freeform {
         return Answer::text(response);
     }
-    find_matching_option(&response, &question.options).unwrap_or_else(Answer::aborted)
+    find_matching_option(&response, &question.options).unwrap_or_else(Answer::interrupted)
 }
 
 fn parse_non_tty_confirm_response(prompt_read: PromptRead) -> Answer {
     let PromptRead::Line(response) = prompt_read else {
-        return Answer::aborted();
+        return Answer::interrupted();
     };
     match response.trim().to_lowercase().as_str() {
         "y" | "yes" => Answer::yes(),
         "n" | "no" => Answer::no(),
-        _ => Answer::aborted(),
+        _ => Answer::interrupted(),
     }
 }
 
 fn parse_non_tty_freeform_response(prompt_read: PromptRead) -> Answer {
     let PromptRead::Line(response) = prompt_read else {
-        return Answer::aborted();
+        return Answer::interrupted();
     };
     if response.trim().is_empty() {
-        Answer::aborted()
+        Answer::interrupted()
     } else {
         Answer::text(response)
     }
@@ -132,10 +133,10 @@ fn ask_select_interactive(question: &Question) -> Answer {
                 .with_prompt("Enter your response")
                 .interact_on(&Term::stderr())
                 .map_or_else(
-                    |_| Answer::aborted(),
+                    |_| Answer::interrupted(),
                     |response| {
                         if response.trim().is_empty() {
-                            Answer::aborted()
+                            Answer::interrupted()
                         } else {
                             Answer::text(response)
                         }
@@ -145,12 +146,12 @@ fn ask_select_interactive(question: &Question) -> Answer {
         Ok(Some(idx)) if idx < question.options.len() => {
             let opt = &question.options[idx];
             Answer {
-                value: AnswerValue::Selected(opt.key.clone()),
+                value:           AnswerValue::Selected(opt.key.clone()),
                 selected_option: Some(opt.clone()),
-                text: None,
+                text:            None,
             }
         }
-        _ => Answer::aborted(),
+        _ => Answer::interrupted(),
     }
 }
 
@@ -175,11 +176,12 @@ fn ask_multi_select_interactive(question: &Question) -> Answer {
                 .collect();
             Answer::multi_selected(keys)
         }
-        _ => Answer::aborted(),
+        _ => Answer::interrupted(),
     }
 }
 
-/// Ask a yes/no or confirmation question using dialoguer's `Confirm` widget on a TTY.
+/// Ask a yes/no or confirmation question using dialoguer's `Confirm` widget on
+/// a TTY.
 fn ask_confirm_interactive(question: &Question) -> Answer {
     let confirmed = dialoguer::Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt(&question.text)
@@ -189,7 +191,7 @@ fn ask_confirm_interactive(question: &Question) -> Answer {
     match confirmed {
         Ok(Some(true)) => Answer::yes(),
         Ok(Some(false)) => Answer::no(),
-        _ => Answer::aborted(),
+        _ => Answer::interrupted(),
     }
 }
 
@@ -199,10 +201,10 @@ fn ask_freeform_interactive(question: &Question) -> Answer {
         .with_prompt(&question.text)
         .interact_on(&Term::stderr())
         .map_or_else(
-            |_| Answer::aborted(),
+            |_| Answer::interrupted(),
             |response| {
                 if response.trim().is_empty() {
-                    Answer::aborted()
+                    Answer::interrupted()
                 } else {
                     Answer::text(response)
                 }
@@ -229,7 +231,7 @@ impl Interviewer for ConsoleInterviewer {
                 QuestionType::Freeform => ask_freeform_interactive(&q),
             })
             .await
-            .unwrap_or_else(|_| Answer::aborted());
+            .unwrap_or_else(|_| Answer::interrupted());
         }
 
         // Non-TTY fallback: line-based stdin reading
@@ -275,11 +277,11 @@ mod tests {
     fn find_matching_option_by_key() {
         let options = vec![
             crate::QuestionOption {
-                key: "A".to_string(),
+                key:   "A".to_string(),
                 label: "Approve".to_string(),
             },
             crate::QuestionOption {
-                key: "R".to_string(),
+                key:   "R".to_string(),
                 label: "Reject".to_string(),
             },
         ];
@@ -292,7 +294,7 @@ mod tests {
     #[test]
     fn find_matching_option_by_key_case_insensitive() {
         let options = vec![crate::QuestionOption {
-            key: "Y".to_string(),
+            key:   "Y".to_string(),
             label: "Yes".to_string(),
         }];
         let result = find_matching_option("y", &options);
@@ -303,11 +305,11 @@ mod tests {
     fn find_matching_option_by_index() {
         let options = vec![
             crate::QuestionOption {
-                key: "A".to_string(),
+                key:   "A".to_string(),
                 label: "Alpha".to_string(),
             },
             crate::QuestionOption {
-                key: "B".to_string(),
+                key:   "B".to_string(),
                 label: "Beta".to_string(),
             },
         ];
@@ -320,7 +322,7 @@ mod tests {
     #[test]
     fn find_matching_option_no_match() {
         let options = vec![crate::QuestionOption {
-            key: "A".to_string(),
+            key:   "A".to_string(),
             label: "Alpha".to_string(),
         }];
         let result = find_matching_option("zzz", &options);
@@ -330,7 +332,7 @@ mod tests {
     #[test]
     fn find_matching_option_index_out_of_range() {
         let options = vec![crate::QuestionOption {
-            key: "A".to_string(),
+            key:   "A".to_string(),
             label: "Alpha".to_string(),
         }];
         let result = find_matching_option("5", &options);
@@ -338,26 +340,26 @@ mod tests {
     }
 
     #[test]
-    fn non_tty_multiple_choice_eof_returns_aborted() {
+    fn non_tty_multiple_choice_eof_returns_interrupted() {
         let mut question = Question::new("Approve?", QuestionType::MultipleChoice);
         question.options = vec![crate::QuestionOption {
-            key: "A".to_string(),
+            key:   "A".to_string(),
             label: "Approve".to_string(),
         }];
 
         let answer = parse_non_tty_choice_response(&question, PromptRead::Eof);
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
     }
 
     #[test]
-    fn non_tty_confirmation_invalid_response_returns_aborted() {
+    fn non_tty_confirmation_invalid_response_returns_interrupted() {
         let answer = parse_non_tty_confirm_response(PromptRead::Line(String::new()));
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
     }
 
     #[test]
-    fn non_tty_freeform_blank_response_returns_aborted() {
+    fn non_tty_freeform_blank_response_returns_interrupted() {
         let answer = parse_non_tty_freeform_response(PromptRead::Line("   ".to_string()));
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
     }
 }

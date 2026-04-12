@@ -1,0 +1,160 @@
+# CLI CommandContext And Server Access Refactor Plan
+
+## Summary
+Refactor `fabro-cli` around an invocation-scoped `CommandContext` that centralizes local settings loading and server connection setup for user-facing server-backed commands. This is a greenfield codebase with no backward-compatibility constraints, so the refactor should be done in one full pass for the in-scope command surface rather than preserving a long-lived mixed model. Keep config-layer composition command-local where commands genuinely need it, keep the generated `fabro_api::Client` as the main HTTP interface, and reuse the existing `ServerStoreClient` type instead of layering a second handwritten endpoint facade on top of it.
+
+## Public Types And Interfaces
+- Add eager, invocation-scoped `CommandContext`:
+  - Holds `cwd`, `base_config_path`, `machine_settings`, `server_mode`, and a cached server client cell.
+  - `cwd` is the invocation working directory and replaces repeated inline `std::env::current_dir()` lookups in migrated commands such as `preflight`, `validate`, `graph`, `fabro settings`, and workflow-oriented run creation paths.
+  - `base_config_path` is the local settings file path chosen by `--config`, `FABRO_CONFIG`, or the default path.
+  - `machine_settings` is the result of the existing local settings loaders for the command:
+    - base settings for commands using `load_settings()`
+    - base settings plus storage-dir override for commands using `load_settings_with_storage_dir(...)`
+  - `machine_settings` does not include workflow or project config layers.
+  - Do not store `ConfigLayer` on `CommandContext`.
+- Keep config-layer composition command-local:
+  - `fabro settings` continues to build `EffectiveSettingsLayers` with its existing helpers.
+  - workflow and manifest code continues to use `ConfigLayer::for_workflow(...)`, `discover_project_config(...)`, and existing workflow resolution structs where individual layers matter.
+  - `CommandContext` should not attempt to reconstruct or cache workflow/project config layers.
+- Use two explicit server access modes that match the real connection paths in the codebase:
+  - `ServerMode::None`
+  - `ServerMode::ByTarget { target_override: Option<String> }`
+  - `ServerMode::ByStorageDir { target_override: Option<String>, storage_dir_override: Option<PathBuf> }`
+  - `ByTarget` maps to the current `connect_server_only(...)` behavior.
+  - `ByTarget` also covers the current `ServerSummaryLookup::connect(...)` resolution path used by run, pr, runs, and artifact lookup commands.
+  - `ByStorageDir` maps to the current `connect_server_backed_api_client_with_storage_dir(...)` behavior when a real storage-dir-aware connection mode is needed.
+  - current callers of `connect_server_backed_api_client(...)` migrate to `ByTarget` in this refactor because their existing `None` storage-dir path collapses to the same local settings load as `connect_server_only(...)`.
+  - Do not collapse these two behaviors into one variant with optional target and storage fields.
+- Reuse existing target concepts instead of introducing a second target enum:
+  - keep `ServerTargetArgs`, `ServerConnectionArgs`, and the resolved `ServerTarget` model already used by `user_config` and `server_client`
+  - do not introduce `ServerTargetInput` in this pass
+- Keep `ServerStoreClient`:
+  - do not rename it during the same refactor
+  - add narrow accessors as needed for:
+    - the generated `fabro_api::Client`
+    - raw `reqwest::Client`
+    - `base_url`
+  - this preserves the current `exec` adapter path without adding a second server session type
+- `CommandContext::server().await?`:
+  - available only for `ServerMode::ByTarget` and `ServerMode::ByStorageDir`
+  - returns `Arc<ServerStoreClient>`
+  - caches the first successful connection in a `OnceCell`
+  - does not cache failures; a later retry should attempt a fresh connection
+  - `ByTarget` performs current target-based resolution and Unix-socket auto-start behavior
+  - `ByStorageDir` performs current storage-dir-backed daemon resolution and startup behavior
+  - to make both modes uniform, refactor the current storage-dir-backed path, which now returns a bare `fabro_api::Client`, to construct a `ServerStoreClient` first and expose the generated client through an accessor
+  - migrated connection logic must use `machine_settings` and `base_config_path` already loaded on `CommandContext`; it should stop re-calling `load_settings()` and `load_settings_with_storage_dir(...)` inside `server_client.rs`
+  - HTTP and HTTPS targets never auto-start
+- Keep the existing run-summary lookup pattern, but separate lookup construction from connection:
+  - add `ServerSummaryLookup::from_client(client: Arc<ServerStoreClient>) -> Result<Self>`
+  - make the existing `ServerSummaryLookup::connect(...)` a compatibility wrapper during migration, then remove direct call sites from migrated commands
+  - migrated commands that currently do `ServerSummaryLookup::connect(...)` should instead do `ServerSummaryLookup::from_client(ctx.server().await?)`
+  - this keeps summary listing, sorting, and selector resolution behavior intact while moving connection ownership into `CommandContext`
+
+## Implementation Changes
+- Keep `main` bootstrap ordering intact:
+  - continue loading enough local settings before tracing init to determine log level and upgrade-check behavior
+  - `CommandContext` begins after tracing is initialized; it does not replace that earlier bootstrap phase
+- Do not introduce `Services` in this pass:
+  - the current review surfaced that a `Services` wrapper does not pull enough independent process-scoped concerns to justify the extra indirection
+  - if a later refactor reveals multiple real process-scoped services, add that separately
+- Keep style construction local for now:
+  - several current command paths still rely on `&'static Styles`
+  - this refactor should not add a style ownership change on top of settings/server wiring cleanup
+- Make `map_api_error` deduplication a firm deliverable:
+  - migrated commands should reuse the shared `server_client::map_api_error`
+  - remove remaining verbatim local copies in the in-scope command surface
+- Implement in this order:
+  - Step 1: add `CommandContext`, `ServerMode`, `ctx.server()` caching semantics, convert the storage-dir-backed connect path to construct `ServerStoreClient`, add `ServerSummaryLookup::from_client(...)`, and thread preloaded `machine_settings` / `base_config_path` into server resolution so migrated commands stop re-loading settings inside connection helpers
+  - Step 2: migrate the workflow-oriented server commands:
+    - the main `run` command in [`commands/run/command.rs`](/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli/src/commands/run/command.rs)
+    - `run create`
+    - `run start`
+    - `run attach`
+    - `run diff`
+    - `run logs`
+    - `run preview`
+    - `run ssh`
+    - `run resume`
+    - `run rewind`
+    - `run fork`
+    - `run wait`
+    - `run cp`
+    - include the existing internal create → start → attach chain where multiple settings loads and server connects exist today
+    - `preflight`
+    - `validate`
+    - `graph`
+  - Step 3: migrate the remaining user-facing commands that use target-based resolution or resolved-target lookup:
+    - `model`
+    - `secret`
+    - `provider login`
+    - `repo init`
+    - `doctor`
+    - `pr` (treat separately inside this step because it mixes settings for app ID and `ServerSummaryLookup::connect`)
+    - `runs`
+    - `artifact`
+    - these commands should use `ServerMode::ByTarget` after migration, even when they currently call `connect_server_backed_api_client(...)`, because their existing `None` storage-dir path collapses to the same local settings load as `connect_server_only(...)`
+  - Step 4: migrate the user-facing commands that genuinely resolve through a storage-dir-aware server mode:
+    - `system info`
+    - `system df`
+    - `system events`
+    - `system prune`
+    - these commands should use `ServerMode::ByStorageDir`
+  - Step 5: adapt `fabro settings` to use `CommandContext` only for base local settings inputs while keeping its existing layer-building and effective-settings logic
+  - Step 6: remove obsolete helper entrypoints from migrated call sites and reduce `server_client.rs` to the minimal shared surface still needed by explicit out-of-scope and internal commands:
+    - migrated commands should stop calling `connect_server_only(...)`, `connect_server_backed_api_client(...)`, `connect_server_backed_api_client_with_storage_dir(...)`, and `ServerSummaryLookup::connect(...)` directly
+    - migrated commands that need run lookup/resolve behavior should use `ServerSummaryLookup::from_client(ctx.server().await?)`
+    - keep `connect_server(...)`, `connect_api_client(...)`, and `connect_server_target_direct(...)` only for direct storage-dir or direct-target flows that remain explicit out-of-scope or internal
+- Stage dependencies:
+  - Steps 2, 3, and 4 all depend on Step 1
+  - Step 5 depends on Step 1 but not on the migration of other command groups
+  - Step 6 happens only after the other steps are complete
+- Explicitly out of scope:
+  - `exec`
+  - `server` lifecycle commands
+  - hidden `run worker`
+  - `store dump`
+  - `workflow`
+  - `parse`
+  - `repo deinit`
+  - `install`
+  - `sandbox`
+  - `upgrade`
+  - hidden analytics and panic upload commands
+  - direct storage-dir run lookup flows, including `ServerRunLookup`, remain unchanged in this pass
+- Cleanup target after the pass:
+  - the remaining old helper surface should exist only for those explicitly out-of-scope or internal commands
+  - migrated user-facing commands should no longer call settings loaders or top-level server connect helpers directly
+
+## Test Plan
+- New unit tests for `CommandContext` construction:
+  - base config path precedence remains `--config` > `FABRO_CONFIG` > default path (`$FABRO_HOME/settings.toml` if `FABRO_HOME` is set, else `$HOME/.fabro/settings.toml`)
+  - missing default base config path is allowed; missing explicit config path still errors
+  - `machine_settings` reflect only the command's existing local settings load path:
+    - base settings for target-based commands
+    - base settings plus storage-dir override for storage-backed commands
+- New unit tests for server access modes:
+  - `ServerMode::ByTarget` matches current target-based resolution
+  - `ServerMode::ByStorageDir` matches current storage-dir-backed resolution
+  - Unix-socket targets may auto-start; HTTP and HTTPS targets never auto-start
+  - `ctx.server()` caches a successful client and retries after failures
+- Existing regression coverage that must keep passing for config-layer commands:
+  - workflow and manifest code still layer workflow and project config exactly as before
+  - `fabro settings` local, daemon, and remote effective-settings modes remain unchanged
+- Existing regression coverage that must keep passing for special cases:
+  - `exec` with no explicit server target still runs directly against providers
+  - `exec` with an explicit server target still constructs the server-backed adapter path correctly using `ServerStoreClient` accessors
+- Existing integration coverage that must keep passing for migrated command groups:
+  - Step 2: the main `run` command, `run create`, `run start`, `run attach`, `run diff`, `run logs`, `run preview`, `run ssh`, `run resume`, `run rewind`, `run fork`, `run wait`, `run cp`, `preflight`, `validate`, and `graph`
+  - Step 3: representative `model`, `secret`, `provider login`, `repo init`, `doctor`, `pr`, `artifact`, and `runs` commands
+  - Step 4: representative `system info`, `system df`, `system events`, and `system prune` commands
+  - Step 5: `fabro settings` base-settings-input path adopted from `CommandContext` while layer-building and effective-settings logic stay unchanged
+
+## Assumptions And Defaults
+- This is a greenfield codebase with no production compatibility constraints, so one full-pass refactor across the in-scope user-facing command surface is acceptable.
+- `CommandContext` is for shared local settings loading and server access only; it is not a universal repository for every config layer or every command concern.
+- Commands that need workflow/project layering continue to compute those layers locally from the existing config helpers.
+- `ServerStoreClient` remains the shared server connection type in this pass and may gain accessors, but not a second handwritten endpoint layer.
+- `exec` remains outside the main abstraction because it still has a real direct-provider fallback mode that is different from normal server-backed commands.
+- "Resolved path" means the same path shape produced by current helpers: expanded and made absolute where the helpers already do so, but not canonicalized in a way that would require the file to exist.

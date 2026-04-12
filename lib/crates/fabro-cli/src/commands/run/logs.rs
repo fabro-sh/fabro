@@ -1,65 +1,52 @@
 use std::fmt::Write as _;
-use std::io::{self, BufRead, IsTerminal, Write};
-use std::path::Path;
+use std::io::{self, IsTerminal, Write};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_config::FabroSettingsExt;
-use fabro_store::RunStore;
+use fabro_util::json::normalize_json_value;
+use fabro_util::printer::Printer;
+use fabro_util::redact::redact_jsonl_line;
 use fabro_util::terminal::Styles;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
-use futures::StreamExt;
 use tokio::time;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::args::{GlobalArgs, LogsArgs};
-use crate::store;
-use crate::user_config::load_user_settings_with_globals;
+use crate::command_context::CommandContext;
+use crate::server_client;
+use crate::server_runs::ServerSummaryLookup;
+use crate::shared::format_usd_micros;
 
-pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
+const FOLLOW_TERMINAL_GRACE: Duration = Duration::from_millis(500);
 
-    info!(run_id = %run.run_id, "Showing logs");
+pub(crate) async fn run(
+    args: &LogsArgs,
+    styles: &Styles,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
+    let run = lookup.resolve(&args.run)?;
+    let client = lookup.client();
+
+    let run_id = run.run_id();
+    info!(run_id = %run_id, "Showing logs");
 
     let since_cutoff = match &args.since {
         Some(value) => Some(parse_since(value)?),
         None => None,
     };
 
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
-    let progress_path = run.path.join("progress.jsonl");
-    let (all_lines, last_seq, use_store_follow) = if let Some(run_store) = run_store.as_ref() {
-        match run_store.list_events().await {
-            Ok(events) => {
-                let last_seq = events.last().map_or(0, |event| event.seq);
-                let lines = events
-                    .iter()
-                    .map(event_payload_line)
-                    .collect::<Result<Vec<_>>>()?;
-                (lines, last_seq, true)
-            }
-            Err(err) => {
-                if !progress_path.exists() {
-                    return Err(err).context("Failed to list store-backed run events");
-                }
-                warn!(
-                    run_id = %run.run_id,
-                    error = %err,
-                    "Failed to read events from store; falling back to progress.jsonl"
-                );
-                (read_lines(&progress_path)?, 0, false)
-            }
-        }
-    } else {
-        if !progress_path.exists() {
-            bail!("No progress.jsonl found for run '{}'", run.run_id);
-        }
-        (read_lines(&progress_path)?, 0, false)
-    };
+    let events = client
+        .list_run_events(&run_id, None, None)
+        .await
+        .context("Failed to list server-backed run events")?;
+    let last_seq = events.last().map_or(0, |event| event.seq);
+    let all_lines = events
+        .iter()
+        .map(event_payload_line)
+        .collect::<Result<Vec<_>>>()?;
     let filtered = apply_filters(&all_lines, since_cutoff.as_ref(), args.tail);
 
     let stdout = io::stdout();
@@ -78,67 +65,22 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
     }
 
     if args.follow {
-        if use_store_follow {
-            if let Some(run_store) = run_store.as_ref() {
-                match follow_store_logs(
-                    run_store.as_ref(),
-                    if last_seq == 0 { 1 } else { last_seq + 1 },
-                    pretty,
-                    styles,
-                    is_tty,
-                )
-                .await
-                {
-                    Ok(()) => {}
-                    Err(err) => {
-                        if !progress_path.exists() {
-                            return Err(err);
-                        }
-                        warn!(
-                            run_id = %run.run_id,
-                            error = %err,
-                            "Failed to follow store events; falling back to progress.jsonl"
-                        );
-                        let lines_seen = read_lines(&progress_path)?.len();
-                        follow_logs(
-                            &progress_path,
-                            &run.path,
-                            lines_seen,
-                            pretty,
-                            styles,
-                            is_tty,
-                        )?;
-                    }
-                }
-            } else {
-                unreachable!("store follow requested without a run store");
-            }
-        } else {
-            follow_logs(
-                &progress_path,
-                &run.path,
-                all_lines.len(),
-                pretty,
-                styles,
-                is_tty,
-            )?;
-        }
+        follow_store_logs(
+            client,
+            &run_id,
+            if last_seq == 0 { 1 } else { last_seq + 1 },
+            pretty,
+            styles,
+            is_tty,
+        )
+        .await?;
     }
 
     Ok(())
 }
 
-fn read_lines(path: &Path) -> Result<Vec<String>> {
-    let file = std::fs::File::open(path).context("Failed to open progress.jsonl")?;
-    let reader = io::BufReader::new(file);
-    let mut lines = Vec::new();
-    for line in reader.lines() {
-        let line = line?;
-        if !line.trim().is_empty() {
-            lines.push(line);
-        }
-    }
-    Ok(lines)
+fn event_name(event: &fabro_store::EventEnvelope) -> Option<&str> {
+    event.payload.as_value().get("event")?.as_str()
 }
 
 fn apply_filters(
@@ -201,114 +143,108 @@ fn try_parse_relative_duration(s: &str) -> Option<chrono::Duration> {
     }
 }
 
-fn follow_logs(
-    progress_path: &Path,
-    run_dir: &Path,
-    mut lines_seen: usize,
-    pretty: bool,
-    styles: &Styles,
-    _is_tty: bool,
-) -> Result<()> {
-    let conclusion_path = run_dir.join("conclusion.json");
-    let stdout = io::stdout();
-    let mut out = stdout.lock();
-
-    loop {
-        std::thread::sleep(std::time::Duration::from_millis(200));
-
-        let all_lines = read_lines(progress_path)?;
-        if all_lines.len() > lines_seen {
-            for line in &all_lines[lines_seen..] {
-                if pretty {
-                    if let Some(formatted) = format_event_pretty(line, styles) {
-                        writeln!(out, "{formatted}")?;
-                    }
-                } else {
-                    writeln!(out, "{line}")?;
-                }
-            }
-            out.flush()?;
-            lines_seen = all_lines.len();
-        }
-
-        if conclusion_path.exists() && all_lines.len() <= lines_seen {
-            debug!("Run concluded, stopping follow");
-            break;
-        }
-    }
-
-    Ok(())
-}
-
 async fn follow_store_logs(
-    run_store: &dyn RunStore,
+    client: &server_client::ServerStoreClient,
+    run_id: &fabro_types::RunId,
     seq: u32,
     pretty: bool,
     styles: &Styles,
     _is_tty: bool,
 ) -> Result<()> {
-    let mut stream = run_store
-        .watch_events_from(seq)
-        .await
-        .context("Failed to watch store-backed run events")?;
     let stdout = io::stdout();
     let mut out = stdout.lock();
     let mut next_seq = seq;
+    let mut terminal_deadline = None;
 
     loop {
-        match time::timeout(Duration::from_millis(200), stream.next()).await {
-            Ok(Some(Ok(event))) => {
-                let line = event_payload_line(&event)?;
-                if pretty {
-                    if let Some(formatted) = format_event_pretty(&line, styles) {
-                        writeln!(out, "{formatted}")?;
+        match time::timeout(
+            Duration::from_millis(200),
+            client.list_run_events(run_id, Some(next_seq), None),
+        )
+        .await
+        {
+            Ok(Ok(events)) => {
+                let had_events = !events.is_empty();
+                let saw_terminal = events
+                    .iter()
+                    .any(|event| matches!(event_name(event), Some("run.completed" | "run.failed")));
+                for event in events {
+                    let line = event_payload_line(&event)?;
+                    if pretty {
+                        if let Some(formatted) = format_event_pretty(&line, styles) {
+                            writeln!(out, "{formatted}")?;
+                        }
+                    } else {
+                        writeln!(out, "{line}")?;
                     }
-                } else {
-                    writeln!(out, "{line}")?;
+                    out.flush()?;
+                    next_seq = event.seq.saturating_add(1);
                 }
-                out.flush()?;
-                next_seq = event.seq.saturating_add(1);
+                if saw_terminal || (terminal_deadline.is_some() && had_events) {
+                    terminal_deadline = Some(time::Instant::now() + FOLLOW_TERMINAL_GRACE);
+                }
             }
-            Ok(Some(Err(err))) => return Err(err.into()),
-            Ok(None) => break,
             Err(_) => {
-                let concluded = run_store
-                    .get_conclusion()
-                    .await
-                    .context("Failed to read conclusion from store while following logs")?
-                    .is_some()
-                    || run_store
-                        .get_status()
-                        .await
-                        .context("Failed to read status from store while following logs")?
-                        .is_some_and(|record| record.status.is_terminal());
-
-                if concluded {
-                    flush_remaining_store_events(run_store, next_seq, pretty, styles, &mut out)
-                        .await?;
-                    debug!("Run reached terminal status, stopping follow");
-                    break;
+                if run_concluded(client, run_id).await? {
+                    terminal_deadline
+                        .get_or_insert_with(|| time::Instant::now() + FOLLOW_TERMINAL_GRACE);
                 }
             }
+            Ok(Err(err)) => return Err(err),
         }
+
+        let Some(deadline) = terminal_deadline else {
+            continue;
+        };
+        if time::Instant::now() < deadline {
+            continue;
+        }
+
+        let flushed_next_seq =
+            flush_remaining_store_events(client, run_id, next_seq, pretty, styles, &mut out)
+                .await?;
+        if flushed_next_seq > next_seq {
+            next_seq = flushed_next_seq;
+            terminal_deadline = Some(time::Instant::now() + FOLLOW_TERMINAL_GRACE);
+            continue;
+        }
+
+        debug!("Run reached terminal status and log tail is quiet, stopping follow");
+        break;
     }
 
     Ok(())
 }
 
+async fn run_concluded(
+    client: &server_client::ServerStoreClient,
+    run_id: &fabro_types::RunId,
+) -> Result<bool> {
+    let state = client
+        .get_run_state(run_id)
+        .await
+        .context("Failed to read run state from server while following logs")?;
+    Ok(state.conclusion.is_some()
+        || state
+            .status
+            .is_some_and(|record| record.status.is_terminal()))
+}
+
 async fn flush_remaining_store_events(
-    run_store: &dyn RunStore,
+    client: &server_client::ServerStoreClient,
+    run_id: &fabro_types::RunId,
     next_seq: u32,
     pretty: bool,
     styles: &Styles,
     out: &mut dyn Write,
-) -> Result<()> {
-    let events = run_store
-        .list_events()
+) -> Result<u32> {
+    let events = client
+        .list_run_events(run_id, Some(next_seq), None)
         .await
-        .context("Failed to list store-backed run events while finalizing follow")?;
+        .context("Failed to list server-backed run events while finalizing follow")?;
 
-    for event in events.into_iter().filter(|event| event.seq >= next_seq) {
+    let mut next_seq = next_seq;
+    for event in events {
         let line = event_payload_line(&event)?;
         if pretty {
             if let Some(formatted) = format_event_pretty(&line, styles) {
@@ -317,13 +253,37 @@ async fn flush_remaining_store_events(
         } else {
             writeln!(out, "{line}")?;
         }
+        next_seq = event.seq.saturating_add(1);
     }
     out.flush()?;
-    Ok(())
+    Ok(next_seq)
 }
 
 fn event_payload_line(event: &fabro_store::EventEnvelope) -> Result<String> {
-    serde_json::to_string(event.payload.as_value()).map_err(Into::into)
+    let mut value = normalize_json_value(event.payload.as_value().clone());
+    restore_empty_run_properties(&mut value);
+    let line = serde_json::to_string(&value)?;
+    Ok(redact_jsonl_line(&line))
+}
+
+fn restore_empty_run_properties(value: &mut serde_json::Value) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    let Some(event_name) = object.get("event").and_then(serde_json::Value::as_str) else {
+        return;
+    };
+    if matches!(event_name, "run.submitted" | "run.running") && !object.contains_key("properties") {
+        let run_id = object.remove("run_id");
+        let ts = object.remove("ts");
+        object.insert("properties".to_string(), serde_json::json!({}));
+        if let Some(run_id) = run_id {
+            object.insert("run_id".to_string(), run_id);
+        }
+        if let Some(ts) = ts {
+            object.insert("ts".to_string(), ts);
+        }
+    }
 }
 
 fn render_indented_markdown(styles: &Styles, text: &str, indent: &str) -> String {
@@ -372,7 +332,10 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 "success" | "partial_success" => &styles.bold_green,
                 _ => &styles.bold_red,
             };
-            let cost = format_cost(prop_field(&envelope, "total_cost"));
+            let cost = format_cost(
+                prop_field(&envelope, "total_usd_micros")
+                    .or_else(|| prop_field(&envelope, "total_cost")),
+            );
 
             let mut lines = vec![format!(
                 "{} {} {}  {}",
@@ -382,8 +345,10 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.dim.apply_to(&cost),
             )];
 
-            if let Some(usage) = prop_field(&envelope, "usage") {
-                let total = usage
+            if let Some(billing) =
+                prop_field(&envelope, "billing").or_else(|| prop_field(&envelope, "usage"))
+            {
+                let total = billing
                     .get("total_tokens")
                     .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0);
@@ -398,11 +363,11 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                         ))
                     ));
                 }
-                if let Some(cache_read) = usage
+                if let Some(cache_read) = billing
                     .get("cache_read_tokens")
                     .and_then(serde_json::Value::as_i64)
                 {
-                    let cache_write = usage
+                    let cache_write = billing
                         .get("cache_write_tokens")
                         .and_then(serde_json::Value::as_i64)
                         .unwrap_or(0);
@@ -416,7 +381,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                         ))
                     ));
                 }
-                if let Some(reasoning) = usage
+                if let Some(reasoning) = billing
                     .get("reasoning_tokens")
                     .and_then(serde_json::Value::as_i64)
                 {
@@ -478,13 +443,18 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
         "stage.completed" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
             let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
-            let usage = prop_field(&envelope, "usage");
-            let cost = format_cost(usage.and_then(|value| value.get("cost")));
-            let input_tokens = usage
+            let billing =
+                prop_field(&envelope, "billing").or_else(|| prop_field(&envelope, "usage"));
+            let cost = format_cost(
+                billing
+                    .and_then(|value| value.get("total_usd_micros"))
+                    .or_else(|| billing.and_then(|value| value.get("cost"))),
+            );
+            let input_tokens = billing
                 .and_then(|value| value.get("input_tokens"))
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            let output_tokens = usage
+            let output_tokens = billing
                 .and_then(|value| value.get("output_tokens"))
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
@@ -747,11 +717,21 @@ fn format_duration_ms(value: Option<&serde_json::Value>) -> String {
 }
 
 fn format_cost(value: Option<&serde_json::Value>) -> String {
-    let cost = value.and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-    if cost > 0.0 {
-        format!("${cost:.2}")
-    } else {
-        String::new()
+    match value {
+        Some(value) => {
+            if let Some(usd_micros) = value.as_i64() {
+                if usd_micros > 0 {
+                    return format_usd_micros(usd_micros);
+                }
+            }
+            let cost = value.as_f64().unwrap_or(0.0);
+            if cost > 0.0 {
+                format!("${cost:.2}")
+            } else {
+                String::new()
+            }
+        }
+        None => String::new(),
     }
 }
 
@@ -983,7 +963,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_completed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.completed","properties":{"duration_ms":25000,"status":"success","total_cost":0.57,"usage":{"input_tokens":5000,"output_tokens":2000,"total_tokens":7000,"cache_read_tokens":3000,"cache_write_tokens":500,"reasoning_tokens":800}}}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.completed","properties":{"duration_ms":25000,"status":"success","total_usd_micros":570000,"billing":{"input_tokens":5000,"output_tokens":2000,"total_tokens":7000,"cache_read_tokens":3000,"cache_write_tokens":500,"reasoning_tokens":800}}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("SUCCESS"), "got: {result}");
         assert!(result.contains("25s"), "got: {result}");

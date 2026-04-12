@@ -1,7 +1,7 @@
 //! Integration tests for `DaytonaSandbox`.
 //!
-//! These tests require a `DAYTONA_API_KEY` environment variable and network access.
-//! Run with: `cargo test --package arc-workflows -- --ignored daytona`
+//! These tests require a `DAYTONA_API_KEY` environment variable and network
+//! access. Run with: `cargo test --package arc-workflows -- --ignored daytona`
 
 #![allow(
     clippy::absolute_paths,
@@ -9,6 +9,10 @@
     clippy::ignore_without_reason,
     clippy::items_after_statements,
     clippy::print_stderr
+)]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "These Daytona integration tests use the real git CLI to prepare remote-repo fixtures for workflow runs."
 )]
 
 use std::collections::HashMap;
@@ -18,24 +22,25 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fabro_agent::Sandbox;
-use fabro_config::FabroSettings;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
-use fabro_sandbox::SandboxRecordExt;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
-use fabro_store::RuntimeState;
-use fabro_types::RunId;
+use fabro_store::{ArtifactStore, Database};
+use fabro_types::settings::SettingsLayer;
+use fabro_types::settings::run::{RunArtifactsLayer, RunLayer};
+use fabro_types::{RunId, StageId};
 use fabro_workflow::artifact::sync_artifacts_to_env;
 use fabro_workflow::context::Context;
-use fabro_workflow::error::FabroError;
-use fabro_workflow::event::EventEmitter;
+use fabro_workflow::error::Error;
+use fabro_workflow::event::Emitter;
 use fabro_workflow::handler::exit::ExitHandler;
 use fabro_workflow::handler::start::StartHandler;
 use fabro_workflow::handler::{Handler, HandlerRegistry};
 use fabro_workflow::outcome::{Outcome, OutcomeExt, StageStatus};
-use fabro_workflow::records::{Checkpoint, CheckpointExt};
+use fabro_workflow::records::Checkpoint;
 use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
-use fabro_workflow::test_support::WorkflowRunner;
+use fabro_workflow::test_support::{WorkflowRunner, test_store_dir};
+use object_store::local::LocalFileSystem;
 use ulid::Ulid;
 
 fn test_run_id(label: &str) -> RunId {
@@ -44,23 +49,132 @@ fn test_run_id(label: &str) -> RunId {
     RunId::from(Ulid(u128::from(hasher.finish())))
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This helper spins up a dedicated current-thread runtime when called from inside an existing Tokio runtime."
+)]
+fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error::Error>> {
+    let run_dir = run_dir.to_path_buf();
+    let uses_shared_store = run_dir
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == "scratch");
+    let store_dir = if uses_shared_store {
+        let runs_dir = run_dir.parent().ok_or("run dir should have parent")?;
+        let storage_dir = runs_dir.parent().ok_or("runs dir should have parent")?;
+        storage_dir.join("store")
+    } else {
+        test_store_dir(&run_dir)
+    };
+    let object_store = Arc::new(LocalFileSystem::new_with_prefix(store_dir)?);
+    let store = Arc::new(Database::new(
+        object_store,
+        "",
+        std::time::Duration::from_millis(1),
+    ));
+    let state = if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::spawn(
+            move || -> Result<_, Box<dyn std::error::Error + Send + Sync>> {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?;
+                let run_id = if uses_shared_store {
+                    run_dir
+                        .file_name()
+                        .ok_or("run dir should have file name")?
+                        .to_string_lossy()
+                        .rsplit('-')
+                        .next()
+                        .ok_or("run dir should contain run id suffix")?
+                        .parse()?
+                } else {
+                    runtime
+                        .block_on(store.list_runs(&fabro_store::ListRunsQuery::default()))?
+                        .into_iter()
+                        .next()
+                        .ok_or("test store should contain one run")?
+                        .run_id
+                };
+                let run = runtime.block_on(store.open_run_reader(&run_id))?;
+                let state = runtime.block_on(async {
+                    for attempt in 0..20 {
+                        let state = run.state().await?;
+                        if state.checkpoint.is_some() || attempt == 19 {
+                            return Ok::<_, fabro_store::Error>(state);
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    unreachable!()
+                })?;
+                Ok(state)
+            },
+        )
+        .join()
+        .map_err(|_| "checkpoint loader thread panicked")?
+        .map_err(|err| err.to_string())?
+    } else {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let run_id = if uses_shared_store {
+            run_dir
+                .file_name()
+                .ok_or("run dir should have file name")?
+                .to_string_lossy()
+                .rsplit('-')
+                .next()
+                .ok_or("run dir should contain run id suffix")?
+                .parse()?
+        } else {
+            runtime
+                .block_on(store.list_runs(&fabro_store::ListRunsQuery::default()))?
+                .into_iter()
+                .next()
+                .ok_or("test store should contain one run")?
+                .run_id
+        };
+        let run = runtime.block_on(store.open_run_reader(&run_id))?;
+        runtime.block_on(async {
+            for attempt in 0..20 {
+                let state = run.state().await?;
+                if state.checkpoint.is_some() || attempt == 19 {
+                    return Ok::<_, fabro_store::Error>(state);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            unreachable!()
+        })?
+    };
+    state
+        .checkpoint
+        .ok_or_else(|| "checkpoint should exist in run store".into())
+}
+
 async fn create_env() -> DaytonaSandbox {
     let creds = load_github_app_credentials();
     create_env_with_github_app(Some(creds)).await
 }
 
+fn test_artifact_store(run_dir: &Path) -> ArtifactStore {
+    let object_store = Arc::new(
+        LocalFileSystem::new_with_prefix(test_store_dir(run_dir))
+            .expect("failed to create local artifact store"),
+    );
+    ArtifactStore::new(object_store, "artifacts")
+}
+
 async fn create_env_with_github_app(
-    github_app: Option<fabro_github::GitHubAppCredentials>,
+    github_app: Option<fabro_github::GitHubCredentials>,
 ) -> DaytonaSandbox {
     DaytonaSandbox::new(DaytonaConfig::default(), github_app, None, None)
         .await
         .expect("Failed to create Daytona client — is DAYTONA_API_KEY set?")
 }
 
-fn load_github_app_credentials() -> fabro_github::GitHubAppCredentials {
-    // Read app_id from ~/.fabro/server.toml
+fn load_github_app_credentials() -> fabro_github::GitHubCredentials {
+    // Read app_id from ~/.fabro/settings.toml
     let home = dirs::home_dir().expect("No home directory");
-    let config_path = home.join(".fabro/server.toml");
+    let config_path = home.join(".fabro/settings.toml");
     let config_str = std::fs::read_to_string(&config_path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {e}", config_path.display()));
 
@@ -74,11 +188,11 @@ fn load_github_app_credentials() -> fabro_github::GitHubAppCredentials {
         app_id: Option<String>,
     }
 
-    let config: Config = toml::from_str(&config_str).expect("Failed to parse server.toml");
+    let config: Config = toml::from_str(&config_str).expect("Failed to parse settings.toml");
     let app_id = config
         .git
         .app_id
-        .expect("app_id not set in server.toml [git] section");
+        .expect("app_id not set in settings.toml [git] section");
 
     let raw = std::env::var("GITHUB_APP_PRIVATE_KEY").expect("GITHUB_APP_PRIVATE_KEY not set");
     let private_key_pem = if raw.starts_with("-----") {
@@ -88,10 +202,10 @@ fn load_github_app_credentials() -> fabro_github::GitHubAppCredentials {
             .expect("GITHUB_APP_PRIVATE_KEY is not valid base64");
         String::from_utf8(bytes).expect("GITHUB_APP_PRIVATE_KEY decoded to invalid UTF-8")
     };
-    fabro_github::GitHubAppCredentials {
+    fabro_github::GitHubCredentials::App(fabro_github::GitHubAppCredentials {
         app_id,
         private_key_pem,
-    }
+    })
 }
 
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
@@ -162,11 +276,12 @@ async fn daytona_exec_command_local_timeout() {
 
     // Use a tiny timeout_ms of 100ms, our local timeout is 100 + 2000 = 2100ms.
     // If the server doesn't enforce the timeout properly or drops the connection,
-    // our local timeout should catch it. To simulate this without making a bad server,
-    // we can't easily force the local timeout to hit before the server timeout
-    // without mocking. But if we run `sleep 10` and Daytona does NOT respect the
-    // short timeout parameter, the local 2.1s timeout will definitely fire.
-    // Let's at least test that a 100ms timeout works and doesn't run for 10s.
+    // our local timeout should catch it. To simulate this without making a bad
+    // server, we can't easily force the local timeout to hit before the server
+    // timeout without mocking. But if we run `sleep 10` and Daytona does NOT
+    // respect the short timeout parameter, the local 2.1s timeout will
+    // definitely fire. Let's at least test that a 100ms timeout works and
+    // doesn't run for 10s.
     let start = std::time::Instant::now();
     let result = env
         .exec_command("sleep 10", 100, None, None, None)
@@ -244,10 +359,10 @@ async fn daytona_snapshot_sandbox() {
     let config = DaytonaConfig {
         auto_stop_interval: Some(60),
         snapshot: Some(DaytonaSnapshotConfig {
-            name: "fabro-test-snapshot".to_string(),
-            cpu: Some(2),
-            memory: Some(4),
-            disk: Some(10),
+            name:       "fabro-test-snapshot".to_string(),
+            cpu:        Some(2),
+            memory:     Some(4),
+            disk:       Some(10),
             dockerfile: Some(fabro_sandbox::daytona::DockerfileSource::Inline(
                 "FROM ubuntu:22.04\nRUN apt-get update && apt-get install -y ripgrep".to_string(),
             )),
@@ -293,7 +408,8 @@ async fn daytona_artifact_sync_uploads_and_rewrites_pointer() {
     let mut updates = HashMap::new();
     updates.insert("response.plan".to_string(), serde_json::json!(pointer));
 
-    // Sync — the local file doesn't exist in the Daytona sandbox, so it should upload
+    // Sync — the local file doesn't exist in the Daytona sandbox, so it should
+    // upload
     sync_artifacts_to_env(&mut updates, &env).await.unwrap();
 
     // Pointer should be rewritten to the Daytona working directory
@@ -325,7 +441,8 @@ async fn daytona_artifact_sync_uploads_and_rewrites_pointer() {
 // Full pipeline E2E on Daytona
 // ---------------------------------------------------------------------------
 
-/// Handler that produces a >100KB context_update to trigger artifact offloading.
+/// Handler that produces a >100KB context_update to trigger artifact
+/// offloading.
 struct LargeOutputHandler;
 
 #[async_trait::async_trait]
@@ -337,7 +454,7 @@ impl Handler for LargeOutputHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let mut outcome = Outcome::success();
         let large_value = "x".repeat(150 * 1024);
         outcome.context_updates.insert(
@@ -390,19 +507,19 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
 
-    let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::default()), env.clone());
+    let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
     let run_options = RunOptions {
-        settings: FabroSettings::default(),
-        run_dir: dir.path().to_path_buf(),
-        cancel_token: None,
-        run_id: test_run_id("test-run"),
-        labels: std::collections::HashMap::new(),
-        workflow_slug: None,
-        github_app: None,
-        base_branch: None,
+        settings:         SettingsLayer::default(),
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     None,
+        run_id:           test_run_id("test-run"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
         display_base_sha: None,
-        host_repo_path: None,
-        git: None,
+        host_repo_path:   None,
+        git:              None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -410,32 +527,21 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // Checkpoint should have a pointer rewritten for Daytona
-    let checkpoint =
-        Checkpoint::load(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
+    // Checkpoint should persist a durable blob ref.
+    let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values
         .get("response.big_output")
         .expect("context should have response.big_output");
     let pointer_str = pointer_value.as_str().expect("pointer should be a string");
-    let expected_prefix = format!("file://{}/.fabro/artifacts/", env.working_directory());
-    assert!(
-        pointer_str.starts_with(&expected_prefix),
-        "pointer should reference Daytona path, got: {pointer_str}"
+    let expected_blob_id = fabro_types::RunBlobId::new(
+        &serde_json::to_vec(&serde_json::json!("x".repeat(150 * 1024)))
+            .expect("large value should serialize"),
     );
-
-    // Verify the artifact file is readable in the sandbox
-    let remote_path = pointer_str.strip_prefix("file://").unwrap();
-    assert!(
-        env.file_exists(remote_path).await.unwrap(),
-        "artifact should exist in Daytona sandbox at {remote_path}"
-    );
-
-    let remote_content = env.read_file(remote_path, None, None).await.unwrap();
-    assert!(
-        remote_content.len() > 100 * 1024,
-        "remote artifact should be >100KB, got {} bytes",
-        remote_content.len()
+    assert_eq!(
+        pointer_str,
+        fabro_types::format_blob_ref(&expected_blob_id),
+        "checkpoint should persist a blob ref"
     );
 
     env.cleanup().await.unwrap();
@@ -461,7 +567,7 @@ impl Handler for FileWriterHandler {
         _graph: &Graph,
         _run_dir: &Path,
         services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let content = format!("output from {}", node.id);
         let cmd = format!("echo '{content}' > {}.txt", node.id);
         let _ = services
@@ -566,7 +672,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
 
     // Set up event collection
     let dir = tempfile::tempdir().unwrap();
-    let emitter = EventEmitter::default();
+    let emitter = Emitter::default();
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     {
         let events_clone = Arc::clone(&events);
@@ -581,19 +687,19 @@ async fn daytona_git_checkpoint_remote_emits_events() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env.clone());
     let run_options = RunOptions {
-        settings: FabroSettings::default(),
-        run_dir: dir.path().to_path_buf(),
-        cancel_token: None,
-        run_id: test_run_id("git-cp-test"),
-        labels: std::collections::HashMap::new(),
-        workflow_slug: None,
-        github_app: None,
-        base_branch: None,
+        settings:         SettingsLayer::default(),
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     None,
+        run_id:           test_run_id("git-cp-test"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
         display_base_sha: None,
-        host_repo_path: Some(dir.path().to_path_buf()),
-        git: Some(GitCheckpointOptions {
-            base_sha: Some(base_sha),
-            run_branch: Some(branch_name),
+        host_repo_path:   Some(dir.path().to_path_buf()),
+        git:              Some(GitCheckpointOptions {
+            base_sha:    Some(base_sha),
+            run_branch:  Some(branch_name),
             meta_branch: None,
         }),
     };
@@ -609,12 +715,13 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         let git_events: Vec<_> = events
             .iter()
             .filter_map(|e| {
-                if e.event != "checkpoint.completed" {
+                if e.event_name() != "checkpoint.completed" {
                     return None;
                 }
+                let properties = e.properties().ok()?;
                 Some((
                     e.node_id.clone()?,
-                    e.properties.get("git_commit_sha")?.as_str()?.to_string(),
+                    properties.get("git_commit_sha")?.as_str()?.to_string(),
                 ))
             })
             .collect();
@@ -634,23 +741,12 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         );
     }
 
-    // Assert diff.patch was written for the work node
-    let work_diff = dir.path().join("nodes").join("work").join("diff.patch");
-    assert!(work_diff.exists(), "diff.patch should exist for work node");
-
     // Verify checkpoint.json has git_commit_sha
-    let checkpoint =
-        Checkpoint::load(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
+    let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
     assert!(
         checkpoint.git_commit_sha.is_some(),
         "checkpoint should have git_commit_sha"
     );
-
-    // Assert final.patch exists and contains changes from the run
-    let final_patch = dir.path().join("final.patch");
-    assert!(final_patch.exists(), "final.patch should exist in run_dir");
-    let patch_content = std::fs::read_to_string(&final_patch).unwrap();
-    assert!(!patch_content.is_empty(), "final.patch should not be empty");
 
     env.cleanup().await.unwrap();
 }
@@ -744,7 +840,7 @@ async fn daytona_parallel_git_branching_e2e() {
     graph.edges.push(Edge::new("fan_in", "exit"));
 
     let run_tmp = tempfile::tempdir().unwrap();
-    let emitter = EventEmitter::default();
+    let emitter = Emitter::default();
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     {
         let events_clone = Arc::clone(&events);
@@ -762,7 +858,7 @@ async fn daytona_parallel_git_branching_e2e() {
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), Arc::clone(&env));
 
     let run_options = RunOptions {
-        settings: FabroSettings::default(),
+        settings: SettingsLayer::default(),
         run_dir: run_tmp.path().to_path_buf(),
         cancel_token: None,
         run_id,
@@ -773,8 +869,8 @@ async fn daytona_parallel_git_branching_e2e() {
         display_base_sha: None,
         host_repo_path: Some(run_tmp.path().to_path_buf()),
         git: Some(GitCheckpointOptions {
-            base_sha: Some(base_sha),
-            run_branch: Some(branch_name),
+            base_sha:    Some(base_sha),
+            run_branch:  Some(branch_name),
             meta_branch: None,
         }),
     };
@@ -790,8 +886,7 @@ async fn daytona_parallel_git_branching_e2e() {
     );
 
     // Verify parallel.results has head_sha for each branch
-    let checkpoint =
-        Checkpoint::load(&run_tmp.path().join("checkpoint.json")).expect("checkpoint should load");
+    let checkpoint = load_run_checkpoint(run_tmp.path()).expect("checkpoint should load");
     let parallel_results = checkpoint
         .context_values
         .get("parallel.results")
@@ -857,7 +952,7 @@ async fn daytona_parallel_git_branching_e2e() {
         let events = events.lock().unwrap();
         let parallel_started: Vec<_> = events
             .iter()
-            .filter(|e| e.event == "parallel.started")
+            .filter(|e| e.event_name() == "parallel.started")
             .collect();
         assert_eq!(
             parallel_started.len(),
@@ -866,7 +961,7 @@ async fn daytona_parallel_git_branching_e2e() {
         );
         let parallel_completed: Vec<_> = events
             .iter()
-            .filter(|e| e.event == "parallel.completed")
+            .filter(|e| e.event_name() == "parallel.completed")
             .collect();
         assert_eq!(
             parallel_completed.len(),
@@ -887,15 +982,16 @@ use fabro_workflow::handler::llm::AgentCliBackend;
 
 /// Helper: run a real CLI backend test on Daytona.
 ///
-/// Installs the CLI tool in the sandbox, then runs the AgentCliBackend against it.
+/// Installs the CLI tool in the sandbox, then runs the AgentCliBackend against
+/// it.
 async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: &str) {
     let creds = load_github_app_credentials();
     let config = DaytonaConfig {
         snapshot: Some(DaytonaSnapshotConfig {
-            name: "daytona-medium".into(),
-            cpu: None,
-            memory: None,
-            disk: None,
+            name:       "daytona-medium".into(),
+            cpu:        None,
+            memory:     None,
+            disk:       None,
             dockerfile: None,
         }),
         ..DaytonaConfig::default()
@@ -950,8 +1046,7 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
     let backend = AgentCliBackend::new(model.to_string(), provider);
     let node = Node::new("daytona_cli_test");
     let context = Context::new();
-    let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
+    let emitter = Arc::new(Emitter::default());
 
     let result = backend
         .run(
@@ -960,7 +1055,6 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
             &context,
             None,
             &emitter,
-            dir.path(),
             &env,
             None,
         )
@@ -974,7 +1068,7 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
             );
             if let Some(u) = usage {
                 assert!(
-                    u.input_tokens > 0,
+                    u.tokens().input_tokens > 0,
                     "{provider}/{model}: input_tokens should be > 0"
                 );
             }
@@ -982,16 +1076,6 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
         Ok(CodergenResult::Full(_)) => panic!("expected Text result"),
         Err(e) => panic!("{provider}/{model} on Daytona failed: {e}"),
     }
-
-    // Verify log files
-    let provider_path = dir.path().join("provider_used.json");
-    assert!(
-        provider_path.exists(),
-        "{provider}/{model}: provider_used.json should exist"
-    );
-    let provider_json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&provider_path).unwrap()).unwrap();
-    assert_eq!(provider_json["mode"], "cli");
 
     env.cleanup().await.unwrap();
 }
@@ -1028,7 +1112,8 @@ async fn daytona_cli_gemini() {
 use fabro_workflow::git::MetadataStore;
 
 /// End-to-end test: pipeline with git checkpointing enabled + `meta_branch`
-/// writes shadow branch on the host repo and includes `Fabro-Checkpoint` trailer in sandbox commits.
+/// writes shadow branch on the host repo and includes `Fabro-Checkpoint`
+/// trailer in sandbox commits.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_git_checkpoint_with_shadow_branch() {
     let env = create_env().await;
@@ -1120,9 +1205,9 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     registry.register("exit", Box::new(ExitHandler));
 
     let meta_branch = MetadataStore::branch_name(&run_id.to_string());
-    let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::default()), env.clone());
+    let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
     let run_options = RunOptions {
-        settings: FabroSettings::default(),
+        settings: SettingsLayer::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         run_id,
@@ -1133,8 +1218,8 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         display_base_sha: None,
         host_repo_path: Some(host_repo.path().to_path_buf()),
         git: Some(GitCheckpointOptions {
-            base_sha: Some(base_sha),
-            run_branch: Some(branch_name),
+            base_sha:    Some(base_sha),
+            run_branch:  Some(branch_name),
             meta_branch: Some(meta_branch),
         }),
     };
@@ -1173,18 +1258,14 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         "sandbox commit should have Fabro-Run trailer, got:\n{commit_msg}"
     );
 
-    // Assert final.patch exists
-    let final_patch = dir.path().join("final.patch");
-    assert!(final_patch.exists(), "final.patch should exist in run_dir");
-
     env.cleanup().await.unwrap();
 }
 
 // ---------------------------------------------------------------------------
-// Asset collection e2e — Daytona sandbox
+// Artifact collection e2e — Daytona sandbox
 // ---------------------------------------------------------------------------
 
-/// Handler that creates asset files via exec_command on the sandbox.
+/// Handler that creates artifact files via exec_command on the sandbox.
 struct AssetCreatorHandler;
 
 #[async_trait::async_trait]
@@ -1196,7 +1277,7 @@ impl Handler for AssetCreatorHandler {
         _graph: &Graph,
         _run_dir: &Path,
         services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let script = concat!(
             "mkdir -p test-results && ",
             "echo '<testsuites><testsuite name=\"example\"/></testsuites>' > test-results/report.xml && ",
@@ -1206,13 +1287,13 @@ impl Handler for AssetCreatorHandler {
             .sandbox
             .exec_command(script, 30_000, None, None, None)
             .await
-            .map_err(|e| FabroError::handler(format!("exec failed: {e}")))?;
+            .map_err(|e| Error::handler(format!("exec failed: {e}")))?;
         Ok(Outcome::success())
     }
 }
 
-/// Daytona sandbox: asset collection discovers files on the remote sandbox and
-/// downloads them to the local logs directory.
+/// Daytona sandbox: artifact collection discovers files on the remote sandbox
+/// and downloads them to the local logs directory.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_asset_collection() {
     let env = create_env().await;
@@ -1225,12 +1306,12 @@ async fn daytona_asset_collection() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
 
-    let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::default()), env.clone());
+    let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
 
     let mut graph = Graph::new("DaytonaAssetTest");
     graph.attrs.insert(
         "goal".to_string(),
-        AttrValue::String("Test asset collection on Daytona".to_string()),
+        AttrValue::String("Test artifact collection on Daytona".to_string()),
     );
 
     let mut start = Node::new("start");
@@ -1260,22 +1341,25 @@ async fn daytona_asset_collection() {
     graph.edges.push(Edge::new("create_assets", "exit"));
 
     let run_options = RunOptions {
-        settings: FabroSettings {
-            assets: Some(fabro_config::run::AssetsSettings {
-                include: vec!["test-results/**".to_string()],
+        settings:         SettingsLayer {
+            run: Some(RunLayer {
+                artifacts: Some(RunArtifactsLayer {
+                    include: vec!["test-results/**".to_string()],
+                }),
+                ..RunLayer::default()
             }),
-            ..FabroSettings::default()
+            ..SettingsLayer::default()
         },
-        run_dir: dir.path().to_path_buf(),
-        cancel_token: None,
-        run_id: test_run_id("asset-test-daytona"),
-        labels: std::collections::HashMap::new(),
-        workflow_slug: None,
-        github_app: None,
-        base_branch: None,
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     None,
+        run_id:           test_run_id("artifact-test-daytona"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
         display_base_sha: None,
-        host_repo_path: None,
-        git: None,
+        host_repo_path:   None,
+        git:              None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -1283,19 +1367,24 @@ async fn daytona_asset_collection() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let assets_dir = RuntimeState::new(dir.path()).asset_stage_dir("create_assets", 1);
-
-    let report_path = assets_dir.join("test-results/report.xml");
-    assert!(
-        report_path.exists(),
-        "report.xml should be collected from Daytona sandbox at {}",
-        report_path.display()
-    );
-    let content = std::fs::read_to_string(&report_path).unwrap();
+    let content = String::from_utf8(
+        test_artifact_store(dir.path())
+            .get(
+                &run_options.run_id,
+                &StageId::new("create_assets", 1),
+                "test-results/report.xml",
+            )
+            .await
+            .unwrap()
+            .expect("artifact should be stored from Daytona sandbox")
+            .to_vec(),
+    )
+    .unwrap();
     assert!(content.contains("testsuites"));
-
-    let manifest_path = assets_dir.join("manifest.json");
-    assert!(manifest_path.exists(), "manifest.json should exist");
+    assert!(
+        !dir.path().join("cache").join("artifacts").exists(),
+        "artifact scratch cache should not be created"
+    );
 
     env.cleanup().await.unwrap();
 }
@@ -1332,13 +1421,15 @@ async fn daytona_ssh_access_before_init_fails() {
 // ---------------------------------------------------------------------------
 
 /// E2E: Clone the current (private) repo using GitHub App IAT credentials.
-/// Verifies the full flow: JWT signing, installation lookup, token creation, clone.
+/// Verifies the full flow: JWT signing, installation lookup, token creation,
+/// clone.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_clone_private_repo_with_github_app_iat() {
     let creds = load_github_app_credentials();
     let env = create_env_with_github_app(Some(creds)).await;
 
-    // initialize() clones the current repo — with IAT credentials this should succeed
+    // initialize() clones the current repo — with IAT credentials this should
+    // succeed
     env.initialize().await.unwrap();
 
     // Verify the clone worked: CLAUDE.md should exist in the workspace
@@ -1389,12 +1480,14 @@ async fn daytona_clone_private_repo_with_github_app_iat() {
     env.cleanup().await.unwrap();
 }
 
-/// E2E: Verify that repos in an installed org get credentials (needed for pushing).
+/// E2E: Verify that repos in an installed org get credentials (needed for
+/// pushing).
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_clone_public_repo_gets_credentials() {
     let creds = load_github_app_credentials();
 
-    // Directly test resolve_clone_credentials against a repo in an org where the app is installed
+    // Directly test resolve_clone_credentials against a repo in an org where the
+    // app is installed
     let (username, password) = fabro_github::resolve_clone_credentials(
         &creds,
         "fabro-sh",
@@ -1513,9 +1606,9 @@ async fn daytona_git_push_run_branch_to_origin() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
 
-    let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::default()), env.clone());
+    let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
     let run_options = RunOptions {
-        settings: FabroSettings::default(),
+        settings: SettingsLayer::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         run_id,
@@ -1526,8 +1619,8 @@ async fn daytona_git_push_run_branch_to_origin() {
         display_base_sha: None,
         host_repo_path: Some(dir.path().to_path_buf()),
         git: Some(GitCheckpointOptions {
-            base_sha: Some(base_sha),
-            run_branch: Some(branch_name.clone()),
+            base_sha:    Some(base_sha),
+            run_branch:  Some(branch_name.clone()),
             meta_branch: None,
         }),
     };
@@ -1577,7 +1670,8 @@ async fn daytona_git_push_run_branch_to_origin() {
 /// retries. If a call fails, makes raw HTTP requests to capture the actual
 /// underlying error that the SDK normally swallows.
 ///
-/// Run: cargo test -p arc-workflows -- --ignored daytona_toolbox_idle_diagnostic --nocapture
+/// Run: cargo test -p arc-workflows -- --ignored
+/// daytona_toolbox_idle_diagnostic --nocapture
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_toolbox_idle_diagnostic() {
     let creds = load_github_app_credentials();
@@ -1622,7 +1716,7 @@ async fn daytona_toolbox_idle_diagnostic() {
 
                 // Diagnose with raw HTTP calls
                 let api_key = std::env::var("DAYTONA_API_KEY").unwrap_or_default();
-                let client = reqwest::Client::builder()
+                let client = fabro_http::HttpClientBuilder::new()
                     .timeout(std::time::Duration::from_secs(15))
                     .build()
                     .unwrap();
@@ -1710,7 +1804,7 @@ async fn daytona_toolbox_idle_diagnostic() {
 
 /// E2E test for `fabro cp` against a live Daytona sandbox.
 ///
-/// Creates a sandbox, saves a SandboxRecord, reconnects via `cp::reconnect`,
+/// Creates a sandbox, reconnects via `cp::reconnect`,
 /// uploads a file, downloads it back, and verifies the round-trip.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_cp_upload_download_round_trip() {
@@ -1729,25 +1823,18 @@ async fn daytona_cp_upload_download_round_trip() {
 
     // 2. Build a SandboxRecord (same as `fabro run` would persist)
     let record = SandboxRecord {
-        provider: "daytona".to_string(),
-        working_directory: env.working_directory().to_string(),
-        identifier: Some(sandbox_name.clone()),
+        provider:               "daytona".to_string(),
+        working_directory:      env.working_directory().to_string(),
+        identifier:             Some(sandbox_name.clone()),
         host_working_directory: None,
-        container_mount_point: None,
+        container_mount_point:  None,
     };
 
-    // 3. Save to temp dir and reload (verify serialization round-trip)
+    // 3. Reconnect via the real cp::reconnect path
     let tmp = tempfile::tempdir().unwrap();
-    let record_path = tmp.path().join("sandbox.json");
-    record.save(&record_path).unwrap();
-    let loaded = SandboxRecord::load(&record_path).unwrap();
-    assert_eq!(loaded.provider, "daytona");
-    assert_eq!(loaded.identifier.as_deref(), Some(sandbox_name.as_str()));
+    let reconnected = reconnect(&record).await.expect("reconnect should succeed");
 
-    // 4. Reconnect via the real cp::reconnect path
-    let reconnected = reconnect(&loaded).await.expect("reconnect should succeed");
-
-    // 5. Upload: write a local file, then upload it to the sandbox
+    // 4. Upload: write a local file, then upload it to the sandbox
     let upload_content = b"hello from fabro cp e2e test\n";
     let local_upload = tmp.path().join("upload.txt");
     std::fs::write(&local_upload, upload_content).unwrap();
@@ -1757,7 +1844,7 @@ async fn daytona_cp_upload_download_round_trip() {
         .await
         .expect("upload_file_from_local should succeed");
 
-    // 6. Verify the file exists in the sandbox via the original connection
+    // 5. Verify the file exists in the sandbox via the original connection
     assert!(
         env.file_exists("cp_test_upload.txt").await.unwrap(),
         "uploaded file should exist in the sandbox"
@@ -1771,7 +1858,7 @@ async fn daytona_cp_upload_download_round_trip() {
         "expected uploaded content in sandbox, got: {remote_content}"
     );
 
-    // 7. Download: retrieve the file back to local via the reconnected sandbox
+    // 6. Download: retrieve the file back to local via the reconnected sandbox
     let local_download = tmp.path().join("download.txt");
     reconnected
         .download_file_to_local("cp_test_upload.txt", &local_download)
@@ -1781,7 +1868,7 @@ async fn daytona_cp_upload_download_round_trip() {
     let downloaded = std::fs::read(&local_download).unwrap();
     assert_eq!(downloaded, upload_content);
 
-    // 8. Upload a binary file to test non-UTF-8 content
+    // 7. Upload a binary file to test non-UTF-8 content
     let binary_content: Vec<u8> = (0..=255).collect();
     let local_binary = tmp.path().join("binary.bin");
     std::fs::write(&local_binary, &binary_content).unwrap();
@@ -1812,10 +1899,10 @@ async fn daytona_computer_use_browser_screenshot() {
     use base64::Engine;
     let config = DaytonaConfig {
         snapshot: Some(DaytonaSnapshotConfig {
-            name: "daytona-medium".into(),
-            cpu: None,
-            memory: None,
-            disk: None,
+            name:       "daytona-medium".into(),
+            cpu:        None,
+            memory:     None,
+            disk:       None,
             dockerfile: None,
         }),
         skip_clone: true,
@@ -1966,10 +2053,10 @@ async fn daytona_playwright_mcp_sandbox_transport() {
     // Create sandbox from daytona-medium (has Node.js + Chromium)
     let config = DaytonaConfig {
         snapshot: Some(DaytonaSnapshotConfig {
-            name: "daytona-medium".into(),
-            cpu: None,
-            memory: None,
-            disk: None,
+            name:       "daytona-medium".into(),
+            cpu:        None,
+            memory:     None,
+            disk:       None,
             dockerfile: None,
         }),
         skip_clone: true,
@@ -2010,9 +2097,9 @@ async fn daytona_playwright_mcp_sandbox_transport() {
 
     // 2. Start the Playwright MCP server via the sandbox transport resolution path
     let mcp_port = 3100u16;
-    let mcp_config = fabro_mcp::config::McpServerConfig {
-        name: "playwright".into(),
-        transport: fabro_mcp::config::McpTransport::Sandbox {
+    let mcp_config = fabro_mcp::config::McpServerSettings {
+        name:                 "playwright".into(),
+        transport:            fabro_mcp::config::McpTransport::Sandbox {
             command: vec![
                 "npx".into(),
                 "@playwright/mcp@latest".into(),
@@ -2022,14 +2109,15 @@ async fn daytona_playwright_mcp_sandbox_transport() {
                 "--browser".into(),
                 "chromium".into(),
             ],
-            port: mcp_port,
-            env: std::collections::HashMap::new(),
+            port:    mcp_port,
+            env:     std::collections::HashMap::new(),
         },
         startup_timeout_secs: 30,
-        tool_timeout_secs: 120,
+        tool_timeout_secs:    120,
     };
 
-    // Resolve the sandbox transport: start the server, get preview URL, rewrite to HTTP
+    // Resolve the sandbox transport: start the server, get preview URL, rewrite to
+    // HTTP
     let resolved = match &mcp_config.transport {
         fabro_mcp::config::McpTransport::Sandbox { command, port, .. } => {
             let (url, headers) = {
@@ -2077,11 +2165,11 @@ async fn daytona_playwright_mcp_sandbox_transport() {
             };
             eprintln!("Preview URL: {url}");
 
-            fabro_mcp::config::McpServerConfig {
-                name: mcp_config.name.clone(),
-                transport: fabro_mcp::config::McpTransport::Http { url, headers },
+            fabro_mcp::config::McpServerSettings {
+                name:                 mcp_config.name.clone(),
+                transport:            fabro_mcp::config::McpTransport::Http { url, headers },
                 startup_timeout_secs: mcp_config.startup_timeout_secs,
-                tool_timeout_secs: mcp_config.tool_timeout_secs,
+                tool_timeout_secs:    mcp_config.tool_timeout_secs,
             }
         }
         _ => unreachable!(),

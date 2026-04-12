@@ -1,40 +1,5 @@
-import { redirect } from "react-router";
 import { AuthLayout } from "../components/auth-layout";
-import { getAppConfig } from "../lib/config.server";
-import { getGitHubOAuth, generateState } from "../lib/github.server";
-import type { Route } from "./+types/auth-login";
-
-export function loader() {
-  const { provider } = getAppConfig().web.auth;
-  return { provider };
-}
-
-export function action({ request }: Route.ActionArgs) {
-  const github = getGitHubOAuth();
-  const state = generateState();
-  const authUrl = github.createAuthorizationURL(state, ["read:user", "user:email"]);
-
-  return redirect(authUrl.toString(), {
-    headers: {
-      "Set-Cookie": `fabro_oauth_state=${state}; HttpOnly; Path=/; Max-Age=600; SameSite=Lax`,
-    },
-  });
-}
-
-export default function AuthLogin({ loaderData }: Route.ComponentProps) {
-  if (loaderData.provider === "tailscale") {
-    return (
-      <AuthLayout>
-        <h1 className="text-center text-lg font-semibold text-fg">
-          Access via Tailscale
-        </h1>
-        <p className="mt-2 text-center text-sm text-fg-3">
-          This app is protected by Tailscale. Make sure you are connected to your Tailscale network and your account is authorized.
-        </p>
-      </AuthLayout>
-    );
-  }
-
+export default function AuthLogin() {
   return (
     <AuthLayout>
       <h1 className="text-center text-lg font-semibold text-fg">
@@ -43,15 +8,15 @@ export default function AuthLogin({ loaderData }: Route.ComponentProps) {
       <p className="mt-2 text-center text-sm text-fg-3">
         Authenticate with your GitHub account to continue.
       </p>
-      <form method="POST" className="mt-6">
-        <button
-          type="submit"
+      <div className="mt-6">
+        <a
+          href="/auth/login/github"
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-teal-500 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-300"
         >
           <GitHubMark />
           Sign in with GitHub
-        </button>
-      </form>
+        </a>
+      </div>
     </AuthLayout>
   );
 }

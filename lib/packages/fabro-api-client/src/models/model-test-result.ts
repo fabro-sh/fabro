@@ -15,7 +15,7 @@
 
 
 /**
- * Result of testing a model with a simple prompt.
+ * Result of testing a model in `basic` or `deep` mode.
  */
 export interface ModelTestResult {
     /**
@@ -34,7 +34,7 @@ export interface ModelTestResult {
 
 export const ModelTestResultStatusEnum = {
     OK: 'ok',
-    ERROR: 'error',
+    ERROR: 'error'
 } as const;
 
 export type ModelTestResultStatusEnum = typeof ModelTestResultStatusEnum[keyof typeof ModelTestResultStatusEnum];

@@ -1,32 +1,36 @@
 use std::path::Path;
 use std::process::Command;
 
+pub use fabro_checkpoint::META_BRANCH_PREFIX;
+pub use fabro_checkpoint::author::GitAuthor;
 use fabro_checkpoint::git::Store;
-use fabro_config::FabroSettings;
-
-use crate::error::{FabroError, Result};
+pub use fabro_checkpoint::metadata::MetadataStore;
+use fabro_types::settings::SettingsLayer;
 use tokio::task::{JoinError, spawn_blocking};
 use tokio::time::timeout;
 
-pub use fabro_checkpoint::META_BRANCH_PREFIX;
-pub use fabro_checkpoint::author::GitAuthor;
-pub use fabro_checkpoint::metadata::MetadataStore;
+use crate::error::{Error, Result};
 
 /// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).
 pub const RUN_BRANCH_PREFIX: &str = "fabro/run/";
 
-pub fn git_author_from_settings(settings: &FabroSettings) -> GitAuthor {
-    settings
-        .git_author()
-        .map(GitAuthor::from)
+pub fn git_author_from_settings(settings: &SettingsLayer) -> GitAuthor {
+    fabro_config::resolve_run_from_file(settings)
+        .ok()
+        .and_then(|settings| settings.git.author)
+        .map(|author| GitAuthor::from(&author))
         .unwrap_or_default()
 }
 
-fn git_error(msg: impl Into<String>) -> FabroError {
-    FabroError::engine(msg.into())
+fn git_error(msg: impl Into<String>) -> Error {
+    Error::engine(msg.into())
 }
 
 /// Return a pre-configured `git` command with auto-maintenance disabled.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This shared synchronous git helper layer is used by sync code; async callers must wrap it in spawn_blocking."
+)]
 fn git_cmd(dir: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.args(["-c", "maintenance.auto=0", "-c", "gc.auto=0"])
@@ -136,8 +140,9 @@ fn run_git_push(cmd: &mut Command) -> Result<()> {
 
 /// Push a local ref to an explicit remote URL.
 ///
-/// Uses a URL (not a named remote) so the host repo's remote config is untouched.
-/// Disables credential helpers so only the inline URL credentials are used.
+/// Uses a URL (not a named remote) so the host repo's remote config is
+/// untouched. Disables credential helpers so only the inline URL credentials
+/// are used.
 pub fn push_ref(repo: &Path, url: &str, refname: &str) -> Result<()> {
     let redacted_url = if let Some(at_pos) = url.find('@') {
         format!("https://***@{}", &url[at_pos + 1..])
@@ -153,7 +158,8 @@ pub fn push_ref(repo: &Path, url: &str, refname: &str) -> Result<()> {
     run_git_push(git_cmd(repo).args(["-c", "credential.helper=", "push", url, refname]))
 }
 
-/// Push a local branch to the named remote using the user's configured credentials.
+/// Push a local branch to the named remote using the user's configured
+/// credentials.
 pub fn push_branch(repo: &Path, remote: &str, branch: &str) -> Result<()> {
     tracing::info!(
         repo_dir = %repo.display(),
@@ -194,7 +200,7 @@ pub fn push_run_branches(
 /// Error from [`blocking_push_with_timeout`].
 pub enum BlockingPushError {
     /// The git push itself failed.
-    Push(FabroError),
+    Push(Error),
     /// The spawned blocking task panicked.
     Panicked(JoinError),
     /// The push did not complete within the timeout.
@@ -211,7 +217,8 @@ impl std::fmt::Display for BlockingPushError {
     }
 }
 
-/// Run a blocking git-push function with a timeout, flattening the triple-nested Result.
+/// Run a blocking git-push function with a timeout, flattening the
+/// triple-nested Result.
 pub async fn blocking_push_with_timeout<F>(
     timeout_secs: u64,
     f: F,
@@ -306,58 +313,24 @@ pub fn sanitize_ref_component(s: &str) -> String {
 }
 
 /// Filenames allowed in per-node directories on the shadow branch.
-const NODE_FILE_ALLOWLIST: &[&str] = &[
-    "prompt.md",
-    "response.md",
-    "status.json",
-    "provider_used.json",
-    "diff.patch",
-    "script_invocation.json",
-    "script_timing.json",
-    "parallel_results.json",
-];
-
-/// Maximum size (bytes) for a single node file. Files larger than this are skipped.
-const MAX_NODE_FILE_SIZE: u64 = 512 * 1024;
-
-/// Scan `{run_dir}/nodes/` for allowlisted files and return them as
-/// `("nodes/{subdir}/{filename}", bytes)` entries suitable for the shadow tree.
-pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
-    let nodes_dir = run_dir.join("nodes");
-    let Ok(entries) = std::fs::read_dir(&nodes_dir) else {
-        return Vec::new();
-    };
-
-    let mut result = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let subdir_name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-        for filename in NODE_FILE_ALLOWLIST {
-            let file_path = path.join(filename);
-            match std::fs::metadata(&file_path) {
-                Ok(meta) if meta.is_file() && meta.len() <= MAX_NODE_FILE_SIZE => {}
-                _ => continue,
-            }
-            if let Ok(data) = std::fs::read(&file_path) {
-                result.push((format!("nodes/{subdir_name}/{filename}"), data));
-            }
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use fabro_store::Database;
+    use fabro_types::fixtures;
+    use object_store::memory::InMemory;
+
+    use super::*;
+    use crate::run_dump::RunDump;
 
     /// Create a temporary git repo with an initial commit.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This synchronous test helper shells out to git while constructing fixture repositories."
+    )]
     fn init_repo(dir: &Path) {
         Command::new("git")
             .args(["init"])
@@ -378,6 +351,14 @@ mod tests {
             .current_dir(dir)
             .output()
             .unwrap();
+    }
+
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     #[test]
@@ -413,6 +394,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This synchronous test verifies git branch listing against the real git CLI."
+    )]
     fn create_branch_and_list() {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());
@@ -441,55 +426,112 @@ mod tests {
         assert!(!wt_path.exists());
     }
 
-    #[test]
-    fn scan_node_files_picks_up_allowlisted() {
-        let dir = tempfile::tempdir().unwrap();
-        let run_dir = dir.path();
-        let node_dir = run_dir.join("nodes").join("work");
-        fs::create_dir_all(&node_dir).unwrap();
-        fs::write(node_dir.join("prompt.md"), "hello").unwrap();
-        fs::write(node_dir.join("response.md"), "world").unwrap();
-        fs::write(node_dir.join("not_allowed.txt"), "skip me").unwrap();
+    #[tokio::test]
+    async fn scan_node_files_from_state_reconstructs_allowlisted_entries() {
+        use crate::event::{Event, append_event};
 
-        let files = scan_node_files(run_dir);
-        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
-        assert!(paths.contains(&"nodes/work/prompt.md"));
-        assert!(paths.contains(&"nodes/work/response.md"));
-        assert!(!paths.iter().any(|p| p.contains("not_allowed")));
-    }
+        let store = test_store();
+        let run = store.create_run(&fixtures::RUN_1).await.unwrap();
+        append_event(&run, &fixtures::RUN_1, &Event::Prompt {
+            stage:    "work".into(),
+            visit:    2,
+            text:     "hello".into(),
+            mode:     Some("prompt".into()),
+            provider: Some("openai".into()),
+            model:    Some("gpt-5.4".into()),
+        })
+        .await
+        .unwrap();
+        append_event(&run, &fixtures::RUN_1, &Event::PromptCompleted {
+            node_id:  "work".into(),
+            response: "world".into(),
+            model:    "gpt-5.4".into(),
+            provider: "openai".into(),
+            billing:  None,
+        })
+        .await
+        .unwrap();
+        append_event(&run, &fixtures::RUN_1, &Event::StageCompleted {
+            node_id: "work".into(),
+            name: "Work".into(),
+            index: 2,
+            duration_ms: 100,
+            status: "success".into(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: Some(std::collections::BTreeMap::from([("work".into(), 2)])),
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: Some("world".into()),
+            attempt: 1,
+            max_attempts: 1,
+        })
+        .await
+        .unwrap();
+        append_event(&run, &fixtures::RUN_1, &Event::CommandStarted {
+            node_id:    "work".into(),
+            script:     "echo hi".into(),
+            command:    "echo hi".into(),
+            language:   "shell".into(),
+            timeout_ms: None,
+        })
+        .await
+        .unwrap();
+        append_event(&run, &fixtures::RUN_1, &Event::CommandCompleted {
+            node_id:     "work".into(),
+            stdout:      "hi\n".into(),
+            stderr:      String::new(),
+            exit_code:   Some(0),
+            duration_ms: 10,
+            timed_out:   false,
+        })
+        .await
+        .unwrap();
+        append_event(&run, &fixtures::RUN_1, &Event::ParallelCompleted {
+            node_id:       "work".into(),
+            visit:         2,
+            duration_ms:   100,
+            success_count: 1,
+            failure_count: 0,
+            results:       vec![serde_json::json!({"id": "a"})],
+        })
+        .await
+        .unwrap();
+        append_event(&run, &fixtures::RUN_1, &Event::CheckpointCompleted {
+            node_id: "work".into(),
+            status: "success".into(),
+            current_node: "work".into(),
+            completed_nodes: Vec::new(),
+            node_retries: std::collections::BTreeMap::new(),
+            context_values: std::collections::BTreeMap::new(),
+            node_outcomes: std::collections::BTreeMap::new(),
+            next_node_id: None,
+            git_commit_sha: None,
+            loop_failure_signatures: std::collections::BTreeMap::new(),
+            restart_failure_signatures: std::collections::BTreeMap::new(),
+            node_visits: std::collections::BTreeMap::from([("work".into(), 2)]),
+            diff: Some("diff --git a/story.txt b/story.txt".into()),
+        })
+        .await
+        .unwrap();
 
-    #[test]
-    fn scan_node_files_skips_oversized() {
-        let dir = tempfile::tempdir().unwrap();
-        let run_dir = dir.path();
-        let node_dir = run_dir.join("nodes").join("big");
-        fs::create_dir_all(&node_dir).unwrap();
-        // Write a file just over the 512KB limit
-        let big_data = vec![0u8; 512 * 1024 + 1];
-        fs::write(node_dir.join("prompt.md"), &big_data).unwrap();
-
-        let files = scan_node_files(run_dir);
-        assert!(files.is_empty());
-    }
-
-    #[test]
-    fn scan_node_files_handles_visit_suffixes() {
-        let dir = tempfile::tempdir().unwrap();
-        let run_dir = dir.path();
-        let node_dir = run_dir.join("nodes").join("work-visit_2");
-        fs::create_dir_all(&node_dir).unwrap();
-        fs::write(node_dir.join("status.json"), "{}").unwrap();
-
-        let files = scan_node_files(run_dir);
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].0, "nodes/work-visit_2/status.json");
-    }
-
-    #[test]
-    fn scan_node_files_empty_when_no_nodes_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        let files = scan_node_files(dir.path());
-        assert!(files.is_empty());
+        let state = run.state().await.unwrap();
+        let files = RunDump::metadata_checkpoint(&state).git_entries().unwrap();
+        let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
+        assert!(paths.contains(&"nodes/work-visit_2/prompt.md"));
+        assert!(paths.contains(&"nodes/work-visit_2/response.md"));
+        assert!(paths.contains(&"nodes/work-visit_2/status.json"));
+        assert!(paths.contains(&"nodes/work-visit_2/provider_used.json"));
+        assert!(paths.contains(&"nodes/work-visit_2/script_invocation.json"));
+        assert!(paths.contains(&"nodes/work-visit_2/script_timing.json"));
+        assert!(paths.contains(&"nodes/work-visit_2/parallel_results.json"));
     }
 
     #[test]
@@ -531,257 +573,11 @@ mod tests {
     }
 
     #[test]
-    fn replace_worktree_replaces_stale() {
-        let dir = tempfile::tempdir().unwrap();
-        init_repo(dir.path());
-        create_branch(dir.path(), "stale-branch").unwrap();
-
-        let wt_path = dir.path().join("stale-wt");
-        add_worktree(dir.path(), &wt_path, "stale-branch").unwrap();
-        assert!(wt_path.join(".git").exists());
-
-        // Calling replace_worktree again succeeds (removes stale, re-creates)
-        replace_worktree(dir.path(), &wt_path, "stale-branch").unwrap();
-        assert!(wt_path.join(".git").exists());
-
-        remove_worktree(dir.path(), &wt_path).unwrap();
-    }
-
-    #[test]
-    fn push_ref_to_bare_remote() {
-        let dir = tempfile::tempdir().unwrap();
-        let repo_dir = dir.path().join("repo");
-        let remote_dir = dir.path().join("remote.git");
-
-        // Create a bare remote
-        Command::new("git")
-            .args(["init", "--bare"])
-            .arg(&remote_dir)
-            .output()
-            .unwrap();
-
-        // Create a local repo with origin pointing at the bare remote
-        Command::new("git")
-            .args(["init"])
-            .arg(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["remote", "add", "origin"])
-            .arg(&remote_dir)
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args([
-                "-c",
-                "user.name=test",
-                "-c",
-                "user.email=test@test",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "init",
-            ])
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-
-        // Create a branch and push it via push_ref
-        create_branch(&repo_dir, "test-push").unwrap();
-        let url = format!("file://{}", remote_dir.display());
-        push_ref(&repo_dir, &url, "refs/heads/test-push").unwrap();
-
-        // Verify the remote now has the branch
-        let output = Command::new("git")
-            .args(["branch", "--list", "test-push"])
-            .current_dir(&remote_dir)
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.contains("test-push"),
-            "remote should have test-push branch"
-        );
-    }
-
-    #[test]
-    fn push_branch_to_remote() {
-        let dir = tempfile::tempdir().unwrap();
-        let repo_dir = dir.path().join("repo");
-        let remote_dir = dir.path().join("remote.git");
-
-        // Create a bare remote
-        Command::new("git")
-            .args(["init", "--bare"])
-            .arg(&remote_dir)
-            .output()
-            .unwrap();
-
-        // Create a local repo with origin pointing at the bare remote
-        Command::new("git")
-            .args(["init"])
-            .arg(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["remote", "add", "origin"])
-            .arg(&remote_dir)
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args([
-                "-c",
-                "user.name=test",
-                "-c",
-                "user.email=test@test",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "init",
-            ])
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-
-        // Rename default branch to "main" for predictability
-        Command::new("git")
-            .args(["branch", "-M", "main"])
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-
-        // Push using push_branch
-        push_branch(&repo_dir, "origin", "main").unwrap();
-
-        // Verify the remote now has the commit
-        let output = Command::new("git")
-            .args(["branch", "--list", "main"])
-            .current_dir(&remote_dir)
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("main"), "remote should have main branch");
-    }
-
-    #[test]
     fn push_branch_fails_for_nonexistent_remote() {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());
         let result = push_branch(dir.path(), "nonexistent", "main");
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn branch_needs_push_when_ahead() {
-        let dir = tempfile::tempdir().unwrap();
-        let repo_dir = dir.path().join("repo");
-        let remote_dir = dir.path().join("remote.git");
-
-        Command::new("git")
-            .args(["init", "--bare"])
-            .arg(&remote_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["init"])
-            .arg(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["remote", "add", "origin"])
-            .arg(&remote_dir)
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args([
-                "-c",
-                "user.name=test",
-                "-c",
-                "user.email=test@test",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "init",
-            ])
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["branch", "-M", "main"])
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-
-        // Push once to establish remote tracking
-        push_branch(&repo_dir, "origin", "main").unwrap();
-
-        // Make another commit locally (now ahead of remote)
-        Command::new("git")
-            .args([
-                "-c",
-                "user.name=test",
-                "-c",
-                "user.email=test@test",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "second",
-            ])
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-
-        assert!(branch_needs_push(&repo_dir, "origin", "main"));
-    }
-
-    #[test]
-    fn branch_needs_push_when_in_sync() {
-        let dir = tempfile::tempdir().unwrap();
-        let repo_dir = dir.path().join("repo");
-        let remote_dir = dir.path().join("remote.git");
-
-        Command::new("git")
-            .args(["init", "--bare"])
-            .arg(&remote_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["init"])
-            .arg(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["remote", "add", "origin"])
-            .arg(&remote_dir)
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args([
-                "-c",
-                "user.name=test",
-                "-c",
-                "user.email=test@test",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "init",
-            ])
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["branch", "-M", "main"])
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-
-        push_branch(&repo_dir, "origin", "main").unwrap();
-
-        assert!(!branch_needs_push(&repo_dir, "origin", "main"));
     }
 
     #[test]

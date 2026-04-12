@@ -73,9 +73,11 @@ fn resolve_variable(expr: &str, ctx: &VariableContext) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use fabro_util::env::{SystemEnv, TestEnv};
     use std::collections::HashMap;
+
+    use fabro_util::env::{SystemEnv, TestEnv};
+
+    use super::*;
 
     fn test_ctx() -> VariableContext<'static> {
         // Tests that don't exercise localEnv don't care about the env impl.

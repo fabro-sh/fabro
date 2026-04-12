@@ -1,17 +1,13 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-use fabro_store::NodeVisitRef;
-
-use crate::context::Context;
-use crate::context::keys;
-use crate::error::FabroError;
-use crate::outcome::{Outcome, OutcomeExt};
-use crate::run_dir::{node_dir, visit_from_context};
 use fabro_graphviz::graph::{Graph, Node};
-use tokio::fs;
 
 use super::{EngineServices, Handler};
+use crate::context::{Context, keys};
+use crate::error::Error;
+use crate::event::{Event, StageScope};
+use crate::outcome::{Outcome, OutcomeExt};
 
 fn timeout_ms(node: &Node) -> Option<u64> {
     node.timeout()
@@ -38,7 +34,7 @@ impl Handler for CommandHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let script = node
             .attrs
             .get("script")
@@ -62,9 +58,9 @@ impl Handler for CommandHandler {
         node: &Node,
         context: &Context,
         _graph: &Graph,
-        run_dir: &Path,
+        _run_dir: &Path,
         services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let script = node
             .attrs
             .get("script")
@@ -88,30 +84,22 @@ impl Handler for CommandHandler {
             )));
         }
 
-        let visit = visit_from_context(context);
-        let stage_dir = node_dir(run_dir, &node.id, visit);
-        fs::create_dir_all(&stage_dir).await?;
-        let node_ref = NodeVisitRef {
-            node_id: &node.id,
-            visit: u32::try_from(visit).unwrap_or(u32::MAX),
-        };
-
-        let invocation = serde_json::json!({
-            "command": script,
-            "language": language,
-            "timeout_ms": timeout_ms(node),
-        });
-        fs::write(
-            stage_dir.join("script_invocation.json"),
-            serde_json::to_string_pretty(&invocation).unwrap(),
-        )
-        .await?;
-
         let command = if language == "python" {
             format!("python3 -c {}", shell_quote(script))
         } else {
             script.to_string()
         };
+        let stage_scope = StageScope::for_handler(context, &node.id);
+        services.emitter.emit_scoped(
+            &Event::CommandStarted {
+                node_id:    node.id.clone(),
+                script:     script.to_string(),
+                command:    command.clone(),
+                language:   language.to_string(),
+                timeout_ms: timeout_ms(node),
+            },
+            &stage_scope,
+        );
 
         let timeout_ms = node
             .timeout()
@@ -121,40 +109,31 @@ impl Handler for CommandHandler {
         } else {
             Some(&services.env)
         };
+        let cancel_token = services.sandbox_cancel_token();
 
         let result = services
             .sandbox
-            .exec_command(&command, timeout_ms, None, env_vars, None)
-            .await
-            .map_err(|e| FabroError::handler(format!("Failed to spawn script: {e}")))?;
-
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_stdout(&node_ref, &result.stdout)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-            store
-                .put_node_stderr(&node_ref, &result.stderr)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        } else {
-            fs::write(stage_dir.join("stdout.log"), &result.stdout).await?;
-            fs::write(stage_dir.join("stderr.log"), &result.stderr).await?;
+            .exec_command(&command, timeout_ms, None, env_vars, cancel_token.clone())
+            .await;
+        if let Some(token) = cancel_token {
+            token.cancel();
         }
+        let result = result.map_err(|e| Error::handler(format!("Failed to spawn script: {e}")))?;
 
-        let timing = serde_json::json!({
-            "duration_ms": result.duration_ms,
-            "exit_code": if result.timed_out { serde_json::Value::Null } else { serde_json::json!(result.exit_code) },
-            "timed_out": result.timed_out,
-        });
-        fs::write(
-            stage_dir.join("script_timing.json"),
-            serde_json::to_string_pretty(&timing).unwrap(),
-        )
-        .await?;
+        services.emitter.emit_scoped(
+            &Event::CommandCompleted {
+                node_id:     node.id.clone(),
+                stdout:      result.stdout.clone(),
+                stderr:      result.stderr.clone(),
+                exit_code:   (!result.timed_out).then_some(result.exit_code),
+                duration_ms: result.duration_ms,
+                timed_out:   result.timed_out,
+            },
+            &stage_scope,
+        );
 
         if result.timed_out {
-            return Err(FabroError::handler(format!(
+            return Err(Error::handler(format!(
                 "Script timed out after {timeout_ms}ms: {script}",
             )));
         }
@@ -197,13 +176,45 @@ impl Handler for CommandHandler {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::time::Duration;
+
+    use fabro_graphviz::graph::AttrValue;
+    use fabro_store::{Database, RunDatabase, StageId};
+    use fabro_types::fixtures;
+    use object_store::memory::InMemory;
+
     use super::*;
     use crate::outcome::StageStatus;
-    use fabro_graphviz::graph::AttrValue;
-    use std::time::Duration;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
+    }
+
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
+    }
+
+    async fn make_services_with_run_store() -> (
+        EngineServices,
+        RunDatabase,
+        crate::event::StoreProgressLogger,
+    ) {
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let services = EngineServices {
+            emitter: Arc::new(crate::event::Emitter::new(fixtures::RUN_1)),
+            run_store: run_store.clone().into(),
+            ..EngineServices::test_default()
+        };
+        let logger = crate::event::StoreProgressLogger::new(run_store.clone());
+        logger.register(services.emitter.as_ref());
+        (services, run_store, logger)
     }
 
     #[tokio::test]
@@ -359,19 +370,17 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let invocation_path = run_dir
-            .path()
-            .join("nodes")
-            .join("script_node")
-            .join("script_invocation.json");
-        let content = std::fs::read_to_string(&invocation_path).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let json = node_state.script_invocation.as_ref().unwrap();
         assert_eq!(json["command"], "echo hello");
         assert_eq!(json["language"], "shell");
         assert_eq!(json["timeout_ms"], serde_json::Value::Null);
@@ -392,19 +401,17 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let invocation_path = run_dir
-            .path()
-            .join("nodes")
-            .join("script_node")
-            .join("script_invocation.json");
-        let content = std::fs::read_to_string(&invocation_path).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let json = node_state.script_invocation.as_ref().unwrap();
         assert_eq!(json["command"], "echo hello");
         assert_eq!(json["language"], "shell");
         assert_eq!(json["timeout_ms"], 5000);
@@ -421,16 +428,19 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let stage_dir = run_dir.path().join("nodes").join("script_node");
-        let stdout = std::fs::read_to_string(stage_dir.join("stdout.log")).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let stdout = node_state.stdout.as_deref().unwrap();
         assert_eq!(stdout.trim(), "hello");
-        let stderr = std::fs::read_to_string(stage_dir.join("stderr.log")).unwrap();
+        let stderr = node_state.stderr.as_deref().unwrap();
         assert_eq!(stderr, "");
     }
 
@@ -445,14 +455,17 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let stage_dir = run_dir.path().join("nodes").join("script_node");
-        let stderr = std::fs::read_to_string(stage_dir.join("stderr.log")).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let stderr = node_state.stderr.as_deref().unwrap();
         assert_eq!(stderr.trim(), "oops");
     }
 
@@ -467,19 +480,17 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let timing_path = run_dir
-            .path()
-            .join("nodes")
-            .join("script_node")
-            .join("script_timing.json");
-        let content = std::fs::read_to_string(&timing_path).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let json = node_state.script_timing.as_ref().unwrap();
         assert!(json["duration_ms"].is_u64());
         assert_eq!(json["exit_code"], 0);
         assert_eq!(json["timed_out"], false);
@@ -494,19 +505,17 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let timing_path = run_dir
-            .path()
-            .join("nodes")
-            .join("script_node")
-            .join("script_timing.json");
-        let content = std::fs::read_to_string(&timing_path).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let json = node_state.script_timing.as_ref().unwrap();
         assert_eq!(json["exit_code"], 1);
         assert_eq!(json["timed_out"], false);
     }
@@ -526,22 +535,49 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         let _err = handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap_err();
+        logger.flush().await;
 
-        let timing_path = run_dir
-            .path()
-            .join("nodes")
-            .join("script_node")
-            .join("script_timing.json");
-        let content = std::fs::read_to_string(&timing_path).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let json = node_state.script_timing.as_ref().unwrap();
         assert!(json["duration_ms"].is_u64());
         assert_eq!(json["exit_code"], serde_json::Value::Null);
         assert_eq!(json["timed_out"], true);
+    }
+
+    #[tokio::test]
+    async fn stores_script_invocation_and_timing_in_run_store() {
+        let handler = CommandHandler;
+        let mut node = Node::new("script_node");
+        node.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("echo hello".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
+
+        handler
+            .execute(&node, &context, &graph, run_dir.path(), &services)
+            .await
+            .unwrap();
+        logger.flush().await;
+
+        let snapshot = run_store.state().await.unwrap();
+        let node = snapshot
+            .node(&StageId::new("script_node", 1))
+            .cloned()
+            .unwrap();
+
+        assert_eq!(node.script_invocation.unwrap()["script"], "echo hello");
+        assert_eq!(node.script_timing.unwrap()["exit_code"], 0);
     }
 
     #[tokio::test]
@@ -676,9 +712,10 @@ mod tests {
     /// proving that `CommandHandler` delegates to the sandbox rather than
     /// spawning a host process.
     struct SpySandbox {
-        exec_result: fabro_agent::sandbox::ExecResult,
-        captured_command: std::sync::Mutex<Option<String>>,
-        captured_env_vars: std::sync::Mutex<Option<std::collections::HashMap<String, String>>>,
+        exec_result:           fabro_agent::sandbox::ExecResult,
+        captured_command:      std::sync::Mutex<Option<String>>,
+        captured_env_vars:     std::sync::Mutex<Option<std::collections::HashMap<String, String>>>,
+        captured_cancel_token: std::sync::Mutex<Option<bool>>,
     }
 
     impl SpySandbox {
@@ -687,6 +724,7 @@ mod tests {
                 exec_result,
                 captured_command: std::sync::Mutex::new(None),
                 captured_env_vars: std::sync::Mutex::new(None),
+                captured_cancel_token: std::sync::Mutex::new(None),
             }
         }
 
@@ -727,10 +765,11 @@ mod tests {
             _timeout_ms: u64,
             _working_dir: Option<&str>,
             env_vars: Option<&std::collections::HashMap<String, String>>,
-            _cancel_token: Option<tokio_util::sync::CancellationToken>,
+            cancel_token: Option<tokio_util::sync::CancellationToken>,
         ) -> Result<fabro_agent::sandbox::ExecResult, String> {
             *self.captured_command.lock().unwrap() = Some(command.to_string());
             *self.captured_env_vars.lock().unwrap() = env_vars.cloned();
+            *self.captured_cancel_token.lock().unwrap() = Some(cancel_token.is_some());
             Ok(self.exec_result.clone())
         }
         async fn grep(
@@ -776,10 +815,10 @@ mod tests {
     #[tokio::test]
     async fn executes_script_via_sandbox() {
         let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
-            stdout: "SANDBOX_MARKER\n".into(),
-            stderr: String::new(),
-            exit_code: 0,
-            timed_out: false,
+            stdout:      "SANDBOX_MARKER\n".into(),
+            stderr:      String::new(),
+            exit_code:   0,
+            timed_out:   false,
             duration_ms: 5,
         }));
 
@@ -821,10 +860,10 @@ mod tests {
     #[tokio::test]
     async fn executes_python_script_via_sandbox() {
         let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
-            stdout: "PYTHON_SANDBOX\n".into(),
-            stderr: String::new(),
-            exit_code: 0,
-            timed_out: false,
+            stdout:      "PYTHON_SANDBOX\n".into(),
+            stderr:      String::new(),
+            exit_code:   0,
+            timed_out:   false,
             duration_ms: 5,
         }));
 
@@ -864,10 +903,10 @@ mod tests {
     #[tokio::test]
     async fn passes_env_vars_to_sandbox() {
         let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
-            stdout: String::new(),
-            stderr: String::new(),
-            exit_code: 0,
-            timed_out: false,
+            stdout:      String::new(),
+            stderr:      String::new(),
+            exit_code:   0,
+            timed_out:   false,
             duration_ms: 5,
         }));
 
@@ -894,6 +933,35 @@ mod tests {
             captured_env.get("MY_VAR").map(String::as_str),
             Some("my_value")
         );
+    }
+
+    #[tokio::test]
+    async fn passes_run_cancellation_to_sandbox() {
+        let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
+            stdout:      String::new(),
+            stderr:      String::new(),
+            exit_code:   0,
+            timed_out:   false,
+            duration_ms: 5,
+        }));
+
+        let handler = CommandHandler;
+        let mut node = Node::new("script_node");
+        node.attrs
+            .insert("script".to_string(), AttrValue::String("true".to_string()));
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let run_dir = tempfile::tempdir().unwrap();
+
+        let mut services = make_spy_services(spy.clone());
+        services.cancel_requested = Some(Arc::new(AtomicBool::new(false)));
+
+        handler
+            .execute(&node, &context, &graph, run_dir.path(), &services)
+            .await
+            .unwrap();
+
+        assert_eq!(*spy.captured_cancel_token.lock().unwrap(), Some(true));
     }
 
     #[tokio::test]
@@ -963,7 +1031,7 @@ mod tests {
         //
         // Pragmatic approach: verify the error construction matches what the
         // handler produces. The timeout test covers the other Err path.
-        let err = FabroError::handler(format!("Failed to spawn script: {}", "No such file"));
+        let err = Error::handler(format!("Failed to spawn script: {}", "No such file"));
         assert!(err.to_string().contains("Failed to spawn script"));
     }
 

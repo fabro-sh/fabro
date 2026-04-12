@@ -1,104 +1,100 @@
 pub(crate) mod artifact;
 pub(crate) mod auto_status;
 pub(crate) mod circuit_breaker;
-pub(crate) mod disk;
 pub(crate) mod event;
 pub(crate) mod fidelity;
 pub(crate) mod git;
 pub(crate) mod hook;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fabro_store::RunStore;
-use fabro_store::RuntimeState;
-use fabro_types::RunId;
-
 use fabro_core::error::Result as CoreResult;
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{
     AttemptContext, AttemptResultContext, EdgeContext, EdgeDecision, NodeDecision, RunLifecycle,
 };
 use fabro_core::outcome::NodeResult;
-use fabro_core::state::RunState;
-
-use crate::artifact::ArtifactStore;
-use crate::context;
-use crate::error::{FailureSignature, FailureSignatureExt};
-use crate::event::EventEmitter;
-use crate::graph::WorkflowGraph;
-use crate::graph::WorkflowNode;
-use crate::outcome::{Outcome, StageUsage};
-use crate::run_options::RunOptions;
+use fabro_core::state::ExecutionState;
 use fabro_graphviz::graph::types::Graph as GvGraph;
 use fabro_hooks::HookRunner;
 use fabro_sandbox::Sandbox;
+use fabro_types::RunId;
 
 use self::artifact::ArtifactLifecycle;
 use self::auto_status::AutoStatusLifecycle;
 use self::circuit_breaker::CircuitBreakerLifecycle;
-use self::disk::DiskLifecycle;
 use self::event::EventLifecycle;
 use self::fidelity::FidelityLifecycle;
 use self::git::{GitCheckpointResult, GitLifecycle};
 use self::hook::HookLifecycle;
-use crate::outcome::OutcomeExt;
+use crate::artifact_upload::ArtifactSink;
+use crate::context;
+use crate::error::{FailureSignature, FailureSignatureExt};
+use crate::event::Emitter;
+use crate::graph::{WorkflowGraph, WorkflowNode};
+use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt};
+use crate::run_control::RunControlState;
+use crate::run_options::RunOptions;
+use crate::runtime_store::RunStoreHandle;
 
-type WfRunState = RunState<Option<StageUsage>>;
-type WfNodeResult = NodeResult<Option<StageUsage>>;
-type WfNodeDecision = NodeDecision<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<BilledModelUsage>>;
+type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
+type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 
 /// Orchestrates all sub-lifecycles with explicit per-callback ordering.
 /// Implements `RunLifecycle<WorkflowGraph>` by delegating to focused structs.
 pub(crate) struct WorkflowLifecycle {
-    event: EventLifecycle,
-    hook: HookLifecycle,
-    fidelity: FidelityLifecycle,
-    auto_status: AutoStatusLifecycle,
-    circuit_breaker: Arc<CircuitBreakerLifecycle>,
-    disk: DiskLifecycle,
-    git: GitLifecycle,
-    artifact: ArtifactLifecycle,
-    on_node: crate::OnNodeCallback,
-    /// Set in on_edge_selected when loop_restart approved; read+cleared by EventLifecycle::on_run_start
-    restarted_from: Arc<Mutex<Option<(String, String)>>>,
+    event:                 EventLifecycle,
+    hook:                  HookLifecycle,
+    fidelity:              FidelityLifecycle,
+    auto_status:           AutoStatusLifecycle,
+    circuit_breaker:       Arc<CircuitBreakerLifecycle>,
+    git:                   GitLifecycle,
+    artifact:              ArtifactLifecycle,
+    on_node:               crate::OnNodeCallback,
+    emitter:               Arc<Emitter>,
+    run_control:           Option<Arc<RunControlState>>,
+    /// Set in on_edge_selected when loop_restart approved; read+cleared by
+    /// EventLifecycle::on_run_start
+    restarted_from:        Arc<Mutex<Option<(String, String)>>>,
     /// Shared git checkpoint result (written by git, read by event)
     checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
-    /// True when constructed with a checkpoint; cleared after first on_run_start.
-    /// Gates context seeding on initial resume.
-    is_initial_resume: AtomicBool,
+    /// True when constructed with a checkpoint; cleared after first
+    /// on_run_start. Gates context seeding on initial resume.
+    is_initial_resume:     AtomicBool,
     // Config needed for context seeding
-    graph: Arc<GvGraph>,
-    run_id: RunId,
-    working_directory: Option<String>,
+    graph:                 Arc<GvGraph>,
+    run_id:                RunId,
+    working_directory:     Option<String>,
 }
 
 impl WorkflowLifecycle {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        emitter: &Arc<EventEmitter>,
+        emitter: &Arc<Emitter>,
         hook_runner: Option<Arc<HookRunner>>,
         sandbox: &Arc<dyn Sandbox>,
         graph: Arc<GvGraph>,
-        run_dir: &PathBuf,
-        run_store: Arc<dyn RunStore>,
+        run_dir: &Path,
+        run_store: &RunStoreHandle,
+        artifact_sink: Option<ArtifactSink>,
         run_options: &Arc<RunOptions>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,
+        run_control: Option<Arc<RunControlState>>,
     ) -> Self {
-        let runtime_state = RuntimeState::new(run_dir);
         let restarted_from: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));
         let loop_restart_signature_limit = graph.loop_restart_signature_limit();
         let checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>> =
             Arc::new(Mutex::new(None));
         let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let artifact_store = Arc::new(Mutex::new(ArtifactStore::new(Some(
-            runtime_state.artifact_values_dir(),
-        ))));
+        let final_patch: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let captured_artifact_count = Arc::new(AtomicUsize::new(0));
 
         let circuit_breaker = Arc::new(CircuitBreakerLifecycle::new(loop_restart_signature_limit));
 
@@ -115,19 +111,21 @@ impl WorkflowLifecycle {
         };
 
         let event = EventLifecycle {
-            emitter: Arc::clone(emitter),
-            graph_name: graph.name.clone(),
-            run_id: run_options.run_id,
-            run_start: Mutex::new(Instant::now()),
-            restarted_from: Arc::clone(&restarted_from),
-            base_branch: run_options.base_branch.clone(),
-            base_sha: run_options.display_base_sha.clone(),
-            run_branch: run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
-            worktree_dir: working_directory.clone(),
-            goal: (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
-            artifact_store: Arc::clone(&artifact_store),
-            last_git_sha: Arc::clone(&last_git_sha),
-            checkpoint_git_result: Arc::clone(&checkpoint_git_result),
+            emitter:                 Arc::clone(emitter),
+            graph_name:              graph.name.clone(),
+            run_id:                  run_options.run_id,
+            run_start:               Mutex::new(Instant::now()),
+            restarted_from:          Arc::clone(&restarted_from),
+            base_branch:             run_options.base_branch.clone(),
+            base_sha:                run_options.git.as_ref().and_then(|g| g.base_sha.clone()),
+            run_branch:              run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
+            worktree_dir:            working_directory.clone(),
+            goal:                    (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
+            captured_artifact_count: Arc::clone(&captured_artifact_count),
+            last_git_sha:            Arc::clone(&last_git_sha),
+            final_patch:             Arc::clone(&final_patch),
+            checkpoint_git_result:   Arc::clone(&checkpoint_git_result),
+            circuit_breaker:         Arc::clone(&circuit_breaker),
         };
 
         let hook = HookLifecycle {
@@ -138,41 +136,35 @@ impl WorkflowLifecycle {
             graph_name: graph.name.clone(),
         };
 
-        let fidelity = FidelityLifecycle::new(Arc::clone(&graph));
-
-        let disk = DiskLifecycle {
-            run_dir: run_dir.clone(),
-            run_id: run_options.run_id,
-            run_store: Arc::clone(&run_store),
-            graph: Arc::clone(&graph),
-            run_options: Arc::clone(run_options),
-            emitter: Arc::clone(emitter),
-            circuit_breaker: Arc::clone(&circuit_breaker),
-            checkpoint_enabled: true,
-        };
+        let fidelity = FidelityLifecycle::new(
+            Arc::clone(&graph),
+            Arc::clone(sandbox),
+            run_store.clone(),
+            run_dir.to_path_buf(),
+        );
 
         let start_node_id = graph.find_start_node().map(|n| n.id.clone());
 
         let git = GitLifecycle {
             sandbox: Arc::clone(sandbox),
-            artifact_store: Arc::clone(&artifact_store),
             emitter: Arc::clone(emitter),
-            run_dir: run_dir.clone(),
             run_id: run_options.run_id,
-            run_store,
+            run_store: run_store.clone(),
             run_options: Arc::clone(run_options),
             start_node_id,
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             last_git_sha: Arc::clone(&last_git_sha),
+            final_patch,
         };
 
         let artifact = ArtifactLifecycle::new(
             Arc::clone(sandbox),
-            Arc::clone(&artifact_store),
-            Some(runtime_state.artifact_values_dir()),
+            run_store.clone(),
             Arc::clone(emitter),
-            runtime_state.assets_dir(),
-            run_options.asset_globs().to_vec(),
+            run_options.run_id,
+            run_options.artifact_globs(),
+            artifact_sink,
+            captured_artifact_count,
         );
 
         Self {
@@ -181,10 +173,11 @@ impl WorkflowLifecycle {
             fidelity,
             auto_status: AutoStatusLifecycle,
             circuit_breaker,
-            disk,
             git,
             artifact,
             on_node,
+            emitter: Arc::clone(emitter),
+            run_control,
             restarted_from,
             checkpoint_git_result,
             is_initial_resume: AtomicBool::new(is_resume),
@@ -248,7 +241,6 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         // Observable callbacks
         self.event.on_run_start(graph, state).await?;
         self.hook.on_run_start(graph, state).await?;
-        self.disk.on_run_start(graph, state).await?;
         self.git.on_run_start(graph, state).await?;
         Ok(())
     }
@@ -269,6 +261,9 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         node: &WorkflowNode,
         state: &WfRunState,
     ) -> CoreResult<WfNodeDecision> {
+        if let Some(run_control) = &self.run_control {
+            run_control.wait_if_paused(self.emitter.as_ref()).await;
+        }
         if let Some(on_node) = &self.on_node {
             on_node(node.id());
         }
@@ -297,6 +292,9 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         ctx: &AttemptResultContext<'_, WorkflowGraph>,
         state: &WfRunState,
     ) -> CoreResult<()> {
+        if let Some(run_control) = &self.run_control {
+            run_control.wait_if_paused(self.emitter.as_ref()).await;
+        }
         self.artifact.after_attempt(ctx, state).await?;
         self.event.after_attempt(ctx, state).await?;
         Ok(())
@@ -310,10 +308,9 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
     ) -> CoreResult<()> {
         self.auto_status.after_node(node, result, state).await?;
         self.circuit_breaker.after_node(node, result, state).await?;
+        self.artifact.after_node(node, result, state).await?;
         self.event.after_node(node, result, state).await?;
         self.hook.after_node(node, result, state).await?;
-        self.disk.after_node(node, result, state).await?;
-        self.artifact.after_node(node, result, state).await?;
         Ok(())
     }
 
@@ -381,7 +378,8 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
             EdgeDecision::Continue => {
                 // Edge unchanged — check circuit breaker for loop_restart
                 let decision = self.circuit_breaker.on_edge_selected(ctx, state).await?;
-                // If loop_restart edge approved by both hook and circuit breaker, mark for LoopRestart emission
+                // If loop_restart edge approved by both hook and circuit breaker, mark for
+                // LoopRestart emission
                 if matches!(decision, EdgeDecision::Continue) {
                     if let Some(ref edge) = ctx.edge {
                         if edge.inner().loop_restart() {
@@ -403,9 +401,6 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         next_node_id: Option<&str>,
         state: &WfRunState,
     ) -> CoreResult<()> {
-        self.disk
-            .on_checkpoint(node, result, next_node_id, state)
-            .await?;
         self.git
             .on_checkpoint(node, result, next_node_id, state)
             .await?;
@@ -422,10 +417,11 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
 
     async fn on_run_end(&self, outcome: &Outcome, state: &WfRunState) {
         if state.cancelled {
+            self.event.on_run_end(outcome, state).await;
             return;
         }
+        self.git.on_run_end(outcome, state).await;
         self.event.on_run_end(outcome, state).await;
         self.hook.on_run_end(outcome, state).await;
-        self.git.on_run_end(outcome, state).await;
     }
 }

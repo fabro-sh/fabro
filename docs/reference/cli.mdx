@@ -9,31 +9,46 @@ These flags apply to all subcommands:
 
 | Flag | Description |
 |---|---|
+| `--json` | Output machine-readable JSON when the command supports it |
 | `--debug` | Enable DEBUG-level logging (default is INFO) |
 | `--no-upgrade-check` | Skip the automatic background upgrade check |
-| `--storage-dir <DIR>` | Storage directory for local run data (default: `~/.fabro`). Implies standalone mode. |
-| `--server-url <URL>` | Fabro API server URL (overrides `server.base_url` from `user.toml`). Implies server mode. |
+| `--quiet` | Suppress non-essential output |
+| `--verbose` | Enable verbose output |
 | `-h, --help` | Print help |
 | `-V, --version` | Print version |
 
-Fabro loads environment variables from `~/.fabro/.env`.
+Connection-target flags like `--storage-dir` and `--server` are command-specific, not global. Fabro no longer auto-loads `~/.fabro/.env`; persist server-owned credentials with `fabro provider login` / `fabro secret set`, or provide environment variables in the invoking shell.
 
 ## Configuration
 
-CLI defaults can be set in `~/.fabro/user.toml` so you don't have to pass common flags every time:
+CLI defaults can be set in `~/.fabro/settings.toml` so you don't have to pass common flags every time:
 
-```toml title="user.toml"
-[exec]
+```toml title="settings.toml"
+_version = 1
+
+[cli.exec.model]
 provider = "anthropic"
-model = "claude-opus-4-6"
-permissions = "read-write"
-output_format = "text"
+name = "claude-opus-4-6"
 
-[llm]
-model = "claude-sonnet-4-5"
+[cli.exec.agent]
+permissions = "read-write"
+
+[cli.output]
+format = "text"
+
+[run.model]
+name = "claude-sonnet-4-5"
+
+[cli.target]
+type = "http"
+url = "https://fabro.example.com:3000/api/v1"
 ```
 
-CLI flags always override `user.toml` values, which override hardcoded defaults.
+`[cli.exec]` config applies to `fabro exec`. `[run.model]` sets the default workflow model/provider for commands like `fabro run` and `fabro preflight`. `[cli.target]` stores connection info for commands that can target a remote Fabro server.
+
+`fabro model` uses `[cli.target]` by default when no explicit `--storage-dir` is passed. `fabro exec` remains a local session unless you pass `--server`, even if `[cli.target]` is configured.
+
+CLI flags always override `settings.toml` values, which override hardcoded defaults.
 
 ---
 
@@ -47,7 +62,7 @@ fabro settings demo
 fabro settings run.toml
 ```
 
-With no argument, Fabro prints the merged ambient defaults from `~/.fabro/user.toml` and the nearest `fabro.toml`.
+With no argument, Fabro prints the merged ambient defaults from `~/.fabro/settings.toml` and the nearest `.fabro/project.toml`.
 
 When you pass a workflow name or path:
 
@@ -71,7 +86,7 @@ fabro run run.toml
 
 | Argument / Flag | Description |
 |---|---|
-| `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name (resolved from `fabro/workflows/` in the project, then `~/.fabro/workflows/`). |
+| `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name (resolved from `.fabro/workflows/` in the project, then `~/.fabro/workflows/`). |
 | `--dry-run` | Execute with a simulated LLM backend |
 | `--auto-approve` | Auto-approve all human gates |
 | `--model <MODEL>` | Override default LLM model |
@@ -79,7 +94,7 @@ fabro run run.toml
 | `-v, --verbose` | Enable verbose output |
 | `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, or `daytona` |
 | `--label <KEY=VALUE>` | Attach a label to this run (repeatable) |
-| `--goal <GOAL>` | Override the workflow goal (exposed as `$goal` in prompts) |
+| `--goal <GOAL>` | Override the workflow goal (available as `{{ goal }}` in prompts) |
 | `--goal-file <FILE>` | Read the goal from a file instead of inline text |
 | `--no-retro` | Skip retro generation after the run |
 | `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
@@ -97,7 +112,7 @@ fabro preflight run.toml
 | Argument / Flag | Description |
 |---|---|
 | `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name. |
-| `--goal <GOAL>` | Override the workflow goal (exposed as `$goal` in prompts) |
+| `--goal <GOAL>` | Override the workflow goal (available as `{{ goal }}` in prompts) |
 | `--goal-file <FILE>` | Read the goal from a file instead of inline text |
 | `--model <MODEL>` | Override default LLM model |
 | `--provider <PROVIDER>` | Override default LLM provider |
@@ -190,7 +205,7 @@ The table shows run ID, status, workflow name, goal, and timing.
 | `--before <DATE>` | Only show runs started before this date (YYYY-MM-DD prefix match) |
 | `--workflow <NAME>` | Filter by workflow name (substring match) |
 | `--label <KEY=VALUE>` | Filter by label (repeatable, AND semantics) |
-| `--orphans` | Include orphan directories (no `run.json`) |
+| `--orphans` | Include orphan directories (no matching durable run) |
 | `--json` | Output as JSON |
 | `-q, --quiet` | Only display full run IDs, one per line (no headers or footers). Takes precedence over `--json`. |
 
@@ -209,22 +224,45 @@ fabro rm my-workflow --force
 | `<RUN>...` | Run IDs or workflow names to remove (required, repeatable) |
 | `-f, --force` | Force removal of active runs |
 
+## `fabro system info`
+
+Show server runtime information including version, uptime, and run counts.
+
+```bash
+fabro system info
+fabro system info --json
+```
+
+## `fabro system events`
+
+Stream run events from the server in real time.
+
+```bash
+fabro system events
+fabro system events --run-id abc123
+```
+
+| Flag | Description |
+|---|---|
+| `--run-id <ID>` | Filter by run ID (repeatable) |
+
 ## `fabro system prune`
 
 Delete old workflow runs. Dry-run by default — pass `--yes` to actually delete.
 
 ```bash
 fabro system prune --before 2026-01-01
-fabro system prune --before 2026-01-01 --yes
+fabro system prune --older-than 7d --yes
 fabro system prune --orphans --yes
 ```
 
 | Flag | Description |
 |---|---|
 | `--before <DATE>` | Only prune runs started before this date (YYYY-MM-DD prefix match) |
+| `--older-than <DURATION>` | Only prune runs older than this duration (e.g. `24h`, `7d`). Default when no explicit filters are set: `24h` |
 | `--workflow <NAME>` | Filter by workflow name (substring match) |
 | `--label <KEY=VALUE>` | Filter by label (repeatable, AND semantics) |
-| `--orphans` | Include orphan directories (no `run.json`) |
+| `--orphans` | Include orphan directories (no matching durable run) |
 | `--yes` | Actually delete (default is dry-run) |
 
 ---
@@ -255,44 +293,6 @@ Permission levels control which tools are auto-approved: `read-only` allows read
 
 ---
 
-## `fabro llm prompt`
-
-Send a one-shot prompt to an LLM. Accepts a prompt as an argument, via stdin, or both (stdin is prepended).
-
-```bash
-fabro llm prompt "Explain quicksort in one paragraph"
-echo "Summarize this:" | fabro llm prompt
-fabro llm prompt "Translate to French" -m claude-sonnet-4-5 -o temperature=0.3
-fabro llm prompt -S '{"type":"object","properties":{"name":{"type":"string"}}}' "Extract the name from: John Smith"
-```
-
-| Argument / Flag | Description |
-|---|---|
-| `[PROMPT]` | The prompt text (also accepts stdin) |
-| `-m, --model <MODEL>` | Model to use |
-| `-s, --system <SYSTEM>` | System prompt |
-| `--no-stream` | Do not stream output |
-| `-u, --usage` | Show token usage |
-| `-S, --schema <SCHEMA>` | JSON schema for structured output (inline JSON string) |
-| `-o, --option <KEY=VALUE>` | Generation options: `temperature`, `max_tokens`, `top_p`, or provider-specific keys |
-
-## `fabro llm chat`
-
-Start an interactive multi-turn chat session. In server mode, the session is backed by the Fabro server's session endpoints.
-
-```bash
-fabro llm chat
-fabro llm chat -m claude-opus-4-6 -s "You are a helpful coding assistant"
-fabro llm chat --server-url http://localhost:3000/api/v1
-```
-
-| Flag | Description |
-|---|---|
-| `-m, --model <MODEL>` | Model to use |
-| `-s, --system <SYSTEM>` | System prompt |
-
----
-
 ## `fabro model list`
 
 List available LLM models from the built-in catalog. Running `fabro model` with no subcommand also lists models.
@@ -301,7 +301,7 @@ List available LLM models from the built-in catalog. Running `fabro model` with 
 fabro model list
 fabro model list -p anthropic
 fabro model list -q sonnet
-fabro model list --server-url http://localhost:3000/api/v1
+fabro model list --server http://localhost:3000/api/v1
 ```
 
 | Flag | Description |
@@ -329,28 +329,59 @@ fabro model test -m claude-sonnet-4-5
 
 ## `fabro server start`
 
-Start the HTTP API server that exposes the [REST API](/api-reference) for launching and managing workflow runs.
+Start the Fabro server daemon. By default, the server launches as a background process listening on a Unix socket. Use `--foreground` for the previous blocking behavior.
 
 ```bash
-fabro server start
-fabro server start --port 8080 --host 0.0.0.0
+fabro server start                                # background daemon on Unix socket
+fabro server start --bind 127.0.0.1              # TCP on 32276, or random port if 32276 is busy
+fabro server start --bind 127.0.0.1:8080          # TCP on a specific port
+fabro server start --no-web                       # API and /health only
+fabro server start --foreground                   # blocking foreground mode
 fabro server start --sandbox daytona --max-concurrent-runs 4
 ```
 
 | Flag | Description | Default |
 |---|---|---|
-| `--port <PORT>` | Port to listen on | `3000` |
-| `--host <HOST>` | Host address to bind to | `127.0.0.1` |
+| `--bind <ADDR>` | Address to bind: `IP` or `IP:port` for TCP, or a path for Unix socket | `~/.fabro/fabro.sock` |
+| `--web` | Enable the embedded web UI, browser auth routes, and web-only helper endpoints | Enabled |
+| `--no-web` | Disable the embedded web UI, browser auth routes, and web-only helper endpoints | Disabled |
+| `--foreground` | Run in the foreground instead of daemonizing | — |
 | `--model <MODEL>` | Override default LLM model | — |
 | `--provider <PROVIDER>` | Override default LLM provider | — |
 | `--dry-run` | Execute with simulated LLM backend | — |
 | `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, or `daytona` | — |
 | `--max-concurrent-runs <N>` | Maximum number of concurrent run executions | — |
-| `--config <PATH>` | Path to server config file | `~/.fabro/server.toml` |
+| `--config <PATH>` | Path to server config file | `~/.fabro/settings.toml` |
 
 Demo mode is per-request: send the `X-Fabro-Demo: 1` header to get static demo data with auth disabled.
 
-If no LLM provider API keys are configured, the server automatically falls back to dry-run mode.
+When `--no-web` is set, the server still exposes the machine API under `/api/v1` and `/health`, but it returns `404` for `/`, `/auth/*`, SPA client routes, and the web-only helper endpoints under `/api/v1`.
+
+## `fabro server stop`
+
+Stop the running server daemon. Sends SIGTERM and waits for graceful shutdown, escalating to SIGKILL after the timeout.
+
+```bash
+fabro server stop
+fabro server stop --timeout 30
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--timeout <SECONDS>` | Seconds to wait for graceful shutdown before SIGKILL | `10` |
+
+## `fabro server status`
+
+Show whether the server daemon is running, along with PID, bind address, and uptime.
+
+```bash
+fabro server status
+fabro server status --json
+```
+
+| Flag | Description |
+|---|---|
+| `--json` | Output as JSON |
 
 ---
 
@@ -374,7 +405,7 @@ Run IDs support prefix matching — you can use the first few characters instead
 
 ## `fabro pr`
 
-Manage GitHub pull requests created by workflow runs. Requires a [GitHub App](/integrations/github) to be configured.
+Manage GitHub pull requests created by workflow runs. Requires GitHub access to be configured via the default `gh_cli` strategy or a [GitHub App](/integrations/github).
 
 ### `fabro pr create`
 
@@ -390,7 +421,7 @@ fabro pr create <run-id> --model claude-opus-4-6
 | `<RUN_ID>` | Run ID or prefix (required) |
 | `--model <MODEL>` | LLM model for generating the PR description |
 
-The run must have completed successfully (or with partial success) and have a `final.patch` with changes.
+The run must have completed successfully (or with partial success) and have a stored diff with changes.
 
 ### `fabro pr list`
 
@@ -474,24 +505,6 @@ fabro graph run.toml --format svg
 | `--format <FORMAT>` | Output format: `svg` (default) or `png` |
 | `-o, --output <FILE>` | Output file path. Defaults to stdout. |
 | `-d, --direction <DIR>` | Graph direction: `lr` or `tb`. If omitted, uses the Graphviz file's own `rankdir`. |
-
-## `fabro skill install`
-
-Install the built-in `fabro-create-workflow` skill for AI assistants (Claude Code, Codex). The skill teaches AI assistants Fabro's Graphviz syntax, node types, and run configuration format.
-
-```bash
-# Install into the current project (.claude/skills/ or .agents/skills/)
-fabro skill install --for project --dir claude
-
-# Install for all projects (user-level, ~/.claude/skills/)
-fabro skill install --for user --dir claude
-```
-
-| Flag | Description |
-|---|---|
-| `--for <SCOPE>` | `user` (default) — installs to `~/<dir>/skills/`. `project` — installs to `./<dir>/skills/`. |
-| `--dir <DIR>` | Directory convention: `claude` (`.claude/skills/`) or `agents` (`.agents/skills/`). Required. |
-| `--force` | Overwrite an existing installation without prompting. |
 
 ## `fabro rewind`
 
@@ -602,7 +615,7 @@ fabro workflow create my-workflow --goal "Run the CI pipeline"
 | `<NAME>` | Name of the workflow (required) |
 | `-g, --goal <GOAL>` | Goal description for the workflow |
 
-Requires a `fabro.toml` project config in the current directory or a parent.
+Requires a `.fabro/project.toml` project config in the current directory or a parent.
 
 ---
 
@@ -635,22 +648,22 @@ fabro parse workflow.fabro
 
 ## `fabro repo init`
 
-Initialize a new Fabro project in the current git repository. Creates a `fabro.toml` project config and a sample `hello` workflow.
+Initialize a new Fabro project in the current git repository. Creates a `.fabro/project.toml` project config and a sample `hello` workflow.
 
 ```bash
 fabro repo init
 ```
 
 The command must be run inside a git repository. It creates:
-- `fabro.toml` — project configuration with comments and a link to docs
-- `fabro/workflows/hello/workflow.fabro` — a simple greeting workflow
-- `fabro/workflows/hello/workflow.toml` — run config for the hello workflow
+- `.fabro/project.toml` — project configuration with comments and a link to docs
+- `.fabro/workflows/hello/workflow.fabro` — a simple greeting workflow
+- `.fabro/workflows/hello/workflow.toml` — run config for the hello workflow
 
-After creating files, it checks whether the GitHub App is installed for the repository. If the app is not installed and the repository owner differs from the app owner, it warns that the app may need to be [made public](/integrations/github#github-app-is-private-but-this-repo-belongs-to-a-different-owner) first.
+After creating files, it checks whether GitHub access is available for the repository. In GitHub App mode, if the app is not installed and the repository owner differs from the app owner, it warns that the app may need to be [made public](/integrations/github#github-app-is-private-but-this-repo-belongs-to-a-different-owner) first.
 
 ## `fabro repo deinit`
 
-Remove Fabro from a project by deleting `fabro.toml` and the `fabro/` directory. Fails with an error if the project is not initialized.
+Remove Fabro from a project by deleting the `.fabro/` project directory. Fails with an error if the project is not initialized.
 
 ```bash
 fabro repo deinit
@@ -658,20 +671,17 @@ fabro repo deinit
 
 ## `fabro diff`
 
-Show the diff from a workflow run. Displays the `final.patch` for completed runs, or connects to the sandbox for a live diff from in-progress runs.
+Show the diff from a workflow run. Reads the stored diff for completed runs.
 
 ```bash
 fabro diff <run-id>
 fabro diff <run-id> --node work
-fabro diff <run-id> --stat
 ```
 
 | Argument / Flag | Description |
 |---|---|
 | `<RUN>` | Run ID or prefix (required) |
 | `--node <NODE>` | Show diff for a specific node instead of the full run |
-| `--stat` | Show diffstat instead of full patch (live diffs only) |
-| `--shortstat` | Show only files-changed/insertions/deletions summary (live diffs only) |
 
 Output is colorized when writing to a terminal.
 
@@ -717,18 +727,17 @@ Without `--signed`, the command prints the URL, token, and a `curl` example. See
 
 ## `fabro doctor`
 
-Check environment and integration health. Verifies system dependencies, API keys, and optional services. Probes live services (LLM providers, sandbox, GitHub App) by default.
+Check environment and integration health. `fabro doctor` always performs live server-backed diagnostics and keeps only local user-config and legacy `.env` checks on the CLI side.
 
 ```bash
 fabro doctor
 fabro doctor -v
-fabro doctor --dry-run
+fabro doctor --server https://fabro.example.com:3000/api/v1
 ```
 
 | Flag | Description |
 |---|---|
 | `-v, --verbose` | Show detailed information for each check |
-| `--dry-run` | Skip live service probes (LLM, sandbox, API, web, Brave Search) |
 
 ## `fabro upgrade`
 
@@ -746,16 +755,16 @@ fabro upgrade --version 0.6.0
 | `--force` | Upgrade even if already on the target version |
 | `--dry-run` | Preview what would happen without making changes |
 
-Fabro refuses to downgrade unless you specify an explicit `--version`. A daily background check notifies you when a new version is available — disable it with `upgrade_check = false` in [`user.toml`](/reference/user-configuration#upgrade_check) or the `--no-upgrade-check` global flag.
+Fabro refuses to downgrade unless you specify an explicit `--version`. A daily background check notifies you when a new version is available — disable it with `upgrade_check = false` in [`settings.toml`](/reference/user-configuration#upgrade_check) or the `--no-upgrade-check` global flag.
 
-## `fabro asset list`
+## `fabro artifact list`
 
-List assets (screenshots, test reports, traces) collected from a workflow run.
+List artifacts (screenshots, test reports, traces) collected from a workflow run.
 
 ```bash
-fabro asset list <RUN_ID>
-fabro asset list <RUN_ID> --node verify --json
-fabro asset list <RUN_ID> --node verify --retry 2
+fabro artifact list <RUN_ID>
+fabro artifact list <RUN_ID> --node verify --json
+fabro artifact list <RUN_ID> --node verify --retry 2
 ```
 
 | Argument / Flag | Description |
@@ -765,15 +774,15 @@ fabro asset list <RUN_ID> --node verify --retry 2
 | `--retry <N>` | Filter to assets from a specific retry attempt |
 | `--json` | Output as JSON |
 
-## `fabro asset cp`
+## `fabro artifact cp`
 
-Copy assets from a workflow run to the local filesystem.
+Copy artifacts from a workflow run to the local filesystem.
 
 ```bash
-fabro asset cp <RUN_ID> ./output               # all assets, flat
-fabro asset cp <RUN_ID> ./output --tree         # preserve directory structure
-fabro asset cp <RUN_ID>:report.html ./output    # specific file
-fabro asset cp <RUN_ID>:report.html ./output --node verify --retry 2
+fabro artifact cp <RUN_ID> ./output               # all assets, flat
+fabro artifact cp <RUN_ID> ./output --tree         # preserve directory structure
+fabro artifact cp <RUN_ID>:report.html ./output    # specific file
+fabro artifact cp <RUN_ID>:report.html ./output --node verify --retry 2
 ```
 
 | Argument / Flag | Description |
@@ -799,7 +808,7 @@ fabro provider login --provider anthropic
 |---|---|
 | `--provider <PROVIDER>` | LLM provider to authenticate with (required) |
 
-For OpenAI, this launches a browser-based OAuth PKCE flow with an automatic fallback to manual API key entry. All other providers prompt for an API key with validation. Credentials are merged non-destructively into `~/.fabro/.env`.
+For OpenAI, this launches a browser-based OAuth PKCE flow with an automatic fallback to manual API key entry. All other providers prompt for an API key with validation. Credentials are saved to the connected Fabro server's secret store.
 
 ## `fabro install`
 
@@ -812,13 +821,13 @@ fabro install --web-url https://fabro.example.com
 
 | Flag | Description | Default |
 |---|---|---|
-| `--web-url <URL>` | Web UI base URL for OAuth callback endpoints | `http://localhost:5173` |
+| `--web-url <URL>` | Web UI base URL for OAuth callback endpoints | `http://localhost:3000` |
 
 ---
 
 ## `fabro secret set`
 
-Store a secret in `~/.fabro/.env`.
+Store or update a server-owned secret on the connected Fabro server.
 
 ```bash
 fabro secret set ANTHROPIC_API_KEY sk-ant-...
@@ -829,34 +838,17 @@ fabro secret set ANTHROPIC_API_KEY sk-ant-...
 | `<KEY>` | Name of the secret (required) |
 | `<VALUE>` | Value to store (required) |
 
-## `fabro secret get`
-
-Print the value of a secret from `~/.fabro/.env`.
-
-```bash
-fabro secret get ANTHROPIC_API_KEY
-```
-
-| Argument | Description |
-|---|---|
-| `<KEY>` | Name of the secret (required) |
-
 ## `fabro secret list`
 
-List secret names stored in `~/.fabro/.env`.
+List server-owned secret names. Values are never returned after storage.
 
 ```bash
 fabro secret list
-fabro secret list --show-values
 ```
-
-| Flag | Description |
-|---|---|
-| `--show-values` | Print values alongside keys |
 
 ## `fabro secret rm`
 
-Remove a secret from `~/.fabro/.env`.
+Remove a server-owned secret from the connected Fabro server.
 
 ```bash
 fabro secret rm ANTHROPIC_API_KEY

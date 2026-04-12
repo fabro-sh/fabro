@@ -4,7 +4,7 @@ pub mod github;
 pub mod linear;
 
 pub use github::GitHubTracker;
-pub use linear::{LINEAR_API_ENDPOINT, LinearConfig, LinearTracker};
+pub use linear::{LINEAR_API_ENDPOINT, LinearOptions, LinearTracker};
 
 /// Shared GraphQL execution used by both provider modules.
 ///
@@ -12,7 +12,7 @@ pub use linear::{LINEAR_API_ENDPOINT, LinearConfig, LinearTracker};
 /// as the `Authorization` value, and returns the parsed JSON response.
 /// Provider-specific error messages use `provider` as a label.
 pub(crate) async fn execute_graphql_request(
-    client: &reqwest::Client,
+    client: &fabro_http::HttpClient,
     endpoint: &str,
     auth_header: &str,
     provider: &str,
@@ -67,15 +67,15 @@ pub(crate) async fn execute_graphql_request(
 
 #[derive(Debug, Clone)]
 pub struct BlockerRef {
-    pub id: String,
+    pub id:         String,
     pub identifier: String,
-    pub state: String,
+    pub state:      String,
 }
 
 #[derive(Debug, Clone)]
 pub struct Issue {
     /// Provider-native issue node ID.
-    pub id: String,
+    pub id:              String,
     /// Provider-native project-item ID for status updates.
     /// None for providers where the issue ID is sufficient (e.g. Linear).
     /// For GitHub Projects, this is the ProjectV2Item node ID.
@@ -83,18 +83,18 @@ pub struct Issue {
     /// even when an issue belongs to multiple project boards.
     pub project_item_id: Option<String>,
     /// Human-readable identifier (e.g. "ABC-123" or "#42").
-    pub identifier: String,
-    pub title: String,
-    pub description: Option<String>,
-    pub priority: Option<i32>,
-    pub state: String,
-    pub branch_name: Option<String>,
-    pub url: String,
-    pub assignee_id: Option<String>,
-    pub labels: Vec<String>,
-    pub blocked_by: Vec<BlockerRef>,
-    pub created_at: Option<String>,
-    pub updated_at: Option<String>,
+    pub identifier:      String,
+    pub title:           String,
+    pub description:     Option<String>,
+    pub priority:        Option<i32>,
+    pub state:           String,
+    pub branch_name:     Option<String>,
+    pub url:             String,
+    pub assignee_id:     Option<String>,
+    pub labels:          Vec<String>,
+    pub blocked_by:      Vec<BlockerRef>,
+    pub created_at:      Option<String>,
+    pub updated_at:      Option<String>,
 }
 
 /// Unified interface for project management / issue tracking systems.

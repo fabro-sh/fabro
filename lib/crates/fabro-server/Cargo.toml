@@ -13,28 +13,35 @@ doctest = false
 workspace = true
 
 [dependencies]
+fabro-spa = { path = "../fabro-spa" }
 fabro-config = { path = "../fabro-config" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-interview = { path = "../fabro-interview" }
+fabro-slack = { path = "../fabro-slack" }
 fabro-workflow = { path = "../fabro-workflow" }
+fabro-validate = { path = "../fabro-validate" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-github = { path = "../fabro-github" }
 fabro-agent = { path = "../fabro-agent" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }
+fabro-proc = { path = "../fabro-proc" }
 fabro-retro = { path = "../fabro-retro" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
-fabro-db = { path = "../fabro-db" }
-fabro-api-types = { path = "../fabro-api-types" }
+fabro-api = { path = "../fabro-api" }
 fabro-store = { path = "../fabro-store" }
+fabro-vault = { path = "../fabro-vault" }
+fabro-http.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
 axum.workspace = true
+axum-extra.workspace = true
+cookie.workspace = true
 dirs.workspace = true
-sqlx.workspace = true
 tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 base64.workspace = true
 jsonwebtoken.workspace = true
@@ -53,21 +60,28 @@ serde_yaml = "0.9"
 anyhow.workspace = true
 clap.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 tracing.workspace = true
 ulid.workspace = true
 uuid.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 hex.workspace = true
-reqwest.workspace = true
+rand.workspace = true
 bytes = "1"
+tempfile = "3"
 object_store.workspace = true
+mime_guess.workspace = true
+regex.workspace = true
+semver.workspace = true
+walkdir.workspace = true
+multer = "3"
+thiserror.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tower = "0.5"
 http-body-util = "0.1"
-tempfile = "3"
 openapiv3 = "2"
 serde_yaml = "0.9"
 fabro-sandbox = { path = "../fabro-sandbox" }

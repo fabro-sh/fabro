@@ -1,15 +1,27 @@
 use std::sync::Arc;
 
+use anyhow::{Result, anyhow};
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use fabro_types::RunAuthMethod;
+use fabro_types::settings::{ServerListenSettings, ServerSettings as ResolvedServerSettings};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rustls_pki_types::CertificateDer;
 use serde::Deserialize;
 use tracing::warn;
 
 use crate::error::ApiError;
-use fabro_config::server::ApiSettings;
+use crate::web_auth::SessionCookie;
+
+/// Env var that explicitly opts the server into unauthenticated startup.
+///
+/// When set to `"1"`, [`resolve_auth_mode_with_lookup`] returns
+/// [`AuthMode::Disabled`] regardless of what `server.auth` says. This is the
+/// only escape hatch for running the server without configured
+/// authentication; it is off by default, so accidental misconfigurations
+/// fail closed.
+pub const FABRO_LOCAL_NO_AUTH_ENV: &str = "FABRO_LOCAL_NO_AUTH";
 
 /// JWT claims for service-to-service authentication.
 #[derive(Debug, Deserialize)]
@@ -24,13 +36,14 @@ struct Claims {
 }
 
 /// A single authentication strategy resolved at startup.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AuthStrategy {
     Jwt {
-        key: Arc<DecodingKey>,
-        validation: Arc<Validation>,
+        key:               Arc<DecodingKey>,
+        validation:        Arc<Validation>,
         allowed_usernames: Vec<String>,
     },
+    Cookie,
     Mtls,
 }
 
@@ -42,71 +55,159 @@ pub fn jwt_validation() -> Validation {
 }
 
 /// Authentication mode resolved at startup.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AuthMode {
     /// One or more strategies to try in order.
     Strategies(Vec<AuthStrategy>),
-    /// Authentication is explicitly disabled (used for demo requests via `X-Fabro-Demo: 1` header).
+    /// Authentication is explicitly disabled (used for demo requests via
+    /// `X-Fabro-Demo: 1` header).
     Disabled,
 }
 
-/// Peer certificates extracted from the TLS connection, inserted as a request extension.
+/// Peer certificates extracted from the TLS connection, inserted as a request
+/// extension.
 #[derive(Clone)]
 pub struct PeerCertificates(pub Option<Vec<CertificateDer<'static>>>);
 
 /// Decode a PEM env var that may be raw PEM or base64-encoded PEM.
-pub fn decode_pem_env(name: &str, value: &str) -> String {
+pub fn decode_pem_env(name: &str, value: &str) -> Result<String> {
     if value.starts_with("-----") {
-        return value.to_string();
+        return Ok(value.to_string());
     }
     let bytes = base64::Engine::decode(&BASE64_STANDARD, value)
-        .unwrap_or_else(|e| panic!("{name} is not valid PEM or base64: {e}"));
-    String::from_utf8(bytes)
-        .unwrap_or_else(|e| panic!("{name} base64 decoded to invalid UTF-8: {e}"))
+        .map_err(|e| anyhow!("{name} is not valid PEM or base64: {e}"))?;
+    String::from_utf8(bytes).map_err(|e| anyhow!("{name} base64 decoded to invalid UTF-8: {e}"))
 }
 
-/// Resolve the authentication mode from the API config section.
+/// Resolve the authentication mode from resolved server settings.
 ///
-/// Call this once at startup before serving requests. Panics if the
-/// configuration is invalid (JWT strategy but no public key, or mTLS without TLS config).
-pub fn resolve_auth_mode(api_settings: &ApiSettings, allowed_usernames: &[String]) -> AuthMode {
-    use fabro_config::server::ApiAuthStrategy;
+/// Call this once at startup before serving requests. Returns
+/// [`AuthMode::Disabled`] when [`FABRO_LOCAL_NO_AUTH_ENV`] is set to `"1"`
+/// (explicit insecure-startup opt-in). Returns `AuthMode::Strategies(...)`
+/// when `server.auth` resolves to at least one enabled strategy.
+///
+/// Fails closed when `server.auth` is absent or resolves to zero enabled
+/// strategies, or when a configured strategy is missing its required
+/// material (JWT public key, mTLS TLS config): startup refuses rather
+/// than silently accepting every request or panicking the binary.
+///
+/// Walks the v2 `server.auth.api.{jwt,mtls}` subtree and
+/// `server.auth.web.allowed_usernames`.
+pub fn resolve_auth_mode(settings: &ResolvedServerSettings) -> Result<AuthMode> {
+    resolve_auth_mode_with_lookup(settings, |name| std::env::var(name).ok())
+}
 
-    if api_settings.authentication_strategies.is_empty() {
-        warn!("No authentication strategies configured; all requests will be rejected");
+/// Describes which API auth strategies are enabled in resolved server settings.
+struct ResolvedAuthStrategies {
+    jwt_enabled:       bool,
+    mtls_enabled:      bool,
+    tls_present:       bool,
+    allowed_usernames: Vec<String>,
+}
+
+fn resolve_auth_strategies(settings: &ResolvedServerSettings) -> ResolvedAuthStrategies {
+    let jwt_enabled = settings
+        .auth
+        .api
+        .jwt
+        .as_ref()
+        .is_some_and(|jwt| jwt.enabled);
+    let mtls_enabled = settings
+        .auth
+        .api
+        .mtls
+        .as_ref()
+        .is_some_and(|mtls| mtls.enabled);
+
+    let tls_present = matches!(
+        settings.listen,
+        ServerListenSettings::Tcp { ref tls, .. } if tls.is_some()
+    );
+
+    let allowed_usernames = settings.auth.web.allowed_usernames.clone();
+
+    ResolvedAuthStrategies {
+        jwt_enabled,
+        mtls_enabled,
+        tls_present,
+        allowed_usernames,
+    }
+}
+
+pub fn resolve_auth_mode_with_lookup<F>(
+    settings: &ResolvedServerSettings,
+    lookup: F,
+) -> Result<AuthMode>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    if lookup(FABRO_LOCAL_NO_AUTH_ENV).as_deref() == Some("1") {
+        warn!(
+            "{FABRO_LOCAL_NO_AUTH_ENV}=1 set; allowing unauthenticated local daemon access. \
+             Do not use this flag outside local development or demo environments."
+        );
+        return Ok(AuthMode::Disabled);
     }
 
-    let strategies = api_settings
-        .authentication_strategies
-        .iter()
-        .map(|s| match s {
-            ApiAuthStrategy::Jwt => {
-                let raw = std::env::var("FABRO_JWT_PUBLIC_KEY").unwrap_or_else(|_| {
-                    panic!(
-                        "FABRO_JWT_PUBLIC_KEY is not set. Provide an Ed25519 public key in PEM \
-                         format (or base64-encoded PEM) for JWT authentication."
-                    )
-                });
-                let pem = decode_pem_env("FABRO_JWT_PUBLIC_KEY", &raw);
-                let key = DecodingKey::from_ed_pem(pem.as_bytes())
-                    .expect("FABRO_JWT_PUBLIC_KEY contains an invalid Ed25519 PEM public key");
-                AuthStrategy::Jwt {
-                    key: Arc::new(key),
-                    validation: Arc::new(jwt_validation()),
-                    allowed_usernames: allowed_usernames.to_vec(),
-                }
-            }
-            ApiAuthStrategy::Mtls => {
-                assert!(
-                    api_settings.tls.is_some(),
-                    "mTLS authentication strategy requires [api.tls] configuration with cert, key, and ca"
-                );
-                AuthStrategy::Mtls
-            }
-        })
-        .collect();
+    let ResolvedAuthStrategies {
+        jwt_enabled,
+        mtls_enabled,
+        tls_present,
+        allowed_usernames,
+    } = resolve_auth_strategies(settings);
 
-    AuthMode::Strategies(strategies)
+    let mut strategies = Vec::new();
+    if lookup("SESSION_SECRET").is_some() {
+        strategies.push(AuthStrategy::Cookie);
+    }
+
+    if jwt_enabled {
+        let raw = lookup("FABRO_JWT_PUBLIC_KEY").ok_or_else(|| {
+            anyhow!(
+                "Fabro server refuses to start: [server.auth.api.jwt] is enabled but \
+                 FABRO_JWT_PUBLIC_KEY is not set. Provide an Ed25519 public key in PEM format \
+                 (or base64-encoded PEM) via process env or server.env for JWT authentication."
+            )
+        })?;
+        let pem = decode_pem_env("FABRO_JWT_PUBLIC_KEY", &raw)?;
+        let key = DecodingKey::from_ed_pem(pem.as_bytes()).map_err(|e| {
+            anyhow!(
+                "Fabro server refuses to start: FABRO_JWT_PUBLIC_KEY contains an invalid \
+                 Ed25519 PEM public key: {e}"
+            )
+        })?;
+        strategies.push(AuthStrategy::Jwt {
+            key:               Arc::new(key),
+            validation:        Arc::new(jwt_validation()),
+            allowed_usernames: allowed_usernames.clone(),
+        });
+    }
+
+    if mtls_enabled {
+        if !tls_present {
+            return Err(anyhow!(
+                "Fabro server refuses to start: [server.auth.api.mtls] is enabled but \
+                 [server.listen.tls] is missing required cert, key, or ca paths."
+            ));
+        }
+        strategies.push(AuthStrategy::Mtls);
+    }
+
+    if strategies.is_empty() {
+        return Err(anyhow!(
+            "Fabro server refuses to start: no authentication strategies are configured.\n\
+             \n\
+             Configure at least one of the following in `[server.auth]`:\n\
+               - `[server.auth.api.jwt]` (requires `FABRO_JWT_PUBLIC_KEY` in process env or server.env)\n\
+               - `[server.auth.api.mtls]` (requires `[server.listen.tls]` cert/key/ca)\n\
+               - `SESSION_SECRET` in process env or server.env (enables cookie-based web auth)\n\
+             \n\
+             Or set `{FABRO_LOCAL_NO_AUTH_ENV}=1` to explicitly opt in to \
+             unauthenticated local daemon access."
+        ));
+    }
+
+    Ok(AuthMode::Strategies(strategies))
 }
 
 /// Extract the login from JWT claims.
@@ -209,6 +310,14 @@ fn try_mtls(parts: &Parts) -> Result<(), ApiError> {
     Ok(())
 }
 
+fn try_cookie(parts: &Parts) -> Result<(), ApiError> {
+    parts
+        .extensions
+        .get::<SessionCookie>()
+        .map(|_| ())
+        .ok_or_else(ApiError::unauthorized)
+}
+
 /// Axum extractor that enforces authentication on a route.
 ///
 /// Tries each configured strategy in order. The first successful match wins.
@@ -216,55 +325,58 @@ fn try_mtls(parts: &Parts) -> Result<(), ApiError> {
 /// When auth is disabled, the extractor accepts all requests.
 pub struct AuthenticatedService;
 
+pub fn authenticate_service_parts(parts: &Parts) -> Result<(), ApiError> {
+    let auth_mode = parts
+        .extensions
+        .get::<AuthMode>()
+        .expect("AuthMode extension must be added to the router");
+
+    let strategies = match auth_mode {
+        AuthMode::Disabled => return Ok(()),
+        AuthMode::Strategies(strategies) => strategies,
+    };
+
+    if strategies.is_empty() {
+        return Err(ApiError::unauthorized());
+    }
+
+    let mut last_err = ApiError::unauthorized();
+
+    for strategy in strategies {
+        let result = match strategy {
+            AuthStrategy::Mtls => try_mtls(parts),
+            AuthStrategy::Cookie => try_cookie(parts),
+            AuthStrategy::Jwt {
+                key,
+                validation,
+                allowed_usernames,
+            } => try_jwt(parts, key, validation, allowed_usernames),
+        };
+        match result {
+            Ok(()) => return Ok(()),
+            Err(err) => last_err = err,
+        }
+    }
+
+    Err(last_err)
+}
+
 impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedService {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let auth_mode = parts
-            .extensions
-            .get::<AuthMode>()
-            .expect("AuthMode extension must be added to the router");
-
-        let strategies = match auth_mode {
-            AuthMode::Disabled => return Ok(Self),
-            AuthMode::Strategies(strategies) => strategies,
-        };
-
-        if strategies.is_empty() {
-            return Err(ApiError::unauthorized());
-        }
-
-        let mut last_err = ApiError::unauthorized();
-
-        for strategy in strategies {
-            let result = match strategy {
-                AuthStrategy::Mtls => try_mtls(parts),
-                AuthStrategy::Jwt {
-                    key,
-                    validation,
-                    allowed_usernames,
-                } => try_jwt(parts, key, validation, allowed_usernames),
-            };
-            match result {
-                Ok(()) => return Ok(Self),
-                Err(e) => last_err = e,
-            }
-        }
-
-        Err(last_err)
+        authenticate_service_parts(parts)?;
+        Ok(Self)
     }
 }
 
-/// Axum extractor that authenticates and extracts the user's login.
-///
-/// - Demo mode → `login: "demo"`
-/// - JWT → login from the `sub` claim (last path segment of URL)
-/// - mTLS → CN from the peer certificate
-pub struct AuthenticatedUser {
-    pub login: String,
+/// Axum extractor that authenticates and extracts the request subject.
+pub struct AuthenticatedSubject {
+    pub login:       Option<String>,
+    pub auth_method: RunAuthMethod,
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
+impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
@@ -276,7 +388,8 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
         let strategies = match auth_mode {
             AuthMode::Disabled => {
                 return Ok(Self {
-                    login: "demo".to_string(),
+                    login:       None,
+                    auth_method: RunAuthMethod::Disabled,
                 });
             }
             AuthMode::Strategies(strategies) => strategies,
@@ -290,6 +403,15 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
 
         for strategy in strategies {
             match strategy {
+                AuthStrategy::Cookie => {
+                    if let Some(session) = parts.extensions.get::<SessionCookie>() {
+                        return Ok(Self {
+                            login:       Some(session.login.clone()),
+                            auth_method: RunAuthMethod::Cookie,
+                        });
+                    }
+                    last_err = ApiError::unauthorized();
+                }
                 AuthStrategy::Jwt {
                     key,
                     validation,
@@ -297,7 +419,10 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
                 } => {
                     if try_jwt(parts, key, validation, allowed_usernames).is_ok() {
                         if let Some(login) = extract_jwt_login(parts, key, validation) {
-                            return Ok(Self { login });
+                            return Ok(Self {
+                                login:       Some(login),
+                                auth_method: RunAuthMethod::Jwt,
+                            });
                         }
                     }
                     last_err = ApiError::unauthorized();
@@ -305,7 +430,10 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
                 AuthStrategy::Mtls => {
                     if try_mtls(parts).is_ok() {
                         if let Some(login) = extract_mtls_cn(parts) {
-                            return Ok(Self { login });
+                            return Ok(Self {
+                                login:       Some(login),
+                                auth_method: RunAuthMethod::Mtls,
+                            });
                         }
                     }
                     last_err = ApiError::unauthorized();
@@ -319,22 +447,182 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use axum::Router;
-    use axum::body::Body;
+    #![expect(
+        clippy::disallowed_methods,
+        reason = "These unit tests use the host openssl CLI to generate certificate fixtures for auth validation."
+    )]
+
+    use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use axum::response::IntoResponse;
     use axum::routing::get;
+    use axum::{Json, Router};
+    use fabro_config::{parse_settings_layer, resolve_server_from_file};
     use tower::ServiceExt;
+
+    use super::*;
+    use crate::web_auth::SessionCookie;
+
+    // --- Fail-closed resolver tests (R52/R53) -----------------------------------
+
+    fn settings(source: &str) -> ResolvedServerSettings {
+        let file = parse_settings_layer(source).expect("fixture should parse");
+        resolve_server_from_file(&file).expect("fixture should resolve")
+    }
+
+    /// Lookup closure that returns nothing — every env var is absent.
+    fn empty_lookup(_name: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn fail_closed_when_server_auth_absent() {
+        let file = settings("_version = 1\n");
+        let err =
+            resolve_auth_mode_with_lookup(&file, empty_lookup).expect_err("should refuse startup");
+        assert!(err.to_string().contains("refuses to start"));
+        assert!(err.to_string().contains("FABRO_LOCAL_NO_AUTH"));
+    }
+
+    #[test]
+    fn fail_closed_when_all_strategies_disabled() {
+        let file = settings(
+            r"
+_version = 1
+
+[server.auth.api.jwt]
+enabled = false
+
+[server.auth.api.mtls]
+enabled = false
+",
+        );
+        let err =
+            resolve_auth_mode_with_lookup(&file, empty_lookup).expect_err("should refuse startup");
+        assert!(err.to_string().contains("no authentication strategies"));
+    }
+
+    #[test]
+    fn opt_in_insecure_startup_via_env() {
+        let file = settings("_version = 1\n");
+        let mode = resolve_auth_mode_with_lookup(&file, |name| {
+            (name == FABRO_LOCAL_NO_AUTH_ENV).then(|| "1".to_string())
+        })
+        .expect("FABRO_LOCAL_NO_AUTH=1 should allow startup");
+        assert!(matches!(mode, AuthMode::Disabled));
+    }
+
+    #[test]
+    fn insecure_startup_flag_any_other_value_still_fails_closed() {
+        let file = settings("_version = 1\n");
+        let err = resolve_auth_mode_with_lookup(&file, |name| {
+            (name == FABRO_LOCAL_NO_AUTH_ENV).then(|| "true".to_string())
+        })
+        .expect_err("only the literal string \"1\" opts in");
+        assert!(err.to_string().contains("refuses to start"));
+    }
+
+    #[test]
+    fn cookie_strategy_alone_unlocks_startup() {
+        let file = settings("_version = 1\n");
+        let mode = resolve_auth_mode_with_lookup(&file, |name| {
+            (name == "SESSION_SECRET").then(|| "deadbeef".to_string())
+        })
+        .expect("SESSION_SECRET alone should unlock startup");
+        let AuthMode::Strategies(strategies) = mode else {
+            panic!("expected Strategies, got Disabled");
+        };
+        assert_eq!(strategies.len(), 1);
+        assert!(matches!(strategies[0], AuthStrategy::Cookie));
+    }
+
+    #[test]
+    fn mtls_strategy_resolves_when_enabled_with_listen_tls() {
+        let file = settings(
+            r#"
+_version = 1
+
+[server.auth.api.mtls]
+enabled = true
+
+[server.listen]
+type = "tcp"
+address = "127.0.0.1:3000"
+
+[server.listen.tls]
+cert = "/etc/fabro/tls/cert.pem"
+key = "/etc/fabro/tls/key.pem"
+ca = "/etc/fabro/tls/ca.pem"
+"#,
+        );
+        let mode =
+            resolve_auth_mode_with_lookup(&file, empty_lookup).expect("mTLS config should resolve");
+        let AuthMode::Strategies(strategies) = mode else {
+            panic!("expected Strategies, got Disabled");
+        };
+        assert!(strategies.iter().any(|s| matches!(s, AuthStrategy::Mtls)));
+    }
+
+    #[test]
+    fn fail_closed_when_jwt_enabled_without_public_key_env() {
+        let file = settings(
+            r"
+_version = 1
+
+[server.auth.api.jwt]
+enabled = true
+",
+        );
+        let err = resolve_auth_mode_with_lookup(&file, empty_lookup)
+            .expect_err("missing FABRO_JWT_PUBLIC_KEY should refuse startup");
+        assert!(err.to_string().contains("FABRO_JWT_PUBLIC_KEY"));
+    }
+
+    #[test]
+    fn fail_closed_when_jwt_public_key_is_invalid_pem() {
+        let file = settings(
+            r"
+_version = 1
+
+[server.auth.api.jwt]
+enabled = true
+",
+        );
+        let err = resolve_auth_mode_with_lookup(&file, |name| {
+            (name == "FABRO_JWT_PUBLIC_KEY").then(|| {
+                "-----BEGIN PUBLIC KEY-----\ngarbage\n-----END PUBLIC KEY-----".to_string()
+            })
+        })
+        .expect_err("invalid PEM should refuse startup");
+        assert!(err.to_string().contains("invalid"));
+    }
 
     async fn protected_handler(_auth: AuthenticatedService) -> impl IntoResponse {
         "ok"
+    }
+
+    async fn subject_handler(subject: AuthenticatedSubject) -> impl IntoResponse {
+        Json(serde_json::json!({
+            "login": subject.login,
+            "auth_method": subject.auth_method,
+        }))
     }
 
     fn test_router(mode: AuthMode) -> Router {
         Router::new()
             .route("/test", get(protected_handler))
             .layer(axum::Extension(mode))
+    }
+
+    fn subject_router(mode: AuthMode) -> Router {
+        Router::new()
+            .route("/subject", get(subject_handler))
+            .layer(axum::Extension(mode))
+    }
+
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
     }
 
     fn generate_test_keypair() -> (jsonwebtoken::EncodingKey, DecodingKey) {
@@ -387,8 +675,8 @@ mod tests {
 
     fn jwt_mode(decoding: DecodingKey, allowed_usernames: Vec<&str>) -> AuthMode {
         AuthMode::Strategies(vec![AuthStrategy::Jwt {
-            key: Arc::new(decoding),
-            validation: Arc::new(jwt_validation()),
+            key:               Arc::new(decoding),
+            validation:        Arc::new(jwt_validation()),
             allowed_usernames: allowed_usernames.into_iter().map(String::from).collect(),
         }])
     }
@@ -404,7 +692,8 @@ mod tests {
     }
 
     /// Generate a self-signed CA + client cert for mTLS testing.
-    /// Returns (ca_cert_der, client_cert_der) where client_cert_der has the given CN.
+    /// Returns (ca_cert_der, client_cert_der) where client_cert_der has the
+    /// given CN.
     fn generate_test_client_cert(cn: &str) -> CertificateDer<'static> {
         use std::process::{Command, Stdio};
 
@@ -670,6 +959,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disabled_mode_extracts_disabled_subject() {
+        let app = subject_router(AuthMode::Disabled);
+
+        let req = Request::builder()
+            .uri("/subject")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["login"], serde_json::Value::Null);
+        assert_eq!(body["auth_method"], "disabled");
+    }
+
+    #[tokio::test]
+    async fn jwt_subject_extracts_login_and_auth_method() {
+        let (encoding, decoding) = generate_test_keypair();
+        let app = subject_router(jwt_mode(decoding, vec!["brynary"]));
+
+        let token = sign_token(
+            &encoding,
+            "fabro-web",
+            60,
+            Some("https://github.com/brynary"),
+        );
+
+        let req = Request::builder()
+            .uri("/subject")
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["login"], "brynary");
+        assert_eq!(body["auth_method"], "jwt");
+    }
+
+    #[tokio::test]
+    async fn cookie_subject_extracts_login_and_auth_method() {
+        let app = subject_router(AuthMode::Strategies(vec![AuthStrategy::Cookie]));
+
+        let mut req = Request::builder()
+            .uri("/subject")
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(SessionCookie {
+            login:      "brynary".to_string(),
+            name:       "Brynary".to_string(),
+            email:      "b@example.com".to_string(),
+            avatar_url: "https://example.com/avatar.png".to_string(),
+            user_url:   "https://github.com/brynary".to_string(),
+            github_id:  1,
+            exp:        9_999_999_999,
+        });
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["login"], "brynary");
+        assert_eq!(body["auth_method"], "cookie");
+    }
+
+    #[tokio::test]
     async fn empty_strategies_rejects() {
         let app = test_router(AuthMode::Strategies(vec![]));
 
@@ -723,6 +1078,20 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
+    #[tokio::test]
+    async fn mtls_subject_extracts_login_and_auth_method() {
+        let app = subject_router(AuthMode::Strategies(vec![AuthStrategy::Mtls]));
+
+        let cert = generate_test_client_cert("brynary");
+        let req = request_with_peer_certs("/subject", Some(vec![cert]));
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["login"], "brynary");
+        assert_eq!(body["auth_method"], "mtls");
+    }
+
     // --- Multi-strategy tests ---
 
     #[tokio::test]
@@ -730,8 +1099,8 @@ mod tests {
         let (_, decoding) = generate_test_keypair();
         let mode = AuthMode::Strategies(vec![
             AuthStrategy::Jwt {
-                key: Arc::new(decoding),
-                validation: Arc::new(jwt_validation()),
+                key:               Arc::new(decoding),
+                validation:        Arc::new(jwt_validation()),
                 allowed_usernames: vec!["brynary".to_string()],
             },
             AuthStrategy::Mtls,
@@ -748,14 +1117,11 @@ mod tests {
     #[tokio::test]
     async fn mtls_and_jwt_falls_back_to_jwt() {
         let (encoding, decoding) = generate_test_keypair();
-        let mode = AuthMode::Strategies(vec![
-            AuthStrategy::Mtls,
-            AuthStrategy::Jwt {
-                key: Arc::new(decoding),
-                validation: Arc::new(jwt_validation()),
-                allowed_usernames: vec!["brynary".to_string()],
-            },
-        ]);
+        let mode = AuthMode::Strategies(vec![AuthStrategy::Mtls, AuthStrategy::Jwt {
+            key:               Arc::new(decoding),
+            validation:        Arc::new(jwt_validation()),
+            allowed_usernames: vec!["brynary".to_string()],
+        }]);
         let app = test_router(mode);
 
         let token = sign_token(

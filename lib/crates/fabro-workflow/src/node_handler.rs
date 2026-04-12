@@ -3,23 +3,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::FutureExt;
-
-use fabro_core::error::{CoreError, HandlerErrorDetail, Result as CoreResult};
+use fabro_core::error::{Error as CoreError, HandlerErrorDetail, Result as CoreResult};
 use fabro_core::handler::NodeHandler;
 use fabro_core::outcome::FailureCategory;
 use fabro_core::retry::RetryPolicy as CoreRetryPolicy;
+use fabro_graphviz::graph::types::Graph as GvGraph;
+use futures::FutureExt;
+use tokio::time::timeout;
 
+use crate::artifact;
 use crate::context::Context;
-
-use crate::graph::WorkflowGraph;
-use crate::graph::WorkflowNode;
+use crate::error::Error;
+use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::handler::{EngineServices, dispatch_handler, format_panic_message};
 use crate::outcome::{Outcome, StageStatus};
 use crate::retry::build_retry_policy;
-use crate::run_dir;
-use fabro_graphviz::graph::types::Graph as GvGraph;
-use tokio::time::timeout;
 
 /// Production node handler that bridges fabro-core's NodeHandler to the
 /// existing fabro-workflow Handler trait via EngineServices.
@@ -28,8 +26,8 @@ use tokio::time::timeout;
 /// then diffs and applies changes back.
 pub(crate) struct WorkflowNodeHandler {
     pub services: Arc<EngineServices>,
-    pub run_dir: PathBuf,
-    pub graph: Arc<GvGraph>,
+    pub run_dir:  PathBuf,
+    pub graph:    Arc<GvGraph>,
 }
 
 #[async_trait]
@@ -43,9 +41,22 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         let gv_node = node.inner();
         let handler = self.services.registry.resolve(gv_node);
 
-        // Fork the context so handler writes don't leak back unless we diff+apply.
-        let snapshot = context.snapshot();
-        let wf_context = context.fork();
+        let wf_context = artifact::resolve_context_for_execution(
+            context,
+            &self.services.run_store,
+            &*self.services.sandbox,
+            &self.run_dir,
+        )
+        .await
+        .map_err(|err| {
+            CoreError::handler(HandlerErrorDetail {
+                message:   err.to_string(),
+                retryable: true,
+                category:  Some(FailureCategory::TransientInfra),
+                signature: None,
+            })
+        })?;
+        let execution_snapshot = wf_context.snapshot();
 
         // Timeout from the node
         let node_timeout = gv_node.timeout();
@@ -67,9 +78,9 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
                 Ok(inner) => inner,
                 Err(_elapsed) => {
                     return Err(CoreError::handler(HandlerErrorDetail {
-                        message: format!("handler timed out after {}ms", duration.as_millis()),
+                        message:   format!("handler timed out after {}ms", duration.as_millis()),
                         retryable: true,
-                        category: Some(FailureCategory::TransientInfra),
+                        category:  Some(FailureCategory::TransientInfra),
                         signature: None,
                     }));
                 }
@@ -78,17 +89,19 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             panic_safe.await
         };
 
-        // 2. After handler returns, diff the forked context against the snapshot
-        //    and apply changes back to the original context
-        let new_values = wf_context.snapshot();
+        // 2. After handler returns, diff the forked context against the snapshot and
+        //    apply changes back to the original context
+        let mut new_values = wf_context.snapshot();
+        artifact::normalize_durable_updates(&mut new_values);
         for (k, v) in &new_values {
-            if snapshot.get(k) != Some(v) {
+            if execution_snapshot.get(k) != Some(v) {
                 context.set(k.clone(), v.clone());
             }
         }
 
         match timed_result {
             Ok(Ok(wf_outcome)) => Ok(wf_outcome),
+            Ok(Err(Error::Cancelled)) => Err(CoreError::Cancelled),
             Ok(Err(fabro_err)) => {
                 let retryable = handler.should_retry(&fabro_err);
                 Err(CoreError::handler(HandlerErrorDetail {
@@ -100,14 +113,10 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             }
             Err(panic_payload) => {
                 let msg = format_panic_message(&panic_payload);
-                let visit = context.node_visit_count().max(1);
-                let panic_dir = run_dir::node_dir(&self.run_dir, &gv_node.id, visit);
-                let _ = std::fs::create_dir_all(&panic_dir);
-                let _ = std::fs::write(panic_dir.join("panic.txt"), &msg);
                 Err(CoreError::handler(HandlerErrorDetail {
-                    message: msg,
+                    message:   msg,
                     retryable: false,
-                    category: Some(FailureCategory::Deterministic),
+                    category:  Some(FailureCategory::Deterministic),
                     signature: None,
                 }))
             }
@@ -142,7 +151,7 @@ mod tests {
     use fabro_core::executor::ExecutorBuilder;
     use fabro_core::lifecycle::NoopLifecycle;
     use fabro_core::outcome::StageStatus;
-    use fabro_core::state::RunState;
+    use fabro_core::state::ExecutionState;
     use fabro_graphviz::graph::AttrValue;
     use fabro_graphviz::graph::types::{Edge, Graph, Node};
 
@@ -188,7 +197,7 @@ mod tests {
 
         let wf_graph = WorkflowGraph(Arc::new(graph));
         let handler: Arc<dyn NodeHandler<WorkflowGraph>> = Arc::new(SpikeHandler);
-        let state = RunState::new(&wf_graph).unwrap();
+        let state = ExecutionState::new(&wf_graph).unwrap();
 
         let executor = ExecutorBuilder::new(handler)
             .lifecycle(Box::new(NoopLifecycle))

@@ -177,65 +177,29 @@ pub async fn create_access_token(
 #[cfg(test)]
 mod tests {
     use crate::server::TestServer;
-    use crate::state::{AppConfig, AppState};
-
-    fn test_rsa_key() -> String {
-        use std::process::Command;
-        let output = Command::new("openssl")
-            .args([
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-            ])
-            .output()
-            .expect("openssl should be available");
-        assert!(output.status.success());
-        String::from_utf8(output.stdout).unwrap()
-    }
-
-    fn sign_test_jwt(app_id: &str, private_key_pem: &str) -> String {
-        use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-        use serde::Serialize;
-
-        #[derive(Serialize)]
-        struct Claims {
-            iss: String,
-            iat: i64,
-            exp: i64,
-        }
-
-        let now = chrono::Utc::now().timestamp();
-        let claims = Claims {
-            iss: app_id.to_string(),
-            iat: now - 60,
-            exp: now + 600,
-        };
-        let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).unwrap();
-        encode(&Header::new(Algorithm::RS256), &claims, &key).unwrap()
-    }
+    use crate::state::{AppOptions, AppState};
+    use crate::test_support::{sign_test_jwt, test_http_client, test_rsa_private_key};
 
     #[tokio::test]
     async fn get_installation_returns_id() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
-            app_id: "100".to_string(),
-            slug: "test-app".to_string(),
-            owner_login: "owner".to_string(),
-            public: true,
-            private_key_pem: pem.clone(),
-            webhook_secret: None,
+        state.register_app(AppOptions {
+            app_id:          "100".to_string(),
+            slug:            "test-app".to_string(),
+            owner_login:     "owner".to_string(),
+            public:          true,
+            private_key_pem: pem.to_string(),
+            webhook_secret:  None,
         });
         state.add_installation("100", "owner", vec!["repo".to_string()], false);
         state.add_repository("owner", "repo", vec!["main".to_string()], false);
         let server = TestServer::start(state).await;
 
-        let jwt = sign_test_jwt("100", &pem);
-        let client = reqwest::Client::new();
+        let jwt = sign_test_jwt("100", pem);
+        let client = test_http_client();
         let resp = client
-            .get(&format!("{}/repos/owner/repo/installation", server.url()))
+            .get(format!("{}/repos/owner/repo/installation", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "test-agent")
@@ -250,23 +214,23 @@ mod tests {
 
     #[tokio::test]
     async fn get_installation_returns_404_when_not_installed() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
-            app_id: "100".to_string(),
-            slug: "test-app".to_string(),
-            owner_login: "owner".to_string(),
-            public: true,
-            private_key_pem: pem.clone(),
-            webhook_secret: None,
+        state.register_app(AppOptions {
+            app_id:          "100".to_string(),
+            slug:            "test-app".to_string(),
+            owner_login:     "owner".to_string(),
+            public:          true,
+            private_key_pem: pem.to_string(),
+            webhook_secret:  None,
         });
         // No installation added
         let server = TestServer::start(state).await;
 
-        let jwt = sign_test_jwt("100", &pem);
-        let client = reqwest::Client::new();
+        let jwt = sign_test_jwt("100", pem);
+        let client = test_http_client();
         let resp = client
-            .get(&format!("{}/repos/owner/repo/installation", server.url()))
+            .get(format!("{}/repos/owner/repo/installation", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -278,23 +242,23 @@ mod tests {
 
     #[tokio::test]
     async fn get_installation_returns_403_when_suspended() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
-            app_id: "100".to_string(),
-            slug: "test-app".to_string(),
-            owner_login: "owner".to_string(),
-            public: true,
-            private_key_pem: pem.clone(),
-            webhook_secret: None,
+        state.register_app(AppOptions {
+            app_id:          "100".to_string(),
+            slug:            "test-app".to_string(),
+            owner_login:     "owner".to_string(),
+            public:          true,
+            private_key_pem: pem.to_string(),
+            webhook_secret:  None,
         });
         state.add_installation("100", "owner", vec!["repo".to_string()], true); // suspended
         let server = TestServer::start(state).await;
 
-        let jwt = sign_test_jwt("100", &pem);
-        let client = reqwest::Client::new();
+        let jwt = sign_test_jwt("100", pem);
+        let client = test_http_client();
         let resp = client
-            .get(&format!("{}/repos/owner/repo/installation", server.url()))
+            .get(format!("{}/repos/owner/repo/installation", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -306,23 +270,23 @@ mod tests {
 
     #[tokio::test]
     async fn create_access_token_returns_201() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
-            app_id: "100".to_string(),
-            slug: "test-app".to_string(),
-            owner_login: "owner".to_string(),
-            public: true,
-            private_key_pem: pem.clone(),
-            webhook_secret: None,
+        state.register_app(AppOptions {
+            app_id:          "100".to_string(),
+            slug:            "test-app".to_string(),
+            owner_login:     "owner".to_string(),
+            public:          true,
+            private_key_pem: pem.to_string(),
+            webhook_secret:  None,
         });
         let install_id = state.add_installation("100", "owner", vec!["repo".to_string()], false);
         let server = TestServer::start(state).await;
 
-        let jwt = sign_test_jwt("100", &pem);
-        let client = reqwest::Client::new();
+        let jwt = sign_test_jwt("100", pem);
+        let client = test_http_client();
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{}/app/installations/{install_id}/access_tokens",
                 server.url()
             ))
@@ -344,23 +308,23 @@ mod tests {
 
     #[tokio::test]
     async fn create_access_token_returns_422_for_unauthorized_repo() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
-            app_id: "100".to_string(),
-            slug: "test-app".to_string(),
-            owner_login: "owner".to_string(),
-            public: true,
-            private_key_pem: pem.clone(),
-            webhook_secret: None,
+        state.register_app(AppOptions {
+            app_id:          "100".to_string(),
+            slug:            "test-app".to_string(),
+            owner_login:     "owner".to_string(),
+            public:          true,
+            private_key_pem: pem.to_string(),
+            webhook_secret:  None,
         });
         let install_id = state.add_installation("100", "owner", vec!["repo".to_string()], false);
         let server = TestServer::start(state).await;
 
-        let jwt = sign_test_jwt("100", &pem);
-        let client = reqwest::Client::new();
+        let jwt = sign_test_jwt("100", pem);
+        let client = test_http_client();
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{}/app/installations/{install_id}/access_tokens",
                 server.url()
             ))

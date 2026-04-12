@@ -60,8 +60,9 @@ pub fn apply_stylesheet(stylesheet: &Stylesheet, graph: &mut Graph) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_graphviz::graph::Node;
+
+    use super::*;
 
     #[test]
     fn apply_universal_to_all_nodes() {

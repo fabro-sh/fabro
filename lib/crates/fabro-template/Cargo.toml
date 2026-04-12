@@ -1,0 +1,21 @@
+[package]
+name = "fabro-template"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Shared MiniJinja-based template rendering for Fabro"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+fabro-util = { path = "../fabro-util" }
+minijinja.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true

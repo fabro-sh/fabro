@@ -1,7 +1,9 @@
-use crate::sandbox::Sandbox;
-use fabro_model::Provider;
 use std::collections::HashSet;
+
+use fabro_model::Provider;
 use tracing::{debug, info, warn};
+
+use crate::sandbox::Sandbox;
 
 const BUDGET_BYTES: usize = 32768;
 
@@ -112,11 +114,12 @@ fn truncate_to_budget(content: &str, budget: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
     use super::*;
     use crate::sandbox::Sandbox;
     use crate::test_support::MockSandbox;
-    use std::collections::HashMap;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn discovers_agents_md() {

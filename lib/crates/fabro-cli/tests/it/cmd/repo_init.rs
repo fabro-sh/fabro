@@ -1,6 +1,5 @@
-use insta::assert_snapshot;
-
 use fabro_test::{fabro_snapshot, test_context};
+use insta::assert_snapshot;
 
 #[test]
 fn help() {
@@ -16,19 +15,19 @@ fn help() {
     Usage: fabro repo init [OPTIONS]
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
 
 #[test]
-fn repo_init_creates_fabro_toml_and_hello_workflow() {
+fn repo_init_creates_project_toml_and_hello_workflow() {
     let context = test_context!();
     context.git_init();
 
@@ -40,41 +39,35 @@ fn repo_init_creates_fabro_toml_and_hello_workflow() {
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-      ✔ fabro.toml
-      ✔ fabro/workflows/hello/workflow.fabro
-      ✔ fabro/workflows/hello/workflow.toml
+      ✔ .fabro/project.toml
+      ✔ .fabro/workflows/hello/workflow.fabro
+      ✔ .fabro/workflows/hello/workflow.toml
 
     Project initialized! Run a workflow with:
 
       fabro run hello
 
-      ! No git remote found — skipping GitHub App check
-      Run `git remote add origin <url>` then `fabro install` to set up the GitHub App
+      ! No git remote found — skipping GitHub check
+      Run `git remote add origin <url>`, then `gh auth login` or `fabro install` to configure GitHub access
     ");
 
     assert_snapshot!(
-        std::fs::read_to_string(context.temp_dir.join("fabro.toml")).unwrap(),
+        std::fs::read_to_string(context.temp_dir.join(".fabro/project.toml")).unwrap(),
         @r###"
     # Fabro project configuration
     # https://docs.fabro.computer/getting-started/quick-start
 
-    version = 1
-
-    [fabro]
-    root = "fabro/"
-
-    # Disable retrospective analysis after workflow runs:
-    # retro = false
+    _version = 1
 
     # Auto-create pull requests on successful workflow runs.
-    [pull_request]
+    [run.pull_request]
     enabled = true
     draft = true
     # auto_merge = true
     "###
     );
     assert_snapshot!(
-        std::fs::read_to_string(context.temp_dir.join("fabro/workflows/hello/workflow.fabro"))
+        std::fs::read_to_string(context.temp_dir.join(".fabro/workflows/hello/workflow.fabro"))
             .unwrap(),
         @r###"
     digraph Hello {
@@ -91,13 +84,15 @@ fn repo_init_creates_fabro_toml_and_hello_workflow() {
     "###
     );
     assert_snapshot!(
-        std::fs::read_to_string(context.temp_dir.join("fabro/workflows/hello/workflow.toml"))
+        std::fs::read_to_string(context.temp_dir.join(".fabro/workflows/hello/workflow.toml"))
             .unwrap(),
         @r###"
-    version = 1
+    _version = 1
+
+    [workflow]
     graph = "workflow.fabro"
 
-    [sandbox]
+    [run.sandbox]
     provider = "local"
     "###
     );
@@ -107,7 +102,12 @@ fn repo_init_creates_fabro_toml_and_hello_workflow() {
 fn repo_init_rejects_already_initialized_repo() {
     let context = test_context!();
     context.git_init();
-    std::fs::write(context.temp_dir.join("fabro.toml"), "version = 1\n").unwrap();
+    std::fs::create_dir_all(context.temp_dir.join(".fabro")).unwrap();
+    std::fs::write(
+        context.temp_dir.join(".fabro/project.toml"),
+        "_version = 1\n",
+    )
+    .unwrap();
 
     let mut cmd = context.command();
     cmd.args(["repo", "init"]);
@@ -117,7 +117,7 @@ fn repo_init_rejects_already_initialized_repo() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: already initialized — fabro.toml exists at [TEMP_DIR]/fabro.toml
+    error: already initialized — .fabro/project.toml exists at [TEMP_DIR]/.fabro/project.toml
     ");
 }
 

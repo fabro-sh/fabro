@@ -1,9 +1,18 @@
+use std::collections::HashMap;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::Output;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use assert_cmd::Command;
+use fabro_config::Storage;
+use fabro_types::RunId;
 use regex::Regex;
+use serde::Serialize;
 use serde_json::{Map, Value, json};
+use toml::Value as TomlValue;
+use toml::map::Map as TomlMap;
 
 /// Walk up from `start` to find the repo-level `test/` fixtures directory.
 pub fn find_test_fixtures_dir(start: &Path) -> Option<PathBuf> {
@@ -24,9 +33,10 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
     (r"\b[0-9A-HJKMNP-TV-Z]{26}\b", "[ULID]"),
     (r"in \d+(\.\d+)?(ms|s)", "in [TIME]"),
     (
-        r"\[STORAGE_DIR\]/runs/\d{8}-dry-run-\[ULID\]",
+        r"\[STORAGE_DIR\]/scratch/\d{8}-dry-run-\[ULID\]",
         "[DRY_RUN_DIR]",
     ),
+    (r"\[STORAGE_DIR\]/scratch/\d{8}-\[ULID\]", "[RUN_DIR]"),
     (
         r"Duration:\s+\d+\s+(seconds?|minutes?|hours?)",
         "Duration:  [DURATION]",
@@ -34,6 +44,10 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
     (r"Base: [^\n]+ \([0-9a-f]{7,40}\)", "Base: [BASE]"),
     (r"\\([\w\d])", "/$1"),
 ];
+
+const MANAGED_STORAGE_MARKER: &str = "# fabro-test managed storage_dir";
+const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
+const SESSION_LOCK_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TestMode {
@@ -67,7 +81,8 @@ impl TestMode {
     }
 }
 
-/// Read an env var required by an E2E test, with mode-aware skip/strict behavior.
+/// Read an env var required by an E2E test, with mode-aware skip/strict
+/// behavior.
 #[must_use]
 #[allow(clippy::print_stderr)]
 pub fn require_env(name: &str) -> Option<String> {
@@ -83,17 +98,678 @@ pub fn require_env(name: &str) -> Option<String> {
     }
 }
 
-/// An isolated test context for running fabro CLI commands.
+/// A test context for running fabro CLI commands.
 ///
-/// Creates temporary directories for home, storage, and working directory,
-/// and provides methods to build commands with proper isolation env vars.
+/// Each context gets isolated home/temp directories. The storage directory is
+/// shared per nextest run when `NEXTEST_RUN_ID` is present, otherwise shared
+/// per test process.
 pub struct TestContext {
-    pub temp_dir: PathBuf,
-    pub home_dir: PathBuf,
-    pub storage_dir: PathBuf,
-    fabro_bin: PathBuf,
-    filters: Vec<(String, String)>,
-    _root: tempfile::TempDir,
+    pub temp_dir:         PathBuf,
+    pub home_dir:         PathBuf,
+    pub storage_dir:      PathBuf,
+    test_case_id:         String,
+    test_run_id:          String,
+    session_root:         PathBuf,
+    fabro_bin:            PathBuf,
+    filters:              Vec<(String, String)>,
+    active_socket_path:   PathBuf,
+    isolated_server:      Option<ServerPaths>,
+    managed_storage_dirs: Vec<PathBuf>,
+    _context_root:        tempfile::TempDir,
+}
+
+#[derive(Debug, Clone)]
+struct ServerPaths {
+    root:        PathBuf,
+    storage_dir: PathBuf,
+    socket_path: PathBuf,
+    config_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct SessionPaths {
+    root:   PathBuf,
+    server: ServerPaths,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SessionMode {
+    Nextest,
+    Process,
+}
+
+#[derive(Debug, Serialize)]
+struct ClientMarker {
+    pid:           u32,
+    touched_at_ms: u128,
+}
+
+static SESSION_REFS: OnceLock<Mutex<HashMap<PathBuf, usize>>> = OnceLock::new();
+
+fn session_refs() -> &'static Mutex<HashMap<PathBuf, usize>> {
+    SESSION_REFS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This synchronous test-support helper uses uuidgen when available to create stable unique case IDs."
+)]
+fn test_case_id() -> String {
+    let ulid = std::process::Command::new("uuidgen")
+        .arg("-r")
+        .output()
+        .ok()
+        .and_then(|output| output.status.success().then_some(output.stdout))
+        .and_then(|stdout| String::from_utf8(stdout).ok())
+        .map(|value| value.trim().replace('-', ""))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos();
+            format!("{nanos:032x}")
+        });
+    ulid
+}
+
+fn current_timestamp_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_millis()
+}
+
+fn current_pid() -> u32 {
+    std::process::id()
+}
+
+fn session_paths() -> (SessionMode, String, SessionPaths) {
+    let base_dir = short_session_base_dir();
+    if let Ok(run_id) = std::env::var("NEXTEST_RUN_ID") {
+        if !run_id.trim().is_empty() {
+            let short_id = shorten_session_id(&run_id);
+            let root = base_dir.join(format!("n-{short_id}"));
+            return (SessionMode::Nextest, run_id, SessionPaths {
+                server: ServerPaths {
+                    root:        root.clone(),
+                    storage_dir: root.join("storage"),
+                    socket_path: root.join("fabro.sock"),
+                    config_path: root.join("settings.toml"),
+                },
+                root,
+            });
+        }
+    }
+
+    let process_id = format!("process-{}", current_pid());
+    let root = base_dir.join(format!("p-{}", current_pid()));
+    (SessionMode::Process, process_id, SessionPaths {
+        server: ServerPaths {
+            root:        root.clone(),
+            storage_dir: root.join("storage"),
+            socket_path: root.join("fabro.sock"),
+            config_path: root.join("settings.toml"),
+        },
+        root,
+    })
+}
+
+fn short_session_base_dir() -> PathBuf {
+    #[cfg(unix)]
+    {
+        PathBuf::from("/tmp/fx")
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::temp_dir().join("fabro-test")
+    }
+}
+
+fn shorten_session_id(id: &str) -> String {
+    let trimmed = id.trim();
+    let shortened: String = trimmed
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .take(12)
+        .collect();
+    if shortened.is_empty() {
+        "session".to_string()
+    } else {
+        shortened
+    }
+}
+
+fn session_lock_path(root: &Path) -> PathBuf {
+    root.join("session.lock")
+}
+
+fn session_clients_dir(root: &Path) -> PathBuf {
+    root.join("clients")
+}
+
+fn session_marker_path(root: &Path, pid: u32) -> PathBuf {
+    session_clients_dir(root).join(pid.to_string())
+}
+
+fn ensure_parent_dir(path: &Path) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", parent.display()));
+    }
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync test helper polls filesystem and flock state without requiring a Tokio runtime."
+)]
+fn with_session_lock<T>(root: &Path, f: impl FnOnce() -> T) -> T {
+    let lock_path = session_lock_path(root);
+    // Retry create-dir + create-file as a unit: another process's
+    // cleanup_session_root can remove_dir_all between the two calls.
+    let deadline = std::time::Instant::now() + SESSION_LOCK_TIMEOUT;
+    let lock_file = loop {
+        std::fs::create_dir_all(root)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
+        ensure_parent_dir(&lock_path);
+        match File::create(&lock_path) {
+            Ok(f) => break f,
+            Err(_) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(err) => panic!("failed to create {}: {err}", lock_path.display()),
+        }
+    };
+    while !fabro_proc::try_flock_exclusive(&lock_file)
+        .unwrap_or_else(|err| panic!("failed to lock {}: {err}", lock_path.display()))
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for session lock {}",
+            lock_path.display()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let result = f();
+    fabro_proc::flock_unlock(&lock_file)
+        .unwrap_or_else(|err| panic!("failed to unlock {}: {err}", lock_path.display()));
+    result
+}
+
+fn live_marker_count(root: &Path) -> usize {
+    let clients_dir = session_clients_dir(root);
+    let Ok(entries) = std::fs::read_dir(&clients_dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .parse::<u32>()
+                .ok()
+                .map(|pid| (pid, entry.path()))
+        })
+        .filter(|(pid, path)| {
+            if fabro_proc::process_alive(*pid) {
+                true
+            } else {
+                let _ = std::fs::remove_file(path);
+                false
+            }
+        })
+        .count()
+}
+
+fn write_marker(root: &Path) {
+    let marker = ClientMarker {
+        pid:           current_pid(),
+        touched_at_ms: current_timestamp_ms(),
+    };
+    let marker_path = session_marker_path(root, marker.pid);
+    ensure_parent_dir(&marker_path);
+    let contents =
+        serde_json::to_vec(&marker).expect("client marker should serialize to JSON bytes");
+    std::fs::write(&marker_path, contents)
+        .unwrap_or_else(|err| panic!("failed to write {}: {err}", marker_path.display()));
+}
+
+fn managed_storage_settings(storage_dir: &Path, rest: &str) -> String {
+    format!(
+        "{MANAGED_STORAGE_MARKER}\n_version = 1\n\n[server.storage]\nroot = \"{}\"\n\n{rest}",
+        storage_dir.display()
+    )
+}
+
+fn strip_managed_storage_settings(contents: &str) -> &str {
+    if !contents.starts_with(MANAGED_STORAGE_MARKER) {
+        return contents;
+    }
+
+    let after_marker = contents
+        .strip_prefix(MANAGED_STORAGE_MARKER)
+        .and_then(|rest| rest.strip_prefix('\n'))
+        .unwrap_or("");
+    after_marker
+}
+
+fn settings_storage_dir(settings_path: &Path) -> Option<PathBuf> {
+    let content = std::fs::read_to_string(settings_path).ok()?;
+    // Settings files that fabro-test injected with its managed marker are
+    // not treated as user-explicit storage overrides — the override tracks
+    // ONLY what the test itself asked for.
+    if content.starts_with(MANAGED_STORAGE_MARKER) {
+        return None;
+    }
+    let value = toml::from_str::<toml::Value>(&content).ok()?;
+    value
+        .get("server")
+        .and_then(toml::Value::as_table)
+        .and_then(|server| server.get("storage"))
+        .and_then(toml::Value::as_table)
+        .and_then(|storage| storage.get("root"))
+        .and_then(toml::Value::as_str)
+        .map(PathBuf::from)
+}
+
+fn home_settings_path(home_dir: &Path) -> PathBuf {
+    home_dir.join(".fabro/settings.toml")
+}
+
+fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
+    ensure_parent_dir(path);
+    std::fs::write(
+        path,
+        format!(
+            "_version = 1\n\n[server.storage]\nroot = \"{}\"\n\n{rest}",
+            storage_dir.display()
+        ),
+    )
+    .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
+}
+
+fn parse_settings_table(contents: &str, source: &Path) -> TomlMap<String, TomlValue> {
+    let stripped = strip_managed_storage_settings(contents);
+    let value = toml::from_str::<TomlValue>(stripped)
+        .unwrap_or_else(|err| panic!("failed to parse {}: {err}", source.display()));
+    let Some(table) = value.as_table() else {
+        panic!("expected {} to contain a TOML table", source.display());
+    };
+    table.clone()
+}
+
+fn write_settings_table(path: &Path, table: &TomlMap<String, TomlValue>) {
+    ensure_parent_dir(path);
+    let mut contents = toml::to_string(table)
+        .unwrap_or_else(|err| panic!("failed to serialize {}: {err}", path.display()));
+    if !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+    std::fs::write(path, contents)
+        .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
+}
+
+fn server_target_from_table(table: &TomlMap<String, TomlValue>) -> Option<String> {
+    table
+        .get("cli")
+        .and_then(TomlValue::as_table)
+        .and_then(|cli| cli.get("target"))
+        .and_then(TomlValue::as_table)
+        .and_then(|target| target.get("path").or_else(|| target.get("url")))
+        .and_then(TomlValue::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn set_server_target(table: &mut TomlMap<String, TomlValue>, socket_path: &Path) {
+    let cli_entry = table
+        .entry("cli".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    let Some(cli_table) = cli_entry.as_table_mut() else {
+        panic!("expected [cli] to be a TOML table");
+    };
+    let target_entry = cli_table
+        .entry("target".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    let Some(target_table) = target_entry.as_table_mut() else {
+        panic!("expected [cli.target] to be a TOML table");
+    };
+    target_table.insert("type".to_string(), TomlValue::String("unix".to_string()));
+    target_table.insert(
+        "path".to_string(),
+        TomlValue::String(socket_path.display().to_string()),
+    );
+}
+
+fn clear_server_target(table: &mut TomlMap<String, TomlValue>) {
+    let Some(cli_entry) = table.get_mut("cli") else {
+        return;
+    };
+    let Some(cli_table) = cli_entry.as_table_mut() else {
+        return;
+    };
+    cli_table.remove("target");
+    if cli_table.is_empty() {
+        table.remove("cli");
+    }
+}
+
+fn sync_home_settings(
+    settings_path: &Path,
+    storage_dir: &Path,
+    socket_path: &Path,
+    force_server_target: bool,
+) {
+    let (mut table, had_explicit_storage, had_explicit_target) =
+        match std::fs::read_to_string(settings_path) {
+            Ok(contents) => {
+                let had_managed_storage = contents.starts_with(MANAGED_STORAGE_MARKER);
+                let table = parse_settings_table(&contents, settings_path);
+                let had_explicit_storage =
+                    !had_managed_storage && has_explicit_storage_root(&table);
+                let had_explicit_target = server_target_from_table(&table).is_some();
+                (table, had_explicit_storage, had_explicit_target)
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                (TomlMap::new(), false, false)
+            }
+            Err(err) => panic!("failed to read {}: {err}", settings_path.display()),
+        };
+
+    table
+        .entry("_version".to_string())
+        .or_insert(TomlValue::Integer(1));
+
+    if !had_explicit_storage {
+        set_server_storage_root(&mut table, storage_dir);
+    }
+
+    if force_server_target || (!had_explicit_storage && !had_explicit_target) {
+        set_server_target(&mut table, socket_path);
+    } else if had_explicit_storage && !had_explicit_target {
+        clear_server_target(&mut table);
+    }
+
+    if !had_explicit_storage {
+        let mut rest = table.clone();
+        clear_server_storage(&mut rest);
+        rest.remove("_version");
+        let managed_target = !had_explicit_target && !force_server_target;
+        if managed_target {
+            clear_server_target(&mut rest);
+        }
+        let rest_toml = toml::to_string(&rest)
+            .unwrap_or_else(|err| panic!("failed to serialize {}: {err}", settings_path.display()));
+        let contents = if managed_target {
+            format!(
+                "{MANAGED_STORAGE_MARKER}\n_version = 1\n\n[server.storage]\nroot = \"{}\"\n\n[cli.target]\ntype = \"unix\"\npath = \"{}\"\n\n{rest_toml}",
+                storage_dir.display(),
+                socket_path.display()
+            )
+        } else {
+            managed_storage_settings(storage_dir, &rest_toml)
+        };
+        ensure_parent_dir(settings_path);
+        std::fs::write(settings_path, contents)
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", settings_path.display()));
+        return;
+    }
+
+    write_settings_table(settings_path, &table);
+}
+
+fn has_explicit_storage_root(table: &TomlMap<String, TomlValue>) -> bool {
+    table
+        .get("server")
+        .and_then(TomlValue::as_table)
+        .and_then(|server| server.get("storage"))
+        .and_then(TomlValue::as_table)
+        .and_then(|storage| storage.get("root"))
+        .is_some()
+}
+
+fn set_server_storage_root(table: &mut TomlMap<String, TomlValue>, storage_dir: &Path) {
+    let server_entry = table
+        .entry("server".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    let Some(server_table) = server_entry.as_table_mut() else {
+        panic!("expected [server] to be a TOML table");
+    };
+    let storage_entry = server_table
+        .entry("storage".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    let Some(storage_table) = storage_entry.as_table_mut() else {
+        panic!("expected [server.storage] to be a TOML table");
+    };
+    storage_table.insert(
+        "root".to_string(),
+        TomlValue::String(storage_dir.display().to_string()),
+    );
+}
+
+fn clear_server_storage(table: &mut TomlMap<String, TomlValue>) {
+    let Some(server_entry) = table.get_mut("server") else {
+        return;
+    };
+    let Some(server_table) = server_entry.as_table_mut() else {
+        return;
+    };
+    server_table.remove("storage");
+    if server_table.is_empty() {
+        table.remove("server");
+    }
+}
+
+fn server_record_path(storage_dir: &Path) -> PathBuf {
+    storage_dir.join("server.json")
+}
+
+fn server_record_pid(storage_dir: &Path) -> Option<u32> {
+    let record_path = server_record_path(storage_dir);
+    let Ok(content) = std::fs::read_to_string(&record_path) else {
+        return None;
+    };
+    let Ok(record) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return None;
+    };
+    record["pid"]
+        .as_u64()
+        .and_then(|pid| u32::try_from(pid).ok())
+}
+
+fn server_running(server: &ServerPaths) -> bool {
+    server_record_pid(&server.storage_dir).is_some_and(fabro_proc::process_alive)
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync test helper polls a child server process without requiring a Tokio runtime."
+)]
+fn wait_for_server_running(server: &ServerPaths) {
+    let poll = std::time::Duration::from_millis(50);
+    let timeout = std::time::Duration::from_secs(5);
+    let mut elapsed = std::time::Duration::ZERO;
+    while elapsed < timeout {
+        if server_running(server) {
+            return;
+        }
+        std::thread::sleep(poll);
+        elapsed += poll;
+    }
+    panic!(
+        "timed out waiting for test server record in {}",
+        server.storage_dir.display()
+    );
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This synchronous test-support helper launches the real fabro CLI server before reqwest clients connect to it."
+)]
+fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &Path) {
+    if server_running(server) {
+        return;
+    }
+
+    ensure_parent_dir(&server.socket_path);
+    ensure_parent_dir(config_path);
+    std::fs::create_dir_all(&server.storage_dir)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", server.storage_dir.display()));
+    let _ = std::fs::remove_file(server_record_path(&server.storage_dir));
+    let _ = std::fs::remove_file(&server.socket_path);
+
+    let output = std::process::Command::new(fabro_bin)
+        .env("NO_COLOR", "1")
+        .env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled")
+        .env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64")
+        .env(TEST_IN_MEMORY_STORE_ENV, "1")
+        .env("FABRO_HOME", &server.root)
+        .args(["server", "start"])
+        .arg("--storage-dir")
+        .arg(&server.storage_dir)
+        .arg("--bind")
+        .arg(&server.socket_path)
+        .arg("--config")
+        .arg(config_path)
+        .output()
+        .unwrap_or_else(|err| panic!("failed to execute {}: {err}", fabro_bin.display()));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() || stderr.contains("Server already running"),
+        "failed to start test server:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr
+    );
+
+    wait_for_server_running(server);
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync test helper polls child shutdown during cleanup without requiring a Tokio runtime."
+)]
+fn stop_test_server(server: &ServerPaths) {
+    let record_path = server_record_path(&server.storage_dir);
+    let Some(pid) = server_record_pid(&server.storage_dir) else {
+        let _ = std::fs::remove_file(&server.socket_path);
+        let _ = std::fs::remove_file(&record_path);
+        return;
+    };
+
+    fabro_proc::sigterm(pid);
+
+    let poll = std::time::Duration::from_millis(50);
+    let timeout = test_server_stop_timeout();
+    let mut elapsed = std::time::Duration::ZERO;
+    while elapsed < timeout && fabro_proc::process_alive(pid) {
+        std::thread::sleep(poll);
+        elapsed += poll;
+    }
+    if fabro_proc::process_alive(pid) {
+        fabro_proc::sigkill(pid);
+    }
+
+    let _ = std::fs::remove_file(&server.socket_path);
+    let _ = std::fs::remove_file(&record_path);
+}
+
+fn test_server_stop_timeout() -> std::time::Duration {
+    // Give the server a brief window to flush state, then escalate.
+    // The server's own 5s worker-shutdown grace is unnecessary in tests
+    // because no real work needs preserving — any lingering workers are
+    // from already-completed runs racing to exit.
+    std::time::Duration::from_millis(500)
+}
+
+fn shared_server_paths(root: &Path) -> ServerPaths {
+    ServerPaths {
+        root:        root.to_path_buf(),
+        storage_dir: root.join("storage"),
+        socket_path: root.join("fabro.sock"),
+        config_path: root.join("settings.toml"),
+    }
+}
+
+fn isolated_server_paths(
+    root: &Path,
+    test_case_id: &str,
+    storage_dir: Option<PathBuf>,
+) -> ServerPaths {
+    let server_root = root.join("isolated").join(test_case_id);
+    ServerPaths {
+        root:        server_root.clone(),
+        storage_dir: storage_dir.unwrap_or_else(|| server_root.join("storage")),
+        socket_path: server_root.join("fabro.sock"),
+        config_path: server_root.join("settings.toml"),
+    }
+}
+
+fn reap_isolated_servers(root: &Path) {
+    let isolated_root = root.join("isolated");
+    let Ok(entries) = std::fs::read_dir(&isolated_root) else {
+        return;
+    };
+
+    for entry in entries.filter_map(Result::ok) {
+        let server_root = entry.path();
+        if !server_root.is_dir() {
+            continue;
+        }
+        stop_test_server(&ServerPaths {
+            root:        server_root.clone(),
+            storage_dir: server_root.join("storage"),
+            socket_path: server_root.join("fabro.sock"),
+            config_path: server_root.join("settings.toml"),
+        });
+        let _ = std::fs::remove_dir_all(server_root);
+    }
+}
+
+fn cleanup_session_root(root: &Path) {
+    with_session_lock(root, || {
+        let marker_path = session_marker_path(root, current_pid());
+        let _ = std::fs::remove_file(&marker_path);
+        let live_count = live_marker_count(root);
+        if live_count == 0 {
+            stop_test_server(&shared_server_paths(root));
+            reap_isolated_servers(root);
+            let _ = std::fs::remove_dir_all(root);
+        }
+    });
+}
+
+fn reap_stale_session_roots(mode: SessionMode) {
+    let base_dir = short_session_base_dir();
+    let Ok(entries) = std::fs::read_dir(&base_dir) else {
+        return;
+    };
+
+    for entry in entries.filter_map(Result::ok) {
+        let root = entry.path();
+        if !root.is_dir() {
+            continue;
+        }
+        let file_name = root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let expected_prefix = match mode {
+            SessionMode::Nextest => "n-",
+            SessionMode::Process => "p-",
+        };
+        if !file_name.starts_with(expected_prefix) {
+            continue;
+        }
+        with_session_lock(&root, || {
+            if live_marker_count(&root) == 0 {
+                stop_test_server(&shared_server_paths(&root));
+                reap_isolated_servers(&root);
+                let _ = std::fs::remove_dir_all(&root);
+            }
+        });
+    }
 }
 
 impl TestContext {
@@ -102,16 +778,68 @@ impl TestContext {
     /// `fabro_bin` should be the path to the compiled `fabro` binary,
     /// typically obtained via `env!("CARGO_BIN_EXE_fabro")`.
     pub fn new(fabro_bin: PathBuf) -> Self {
-        let root = tempfile::tempdir().expect("failed to create temp dir");
-        let root_path = root.path().to_path_buf();
+        let test_name: String = std::thread::current()
+            .name()
+            .unwrap_or("unknown")
+            .rsplit("::")
+            .next()
+            .unwrap_or("unknown")
+            .to_string();
+        // Truncate to keep total temp path under Unix socket limit (104 bytes).
+        // Budget: TMPDIR (~49) + prefix + suffix (~6) + /home/fabro-data/fabro.sock
+        // (27) < 104
+        let label = &test_name[..test_name.len().min(16)];
+        let context_root = tempfile::Builder::new()
+            .prefix(&format!(".ft-{label}-"))
+            .tempdir()
+            .expect("failed to create temp dir");
+        let root_path = context_root.path().to_path_buf();
+        let (_, test_run_id, session_paths) = session_paths();
+        reap_stale_session_roots(SessionMode::Nextest);
+        reap_stale_session_roots(SessionMode::Process);
+        with_session_lock(&session_paths.root, || {
+            std::fs::create_dir_all(session_clients_dir(&session_paths.root)).unwrap_or_else(
+                |err| {
+                    panic!(
+                        "failed to create {}: {err}",
+                        session_clients_dir(&session_paths.root).display()
+                    )
+                },
+            );
+            std::fs::create_dir_all(&session_paths.server.storage_dir).unwrap_or_else(|err| {
+                panic!(
+                    "failed to create {}: {err}",
+                    session_paths.server.storage_dir.display()
+                )
+            });
+            write_settings_file(
+                &session_paths.server.config_path,
+                &session_paths.server.storage_dir,
+                "",
+            );
+            if fabro_bin.exists() {
+                ensure_server_running(
+                    &fabro_bin,
+                    &session_paths.server,
+                    &session_paths.server.config_path,
+                );
+            }
+            write_marker(&session_paths.root);
+        });
 
         let temp_dir = root_path.join("temp");
         let home_dir = root_path.join("home");
-        let storage_dir = root_path.join("storage");
+        let storage_dir = session_paths.server.storage_dir.clone();
+        let test_case_id = test_case_id();
 
         std::fs::create_dir_all(&temp_dir).expect("failed to create temp_dir");
         std::fs::create_dir_all(&home_dir).expect("failed to create home_dir");
-        std::fs::create_dir_all(&storage_dir).expect("failed to create storage_dir");
+        sync_home_settings(
+            &home_settings_path(&home_dir),
+            &storage_dir,
+            &session_paths.server.socket_path,
+            false,
+        );
 
         let filters = vec![
             (
@@ -138,15 +866,28 @@ impl TestContext {
                 regex::escape(storage_dir.to_str().unwrap()),
                 "[STORAGE_DIR]".to_string(),
             ),
+            (regex::escape(&test_case_id), "[TEST_CASE]".to_string()),
+            (regex::escape(&test_run_id), "[TEST_RUN]".to_string()),
         ];
+
+        {
+            let mut refs = session_refs().lock().expect("session refs lock poisoned");
+            *refs.entry(session_paths.root.clone()).or_default() += 1;
+        }
 
         Self {
             temp_dir,
             home_dir,
             storage_dir,
+            test_case_id,
+            test_run_id,
+            session_root: session_paths.root,
             fabro_bin,
             filters,
-            _root: root,
+            active_socket_path: session_paths.server.socket_path,
+            isolated_server: None,
+            managed_storage_dirs: Vec::new(),
+            _context_root: context_root,
         }
     }
 
@@ -167,6 +908,29 @@ impl TestContext {
         filters
     }
 
+    pub fn test_run_id(&self) -> &str {
+        &self.test_run_id
+    }
+
+    pub fn test_case_id(&self) -> &str {
+        &self.test_case_id
+    }
+
+    pub fn test_run_label(&self) -> String {
+        format!("fabro_test_run={}", self.test_run_id)
+    }
+
+    pub fn test_case_label(&self) -> String {
+        format!("fabro_test_case={}", self.test_case_id)
+    }
+
+    fn append_test_labels(&self, cmd: &mut Command) {
+        cmd.arg("--label");
+        cmd.arg(self.test_run_label());
+        cmd.arg("--label");
+        cmd.arg(self.test_case_label());
+    }
+
     /// Build a base `Command` with all isolation env vars set.
     ///
     /// The working directory defaults to `self.temp_dir` (a non-git temp
@@ -176,10 +940,21 @@ impl TestContext {
     pub fn command(&self) -> Command {
         let mut cmd = Command::new(&self.fabro_bin);
         cmd.current_dir(&self.temp_dir);
+        // Scrub all inherited FABRO_* env so a developer running with
+        // e.g. FABRO_CONFIG=/some/path doesn't pollute child processes.
+        for (key, _) in std::env::vars_os() {
+            if let Some(s) = key.to_str() {
+                if s.starts_with("FABRO_") {
+                    cmd.env_remove(&key);
+                }
+            }
+        }
         cmd.env("NO_COLOR", "1");
         cmd.env("HOME", &self.home_dir);
-        cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
-        cmd.env("FABRO_STORAGE_DIR", &self.storage_dir);
+        cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+            .env("FABRO_HTTP_PROXY_POLICY", "disabled");
+        cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
+        cmd.env(TEST_IN_MEMORY_STORE_ENV, "1");
         cmd
     }
 
@@ -194,6 +969,15 @@ impl TestContext {
     pub fn run_cmd(&self) -> Command {
         let mut cmd = self.command();
         cmd.arg("run");
+        self.append_test_labels(&mut cmd);
+        cmd
+    }
+
+    /// Build a `create` subcommand with per-test labels attached.
+    pub fn create_cmd(&self) -> Command {
+        let mut cmd = self.command();
+        cmd.arg("create");
+        self.append_test_labels(&mut cmd);
         cmd
     }
 
@@ -229,13 +1013,6 @@ impl TestContext {
     pub fn exec_cmd(&self) -> Command {
         let mut cmd = self.command();
         cmd.arg("exec");
-        cmd
-    }
-
-    /// Build a `llm` subcommand.
-    pub fn llm(&self) -> Command {
-        let mut cmd = self.command();
-        cmd.arg("llm");
         cmd
     }
 
@@ -326,6 +1103,10 @@ impl TestContext {
     }
 
     /// Initialize a git repository in `temp_dir`.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This synchronous test-support helper initializes fixture repositories with the real git CLI."
+    )]
     pub fn git_init(&self) -> &Self {
         std::process::Command::new("git")
             .args(["init"])
@@ -343,19 +1124,84 @@ impl TestContext {
         path: impl AsRef<std::path::Path>,
         content: impl AsRef<[u8]>,
     ) -> &Self {
+        let path = path.as_ref();
         let full = self.home_dir.join(path);
         if let Some(parent) = full.parent() {
             std::fs::create_dir_all(parent).expect("failed to create parent dirs");
         }
-        std::fs::write(&full, content).expect("failed to write file");
+        let content = content.as_ref();
+        if path == std::path::Path::new(".fabro/settings.toml") {
+            let contents =
+                std::str::from_utf8(content).expect("settings.toml should be valid UTF-8");
+            let table = parse_settings_table(contents, &full);
+            write_settings_table(&full, &table);
+            sync_home_settings(
+                &full,
+                &self.storage_dir,
+                &self.active_socket_path,
+                self.isolated_server.is_some(),
+            );
+        } else {
+            std::fs::write(&full, content).expect("failed to write file");
+        }
+        self
+    }
+
+    pub fn server_target(&self) -> String {
+        self.active_socket_path.display().to_string()
+    }
+
+    pub fn isolated_server(&mut self) -> &mut Self {
+        if self.isolated_server.is_some() {
+            return self;
+        }
+
+        let settings_path = home_settings_path(&self.home_dir);
+        let storage_dir_override = settings_storage_dir(&settings_path);
+        let server =
+            isolated_server_paths(&self.session_root, &self.test_case_id, storage_dir_override);
+        std::fs::create_dir_all(&server.root)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", server.root.display()));
+        sync_home_settings(
+            &settings_path,
+            &server.storage_dir,
+            &server.socket_path,
+            true,
+        );
+        if fabro_bin_exists(&self.fabro_bin) {
+            ensure_server_running(&self.fabro_bin, &server, &settings_path);
+        }
+        self.storage_dir.clone_from(&server.storage_dir);
+        self.active_socket_path.clone_from(&server.socket_path);
+        self.isolated_server = Some(server);
+        self
+    }
+
+    /// Register an additional storage directory that this test may cause to
+    /// auto-start a daemon for, so Drop can stop it.
+    pub fn manage_storage_dir(&mut self, path: impl AsRef<Path>) -> &mut Self {
+        let path = path.as_ref().to_path_buf();
+        if path != self.storage_dir && !self.managed_storage_dirs.contains(&path) {
+            self.managed_storage_dirs.push(path);
+        }
         self
     }
 
     /// Find a run directory whose name ends with `run_id_suffix`.
     pub fn find_run_dir(&self, run_id_suffix: &str) -> PathBuf {
-        let runs_dir = self.storage_dir.join("runs");
-        std::fs::read_dir(&runs_dir)
-            .expect("runs directory should exist")
+        if let Ok(run_id) = run_id_suffix.parse::<RunId>() {
+            let run_dir = Storage::new(&self.storage_dir)
+                .run_scratch(&run_id)
+                .root()
+                .to_path_buf();
+            if run_dir.is_dir() {
+                return run_dir;
+            }
+        }
+
+        let scratch_dir = self.storage_dir.join("scratch");
+        std::fs::read_dir(&scratch_dir)
+            .expect("scratch directory should exist")
             .flatten()
             .map(|entry| entry.path())
             .find(|path| {
@@ -367,27 +1213,86 @@ impl TestContext {
             .unwrap_or_else(|| {
                 panic!(
                     "expected run directory for {run_id_suffix} under {}",
-                    runs_dir.display()
+                    scratch_dir.display()
                 )
             })
     }
 
     /// Return the only run directory currently present under storage.
     pub fn single_run_dir(&self) -> PathBuf {
-        let runs_dir = self.storage_dir.join("runs");
-        let entries: Vec<_> = std::fs::read_dir(&runs_dir)
-            .expect("runs directory should exist")
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
+        let output = self
+            .ps()
+            .args(["-a", "--json", "--label", &self.test_case_label()])
+            .output()
+            .expect("ps should execute");
+        assert!(
+            output.status.success(),
+            "ps should succeed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let runs: Vec<Value> =
+            serde_json::from_slice(&output.stdout).expect("ps JSON should parse");
+        let entries: Vec<_> = runs
+            .into_iter()
+            .filter_map(|run| {
+                run.get("run_id")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .map(|run_id| self.find_run_dir(&run_id))
             .collect();
+        let scratch_dir = self.storage_dir.join("scratch");
         assert_eq!(
             entries.len(),
             1,
-            "expected exactly one run directory under {}",
-            runs_dir.display()
+            "expected exactly one run directory for fabro_test_case={} under {}",
+            self.test_case_id(),
+            scratch_dir.display()
         );
         entries.into_iter().next().unwrap()
+    }
+}
+
+fn fabro_bin_exists(path: &Path) -> bool {
+    path.exists()
+}
+
+impl Drop for TestContext {
+    fn drop(&mut self) {
+        for storage_dir in &self.managed_storage_dirs {
+            stop_test_server(&ServerPaths {
+                root:        storage_dir.clone(),
+                storage_dir: storage_dir.clone(),
+                socket_path: PathBuf::new(),
+                config_path: PathBuf::new(),
+            });
+        }
+
+        if let Some(server) = &self.isolated_server {
+            stop_test_server(server);
+            let _ = std::fs::remove_dir_all(&server.root);
+        }
+
+        let is_last_ref = {
+            let mut refs = session_refs().lock().expect("session refs lock poisoned");
+            let Some(count) = refs.get_mut(&self.session_root) else {
+                return;
+            };
+            *count -= 1;
+            if *count == 0 {
+                refs.remove(&self.session_root);
+                true
+            } else {
+                false
+            }
+        };
+
+        if !is_last_ref {
+            return;
+        }
+
+        cleanup_session_root(&self.session_root);
     }
 }
 
@@ -436,7 +1341,8 @@ pub fn apply_filters(snapshot: &str, filters: &[(String, String)]) -> String {
 /// Create a `TestContext` using the `fabro` binary built by cargo.
 ///
 /// Automatically registers a `[FIXTURES]` snapshot filter for the `test/`
-/// directory at the repository root (found by walking up from `CARGO_MANIFEST_DIR`).
+/// directory at the repository root (found by walking up from
+/// `CARGO_MANIFEST_DIR`).
 #[macro_export]
 macro_rules! test_context {
     () => {{
@@ -491,7 +1397,7 @@ use tokio::net::TcpListener as TokioTcpListener;
 use tokio::sync::OnceCell;
 use tokio::time;
 pub use twin_github::AppState as GitHubAppState;
-pub use twin_github::state::AppConfig as GitHubAppConfig;
+pub use twin_github::state::AppOptions as GitHubAppOptions;
 use twin_openai::config::Config as TwinConfig;
 
 /// A shared twin-openai server instance.
@@ -502,7 +1408,11 @@ pub struct TwinOpenAi {
 
 pub struct TwinGitHub {
     pub base_url: String,
-    server: twin_github::TestServer,
+    server:       twin_github::TestServer,
+}
+
+pub fn test_http_client() -> fabro_http::HttpClient {
+    fabro_http::test_http_client().unwrap()
 }
 
 impl TwinGitHub {
@@ -529,7 +1439,7 @@ impl TwinOpenAi {
     }
 
     pub async fn reset_namespace(&self, namespace: &str) {
-        let response = reqwest::Client::new()
+        let response = test_http_client()
             .post(format!("{}/__admin/reset", self.admin_url()))
             .bearer_auth(namespace)
             .send()
@@ -567,7 +1477,7 @@ impl TwinScenarios {
     pub async fn load(self, twin: &TwinOpenAi) {
         twin.reset_namespace(&self.namespace).await;
 
-        let response = reqwest::Client::new()
+        let response = test_http_client()
             .post(format!("{}/__admin/scenarios", twin.admin_url()))
             .bearer_auth(&self.namespace)
             .json(&json!({
@@ -587,7 +1497,7 @@ impl TwinScenarios {
 #[derive(Debug, Clone)]
 pub struct TwinScenario {
     matcher: Map<String, Value>,
-    script: Value,
+    script:  Value,
 }
 
 impl TwinScenario {
@@ -601,7 +1511,7 @@ impl TwinScenario {
                 ),
                 ("model".to_string(), Value::String(model.into())),
             ]),
-            script: json!({ "kind": "success" }),
+            script:  json!({ "kind": "success" }),
         }
     }
 
@@ -695,7 +1605,7 @@ impl TwinScenario {
 
 #[derive(Debug, Clone)]
 pub struct TwinToolCall {
-    name: String,
+    name:      String,
     arguments: Value,
 }
 
@@ -777,7 +1687,7 @@ pub async fn twin_openai() -> &'static TwinOpenAi {
             let base_url = format!("http://127.0.0.1:{}/v1", addr.port());
 
             let config = TwinConfig {
-                bind_addr: addr,
+                bind_addr:    addr,
                 require_auth: true,
                 enable_admin: true,
             };
@@ -788,7 +1698,7 @@ pub async fn twin_openai() -> &'static TwinOpenAi {
             });
 
             // Wait for server readiness
-            let client = reqwest::Client::new();
+            let client = test_http_client();
             let healthz_url = format!("http://127.0.0.1:{}/healthz", addr.port());
             for _ in 0..50 {
                 if let Ok(resp) = client.get(&healthz_url).send().await {
@@ -828,7 +1738,15 @@ macro_rules! e2e_openai {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, OnceLock};
+
     use super::*;
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_lock() -> &'static Mutex<()> {
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn twin_admin_url_removes_v1_suffix() {
@@ -886,5 +1804,102 @@ mod tests {
     #[should_panic(expected = "TwinScenario::retry_after requires a error script")]
     fn twin_scenario_rejects_retry_after_on_success() {
         let _ = TwinScenario::responses("gpt-5.4-mini").retry_after("30");
+    }
+
+    #[test]
+    fn session_paths_share_nextest_storage_dir() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _guard = EnvGuard::set("NEXTEST_RUN_ID", Some("nextest-run-123"));
+        let (_, run_id, paths) = session_paths();
+        assert_eq!(run_id, "nextest-run-123");
+        assert!(paths.root.ends_with(Path::new("fx").join("n-nextestrun12")));
+        assert_eq!(paths.server.storage_dir, paths.root.join("storage"));
+        assert_eq!(paths.server.socket_path, paths.root.join("fabro.sock"));
+    }
+
+    #[test]
+    fn session_paths_fall_back_to_process_storage_dir() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _guard = EnvGuard::set("NEXTEST_RUN_ID", None);
+        let (_, run_id, paths) = session_paths();
+        assert_eq!(run_id, format!("process-{}", current_pid()));
+        assert!(
+            paths
+                .root
+                .ends_with(Path::new("fx").join(format!("p-{}", current_pid())))
+        );
+        assert_eq!(paths.server.storage_dir, paths.root.join("storage"));
+        assert_eq!(paths.server.socket_path, paths.root.join("fabro.sock"));
+    }
+
+    #[test]
+    fn run_and_create_commands_include_test_labels() {
+        let context_root = tempfile::tempdir().expect("failed to create temp dir");
+        let context = TestContext {
+            temp_dir:             context_root.path().join("temp"),
+            home_dir:             context_root.path().join("home"),
+            storage_dir:          context_root.path().join("storage"),
+            test_case_id:         "case-123".to_string(),
+            test_run_id:          "run-cmd-labels".to_string(),
+            session_root:         context_root.path().join("session"),
+            fabro_bin:            context_root.path().join("fabro"),
+            filters:              Vec::new(),
+            active_socket_path:   context_root.path().join("fabro.sock"),
+            isolated_server:      None,
+            managed_storage_dirs: Vec::new(),
+            _context_root:        context_root,
+        };
+
+        let run_args = context
+            .run_cmd()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(run_args[0], "run");
+        assert!(run_args.contains(&"--label".to_string()));
+        assert!(run_args.contains(&context.test_run_label()));
+        assert!(run_args.contains(&context.test_case_label()));
+
+        let create_args = context
+            .create_cmd()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(create_args[0], "create");
+        assert!(create_args.contains(&context.test_run_label()));
+        assert!(create_args.contains(&context.test_case_label()));
+    }
+
+    #[test]
+    fn stop_test_server_timeout_is_short() {
+        assert!(
+            test_server_stop_timeout() <= std::time::Duration::from_secs(1),
+            "test harness should SIGKILL quickly — no real work to preserve"
+        );
+    }
+
+    struct EnvGuard {
+        key:      &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: Option<&str>) -> Self {
+            let original = std::env::var(key).ok();
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
     }
 }

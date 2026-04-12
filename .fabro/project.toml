@@ -1,0 +1,55 @@
+_version = 1
+
+[run.pull_request]
+enabled = true
+draft = false
+
+[run.sandbox]
+provider = "daytona"
+
+[run.sandbox.daytona]
+auto_stop_interval = 30
+
+[run.sandbox.daytona.labels]
+repo = "fabro-sh/fabro"
+
+[run.sandbox.daytona.snapshot]
+name = "fabro-v6"
+cpu = 4
+memory = "8GB"
+disk = "20GB"
+dockerfile = """
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN cargo install cargo-nextest --locked
+ENV CARGO_INCREMENTAL=0
+
+# Bun
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
+WORKDIR /root
+"""
+
+[[run.hooks]]
+id = "cargo-fmt"
+name = "cargo-fmt"
+event = "post_tool_use"
+matcher = "write_file|edit_file|apply_patch"
+script = "cargo fmt"
+blocking = true

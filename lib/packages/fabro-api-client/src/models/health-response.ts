@@ -22,5 +22,9 @@ export interface HealthResponse {
      * Health status indicator.
      */
     'status': string;
+    /**
+     * Server version string.
+     */
+    'version': string;
 }
 

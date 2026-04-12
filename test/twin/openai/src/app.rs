@@ -1,7 +1,10 @@
-use axum::{Json, Router, response::IntoResponse, routing::get};
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::{Json, Router};
 use serde_json::json;
 
-use crate::{admin, debug_ui, openai, state::AppState};
+use crate::state::AppState;
+use crate::{admin, debug_ui, openai};
 
 pub fn router(state: AppState) -> Router {
     let mut router = Router::new()

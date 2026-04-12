@@ -67,7 +67,8 @@ impl AttrValue {
     }
 }
 
-/// Returns true if the handler type is an LLM-based handler (agent or prompt, including legacy aliases).
+/// Returns true if the handler type is an LLM-based handler (agent or prompt,
+/// including legacy aliases).
 #[must_use]
 pub fn is_llm_handler_type(handler_type: Option<&str>) -> bool {
     matches!(
@@ -96,11 +97,12 @@ pub fn shape_to_handler_type(shape: &str) -> Option<&'static str> {
 }
 
 /// A node in the workflow graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
-    pub id: String,
-    pub attrs: HashMap<String, AttrValue>,
-    /// CSS-like classes for model stylesheet targeting (from `class` attr and subgraph derivation).
+    pub id:      String,
+    pub attrs:   HashMap<String, AttrValue>,
+    /// CSS-like classes for model stylesheet targeting (from `class` attr and
+    /// subgraph derivation).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub classes: Vec<String>,
 }
@@ -108,8 +110,8 @@ pub struct Node {
 impl Node {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
-            id: id.into(),
-            attrs: HashMap::new(),
+            id:      id.into(),
+            attrs:   HashMap::new(),
             classes: Vec::new(),
         }
     }
@@ -245,7 +247,8 @@ impl Node {
         self.str_attr("selection").unwrap_or("deterministic")
     }
 
-    /// Resolve the handler type for this node using explicit type or shape mapping.
+    /// Resolve the handler type for this node using explicit type or shape
+    /// mapping.
     #[must_use]
     pub fn handler_type(&self) -> Option<&str> {
         if let Some(t) = self.node_type() {
@@ -256,18 +259,18 @@ impl Node {
 }
 
 /// An edge connecting two nodes in the workflow graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Edge {
-    pub from: String,
-    pub to: String,
+    pub from:  String,
+    pub to:    String,
     pub attrs: HashMap<String, AttrValue>,
 }
 
 impl Edge {
     pub fn new(from: impl Into<String>, to: impl Into<String>) -> Self {
         Self {
-            from: from.into(),
-            to: to.into(),
+            from:  from.into(),
+            to:    to.into(),
             attrs: HashMap::new(),
         }
     }
@@ -320,10 +323,11 @@ impl Edge {
     }
 }
 
-/// The parsed workflow graph containing nodes, edges, and graph-level attributes.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// The parsed workflow graph containing nodes, edges, and graph-level
+/// attributes.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Graph {
-    pub name: String,
+    pub name:  String,
     pub nodes: HashMap<String, Node>,
     pub edges: Vec<Edge>,
     pub attrs: HashMap<String, AttrValue>,
@@ -332,7 +336,7 @@ pub struct Graph {
 impl Graph {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
-            name: name.into(),
+            name:  name.into(),
             nodes: HashMap::new(),
             edges: Vec::new(),
             attrs: HashMap::new(),
@@ -426,7 +430,8 @@ impl Graph {
     }
 
     /// Graph-level `loop_restart_signature_limit` (default 3).
-    /// When the same failure signature repeats this many times, the pipeline aborts.
+    /// When the same failure signature repeats this many times, the pipeline
+    /// aborts.
     pub fn loop_restart_signature_limit(&self) -> usize {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // filtered >= 1 above
         self.attrs
@@ -436,7 +441,8 @@ impl Graph {
             .map_or(3, |v| v as usize)
     }
 
-    /// Graph-level `stall_timeout`. Defaults to 1800s. Returns `None` when set to zero (disabled).
+    /// Graph-level `stall_timeout`. Defaults to 1800s. Returns `None` when set
+    /// to zero (disabled).
     pub fn stall_timeout(&self) -> Option<Duration> {
         match self
             .attrs

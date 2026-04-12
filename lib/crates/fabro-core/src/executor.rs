@@ -2,10 +2,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 use crate::context::Context;
-use crate::error::{CoreError, Result, VisitLimitSource};
+use crate::error::{Error, Result, VisitLimitSource};
 use crate::graph::{EdgeSpec, Graph, NodeSpec};
 use crate::handler::NodeHandler;
 use crate::lifecycle::{
@@ -13,20 +14,19 @@ use crate::lifecycle::{
     RunLifecycle,
 };
 use crate::outcome::{NodeResult, NodeResultExt, Outcome, StageStatus};
-use crate::state::RunState;
-use tokio::time::sleep;
+use crate::state::ExecutionState;
 
 #[derive(Default)]
 pub struct ExecutorOptions {
-    pub cancel_token: Option<Arc<AtomicBool>>,
-    pub stall_token: Option<CancellationToken>,
+    pub cancel_token:    Option<Arc<AtomicBool>>,
+    pub stall_token:     Option<CancellationToken>,
     pub max_node_visits: Option<usize>,
 }
 
 pub struct Executor<G: Graph> {
-    handler: Arc<dyn NodeHandler<G>>,
+    handler:   Arc<dyn NodeHandler<G>>,
     lifecycle: Box<dyn RunLifecycle<G>>,
-    options: ExecutorOptions,
+    options:   ExecutorOptions,
 }
 
 enum NextStep {
@@ -37,9 +37,9 @@ enum NextStep {
 }
 
 pub struct ExecutorBuilder<G: Graph> {
-    handler: Arc<dyn NodeHandler<G>>,
+    handler:   Arc<dyn NodeHandler<G>>,
     lifecycle: Option<Box<dyn RunLifecycle<G>>>,
-    options: ExecutorOptions,
+    options:   ExecutorOptions,
 }
 
 impl<G: Graph + 'static> ExecutorBuilder<G> {
@@ -77,9 +77,9 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
 
     pub fn build(self) -> Executor<G> {
         Executor {
-            handler: self.handler,
+            handler:   self.handler,
             lifecycle: self.lifecycle.unwrap_or_else(|| Box::new(NoopLifecycle)),
-            options: self.options,
+            options:   self.options,
         }
     }
 }
@@ -88,8 +88,8 @@ impl<G: Graph + 'static> Executor<G> {
     pub async fn run(
         &self,
         graph: &G,
-        mut state: RunState<G::Meta>,
-    ) -> Result<(Outcome<G::Meta>, RunState<G::Meta>)> {
+        mut state: ExecutionState<G::Meta>,
+    ) -> Result<(Outcome<G::Meta>, ExecutionState<G::Meta>)> {
         self.lifecycle.on_run_start(graph, &state).await?;
 
         loop {
@@ -99,17 +99,18 @@ impl<G: Graph + 'static> Executor<G> {
                     state.cancelled = true;
                     let outcome = Outcome::fail("run cancelled");
                     self.lifecycle.on_run_end(&outcome, &state).await;
-                    return Err(CoreError::Cancelled);
+                    return Err(Error::Cancelled);
                 }
             }
 
             let node = state
                 .current_node(graph)
-                .ok_or_else(|| CoreError::NodeNotFound {
+                .ok_or_else(|| Error::NodeNotFound {
                     id: state.current_node_id.clone(),
                 })?;
 
-            // Terminal nodes: skip normal lifecycle, check goal gates, call on_terminal_reached
+            // Terminal nodes: skip normal lifecycle, check goal gates, call
+            // on_terminal_reached
             if node.is_terminal() {
                 match graph.check_goal_gates(&state.node_outcomes) {
                     Ok(()) => {
@@ -126,14 +127,19 @@ impl<G: Graph + 'static> Executor<G> {
                             .await;
                         // Check if there's a retry target for goal gate failure
                         if let Some(retry_target) = graph.get_retry_target(&failed_node_id) {
-                            tracing::debug!(
-                                node = %node.id(),
-                                retry_target = %retry_target,
-                                failed_node = %failed_node_id,
-                                "Goal gate unsatisfied, retrying"
-                            );
-                            state.advance(&retry_target);
-                            continue;
+                            if graph
+                                .get_node(&retry_target)
+                                .is_some_and(|retry_node| !retry_node.is_terminal())
+                            {
+                                tracing::debug!(
+                                    node = %node.id(),
+                                    retry_target = %retry_target,
+                                    failed_node = %failed_node_id,
+                                    "Goal gate unsatisfied, retrying"
+                                );
+                                state.advance(&retry_target);
+                                continue;
+                            }
                         }
                         let outcome = Outcome::fail(&format!(
                             "goal gate unsatisfied for node {failed_node_id} and no retry target"
@@ -148,7 +154,7 @@ impl<G: Graph + 'static> Executor<G> {
             let visits = state.increment_visits(node.id());
             if let Some(max) = node.max_visits() {
                 if visits >= max {
-                    return Err(CoreError::VisitLimitExceeded {
+                    return Err(Error::VisitLimitExceeded {
                         node_id: node.id().to_string(),
                         visits,
                         limit: max,
@@ -158,7 +164,7 @@ impl<G: Graph + 'static> Executor<G> {
             }
             if let Some(global_max) = self.options.max_node_visits {
                 if visits >= global_max {
-                    return Err(CoreError::VisitLimitExceeded {
+                    return Err(Error::VisitLimitExceeded {
                         node_id: node.id().to_string(),
                         visits,
                         limit: global_max,
@@ -177,21 +183,31 @@ impl<G: Graph + 'static> Executor<G> {
                     result
                 }
                 NodeDecision::Block(msg) => {
-                    return Err(CoreError::blocked(msg));
+                    return Err(Error::blocked(msg));
                 }
                 NodeDecision::Continue => {
                     // Execute with retry, racing against stall token
-                    let mut result = if let Some(ref stall) = self.options.stall_token {
+                    let execution_result = if let Some(ref stall) = self.options.stall_token {
                         tokio::select! {
-                            r = self.execute_with_retry(&node, &state, graph) => r?,
+                            r = self.execute_with_retry(&node, &state, graph) => r,
                             () = stall.cancelled() => {
-                                return Err(CoreError::StallTimeout {
+                                return Err(Error::StallTimeout {
                                     node_id: node.id().to_string(),
                                 });
                             }
                         }
                     } else {
-                        self.execute_with_retry(&node, &state, graph).await?
+                        self.execute_with_retry(&node, &state, graph).await
+                    };
+                    let mut result = match execution_result {
+                        Ok(result) => result,
+                        Err(Error::Cancelled) => {
+                            state.cancelled = true;
+                            let outcome = Outcome::fail("run cancelled");
+                            self.lifecycle.on_run_end(&outcome, &state).await;
+                            return Err(Error::Cancelled);
+                        }
+                        Err(err) => return Err(err),
                     };
                     self.lifecycle
                         .after_node(&node, &mut result, &state)
@@ -248,7 +264,7 @@ impl<G: Graph + 'static> Executor<G> {
     async fn execute_with_retry(
         &self,
         node: &G::Node,
-        state: &RunState<G::Meta>,
+        state: &ExecutionState<G::Meta>,
         graph: &G,
     ) -> Result<NodeResult<G::Meta>> {
         let policy = self.handler.retry_policy(node, graph);
@@ -262,7 +278,7 @@ impl<G: Graph + 'static> Executor<G> {
             };
             match self.lifecycle.before_attempt(&attempt_ctx, state).await? {
                 NodeDecision::Skip(o) => return Ok(NodeResult::from_skip(*o)),
-                NodeDecision::Block(msg) => return Err(CoreError::blocked(msg)),
+                NodeDecision::Block(msg) => return Err(Error::blocked(msg)),
                 NodeDecision::Continue => {}
             }
 
@@ -328,8 +344,8 @@ impl<G: Graph + 'static> Executor<G> {
                     self.lifecycle.after_attempt(&ctx, state).await?;
                     sleep(delay).await;
                 }
-                Err(e) => {
-                    // Convert handler error to fail outcome so routing continues
+                Err(e @ Error::Handler { .. }) => {
+                    // Convert handler failures to fail outcomes so routing continues.
                     let outcome = e.to_fail_outcome();
                     let result =
                         NodeResult::new(outcome, start.elapsed(), attempt, policy.max_attempts);
@@ -343,6 +359,7 @@ impl<G: Graph + 'static> Executor<G> {
                     self.lifecycle.after_attempt(&ctx, state).await?;
                     return Ok(result);
                 }
+                Err(e) => return Err(e),
             }
         }
         unreachable!("loop always returns or continues")
@@ -352,7 +369,7 @@ impl<G: Graph + 'static> Executor<G> {
         &self,
         node: &G::Node,
         outcome: &Outcome<G::Meta>,
-        state: &RunState<G::Meta>,
+        state: &ExecutionState<G::Meta>,
         graph: &G,
     ) -> Result<NextStep> {
         // Jump takes priority
@@ -368,7 +385,7 @@ impl<G: Graph + 'static> Executor<G> {
             match self.lifecycle.on_edge_selected(&ctx, state).await? {
                 EdgeDecision::Continue => return Ok(NextStep::Jump(target.clone())),
                 EdgeDecision::Override(new_target) => return Ok(NextStep::Edge(new_target)),
-                EdgeDecision::Block(msg) => return Err(CoreError::blocked(msg)),
+                EdgeDecision::Block(msg) => return Err(Error::blocked(msg)),
             }
         }
 
@@ -394,7 +411,7 @@ impl<G: Graph + 'static> Executor<G> {
                     }
                 }
                 EdgeDecision::Override(new_target) => Ok(NextStep::Edge(new_target)),
-                EdgeDecision::Block(msg) => Err(CoreError::blocked(msg)),
+                EdgeDecision::Block(msg) => Err(Error::blocked(msg)),
             }
         } else {
             // No edge found
@@ -417,6 +434,7 @@ mod tests {
     use std::time::Duration;
 
     use async_trait::async_trait;
+    use tokio::time::{self, Instant};
 
     use super::*;
     use crate::context::Context;
@@ -424,7 +442,6 @@ mod tests {
     use crate::lifecycle::RunLifecycle;
     use crate::retry::{BackoffPolicy, RetryPolicy};
     use crate::test_fixtures::*;
-    use tokio::time::{self, Instant};
 
     type NextNodeLog = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
@@ -434,7 +451,7 @@ mod tests {
         handler: Arc<dyn NodeHandler<TestGraph>>,
     ) -> Result<Outcome> {
         let g = linear_graph(node_ids);
-        let state = RunState::new(&g)?;
+        let state = ExecutionState::new(&g)?;
         let executor = ExecutorBuilder::new(handler).build();
         executor
             .run(&g, state)
@@ -458,13 +475,13 @@ mod tests {
         struct LogLifecycle(Arc<Mutex<Vec<String>>>);
         #[async_trait]
         impl RunLifecycle<TestGraph> for LogLifecycle {
-            async fn on_run_start(&self, _g: &TestGraph, _s: &RunState) -> Result<()> {
+            async fn on_run_start(&self, _g: &TestGraph, _s: &ExecutionState) -> Result<()> {
                 self.0.lock().unwrap().push("start".into());
                 Ok(())
             }
         }
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(LogLifecycle(log.clone())))
@@ -477,13 +494,13 @@ mod tests {
     async fn executor_builder_sets_cancel_token() {
         let token = Arc::new(AtomicBool::new(true)); // already cancelled
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .cancel_token(token)
                 .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::Cancelled)));
+        assert!(matches!(result, Err(Error::Cancelled)));
     }
 
     // ---- Step 9: Terminal nodes, goal gates, visit limits ----
@@ -498,7 +515,7 @@ mod tests {
             vec![TestEdge::new("work", "end")],
             "work",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
@@ -525,7 +542,7 @@ mod tests {
             Ok(Outcome::fail("first attempt")),
             Ok(Outcome::success()),
         ]));
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>).build();
         let (result, _) = executor.run(&g, state).await.unwrap();
@@ -544,7 +561,7 @@ mod tests {
             "work",
         );
         // No retry target, and handler fails
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(
             Arc::new(AlwaysFailHandler::new("nope")) as Arc<dyn NodeHandler<TestGraph>>
         )
@@ -559,7 +576,11 @@ mod tests {
         struct TrackingLifecycle(Arc<Mutex<Vec<String>>>);
         #[async_trait]
         impl RunLifecycle<TestGraph> for TrackingLifecycle {
-            async fn before_node(&self, node: &TestNode, _s: &RunState) -> Result<NodeDecision> {
+            async fn before_node(
+                &self,
+                node: &TestNode,
+                _s: &ExecutionState,
+            ) -> Result<NodeDecision> {
                 self.0
                     .lock()
                     .unwrap()
@@ -570,7 +591,7 @@ mod tests {
                 &self,
                 node: &TestNode,
                 _r: &mut NodeResult,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<()> {
                 self.0
                     .lock()
@@ -582,7 +603,7 @@ mod tests {
                 &self,
                 node: &TestNode,
                 _goal_gates_passed: bool,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) {
                 self.0
                     .lock()
@@ -591,7 +612,7 @@ mod tests {
             }
         }
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(TrackingLifecycle(log.clone())))
@@ -617,7 +638,7 @@ mod tests {
                 &self,
                 node: &TestNode,
                 _goal_gates_passed: bool,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) {
                 self.0
                     .lock()
@@ -626,7 +647,7 @@ mod tests {
             }
         }
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(TerminalTracker(log.clone())))
@@ -650,12 +671,12 @@ mod tests {
             ],
             "loop_node",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::VisitLimitExceeded { .. })));
+        assert!(matches!(result, Err(Error::VisitLimitExceeded { .. })));
     }
 
     #[tokio::test]
@@ -669,13 +690,13 @@ mod tests {
             vec![TestEdge::new("a", "b"), TestEdge::new("b", "a")],
             "a",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .max_node_visits(3)
                 .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::VisitLimitExceeded { .. })));
+        assert!(matches!(result, Err(Error::VisitLimitExceeded { .. })));
     }
 
     // ---- Step 10: Edge selection, jumps, loop restarts ----
@@ -694,7 +715,7 @@ mod tests {
             ],
             "start",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(
             Arc::new(AlwaysFailHandler::new("oops")) as Arc<dyn NodeHandler<TestGraph>>
         )
@@ -718,7 +739,7 @@ mod tests {
             ],
             "start",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
@@ -752,7 +773,7 @@ mod tests {
             vec![TestEdge::new("start", "end")],
             "start",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(JumpHandler) as Arc<dyn NodeHandler<TestGraph>>).build();
         let (result, _) = executor.run(&g, state).await.unwrap();
@@ -787,7 +808,7 @@ mod tests {
             ],
             "start",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>)
             .max_node_visits(5)
             .build();
@@ -802,7 +823,7 @@ mod tests {
         struct StartTracker(Arc<Mutex<Vec<String>>>);
         #[async_trait]
         impl RunLifecycle<TestGraph> for StartTracker {
-            async fn on_run_start(&self, _g: &TestGraph, _s: &RunState) -> Result<()> {
+            async fn on_run_start(&self, _g: &TestGraph, _s: &ExecutionState) -> Result<()> {
                 self.0.lock().unwrap().push("on_run_start".into());
                 Ok(())
             }
@@ -832,7 +853,7 @@ mod tests {
             ],
             "start",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<TestGraph>>)
             .lifecycle(Box::new(StartTracker(log.clone())))
             .max_node_visits(5)
@@ -850,7 +871,7 @@ mod tests {
             vec![TestEdge::new("start", "end").with_label("success")],
             "start",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(
             Arc::new(AlwaysFailHandler::new("boom")) as Arc<dyn NodeHandler<TestGraph>>
         )
@@ -863,7 +884,7 @@ mod tests {
     async fn executor_no_edge_after_success_returns_success() {
         // Node succeeds with no outgoing edges → run ends with success
         let g = TestGraph::new(vec![TestNode::new("only")], vec![], "only");
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
@@ -894,14 +915,52 @@ mod tests {
         }
 
         let g = linear_graph(&["start", "work", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(
             Arc::new(CancellingHandler(token_clone)) as Arc<dyn NodeHandler<TestGraph>>
         )
         .cancel_token(token)
         .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::Cancelled)));
+        assert!(matches!(result, Err(Error::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn executor_preserves_handler_returned_cancellation() {
+        let handler = Arc::new(CountingHandler::new(vec![Err(Error::Cancelled)]));
+        let g = linear_graph(&["start", "end"]);
+        let state = ExecutionState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<TestGraph>>).build();
+
+        let result = executor.run(&g, state).await;
+
+        assert!(matches!(result, Err(Error::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn executor_marks_state_cancelled_for_handler_returned_cancellation() {
+        let log = Arc::new(Mutex::new(Vec::<bool>::new()));
+
+        struct CancellationLifecycle(Arc<Mutex<Vec<bool>>>);
+
+        #[async_trait]
+        impl RunLifecycle<TestGraph> for CancellationLifecycle {
+            async fn on_run_end(&self, _outcome: &Outcome, state: &ExecutionState) {
+                self.0.lock().unwrap().push(state.cancelled);
+            }
+        }
+
+        let handler = Arc::new(CountingHandler::new(vec![Err(Error::Cancelled)]));
+        let g = linear_graph(&["start", "end"]);
+        let state = ExecutionState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<TestGraph>>)
+            .lifecycle(Box::new(CancellationLifecycle(Arc::clone(&log))))
+            .build();
+
+        let result = executor.run(&g, state).await;
+
+        assert!(matches!(result, Err(Error::Cancelled)));
+        assert_eq!(log.lock().unwrap().as_slice(), &[true]);
     }
 
     // ---- Step 12: Retry integration ----
@@ -910,27 +969,27 @@ mod tests {
     async fn executor_retry_on_retryable_error() {
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(CoreError::handler(HandlerErrorDetail {
-                    message: "fail1".into(),
+                Err(Error::handler(HandlerErrorDetail {
+                    message:   "fail1".into(),
                     retryable: true,
-                    category: None,
+                    category:  None,
                     signature: None,
                 })),
-                Err(CoreError::handler(HandlerErrorDetail {
-                    message: "fail2".into(),
+                Err(Error::handler(HandlerErrorDetail {
+                    message:   "fail2".into(),
                     retryable: true,
-                    category: None,
+                    category:  None,
                     signature: None,
                 })),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff: BackoffPolicy {
+                backoff:      BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor: 1.0,
-                    max_delay: Duration::from_millis(1),
-                    jitter: false,
+                    factor:        1.0,
+                    max_delay:     Duration::from_millis(1),
+                    jitter:        false,
                 },
             }),
         );
@@ -960,11 +1019,11 @@ mod tests {
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff: BackoffPolicy {
+                backoff:      BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor: 1.0,
-                    max_delay: Duration::from_millis(1),
-                    jitter: false,
+                    factor:        1.0,
+                    max_delay:     Duration::from_millis(1),
+                    jitter:        false,
                 },
             }),
         );
@@ -981,10 +1040,10 @@ mod tests {
     #[tokio::test]
     async fn executor_retry_non_retryable_error_no_retry() {
         let handler = Arc::new(
-            CountingHandler::new(vec![Err(CoreError::handler(HandlerErrorDetail {
-                message: "fatal".into(),
+            CountingHandler::new(vec![Err(Error::handler(HandlerErrorDetail {
+                message:   "fatal".into(),
                 retryable: false,
-                category: None,
+                category:  None,
                 signature: None,
             }))])
             .with_retry_policy(RetryPolicy::with_max_attempts(3)),
@@ -994,7 +1053,8 @@ mod tests {
             handler.clone() as Arc<dyn NodeHandler<TestGraph>>,
         )
         .await;
-        // Non-retryable errors become fail outcomes, routing continues through the linear graph
+        // Non-retryable errors become fail outcomes, routing continues through the
+        // linear graph
         assert!(result.is_ok());
         assert_eq!(handler.calls(), 1);
     }
@@ -1002,11 +1062,11 @@ mod tests {
     #[tokio::test]
     async fn executor_retry_no_retry_by_default() {
         // Default policy is RetryPolicy::none() (max_attempts=1)
-        let handler = Arc::new(CountingHandler::new(vec![Err(CoreError::handler(
+        let handler = Arc::new(CountingHandler::new(vec![Err(Error::handler(
             HandlerErrorDetail {
-                message: "fail".into(),
+                message:   "fail".into(),
                 retryable: true,
-                category: None,
+                category:  None,
                 signature: None,
             },
         ))]));
@@ -1039,11 +1099,11 @@ mod tests {
             fn retry_policy(&self, _n: &TestNode, _g: &TestGraph) -> RetryPolicy {
                 RetryPolicy {
                     max_attempts: 2,
-                    backoff: BackoffPolicy {
+                    backoff:      BackoffPolicy {
                         initial_delay: Duration::from_millis(1),
-                        factor: 1.0,
-                        max_delay: Duration::from_millis(1),
-                        jitter: false,
+                        factor:        1.0,
+                        max_delay:     Duration::from_millis(1),
+                        jitter:        false,
                     },
                 }
             }
@@ -1057,7 +1117,7 @@ mod tests {
         }
         // No outgoing edges from "start" so PartialSuccess becomes the run result
         let g = TestGraph::new(vec![TestNode::new("start")], vec![], "start");
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(ExhaustedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
@@ -1074,7 +1134,7 @@ mod tests {
             async fn before_attempt(
                 &self,
                 ctx: &AttemptContext<'_, TestGraph>,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<NodeDecision> {
                 self.0.lock().unwrap().push(ctx.attempt);
                 Ok(NodeDecision::Continue)
@@ -1082,26 +1142,26 @@ mod tests {
         }
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(CoreError::handler(HandlerErrorDetail {
-                    message: "r".into(),
+                Err(Error::handler(HandlerErrorDetail {
+                    message:   "r".into(),
                     retryable: true,
-                    category: None,
+                    category:  None,
                     signature: None,
                 })),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff: BackoffPolicy {
+                backoff:      BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor: 1.0,
-                    max_delay: Duration::from_millis(1),
-                    jitter: false,
+                    factor:        1.0,
+                    max_delay:     Duration::from_millis(1),
+                    jitter:        false,
                 },
             }),
         );
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<TestGraph>>)
             .lifecycle(Box::new(AttemptTracker(attempt_log.clone())))
             .build();
@@ -1118,7 +1178,7 @@ mod tests {
             async fn after_attempt(
                 &self,
                 ctx: &AttemptResultContext<'_, TestGraph>,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<()> {
                 self.0.lock().unwrap().push((ctx.attempt, ctx.will_retry));
                 Ok(())
@@ -1126,26 +1186,26 @@ mod tests {
         }
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(CoreError::handler(HandlerErrorDetail {
-                    message: "r".into(),
+                Err(Error::handler(HandlerErrorDetail {
+                    message:   "r".into(),
                     retryable: true,
-                    category: None,
+                    category:  None,
                     signature: None,
                 })),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff: BackoffPolicy {
+                backoff:      BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor: 1.0,
-                    max_delay: Duration::from_millis(1),
-                    jitter: false,
+                    factor:        1.0,
+                    max_delay:     Duration::from_millis(1),
+                    jitter:        false,
                 },
             }),
         );
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<TestGraph>>)
             .lifecycle(Box::new(RetryTracker(retry_log.clone())))
             .build();
@@ -1164,7 +1224,7 @@ mod tests {
             async fn before_attempt(
                 &self,
                 ctx: &AttemptContext<'_, TestGraph>,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<NodeDecision> {
                 self.0.fetch_add(1, Ordering::Relaxed);
                 if ctx.attempt >= 2 {
@@ -1176,26 +1236,26 @@ mod tests {
         }
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(CoreError::handler(HandlerErrorDetail {
-                    message: "r".into(),
+                Err(Error::handler(HandlerErrorDetail {
+                    message:   "r".into(),
                     retryable: true,
-                    category: None,
+                    category:  None,
                     signature: None,
                 })),
                 Ok(Outcome::success()), // should not be reached
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff: BackoffPolicy {
+                backoff:      BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor: 1.0,
-                    max_delay: Duration::from_millis(1),
-                    jitter: false,
+                    factor:        1.0,
+                    max_delay:     Duration::from_millis(1),
+                    jitter:        false,
                 },
             }),
         );
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>)
             .lifecycle(Box::new(SkipOnSecondAttempt(call_count_clone)))
             .build();
@@ -1218,11 +1278,11 @@ mod tests {
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff: BackoffPolicy {
+                backoff:      BackoffPolicy {
                     initial_delay: Duration::from_secs(5),
-                    factor: 2.0,
-                    max_delay: Duration::from_secs(60),
-                    jitter: false,
+                    factor:        2.0,
+                    max_delay:     Duration::from_secs(60),
+                    jitter:        false,
                 },
             }),
         );
@@ -1245,7 +1305,11 @@ mod tests {
         struct SkipFirst(Mutex<bool>);
         #[async_trait]
         impl RunLifecycle<TestGraph> for SkipFirst {
-            async fn before_node(&self, node: &TestNode, _s: &RunState) -> Result<NodeDecision> {
+            async fn before_node(
+                &self,
+                node: &TestNode,
+                _s: &ExecutionState,
+            ) -> Result<NodeDecision> {
                 if node.id() == "start" {
                     let mut skipped = self.0.lock().unwrap();
                     if !*skipped {
@@ -1257,7 +1321,7 @@ mod tests {
             }
         }
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(SkipFirst(Mutex::new(false))))
@@ -1271,18 +1335,22 @@ mod tests {
         struct Blocker;
         #[async_trait]
         impl RunLifecycle<TestGraph> for Blocker {
-            async fn before_node(&self, _n: &TestNode, _s: &RunState) -> Result<NodeDecision> {
+            async fn before_node(
+                &self,
+                _n: &TestNode,
+                _s: &ExecutionState,
+            ) -> Result<NodeDecision> {
                 Ok(NodeDecision::Block("blocked".into()))
             }
         }
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(Blocker))
                 .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::Blocked { .. })));
+        assert!(matches!(result, Err(Error::Blocked { .. })));
     }
 
     #[tokio::test]
@@ -1294,14 +1362,14 @@ mod tests {
                 &self,
                 _n: &TestNode,
                 result: &mut NodeResult,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<()> {
                 result.outcome.notes = Some("mutated".into());
                 Ok(())
             }
         }
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(Mutator))
@@ -1318,7 +1386,7 @@ mod tests {
             async fn on_edge_selected(
                 &self,
                 _ctx: &EdgeContext<'_, TestGraph>,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<EdgeDecision> {
                 Ok(EdgeDecision::Override("alt".into()))
             }
@@ -1332,7 +1400,7 @@ mod tests {
             vec![TestEdge::new("start", "end")],
             "start",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(Redirector))
@@ -1349,19 +1417,19 @@ mod tests {
             async fn on_edge_selected(
                 &self,
                 _ctx: &EdgeContext<'_, TestGraph>,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<EdgeDecision> {
                 Ok(EdgeDecision::Block("edge blocked".into()))
             }
         }
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(EdgeBlocker))
                 .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::Blocked { .. })));
+        assert!(matches!(result, Err(Error::Blocked { .. })));
     }
 
     #[tokio::test]
@@ -1375,14 +1443,14 @@ mod tests {
                 node: &TestNode,
                 _r: &NodeResult,
                 _next_node_id: Option<&str>,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<()> {
                 self.0.lock().unwrap().push(node.id().to_string());
                 Ok(())
             }
         }
         let g = linear_graph(&["start", "work", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(CheckpointTracker(log.clone())))
@@ -1397,16 +1465,16 @@ mod tests {
         struct RunTracker(Arc<Mutex<Vec<String>>>);
         #[async_trait]
         impl RunLifecycle<TestGraph> for RunTracker {
-            async fn on_run_start(&self, _g: &TestGraph, _s: &RunState) -> Result<()> {
+            async fn on_run_start(&self, _g: &TestGraph, _s: &ExecutionState) -> Result<()> {
                 self.0.lock().unwrap().push("start".into());
                 Ok(())
             }
-            async fn on_run_end(&self, _o: &Outcome, _s: &RunState) {
+            async fn on_run_end(&self, _o: &Outcome, _s: &ExecutionState) {
                 self.0.lock().unwrap().push("end".into());
             }
         }
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(RunTracker(log.clone())))
@@ -1424,7 +1492,7 @@ mod tests {
             async fn on_edge_selected(
                 &self,
                 ctx: &EdgeContext<'_, TestGraph>,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<EdgeDecision> {
                 self.0
                     .lock()
@@ -1456,7 +1524,7 @@ mod tests {
             vec![TestEdge::new("start", "end")],
             "start",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(JumpHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(JumpTracker(log.clone())))
@@ -1500,7 +1568,7 @@ mod tests {
                 &self,
                 node: &TestNode,
                 result: &mut NodeResult,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<()> {
                 if node.id() == "work" {
                     if let Some(ref notes) = result.outcome.notes {
@@ -1512,7 +1580,7 @@ mod tests {
         }
 
         let g = linear_graph(&["start", "work", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(ContextWriter) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(NoteCapture(log.clone())))
@@ -1533,7 +1601,7 @@ mod tests {
                 node: &TestNode,
                 _r: &NodeResult,
                 next_node_id: Option<&str>,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<()> {
                 self.0
                     .lock()
@@ -1543,7 +1611,7 @@ mod tests {
             }
         }
         let g = linear_graph(&["start", "work", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(NextNodeTracker(log.clone())))
@@ -1551,13 +1619,10 @@ mod tests {
         executor.run(&g, state).await.unwrap();
         let checkpoints = log.lock().unwrap().clone();
         // "start" checkpoints with next="work", "work" checkpoints with next="end"
-        assert_eq!(
-            checkpoints,
-            vec![
-                ("start".to_string(), Some("work".to_string())),
-                ("work".to_string(), Some("end".to_string())),
-            ]
-        );
+        assert_eq!(checkpoints, vec![
+            ("start".to_string(), Some("work".to_string())),
+            ("work".to_string(), Some("end".to_string())),
+        ]);
     }
 
     #[tokio::test]
@@ -1591,7 +1656,7 @@ mod tests {
                 &self,
                 node: &TestNode,
                 _result: &NodeResult,
-                state: &RunState,
+                state: &ExecutionState,
             ) -> Result<()> {
                 let shared = state.context.get_string("shared", "missing");
                 let completed = state.completed_nodes.join(",");
@@ -1607,7 +1672,7 @@ mod tests {
             async fn on_edge_selected(
                 &self,
                 ctx: &EdgeContext<'_, TestGraph>,
-                state: &RunState,
+                state: &ExecutionState,
             ) -> Result<EdgeDecision> {
                 let shared = state.context.get_string("shared", "missing");
                 self.0
@@ -1619,7 +1684,7 @@ mod tests {
         }
 
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(ContextWriter) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(RecordTracker(log.clone())))
@@ -1627,13 +1692,10 @@ mod tests {
 
         executor.run(&g, state).await.unwrap();
 
-        assert_eq!(
-            *log.lock().unwrap(),
-            vec![
-                "after_record:start:start:hello".to_string(),
-                "on_edge_selected:start:hello".to_string(),
-            ]
-        );
+        assert_eq!(*log.lock().unwrap(), vec![
+            "after_record:start:start:hello".to_string(),
+            "on_edge_selected:start:hello".to_string(),
+        ]);
     }
 
     #[tokio::test]
@@ -1646,7 +1708,7 @@ mod tests {
                 &self,
                 node: &TestNode,
                 goal_gates_passed: bool,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) {
                 self.0
                     .lock()
@@ -1657,7 +1719,7 @@ mod tests {
 
         // Test 1: goal gates pass
         let g = linear_graph(&["work", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(GateTracker(log.clone())))
@@ -1675,17 +1737,17 @@ mod tests {
             vec![TestEdge::new("work", "end")],
             "work",
         );
-        let state2 = RunState::new(&g2).unwrap();
+        let state2 = ExecutionState::new(&g2).unwrap();
         let executor2 = ExecutorBuilder::new(
             Arc::new(AlwaysFailHandler::new("nope")) as Arc<dyn NodeHandler<TestGraph>>
         )
         .lifecycle(Box::new(GateTracker(log2.clone())))
         .build();
         executor2.run(&g2, state2).await.unwrap();
-        assert_eq!(
-            log2.lock().unwrap().clone(),
-            vec![("end".to_string(), false)]
-        );
+        assert_eq!(log2.lock().unwrap().clone(), vec![(
+            "end".to_string(),
+            false
+        )]);
     }
 
     #[tokio::test]
@@ -1734,7 +1796,7 @@ mod tests {
             ],
             "start",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(
             Arc::new(LogHandler(log_clone)) as Arc<dyn NodeHandler<TestGraph>>
         )
@@ -1794,7 +1856,7 @@ mod tests {
             ],
             "start",
         );
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(
             Arc::new(ContextChecker { log: log.clone() }) as Arc<dyn NodeHandler<TestGraph>>
         )
@@ -1826,7 +1888,7 @@ mod tests {
         )
         .with_retry_target("work", "work");
 
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>).build();
         let (result, _) = executor.run(&g, state).await.unwrap();
@@ -1856,13 +1918,60 @@ mod tests {
         )
         .with_retry_target("work", "recovery");
 
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>)
             .max_node_visits(5)
             .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
         assert_eq!(handler.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn executor_goal_gate_retry_target_to_terminal_fails_without_looping() {
+        let terminal_visits = Arc::new(AtomicU32::new(0));
+
+        struct SingleTerminalVisit(Arc<AtomicU32>);
+        #[async_trait]
+        impl RunLifecycle<TestGraph> for SingleTerminalVisit {
+            async fn on_terminal_reached(
+                &self,
+                _node: &TestNode,
+                _goal_gates_passed: bool,
+                _s: &ExecutionState,
+            ) {
+                let visits = self.0.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(visits, 0, "terminal node reached more than once");
+            }
+        }
+
+        let g = TestGraph::new(
+            vec![
+                TestNode::new("work"),
+                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+            ],
+            vec![TestEdge::new("work", "end")],
+            "work",
+        )
+        .with_retry_target("work", "end");
+
+        let state = ExecutionState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(
+            Arc::new(AlwaysFailHandler::new("boom")) as Arc<dyn NodeHandler<TestGraph>>
+        )
+        .lifecycle(Box::new(SingleTerminalVisit(terminal_visits.clone())))
+        .build();
+
+        let (result, _) = executor.run(&g, state).await.unwrap();
+        assert_eq!(result.status, StageStatus::Fail);
+        assert_eq!(
+            result
+                .failure
+                .as_ref()
+                .map(|failure| failure.message.as_str()),
+            Some("goal gate unsatisfied for node work and no retry target")
+        );
+        assert_eq!(terminal_visits.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -1889,7 +1998,7 @@ mod tests {
         }
 
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(
             Arc::new(SlowHandler(stall_clone)) as Arc<dyn NodeHandler<TestGraph>>
         )
@@ -1897,7 +2006,7 @@ mod tests {
         .build();
         let result = executor.run(&g, state).await;
         match result {
-            Err(CoreError::StallTimeout { ref node_id }) => {
+            Err(Error::StallTimeout { ref node_id }) => {
                 assert_eq!(node_id, "start");
             }
             other => panic!("expected StallTimeout, got {other:?}"),
@@ -1926,10 +2035,10 @@ mod tests {
                 if c == 0 {
                     // First call: fail with retryable, then cancel stall during backoff
                     self.stall.cancel();
-                    Err(CoreError::handler(HandlerErrorDetail {
-                        message: "transient".into(),
+                    Err(Error::handler(HandlerErrorDetail {
+                        message:   "transient".into(),
                         retryable: true,
-                        category: None,
+                        category:  None,
                         signature: None,
                     }))
                 } else {
@@ -1939,18 +2048,18 @@ mod tests {
             fn retry_policy(&self, _n: &TestNode, _g: &TestGraph) -> RetryPolicy {
                 RetryPolicy {
                     max_attempts: 3,
-                    backoff: BackoffPolicy {
+                    backoff:      BackoffPolicy {
                         initial_delay: Duration::from_secs(60),
-                        factor: 1.0,
-                        max_delay: Duration::from_secs(60),
-                        jitter: false,
+                        factor:        1.0,
+                        max_delay:     Duration::from_secs(60),
+                        jitter:        false,
                     },
                 }
             }
         }
 
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(Arc::new(FailOnceHandler {
             stall: stall_clone,
             calls: AtomicU32::new(0),
@@ -1959,7 +2068,7 @@ mod tests {
         .build();
         let result = executor.run(&g, state).await;
         assert!(
-            matches!(result, Err(CoreError::StallTimeout { .. })),
+            matches!(result, Err(Error::StallTimeout { .. })),
             "expected StallTimeout, got {result:?}"
         );
     }
@@ -1976,7 +2085,7 @@ mod tests {
             async fn before_attempt(
                 &self,
                 _ctx: &AttemptContext<'_, TestGraph>,
-                _s: &RunState,
+                _s: &ExecutionState,
             ) -> Result<NodeDecision> {
                 self.0.cancel();
                 sleep(Duration::from_secs(10)).await;
@@ -1985,7 +2094,7 @@ mod tests {
         }
 
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(SlowBeforeAttempt(stall_clone)))
@@ -1993,7 +2102,7 @@ mod tests {
                 .build();
         let result = executor.run(&g, state).await;
         assert!(
-            matches!(result, Err(CoreError::StallTimeout { .. })),
+            matches!(result, Err(Error::StallTimeout { .. })),
             "expected StallTimeout, got {result:?}"
         );
     }

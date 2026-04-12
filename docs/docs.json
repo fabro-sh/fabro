@@ -185,6 +185,7 @@
               "GET /api/v1/runs",
               "POST /api/v1/runs",
               "GET /api/v1/runs/{id}",
+              "POST /api/v1/runs/{id}/start",
               "POST /api/v1/runs/{id}/cancel",
               "POST /api/v1/runs/{id}/pause",
               "POST /api/v1/runs/{id}/unpause",
@@ -198,7 +199,6 @@
             "pages": [
               "GET /api/v1/runs/{id}/questions",
               "POST /api/v1/runs/{id}/questions/{qid}/answer",
-              "POST /api/v1/runs/{id}/steer",
               "POST /api/v1/runs/{id}/preview"
             ]
           },
@@ -206,28 +206,18 @@
             "group": "Run Outputs",
             "icon": "file-export",
             "pages": [
-              "GET /api/v1/runs/{id}/files",
+              "GET /api/v1/runs/{id}/artifacts",
               "GET /api/v1/runs/{id}/usage",
               {
                 "group": "Run Internals",
                 "icon": "microchip",
                 "pages": [
                   "GET /api/v1/runs/{id}/checkpoint",
-                  "GET /api/v1/runs/{id}/context",
                   "GET /api/v1/runs/{id}/stages",
                   "GET /api/v1/runs/{id}/stages/{stageId}/turns",
                   "GET /api/v1/runs/{id}/settings"
                 ]
               }
-            ]
-          },
-          {
-            "group": "Workflows",
-            "icon": "diagram-project",
-            "pages": [
-              "GET /api/v1/workflows",
-              "GET /api/v1/workflows/{name}",
-              "GET /api/v1/workflows/{name}/runs"
             ]
           },
           {
@@ -248,17 +238,6 @@
                   "GET /api/v1/models",
                   "POST /api/v1/models/{id}/test"
                 ]
-              },
-              {
-                "group": "Sessions",
-                "icon": "comments",
-                "pages": [
-                  "GET /api/v1/sessions",
-                  "POST /api/v1/sessions",
-                  "GET /api/v1/sessions/{id}",
-                  "POST /api/v1/sessions/{id}/messages",
-                  "GET /api/v1/sessions/{id}/events"
-                ]
               }
             ]
           }
@@ -269,9 +248,21 @@
         "icon": "clock-rotate-left",
         "groups": [
           {
+            "group": "April 2026",
+            "icon": "clock-rotate-left",
+            "pages": [
+              "changelog/2026-04-06",
+              "changelog/2026-04-04",
+              "changelog/2026-04-02",
+              "changelog/2026-04-01"
+            ]
+          },
+          {
             "group": "March 2026",
             "icon": "clock-rotate-left",
             "pages": [
+              "changelog/2026-03-31",
+              "changelog/2026-03-30",
               "changelog/2026-03-29",
               "changelog/2026-03-28",
               "changelog/2026-03-27",

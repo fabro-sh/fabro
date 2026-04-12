@@ -1,12 +1,17 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
+use fabro_util::printer::Printer;
+use tokio::process::Command as TokioCommand;
 use tokio::task::spawn_blocking;
 
-use crate::args::GlobalArgs;
-use crate::shared::github::build_github_app_credentials;
-use crate::user_config::load_user_settings;
+use crate::args::{GlobalArgs, RepoInitArgs, ServerTargetArgs};
+use crate::command_context::CommandContext;
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This is a shared synchronous git helper used by repo deinit; async callers should use spawn_blocking."
+)]
 pub(super) fn git_repo_root() -> Result<PathBuf> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -22,52 +27,61 @@ pub(super) fn git_repo_root() -> Result<PathBuf> {
     ))
 }
 
-pub(crate) async fn run_init(globals: &GlobalArgs) -> Result<Vec<String>> {
-    let repo_root = git_repo_root()?;
+pub(crate) async fn run_init(
+    args: &RepoInitArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<Vec<String>> {
+    let repo_root = spawn_blocking(git_repo_root)
+        .await
+        .context("git repo root task panicked")??;
     let mut created = Vec::new();
 
-    let fabro_toml = repo_root.join("fabro.toml");
-    if fabro_toml.exists() {
+    let fabro_dir = repo_root.join(".fabro");
+    let project_toml = fabro_dir.join("project.toml");
+    if project_toml.exists() {
         bail!(
-            "already initialized — fabro.toml exists at {}",
-            fabro_toml.display()
+            "already initialized — .fabro/project.toml exists at {}",
+            project_toml.display()
         );
     }
 
-    // Create fabro.toml
+    std::fs::create_dir_all(&fabro_dir)
+        .with_context(|| format!("failed to create {}", fabro_dir.display()))?;
+
+    // Create .fabro/project.toml
     std::fs::write(
-        &fabro_toml,
+        &project_toml,
         "\
 # Fabro project configuration
 # https://docs.fabro.computer/getting-started/quick-start
 
-version = 1
-
-[fabro]
-root = \"fabro/\"
-
-# Disable retrospective analysis after workflow runs:
-# retro = false
+_version = 1
 
 # Auto-create pull requests on successful workflow runs.
-[pull_request]
+[run.pull_request]
 enabled = true
 draft = true
 # auto_merge = true
 ",
     )
-    .with_context(|| format!("failed to write {}", fabro_toml.display()))?;
-    created.push("fabro.toml".to_string());
+    .with_context(|| format!("failed to write {}", project_toml.display()))?;
+    created.push(".fabro/project.toml".to_string());
 
     let green = console::Style::new().green();
     let bold = console::Style::new().bold();
     let dim = console::Style::new().dim();
     if !globals.json {
-        eprintln!("  {} {}", green.apply_to("✔"), dim.apply_to("fabro.toml"));
+        fabro_util::printerr!(
+            printer,
+            "  {} {}",
+            green.apply_to("✔"),
+            dim.apply_to(".fabro/project.toml")
+        );
     }
 
     // Create hello workflow directory
-    let workflow_dir = repo_root.join("fabro/workflows/hello");
+    let workflow_dir = repo_root.join(".fabro/workflows/hello");
     std::fs::create_dir_all(&workflow_dir)
         .with_context(|| format!("failed to create {}", workflow_dir.display()))?;
 
@@ -89,12 +103,13 @@ draft = true
 "#,
     )
     .with_context(|| format!("failed to write {}", dot_path.display()))?;
-    created.push("fabro/workflows/hello/workflow.fabro".to_string());
+    created.push(".fabro/workflows/hello/workflow.fabro".to_string());
     if !globals.json {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "  {} {}",
             green.apply_to("✔"),
-            dim.apply_to("fabro/workflows/hello/workflow.fabro")
+            dim.apply_to(".fabro/workflows/hello/workflow.fabro")
         );
     }
 
@@ -102,20 +117,22 @@ draft = true
     let toml_path = workflow_dir.join("workflow.toml");
     std::fs::write(
         &toml_path,
-        "version = 1\ngraph = \"workflow.fabro\"\n\n[sandbox]\nprovider = \"local\"\n",
+        "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n\n[run.sandbox]\nprovider = \"local\"\n",
     )
     .with_context(|| format!("failed to write {}", toml_path.display()))?;
-    created.push("fabro/workflows/hello/workflow.toml".to_string());
+    created.push(".fabro/workflows/hello/workflow.toml".to_string());
     if !globals.json {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "  {} {}",
             green.apply_to("✔"),
-            dim.apply_to("fabro/workflows/hello/workflow.toml")
+            dim.apply_to(".fabro/workflows/hello/workflow.toml")
         );
     }
 
     if !globals.json {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "\n{} Run a workflow with:\n\n  {}",
             bold.apply_to("Project initialized!"),
             console::Style::new()
@@ -126,30 +143,33 @@ draft = true
     }
 
     if !globals.json {
-        check_github_app_installation().await;
+        check_github_app_installation(&args.target, printer).await;
     }
 
     Ok(created)
 }
 
-async fn check_github_app_installation() {
+async fn check_github_app_installation(target: &ServerTargetArgs, printer: Printer) {
     // Get the git remote origin URL
-    let output = match std::process::Command::new("git")
+    let output = match TokioCommand::new("git")
         .args(["remote", "get-url", "origin"])
         .output()
+        .await
     {
         Ok(o) if o.status.success() => o,
         _ => {
             let yellow = console::Style::new().yellow();
             let dim = console::Style::new().dim();
-            eprintln!(
-                "\n  {} No git remote found — skipping GitHub App check",
+            fabro_util::printerr!(
+                printer,
+                "\n  {} No git remote found — skipping GitHub check",
                 yellow.apply_to("!")
             );
-            eprintln!(
+            fabro_util::printerr!(
+                printer,
                 "  {}",
                 dim.apply_to(
-                    "Run `git remote add origin <url>` then `fabro install` to set up the GitHub App"
+                    "Run `git remote add origin <url>`, then `gh auth login` or `fabro install` to configure GitHub access"
                 )
             );
             return;
@@ -167,158 +187,106 @@ async fn check_github_app_installation() {
         return; // Not a GitHub repo — skip silently
     };
 
-    // Load CLI config to get app_id and slug
-    let Ok(cli_settings) = load_user_settings() else {
-        return;
+    let ctx = match CommandContext::for_target(target, printer) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            fabro_util::printerr!(
+                printer,
+                "\n  Warning: could not resolve fabro server settings: {err}"
+            );
+            return;
+        }
     };
 
-    let app_id = if let Some(id) = cli_settings.app_id() {
-        id.to_string()
-    } else {
-        eprintln!(
-            "\n  Run {} to set up the GitHub App",
-            console::Style::new()
-                .cyan()
-                .bold()
-                .apply_to("fabro install")
+    let server = match ctx.server().await {
+        Ok(server) => server,
+        Err(err) => {
+            fabro_util::printerr!(
+                printer,
+                "\n  Warning: could not connect to fabro server: {err}"
+            );
+            return;
+        }
+    };
+
+    let check = match server
+        .api()
+        .get_github_repo()
+        .owner(owner.clone())
+        .name(repo.clone())
+        .send()
+        .await
+    {
+        Ok(response) => response.into_inner(),
+        Err(err) => {
+            fabro_util::printerr!(printer, "\n  Warning: could not check GitHub access: {err}");
+            return;
+        }
+    };
+
+    if check.accessible {
+        let green = console::Style::new().green();
+        fabro_util::printerr!(
+            printer,
+            "\n  {} GitHub access is configured for {owner}/{repo}",
+            green.apply_to("✔")
         );
         return;
-    };
+    }
 
-    let slug = cli_settings.slug().map(String::from);
+    let yellow = console::Style::new().yellow();
+    fabro_util::printerr!(
+        printer,
+        "\n  {} GitHub access is not available for {owner}/{repo}",
+        yellow.apply_to("!")
+    );
+    if let Some(url) = &check.install_url {
+        fabro_util::printerr!(printer, "  Install at: {url}");
+    } else {
+        fabro_util::printerr!(
+            printer,
+            "  Run `gh auth login` or `fabro install`, then try again."
+        );
+    }
 
-    // Build GitHub App credentials
-    let creds = match build_github_app_credentials(Some(&app_id)) {
-        Ok(Some(creds)) => creds,
-        Ok(None) => {
-            eprintln!(
-                "\n  Set {} to enable GitHub App integration",
-                console::Style::new()
-                    .cyan()
-                    .bold()
-                    .apply_to("GITHUB_APP_PRIVATE_KEY")
-            );
-            return;
-        }
-        Err(err) => {
-            eprintln!("\n  Warning: invalid GITHUB_APP_PRIVATE_KEY: {err}");
-            return;
-        }
-    };
+    if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        fabro_util::printerr!(printer, "  Press Enter to continue after installing...");
+        let _ = spawn_blocking(|| {
+            let mut buf = String::new();
+            let _ = std::io::stdin().read_line(&mut buf);
+        })
+        .await;
 
-    let jwt = match fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem) {
-        Ok(j) => j,
-        Err(e) => {
-            eprintln!("\n  Warning: failed to sign GitHub App JWT: {e}");
-            return;
-        }
-    };
-
-    let client = reqwest::Client::new();
-
-    match fabro_github::check_app_installed(
-        &client,
-        &jwt,
-        &owner,
-        &repo,
-        &fabro_github::github_api_base_url(),
-    )
-    .await
-    {
-        Ok(true) => {
-            let green = console::Style::new().green();
-            eprintln!(
-                "\n  {} GitHub App is installed for {owner}/{repo}",
-                green.apply_to("✔")
-            );
-        }
-        Ok(false) => {
-            let install_url = match &slug {
-                Some(s) => format!("https://github.com/apps/{s}/installations/new"),
-                None => format!("https://github.com/organizations/{owner}/settings/installations"),
-            };
-
-            let yellow = console::Style::new().yellow();
-
-            // Best-effort: warn if the app is private and the repo belongs to a different owner.
-            if let Ok(app_info) = fabro_github::get_authenticated_app(
-                &client,
-                &jwt,
-                &fabro_github::github_api_base_url(),
-            )
+        match server
+            .api()
+            .get_github_repo()
+            .owner(owner.clone())
+            .name(repo.clone())
+            .send()
             .await
-            {
-                let cross_owner = !app_info.owner.login.eq_ignore_ascii_case(&owner);
-                let is_private = cross_owner
-                    && fabro_github::is_app_public(
-                        &client,
-                        &app_info.slug,
-                        &fabro_github::github_api_base_url(),
-                    )
-                    .await
-                        == Ok(false);
-
-                if is_private {
-                    eprintln!(
-                        "\n  {} GitHub App \"{}\" is private but this repo belongs to a different owner ({}).",
-                        yellow.apply_to("!"),
-                        app_info.slug,
-                        owner
+        {
+            Ok(response) => {
+                let response = response.into_inner();
+                if response.accessible {
+                    let green = console::Style::new().green();
+                    fabro_util::printerr!(
+                        printer,
+                        "  {} GitHub access is configured for {owner}/{repo}",
+                        green.apply_to("✔")
                     );
-                    eprintln!(
-                        "    The app must be made public before it can be installed outside {}.",
-                        app_info.owner.login
-                    );
-                    eprintln!(
-                        "    Update visibility at: https://github.com/settings/apps/{}",
-                        app_info.slug
-                    );
-                }
-            }
-            eprintln!(
-                "\n  {} GitHub App is not installed for {owner}/{repo}",
-                yellow.apply_to("!")
-            );
-            eprintln!("  Install at: {install_url}");
-
-            // Only prompt if stdin is a terminal
-            if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                eprintln!("  Press Enter to continue after installing...");
-                let _ = spawn_blocking(|| {
-                    let mut buf = String::new();
-                    let _ = std::io::stdin().read_line(&mut buf);
-                })
-                .await;
-
-                // Re-check after user presses Enter
-                match fabro_github::check_app_installed(
-                    &client,
-                    &jwt,
-                    &owner,
-                    &repo,
-                    &fabro_github::github_api_base_url(),
-                )
-                .await
-                {
-                    Ok(true) => {
-                        let green = console::Style::new().green();
-                        eprintln!(
-                            "  {} GitHub App is installed for {owner}/{repo}",
-                            green.apply_to("✔")
-                        );
-                    }
-                    Ok(false) => {
-                        eprintln!("  GitHub App is still not installed.");
-                        eprintln!("  Install at: {install_url}");
-                    }
-                    Err(e) => {
-                        eprintln!("  Warning: could not re-check GitHub App installation: {e}");
+                } else {
+                    fabro_util::printerr!(printer, "  GitHub access is still unavailable.");
+                    if let Some(url) = &check.install_url {
+                        fabro_util::printerr!(printer, "  Install at: {url}");
                     }
                 }
             }
-        }
-        Err(e) => {
-            eprintln!("\n  Warning: could not check GitHub App installation: {e}");
+            Err(err) => {
+                fabro_util::printerr!(
+                    printer,
+                    "  Warning: could not re-check GitHub access: {err}"
+                );
+            }
         }
     }
 }

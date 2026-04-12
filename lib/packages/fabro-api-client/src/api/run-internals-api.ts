@@ -22,20 +22,311 @@ import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObj
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
 // @ts-ignore
+import type { AppendEventResponse } from '../models';
+// @ts-ignore
+import type { ArtifactListResponse } from '../models';
+// @ts-ignore
 import type { ErrorResponse } from '../models';
+// @ts-ignore
+import type { PaginatedEventList } from '../models';
 // @ts-ignore
 import type { PaginatedRunStageList } from '../models';
 // @ts-ignore
 import type { PaginatedStageTurnList } from '../models';
 // @ts-ignore
+import type { RunArtifactListResponse } from '../models';
+// @ts-ignore
 import type { RunCheckpoint } from '../models';
 // @ts-ignore
-import type { RunSettings } from '../models';
+import type { RunEvent } from '../models';
+// @ts-ignore
+import type { RunProjection } from '../models';
+// @ts-ignore
+import type { WriteBlobResponse } from '../models';
+// @ts-ignore
+import type { WriteRunBlobRequest } from '../models';
 /**
  * RunInternalsApi - axios parameter creator
  */
 export const RunInternalsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
+        /**
+         * Appends a validated event to the run event log. Intended for trusted internal callers.
+         * @summary Append Run Event
+         * @param {string} id Unique run identifier (ULID).
+         * @param {RunEvent} runEvent 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        appendRunEvent: async (id: string, runEvent: RunEvent, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('appendRunEvent', 'id', id)
+            // verify required parameter 'runEvent' is not null or undefined
+            assertParamExists('appendRunEvent', 'runEvent', runEvent)
+            const localVarPath = `/api/v1/runs/{id}/events`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(runEvent, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
+         * @summary Attach Run Events
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        attachRunEvents: async (id: string, sinceSeq?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('attachRunEvents', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/attach`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (sinceSeq !== undefined) {
+                localVarQueryParameter['since_seq'] = sinceSeq;
+            }
+
+            localVarHeaderParameter['Accept'] = 'text/event-stream,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns the internal event-sourced run projection. This is not a stable public contract.
+         * @summary Get Run State
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunState: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('getRunState', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/state`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Downloads an artifact by filename.
+         * @summary Get Stage Artifact
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStageArtifact: async (id: string, stageId: string, filename: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('getStageArtifact', 'id', id)
+            // verify required parameter 'stageId' is not null or undefined
+            assertParamExists('getStageArtifact', 'stageId', stageId)
+            // verify required parameter 'filename' is not null or undefined
+            assertParamExists('getStageArtifact', 'filename', filename)
+            const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/artifacts/download`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"stageId"}}`, encodeURIComponent(String(stageId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (filename !== undefined) {
+                localVarQueryParameter['filename'] = filename;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/octet-stream,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Lists captured artifact files for a run.
+         * @summary List Run Artifacts
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listRunArtifacts: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('listRunArtifacts', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/artifacts`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns a paginated JSON list of stored run events.
+         * @summary List Run Events
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {number} [limit] Maximum number of events to return.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listRunEvents: async (id: string, sinceSeq?: number, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('listRunEvents', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/events`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (sinceSeq !== undefined) {
+                localVarQueryParameter['since_seq'] = sinceSeq;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
         /**
          * Returns the ordered list of stages in a run\'s workflow graph with their current status and timing. Stages are bounded by the workflow graph size, typically fewer than 20.
          * @summary List Run Stages
@@ -88,10 +379,55 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
+         * Lists artifact filenames stored for a stage.
+         * @summary List Stage Artifacts
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listStageArtifacts: async (id: string, stageId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('listStageArtifacts', 'id', id)
+            // verify required parameter 'stageId' is not null or undefined
+            assertParamExists('listStageArtifacts', 'stageId', stageId)
+            const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/artifacts`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"stageId"}}`, encodeURIComponent(String(stageId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Returns a paginated list of conversation turns within a specific stage, including system prompts, assistant responses, and tool invocations.
          * @summary List Stage Turns
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph.
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
@@ -143,17 +479,76 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Returns the latest checkpoint data for a run, or null if no checkpoint has been recorded yet.
-         * @summary Retrieve Run Checkpoint
+         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation. 
+         * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {File} body 
+         * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunCheckpoint: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        putStageArtifact: async (id: string, stageId: string, body: File, filename?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
-            assertParamExists('retrieveRunCheckpoint', 'id', id)
-            const localVarPath = `/api/v1/runs/{id}/checkpoint`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            assertParamExists('putStageArtifact', 'id', id)
+            // verify required parameter 'stageId' is not null or undefined
+            assertParamExists('putStageArtifact', 'stageId', stageId)
+            // verify required parameter 'body' is not null or undefined
+            assertParamExists('putStageArtifact', 'body', body)
+            const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/artifacts`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"stageId"}}`, encodeURIComponent(String(stageId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (filename !== undefined) {
+                localVarQueryParameter['filename'] = filename;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/octet-stream';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Reads a previously stored blob by identifier.
+         * @summary Read Run Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} blobId Content-addressed blob identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        readRunBlob: async (id: string, blobId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('readRunBlob', 'id', id)
+            // verify required parameter 'blobId' is not null or undefined
+            assertParamExists('readRunBlob', 'blobId', blobId)
+            const localVarPath = `/api/v1/runs/{id}/blobs/{blobId}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"blobId"}}`, encodeURIComponent(String(blobId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -172,7 +567,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
-            localVarHeaderParameter['Accept'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/octet-stream,application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -184,16 +579,16 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Returns the key-value context map accumulated during the run. Empty if the run has not started.
-         * @summary Retrieve Run Context
+         * Returns the latest checkpoint data for a run, or null if no checkpoint has been recorded yet.
+         * @summary Retrieve Run Checkpoint
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunContext: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        retrieveRunCheckpoint: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
-            assertParamExists('retrieveRunContext', 'id', id)
-            const localVarPath = `/api/v1/runs/{id}/context`
+            assertParamExists('retrieveRunCheckpoint', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/checkpoint`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -265,6 +660,52 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
                 options: localVarRequestOptions,
             };
         },
+        /**
+         * Writes an opaque binary blob and returns its content-addressed blob identifier.
+         * @summary Write Run Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {File} body 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        writeRunBlob: async (id: string, body: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('writeRunBlob', 'id', id)
+            // verify required parameter 'body' is not null or undefined
+            assertParamExists('writeRunBlob', 'body', body)
+            const localVarPath = `/api/v1/runs/{id}/blobs`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/octet-stream';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -274,6 +715,90 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
 export const RunInternalsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = RunInternalsApiAxiosParamCreator(configuration)
     return {
+        /**
+         * Appends a validated event to the run event log. Intended for trusted internal callers.
+         * @summary Append Run Event
+         * @param {string} id Unique run identifier (ULID).
+         * @param {RunEvent} runEvent 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async appendRunEvent(id: string, runEvent: RunEvent, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AppendEventResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.appendRunEvent(id, runEvent, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.appendRunEvent']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
+         * @summary Attach Run Events
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async attachRunEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.attachRunEvents(id, sinceSeq, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.attachRunEvents']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns the internal event-sourced run projection. This is not a stable public contract.
+         * @summary Get Run State
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getRunState(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunProjection>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getRunState(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.getRunState']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Downloads an artifact by filename.
+         * @summary Get Stage Artifact
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getStageArtifact(id: string, stageId: string, filename: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getStageArtifact(id, stageId, filename, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.getStageArtifact']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Lists captured artifact files for a run.
+         * @summary List Run Artifacts
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listRunArtifacts(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunArtifactListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listRunArtifacts(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listRunArtifacts']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns a paginated JSON list of stored run events.
+         * @summary List Run Events
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {number} [limit] Maximum number of events to return.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listRunEvents(id: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedEventList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listRunEvents(id, sinceSeq, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listRunEvents']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
         /**
          * Returns the ordered list of stages in a run\'s workflow graph with their current status and timing. Stages are bounded by the workflow graph size, typically fewer than 20.
          * @summary List Run Stages
@@ -290,10 +815,24 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Lists artifact filenames stored for a stage.
+         * @summary List Stage Artifacts
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listStageArtifacts(id: string, stageId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ArtifactListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listStageArtifacts(id, stageId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listStageArtifacts']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns a paginated list of conversation turns within a specific stage, including system prompts, assistant responses, and tool invocations.
          * @summary List Stage Turns
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph.
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
@@ -303,6 +842,36 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.listStageTurns(id, stageId, pageLimit, pageOffset, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listStageTurns']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation. 
+         * @summary Put Stage Artifact
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {File} body 
+         * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async putStageArtifact(id: string, stageId: string, body: File, filename?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.putStageArtifact(id, stageId, body, filename, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.putStageArtifact']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Reads a previously stored blob by identifier.
+         * @summary Read Run Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} blobId Content-addressed blob identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async readRunBlob(id: string, blobId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.readRunBlob(id, blobId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.readRunBlob']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -319,29 +888,30 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns the key-value context map accumulated during the run. Empty if the run has not started.
-         * @summary Retrieve Run Context
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async retrieveRunContext(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunContext(id, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.retrieveRunContext']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
          * Returns the structured settings used to launch this run.
          * @summary Retrieve Run Settings
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunSettings>> {
+        async retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunSettings(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.retrieveRunSettings']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Writes an opaque binary blob and returns its content-addressed blob identifier.
+         * @summary Write Run Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {File} body 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async writeRunBlob(id: string, body: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<WriteBlobResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.writeRunBlob(id, body, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.writeRunBlob']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
     }
@@ -353,6 +923,72 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
 export const RunInternalsApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
     const localVarFp = RunInternalsApiFp(configuration)
     return {
+        /**
+         * Appends a validated event to the run event log. Intended for trusted internal callers.
+         * @summary Append Run Event
+         * @param {string} id Unique run identifier (ULID).
+         * @param {RunEvent} runEvent 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        appendRunEvent(id: string, runEvent: RunEvent, options?: RawAxiosRequestConfig): AxiosPromise<AppendEventResponse> {
+            return localVarFp.appendRunEvent(id, runEvent, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
+         * @summary Attach Run Events
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        attachRunEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig): AxiosPromise<string> {
+            return localVarFp.attachRunEvents(id, sinceSeq, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns the internal event-sourced run projection. This is not a stable public contract.
+         * @summary Get Run State
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunState(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunProjection> {
+            return localVarFp.getRunState(id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Downloads an artifact by filename.
+         * @summary Get Stage Artifact
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStageArtifact(id: string, stageId: string, filename: string, options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.getStageArtifact(id, stageId, filename, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Lists captured artifact files for a run.
+         * @summary List Run Artifacts
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listRunArtifacts(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunArtifactListResponse> {
+            return localVarFp.listRunArtifacts(id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns a paginated JSON list of stored run events.
+         * @summary List Run Events
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {number} [limit] Maximum number of events to return.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listRunEvents(id: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedEventList> {
+            return localVarFp.listRunEvents(id, sinceSeq, limit, options).then((request) => request(axios, basePath));
+        },
         /**
          * Returns the ordered list of stages in a run\'s workflow graph with their current status and timing. Stages are bounded by the workflow graph size, typically fewer than 20.
          * @summary List Run Stages
@@ -366,10 +1002,21 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.listRunStages(id, pageLimit, pageOffset, options).then((request) => request(axios, basePath));
         },
         /**
+         * Lists artifact filenames stored for a stage.
+         * @summary List Stage Artifacts
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listStageArtifacts(id: string, stageId: string, options?: RawAxiosRequestConfig): AxiosPromise<ArtifactListResponse> {
+            return localVarFp.listStageArtifacts(id, stageId, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns a paginated list of conversation turns within a specific stage, including system prompts, assistant responses, and tool invocations.
          * @summary List Stage Turns
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph.
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
@@ -377,6 +1024,30 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          */
         listStageTurns(id: string, stageId: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedStageTurnList> {
             return localVarFp.listStageTurns(id, stageId, pageLimit, pageOffset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation. 
+         * @summary Put Stage Artifact
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {File} body 
+         * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putStageArtifact(id: string, stageId: string, body: File, filename?: string, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.putStageArtifact(id, stageId, body, filename, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Reads a previously stored blob by identifier.
+         * @summary Read Run Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} blobId Content-addressed blob identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        readRunBlob(id: string, blobId: string, options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.readRunBlob(id, blobId, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns the latest checkpoint data for a run, or null if no checkpoint has been recorded yet.
@@ -389,24 +1060,25 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.retrieveRunCheckpoint(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns the key-value context map accumulated during the run. Empty if the run has not started.
-         * @summary Retrieve Run Context
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        retrieveRunContext(id: string, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
-            return localVarFp.retrieveRunContext(id, options).then((request) => request(axios, basePath));
-        },
-        /**
          * Returns the structured settings used to launch this run.
          * @summary Retrieve Run Settings
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunSettings> {
+        retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
             return localVarFp.retrieveRunSettings(id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Writes an opaque binary blob and returns its content-addressed blob identifier.
+         * @summary Write Run Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {File} body 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        writeRunBlob(id: string, body: File, options?: RawAxiosRequestConfig): AxiosPromise<WriteBlobResponse> {
+            return localVarFp.writeRunBlob(id, body, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -415,6 +1087,78 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
  * RunInternalsApi - object-oriented interface
  */
 export class RunInternalsApi extends BaseAPI {
+    /**
+     * Appends a validated event to the run event log. Intended for trusted internal callers.
+     * @summary Append Run Event
+     * @param {string} id Unique run identifier (ULID).
+     * @param {RunEvent} runEvent 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public appendRunEvent(id: string, runEvent: RunEvent, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).appendRunEvent(id, runEvent, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
+     * @summary Attach Run Events
+     * @param {string} id Unique run identifier (ULID).
+     * @param {number} [sinceSeq] First event sequence number to include.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public attachRunEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).attachRunEvents(id, sinceSeq, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns the internal event-sourced run projection. This is not a stable public contract.
+     * @summary Get Run State
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getRunState(id: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).getRunState(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Downloads an artifact by filename.
+     * @summary Get Stage Artifact
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+     * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getStageArtifact(id: string, stageId: string, filename: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).getStageArtifact(id, stageId, filename, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Lists captured artifact files for a run.
+     * @summary List Run Artifacts
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listRunArtifacts(id: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).listRunArtifacts(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns a paginated JSON list of stored run events.
+     * @summary List Run Events
+     * @param {string} id Unique run identifier (ULID).
+     * @param {number} [sinceSeq] First event sequence number to include.
+     * @param {number} [limit] Maximum number of events to return.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listRunEvents(id: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).listRunEvents(id, sinceSeq, limit, options).then((request) => request(this.axios, this.basePath));
+    }
+
     /**
      * Returns the ordered list of stages in a run\'s workflow graph with their current status and timing. Stages are bounded by the workflow graph size, typically fewer than 20.
      * @summary List Run Stages
@@ -429,10 +1173,22 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
+     * Lists artifact filenames stored for a stage.
+     * @summary List Stage Artifacts
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listStageArtifacts(id: string, stageId: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).listStageArtifacts(id, stageId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Returns a paginated list of conversation turns within a specific stage, including system prompts, assistant responses, and tool invocations.
      * @summary List Stage Turns
      * @param {string} id Unique run identifier (ULID).
-     * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph.
+     * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
      * @param {number} [pageLimit] Maximum number of items to return per page.
      * @param {number} [pageOffset] Number of items to skip before returning results.
      * @param {*} [options] Override http request option.
@@ -440,6 +1196,32 @@ export class RunInternalsApi extends BaseAPI {
      */
     public listStageTurns(id: string, stageId: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
         return RunInternalsApiFp(this.configuration).listStageTurns(id, stageId, pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation. 
+     * @summary Put Stage Artifact
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+     * @param {File} body 
+     * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public putStageArtifact(id: string, stageId: string, body: File, filename?: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).putStageArtifact(id, stageId, body, filename, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Reads a previously stored blob by identifier.
+     * @summary Read Run Blob
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} blobId Content-addressed blob identifier.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public readRunBlob(id: string, blobId: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).readRunBlob(id, blobId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -454,17 +1236,6 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
-     * Returns the key-value context map accumulated during the run. Empty if the run has not started.
-     * @summary Retrieve Run Context
-     * @param {string} id Unique run identifier (ULID).
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public retrieveRunContext(id: string, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).retrieveRunContext(id, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
      * Returns the structured settings used to launch this run.
      * @summary Retrieve Run Settings
      * @param {string} id Unique run identifier (ULID).
@@ -473,6 +1244,18 @@ export class RunInternalsApi extends BaseAPI {
      */
     public retrieveRunSettings(id: string, options?: RawAxiosRequestConfig) {
         return RunInternalsApiFp(this.configuration).retrieveRunSettings(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Writes an opaque binary blob and returns its content-addressed blob identifier.
+     * @summary Write Run Blob
+     * @param {string} id Unique run identifier (ULID).
+     * @param {File} body 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public writeRunBlob(id: string, body: File, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).writeRunBlob(id, body, options).then((request) => request(this.axios, this.basePath));
     }
 }
 

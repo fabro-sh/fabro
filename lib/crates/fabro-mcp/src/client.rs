@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use fabro_http::{HeaderMap, HeaderName, HeaderValue};
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::service::{RoleClient, RunningService, serve_client};
 use rmcp::transport::StreamableHttpClientTransport;
@@ -15,7 +15,7 @@ use tokio::time;
 use tracing::{debug, error, info, warn};
 
 use crate::client_handler::LoggingClientHandler;
-use crate::config::{McpServerConfig, McpTransport};
+use crate::config::{McpServerSettings, McpTransport};
 
 enum ClientState {
     /// Transport created but handshake not yet performed.
@@ -26,18 +26,19 @@ enum ClientState {
 
 enum PendingTransport {
     Stdio(TokioChildProcess),
-    Http(StreamableHttpClientTransport<reqwest::Client>),
+    Http(StreamableHttpClientTransport<fabro_http::HttpClient>),
 }
 
 /// MCP client wrapping the rmcp SDK. Handles stdio and HTTP transports.
 pub struct McpClient {
     server_name: String,
-    state: Mutex<ClientState>,
+    state:       Mutex<ClientState>,
 }
 
 impl McpClient {
-    /// Create a new MCP client from config. Does not connect yet — call `initialize()`.
-    pub fn new(config: &McpServerConfig) -> Result<Self> {
+    /// Create a new MCP client from config. Does not connect yet — call
+    /// `initialize()`.
+    pub fn new(config: &McpServerSettings) -> Result<Self> {
         let transport = match &config.transport {
             McpTransport::Stdio { command, env } => {
                 let (program, args) = command.split_first().ok_or_else(|| {
@@ -65,7 +66,7 @@ impl McpClient {
             McpTransport::Http { url, headers } => {
                 let http_config = StreamableHttpClientTransportConfig::with_uri(url.clone());
 
-                let mut builder = reqwest::Client::builder();
+                let mut builder = fabro_http::HttpClientBuilder::new();
                 if !headers.is_empty() {
                     let mut header_map = HeaderMap::new();
                     for (key, value) in headers {
@@ -100,7 +101,7 @@ impl McpClient {
 
         Ok(Self {
             server_name: config.name.clone(),
-            state: Mutex::new(ClientState::Connecting(Some(transport))),
+            state:       Mutex::new(ClientState::Connecting(Some(transport))),
         })
     }
 
@@ -212,12 +213,10 @@ impl McpClient {
             }
         };
 
-        let params = CallToolRequestParams {
-            meta: None,
-            name: name.to_string().into(),
-            arguments: args,
-            task: None,
-        };
+        let mut params = CallToolRequestParams::new(name.to_string());
+        if let Some(arguments) = args {
+            params = params.with_arguments(arguments);
+        }
 
         debug!(server = %self.server_name, tool = %name, "Calling MCP tool");
 

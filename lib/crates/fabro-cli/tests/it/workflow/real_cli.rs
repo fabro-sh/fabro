@@ -4,7 +4,7 @@ use std::time::Duration;
 use fabro_graphviz::graph::{AttrValue, Node};
 use fabro_llm::provider::Provider;
 use fabro_workflow::context::Context;
-use fabro_workflow::event::EventEmitter;
+use fabro_workflow::event::Emitter;
 use fabro_workflow::handler::agent::{CodergenBackend, CodergenResult};
 use fabro_workflow::handler::llm::cli::AgentCliBackend;
 
@@ -24,9 +24,7 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
     );
 
     let context = Context::new();
-    let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
-
+    let emitter = Arc::new(Emitter::default());
     let result = backend
         .run(
             &node,
@@ -34,7 +32,6 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
             &context,
             None,
             &emitter,
-            dir.path(),
             &env,
             None,
         )
@@ -48,37 +45,15 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
                 "{provider}/{model}: expected response to contain '4', got: {text}"
             );
             let usage = usage.unwrap_or_else(|| panic!("{provider}/{model}: should have usage"));
+            let tokens = usage.tokens();
             assert!(
-                usage.input_tokens > 0,
+                tokens.input_tokens > 0,
                 "{provider}/{model}: input_tokens should be > 0, got {}",
-                usage.input_tokens
+                tokens.input_tokens
             );
         }
         CodergenResult::Full(_) => panic!("expected Text result from {provider}/{model}"),
     }
-
-    // Verify log files were written
-    let provider_path = dir.path().join("provider_used.json");
-    assert!(
-        provider_path.exists(),
-        "{provider}/{model}: provider_used.json should exist"
-    );
-    let provider_json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&provider_path).unwrap()).unwrap();
-    assert_eq!(provider_json["mode"], "cli");
-    assert_eq!(provider_json["provider"], provider.as_str());
-
-    // Verify CLI output was streamed to stage_dir during poll
-    let stdout_log = dir.path().join("cli_stdout.log");
-    assert!(
-        stdout_log.exists(),
-        "{provider}/{model}: cli_stdout.log should be written during poll"
-    );
-    let stdout_content = std::fs::read_to_string(&stdout_log).unwrap();
-    assert!(
-        !stdout_content.is_empty(),
-        "{provider}/{model}: cli_stdout.log should not be empty"
-    );
 }
 
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]

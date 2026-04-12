@@ -1,21 +1,19 @@
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_agent::sandbox::ExecResult;
+use fabro_graphviz::graph::Node;
+use fabro_llm::types::TokenCounts;
 use fabro_model::Provider;
-use tokio::fs;
 use tokio::time::sleep;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::Context;
-use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
-use crate::outcome::StageUsage;
-use crate::outcome::compute_stage_cost;
-use fabro_graphviz::graph::Node;
+use crate::error::Error;
+use crate::event::{Emitter, Event, StageScope};
+use crate::outcome::billed_model_usage_from_llm;
 
 /// Maps a provider to its corresponding CLI tool metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,18 +62,19 @@ async fn ensure_cli(
     cli: AgentCli,
     provider: Provider,
     sandbox: &Arc<dyn Sandbox>,
-    emitter: &Arc<EventEmitter>,
-) -> Result<(), FabroError> {
+    emitter: &Arc<Emitter>,
+) -> Result<(), Error> {
     let start = std::time::Instant::now();
     let cli_name = cli.name();
     let provider_str = provider.as_str();
 
-    emitter.emit(&WorkflowRunEvent::CliEnsureStarted {
+    emitter.emit(&Event::CliEnsureStarted {
         cli_name: cli_name.to_string(),
         provider: provider_str.to_string(),
     });
 
-    // Check if the CLI is already installed (include ~/.local/bin for npm-installed CLIs)
+    // Check if the CLI is already installed (include ~/.local/bin for npm-installed
+    // CLIs)
     let version_check = sandbox
         .exec_command(
             &format!("PATH=\"$HOME/.local/bin:$PATH\" {cli_name} --version"),
@@ -85,11 +84,11 @@ async fn ensure_cli(
             None,
         )
         .await
-        .map_err(|e| FabroError::handler(format!("Failed to check {cli_name} version: {e}")))?;
+        .map_err(|e| Error::handler(format!("Failed to check {cli_name} version: {e}")))?;
 
     if version_check.exit_code == 0 {
         let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        emitter.emit(&WorkflowRunEvent::CliEnsureCompleted {
+        emitter.emit(&Event::CliEnsureCompleted {
             cli_name: cli_name.to_string(),
             provider: provider_str.to_string(),
             already_installed: true,
@@ -110,7 +109,7 @@ async fn ensure_cli(
     let install_result = sandbox
         .exec_command(&install_cmd, 180_000, None, None, None)
         .await
-        .map_err(|e| FabroError::handler(format!("Failed to install {cli_name}: {e}")))?;
+        .map_err(|e| Error::handler(format!("Failed to install {cli_name}: {e}")))?;
 
     let node_installed = true;
     if install_result.exit_code != 0 {
@@ -132,17 +131,17 @@ async fn ensure_cli(
             "{cli_name} install exited with code {}: {detail}",
             install_result.exit_code
         );
-        emitter.emit(&WorkflowRunEvent::CliEnsureFailed {
+        emitter.emit(&Event::CliEnsureFailed {
             cli_name: cli_name.to_string(),
             provider: provider_str.to_string(),
             error: error_msg.clone(),
             duration_ms,
         });
-        return Err(FabroError::handler(error_msg));
+        return Err(Error::handler(error_msg));
     }
 
     let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-    emitter.emit(&WorkflowRunEvent::CliEnsureCompleted {
+    emitter.emit(&Event::CliEnsureCompleted {
         cli_name: cli_name.to_string(),
         provider: provider_str.to_string(),
         already_installed: false,
@@ -199,8 +198,9 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
         }
         // --yolo: auto-approve all tool calls
         Provider::Gemini => format!("cat {prompt_file} | gemini -o json --yolo{model_flag}"),
-        // --dangerously-skip-permissions: bypass all permission checks (required for non-interactive use).
-        // CLAUDECODE= unset to allow running inside a Claude Code session.
+        // --dangerously-skip-permissions: bypass all permission checks (required for
+        // non-interactive use). CLAUDECODE= unset to allow running inside a Claude Code
+        // session.
         Provider::Anthropic => format!(
             "cat {prompt_file} | CLAUDECODE= claude -p --verbose --output-format stream-json --dangerously-skip-permissions{model_flag}"
         ),
@@ -210,14 +210,15 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
 /// Parsed response from a CLI tool invocation.
 #[derive(Debug)]
 pub struct CliResponse {
-    pub text: String,
-    pub input_tokens: i64,
+    pub text:          String,
+    pub input_tokens:  i64,
     pub output_tokens: i64,
 }
 
 /// Parse NDJSON output from Claude CLI (`--output-format stream-json`).
 ///
-/// Looks for the last `{"type":"result",...}` line, extracts `result` text and `usage`.
+/// Looks for the last `{"type":"result",...}` line, extracts `result` text and
+/// `usage`.
 fn parse_claude_ndjson(output: &str) -> Option<CliResponse> {
     let mut last_result: Option<serde_json::Value> = None;
 
@@ -258,7 +259,8 @@ fn parse_claude_ndjson(output: &str) -> Option<CliResponse> {
 /// Parse NDJSON output from Codex CLI (`codex exec --json`).
 ///
 /// Codex emits NDJSON lines. Text comes from `item.completed` events where
-/// `item.type == "agent_message"`. Usage comes from the `turn.completed` event.
+/// `item.type == "agent_message"`. TokenCounts comes from the `turn.completed`
+/// event.
 fn parse_codex_ndjson(output: &str) -> Option<CliResponse> {
     let mut last_message_text = String::new();
     let mut input_tokens: i64 = 0;
@@ -371,11 +373,12 @@ fn shell_escape(val: &str) -> String {
     val.replace('\'', "'\\''")
 }
 
-/// CLI backend that invokes external CLI tools (claude, codex, gemini) via `exec_command()`.
+/// CLI backend that invokes external CLI tools (claude, codex, gemini) via
+/// `exec_command()`.
 pub struct AgentCliBackend {
-    model: String,
-    provider: Provider,
-    env: HashMap<String, String>,
+    model:         String,
+    provider:      Provider,
+    env:           HashMap<String, String>,
     poll_interval: std::time::Duration,
 }
 
@@ -402,7 +405,8 @@ impl AgentCliBackend {
         self
     }
 
-    /// Detect changed files by comparing git state before and after the CLI run.
+    /// Detect changed files by comparing git state before and after the CLI
+    /// run.
     async fn detect_changed_files(&self, sandbox: &Arc<dyn Sandbox>) -> Vec<String> {
         // Get unstaged changes
         let diff_result = sandbox
@@ -458,13 +462,12 @@ impl CodergenBackend for AgentCliBackend {
         &self,
         node: &Node,
         prompt: &str,
-        _context: &Context,
+        context: &Context,
         _thread_id: Option<&str>,
-        emitter: &Arc<EventEmitter>,
-        stage_dir: &Path,
+        emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-    ) -> Result<CodergenResult, FabroError> {
+    ) -> Result<CodergenResult, Error> {
         // 1. Snapshot git state before the CLI run
         let files_before = self.detect_changed_files(sandbox).await;
 
@@ -480,7 +483,7 @@ impl CodergenBackend for AgentCliBackend {
         sandbox
             .write_file(&prompt_path, prompt)
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to write prompt file: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to write prompt file: {e}")))?;
 
         // 3. Build CLI command
         let model = node.model().unwrap_or(&self.model);
@@ -494,23 +497,25 @@ impl CodergenBackend for AgentCliBackend {
         ensure_cli(cli, provider, sandbox, emitter).await?;
 
         let command = cli_command_for_provider(provider, model, &prompt_path);
+        let stage_scope = StageScope::for_handler(context, &node.id);
+        emitter.emit_scoped(
+            &Event::AgentCliStarted {
+                node_id:  node.id.clone(),
+                visit:    stage_scope.visit,
+                mode:     "cli".to_string(),
+                provider: provider.as_str().to_string(),
+                model:    model.to_string(),
+                command:  command.clone(),
+            },
+            &stage_scope,
+        );
 
-        let _ = fs::create_dir_all(stage_dir).await;
-        let provider_used = serde_json::json!({
-            "mode": "cli",
-            "provider": provider.as_str(),
-            "model": model,
-            "command": &command,
-        });
-        if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
-            let _ = fs::write(stage_dir.join("provider_used.json"), json).await;
-        }
-
-        // Forward provider API key and custom env vars so the CLI tool can authenticate.
-        // Build a HashMap to pass via exec_command's env_vars parameter — this
-        // prepends `export` statements directly into the base64-encoded command,
-        // avoiding filesystem-to-process race conditions that can occur when
-        // writing an env file via the fs API and sourcing it via the process API.
+        // Forward provider API key and custom env vars so the CLI tool can
+        // authenticate. Build a HashMap to pass via exec_command's env_vars
+        // parameter — this prepends `export` statements directly into the
+        // base64-encoded command, avoiding filesystem-to-process race
+        // conditions that can occur when writing an env file via the fs API and
+        // sourcing it via the process API.
         let mut launch_env: HashMap<String, String> = HashMap::new();
         for name in provider.api_key_env_vars() {
             if let Ok(val) = std::env::var(name) {
@@ -532,7 +537,7 @@ impl CodergenBackend for AgentCliBackend {
                 let login_result = sandbox
                     .exec_command(&login_cmd, 30_000, None, None, None)
                     .await
-                    .map_err(|e| FabroError::handler(format!("codex login failed: {e}")))?;
+                    .map_err(|e| Error::handler(format!("codex login failed: {e}")))?;
                 if login_result.exit_code != 0 {
                     tracing::warn!(
                         exit_code = login_result.exit_code,
@@ -543,7 +548,8 @@ impl CodergenBackend for AgentCliBackend {
             }
         }
 
-        // Also write env file as fallback for commands that source it (e.g. ensure_cli PATH)
+        // Also write env file as fallback for commands that source it (e.g. ensure_cli
+        // PATH)
         let mut env_lines: Vec<String> = vec!["export PATH=\"$HOME/.local/bin:$PATH\"".to_string()];
         env_lines.extend(
             launch_env
@@ -554,7 +560,7 @@ impl CodergenBackend for AgentCliBackend {
             sandbox
                 .write_file(&env_path, &env_lines.join("\n"))
                 .await
-                .map_err(|e| FabroError::handler(format!("Failed to write env file: {e}")))?;
+                .map_err(|e| Error::handler(format!("Failed to write env file: {e}")))?;
         }
 
         // 3a. Disable auto-stop so the sandbox stays alive during long CLI runs
@@ -581,7 +587,7 @@ impl CodergenBackend for AgentCliBackend {
         let launch_result = sandbox
             .exec_command(&bg_command, 30_000, None, launch_env_ref, None)
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to launch CLI command: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to launch CLI command: {e}")))?;
         let pid = launch_result.stdout.trim();
         tracing::info!(pid, "CLI process launched in background");
 
@@ -595,23 +601,8 @@ impl CodergenBackend for AgentCliBackend {
             let poll_result = sandbox
                 .exec_command(&poll_command, 30_000, None, None, None)
                 .await
-                .map_err(|e| FabroError::handler(format!("Failed to poll CLI command: {e}")))?;
+                .map_err(|e| Error::handler(format!("Failed to poll CLI command: {e}")))?;
             let status = poll_result.stdout.trim();
-
-            // Sync CLI output to stage_dir for visibility (best-effort)
-            for (remote, local) in [
-                (&stdout_path, "cli_stdout.log"),
-                (&stderr_path, "cli_stderr.log"),
-            ] {
-                if let Ok(r) = sandbox
-                    .exec_command(&format!("cat {remote}"), 30_000, None, None, None)
-                    .await
-                {
-                    if !r.stdout.is_empty() {
-                        let _ = fs::write(stage_dir.join(local), &r.stdout).await;
-                    }
-                }
-            }
 
             if status != "running" {
                 break status.parse::<i32>().unwrap_or(-1);
@@ -623,11 +614,11 @@ impl CodergenBackend for AgentCliBackend {
         let stdout_result = sandbox
             .exec_command(&format!("cat {stdout_path}"), 60_000, None, None, None)
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to read stdout: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to read stdout: {e}")))?;
         let stderr_result = sandbox
             .exec_command(&format!("cat {stderr_path}"), 60_000, None, None, None)
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to read stderr: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to read stderr: {e}")))?;
 
         let result = ExecResult {
             stdout: stdout_result.stdout,
@@ -636,25 +627,23 @@ impl CodergenBackend for AgentCliBackend {
             timed_out: false,
             duration_ms,
         };
+        emitter.emit_scoped(
+            &Event::AgentCliCompleted {
+                node_id:     node.id.clone(),
+                stdout:      result.stdout.clone(),
+                stderr:      result.stderr.clone(),
+                exit_code:   result.exit_code,
+                duration_ms: result.duration_ms,
+            },
+            &stage_scope,
+        );
 
         // 3e. Cleanup temp files
         let _ = sandbox
             .exec_command(&format!("rm -f {tmp_prefix}_*"), 30_000, None, None, None)
             .await;
 
-        if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({
-            "exit_code": result.exit_code,
-            "stdout_len": result.stdout.len(),
-            "stderr_len": result.stderr.len(),
-            "duration_ms": result.duration_ms,
-        })) {
-            let _ = fs::write(stage_dir.join("cli_result_meta.json"), json).await;
-        }
-
         if result.exit_code != 0 {
-            let _ = fs::write(stage_dir.join("cli_stdout.log"), &result.stdout).await;
-            let _ = fs::write(stage_dir.join("cli_stderr.log"), &result.stderr).await;
-
             let tail = |s: &str, n: usize| -> String {
                 s.chars()
                     .rev()
@@ -672,7 +661,7 @@ impl CodergenBackend for AgentCliBackend {
                 (true, false) => format!("stdout: {stdout_tail}"),
                 (true, true) => format!("command: {command}"),
             };
-            return Err(FabroError::handler(format!(
+            return Err(Error::handler(format!(
                 "CLI command exited with code {}: {detail}",
                 result.exit_code,
             )));
@@ -680,7 +669,7 @@ impl CodergenBackend for AgentCliBackend {
 
         // 4. Parse the CLI output
         let parsed = parse_cli_response(provider, &result.stdout)
-            .ok_or_else(|| FabroError::handler("Failed to parse CLI output".to_string()))?;
+            .ok_or_else(|| Error::handler("Failed to parse CLI output".to_string()))?;
 
         // 5. Detect changed files
         let files_after = self.detect_changed_files(sandbox).await;
@@ -710,17 +699,12 @@ impl CodergenBackend for AgentCliBackend {
             }
         };
 
-        let mut stage_usage = StageUsage {
-            model: model.to_string(),
-            input_tokens: parsed.input_tokens,
-            output_tokens: parsed.output_tokens,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            reasoning_tokens: None,
-            speed: None,
-            cost: None,
-        };
-        stage_usage.cost = compute_stage_cost(&stage_usage);
+        let stage_usage =
+            billed_model_usage_from_llm(model, provider, node.speed(), &TokenCounts {
+                input_tokens: parsed.input_tokens,
+                output_tokens: parsed.output_tokens,
+                ..TokenCounts::default()
+            });
 
         Ok(CodergenResult::Text {
             text: parsed.text,
@@ -773,21 +757,20 @@ impl CodergenBackend for BackendRouter {
         prompt: &str,
         context: &Context,
         thread_id: Option<&str>,
-        emitter: &Arc<EventEmitter>,
-        stage_dir: &Path,
+        emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-    ) -> Result<CodergenResult, FabroError> {
+    ) -> Result<CodergenResult, Error> {
         if self.should_use_cli(node) {
             self.cli_backend
                 .run(
-                    node, prompt, context, thread_id, emitter, stage_dir, sandbox, tool_hooks,
+                    node, prompt, context, thread_id, emitter, sandbox, tool_hooks,
                 )
                 .await
         } else {
             self.api_backend
                 .run(
-                    node, prompt, context, thread_id, emitter, stage_dir, sandbox, tool_hooks,
+                    node, prompt, context, thread_id, emitter, sandbox, tool_hooks,
                 )
                 .await
         }
@@ -798,19 +781,19 @@ impl CodergenBackend for BackendRouter {
         node: &Node,
         prompt: &str,
         system_prompt: Option<&str>,
-        stage_dir: &Path,
-    ) -> Result<CodergenResult, FabroError> {
+    ) -> Result<CodergenResult, Error> {
         // CLI backend doesn't support one_shot, always route to API
-        self.api_backend
-            .one_shot(node, prompt, system_prompt, stage_dir)
-            .await
+        self.api_backend.one_shot(node, prompt, system_prompt).await
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::Path;
+
     use fabro_graphviz::graph::AttrValue;
+
+    use super::*;
 
     // -- AgentCli --
 
@@ -844,26 +827,23 @@ mod tests {
 
     // -- ensure_cli --
 
-    use fabro_agent::sandbox::{DirEntry, GrepOptions};
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
+    use fabro_agent::sandbox::{DirEntry, GrepOptions};
+
     /// Mock sandbox that returns pre-configured ExecResults in FIFO order.
     struct CliMockSandbox {
-        results: Mutex<VecDeque<ExecResult>>,
-        commands: Mutex<Vec<String>>,
+        results:  Mutex<VecDeque<ExecResult>>,
+        commands: Arc<Mutex<Vec<String>>>,
     }
 
     impl CliMockSandbox {
-        fn new(results: Vec<ExecResult>) -> Self {
+        fn new(results: Vec<ExecResult>, commands: Arc<Mutex<Vec<String>>>) -> Self {
             Self {
                 results: Mutex::new(results.into()),
-                commands: Mutex::new(Vec::new()),
+                commands,
             }
-        }
-
-        fn commands(&self) -> Vec<String> {
-            self.commands.lock().unwrap().clone()
         }
     }
 
@@ -947,65 +927,73 @@ mod tests {
 
     fn ok_result() -> ExecResult {
         ExecResult {
-            exit_code: 0,
-            stdout: String::new(),
-            stderr: String::new(),
-            timed_out: false,
+            exit_code:   0,
+            stdout:      String::new(),
+            stderr:      String::new(),
+            timed_out:   false,
             duration_ms: 10,
         }
     }
 
     fn fail_result(code: i32) -> ExecResult {
         ExecResult {
-            exit_code: code,
-            stdout: String::new(),
-            stderr: "error".to_string(),
-            timed_out: false,
+            exit_code:   code,
+            stdout:      String::new(),
+            stderr:      "error".to_string(),
+            timed_out:   false,
             duration_ms: 10,
         }
     }
 
     #[tokio::test]
-    #[allow(unsafe_code)]
     async fn ensure_cli_skips_install_when_present() {
-        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(vec![ok_result()]));
-        let emitter = Arc::new(EventEmitter::default());
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(
+            vec![ok_result()],
+            Arc::clone(&commands),
+        ));
+        let emitter = Arc::new(Emitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_ok());
 
-        let mock = sandbox.as_ref() as *const dyn Sandbox as *const CliMockSandbox;
-        let commands = unsafe { &*mock }.commands();
+        let commands = commands.lock().unwrap();
         assert_eq!(commands.len(), 1);
         assert!(commands[0].contains("claude --version"));
     }
 
     #[tokio::test]
-    #[allow(unsafe_code)]
     async fn ensure_cli_installs_when_missing() {
+        let commands = Arc::new(Mutex::new(Vec::new()));
         // version check fails, combined install succeeds
-        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(vec![
-            fail_result(127), // claude --version
-            ok_result(),      // combined node + npm install
-        ]));
-        let emitter = Arc::new(EventEmitter::default());
+        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(
+            vec![
+                fail_result(127), // claude --version
+                ok_result(),      // combined node + npm install
+            ],
+            Arc::clone(&commands),
+        ));
+        let emitter = Arc::new(Emitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_ok());
 
-        let mock = sandbox.as_ref() as *const dyn Sandbox as *const CliMockSandbox;
-        let commands = unsafe { &*mock }.commands();
+        let commands = commands.lock().unwrap();
         assert_eq!(commands.len(), 2);
         assert!(commands[1].contains("npm install -g @anthropic-ai/claude-code"));
     }
 
     #[tokio::test]
     async fn ensure_cli_fails_on_install_failure() {
-        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(vec![
-            fail_result(127), // claude --version
-            fail_result(1),   // combined install fails
-        ]));
-        let emitter = Arc::new(EventEmitter::default());
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(
+            vec![
+                fail_result(127), // claude --version
+                fail_result(1),   // combined install fails
+            ],
+            Arc::clone(&commands),
+        ));
+        let emitter = Arc::new(Emitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_err());
@@ -1146,7 +1134,8 @@ mod tests {
         assert!(parse_cli_response(Provider::OpenAi, "not json at all").is_none());
     }
 
-    // -- Cycle 5: Node::backend() accessor (tested here since the accessor is simple) --
+    // -- Cycle 5: Node::backend() accessor (tested here since the accessor is
+    // simple) --
 
     #[test]
     fn node_backend_returns_none_by_default() {
@@ -1210,15 +1199,14 @@ mod tests {
             _prompt: &str,
             _context: &Context,
             _thread_id: Option<&str>,
-            _emitter: &Arc<EventEmitter>,
-            _stage_dir: &Path,
+            _emitter: &Arc<Emitter>,
             _sandbox: &Arc<dyn Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        ) -> Result<CodergenResult, FabroError> {
+        ) -> Result<CodergenResult, Error> {
             Ok(CodergenResult::Text {
-                text: "stub".to_string(),
-                usage: None,
-                files_touched: Vec::new(),
+                text:              "stub".to_string(),
+                usage:             None,
+                files_touched:     Vec::new(),
                 last_file_touched: None,
             })
         }

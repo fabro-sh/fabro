@@ -11,7 +11,7 @@ Re-authenticating with LLM providers previously required re-running the full `fa
 fabro provider login --provider openai
 ```
 
-For OpenAI, this launches the browser-based OAuth PKCE flow with an automatic fallback to manual API key entry. All other providers prompt for an API key with validation. Credentials are merged non-destructively into `~/.fabro/.env`.
+For OpenAI, this launches the browser-based OAuth PKCE flow with an automatic fallback to manual API key entry. All other providers prompt for an API key with validation. Later releases moved these credentials into the server-owned secret store.
 
 ## Auto-detect default LLM provider
 

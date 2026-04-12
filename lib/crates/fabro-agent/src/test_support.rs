@@ -1,34 +1,37 @@
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use fabro_llm::Error as LlmError;
+use fabro_llm::client::Client;
+use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
+use fabro_llm::types::{
+    ContentPart, FinishReason, Message, Request, Response, StreamEvent, TokenCounts,
+};
+use fabro_model::Provider;
 pub use fabro_sandbox::test_support::{MockSandbox, MutableMockSandbox};
+use futures::stream;
 
 use crate::agent_profile::AgentProfile;
-use crate::config::SessionConfig;
+use crate::config::SessionOptions;
 use crate::profiles::EnvContext;
 use crate::sandbox::*;
 use crate::session::Session;
 use crate::skills::{Skill, format_skills_prompt_section};
 use crate::tool_registry::{RegisteredTool, ToolRegistry};
-use async_trait::async_trait;
-use fabro_llm::client::Client;
-use fabro_llm::error::SdkError;
-use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
-use fabro_llm::types::{ContentPart, FinishReason, Message, Request, Response, StreamEvent, Usage};
-use fabro_model::Provider;
-use futures::stream;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 // --- TestProfile ---
 
 pub struct TestProfile {
-    pub registry: ToolRegistry,
+    pub registry:       ToolRegistry,
     pub context_window: usize,
 }
 
 impl TestProfile {
     pub fn new() -> Self {
         Self {
-            registry: ToolRegistry::new(),
+            registry:       ToolRegistry::new(),
             context_window: 200_000,
         }
     }
@@ -95,7 +98,7 @@ impl AgentProfile for TestProfile {
 // --- MockLlmProvider ---
 
 pub struct MockLlmProvider {
-    pub responses: Vec<Response>,
+    pub responses:  Vec<Response>,
     pub call_index: AtomicUsize,
 }
 
@@ -114,7 +117,7 @@ impl ProviderAdapter for MockLlmProvider {
         "mock"
     }
 
-    async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
+    async fn complete(&self, _request: &Request) -> Result<Response, LlmError> {
         let idx = self.call_index.fetch_add(1, Ordering::SeqCst);
         if idx < self.responses.len() {
             Ok(self.responses[idx].clone())
@@ -123,7 +126,7 @@ impl ProviderAdapter for MockLlmProvider {
         }
     }
 
-    async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+    async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
         let idx = self.call_index.fetch_add(1, Ordering::SeqCst);
         let response = if idx < self.responses.len() {
             self.responses[idx].clone()
@@ -136,7 +139,7 @@ impl ProviderAdapter for MockLlmProvider {
 
 /// Convert a canned `Response` into a `StreamEventStream` for mock streaming.
 pub fn response_to_stream(response: Response) -> StreamEventStream {
-    let mut events: Vec<Result<StreamEvent, SdkError>> = Vec::new();
+    let mut events: Vec<Result<StreamEvent, LlmError>> = Vec::new();
 
     // Emit text deltas for text content
     let text = response.text();
@@ -167,27 +170,27 @@ pub fn response_to_stream(response: Response) -> StreamEventStream {
 
 pub fn text_response(text: &str) -> Response {
     Response {
-        id: format!("resp_{text}"),
-        model: "mock-model".into(),
-        provider: "mock".into(),
-        message: Message::assistant(text),
+        id:            format!("resp_{text}"),
+        model:         "mock-model".into(),
+        provider:      "mock".into(),
+        message:       Message::assistant(text),
         finish_reason: FinishReason::Stop,
-        usage: Usage {
+        usage:         TokenCounts {
             input_tokens: 10,
             output_tokens: 5,
-            total_tokens: 15,
             ..Default::default()
         },
-        raw: None,
-        warnings: vec![],
-        rate_limit: None,
+        raw:           None,
+        warnings:      vec![],
+        rate_limit:    None,
     }
 }
 
 pub async fn make_client(provider: Arc<dyn ProviderAdapter>) -> Client {
     let mut providers = HashMap::new();
     providers.insert(provider.name().to_string(), provider.clone());
-    // Also register under "anthropic" so TestProfile (Provider::Anthropic) routes correctly
+    // Also register under "anthropic" so TestProfile (Provider::Anthropic) routes
+    // correctly
     providers.insert("anthropic".to_string(), provider);
     Client::new(providers, Some("mock".into()), vec![])
 }
@@ -197,7 +200,7 @@ pub async fn make_session(responses: Vec<Response>) -> Session {
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::new());
     let env = Arc::new(MockSandbox::default());
-    Session::new(client, profile, env, SessionConfig::default(), None)
+    Session::new(client, profile, env, SessionOptions::default(), None)
 }
 
 pub async fn make_session_with_tools(responses: Vec<Response>, registry: ToolRegistry) -> Session {
@@ -205,10 +208,10 @@ pub async fn make_session_with_tools(responses: Vec<Response>, registry: ToolReg
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::with_tools(registry));
     let env = Arc::new(MockSandbox::default());
-    Session::new(client, profile, env, SessionConfig::default(), None)
+    Session::new(client, profile, env, SessionOptions::default(), None)
 }
 
-pub async fn make_session_with_config(responses: Vec<Response>, config: SessionConfig) -> Session {
+pub async fn make_session_with_config(responses: Vec<Response>, config: SessionOptions) -> Session {
     let provider = Arc::new(MockLlmProvider::new(responses));
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::new());
@@ -219,7 +222,7 @@ pub async fn make_session_with_config(responses: Vec<Response>, config: SessionC
 pub async fn make_session_with_tools_and_config(
     responses: Vec<Response>,
     registry: ToolRegistry,
-    config: SessionConfig,
+    config: SessionOptions,
 ) -> Session {
     let provider = Arc::new(MockLlmProvider::new(responses));
     let client = make_client(provider).await;
@@ -235,28 +238,27 @@ pub fn tool_call_response(
 ) -> Response {
     use fabro_llm::types::{ContentPart, Role, ToolCall};
     Response {
-        id: format!("resp_{tool_call_id}"),
-        model: "mock-model".into(),
-        provider: "mock".into(),
-        message: Message {
-            role: Role::Assistant,
-            content: vec![
+        id:            format!("resp_{tool_call_id}"),
+        model:         "mock-model".into(),
+        provider:      "mock".into(),
+        message:       Message {
+            role:         Role::Assistant,
+            content:      vec![
                 ContentPart::text("Let me use a tool."),
                 ContentPart::ToolCall(ToolCall::new(tool_call_id, tool_name, args)),
             ],
-            name: None,
+            name:         None,
             tool_call_id: None,
         },
         finish_reason: FinishReason::ToolCalls,
-        usage: Usage {
+        usage:         TokenCounts {
             input_tokens: 10,
             output_tokens: 5,
-            total_tokens: 15,
             ..Default::default()
         },
-        raw: None,
-        warnings: vec![],
-        rate_limit: None,
+        raw:           None,
+        warnings:      vec![],
+        rate_limit:    None,
     }
 }
 
@@ -264,11 +266,11 @@ pub fn make_echo_tool() -> RegisteredTool {
     use fabro_llm::types::ToolDefinition;
     RegisteredTool {
         definition: ToolDefinition {
-            name: "echo".into(),
+            name:        "echo".into(),
             description: "Echoes the input".into(),
-            parameters: serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}}),
+            parameters:  serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}}),
         },
-        executor: Arc::new(|args, _ctx| {
+        executor:   Arc::new(|args, _ctx| {
             Box::pin(async move {
                 let text = args
                     .get("text")
@@ -284,11 +286,11 @@ pub fn make_error_tool() -> RegisteredTool {
     use fabro_llm::types::ToolDefinition;
     RegisteredTool {
         definition: ToolDefinition {
-            name: "fail_tool".into(),
+            name:        "fail_tool".into(),
             description: "Always fails".into(),
-            parameters: serde_json::json!({"type": "object"}),
+            parameters:  serde_json::json!({"type": "object"}),
         },
-        executor: Arc::new(|_args, _ctx| {
+        executor:   Arc::new(|_args, _ctx| {
             Box::pin(async move { Err("tool execution failed".to_string()) })
         }),
     }
@@ -297,7 +299,7 @@ pub fn make_error_tool() -> RegisteredTool {
 // --- MockErrorProvider ---
 
 pub struct MockErrorProvider {
-    pub error: SdkError,
+    pub error: LlmError,
 }
 
 #[async_trait]
@@ -306,11 +308,11 @@ impl ProviderAdapter for MockErrorProvider {
         "mock"
     }
 
-    async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
+    async fn complete(&self, _request: &Request) -> Result<Response, LlmError> {
         Err(self.error.clone())
     }
 
-    async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+    async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
         Err(self.error.clone())
     }
 }
@@ -336,7 +338,7 @@ impl ProviderAdapter for CapturingLlmProvider {
         "mock"
     }
 
-    async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+    async fn complete(&self, request: &Request) -> Result<Response, LlmError> {
         *self
             .captured_request
             .lock()
@@ -344,7 +346,7 @@ impl ProviderAdapter for CapturingLlmProvider {
         Ok(text_response("captured"))
     }
 
-    async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+    async fn stream(&self, request: &Request) -> Result<StreamEventStream, LlmError> {
         *self
             .captured_request
             .lock()
@@ -358,7 +360,7 @@ impl ProviderAdapter for CapturingLlmProvider {
 /// A mock provider that yields some text deltas then an error mid-stream.
 pub struct MockMidStreamErrorProvider {
     pub partial_text: String,
-    pub error: SdkError,
+    pub error:        LlmError,
 }
 
 #[async_trait]
@@ -367,12 +369,12 @@ impl ProviderAdapter for MockMidStreamErrorProvider {
         "mock"
     }
 
-    async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
+    async fn complete(&self, _request: &Request) -> Result<Response, LlmError> {
         Err(self.error.clone())
     }
 
-    async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
-        let events: Vec<Result<StreamEvent, SdkError>> = vec![
+    async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
+        let events: Vec<Result<StreamEvent, LlmError>> = vec![
             Ok(StreamEvent::text_delta(self.partial_text.clone(), None)),
             Err(self.error.clone()),
         ];
@@ -391,24 +393,23 @@ pub fn multi_tool_call_response(calls: Vec<(&str, &str, serde_json::Value)>) -> 
         )));
     }
     Response {
-        id: "resp_multi".into(),
-        model: "mock-model".into(),
-        provider: "mock".into(),
-        message: Message {
+        id:            "resp_multi".into(),
+        model:         "mock-model".into(),
+        provider:      "mock".into(),
+        message:       Message {
             role: Role::Assistant,
             content,
             name: None,
             tool_call_id: None,
         },
         finish_reason: FinishReason::ToolCalls,
-        usage: Usage {
+        usage:         TokenCounts {
             input_tokens: 10,
             output_tokens: 5,
-            total_tokens: 15,
             ..Default::default()
         },
-        raw: None,
-        warnings: vec![],
-        rate_limit: None,
+        raw:           None,
+        warnings:      vec![],
+        rate_limit:    None,
     }
 }

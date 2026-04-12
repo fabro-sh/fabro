@@ -1,4 +1,6 @@
-use axum::{Json, extract::rejection::JsonRejection, http::StatusCode};
+use axum::Json;
+use axum::extract::rejection::JsonRejection;
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -6,23 +8,23 @@ use serde_json::{Map, Value};
 /// via `#[serde(flatten)]` so the twin stays compatible as the API evolves.
 #[derive(Clone, Debug, Deserialize)]
 pub struct ResponsesRequest {
-    pub model: String,
+    pub model:                String,
     #[serde(default)]
-    pub input: ResponseInput,
+    pub input:                ResponseInput,
     #[serde(default)]
-    pub stream: bool,
+    pub stream:               bool,
     #[serde(default)]
-    pub metadata: Map<String, Value>,
-    pub stop: Option<Value>,
+    pub metadata:             Map<String, Value>,
+    pub stop:                 Option<Value>,
     pub previous_response_id: Option<String>,
-    pub reasoning: Option<Value>,
-    pub text: Option<TextConfig>,
-    pub tools: Option<Vec<Value>>,
-    pub tool_choice: Option<Value>,
+    pub reasoning:            Option<Value>,
+    pub text:                 Option<TextOptions>,
+    pub tools:                Option<Vec<Value>>,
+    pub tool_choice:          Option<Value>,
     /// Catch-all for fields the twin doesn't use (temperature, top_p, etc.)
     #[allow(dead_code)]
     #[serde(flatten)]
-    extra: Map<String, Value>,
+    extra:                    Map<String, Value>,
 }
 
 impl ResponsesRequest {
@@ -133,16 +135,16 @@ impl ResponseInput {
 #[derive(Clone, Debug, Deserialize)]
 pub struct InputItem {
     #[serde(default)]
-    pub role: Option<String>,
+    pub role:      Option<String>,
     #[serde(default)]
-    pub content: InputContent,
+    pub content:   InputContent,
     #[serde(default)]
     #[serde(rename = "type")]
     pub item_type: Option<String>,
     #[serde(default)]
-    pub output: Option<String>,
+    pub output:    Option<String>,
     #[serde(default)]
-    pub call_id: Option<String>,
+    pub call_id:   Option<String>,
 }
 
 impl InputItem {
@@ -194,9 +196,9 @@ impl InputContent {
 #[serde(deny_unknown_fields)]
 pub struct ContentPart {
     #[serde(rename = "type")]
-    pub kind: String,
+    pub kind:      String,
     #[serde(default)]
-    pub text: Option<String>,
+    pub text:      Option<String>,
     #[serde(default)]
     pub image_url: Option<String>,
 }
@@ -319,7 +321,7 @@ fn validate_input_content_part(part: &ContentPart) -> Result<(), OpenAiError> {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct TextConfig {
+pub struct TextOptions {
     pub format: Option<TextFormat>,
 }
 
@@ -327,17 +329,17 @@ pub struct TextConfig {
 #[serde(deny_unknown_fields)]
 pub struct TextFormat {
     #[serde(rename = "type")]
-    pub kind: String,
+    pub kind:        String,
     #[serde(default)]
     pub json_schema: Option<Value>,
     #[serde(default)]
-    pub name: Option<String>,
+    pub name:        Option<String>,
     #[serde(default)]
-    pub schema: Option<Value>,
+    pub schema:      Option<Value>,
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub strict: Option<bool>,
+    pub strict:      Option<bool>,
 }
 
 impl TextFormat {
@@ -360,29 +362,29 @@ pub struct ErrorEnvelope {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ErrorBody {
-    pub message: String,
+    pub message:    String,
     #[serde(rename = "type")]
     pub error_type: String,
-    pub param: Value,
-    pub code: String,
+    pub param:      Value,
+    pub code:       String,
 }
 
 #[derive(Clone, Debug)]
 pub struct OpenAiError {
     pub status: StatusCode,
-    pub body: ErrorEnvelope,
+    pub body:   ErrorEnvelope,
 }
 
 impl OpenAiError {
     pub fn invalid_request(param: &str, message: &str) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
-            body: ErrorEnvelope {
+            body:   ErrorEnvelope {
                 error: ErrorBody {
-                    message: message.to_owned(),
+                    message:    message.to_owned(),
                     error_type: "invalid_request_error".to_owned(),
-                    param: Value::String(param.to_owned()),
-                    code: "invalid_request".to_owned(),
+                    param:      Value::String(param.to_owned()),
+                    code:       "invalid_request".to_owned(),
                 },
             },
         }
@@ -445,14 +447,14 @@ pub fn normalize_whitespace(input: &str) -> String {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChatCompletionsRequest {
-    pub model: String,
-    pub messages: Vec<ChatMessage>,
+    pub model:           String,
+    pub messages:        Vec<ChatMessage>,
     #[serde(default)]
-    pub stream: bool,
-    pub tools: Option<Vec<Value>>,
-    pub tool_choice: Option<Value>,
+    pub stream:          bool,
+    pub tools:           Option<Vec<Value>>,
+    pub tool_choice:     Option<Value>,
     pub response_format: Option<ChatResponseFormat>,
-    pub stop: Option<Value>,
+    pub stop:            Option<Value>,
 }
 
 impl ChatCompletionsRequest {
@@ -530,7 +532,7 @@ impl ChatCompletionsRequest {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChatMessage {
-    pub role: String,
+    pub role:    String,
     pub content: Value,
 }
 
@@ -663,9 +665,9 @@ fn validate_chat_message_part(part: &Value, role: &str) -> Result<(), OpenAiErro
 #[serde(deny_unknown_fields)]
 pub struct ChatResponseFormat {
     #[serde(rename = "type")]
-    pub kind: String,
+    pub kind:        String,
     #[serde(default)]
-    pub schema: Option<Value>,
+    pub schema:      Option<Value>,
     #[serde(default)]
     pub json_schema: Option<Value>,
 }

@@ -1,11 +1,11 @@
-use anyhow::{Context, Result};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use anyhow::{Context, Result};
 use uuid::Uuid;
 
-fn dot_id_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("could not determine home directory")?;
-    Ok(home.join(".fabro").join(".id"))
+fn dot_id_path() -> std::path::PathBuf {
+    fabro_util::Home::from_env().root().join(".id")
 }
 
 fn read_existing_id(path: &Path) -> Option<String> {
@@ -16,7 +16,7 @@ fn read_existing_id(path: &Path) -> Option<String> {
 
 /// Server: UUID persisted at ~/.fabro/.id
 pub fn load_or_create_server_id() -> Result<String> {
-    let path = dot_id_path()?;
+    let path = dot_id_path();
 
     if let Some(id) = read_existing_id(&path) {
         return Ok(id);
@@ -37,7 +37,7 @@ pub fn load_or_create_server_id() -> Result<String> {
 
 /// CLI: prefer existing ~/.fabro/.id, else MD5 of MAC address
 pub fn compute_cli_id() -> Result<String> {
-    if let Some(id) = read_existing_id(&dot_id_path()?) {
+    if let Some(id) = read_existing_id(&dot_id_path()) {
         return Ok(id);
     }
 

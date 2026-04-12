@@ -4,21 +4,19 @@ use fabro_checkpoint::git::Store;
 use fabro_types::RunId;
 use git2::{Oid, Signature};
 
-use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
-use crate::records::Checkpoint;
-use crate::records::RunRecord;
-use crate::records::StartRecord;
-
 use super::rewind::{RewindTarget, TimelineEntry, build_timeline};
+use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
+use crate::records::{Checkpoint, RunRecord, StartRecord};
 
 #[derive(Debug, Clone)]
 pub struct ForkRunInput {
     pub source_run_id: RunId,
-    pub target: Option<RewindTarget>,
-    pub push: bool,
+    pub target:        Option<RewindTarget>,
+    pub push:          bool,
 }
 
-/// Create a new run that branches from an existing run at a specific checkpoint.
+/// Create a new run that branches from an existing run at a specific
+/// checkpoint.
 ///
 /// Returns the new run ID.
 pub fn fork(store: &Store, input: &ForkRunInput) -> Result<RunId> {
@@ -72,12 +70,10 @@ fn fork_from_entry(
         .map_err(|e| anyhow::anyhow!("failed to read source metadata: {e}"))?;
 
     let mut run_record_bytes = None;
-    let mut start_record_bytes = None;
     let mut sandbox_bytes = None;
     for (path, data) in source_entries {
         match path {
             "run.json" => run_record_bytes = Some(data),
-            "start.json" => start_record_bytes = Some(data),
             "sandbox.json" => sandbox_bytes = Some(data),
             _ => {}
         }
@@ -85,29 +81,21 @@ fn fork_from_entry(
     let run_record_bytes =
         run_record_bytes.ok_or_else(|| anyhow::anyhow!("source run has no run.json"))?;
 
-    let now = chrono::Utc::now();
-
     let mut run_record: RunRecord =
         serde_json::from_slice(&run_record_bytes).context("failed to parse source run.json")?;
     run_record.run_id = new_run_id;
-    run_record.created_at = now;
     let new_run_record_bytes =
         serde_json::to_vec_pretty(&run_record).context("failed to serialize new run.json")?;
 
-    let new_start_record_bytes = if start_record_bytes.is_some() {
-        let start_record = StartRecord {
-            run_id: new_run_id,
-            start_time: now,
-            run_branch: Some(new_run_branch.clone()),
-            base_sha: None,
-        };
-        Some(
-            serde_json::to_vec_pretty(&start_record)
-                .context("failed to serialize new start.json")?,
-        )
-    } else {
-        None
+    let now = new_run_id.created_at();
+    let start_record = StartRecord {
+        run_id:     new_run_id,
+        start_time: now,
+        run_branch: Some(new_run_branch.clone()),
+        base_sha:   None,
     };
+    let new_start_record_bytes =
+        serde_json::to_vec_pretty(&start_record).context("failed to serialize new start.json")?;
 
     let checkpoint_bytes = store
         .read_blob_at(entry.metadata_commit_oid, "checkpoint.json")
@@ -125,9 +113,7 @@ fn fork_from_entry(
         serde_json::to_vec_pretty(&checkpoint).context("failed to serialize checkpoint.json")?;
 
     let mut init_entries: Vec<(&str, &[u8])> = vec![("run.json", &new_run_record_bytes)];
-    if let Some(ref start_record) = new_start_record_bytes {
-        init_entries.push(("start.json", start_record));
-    }
+    init_entries.push(("start.json", &new_start_record_bytes));
     if let Some(ref sandbox) = sandbox_bytes {
         init_entries.push(("sandbox.json", sandbox));
     }
@@ -135,8 +121,10 @@ fn fork_from_entry(
     new_bs
         .write_entries(&init_entries, "init run")
         .map_err(|e| anyhow::anyhow!("failed to write init metadata entries: {e}"))?;
+    let mut checkpoint_entries: Vec<(&str, &[u8])> = vec![("checkpoint.json", &checkpoint_bytes)];
+    checkpoint_entries.extend(init_entries.iter().copied());
     new_bs
-        .write_entry("checkpoint.json", &checkpoint_bytes, "checkpoint")
+        .write_entries(&checkpoint_entries, "checkpoint")
         .map_err(|e| anyhow::anyhow!("failed to write metadata entries: {e}"))?;
 
     if push {
@@ -159,11 +147,11 @@ fn fork_from_entry(
 mod tests {
     use std::str::FromStr;
 
-    use super::super::test_support::*;
-    use super::*;
     use fabro_types::RunId;
     use git2::Oid;
 
+    use super::super::test_support::*;
+    use super::*;
     use crate::operations::find_run_id_by_prefix;
 
     fn parse_run_id(value: &str) -> RunId {
@@ -255,14 +243,11 @@ mod tests {
         let source_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
         let run_oids = setup_source_run(&store, &source_run_id, &["start", "build", "test"]);
 
-        let new_run_id = fork(
-            &store,
-            &ForkRunInput {
-                source_run_id,
-                target: Some(RewindTarget::from_str("@2").unwrap()),
-                push: false,
-            },
-        )
+        let new_run_id = fork(&store, &ForkRunInput {
+            source_run_id,
+            target: Some(RewindTarget::from_str("@2").unwrap()),
+            push: false,
+        })
         .unwrap();
 
         let new_run_branch = format!("{RUN_BRANCH_PREFIX}{new_run_id}");
@@ -302,11 +287,11 @@ mod tests {
             .write_entry("checkpoint.json", &cp, "checkpoint")
             .unwrap();
         let entry = TimelineEntry {
-            ordinal: 1,
-            node_name: "start".to_string(),
-            visit: 1,
+            ordinal:             1,
+            node_name:           "start".to_string(),
+            visit:               1,
             metadata_commit_oid: oid,
-            run_commit_sha: None,
+            run_commit_sha:      None,
         };
 
         let err = fork_from_entry(&store, &run_id, &entry, false)

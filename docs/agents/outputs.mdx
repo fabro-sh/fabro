@@ -3,7 +3,7 @@ title: "Outputs & Artifacts"
 description: "How Fabro captures agent responses, tracks file changes, and collects test assets"
 ---
 
-When an agent or prompt node finishes, Fabro captures its response text and produces an **outcome** that feeds into context, transition logic, and downstream nodes. Fabro also tracks every file change per stage, offloads large outputs to disk, and automatically collects test artifacts like screenshots and reports.
+When an agent or prompt node finishes, Fabro captures its response text and produces an **outcome** that feeds into context, transition logic, and downstream nodes. Fabro also tracks every file change per stage, offloads large outputs into content-addressed blob storage, and automatically collects test artifacts like screenshots and reports.
 
 ## Response capture
 
@@ -119,7 +119,7 @@ The tracked paths are stored as `files_touched` on the stage outcome:
 
 | Location | How it's used |
 |---|---|
-| `StageCompleted` event | Emitted with `files_touched` in the event stream and `progress.jsonl` |
+| `StageCompleted` event | Emitted with `files_touched` in the event stream and surfaced by `fabro logs` / exported event streams |
 | Preambles | Listed under each completed stage so downstream agents know what changed |
 | Retros | Included per-stage and aggregated across the full run |
 | `status.json` | Written to the stage's logs directory after each node completes |
@@ -132,88 +132,52 @@ For the **CLI backend**, Fabro takes a different approach: it runs `git diff --n
 
 ## Artifact offloading
 
-When a stage produces a large context value -- an LLM response, command output, or any context update -- Fabro automatically offloads it to disk instead of keeping it in memory. This prevents large outputs from bloating checkpoint files and overwhelming preamble summaries.
+When a stage produces a large context value -- an LLM response, command output, or any context update -- Fabro automatically offloads it into a global content-addressed blob store instead of leaving the full value inline in durable context.
 
 ### How offloading works
 
-After each node completes, Fabro checks every context update. If the serialized JSON of a value exceeds **100KB**, it is written to the artifact store on disk and replaced in the context with a `file://` pointer:
+After each node completes, Fabro checks every context update. If the serialized JSON of a value exceeds **100KB**, it is stored once by SHA-256 hash and replaced with a durable blob ref:
 
 ```
-response.plan  -->  file:///path/to/logs/cache/artifacts/values/response.plan.json
-command.output -->  file:///path/to/logs/cache/artifacts/values/command.output.json
+response.plan  -->  blob://sha256/2cf24dba5fb0...
+command.output -->  blob://sha256/a4f3c1d9c2e1...
 ```
 
-Values under 100KB remain in the context as-is.
+Values under 100KB remain inline.
 
-### Artifact storage layout
-
-Offloaded artifacts are written to the run's directory:
-
-```
-~/.fabro/runs/{run_id}/
-  cache/
-    artifacts/
-      values/
-        response.plan.json
-        response.implement.json
-        command.output.json
-```
-
-Each file contains the full serialized JSON value. The `ArtifactStore` manages reads and writes, and cleans up files when artifacts are removed.
+Checkpoints, checkpoint-completed events, forks, and resumes persist these `blob://` refs, not host-specific file paths.
 
 ### Preamble rendering
 
-When Fabro builds a [preamble](/execution/context#preamble-construction) for a downstream stage, it resolves `file://` pointers and renders a reference instead of inlining the full content:
+When Fabro builds a [preamble](/execution/context#preamble-construction) for a downstream stage, it first materializes any blob refs into execution-local files and then renders a reference instead of inlining the full content:
 
 ```markdown
 ## Completed stages
 - **plan**: success
   - Model: claude-sonnet-4-5, 12.4k tokens in / 3.2k out
   - Files: src/main.rs, tests/api_test.rs
-  - Response: See: /path/to/logs/cache/artifacts/values/response.plan.json
+  - Response: See: /path/to/runtime/blobs/<blob_id>.json
 - **test**: success
   - Script: `cargo test 2>&1 || true`
-  - Stdout: See: /path/to/logs/cache/artifacts/values/command.output.json
+  - Stdout: See: /path/to/runtime/blobs/<blob_id>.json
 ```
 
 This keeps preambles concise while still giving agents a path to read the full output if needed.
 
 ## Git storage
 
-Artifact data is persisted on the Git [metadata branch](/execution/checkpoints#metadata-branch) alongside checkpoint data. Each time a checkpoint is written, any file-backed artifacts are included as additional entries:
+Large offloaded context values are not stored on the Git [metadata branch](/execution/checkpoints#metadata-branch). The metadata branch keeps checkpoint JSON and stage metadata; blob payloads live in the durable blob store and are referenced by `blob://sha256/...`.
 
-```
-fabro/meta/{run_id}
-  run.json
-  start.json
-  checkpoint.json
-  artifacts/
-    response.plan.json
-    command.output.json
-```
-
-This means artifact data survives process restarts and can be recovered when resuming a run from a Git branch.
+Captured stage artifacts such as screenshots, videos, reports, and traces still use the artifact store and metadata export paths described below.
 
 ## Remote sandbox syncing
 
-For remote sandboxes (Docker, Daytona), artifact files stored on the host are not directly accessible inside the sandbox. Before a stage executes, Fabro syncs any `file://` pointers to the sandbox filesystem.
+For remote sandboxes (Docker, Daytona), execution-time file access happens inside the sandbox filesystem.
 
-For each pointer in the context updates:
+- Blob refs are materialized into `{working_directory}/.fabro/blobs/{blob_id}.json`
+- Explicit non-blob `file://` refs keep the existing copy-on-demand behavior and are copied into `{working_directory}/.fabro/artifacts/{filename}` when needed
 
-1. Fabro checks whether the file is already accessible inside the sandbox
-2. If not, it reads the local file and uploads it via the sandbox's `write_file` interface
-3. The file is placed at `{working_directory}/.fabro/artifacts/{filename}`
-4. The pointer is rewritten to reference the remote path
-
-```
-# Before sync (host path)
-file:///home/user/.fabro/runs/01JK.../cache/artifacts/values/response.plan.json
-
-# After sync (sandbox path)
-file:///workspace/.fabro/artifacts/response.plan.json
-```
-
-This ensures agents running in remote sandboxes can read offloaded artifacts using the same `file://` pointer mechanism.
+In both cases, downstream handlers and agents continue to consume ordinary `file://` pointers during execution.
 
 <Note>
 For local sandboxes, syncing is a no-op since the agent can already access the host filesystem directly.
@@ -225,9 +189,9 @@ After each node executes a command, Fabro automatically scans the sandbox for te
 
 ### How asset capture works
 
-1. **Before** the command runs, Fabro takes a baseline snapshot of known asset paths in the sandbox
+1. **Before** the command runs, Fabro takes a baseline snapshot of known artifact paths in the sandbox
 2. **After** the command completes, Fabro re-scans and diffs against the baseline
-3. Files that are new or modified since the command started are downloaded to the stage's asset directory
+3. Files that are new or modified since the command started are downloaded to the stage's artifact directory
 
 Only files modified after the command started are collected. Files that match the baseline fingerprint (same size and mtime) are skipped. Individual files over 10 MB and total collections over 50 MB are also skipped.
 
@@ -256,37 +220,15 @@ Tool caches and dependency directories (`node_modules`, `.cache/ms-playwright`, 
 Collected assets are written to the run's directory, organized by node and retry attempt:
 
 ```
-~/.fabro/runs/{run_id}/
+~/.fabro/scratch/{run_id}/
   cache/
     artifacts/
-      assets/
+      files/
         {node_slug}/
           retry_1/
             test-results/
               screenshot.png
               video.webm
-            manifest.json
-```
-
-Each collection writes a `manifest.json` summarizing what was captured:
-
-```json
-{
-  "files_copied": 3,
-  "total_bytes": 245760,
-  "files_skipped": 0,
-  "download_errors": 0,
-  "hash_errors": 0,
-  "captured_assets": [
-    {
-      "path": "test-results/screenshot.png",
-      "mime": "image/png",
-      "content_md5": "a1b2c3...",
-      "content_sha256": "d4e5f6...",
-      "bytes": 81920
-    }
-  ]
-}
 ```
 
 ## Observability

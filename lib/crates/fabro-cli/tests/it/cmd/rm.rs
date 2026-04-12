@@ -1,8 +1,11 @@
 use fabro_test::{fabro_snapshot, test_context};
+use httpmock::MockServer;
 use serde_json::Value;
 
-use super::support::{setup_completed_dry_run, setup_created_dry_run};
-use walkdir::WalkDir;
+use super::support::{
+    setup_completed_fast_dry_run, setup_created_fast_dry_run, setup_local_sandbox_run,
+};
+use crate::support::unique_run_id;
 
 #[test]
 fn help() {
@@ -21,14 +24,14 @@ fn help() {
       <RUNS>...  Run IDs or workflow names to remove
 
     Options:
-      -f, --force                      Force removal of active runs
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+      -f, --force             Force removal of active runs
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -36,7 +39,7 @@ fn help() {
 #[test]
 fn rm_deletes_completed_run() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -55,7 +58,7 @@ fn rm_deletes_completed_run() {
     assert!(!run.run_dir.exists(), "run directory should be deleted");
 
     let mut ps = context.ps();
-    ps.args(["-a", "--json"]);
+    ps.args(["-a", "--json", "--label", &context.test_case_label()]);
     fabro_snapshot!(context.filters(), ps, @r###"
     success: true
     exit_code: 0
@@ -68,7 +71,7 @@ fn rm_deletes_completed_run() {
 #[test]
 fn rm_rejects_submitted_run_without_force() {
     let context = test_context!();
-    let run = setup_created_dry_run(&context);
+    let run = setup_created_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -89,7 +92,7 @@ fn rm_rejects_submitted_run_without_force() {
 #[test]
 fn rm_force_deletes_submitted_run() {
     let context = test_context!();
-    let run = setup_created_dry_run(&context);
+    let run = setup_created_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -108,7 +111,7 @@ fn rm_force_deletes_submitted_run() {
     assert!(!run.run_dir.exists(), "run directory should be deleted");
 
     let mut ps = context.ps();
-    ps.args(["-a", "--json"]);
+    ps.args(["-a", "--json", "--label", &context.test_case_label()]);
     fabro_snapshot!(context.filters(), ps, @r###"
     success: true
     exit_code: 0
@@ -119,9 +122,93 @@ fn rm_force_deletes_submitted_run() {
 }
 
 #[test]
+fn rm_force_deletes_run_without_sandbox_json_when_store_has_sandbox() {
+    let context = test_context!();
+    let setup = setup_local_sandbox_run(&context);
+
+    let mut filters = context.filters();
+    filters.push((
+        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
+        "[ULID]".to_string(),
+    ));
+
+    let mut cmd = context.command();
+    cmd.args(["rm", "--force", &setup.run.run_id]);
+    fabro_snapshot!(filters, cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    [ULID]
+    ");
+    assert!(
+        !setup.run.run_dir.exists(),
+        "run directory should be deleted"
+    );
+}
+
+#[test]
+fn rm_force_removes_active_run() {
+    let context = test_context!();
+    let run_id = unique_run_id();
+    let server = MockServer::start();
+    let list_mock = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/runs");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!([
+                    {
+                        "run_id": run_id,
+                        "workflow_name": "Active Workflow",
+                        "workflow_slug": "active-workflow",
+                        "goal": "Active goal",
+                        "labels": {},
+                        "host_repo_path": null,
+                        "start_time": "2026-04-05T12:00:00Z",
+                        "status": "running",
+                        "status_reason": null,
+                        "duration_ms": 123,
+                        "total_usd_micros": null
+                    }
+                ])
+                .to_string(),
+            );
+    });
+    let delete_mock = server.mock(|when, then| {
+        when.method("DELETE").path(format!("/api/v1/runs/{run_id}"));
+        then.status(204);
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
+    );
+
+    let mut filters = context.filters();
+    filters.push((
+        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
+        "[ULID]".to_string(),
+    ));
+    let mut cmd = context.command();
+    cmd.args(["rm", "--force", &run_id]);
+    fabro_snapshot!(filters, cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    [ULID]
+    ");
+    list_mock.assert();
+    delete_mock.assert();
+}
+
+#[test]
 fn rm_partial_failure_reports_which_identifiers_failed() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -147,7 +234,7 @@ fn rm_partial_failure_reports_which_identifiers_failed() {
 #[test]
 fn rm_partial_failure_json_includes_removed_and_errors() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
 
     let output = context
         .command()
@@ -174,69 +261,57 @@ fn rm_partial_failure_json_includes_removed_and_errors() {
 }
 
 #[test]
-fn rm_json_reports_removed_run_when_store_delete_fails() {
+fn rm_uses_configured_server_target_without_local_run_dir() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
-    let by_id_path = find_store_catalog_entry(&context.storage_dir.join("store"), &run.run_id);
-    let original = std::fs::read(&by_id_path)
-        .unwrap_or_else(|err| panic!("failed to read {}: {err}", by_id_path.display()));
-
-    // This intentionally mutates the backing store metadata to force a store-only
-    // delete failure. Reproducing that failure through public commands is not
-    // practical, and the command contract under test is still `fabro rm`'s JSON
-    // partial-success reporting.
-    std::fs::write(&by_id_path, b"{not valid json")
-        .unwrap_or_else(|err| panic!("failed to corrupt {}: {err}", by_id_path.display()));
-    scopeguard::defer! {
-        let _ = std::fs::write(&by_id_path, &original);
-    }
+    let run_id = unique_run_id();
+    let server = MockServer::start();
+    let list_mock = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/runs");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!([
+                    {
+                        "run_id": run_id,
+                        "workflow_name": "Remote Workflow",
+                        "workflow_slug": "remote-workflow",
+                        "goal": "Remote goal",
+                        "labels": {},
+                        "host_repo_path": null,
+                        "start_time": "2026-04-05T12:00:00Z",
+                        "status": "succeeded",
+                        "status_reason": null,
+                        "duration_ms": 123,
+                        "total_usd_micros": null
+                    }
+                ])
+                .to_string(),
+            );
+    });
+    let delete_mock = server.mock(|when, then| {
+        when.method("DELETE").path(format!("/api/v1/runs/{run_id}"));
+        then.status(204);
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
+    );
 
     let output = context
         .command()
-        .args(["--json", "rm", &run.run_id])
+        .args(["rm", &run_id])
         .output()
-        .expect("command should run");
+        .expect("rm should execute");
 
     assert!(
-        !output.status.success(),
-        "rm should report the store failure"
+        output.status.success(),
+        "rm failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
-    let value: Value = serde_json::from_slice(&output.stdout).expect("rm JSON should parse");
-    assert_eq!(
-        value["removed"],
-        Value::Array(vec![Value::String(run.run_id.clone())])
-    );
-    assert_eq!(value["errors"][0]["identifier"], run.run_id);
-    assert!(
-        value["errors"][0]["error"]
-            .as_str()
-            .is_some_and(|error| error.contains("failed to delete store state"))
-    );
-    assert!(
-        !run.run_dir.exists(),
-        "run directory should still be deleted"
-    );
-}
-
-fn find_store_catalog_entry(root: &std::path::Path, run_id: &str) -> std::path::PathBuf {
-    let expected_name = format!("{run_id}.json");
-    WalkDir::new(root)
-        .into_iter()
-        .filter_map(Result::ok)
-        .map(|entry| entry.into_path())
-        .find(|path| {
-            path.is_file()
-                && path
-                    .file_name()
-                    .is_some_and(|name| name.to_string_lossy() == expected_name)
-                && path
-                    .components()
-                    .any(|component| component.as_os_str() == "by-id")
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "missing by-id catalog entry for {run_id} under {}",
-                root.display()
-            )
-        })
+    list_mock.assert();
+    delete_mock.assert();
 }

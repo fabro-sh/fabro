@@ -1,85 +1,50 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Graph};
 
 use super::Transform;
+use crate::error::Error;
+use crate::file_resolver::FileResolver;
 
 /// Resolve a potential `@path` file reference.
 ///
 /// If `value` starts with `@` and the referenced file exists locally, the file
 /// contents are returned (inlined). Otherwise the original value is returned
 /// unchanged.
-pub fn resolve_file_ref(value: &str, base_dir: &Path, fallback_dir: Option<&Path>) -> String {
+pub fn resolve_file_ref(value: &str, current_dir: &Path, resolver: &dyn FileResolver) -> String {
     let Some(path_str) = value.strip_prefix('@') else {
         return value.to_string();
     };
-
-    // Build the raw path: expand ~ then resolve relative to base_dir
-    let raw = Path::new(path_str);
-    let is_tilde = raw.starts_with("~");
-    let expanded = if is_tilde {
-        match dirs::home_dir() {
-            Some(home) => home.join(raw.strip_prefix("~").unwrap()),
-            None => base_dir.join(path_str),
-        }
-    } else {
-        base_dir.join(path_str)
-    };
-
-    // Canonicalize resolves `.`, `..`, symlinks, and checks existence
-    let file_path = match expanded.canonicalize() {
-        Ok(p) if p.is_file() => Some(p),
-        _ if !is_tilde => {
-            // Try fallback_dir for relative (non-tilde) paths
-            fallback_dir.and_then(|fb| {
-                let fallback_path = fb.join(path_str);
-                match fallback_path.canonicalize() {
-                    Ok(p) if p.is_file() => Some(p),
-                    _ => None,
-                }
-            })
-        }
-        _ => None,
-    };
-
-    let Some(file_path) = file_path else {
-        return value.to_string();
-    };
-
-    match std::fs::read_to_string(&file_path) {
-        Ok(contents) => contents,
-        Err(e) => {
-            tracing::warn!(path = %file_path.display(), error = %e, "Failed to read @file reference");
-            value.to_string()
-        }
-    }
+    resolver
+        .resolve(current_dir, path_str)
+        .map_or_else(|| value.to_string(), |resolved| resolved.content)
 }
 
 /// Inlines `@file` references in node prompts and the graph-level goal.
 pub struct FileInliningTransform {
-    base_dir: PathBuf,
-    fallback_dir: Option<PathBuf>,
+    current_dir: PathBuf,
+    resolver:    Arc<dyn FileResolver>,
 }
 
 impl FileInliningTransform {
     #[must_use]
-    pub fn new(base_dir: PathBuf, fallback_dir: Option<PathBuf>) -> Self {
+    pub fn new(current_dir: PathBuf, resolver: Arc<dyn FileResolver>) -> Self {
         Self {
-            base_dir,
-            fallback_dir,
+            current_dir,
+            resolver,
         }
     }
 }
 
 impl Transform for FileInliningTransform {
-    fn apply(&self, graph: Graph) -> Graph {
+    fn apply(&self, graph: Graph) -> Result<Graph, Error> {
         let mut graph = graph;
-        let fallback = self.fallback_dir.as_deref();
 
         // Inline @file refs in node prompts
         for node in graph.nodes.values_mut() {
             if let Some(AttrValue::String(prompt)) = node.attrs.get("prompt") {
-                let resolved = resolve_file_ref(prompt, &self.base_dir, fallback);
+                let resolved = resolve_file_ref(prompt, &self.current_dir, self.resolver.as_ref());
                 if resolved != *prompt {
                     node.attrs
                         .insert("prompt".to_string(), AttrValue::String(resolved));
@@ -89,7 +54,7 @@ impl Transform for FileInliningTransform {
 
         // Inline @file refs in graph-level goal
         if let Some(AttrValue::String(goal)) = graph.attrs.get("goal") {
-            let resolved = resolve_file_ref(goal, &self.base_dir, fallback);
+            let resolved = resolve_file_ref(goal, &self.current_dir, self.resolver.as_ref());
             if resolved != *goal {
                 graph
                     .attrs
@@ -97,21 +62,33 @@ impl Transform for FileInliningTransform {
             }
         }
 
-        graph
+        Ok(graph)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::disallowed_methods,
+        reason = "These unit tests use the real git CLI to build repositories for file-inlining transform coverage."
+    )]
+
+    use std::sync::Arc;
+
     use fabro_graphviz::graph::{AttrValue, Graph, Node};
 
     use super::*;
+    use crate::file_resolver::FilesystemFileResolver;
 
     #[test]
     fn resolve_file_ref_passthrough_non_at() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(
-            resolve_file_ref("hello world", dir.path(), None),
+            resolve_file_ref(
+                "hello world",
+                dir.path(),
+                &FilesystemFileResolver::new(None),
+            ),
             "hello world"
         );
     }
@@ -120,7 +97,11 @@ mod tests {
     fn resolve_file_ref_passthrough_missing_file() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(
-            resolve_file_ref("@nonexistent.md", dir.path(), None),
+            resolve_file_ref(
+                "@nonexistent.md",
+                dir.path(),
+                &FilesystemFileResolver::new(None),
+            ),
             "@nonexistent.md"
         );
     }
@@ -131,7 +112,7 @@ mod tests {
         std::fs::write(dir.path().join("prompt.md"), "inlined content").unwrap();
 
         assert_eq!(
-            resolve_file_ref("@prompt.md", dir.path(), None),
+            resolve_file_ref("@prompt.md", dir.path(), &FilesystemFileResolver::new(None)),
             "inlined content"
         );
     }
@@ -175,8 +156,11 @@ mod tests {
         );
         graph.nodes.insert("work".to_string(), node);
 
-        let transform = FileInliningTransform::new(dir.path().to_path_buf(), None);
-        let graph = transform.apply(graph);
+        let transform = FileInliningTransform::new(
+            dir.path().to_path_buf(),
+            Arc::new(FilesystemFileResolver::new(None)),
+        );
+        let graph = transform.apply(graph).unwrap();
 
         assert_eq!(
             graph.nodes["work"]
@@ -203,7 +187,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         assert_eq!(
-            resolve_file_ref("@~/.fabro_test_tilde_tmp", dir.path(), None),
+            resolve_file_ref(
+                "@~/.fabro_test_tilde_tmp",
+                dir.path(),
+                &FilesystemFileResolver::new(None),
+            ),
             "tilde content"
         );
     }
@@ -215,7 +203,11 @@ mod tests {
         std::fs::create_dir(dir.path().join("subdir")).unwrap();
 
         assert_eq!(
-            resolve_file_ref("@subdir/../file.md", dir.path(), None),
+            resolve_file_ref(
+                "@subdir/../file.md",
+                dir.path(),
+                &FilesystemFileResolver::new(None),
+            ),
             "dotdot content"
         );
     }
@@ -227,7 +219,11 @@ mod tests {
         std::fs::write(fallback.path().join("shared.md"), "shared content").unwrap();
 
         assert_eq!(
-            resolve_file_ref("@shared.md", base.path(), Some(fallback.path())),
+            resolve_file_ref(
+                "@shared.md",
+                base.path(),
+                &FilesystemFileResolver::new(Some(fallback.path().to_path_buf())),
+            ),
             "shared content"
         );
     }
@@ -240,7 +236,11 @@ mod tests {
         std::fs::write(fallback.path().join("prompt.md"), "fallback content").unwrap();
 
         assert_eq!(
-            resolve_file_ref("@prompt.md", base.path(), Some(fallback.path())),
+            resolve_file_ref(
+                "@prompt.md",
+                base.path(),
+                &FilesystemFileResolver::new(Some(fallback.path().to_path_buf())),
+            ),
             "base content"
         );
     }
@@ -255,7 +255,7 @@ mod tests {
         let result = resolve_file_ref(
             "@~/nonexistent_fabro_test.md",
             base.path(),
-            Some(fallback.path()),
+            &FilesystemFileResolver::new(Some(fallback.path().to_path_buf())),
         );
         assert_eq!(result, "@~/nonexistent_fabro_test.md");
     }
@@ -264,7 +264,11 @@ mod tests {
     fn resolve_file_ref_fallback_none_behaves_as_before() {
         let base = tempfile::tempdir().unwrap();
         assert_eq!(
-            resolve_file_ref("@missing.md", base.path(), None),
+            resolve_file_ref(
+                "@missing.md",
+                base.path(),
+                &FilesystemFileResolver::new(None)
+            ),
             "@missing.md"
         );
     }
@@ -285,9 +289,11 @@ mod tests {
 
         let transform = FileInliningTransform::new(
             base.path().to_path_buf(),
-            Some(fallback.path().to_path_buf()),
+            Arc::new(FilesystemFileResolver::new(Some(
+                fallback.path().to_path_buf(),
+            ))),
         );
-        let graph = transform.apply(graph);
+        let graph = transform.apply(graph).unwrap();
 
         assert_eq!(
             graph.nodes["work"]

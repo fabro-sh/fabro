@@ -15,12 +15,12 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 fabro-config = { path = "../fabro-config" }
+fabro-http.workspace = true
 fabro-types = { path = "../fabro-types" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 futures.workspace = true
-reqwest.workspace = true
 tracing.workspace = true
 rmcp = { workspace = true, features = [
     "client",

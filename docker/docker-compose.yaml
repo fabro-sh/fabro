@@ -20,7 +20,7 @@ services:
     environment:
       - FABRO_DEMO=1
     volumes:
-      - ./demo-server.toml:/root/.fabro/server.toml:ro
+      - ./demo-settings.toml:/root/.fabro/settings.toml:ro
       - ../apps/fabro-web/public:/app/apps/fabro-web/public
     depends_on:
       - api

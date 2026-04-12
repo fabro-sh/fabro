@@ -37,11 +37,11 @@ Without `--preserve-sandbox`, the SSH session is terminated when the run ends an
 You can also set `auto_stop_interval` in your run config to control how long an idle sandbox stays alive:
 
 ```toml title="run.toml"
-[sandbox]
+[run.sandbox]
 provider = "daytona"
 preserve = true
 
-[sandbox.daytona]
+[run.sandbox.daytona]
 auto_stop_interval = 60
 ```
 

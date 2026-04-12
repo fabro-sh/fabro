@@ -1,0 +1,32 @@
+class Fabro < Formula
+  desc "Unified CLI for the Fabro AI framework"
+  homepage "https://fabro.sh"
+  license "MIT"
+  version "{{VERSION}}"
+
+  if OS.mac?
+    if Hardware::CPU.arm?
+      url "https://github.com/fabro-sh/fabro/releases/download/v{{VERSION}}/fabro-aarch64-apple-darwin.tar.gz"
+      sha256 "{{SHA_AARCH64_DARWIN}}"
+    end
+  end
+
+  if OS.linux?
+    if Hardware::CPU.intel?
+      url "https://github.com/fabro-sh/fabro/releases/download/v{{VERSION}}/fabro-x86_64-unknown-linux-gnu.tar.gz"
+      sha256 "{{SHA_X86_64_LINUX}}"
+    end
+    if Hardware::CPU.arm?
+      url "https://github.com/fabro-sh/fabro/releases/download/v{{VERSION}}/fabro-aarch64-unknown-linux-gnu.tar.gz"
+      sha256 "{{SHA_AARCH64_LINUX}}"
+    end
+  end
+
+  def install
+    bin.install "fabro"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/fabro --version")
+  end
+end

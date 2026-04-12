@@ -112,63 +112,27 @@ pub async fn patch_webhook_config(
 #[cfg(test)]
 mod tests {
     use crate::server::TestServer;
-    use crate::state::{AppConfig, AppState};
-
-    fn test_rsa_key() -> String {
-        use std::process::Command;
-        let output = Command::new("openssl")
-            .args([
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-            ])
-            .output()
-            .expect("openssl should be available");
-        assert!(output.status.success());
-        String::from_utf8(output.stdout).unwrap()
-    }
-
-    fn sign_test_jwt(app_id: &str, private_key_pem: &str) -> String {
-        use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-        use serde::Serialize;
-
-        #[derive(Serialize)]
-        struct Claims {
-            iss: String,
-            iat: i64,
-            exp: i64,
-        }
-
-        let now = chrono::Utc::now().timestamp();
-        let claims = Claims {
-            iss: app_id.to_string(),
-            iat: now - 60,
-            exp: now + 600,
-        };
-        let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).unwrap();
-        encode(&Header::new(Algorithm::RS256), &claims, &key).unwrap()
-    }
+    use crate::state::{AppOptions, AppState};
+    use crate::test_support::{sign_test_jwt, test_http_client, test_rsa_private_key};
 
     #[tokio::test]
     async fn get_app_returns_app_info() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
-            app_id: "12345".to_string(),
-            slug: "my-app".to_string(),
-            owner_login: "my-org".to_string(),
-            public: true,
-            private_key_pem: pem.clone(),
-            webhook_secret: None,
+        state.register_app(AppOptions {
+            app_id:          "12345".to_string(),
+            slug:            "my-app".to_string(),
+            owner_login:     "my-org".to_string(),
+            public:          true,
+            private_key_pem: pem.to_string(),
+            webhook_secret:  None,
         });
         let server = TestServer::start(state).await;
 
-        let jwt = sign_test_jwt("12345", &pem);
-        let client = reqwest::Client::new();
+        let jwt = sign_test_jwt("12345", pem);
+        let client = test_http_client();
         let resp = client
-            .get(&format!("{}/app", server.url()))
+            .get(format!("{}/app", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Accept", "application/vnd.github+json")
             .send()
@@ -185,21 +149,21 @@ mod tests {
 
     #[tokio::test]
     async fn get_app_rejects_invalid_jwt() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
-            app_id: "12345".to_string(),
-            slug: "my-app".to_string(),
-            owner_login: "my-org".to_string(),
-            public: true,
-            private_key_pem: pem,
-            webhook_secret: None,
+        state.register_app(AppOptions {
+            app_id:          "12345".to_string(),
+            slug:            "my-app".to_string(),
+            owner_login:     "my-org".to_string(),
+            public:          true,
+            private_key_pem: pem.to_string(),
+            webhook_secret:  None,
         });
         let server = TestServer::start(state).await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
-            .get(&format!("{}/app", server.url()))
+            .get(format!("{}/app", server.url()))
             .header("Authorization", "Bearer invalid-jwt")
             .send()
             .await
@@ -211,24 +175,28 @@ mod tests {
 
     #[tokio::test]
     async fn get_apps_slug_public() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
-            app_id: "12345".to_string(),
-            slug: "my-app".to_string(),
-            owner_login: "my-org".to_string(),
-            public: true,
-            private_key_pem: pem,
-            webhook_secret: None,
+        state.register_app(AppOptions {
+            app_id:          "12345".to_string(),
+            slug:            "my-app".to_string(),
+            owner_login:     "my-org".to_string(),
+            public:          true,
+            private_key_pem: pem.to_string(),
+            webhook_secret:  None,
         });
         let server = TestServer::start(state).await;
 
-        let resp = reqwest::get(&format!("{}/apps/my-app", server.url()))
+        let resp = test_http_client()
+            .get(format!("{}/apps/my-app", server.url()))
+            .send()
             .await
             .unwrap();
         assert_eq!(resp.status(), 200);
 
-        let resp404 = reqwest::get(&format!("{}/apps/nonexistent", server.url()))
+        let resp404 = test_http_client()
+            .get(format!("{}/apps/nonexistent", server.url()))
+            .send()
             .await
             .unwrap();
         assert_eq!(resp404.status(), 404);
@@ -238,19 +206,21 @@ mod tests {
 
     #[tokio::test]
     async fn get_apps_slug_private_returns_404() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
-            app_id: "12345".to_string(),
-            slug: "private-app".to_string(),
-            owner_login: "my-org".to_string(),
-            public: false,
-            private_key_pem: pem,
-            webhook_secret: None,
+        state.register_app(AppOptions {
+            app_id:          "12345".to_string(),
+            slug:            "private-app".to_string(),
+            owner_login:     "my-org".to_string(),
+            public:          false,
+            private_key_pem: pem.to_string(),
+            webhook_secret:  None,
         });
         let server = TestServer::start(state).await;
 
-        let resp = reqwest::get(&format!("{}/apps/private-app", server.url()))
+        let resp = test_http_client()
+            .get(format!("{}/apps/private-app", server.url()))
+            .send()
             .await
             .unwrap();
         assert_eq!(resp.status(), 404);

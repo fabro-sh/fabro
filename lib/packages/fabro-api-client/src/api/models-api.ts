@@ -24,6 +24,8 @@ import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError
 // @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
+import type { ModelTestMode } from '../models';
+// @ts-ignore
 import type { ModelTestResult } from '../models';
 // @ts-ignore
 import type { PaginatedModelList } from '../models';
@@ -35,12 +37,14 @@ export const ModelsApiAxiosParamCreator = function (configuration?: Configuratio
         /**
          * Returns a paginated list of available LLM models from the built-in catalog.
          * @summary List Models
+         * @param {string} [provider] Filter models by provider name. Invalid values return &#x60;400&#x60;.
+         * @param {string} [query] Case-insensitive substring search across &#x60;id&#x60;, &#x60;display_name&#x60;, and &#x60;aliases&#x60;.
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listModels: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listModels: async (provider?: string, query?: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/v1/models`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -59,6 +63,14 @@ export const ModelsApiAxiosParamCreator = function (configuration?: Configuratio
             // authentication BearerAuth required
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (provider !== undefined) {
+                localVarQueryParameter['provider'] = provider;
+            }
+
+            if (query !== undefined) {
+                localVarQueryParameter['query'] = query;
+            }
 
             if (pageLimit !== undefined) {
                 localVarQueryParameter['page[limit]'] = pageLimit;
@@ -83,10 +95,11 @@ export const ModelsApiAxiosParamCreator = function (configuration?: Configuratio
          * Tests a model by sending a simple prompt and reporting pass/fail.
          * @summary Test Model
          * @param {string} id The model identifier.
+         * @param {ModelTestMode} [mode] Test mode for the single-model test endpoint. Defaults to &#x60;basic&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        testModel: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        testModel: async (id: string, mode?: ModelTestMode, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('testModel', 'id', id)
             const localVarPath = `/api/v1/models/{id}/test`
@@ -108,6 +121,10 @@ export const ModelsApiAxiosParamCreator = function (configuration?: Configuratio
             // authentication BearerAuth required
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (mode !== undefined) {
+                localVarQueryParameter['mode'] = mode;
+            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -132,13 +149,15 @@ export const ModelsApiFp = function(configuration?: Configuration) {
         /**
          * Returns a paginated list of available LLM models from the built-in catalog.
          * @summary List Models
+         * @param {string} [provider] Filter models by provider name. Invalid values return &#x60;400&#x60;.
+         * @param {string} [query] Case-insensitive substring search across &#x60;id&#x60;, &#x60;display_name&#x60;, and &#x60;aliases&#x60;.
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listModels(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedModelList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listModels(pageLimit, pageOffset, options);
+        async listModels(provider?: string, query?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedModelList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listModels(provider, query, pageLimit, pageOffset, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelsApi.listModels']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -147,11 +166,12 @@ export const ModelsApiFp = function(configuration?: Configuration) {
          * Tests a model by sending a simple prompt and reporting pass/fail.
          * @summary Test Model
          * @param {string} id The model identifier.
+         * @param {ModelTestMode} [mode] Test mode for the single-model test endpoint. Defaults to &#x60;basic&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async testModel(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ModelTestResult>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.testModel(id, options);
+        async testModel(id: string, mode?: ModelTestMode, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ModelTestResult>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.testModel(id, mode, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelsApi.testModel']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -168,23 +188,26 @@ export const ModelsApiFactory = function (configuration?: Configuration, basePat
         /**
          * Returns a paginated list of available LLM models from the built-in catalog.
          * @summary List Models
+         * @param {string} [provider] Filter models by provider name. Invalid values return &#x60;400&#x60;.
+         * @param {string} [query] Case-insensitive substring search across &#x60;id&#x60;, &#x60;display_name&#x60;, and &#x60;aliases&#x60;.
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listModels(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedModelList> {
-            return localVarFp.listModels(pageLimit, pageOffset, options).then((request) => request(axios, basePath));
+        listModels(provider?: string, query?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedModelList> {
+            return localVarFp.listModels(provider, query, pageLimit, pageOffset, options).then((request) => request(axios, basePath));
         },
         /**
          * Tests a model by sending a simple prompt and reporting pass/fail.
          * @summary Test Model
          * @param {string} id The model identifier.
+         * @param {ModelTestMode} [mode] Test mode for the single-model test endpoint. Defaults to &#x60;basic&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        testModel(id: string, options?: RawAxiosRequestConfig): AxiosPromise<ModelTestResult> {
-            return localVarFp.testModel(id, options).then((request) => request(axios, basePath));
+        testModel(id: string, mode?: ModelTestMode, options?: RawAxiosRequestConfig): AxiosPromise<ModelTestResult> {
+            return localVarFp.testModel(id, mode, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -196,24 +219,27 @@ export class ModelsApi extends BaseAPI {
     /**
      * Returns a paginated list of available LLM models from the built-in catalog.
      * @summary List Models
+     * @param {string} [provider] Filter models by provider name. Invalid values return &#x60;400&#x60;.
+     * @param {string} [query] Case-insensitive substring search across &#x60;id&#x60;, &#x60;display_name&#x60;, and &#x60;aliases&#x60;.
      * @param {number} [pageLimit] Maximum number of items to return per page.
      * @param {number} [pageOffset] Number of items to skip before returning results.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public listModels(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
-        return ModelsApiFp(this.configuration).listModels(pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
+    public listModels(provider?: string, query?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
+        return ModelsApiFp(this.configuration).listModels(provider, query, pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      * Tests a model by sending a simple prompt and reporting pass/fail.
      * @summary Test Model
      * @param {string} id The model identifier.
+     * @param {ModelTestMode} [mode] Test mode for the single-model test endpoint. Defaults to &#x60;basic&#x60;.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public testModel(id: string, options?: RawAxiosRequestConfig) {
-        return ModelsApiFp(this.configuration).testModel(id, options).then((request) => request(this.axios, this.basePath));
+    public testModel(id: string, mode?: ModelTestMode, options?: RawAxiosRequestConfig) {
+        return ModelsApiFp(this.configuration).testModel(id, mode, options).then((request) => request(this.axios, this.basePath));
     }
 }
 

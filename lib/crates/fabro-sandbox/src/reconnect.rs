@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 #[cfg(feature = "daytona")]
 use crate::daytona::DaytonaSandbox;
 #[cfg(feature = "docker")]
-use crate::docker::{DockerSandbox, DockerSandboxConfig};
+use crate::docker::{DockerSandbox, DockerSandboxOptions};
 use crate::local::LocalSandbox;
 use crate::sandbox_record::SandboxRecord;
 
@@ -30,10 +30,10 @@ pub async fn reconnect(record: &SandboxRecord) -> Result<Box<dyn crate::Sandbox>
                 .as_deref()
                 .unwrap_or("/workspace");
 
-            let config = DockerSandboxConfig {
+            let config = DockerSandboxOptions {
                 host_working_directory: host_dir.to_string(),
                 container_mount_point: mount_point.to_string(),
-                ..DockerSandboxConfig::default()
+                ..DockerSandboxOptions::default()
             };
             let sandbox = DockerSandbox::new(config)
                 .map_err(|e| anyhow::anyhow!("Failed to create Docker sandbox: {e}"))?;

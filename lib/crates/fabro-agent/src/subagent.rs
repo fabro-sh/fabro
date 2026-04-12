@@ -1,14 +1,16 @@
-use crate::error::AgentError;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
+
+use fabro_llm::types::ToolDefinition;
+use tokio::sync::Mutex as AsyncMutex;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+
+use crate::error::Error;
 use crate::session::Session;
 use crate::tool_registry::RegisteredTool;
 use crate::tools::required_str;
 use crate::types::{AgentEvent, SessionEvent, Turn};
-use fabro_llm::types::ToolDefinition;
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
-use tokio::sync::Mutex as AsyncMutex;
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 
 pub type SessionFactory = Arc<dyn Fn() -> Session + Send + Sync>;
 
@@ -22,29 +24,29 @@ pub type SubAgentEventCallback = Arc<dyn Fn(SubAgentCallbackEvent) + Send + Sync
 
 #[derive(Debug, Clone)]
 pub struct SubAgentResult {
-    pub output: String,
-    pub success: bool,
+    pub output:     String,
+    pub success:    bool,
     pub turns_used: usize,
 }
 
 #[derive(Debug, Clone)]
 pub enum SubAgentStatus {
     Running,
-    Finished(Result<SubAgentResult, AgentError>),
+    Finished(Result<SubAgentResult, Error>),
     Closed,
 }
 
 pub struct SubAgent {
-    task: Option<JoinHandle<Result<SubAgentResult, AgentError>>>,
+    task:           Option<JoinHandle<Result<SubAgentResult, Error>>>,
     followup_queue: Arc<Mutex<VecDeque<String>>>,
-    cancel_token: CancellationToken,
-    depth: usize,
-    status: SubAgentStatus,
+    cancel_token:   CancellationToken,
+    depth:          usize,
+    status:         SubAgentStatus,
 }
 
 pub struct SubAgentManager {
-    agents: HashMap<String, SubAgent>,
-    max_depth: usize,
+    agents:         HashMap<String, SubAgent>,
+    max_depth:      usize,
     event_callback: Option<SubAgentEventCallback>,
 }
 
@@ -73,9 +75,9 @@ impl SubAgentManager {
         mut session: Session,
         task_prompt: String,
         depth: usize,
-    ) -> Result<String, AgentError> {
+    ) -> Result<String, Error> {
         if depth >= self.max_depth {
-            return Err(AgentError::InvalidState(format!(
+            return Err(Error::InvalidState(format!(
                 "Maximum subagent depth ({}) reached",
                 self.max_depth
             )));
@@ -92,18 +94,14 @@ impl SubAgentManager {
             tokio::spawn(async move {
                 while let Ok(event) = rx.recv().await {
                     // Skip streaming / noise events
-                    if matches!(
-                        &event.event,
-                        AgentEvent::TextDelta { .. }
-                            | AgentEvent::AssistantOutputReplace { .. }
-                            | AgentEvent::ReasoningDelta { .. }
-                            | AgentEvent::ToolCallOutputDelta { .. }
-                            | AgentEvent::AssistantTextStart
-                            | AgentEvent::SessionStarted
-                            | AgentEvent::SessionEnded
-                            | AgentEvent::ProcessingEnd
-                            | AgentEvent::SkillExpanded { .. }
-                    ) {
+                    if event.event.is_streaming_noise()
+                        || matches!(
+                            &event.event,
+                            AgentEvent::SessionStarted { .. }
+                                | AgentEvent::SessionEnded
+                                | AgentEvent::ProcessingEnd
+                        )
+                    {
                         continue;
                     }
                     cb(SubAgentCallbackEvent::Forwarded(event));
@@ -121,35 +119,32 @@ impl SubAgentManager {
                 _ => None,
             });
             Ok(SubAgentResult {
-                output: last_text.unwrap_or_default(),
-                success: true,
+                output:     last_text.unwrap_or_default(),
+                success:    true,
                 turns_used: turns.len(),
             })
         });
 
-        self.agents.insert(
-            agent_id.clone(),
-            SubAgent {
-                task: Some(task),
-                followup_queue,
-                cancel_token,
-                depth: depth + 1,
-                status: SubAgentStatus::Running,
-            },
-        );
+        self.agents.insert(agent_id.clone(), SubAgent {
+            task: Some(task),
+            followup_queue,
+            cancel_token,
+            depth: depth + 1,
+            status: SubAgentStatus::Running,
+        });
 
         self.emit_event(AgentEvent::SubAgentSpawned {
             agent_id: agent_id.clone(),
-            depth: depth + 1,
-            task: task_prompt,
+            depth:    depth + 1,
+            task:     task_prompt,
         });
 
         Ok(agent_id)
     }
 
-    pub fn send_input(&self, agent_id: &str, message: &str) -> Result<(), AgentError> {
+    pub fn send_input(&self, agent_id: &str, message: &str) -> Result<(), Error> {
         let agent = self.agents.get(agent_id).ok_or_else(|| {
-            AgentError::InvalidState(format!(
+            Error::InvalidState(format!(
                 "No agent found with id: {agent_id} (it was never spawned)"
             ))
         })?;
@@ -157,7 +152,7 @@ impl SubAgentManager {
         match agent.status {
             SubAgentStatus::Running => {}
             _ => {
-                return Err(AgentError::InvalidState(format!(
+                return Err(Error::InvalidState(format!(
                     "Agent {agent_id} is not running"
                 )));
             }
@@ -172,12 +167,12 @@ impl SubAgentManager {
         Ok(())
     }
 
-    pub async fn wait(&mut self, agent_id: &str) -> Result<SubAgentResult, AgentError> {
+    pub async fn wait(&mut self, agent_id: &str) -> Result<SubAgentResult, Error> {
         // Phase 1: Check existence and current status
         let agent = self.agents.get(agent_id);
         let depth = match agent {
             None => {
-                return Err(AgentError::InvalidState(format!(
+                return Err(Error::InvalidState(format!(
                     "No agent found with id: {agent_id} (it was never spawned)"
                 )));
             }
@@ -186,7 +181,7 @@ impl SubAgentManager {
 
         match &self.agents[agent_id].status {
             SubAgentStatus::Closed => {
-                return Err(AgentError::InvalidState(format!(
+                return Err(Error::InvalidState(format!(
                     "Agent {agent_id} has been closed"
                 )));
             }
@@ -203,16 +198,12 @@ impl SubAgentManager {
             .unwrap()
             .task
             .take()
-            .ok_or_else(|| {
-                AgentError::InvalidState(format!("Agent {agent_id} has no running task"))
-            })?;
+            .ok_or_else(|| Error::InvalidState(format!("Agent {agent_id} has no running task")))?;
 
         // Phase 3: Await the task (no borrow held)
         let task_result = match join_handle.await {
             Ok(result) => result,
-            Err(e) => Err(AgentError::InvalidState(format!(
-                "Agent task panicked: {e}"
-            ))),
+            Err(e) => Err(Error::InvalidState(format!("Agent task panicked: {e}"))),
         };
 
         // Phase 4: Emit event
@@ -244,16 +235,16 @@ impl SubAgentManager {
         }
     }
 
-    pub fn close(&mut self, agent_id: &str) -> Result<(), AgentError> {
+    pub fn close(&mut self, agent_id: &str) -> Result<(), Error> {
         let agent = self.agents.get_mut(agent_id).ok_or_else(|| {
-            AgentError::InvalidState(format!(
+            Error::InvalidState(format!(
                 "No agent found with id: {agent_id} (it was never spawned)"
             ))
         })?;
 
         match agent.status {
             SubAgentStatus::Closed => {
-                return Err(AgentError::InvalidState(format!(
+                return Err(Error::InvalidState(format!(
                     "Agent {agent_id} is already closed"
                 )));
             }
@@ -312,9 +303,9 @@ pub fn make_spawn_agent_tool(
 ) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
-            name: "spawn_agent".into(),
+            name:        "spawn_agent".into(),
             description: "Spawn a subagent to work on a delegated task".into(),
-            parameters: serde_json::json!({
+            parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
                     "task": {
@@ -337,7 +328,7 @@ pub fn make_spawn_agent_tool(
                 "required": ["task"]
             }),
         },
-        executor: Arc::new(move |args, _ctx| {
+        executor:   Arc::new(move |args, _ctx| {
             let manager = manager.clone();
             let session_factory = session_factory.clone();
             Box::pin(async move {
@@ -351,7 +342,8 @@ pub fn make_spawn_agent_tool(
 
                 // Note: working_dir and model require session factory changes to wire through
                 let mut session = session_factory();
-                // Default subagent max_turns is 0 (unlimited) per spec (overridable via parameter)
+                // Default subagent max_turns is 0 (unlimited) per spec (overridable via
+                // parameter)
                 session.set_max_turns(max_turns.unwrap_or(0));
                 let mut mgr = manager.lock().await;
                 mgr.spawn(session, task.to_string(), current_depth)
@@ -364,9 +356,9 @@ pub fn make_spawn_agent_tool(
 pub fn make_send_input_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
-            name: "send_input".into(),
+            name:        "send_input".into(),
             description: "Send a follow-up message to a running subagent".into(),
-            parameters: serde_json::json!({
+            parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
                     "agent_id": {
@@ -381,7 +373,7 @@ pub fn make_send_input_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regist
                 "required": ["agent_id", "message"]
             }),
         },
-        executor: Arc::new(move |args, _ctx| {
+        executor:   Arc::new(move |args, _ctx| {
             let manager = manager.clone();
             Box::pin(async move {
                 let agent_id = required_str(&args, "agent_id")?;
@@ -399,9 +391,9 @@ pub fn make_send_input_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regist
 pub fn make_wait_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
-            name: "wait".into(),
+            name:        "wait".into(),
             description: "Wait for a subagent to complete and return its result".into(),
-            parameters: serde_json::json!({
+            parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
                     "agent_id": {
@@ -412,7 +404,7 @@ pub fn make_wait_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTo
                 "required": ["agent_id"]
             }),
         },
-        executor: Arc::new(move |args, _ctx| {
+        executor:   Arc::new(move |args, _ctx| {
             let manager = manager.clone();
             Box::pin(async move {
                 let agent_id = required_str(&args, "agent_id")?;
@@ -431,9 +423,9 @@ pub fn make_wait_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTo
 pub fn make_close_agent_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
-            name: "close_agent".into(),
+            name:        "close_agent".into(),
             description: "Close a running subagent".into(),
-            parameters: serde_json::json!({
+            parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
                     "agent_id": {
@@ -444,7 +436,7 @@ pub fn make_close_agent_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regis
                 "required": ["agent_id"]
             }),
         },
-        executor: Arc::new(move |args, _ctx| {
+        executor:   Arc::new(move |args, _ctx| {
             let manager = manager.clone();
             Box::pin(async move {
                 let agent_id = required_str(&args, "agent_id")?;
@@ -459,12 +451,13 @@ pub fn make_close_agent_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regis
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::config::SessionConfig;
-    use crate::test_support::*;
     use fabro_llm::provider::ProviderAdapter;
     use fabro_llm::types::Role;
     use tokio::time;
+
+    use super::*;
+    use crate::config::SessionOptions;
+    use crate::test_support::*;
 
     // --- Tests ---
 
@@ -495,7 +488,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let session = Session::new(client, profile, env, SessionOptions::default(), None);
 
         let agent_id = manager.spawn(session, "Do something".into(), 0).unwrap();
         let _ = manager.wait(&agent_id).await.unwrap();
@@ -722,15 +715,21 @@ mod tests {
         let mut rx = parent.subscribe();
 
         callback(SubAgentCallbackEvent::Forwarded(SessionEvent {
-            event: AgentEvent::SessionStarted,
-            timestamp: std::time::SystemTime::now(),
-            session_id: "child".into(),
+            event:             AgentEvent::SessionStarted {
+                provider: Some("anthropic".into()),
+                model:    Some("claude-opus".into()),
+            },
+            timestamp:         std::time::SystemTime::now(),
+            session_id:        "child".into(),
             parent_session_id: None,
         }));
         callback(SubAgentCallbackEvent::Forwarded(SessionEvent {
-            event: AgentEvent::SessionStarted,
-            timestamp: std::time::SystemTime::now(),
-            session_id: "grandchild".into(),
+            event:             AgentEvent::SessionStarted {
+                provider: Some("anthropic".into()),
+                model:    Some("claude-opus".into()),
+            },
+            timestamp:         std::time::SystemTime::now(),
+            session_id:        "grandchild".into(),
             parent_session_id: Some("child".into()),
         }));
 
@@ -748,7 +747,7 @@ mod tests {
         let manager = SubAgentManager::new(3);
         manager.emit_event(AgentEvent::SubAgentClosed {
             agent_id: "x".into(),
-            depth: 0,
+            depth:    0,
         });
     }
 

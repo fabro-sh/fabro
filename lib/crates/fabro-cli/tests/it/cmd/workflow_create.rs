@@ -1,11 +1,9 @@
+use fabro_test::{fabro_snapshot, test_context};
 use insta::assert_snapshot;
 use serde_json::Value;
 
-use fabro_test::{fabro_snapshot, test_context};
-
-use crate::support::fabro_json_snapshot;
-
 use super::support::setup_project_fixture;
+use crate::support::fabro_json_snapshot;
 
 #[test]
 fn help() {
@@ -24,14 +22,13 @@ fn help() {
       <NAME>  Name of the workflow
 
     Options:
-      -g, --goal <GOAL>                Goal description for the workflow
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+      -g, --goal <GOAL>       Goal description for the workflow
+          --json              Output as JSON [env: FABRO_JSON=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -49,12 +46,12 @@ fn workflow_create_writes_scaffold_files() {
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-      ✔ fabro/workflows/hello-world/workflow.fabro
-      ✔ fabro/workflows/hello-world/workflow.toml
+      ✔ .fabro/workflows/hello-world/workflow.fabro
+      ✔ .fabro/workflows/hello-world/workflow.toml
 
     Workflow created! Next steps:
 
-      1. Edit the graph:  fabro/workflows/hello-world/workflow.fabro
+      1. Edit the graph:  .fabro/workflows/hello-world/workflow.fabro
       2. Validate:        fabro validate hello-world
       3. Run:             fabro run hello-world
     ");
@@ -80,7 +77,7 @@ fn workflow_create_writes_scaffold_files() {
         std::fs::read_to_string(project.fabro_root.join("workflows/hello-world/workflow.toml"))
             .unwrap(),
         @r###"
-    version = 1
+    _version = 1
     "###
     );
 }
@@ -126,7 +123,7 @@ fn workflow_create_rejects_existing_workflow() {
     std::fs::create_dir_all(project.fabro_root.join("workflows/existing")).unwrap();
     std::fs::write(
         project.fabro_root.join("workflows/existing/workflow.toml"),
-        "version = 1\n",
+        "_version = 1\n",
     )
     .unwrap();
 
@@ -139,7 +136,7 @@ fn workflow_create_rejects_existing_workflow() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: Workflow 'existing' already exists at [TEMP_DIR]/project/fabro/workflows/existing
+    error: Workflow 'existing' already exists at [TEMP_DIR]/project/.fabro/workflows/existing
     ");
 }
 
@@ -154,7 +151,7 @@ fn workflow_create_errors_without_project_config() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: No fabro.toml found in [TEMP_DIR] or any parent directory
+    error: No .fabro/project.toml found in [TEMP_DIR] or any parent directory
     ");
 }
 
@@ -163,8 +160,8 @@ fn workflow_create_json_uses_resolved_custom_root_paths() {
     let context = test_context!();
     let project_dir = context.temp_dir.join("project");
     context.write_temp(
-        "project/fabro.toml",
-        "version = 1\n[fabro]\nroot = \"custom/fabro-data\"\n",
+        "project/.fabro/project.toml",
+        "_version = 1\n\n[project]\ndirectory = \"../custom/fabro-data\"\n",
     );
 
     let output = context

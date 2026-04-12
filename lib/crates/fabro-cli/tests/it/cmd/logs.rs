@@ -1,6 +1,47 @@
 use fabro_test::{fabro_snapshot, test_context};
+use serde_json::Value;
 
 use super::support::{setup_completed_dry_run, setup_detached_dry_run};
+
+fn parse_ndjson(stdout: &[u8]) -> Vec<Value> {
+    String::from_utf8(stdout.to_vec())
+        .expect("stdout should be valid UTF-8")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str::<Value>(line).expect("logs output should be valid NDJSON")
+        })
+        .collect()
+}
+
+fn assert_event_sequence_contains(events: &[Value], expected: &[&str]) {
+    let event_names: Vec<&str> = events
+        .iter()
+        .filter_map(|event| event["event"].as_str())
+        .collect();
+
+    let mut cursor = 0;
+    for expected_name in expected {
+        let Some(found_at) = event_names[cursor..]
+            .iter()
+            .position(|name| name == expected_name)
+        else {
+            panic!("missing event {expected_name} in sequence: {event_names:?}");
+        };
+        cursor += found_at + 1;
+    }
+}
+
+fn assert_events_belong_to_run(events: &[Value], run_id: &str) {
+    assert!(!events.is_empty(), "expected at least one log event");
+    for event in events {
+        assert_eq!(
+            event["run_id"].as_str(),
+            Some(run_id),
+            "event should belong to requested run: {event}"
+        );
+    }
+}
 
 #[test]
 fn help() {
@@ -19,17 +60,17 @@ fn help() {
       <RUN>  Run ID prefix or workflow name (most recent run)
 
     Options:
-      -f, --follow                     Follow log output
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --since <SINCE>              Logs since timestamp or relative (e.g. "42m", "2h", "2026-01-02T13:00:00Z")
-      -n, --tail <TAIL>                Lines from end (default: all)
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-      -p, --pretty                     Formatted colored output with rendered assistant text
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+      -f, --follow            Follow log output
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --since <SINCE>     Logs since timestamp or relative (e.g. "42m", "2h", "2026-01-02T13:00:00Z")
+      -n, --tail <TAIL>       Lines from end (default: all)
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+      -p, --pretty            Formatted colored output with rendered assistant text
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     "#);
 }
@@ -38,6 +79,33 @@ fn help() {
 fn logs_completed_run_outputs_raw_ndjson() {
     let context = test_context!();
     let run = setup_completed_dry_run(&context);
+    let mut cmd = context.command();
+    cmd.args(["logs", &run.run_id]);
+    let output = cmd.output().expect("command should execute");
+    assert!(
+        output.status.success(),
+        "logs should succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let events = parse_ndjson(&output.stdout);
+    assert_events_belong_to_run(&events, &run.run_id);
+    assert_event_sequence_contains(&events, &[
+        "run.created",
+        "run.running",
+        "stage.started",
+        "stage.completed",
+        "run.completed",
+        "sandbox.cleanup.completed",
+    ]);
+}
+
+#[test]
+fn logs_completed_run_reads_store_without_progress_jsonl() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+
     let mut filters = context.filters();
     filters.push((
         r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z".to_string(),
@@ -51,36 +119,22 @@ fn logs_completed_run_outputs_raw_ndjson() {
         r#""id":"[0-9a-f-]+""#.to_string(),
         r#""id":"[EVENT_ID]""#.to_string(),
     ));
-    let mut cmd = context.command();
-    cmd.args(["logs", &run.run_id]);
+    filters.push((
+        r#""run_dir":"(?:\[DRY_RUN_DIR\]|\[STORAGE_DIR\]/scratch/REDACTED)""#.to_string(),
+        r#""run_dir":"[RUN_DIR]""#.to_string(),
+    ));
 
-    fabro_snapshot!(filters, cmd, @r###"
+    let mut cmd = context.command();
+    cmd.args(["logs", "--tail", "2", &run.run_id]);
+
+    fabro_snapshot!(filters, cmd, @r#"
     success: true
     exit_code: 0
     ----- stdout -----
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.initializing","properties":{"provider":"local"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.ready","properties":{"provider":"local","duration_ms": [DURATION_MS],"name":null,"cpu":null,"memory":null,"url":null}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.initialized","properties":{"working_directory":"[TEMP_DIR]"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"run.started","properties":{"name":"Simple","goal":"Run tests and report results"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"start","node_label":"Start","properties":{"max_attempts":1,"attempt":1,"index":0,"handler_type":"start"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"start","node_label":"Start","properties":{"max_attempts":1,"attempt":1,"index":0,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] start","files_touched":[]}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"start","to_node":"run_tests","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"start","node_label":"start","properties":{"status":"success"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"run_tests","node_label":"Run Tests","properties":{"max_attempts":1,"attempt":1,"index":1,"handler_type":"agent"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"run_tests","node_label":"Run Tests","properties":{"max_attempts":1,"attempt":1,"index":1,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] run_tests","files_touched":[]}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"run_tests","to_node":"report","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"run_tests","node_label":"run_tests","properties":{"status":"success"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"report","node_label":"Report","properties":{"max_attempts":1,"attempt":1,"index":2,"handler_type":"agent"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"report","node_label":"Report","properties":{"max_attempts":1,"attempt":1,"index":2,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] report","files_touched":[]}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"report","to_node":"exit","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"report","node_label":"report","properties":{"status":"success"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"exit","node_label":"Exit","properties":{"max_attempts":1,"attempt":1,"index":3,"handler_type":"exit"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"exit","node_label":"Exit","properties":{"max_attempts":1,"attempt":1,"index":3,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":null,"files_touched":[]}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"run.completed","properties":{"duration_ms": [DURATION_MS],"artifact_count":0,"status":"success"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.started","properties":{"provider":"local"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.completed","properties":{"provider":"local","duration_ms": [DURATION_MS]}}
+    {"event":"sandbox.cleanup.started","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"event":"sandbox.cleanup.completed","id":"[EVENT_ID]","properties":{"duration_ms": [DURATION_MS],"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     ----- stderr -----
-    "###);
+    "#);
 }
 
 #[test]
@@ -100,17 +154,21 @@ fn logs_tail_limits_output() {
         r#""id":"[0-9a-f-]+""#.to_string(),
         r#""id":"[EVENT_ID]""#.to_string(),
     ));
+    filters.push((
+        r#""run_dir":"(?:\[DRY_RUN_DIR\]|\[STORAGE_DIR\]/scratch/REDACTED)""#.to_string(),
+        r#""run_dir":"[RUN_DIR]""#.to_string(),
+    ));
     let mut cmd = context.command();
     cmd.args(["logs", "--tail", "2", &run.run_id]);
 
-    fabro_snapshot!(filters, cmd, @r###"
+    fabro_snapshot!(filters, cmd, @r#"
     success: true
     exit_code: 0
     ----- stdout -----
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.started","properties":{"provider":"local"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.completed","properties":{"provider":"local","duration_ms": [DURATION_MS]}}
+    {"event":"sandbox.cleanup.started","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"event":"sandbox.cleanup.completed","id":"[EVENT_ID]","properties":{"duration_ms": [DURATION_MS],"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     ----- stderr -----
-    "###);
+    "#);
 }
 
 #[test]
@@ -154,47 +212,24 @@ fn logs_pretty_formats_small_run() {
 fn logs_follow_detached_run_streams_until_completion() {
     let context = test_context!();
     let run = setup_detached_dry_run(&context);
-    let mut filters = context.filters();
-    filters.push((
-        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z".to_string(),
-        "[TIMESTAMP]".to_string(),
-    ));
-    filters.push((
-        r#""duration_ms":\s*\d+"#.to_string(),
-        r#""duration_ms": [DURATION_MS]"#.to_string(),
-    ));
-    filters.push((
-        r#""id":"[0-9a-f-]+""#.to_string(),
-        r#""id":"[EVENT_ID]""#.to_string(),
-    ));
     let mut cmd = context.command();
     cmd.args(["logs", "--follow", &run.run_id]);
+    let output = cmd.output().expect("command should execute");
+    assert!(
+        output.status.success(),
+        "logs --follow should succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-    fabro_snapshot!(filters, cmd, @r###"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.initializing","properties":{"provider":"local"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.ready","properties":{"provider":"local","duration_ms": [DURATION_MS],"name":null,"cpu":null,"memory":null,"url":null}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.initialized","properties":{"working_directory":"[TEMP_DIR]"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"run.started","properties":{"name":"Simple","goal":"Run tests and report results"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"start","node_label":"Start","properties":{"max_attempts":1,"attempt":1,"index":0,"handler_type":"start"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"start","node_label":"Start","properties":{"max_attempts":1,"attempt":1,"index":0,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] start","files_touched":[]}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"start","to_node":"run_tests","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"start","node_label":"start","properties":{"status":"success"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"run_tests","node_label":"Run Tests","properties":{"max_attempts":1,"attempt":1,"index":1,"handler_type":"agent"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"run_tests","node_label":"Run Tests","properties":{"max_attempts":1,"attempt":1,"index":1,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] run_tests","files_touched":[]}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"run_tests","to_node":"report","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"run_tests","node_label":"run_tests","properties":{"status":"success"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"report","node_label":"Report","properties":{"max_attempts":1,"attempt":1,"index":2,"handler_type":"agent"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"report","node_label":"Report","properties":{"max_attempts":1,"attempt":1,"index":2,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] report","files_touched":[]}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"report","to_node":"exit","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"report","node_label":"report","properties":{"status":"success"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"exit","node_label":"Exit","properties":{"max_attempts":1,"attempt":1,"index":3,"handler_type":"exit"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"exit","node_label":"Exit","properties":{"max_attempts":1,"attempt":1,"index":3,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":null,"files_touched":[]}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"run.completed","properties":{"duration_ms": [DURATION_MS],"artifact_count":0,"status":"success"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.started","properties":{"provider":"local"}}
-    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.completed","properties":{"provider":"local","duration_ms": [DURATION_MS]}}
-    ----- stderr -----
-    "###);
+    let events = parse_ndjson(&output.stdout);
+    assert_events_belong_to_run(&events, &run.run_id);
+    assert_event_sequence_contains(&events, &[
+        "run.created",
+        "run.running",
+        "stage.started",
+        "stage.completed",
+        "run.completed",
+        "sandbox.cleanup.completed",
+    ]);
 }

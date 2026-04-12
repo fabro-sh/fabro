@@ -14,7 +14,7 @@ fn help() {
     Commands:
       run         Launch a workflow run
       create      Create a workflow run (allocate run dir, persist spec)
-      start       Start a created workflow run (spawn engine process)
+      start       Start a created workflow run on the server
       attach      Attach to a running or finished workflow run
       logs        View the event log of a workflow run
       resume      Resume an interrupted workflow run
@@ -24,16 +24,18 @@ fn help() {
       preflight   Validate run configuration without executing
       validate    Validate a workflow
       graph       Render a workflow graph as SVG or PNG
-      asset       Inspect and copy run assets (screenshots, reports, traces)
+      artifact    Inspect and copy run artifacts (screenshots, reports, traces)
       store       Export store-backed run state for debugging
       rm          Remove one or more workflow runs
       inspect     Show detailed information about a workflow run
       model       List and test LLM models
+      server      Server operations
       doctor      Check environment and integration health
       install     Set up the Fabro environment (LLMs, certs, GitHub)
+      uninstall   Uninstall Fabro from this machine
       pr          Pull request operations
-      secret      Manage secrets in ~/.fabro/.env
-      settings    Inspect merged configuration
+      secret      Manage server-owned secrets
+      settings    Inspect effective settings
       workflow    Workflow operations
       discord     Open the Discord community in the browser
       docs        Open the docs website in the browser
@@ -46,14 +48,31 @@ fn help() {
       help        Print this message or the help of the given subcommand(s)
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
-      -V, --version                    Print version
+          --json              Output as JSON [env: FABRO_JSON=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
+      -V, --version           Print version
     ----- stderr -----
+    ");
+}
+
+#[test]
+fn llm_namespace_is_not_available() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.arg("llm");
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 2
+    ----- stdout -----
+    ----- stderr -----
+    error: unrecognized subcommand 'llm'
+
+    Usage: fabro [OPTIONS] <COMMAND>
+
+    For more information, try '--help'.
     ");
 }

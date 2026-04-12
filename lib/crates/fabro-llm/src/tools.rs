@@ -1,15 +1,17 @@
-use crate::types::{Message, ToolCall, ToolDefinition, ToolResult};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
+
+use crate::types::{Message, ToolCall, ToolDefinition, ToolResult};
 
 /// Context passed to tool execute handlers (Section 5.2).
 #[derive(Clone)]
 pub struct ToolContext {
     pub tool_call_id: String,
-    pub messages: Vec<Message>,
+    pub messages:     Vec<Message>,
     pub abort_signal: Option<CancellationToken>,
 }
 
@@ -28,7 +30,7 @@ pub type ExecuteHandler = Arc<
 /// "Passive" tools have no handler and are returned to the caller.
 pub struct Tool {
     pub definition: ToolDefinition,
-    pub execute: Option<ExecuteHandler>,
+    pub execute:    Option<ExecuteHandler>,
 }
 
 impl Tool {
@@ -48,7 +50,7 @@ impl Tool {
                 description: description.to_string(),
                 parameters,
             },
-            execute: None,
+            execute:    None,
         }
     }
 
@@ -76,7 +78,7 @@ impl Tool {
                 description: description.to_string(),
                 parameters,
             },
-            execute: Some(Arc::new(move |args, ctx| Box::pin(handler(args, ctx)))),
+            execute:    Some(Arc::new(move |args, ctx| Box::pin(handler(args, ctx)))),
         }
     }
 
@@ -116,8 +118,8 @@ pub fn validate_tool_name(name: &str) -> Result<(), String> {
 }
 
 /// A callback to repair invalid tool call arguments (Section 5.8).
-/// Receives the tool call and the validation error message, returns repaired arguments
-/// or an error if repair is not possible.
+/// Receives the tool call and the validation error message, returns repaired
+/// arguments or an error if repair is not possible.
 pub type RepairToolCallFn = Arc<
     dyn Fn(
             ToolCall,
@@ -169,12 +171,14 @@ const fn args_type_name(value: &serde_json::Value) -> &'static str {
     }
 }
 
-/// Execute all tool calls with optional schema validation and repair (Section 5.8).
+/// Execute all tool calls with optional schema validation and repair (Section
+/// 5.8).
 ///
 /// Before calling a tool's execute handler, validates the arguments against the
-/// tool's parameter schema. If validation fails and a `repair` callback is provided,
-/// calls it to attempt repair. If repair succeeds, uses the repaired arguments.
-/// If repair fails or is not configured, returns an error `ToolResult`.
+/// tool's parameter schema. If validation fails and a `repair` callback is
+/// provided, calls it to attempt repair. If repair succeeds, uses the repaired
+/// arguments. If repair fails or is not configured, returns an error
+/// `ToolResult`.
 pub async fn execute_all_tools_with_repair(
     tools: &[&Tool],
     tool_calls: &[ToolCall],

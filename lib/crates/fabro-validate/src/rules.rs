@@ -57,26 +57,26 @@ impl LintRule for StartNodeRule {
             .count();
         if start_count == 0 {
             return vec![Diagnostic {
-                rule: self.name().to_string(),
+                rule:     self.name().to_string(),
                 severity: Severity::Error,
                 message:
                     "Pipeline must have exactly one start node (shape=Mdiamond or id start/Start)"
                         .to_string(),
-                node_id: None,
-                edge: None,
-                fix: Some("Add a node with shape=Mdiamond or id 'start'".to_string()),
+                node_id:  None,
+                edge:     None,
+                fix:      Some("Add a node with shape=Mdiamond or id 'start'".to_string()),
             }];
         }
         if start_count > 1 {
             return vec![Diagnostic {
-                rule: self.name().to_string(),
+                rule:     self.name().to_string(),
                 severity: Severity::Error,
-                message: format!(
+                message:  format!(
                     "Pipeline has {start_count} start nodes but must have exactly one"
                 ),
-                node_id: None,
-                edge: None,
-                fix: Some("Remove extra start nodes".to_string()),
+                node_id:  None,
+                edge:     None,
+                fix:      Some("Remove extra start nodes".to_string()),
             }];
         }
         Vec::new()
@@ -106,26 +106,26 @@ impl LintRule for TerminalNodeRule {
             .count();
         if terminal_count == 0 {
             return vec![Diagnostic {
-                rule: self.name().to_string(),
+                rule:     self.name().to_string(),
                 severity: Severity::Error,
                 message:
                     "Pipeline must have exactly one terminal node (shape=Msquare or id exit/end)"
                         .to_string(),
-                node_id: None,
-                edge: None,
-                fix: Some("Add a node with shape=Msquare or id 'exit'/'end'".to_string()),
+                node_id:  None,
+                edge:     None,
+                fix:      Some("Add a node with shape=Msquare or id 'exit'/'end'".to_string()),
             }];
         }
         if terminal_count > 1 {
             return vec![Diagnostic {
-                rule: self.name().to_string(),
+                rule:     self.name().to_string(),
                 severity: Severity::Error,
-                message: format!(
+                message:  format!(
                     "Pipeline must have exactly one terminal node, found {terminal_count}"
                 ),
-                node_id: None,
-                edge: None,
-                fix: Some("Remove extra terminal nodes so exactly one remains".to_string()),
+                node_id:  None,
+                edge:     None,
+                fix:      Some("Remove extra terminal nodes so exactly one remains".to_string()),
             }];
         }
         Vec::new()
@@ -170,12 +170,12 @@ impl LintRule for ReachabilityRule {
         unreachable
             .into_iter()
             .map(|node_id| Diagnostic {
-                rule: self.name().to_string(),
+                rule:     self.name().to_string(),
                 severity: Severity::Warning,
-                message: format!("Node '{node_id}' is not reachable from the start node"),
-                node_id: Some(node_id.to_string()),
-                edge: None,
-                fix: Some(format!(
+                message:  format!("Node '{node_id}' is not reachable from the start node"),
+                node_id:  Some(node_id.to_string()),
+                edge:     None,
+                fix:      Some(format!(
                     "Add an edge path from the start node to '{node_id}'"
                 )),
             })
@@ -197,25 +197,25 @@ impl LintRule for EdgeTargetExistsRule {
         for edge in &graph.edges {
             if !graph.nodes.contains_key(&edge.to) {
                 diagnostics.push(Diagnostic {
-                    rule: self.name().to_string(),
+                    rule:     self.name().to_string(),
                     severity: Severity::Error,
-                    message: format!(
+                    message:  format!(
                         "Edge from '{}' targets non-existent node '{}'",
                         edge.from, edge.to
                     ),
-                    node_id: None,
-                    edge: Some((edge.from.clone(), edge.to.clone())),
-                    fix: Some(format!("Define node '{}' or fix the edge target", edge.to)),
+                    node_id:  None,
+                    edge:     Some((edge.from.clone(), edge.to.clone())),
+                    fix:      Some(format!("Define node '{}' or fix the edge target", edge.to)),
                 });
             }
             if !graph.nodes.contains_key(&edge.from) {
                 diagnostics.push(Diagnostic {
-                    rule: self.name().to_string(),
+                    rule:     self.name().to_string(),
                     severity: Severity::Error,
-                    message: format!("Edge source '{}' references non-existent node", edge.from),
-                    node_id: None,
-                    edge: Some((edge.from.clone(), edge.to.clone())),
-                    fix: Some(format!(
+                    message:  format!("Edge source '{}' references non-existent node", edge.from),
+                    node_id:  None,
+                    edge:     Some((edge.from.clone(), edge.to.clone())),
+                    fix:      Some(format!(
                         "Define node '{}' or fix the edge source",
                         edge.from
                     )),
@@ -242,16 +242,16 @@ impl LintRule for StartNoIncomingRule {
         let incoming = graph.incoming_edges(&start.id);
         if !incoming.is_empty() {
             return vec![Diagnostic {
-                rule: self.name().to_string(),
+                rule:     self.name().to_string(),
                 severity: Severity::Error,
-                message: format!(
+                message:  format!(
                     "Start node '{}' has {} incoming edge(s) but must have none",
                     start.id,
                     incoming.len()
                 ),
-                node_id: Some(start.id.clone()),
-                edge: None,
-                fix: Some("Remove incoming edges to the start node".to_string()),
+                node_id:  Some(start.id.clone()),
+                edge:     None,
+                fix:      Some("Remove incoming edges to the start node".to_string()),
             }];
         }
         Vec::new()
@@ -279,16 +279,16 @@ impl LintRule for ExitNoOutgoingRule {
                 let outgoing = graph.outgoing_edges(&node.id);
                 if !outgoing.is_empty() {
                     diagnostics.push(Diagnostic {
-                        rule: self.name().to_string(),
+                        rule:     self.name().to_string(),
                         severity: Severity::Error,
-                        message: format!(
+                        message:  format!(
                             "Exit node '{}' has {} outgoing edge(s) but must have none",
                             node.id,
                             outgoing.len()
                         ),
-                        node_id: Some(node.id.clone()),
-                        edge: None,
-                        fix: Some("Remove outgoing edges from the exit node".to_string()),
+                        node_id:  Some(node.id.clone()),
+                        edge:     None,
+                        fix:      Some("Remove outgoing edges from the exit node".to_string()),
                     });
                 }
             }
@@ -317,15 +317,15 @@ impl LintRule for ConditionSyntaxRule {
             }
             if let Err(e) = parse_condition(condition) {
                 diagnostics.push(Diagnostic {
-                    rule: self.name().to_string(),
+                    rule:     self.name().to_string(),
                     severity: Severity::Error,
-                    message: format!(
+                    message:  format!(
                         "Condition '{condition}' on edge {} -> {} failed parse: {e}",
                         edge.from, edge.to
                     ),
-                    node_id: None,
-                    edge: Some((edge.from.clone(), edge.to.clone())),
-                    fix: Some(
+                    node_id:  None,
+                    edge:     Some((edge.from.clone(), edge.to.clone())),
+                    fix:      Some(
                         "Use key=value, key!=value, key>value, key contains value, \
                          key matches pattern, or bare key syntax"
                             .to_string(),
@@ -354,12 +354,12 @@ impl LintRule for StylesheetSyntaxRule {
         match parse_stylesheet(stylesheet) {
             Ok(_) => Vec::new(),
             Err(e) => vec![Diagnostic {
-                rule: self.name().to_string(),
+                rule:     self.name().to_string(),
                 severity: Severity::Error,
-                message: format!("Model stylesheet parse error: {e}"),
-                node_id: None,
-                edge: None,
-                fix: Some("Fix the model_stylesheet syntax".to_string()),
+                message:  format!("Model stylesheet parse error: {e}"),
+                node_id:  None,
+                edge:     None,
+                fix:      Some("Fix the model_stylesheet syntax".to_string()),
             }],
         }
     }
@@ -397,12 +397,12 @@ impl LintRule for TypeKnownRule {
             if let Some(node_type) = node.node_type() {
                 if !KNOWN_HANDLER_TYPES.contains(&node_type) {
                     diagnostics.push(Diagnostic {
-                        rule: self.name().to_string(),
+                        rule:     self.name().to_string(),
                         severity: Severity::Warning,
-                        message: format!("Node '{}' has unrecognized type '{node_type}'", node.id),
-                        node_id: Some(node.id.clone()),
-                        edge: None,
-                        fix: Some(format!("Use one of: {}", KNOWN_HANDLER_TYPES.join(", "))),
+                        message:  format!("Node '{}' has unrecognized type '{node_type}'", node.id),
+                        node_id:  Some(node.id.clone()),
+                        edge:     None,
+                        fix:      Some(format!("Use one of: {}", KNOWN_HANDLER_TYPES.join(", "))),
                     });
                 }
             }
@@ -446,15 +446,15 @@ impl LintRule for FidelityValidRule {
             if let Some(fidelity) = node.fidelity() {
                 if fidelity.parse::<Fidelity>().is_err() {
                     diagnostics.push(Diagnostic {
-                        rule: self.name().to_string(),
+                        rule:     self.name().to_string(),
                         severity: Severity::Warning,
-                        message: format!(
+                        message:  format!(
                             "Node '{}' has invalid fidelity mode '{fidelity}'",
                             node.id
                         ),
-                        node_id: Some(node.id.clone()),
-                        edge: None,
-                        fix: Some(Self::fix_message()),
+                        node_id:  Some(node.id.clone()),
+                        edge:     None,
+                        fix:      Some(Self::fix_message()),
                     });
                 }
             }
@@ -463,15 +463,15 @@ impl LintRule for FidelityValidRule {
             if let Some(fidelity) = edge.fidelity() {
                 if fidelity.parse::<Fidelity>().is_err() {
                     diagnostics.push(Diagnostic {
-                        rule: self.name().to_string(),
+                        rule:     self.name().to_string(),
                         severity: Severity::Warning,
-                        message: format!(
+                        message:  format!(
                             "Edge {} -> {} has invalid fidelity mode '{fidelity}'",
                             edge.from, edge.to
                         ),
-                        node_id: None,
-                        edge: Some((edge.from.clone(), edge.to.clone())),
-                        fix: Some(Self::fix_message()),
+                        node_id:  None,
+                        edge:     Some((edge.from.clone(), edge.to.clone())),
+                        fix:      Some(Self::fix_message()),
                     });
                 }
             }
@@ -479,12 +479,12 @@ impl LintRule for FidelityValidRule {
         if let Some(fidelity) = graph.default_fidelity() {
             if fidelity.parse::<Fidelity>().is_err() {
                 diagnostics.push(Diagnostic {
-                    rule: self.name().to_string(),
+                    rule:     self.name().to_string(),
                     severity: Severity::Warning,
-                    message: format!("Graph has invalid default_fidelity '{fidelity}'"),
-                    node_id: None,
-                    edge: None,
-                    fix: Some(Self::fix_message()),
+                    message:  format!("Graph has invalid default_fidelity '{fidelity}'"),
+                    node_id:  None,
+                    edge:     None,
+                    fix:      Some(Self::fix_message()),
                 });
             }
         }
@@ -507,30 +507,30 @@ impl LintRule for RetryTargetExistsRule {
             if let Some(target) = node.retry_target() {
                 if !graph.nodes.contains_key(target) {
                     diagnostics.push(Diagnostic {
-                        rule: self.name().to_string(),
+                        rule:     self.name().to_string(),
                         severity: Severity::Warning,
-                        message: format!(
+                        message:  format!(
                             "Node '{}' has retry_target '{}' that does not exist",
                             node.id, target
                         ),
-                        node_id: Some(node.id.clone()),
-                        edge: None,
-                        fix: Some(format!("Define node '{target}' or fix retry_target")),
+                        node_id:  Some(node.id.clone()),
+                        edge:     None,
+                        fix:      Some(format!("Define node '{target}' or fix retry_target")),
                     });
                 }
             }
             if let Some(target) = node.fallback_retry_target() {
                 if !graph.nodes.contains_key(target) {
                     diagnostics.push(Diagnostic {
-                        rule: self.name().to_string(),
+                        rule:     self.name().to_string(),
                         severity: Severity::Warning,
-                        message: format!(
+                        message:  format!(
                             "Node '{}' has fallback_retry_target '{}' that does not exist",
                             node.id, target
                         ),
-                        node_id: Some(node.id.clone()),
-                        edge: None,
-                        fix: Some(format!(
+                        node_id:  Some(node.id.clone()),
+                        edge:     None,
+                        fix:      Some(format!(
                             "Define node '{target}' or fix fallback_retry_target"
                         )),
                     });
@@ -540,26 +540,26 @@ impl LintRule for RetryTargetExistsRule {
         if let Some(target) = graph.retry_target() {
             if !graph.nodes.contains_key(target) {
                 diagnostics.push(Diagnostic {
-                    rule: self.name().to_string(),
+                    rule:     self.name().to_string(),
                     severity: Severity::Warning,
-                    message: format!("Graph has retry_target '{target}' that does not exist"),
-                    node_id: None,
-                    edge: None,
-                    fix: Some(format!("Define node '{target}' or fix graph retry_target")),
+                    message:  format!("Graph has retry_target '{target}' that does not exist"),
+                    node_id:  None,
+                    edge:     None,
+                    fix:      Some(format!("Define node '{target}' or fix graph retry_target")),
                 });
             }
         }
         if let Some(target) = graph.fallback_retry_target() {
             if !graph.nodes.contains_key(target) {
                 diagnostics.push(Diagnostic {
-                    rule: self.name().to_string(),
+                    rule:     self.name().to_string(),
                     severity: Severity::Warning,
-                    message: format!(
+                    message:  format!(
                         "Graph has fallback_retry_target '{target}' that does not exist"
                     ),
-                    node_id: None,
-                    edge: None,
-                    fix: Some(format!(
+                    node_id:  None,
+                    edge:     None,
+                    fix:      Some(format!(
                         "Define node '{target}' or fix graph fallback_retry_target"
                     )),
                 });
@@ -628,12 +628,15 @@ impl LintRule for PromptOnLlmNodesRule {
                     .is_some_and(|l| !l.is_empty());
                 if !has_prompt && !has_label {
                     diagnostics.push(Diagnostic {
-                        rule: self.name().to_string(),
+                        rule:     self.name().to_string(),
                         severity: Severity::Warning,
-                        message: format!("LLM node '{}' has no prompt or label attribute", node.id),
-                        node_id: Some(node.id.clone()),
-                        edge: None,
-                        fix: Some("Add a prompt or label attribute".to_string()),
+                        message:  format!(
+                            "LLM node '{}' has no prompt or label attribute",
+                            node.id
+                        ),
+                        node_id:  Some(node.id.clone()),
+                        edge:     None,
+                        fix:      Some("Add a prompt or label attribute".to_string()),
                     });
                 }
             }
@@ -700,12 +703,12 @@ impl LintRule for DirectionValidRule {
             return Vec::new();
         }
         vec![Diagnostic {
-            rule: self.name().to_string(),
+            rule:     self.name().to_string(),
             severity: Severity::Warning,
-            message: format!("Graph has invalid rankdir '{rankdir}'"),
-            node_id: None,
-            edge: None,
-            fix: Some(format!("Use one of: {}", VALID_DIRECTIONS.join(", "))),
+            message:  format!("Graph has invalid rankdir '{rankdir}'"),
+            node_id:  None,
+            edge:     None,
+            fix:      Some(format!("Use one of: {}", VALID_DIRECTIONS.join(", "))),
         }]
     }
 }
@@ -729,15 +732,15 @@ impl LintRule for ReservedKeywordNodeIdRule {
             .values()
             .filter(|node| DOT_RESERVED_KEYWORDS.contains(&node.id.to_lowercase().as_str()))
             .map(|node| Diagnostic {
-                rule: self.name().to_string(),
+                rule:     self.name().to_string(),
                 severity: Severity::Warning,
-                message: format!(
+                message:  format!(
                     "Node ID '{}' is a DOT reserved keyword and may cause parsing failures",
                     node.id
                 ),
-                node_id: Some(node.id.clone()),
-                edge: None,
-                fix: Some(format!(
+                node_id:  Some(node.id.clone()),
+                edge:     None,
+                fix:      Some(format!(
                     "Rename '{}' to '{}_step' or another non-reserved ID",
                     node.id,
                     node.id.to_lowercase()
@@ -1049,23 +1052,23 @@ impl LintRule for ImportErrorRule {
         for node in graph.nodes.values() {
             if let Some(AttrValue::String(message)) = node.attrs.get("import_error") {
                 diagnostics.push(Diagnostic {
-                    rule: self.name().to_string(),
+                    rule:     self.name().to_string(),
                     severity: Severity::Error,
-                    message: message.clone(),
-                    node_id: Some(node.id.clone()),
-                    edge: None,
-                    fix: Some("Fix the imported workflow or import path".to_string()),
+                    message:  message.clone(),
+                    node_id:  Some(node.id.clone()),
+                    edge:     None,
+                    fix:      Some("Fix the imported workflow or import path".to_string()),
                 });
             }
 
             if node.attrs.contains_key("import") {
                 diagnostics.push(Diagnostic {
-                    rule: self.name().to_string(),
+                    rule:     self.name().to_string(),
                     severity: Severity::Error,
-                    message: "unresolved import (no base directory available)".to_string(),
-                    node_id: Some(node.id.clone()),
-                    edge: None,
-                    fix: Some(
+                    message:  "unresolved import (no base directory available)".to_string(),
+                    node_id:  Some(node.id.clone()),
+                    edge:     None,
+                    fix:      Some(
                         "Load the workflow from a file so imports can resolve relative to it"
                             .to_string(),
                     ),
@@ -1145,15 +1148,15 @@ impl LintRule for ThreadIdRequiresFidelityFullRule {
             if node.thread_id().is_some() && node.fidelity() != Some("full") && !graph_default_full
             {
                 diagnostics.push(Diagnostic {
-                    rule: self.name().to_string(),
+                    rule:     self.name().to_string(),
                     severity: Severity::Warning,
-                    message: format!(
+                    message:  format!(
                         "Node '{}' has thread_id but fidelity is not 'full'",
                         node.id
                     ),
-                    node_id: Some(node.id.clone()),
-                    edge: None,
-                    fix: Some(Self::FIX.to_string()),
+                    node_id:  Some(node.id.clone()),
+                    edge:     None,
+                    fix:      Some(Self::FIX.to_string()),
                 });
             }
         }
@@ -1165,15 +1168,15 @@ impl LintRule for ThreadIdRequiresFidelityFullRule {
                     graph.nodes.get(&edge.to).and_then(|n| n.fidelity()) == Some("full");
                 if !edge_full && !target_full && !graph_default_full {
                     diagnostics.push(Diagnostic {
-                        rule: self.name().to_string(),
+                        rule:     self.name().to_string(),
                         severity: Severity::Warning,
-                        message: format!(
+                        message:  format!(
                             "Edge {} -> {} has thread_id but fidelity is not 'full'",
                             edge.from, edge.to
                         ),
-                        node_id: None,
-                        edge: Some((edge.from.clone(), edge.to.clone())),
-                        fix: Some(Self::FIX.to_string()),
+                        node_id:  None,
+                        edge:     Some((edge.from.clone(), edge.to.clone())),
+                        fix:      Some(Self::FIX.to_string()),
                     });
                 }
             }
@@ -1181,12 +1184,12 @@ impl LintRule for ThreadIdRequiresFidelityFullRule {
 
         if graph.default_thread().is_some() && !graph_default_full {
             diagnostics.push(Diagnostic {
-                rule: self.name().to_string(),
+                rule:     self.name().to_string(),
                 severity: Severity::Warning,
-                message: "Graph has default_thread but default_fidelity is not 'full'".to_string(),
-                node_id: None,
-                edge: None,
-                fix: Some(Self::FIX.to_string()),
+                message:  "Graph has default_thread but default_fidelity is not 'full'".to_string(),
+                node_id:  None,
+                edge:     None,
+                fix:      Some(Self::FIX.to_string()),
             });
         }
 
@@ -1211,12 +1214,12 @@ impl LintRule for SelectionValidRule {
             if let Some(sel) = node.attrs.get("selection").and_then(AttrValue::as_str) {
                 if !VALID_SELECTIONS.contains(&sel) {
                     diagnostics.push(Diagnostic {
-                        rule: self.name().to_string(),
+                        rule:     self.name().to_string(),
                         severity: Severity::Warning,
-                        message: format!("Node '{}' has invalid selection mode '{sel}'", node.id),
-                        node_id: Some(node.id.clone()),
-                        edge: None,
-                        fix: Some(format!("Use one of: {}", VALID_SELECTIONS.join(", "))),
+                        message:  format!("Node '{}' has invalid selection mode '{sel}'", node.id),
+                        node_id:  Some(node.id.clone()),
+                        edge:     None,
+                        fix:      Some(format!("Use one of: {}", VALID_SELECTIONS.join(", "))),
                     });
                 }
             }
@@ -1266,8 +1269,9 @@ impl LintRule for RandomSelectionNoConditionsRule {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_graphviz::graph::{AttrValue, Edge, Node};
+
+    use super::*;
 
     fn minimal_graph() -> Graph {
         let mut g = Graph::new("test");
@@ -2144,7 +2148,8 @@ mod tests {
     #[test]
     fn freeform_edge_count_rule_non_wait_human_ignored() {
         let mut g = minimal_graph();
-        // Regular codergen node (box shape) with multiple freeform edges should not trigger
+        // Regular codergen node (box shape) with multiple freeform edges should not
+        // trigger
         g.nodes.insert("a".to_string(), Node::new("a"));
         g.nodes.insert("b".to_string(), Node::new("b"));
         g.nodes.insert("work".to_string(), Node::new("work"));
@@ -2511,7 +2516,8 @@ mod tests {
         assert_eq!(d.len(), 3);
     }
 
-    // --- retry_target_exists: both retry_target and fallback on same node, both invalid ---
+    // --- retry_target_exists: both retry_target and fallback on same node, both
+    // invalid ---
 
     #[test]
     fn retry_target_exists_rule_both_node_targets_invalid() {
@@ -2697,8 +2703,9 @@ mod tests {
     #[test]
     fn type_known_rule_start_exit_shapes_no_warning() {
         // The minimal_graph has start (Mdiamond) and exit (Msquare), which resolve
-        // to known handler types "start" and "exit" via shape mapping, not explicit type.
-        // Since they have no explicit `type` attr, the rule should not flag them.
+        // to known handler types "start" and "exit" via shape mapping, not explicit
+        // type. Since they have no explicit `type` attr, the rule should not
+        // flag them.
         let g = minimal_graph();
         let rule = TypeKnownRule;
         let d = rule.apply(&g);

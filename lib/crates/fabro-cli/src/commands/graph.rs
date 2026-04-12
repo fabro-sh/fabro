@@ -1,51 +1,65 @@
-use std::borrow::Cow;
 use std::io::Write;
-use std::sync::LazyLock;
 
 use anyhow::bail;
-use fabro_config::ConfigLayer;
-use fabro_config::project::resolve_workflow_path;
-use fabro_graphviz::render::render_dot;
+use fabro_api::types;
+use fabro_config::load::load_settings_user;
+use fabro_config::user::active_settings_path;
+use fabro_types::settings::SettingsLayer;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
-use fabro_validate::Severity;
-use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
 use tracing::debug;
 
-use crate::args::{GlobalArgs, GraphArgs, GraphDirection};
-use crate::shared::{
-    absolute_or_current, print_diagnostics, print_json_pretty, read_workflow_file, relative_path,
-};
+use crate::args::{GlobalArgs, GraphArgs, GraphDirection, GraphOutputFormat};
+use crate::command_context::CommandContext;
+use crate::commands::run::output::api_diagnostics_to_local;
+use crate::manifest_builder::{ManifestBuildInput, build_run_manifest};
+use crate::shared::{absolute_or_current, print_diagnostics, print_json_pretty, relative_path};
 
-static RANKDIR_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"rankdir\s*=\s*\w+").unwrap());
-
-pub(crate) fn run(args: &GraphArgs, styles: &Styles, globals: &GlobalArgs) -> anyhow::Result<()> {
+pub(crate) async fn run(
+    args: &GraphArgs,
+    styles: &Styles,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> anyhow::Result<()> {
     if globals.json && args.output.is_none() {
         globals.require_no_json()?;
     }
 
-    let cwd = std::env::current_dir()?;
-    let settings = ConfigLayer::for_workflow(&args.workflow, &cwd)?
-        .combine(ConfigLayer::user()?)
-        .resolve()?;
-    let resolution = resolve_workflow_path(&args.workflow, &cwd)?;
-    let validated = validate(ValidateInput {
-        workflow: WorkflowInput::Path(args.workflow.clone()),
-        settings,
-        cwd,
-        custom_transforms: Vec::new(),
+    let ctx = CommandContext::for_target(&args.target, printer)?;
+    let built = build_run_manifest(ManifestBuildInput {
+        workflow:           args.workflow.clone(),
+        cwd:                ctx.cwd().to_path_buf(),
+        args_layer:         SettingsLayer::default(),
+        args:               None,
+        run_id:             None,
+        user_layer:         load_settings_user()?,
+        user_settings_path: Some(active_settings_path(None)),
     })?;
-    let diagnostics = validated.diagnostics();
+    let client = ctx.server().await?;
+    let preflight = client.run_preflight(built.manifest.clone()).await?;
+    let diagnostics = api_diagnostics_to_local(&preflight.workflow.diagnostics);
 
-    print_diagnostics(diagnostics, styles);
-
-    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+    print_diagnostics(&diagnostics, styles, printer);
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
+    {
         bail!("Validation failed");
     }
 
-    let source = read_workflow_file(&resolution.dot_path)?;
-    let source = apply_direction(&source, args.direction);
-    let rendered = render_dot(&source, args.format.into())?;
+    let rendered = client
+        .render_workflow_graph(types::RenderWorkflowGraphRequest {
+            manifest:  built.manifest,
+            format:    Some(match args.format {
+                GraphOutputFormat::Svg => types::RenderWorkflowGraphFormat::Svg,
+                GraphOutputFormat::Png => types::RenderWorkflowGraphFormat::Png,
+            }),
+            direction: args.direction.map(|direction| match direction {
+                GraphDirection::Lr => types::RenderWorkflowGraphDirection::Lr,
+                GraphDirection::Tb => types::RenderWorkflowGraphDirection::Tb,
+            }),
+        })
+        .await?;
 
     if let Some(ref output_path) = args.output {
         std::fs::write(output_path, &rendered)?;
@@ -60,20 +74,10 @@ pub(crate) fn run(args: &GraphArgs, styles: &Styles, globals: &GlobalArgs) -> an
     }
 
     debug!(
-        path = %relative_path(&resolution.dot_path),
+        path = %relative_path(&built.target_path),
         format = %args.format,
         "Rendered workflow graph"
     );
 
     Ok(())
-}
-
-fn apply_direction(source: &str, direction: Option<GraphDirection>) -> Cow<'_, str> {
-    match direction {
-        Some(dir) => {
-            let replacement = format!("rankdir={dir}");
-            RANKDIR_RE.replace(source, replacement.as_str())
-        }
-        None => Cow::Borrowed(source),
-    }
 }
