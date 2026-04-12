@@ -180,6 +180,10 @@ fn attach_replays_completed_detached_run() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync integration test uses a dedicated stderr reader thread so the child process can stream output concurrently."
+)]
 fn attach_before_completion_streams_to_finished_state() {
     let context = test_context!();
     let gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
@@ -284,6 +288,10 @@ fn attach_before_completion_streams_to_finished_state() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync integration test polls logs for a human gate without creating a Tokio runtime."
+)]
 fn attach_json_errors_without_prompting_for_human_input() {
     let context = test_context!();
     let workflow = context.temp_dir.join("human-gate.fabro");

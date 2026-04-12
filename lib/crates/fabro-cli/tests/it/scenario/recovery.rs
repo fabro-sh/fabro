@@ -73,6 +73,10 @@ fn timeline_node_names(repo_dir: &Path, run_id: &str) -> Vec<String> {
         .collect()
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync git integration helper polls until metadata commits become readable without requiring Tokio."
+)]
 fn build_timeline_when_ready(repo_dir: &Path, run_id: &str) -> RunTimeline {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
@@ -91,6 +95,10 @@ fn build_timeline_when_ready(repo_dir: &Path, run_id: &str) -> RunTimeline {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync git integration helper retries metadata branch deletion until libgit2 releases its lock."
+)]
 fn delete_metadata_branch_when_ready(repo_dir: &Path, run_id: &str) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {

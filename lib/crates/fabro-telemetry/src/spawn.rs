@@ -150,6 +150,10 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This sync test polls for detached child output without creating a Tokio runtime."
+    )]
     fn spawn_detached_unix_creates_marker_file() {
         fn wait_for_file(path: &std::path::Path) {
             for _ in 0..100 {

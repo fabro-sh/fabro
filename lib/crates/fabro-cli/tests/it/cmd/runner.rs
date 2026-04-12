@@ -66,6 +66,10 @@ fn spawn_worker_process(
     cmd.spawn().expect("worker should spawn")
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync integration helper polls child exit without requiring a Tokio runtime."
+)]
 fn wait_for_child_exit(child: &mut Child, timeout: Duration) -> ExitStatus {
     let deadline = Instant::now() + timeout;
     loop {

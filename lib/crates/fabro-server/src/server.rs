@@ -8094,6 +8094,10 @@ timeout = "30s"
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This test intentionally blocks inside a sync registry factory to simulate slow startup before cancellation."
+    )]
     async fn cancel_before_run_transitions_to_running_returns_empty_attach_stream() {
         let state = create_app_state_with_registry_factory(|interviewer| {
             std::thread::sleep(std::time::Duration::from_millis(200));

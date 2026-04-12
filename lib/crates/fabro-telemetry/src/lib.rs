@@ -71,6 +71,10 @@ pub fn init_server() {
     init_inner(level, anonymous_id);
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Telemetry uses a long-lived dedicated OS thread for buffered blocking delivery and shutdown joins."
+)]
 fn init_inner(level: TelemetryLevel, anonymous_id: String) {
     let ctx = context::build_context();
     let (tx, rx) = mpsc::channel();

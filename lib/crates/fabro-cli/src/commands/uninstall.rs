@@ -60,7 +60,7 @@ pub(crate) async fn run_uninstall(
         return Ok(());
     }
 
-    execute_uninstall(&inventory, globals.json, printer)
+    execute_uninstall(&inventory, globals.json, printer).await
 }
 
 fn build_inventory(home_root: &Path, storage_dir: &Path) -> Inventory {
@@ -226,7 +226,7 @@ struct UninstallResult {
     binary_hint:           Option<String>,
 }
 
-fn execute_uninstall(inventory: &Inventory, json: bool, printer: Printer) -> Result<()> {
+async fn execute_uninstall(inventory: &Inventory, json: bool, printer: Printer) -> Result<()> {
     let green = console::Style::new().green();
     let dim = console::Style::new().dim();
     let bold = console::Style::new().bold();
@@ -242,7 +242,7 @@ fn execute_uninstall(inventory: &Inventory, json: bool, printer: Printer) -> Res
 
     // Unit 3a: Server stop
     if inventory.server_running {
-        server::stop::execute(&inventory.storage_dir, Duration::from_secs(5), printer);
+        server::stop::execute(&inventory.storage_dir, Duration::from_secs(5), printer).await;
         result.server_stopped = true;
     }
 

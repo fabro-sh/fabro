@@ -337,6 +337,10 @@ fn isolated_server_switches_context_to_separate_daemon() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync integration test uses OS threads to exercise concurrent CLI auto-start behavior across separate processes."
+)]
 fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
     fn run_ps_json(
         home_dir: &std::path::Path,

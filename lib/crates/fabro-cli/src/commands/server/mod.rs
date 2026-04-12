@@ -55,7 +55,7 @@ pub(crate) async fn dispatch(
         }) => {
             let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
             let storage_dir = user_config::storage_dir(&settings)?;
-            stop::execute(&storage_dir, Duration::from_secs(timeout), printer);
+            stop::execute(&storage_dir, Duration::from_secs(timeout), printer).await;
             Ok(())
         }
         ServerCommand::Status(ServerStatusArgs { storage_dir, json }) => {

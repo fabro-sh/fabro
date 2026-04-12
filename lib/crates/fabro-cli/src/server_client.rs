@@ -113,6 +113,7 @@ pub(crate) async fn connect_server_with_settings(
 async fn connect_api_client_bundle(storage_dir: &Path) -> Result<ServerStoreClient> {
     let config_path = user_config::active_settings_path(None);
     let bind = start::ensure_server_running_for_storage(storage_dir, &config_path)
+        .await
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
     match bind {
         Bind::Unix(path) => connect_unix_socket_api_client_bundle(&path).await,
@@ -145,6 +146,7 @@ async fn connect_target_api_client_bundle(
                     &runtime.active_config_path,
                     &runtime.storage_dir,
                 )
+                .await
                 .with_context(|| format!("Failed to start fabro server for {}", path.display()))?;
                 connect_unix_socket_api_client_bundle(path).await
             }

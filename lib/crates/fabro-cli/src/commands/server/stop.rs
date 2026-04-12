@@ -1,13 +1,13 @@
 use std::path::Path;
-use std::thread;
 use std::time::Duration;
 
 use fabro_server::bind::Bind;
 use fabro_util::printer::Printer;
+use tokio::time;
 
 use super::record;
 
-pub(crate) fn execute(storage_dir: &Path, timeout: Duration, printer: Printer) {
+pub(crate) async fn execute(storage_dir: &Path, timeout: Duration, printer: Printer) {
     let Some(active) = record::active_server_record_details(storage_dir) else {
         fabro_util::printerr!(printer, "Server is not running");
         std::process::exit(1);
@@ -22,13 +22,13 @@ pub(crate) fn execute(storage_dir: &Path, timeout: Duration, printer: Printer) {
         if !fabro_proc::process_alive(record.pid) {
             break;
         }
-        thread::sleep(poll_interval);
+        time::sleep(poll_interval).await;
         elapsed += poll_interval;
     }
 
     if fabro_proc::process_alive(record.pid) {
         fabro_proc::sigkill(record.pid);
-        thread::sleep(Duration::from_millis(100));
+        time::sleep(Duration::from_millis(100)).await;
     }
 
     record::remove_server_record(&active.record_path);

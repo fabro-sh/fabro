@@ -6,6 +6,7 @@ use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_workflow::records::Conclusion;
 use fabro_workflow::run_status::RunStatus;
+use tokio::time;
 use tracing::info;
 
 use crate::args::{GlobalArgs, WaitArgs};
@@ -65,9 +66,9 @@ pub(crate) async fn run(
                     run_id
                 );
             }
-            std::thread::sleep(interval.min(dl - now));
+            time::sleep(interval.min(dl - now)).await;
         } else {
-            std::thread::sleep(interval);
+            time::sleep(interval).await;
         }
     };
 

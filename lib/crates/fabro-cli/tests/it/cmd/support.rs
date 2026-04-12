@@ -219,6 +219,10 @@ fn fast_simple_workflow(context: &TestContext) -> PathBuf {
     workflow
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync integration helper polls run artifacts after spawning a detached CLI process."
+)]
 pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
     let workflow = fixture("simple.fabro");
     let run_id = unique_run_id();
@@ -457,6 +461,10 @@ pub(crate) fn write_gated_workflow(path: &Path, name: &str, goal: &str) -> Workf
     WorkflowGate { gate_path }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync integration helper polls stored run status without requiring a Tokio runtime."
+)]
 pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
     let deadline = Instant::now() + COMMAND_TIMEOUT;
     loop {
@@ -518,6 +526,10 @@ pub(crate) fn git_filters(context: &TestContext) -> Vec<(String, String)> {
     filters
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync integration helper polls for the run directory to appear without requiring a Tokio runtime."
+)]
 pub(crate) fn resolve_run(context: &TestContext, run_id: &str) -> RunSetup {
     let deadline = Instant::now() + COMMAND_TIMEOUT;
     loop {
@@ -674,6 +686,10 @@ pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
     crate::support::parse_event_envelopes(&response)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync integration helper polls stored events without requiring a Tokio runtime."
+)]
 pub(crate) fn wait_for_event_names(run_dir: &Path, expected: &[&str]) {
     let deadline = std::time::Instant::now() + COMMAND_TIMEOUT;
 

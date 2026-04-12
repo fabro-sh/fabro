@@ -114,6 +114,10 @@ enum WorkerControlStreamEvent {
     Eof,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Worker control reads blocking stdin on a dedicated OS thread and forwards lines into Tokio."
+)]
 fn spawn_worker_control_stream(
     interviewer: Arc<ControlInterviewer>,
     cancel_token: Arc<AtomicBool>,

@@ -1,2 +1,7 @@
 absolute-paths-max-segments = 2
 absolute-paths-allowed-crates = ["std", "core", "alloc"]
+disallowed-methods = [
+  { path = "std::thread::sleep", reason = "Prefer tokio::time::sleep on Tokio paths; document intentional blocking sleeps with #[expect(clippy::disallowed_methods, reason = \"...\")]", replacement = "tokio::time::sleep" },
+  { path = "std::thread::spawn", reason = "Prefer Tokio task APIs on async paths; document intentional dedicated OS threads with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
+  { path = "std::thread::Builder::spawn", reason = "Prefer Tokio task APIs on async paths; document intentional dedicated OS threads with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
+]

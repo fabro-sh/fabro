@@ -45,6 +45,10 @@ fn test_run_id(label: &str) -> RunId {
     RunId::from(Ulid(u128::from(hasher.finish())))
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This helper spins up a dedicated current-thread runtime when called from inside an existing Tokio runtime."
+)]
 fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error::Error>> {
     let run_dir = run_dir.to_path_buf();
     let uses_shared_store = run_dir

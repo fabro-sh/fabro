@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::thread;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -12,6 +11,7 @@ use fabro_server::serve;
 use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
+use tokio::time;
 
 use super::record;
 
@@ -28,11 +28,11 @@ pub(crate) async fn execute(
     if foreground {
         Box::pin(execute_foreground(bind, serve_args, storage_dir, styles)).await
     } else {
-        execute_daemon(&bind, &serve_args, &storage_dir, true, printer)
+        execute_daemon(&bind, &serve_args, &storage_dir, true, printer).await
     }
 }
 
-pub(crate) fn ensure_server_running_for_storage(
+pub(crate) async fn ensure_server_running_for_storage(
     storage_dir: &Path,
     config_path: &Path,
 ) -> Result<Bind> {
@@ -41,20 +41,20 @@ pub(crate) fn ensure_server_running_for_storage(
     }
 
     let bind = Bind::Unix(default_socket_path());
-    ensure_server_running_with_bind(bind, config_path, storage_dir)
+    ensure_server_running_with_bind(bind, config_path, storage_dir).await
 }
 
-pub(crate) fn ensure_server_running_on_socket(
+pub(crate) async fn ensure_server_running_on_socket(
     socket_path: &Path,
     config_path: &Path,
     storage_dir: &Path,
 ) -> Result<()> {
     let bind = Bind::Unix(socket_path.to_path_buf());
-    let _ = ensure_server_running_with_bind(bind, config_path, storage_dir)?;
+    let _ = ensure_server_running_with_bind(bind, config_path, storage_dir).await?;
     Ok(())
 }
 
-fn ensure_server_running_with_bind(
+async fn ensure_server_running_with_bind(
     bind: Bind,
     config_path: &Path,
     storage_dir: &Path,
@@ -93,7 +93,9 @@ fn ensure_server_running_with_bind(
         storage_dir,
         false,
         Printer::Silent,
-    ) {
+    )
+    .await
+    {
         Ok(()) => Ok(bind),
         Err(err) => {
             if let Some(existing) = record::active_server_record(storage_dir) {
@@ -122,7 +124,7 @@ async fn execute_foreground(
     storage_dir: PathBuf,
     styles: &'static Styles,
 ) -> Result<()> {
-    let lock_file = acquire_lock(&storage_dir)?;
+    let lock_file = acquire_lock(&storage_dir).await?;
     let _lock_file = lock_file; // keep alive for the duration
 
     if let Some(existing) = record::active_server_record(&storage_dir) {
@@ -171,14 +173,14 @@ async fn execute_foreground(
 // Daemon mode
 // ---------------------------------------------------------------------------
 
-fn execute_daemon(
+async fn execute_daemon(
     bind: &BindRequest,
     serve_args: &ServeArgs,
     storage_dir: &Path,
     announce: bool,
     printer: Printer,
 ) -> Result<()> {
-    let lock_file = acquire_lock(storage_dir)?;
+    let lock_file = acquire_lock(storage_dir).await?;
     let _lock_file = lock_file; // keep alive until function returns
 
     if let Some(existing) = record::active_server_record(storage_dir) {
@@ -288,7 +290,7 @@ fn execute_daemon(
             bail!("Server exited during startup with status {status}");
         }
 
-        thread::sleep(poll_interval);
+        time::sleep(poll_interval).await;
         elapsed += poll_interval;
     }
 
@@ -306,7 +308,7 @@ fn execute_daemon(
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn acquire_lock(storage_dir: &Path) -> Result<std::fs::File> {
+async fn acquire_lock(storage_dir: &Path) -> Result<std::fs::File> {
     let lock_path = Storage::new(storage_dir).server_state().lock_path();
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -325,7 +327,7 @@ fn acquire_lock(storage_dir: &Path) -> Result<std::fs::File> {
         if elapsed >= timeout {
             bail!("timed out waiting for server lock");
         }
-        thread::sleep(poll_interval);
+        time::sleep(poll_interval).await;
         elapsed += poll_interval;
     }
 

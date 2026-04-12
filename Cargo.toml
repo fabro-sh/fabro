@@ -108,6 +108,7 @@ use_self = "warn"
 # Project-specific lints
 wildcard_imports = "warn"
 absolute_paths = "warn"
+disallowed_methods = "warn"
 
 [profile.release]
 lto = "thin"

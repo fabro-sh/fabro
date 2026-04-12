@@ -93,6 +93,10 @@ impl EngineServices {
 
     /// Test-only default: empty registry, no hooks, local sandbox at cwd.
     #[cfg(test)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This test helper must initialize a current-thread runtime safely from both sync tests and #[tokio::test]."
+    )]
     pub fn test_default() -> Self {
         let store = Arc::new(Database::new(
             Arc::new(InMemory::new()),

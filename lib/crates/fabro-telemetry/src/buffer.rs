@@ -148,6 +148,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This sync test needs a dedicated OS thread to let the blocking consumer loop flush on its own timer."
+    )]
     fn flushes_on_time_threshold() {
         let (tx, rx) = mpsc::channel();
         let mid_flushes: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));

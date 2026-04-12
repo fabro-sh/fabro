@@ -255,6 +255,10 @@ fn ensure_parent_dir(path: &Path) {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync test helper polls filesystem and flock state without requiring a Tokio runtime."
+)]
 fn with_session_lock<T>(root: &Path, f: impl FnOnce() -> T) -> T {
     let lock_path = session_lock_path(root);
     // Retry create-dir + create-file as a unit: another process's
@@ -573,6 +577,10 @@ fn server_running(server: &ServerPaths) -> bool {
     server_record_pid(&server.storage_dir).is_some_and(fabro_proc::process_alive)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync test helper polls a child server process without requiring a Tokio runtime."
+)]
 fn wait_for_server_running(server: &ServerPaths) {
     let poll = std::time::Duration::from_millis(50);
     let timeout = std::time::Duration::from_secs(5);
@@ -629,6 +637,10 @@ fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &P
     wait_for_server_running(server);
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This sync test helper polls child shutdown during cleanup without requiring a Tokio runtime."
+)]
 fn stop_test_server(server: &ServerPaths) {
     let record_path = server_record_path(&server.storage_dir);
     let Some(pid) = server_record_pid(&server.storage_dir) else {
