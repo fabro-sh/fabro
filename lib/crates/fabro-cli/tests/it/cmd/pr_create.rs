@@ -1,6 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
+use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run, setup_failed_run};
 
 #[test]
 fn help() {
@@ -23,6 +23,7 @@ fn help() {
           --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --model <MODEL>     LLM model for generating PR description
+      -f, --force             Create PR even if the run status is not success/partial_success
           --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet             Suppress non-essential output [env: FABRO_QUIET=]
           --verbose           Enable verbose output [env: FABRO_VERBOSE=]
@@ -70,6 +71,38 @@ fn pr_create_uses_store_run_record_without_run_json() {
 
     let mut cmd = context.command();
     cmd.args(["pr", "create", &run.run_id]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Run has no run_branch — was it run with git push enabled?
+    ");
+}
+
+#[test]
+fn pr_create_failed_run_rejects_without_force() {
+    let context = test_context!();
+    let run = setup_failed_run(&context);
+    let mut cmd = context.command();
+    cmd.args(["pr", "create", &run.run_id]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Run status is 'fail', expected success or partial_success
+    ");
+}
+
+#[test]
+fn pr_create_failed_run_proceeds_with_force() {
+    let context = test_context!();
+    let run = setup_failed_run(&context);
+    let mut cmd = context.command();
+    cmd.args(["pr", "create", "--force", &run.run_id]);
 
     fabro_snapshot!(context.filters(), cmd, @"
     success: false

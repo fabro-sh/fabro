@@ -378,6 +378,66 @@ worktree_mode = "never"
     WorkspaceRunSetup { run, workspace_dir }
 }
 
+pub(crate) fn setup_failed_run(context: &TestContext) -> RunSetup {
+    let workspace_dir = context.temp_dir.join("failed-run");
+    std::fs::create_dir_all(&workspace_dir)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", workspace_dir.display()));
+
+    write_text_file(
+        &workspace_dir.join("fail.fabro"),
+        r#"digraph Fail {
+  graph [goal="Always fail", default_max_retries=0]
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  boom [shape=parallelogram, script="exit 1", goal_gate=true]
+  start -> boom -> exit
+}
+"#,
+    );
+    write_text_file(
+        &workspace_dir.join("run.toml"),
+        r#"_version = 1
+
+[workflow]
+graph = "fail.fabro"
+
+[run]
+goal = "Always fail"
+
+[run.sandbox]
+provider = "local"
+
+[run.sandbox.local]
+worktree_mode = "never"
+"#,
+    );
+
+    // The workflow is expected to fail (script exits 1), but the CLI may still
+    // exit 0.  The `pr create` tests verify that the conclusion has a fail status.
+    let run_id = unique_run_id();
+    let mut cmd = context.run_cmd();
+    cmd.current_dir(&workspace_dir);
+    cmd.timeout(COMMAND_TIMEOUT);
+    cmd.env("OPENAI_API_KEY", "test");
+    cmd.args([
+        "--run-id",
+        run_id.as_str(),
+        "--auto-approve",
+        "--no-retro",
+        "--sandbox",
+        "local",
+        "--provider",
+        "openai",
+        "run.toml",
+    ]);
+    let _output = cmd.output().expect("command should execute");
+
+    RunSetup {
+        run_dir: context.find_run_dir(&run_id),
+        run_id,
+    }
+}
+
 fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &str) -> RunSetup {
     let run_id = unique_run_id();
     let mut cmd = context.run_cmd();
