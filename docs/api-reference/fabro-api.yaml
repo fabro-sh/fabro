@@ -1510,10 +1510,23 @@ paths:
       operationId: retrieveServerSettings
       tags: [Settings]
       summary: Retrieve Server Settings
-      description: Returns the structured server settings.
+      description: >
+        Returns the server settings view selected by the optional `view` query
+        parameter. `view=layer` (the default) returns the current sparse
+        redacted `SettingsLayer` payload. `view=resolved` returns the server's
+        dense resolved settings payload after applying the same redaction
+        policy.
+      parameters:
+        - $ref: "#/components/parameters/SettingsView"
       responses:
         "200":
           description: Server settings
+          headers:
+            X-Fabro-Settings-View:
+              description: Present with value `resolved` when the response body is the dense resolved settings view.
+              schema:
+                type: string
+                enum: [resolved]
           content:
             application/json:
               schema:
@@ -1548,6 +1561,16 @@ components:
       schema:
         type: string
       example: 01JNQVR7M0EJ5GKAT2SC4ERS1Z
+
+    SettingsView:
+      name: view
+      in: query
+      required: false
+      description: Selects the server settings representation to return.
+      schema:
+        type: string
+        enum: [layer, resolved]
+        default: layer
 
     StageId:
       name: stageId
@@ -4046,22 +4069,24 @@ components:
 
     ServerSettings:
       description: |
-        Non-secret view of the server's effective v2 settings.
+        Redacted server settings payload.
 
-        Wire shape mirrors `fabro_types::settings::SettingsFile` with the
-        secret-bearing subtrees dropped before serialization:
+        The `/api/v1/settings` endpoint supports two response shapes:
 
-        - `server.listen.*` (bind address, TLS key material)
-        - `server.auth.api.{jwt,mtls}` internals
-        - `server.artifacts.s3` / `server.slatedb.s3` credentials
-        - `server.integrations.github.webhooks`, Slack/Discord/Teams tokens
-        - Every `{{ env.NAME }}` InterpString is serialized in its unresolved
-          template form, never the resolved secret value.
+        - `view=layer` (default): the sparse redacted `SettingsLayer` shape
+        - `view=resolved`: the dense resolved `Settings` shape
 
-        The top-level object keys follow the v2 schema: `_version`, `project`,
-        `workflow`, `run`, `cli`, `server`, `features`.
+        Both views drop the same exact secret-bearing paths:
 
-        See `lib/crates/fabro-types/src/settings/tree.rs` for the full type.
+        - `server.listen`
+        - `server.auth.api.jwt.issuer`
+        - `server.auth.api.jwt.audience`
+        - `server.auth.api.mtls.ca`
+        - `server.auth.web.providers.github.client_secret`
+
+        For non-redacted `InterpString` fields, the wire payload preserves the
+        unresolved source/template string rather than any environment-resolved
+        secret value.
       type: object
       additionalProperties: true
 

@@ -48,8 +48,9 @@ impl EffectiveSettingsLayers {
     }
 }
 
-/// Resolve layered configuration down to a single effective [`SettingsLayer`].
-pub fn resolve_settings(
+/// Materialize layered configuration down to a single effective
+/// [`SettingsLayer`].
+pub fn materialize_settings_layer(
     layers: EffectiveSettingsLayers,
     server_settings: Option<&SettingsLayer>,
     mode: EffectiveSettingsMode,
@@ -187,7 +188,7 @@ mod tests {
     use fabro_types::settings::server::{ServerLayer, ServerSchedulerLayer, ServerStorageLayer};
     use fabro_types::settings::{InterpString, SettingsLayer};
 
-    use super::{EffectiveSettingsLayers, EffectiveSettingsMode, resolve_settings};
+    use super::{EffectiveSettingsLayers, EffectiveSettingsMode, materialize_settings_layer};
     use crate::parse::parse_settings_layer;
 
     fn layer(source: &str) -> SettingsLayer {
@@ -196,7 +197,7 @@ mod tests {
 
     #[test]
     fn local_only_merges_project_and_user_layers() {
-        let settings = resolve_settings(
+        let settings = materialize_settings_layer(
             EffectiveSettingsLayers::new(
                 SettingsLayer::default(),
                 SettingsLayer::default(),
@@ -286,7 +287,7 @@ shared = "user"
 
     #[test]
     fn local_only_merges_workflow_project_user() {
-        let settings = resolve_settings(
+        let settings = materialize_settings_layer(
             EffectiveSettingsLayers::new(
                 SettingsLayer::default(),
                 layer(
@@ -381,7 +382,7 @@ root = "/tmp/should-be-inert"
 "#,
         );
 
-        let settings = resolve_settings(
+        let settings = materialize_settings_layer(
             EffectiveSettingsLayers::new(
                 SettingsLayer::default(),
                 SettingsLayer::default(),
@@ -445,7 +446,7 @@ root = "/tmp/should-be-inert"
             ..SettingsLayer::default()
         };
 
-        let settings = resolve_settings(
+        let settings = materialize_settings_layer(
             EffectiveSettingsLayers::default(),
             Some(&server_settings),
             EffectiveSettingsMode::LocalDaemon,

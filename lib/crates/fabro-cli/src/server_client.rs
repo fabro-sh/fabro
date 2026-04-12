@@ -279,16 +279,43 @@ impl ServerStoreClient {
         &self.base_url
     }
 
-    pub(crate) async fn retrieve_server_settings(&self) -> Result<SettingsLayer> {
-        let response = self
-            .client
-            .retrieve_server_settings()
-            .send()
+    pub(crate) async fn retrieve_resolved_server_settings(&self) -> Result<serde_json::Value> {
+        let url = format!("{}/api/v1/settings?view=resolved", self.base_url);
+        let response = self.http_client.get(&url).send().await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+                if let Some(detail) = value
+                    .get("errors")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|errors| errors.first())
+                    .and_then(|entry| entry.get("detail"))
+                    .and_then(serde_json::Value::as_str)
+                {
+                    bail!("{detail}");
+                }
+            }
+            if body.is_empty() {
+                bail!("request failed with status {status}");
+            }
+            bail!("request failed with status {status}: {body}");
+        }
+
+        let marker = response
+            .headers()
+            .get("x-fabro-settings-view")
+            .and_then(|value| value.to_str().ok());
+        if marker != Some("resolved") {
+            bail!(
+                "server does not support resolved settings view; upgrade the server or use --local"
+            );
+        }
+
+        response
+            .json::<serde_json::Value>()
             .await
-            .map_err(map_api_error)?;
-        let raw = serde_json::Value::Object(response.into_inner().into());
-        serde_json::from_value::<SettingsLayer>(raw)
-            .context("server returned a settings payload that does not match the v2 schema")
+            .context("server returned invalid JSON for the resolved settings view")
     }
 
     pub(crate) async fn create_run_from_manifest(

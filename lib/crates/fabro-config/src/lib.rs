@@ -41,7 +41,7 @@ pub fn load_and_resolve(
     server_settings: Option<&SettingsLayer>,
     mode: effective_settings::EffectiveSettingsMode,
 ) -> Result<Settings> {
-    let layer = effective_settings::resolve_settings(layers, server_settings, mode)?;
+    let layer = effective_settings::materialize_settings_layer(layers, server_settings, mode)?;
     resolve(&layer).map_err(|errors| Error::resolve("failed to resolve settings", errors))
 }
 

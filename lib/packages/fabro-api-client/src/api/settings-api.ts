@@ -27,12 +27,13 @@ import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError
 export const SettingsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Returns the structured server settings.
+         * Returns the server settings view selected by the optional `view` query parameter. `view=layer` (the default) returns the current sparse redacted `SettingsLayer` payload. `view=resolved` returns the server\'s dense resolved settings payload after applying the same redaction policy. 
          * @summary Retrieve Server Settings
+         * @param {RetrieveServerSettingsViewEnum} [view] Selects the server settings representation to return.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveServerSettings: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        retrieveServerSettings: async (view?: RetrieveServerSettingsViewEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/v1/settings`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -51,6 +52,10 @@ export const SettingsApiAxiosParamCreator = function (configuration?: Configurat
             // authentication BearerAuth required
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -73,13 +78,14 @@ export const SettingsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = SettingsApiAxiosParamCreator(configuration)
     return {
         /**
-         * Returns the structured server settings.
+         * Returns the server settings view selected by the optional `view` query parameter. `view=layer` (the default) returns the current sparse redacted `SettingsLayer` payload. `view=resolved` returns the server\'s dense resolved settings payload after applying the same redaction policy. 
          * @summary Retrieve Server Settings
+         * @param {RetrieveServerSettingsViewEnum} [view] Selects the server settings representation to return.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async retrieveServerSettings(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveServerSettings(options);
+        async retrieveServerSettings(view?: RetrieveServerSettingsViewEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveServerSettings(view, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SettingsApi.retrieveServerSettings']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -94,13 +100,14 @@ export const SettingsApiFactory = function (configuration?: Configuration, baseP
     const localVarFp = SettingsApiFp(configuration)
     return {
         /**
-         * Returns the structured server settings.
+         * Returns the server settings view selected by the optional `view` query parameter. `view=layer` (the default) returns the current sparse redacted `SettingsLayer` payload. `view=resolved` returns the server\'s dense resolved settings payload after applying the same redaction policy. 
          * @summary Retrieve Server Settings
+         * @param {RetrieveServerSettingsViewEnum} [view] Selects the server settings representation to return.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveServerSettings(options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
-            return localVarFp.retrieveServerSettings(options).then((request) => request(axios, basePath));
+        retrieveServerSettings(view?: RetrieveServerSettingsViewEnum, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.retrieveServerSettings(view, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -110,13 +117,19 @@ export const SettingsApiFactory = function (configuration?: Configuration, baseP
  */
 export class SettingsApi extends BaseAPI {
     /**
-     * Returns the structured server settings.
+     * Returns the server settings view selected by the optional `view` query parameter. `view=layer` (the default) returns the current sparse redacted `SettingsLayer` payload. `view=resolved` returns the server\'s dense resolved settings payload after applying the same redaction policy. 
      * @summary Retrieve Server Settings
+     * @param {RetrieveServerSettingsViewEnum} [view] Selects the server settings representation to return.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public retrieveServerSettings(options?: RawAxiosRequestConfig) {
-        return SettingsApiFp(this.configuration).retrieveServerSettings(options).then((request) => request(this.axios, this.basePath));
+    public retrieveServerSettings(view?: RetrieveServerSettingsViewEnum, options?: RawAxiosRequestConfig) {
+        return SettingsApiFp(this.configuration).retrieveServerSettings(view, options).then((request) => request(this.axios, this.basePath));
     }
 }
 
+export const RetrieveServerSettingsViewEnum = {
+    LAYER: 'layer',
+    RESOLVED: 'resolved'
+} as const;
+export type RetrieveServerSettingsViewEnum = typeof RetrieveServerSettingsViewEnum[keyof typeof RetrieveServerSettingsViewEnum];

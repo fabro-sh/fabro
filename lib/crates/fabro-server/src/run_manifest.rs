@@ -84,7 +84,7 @@ pub(crate) fn prepare_manifest_with_mode(
         .try_fold(SettingsLayer::default(), |layer, config| {
             Ok::<_, anyhow::Error>(combine_files(layer, parse_manifest_config(config)?))
         })?;
-    let mut settings = effective_settings::resolve_settings(
+    let mut settings = effective_settings::materialize_settings_layer(
         EffectiveSettingsLayers::new(args_layer, workflow_layer, project_layer, user_layer),
         Some(server_settings),
         if local_daemon_mode {

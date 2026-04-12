@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::Path;
 
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
-use fabro_config::{effective_settings, load_settings_project, project};
+use fabro_config::{load_and_resolve, load_settings_project, project};
 use fabro_types::settings::SettingsLayer;
 use fabro_util::printer::Printer;
 
@@ -57,30 +57,53 @@ fn workflow_and_project_layers(
     Ok((workflow_layer, project_layer))
 }
 
-async fn merged_config(args: &SettingsArgs, printer: Printer) -> anyhow::Result<SettingsLayer> {
+fn strip_nulls(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for child in map.values_mut() {
+                strip_nulls(child);
+            }
+            map.retain(|_, child| !child.is_null());
+        }
+        serde_json::Value::Array(values) => {
+            for child in values {
+                strip_nulls(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn local_settings_value(
+    args: &SettingsArgs,
+    printer: Printer,
+) -> anyhow::Result<serde_json::Value> {
     let base_ctx = CommandContext::base(printer)?;
     let layers = config_layers(&base_ctx, args.workflow.as_deref())?;
-    if args.local {
-        return Ok(effective_settings::resolve_settings(
-            layers,
-            None,
-            EffectiveSettingsMode::LocalOnly,
-        )?);
-    }
-
-    let ctx = CommandContext::for_target(&args.target, printer)?;
-    let target = user_config::resolve_server_target(&args.target, ctx.machine_settings())?;
-    let server_settings = ctx.server().await?.retrieve_server_settings().await?;
-    let mode = match target {
-        user_config::ServerTarget::HttpUrl { .. } => EffectiveSettingsMode::RemoteServer,
-        user_config::ServerTarget::UnixSocket(_) => EffectiveSettingsMode::LocalDaemon,
-    };
-
-    Ok(effective_settings::resolve_settings(
+    let mut value = serde_json::to_value(load_and_resolve(
         layers,
-        Some(&server_settings),
-        mode,
-    )?)
+        None,
+        EffectiveSettingsMode::LocalOnly,
+    )?)?;
+    strip_nulls(&mut value);
+    Ok(value)
+}
+
+async fn rendered_config(
+    args: &SettingsArgs,
+    printer: Printer,
+) -> anyhow::Result<serde_json::Value> {
+    if args.local {
+        return local_settings_value(args, printer);
+    }
+    if args.workflow.is_some() {
+        anyhow::bail!("WORKFLOW requires --local; use `fabro settings --local WORKFLOW`");
+    }
+    let ctx = CommandContext::for_target(&args.target, printer)?;
+    ctx.server()
+        .await?
+        .retrieve_resolved_server_settings()
+        .await
 }
 
 pub(crate) async fn execute(
@@ -88,7 +111,7 @@ pub(crate) async fn execute(
     globals: &GlobalArgs,
     printer: Printer,
 ) -> anyhow::Result<()> {
-    let config = Box::pin(merged_config(args, printer)).await?;
+    let config = Box::pin(rendered_config(args, printer)).await?;
     if globals.json {
         print_json_pretty(&config)?;
         return Ok(());

@@ -1123,35 +1123,53 @@ async fn health() -> Response {
 async fn get_server_settings(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
+    Query(query): Query<settings_view::SettingsQuery>,
 ) -> Response {
     let settings = state.settings.read().unwrap().clone();
-    let redacted = settings_view::redact_for_api(&settings);
-    let mut value = match serde_json::to_value(&redacted) {
-        Ok(value) => value,
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
+    match query.view {
+        settings_view::SettingsApiView::Layer => {
+            let redacted = settings_view::redact_for_api(&settings);
+            let mut value = match serde_json::to_value(&redacted) {
+                Ok(value) => value,
+                Err(err) => {
+                    return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                        .into_response();
+                }
+            };
+            strip_nulls(&mut value);
+            (StatusCode::OK, Json(value)).into_response()
         }
-    };
-    strip_nulls(&mut value);
-    (StatusCode::OK, Json(value)).into_response()
+        settings_view::SettingsApiView::Resolved => {
+            let resolved = match fabro_config::resolve(&settings) {
+                Ok(settings) => settings,
+                Err(err) => {
+                    return ApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("failed to resolve settings: {err:?}"),
+                    )
+                    .into_response();
+                }
+            };
+            let mut value = match settings_view::redact_resolved_value(&resolved) {
+                Ok(value) => value,
+                Err(err) => {
+                    return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                        .into_response();
+                }
+            };
+            strip_nulls(&mut value);
+            let mut response = (StatusCode::OK, Json(value)).into_response();
+            response.headers_mut().insert(
+                settings_view::RESOLVED_VIEW_HEADER_NAME,
+                HeaderValue::from_static(settings_view::RESOLVED_VIEW_HEADER_VALUE),
+            );
+            response
+        }
+    }
 }
 
 fn strip_nulls(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            for child in map.values_mut() {
-                strip_nulls(child);
-            }
-            map.retain(|_, child| !child.is_null());
-        }
-        serde_json::Value::Array(values) => {
-            for child in values {
-                strip_nulls(child);
-            }
-        }
-        _ => {}
-    }
+    settings_view::strip_nulls(value);
 }
 
 async fn get_system_info(
@@ -6206,6 +6224,34 @@ mod tests {
 
     fn api(path: &str) -> String {
         format!("/api/v1{path}")
+    }
+
+    #[tokio::test]
+    async fn resolved_settings_view_returns_internal_error_when_runtime_settings_stop_resolving() {
+        let state = create_app_state();
+        *state.settings.write().unwrap() = fabro_config::parse_settings_layer(
+            r#"
+_version = 1
+
+[cli.target]
+type = "http"
+"#,
+        )
+        .expect("settings fixture should parse");
+        let app = build_router(state, AuthMode::Disabled);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api("/settings?view=resolved"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[tokio::test]

@@ -37,8 +37,8 @@ import type { SecretMetadata } from '../models';
 export const SecretsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * 
-         * @summary Store or update a secret
+         * Stores a secret in the workflow-visible vault. Anything stored here may be used by workflows.
+         * @summary Store or update a vault secret
          * @param {CreateSecretRequest} createSecretRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -80,7 +80,7 @@ export const SecretsApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
-         * @summary Delete a stored secret
+         * @summary Delete a vault secret
          * @param {DeleteSecretRequest} deleteSecretRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -121,8 +121,8 @@ export const SecretsApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         * Returns stored secret names and timestamps. Secret values are never exposed.
-         * @summary List stored secrets
+         * Returns workflow-visible vault secret names and timestamps. Secret values are never exposed.
+         * @summary List vault secrets
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -167,8 +167,8 @@ export const SecretsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = SecretsApiAxiosParamCreator(configuration)
     return {
         /**
-         * 
-         * @summary Store or update a secret
+         * Stores a secret in the workflow-visible vault. Anything stored here may be used by workflows.
+         * @summary Store or update a vault secret
          * @param {CreateSecretRequest} createSecretRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -181,7 +181,7 @@ export const SecretsApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
-         * @summary Delete a stored secret
+         * @summary Delete a vault secret
          * @param {DeleteSecretRequest} deleteSecretRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -193,8 +193,8 @@ export const SecretsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns stored secret names and timestamps. Secret values are never exposed.
-         * @summary List stored secrets
+         * Returns workflow-visible vault secret names and timestamps. Secret values are never exposed.
+         * @summary List vault secrets
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -214,8 +214,8 @@ export const SecretsApiFactory = function (configuration?: Configuration, basePa
     const localVarFp = SecretsApiFp(configuration)
     return {
         /**
-         * 
-         * @summary Store or update a secret
+         * Stores a secret in the workflow-visible vault. Anything stored here may be used by workflows.
+         * @summary Store or update a vault secret
          * @param {CreateSecretRequest} createSecretRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -225,7 +225,7 @@ export const SecretsApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
-         * @summary Delete a stored secret
+         * @summary Delete a vault secret
          * @param {DeleteSecretRequest} deleteSecretRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -234,8 +234,8 @@ export const SecretsApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.deleteSecretByName(deleteSecretRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns stored secret names and timestamps. Secret values are never exposed.
-         * @summary List stored secrets
+         * Returns workflow-visible vault secret names and timestamps. Secret values are never exposed.
+         * @summary List vault secrets
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -250,8 +250,8 @@ export const SecretsApiFactory = function (configuration?: Configuration, basePa
  */
 export class SecretsApi extends BaseAPI {
     /**
-     * 
-     * @summary Store or update a secret
+     * Stores a secret in the workflow-visible vault. Anything stored here may be used by workflows.
+     * @summary Store or update a vault secret
      * @param {CreateSecretRequest} createSecretRequest 
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -262,7 +262,7 @@ export class SecretsApi extends BaseAPI {
 
     /**
      * 
-     * @summary Delete a stored secret
+     * @summary Delete a vault secret
      * @param {DeleteSecretRequest} deleteSecretRequest 
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -272,8 +272,8 @@ export class SecretsApi extends BaseAPI {
     }
 
     /**
-     * Returns stored secret names and timestamps. Secret values are never exposed.
-     * @summary List stored secrets
+     * Returns workflow-visible vault secret names and timestamps. Secret values are never exposed.
+     * @summary List vault secrets
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */

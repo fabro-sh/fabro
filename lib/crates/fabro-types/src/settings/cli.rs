@@ -13,7 +13,7 @@ use super::interp::InterpString;
 use super::run::{AgentPermissions, McpEntryLayer, McpServerSettings};
 
 /// A structurally resolved `[cli]` view for consumers.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct CliSettings {
     pub target:  Option<CliTargetSettings>,
     pub auth:    CliAuthSettings,
@@ -23,7 +23,8 @@ pub struct CliSettings {
     pub logging: CliLoggingSettings,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum CliTargetSettings {
     Http {
         url: InterpString,
@@ -34,49 +35,49 @@ pub enum CliTargetSettings {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CliTargetTlsSettings {
     pub cert: InterpString,
     pub key:  InterpString,
     pub ca:   InterpString,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct CliAuthSettings {
     pub strategy: Option<CliAuthStrategy>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct CliExecSettings {
     pub prevent_idle_sleep: bool,
     pub model:              CliExecModelSettings,
     pub agent:              CliExecAgentSettings,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct CliExecModelSettings {
     pub provider: Option<InterpString>,
     pub name:     Option<InterpString>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct CliExecAgentSettings {
     pub permissions: Option<AgentPermissions>,
     pub mcps:        HashMap<String, McpServerSettings>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct CliOutputSettings {
     pub format:    OutputFormat,
     pub verbosity: OutputVerbosity,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct CliUpdatesSettings {
     pub check: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct CliLoggingSettings {
     pub level: Option<String>,
 }

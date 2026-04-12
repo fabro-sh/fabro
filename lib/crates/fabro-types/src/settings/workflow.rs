@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// A structurally resolved `[workflow]` view for consumers.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct WorkflowSettings {
     pub name:        Option<String>,
     pub description: Option<String>,
