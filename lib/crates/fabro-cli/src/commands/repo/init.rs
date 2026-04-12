@@ -154,14 +154,14 @@ async fn check_github_app_installation(target: &ServerTargetArgs, printer: Print
             let dim = console::Style::new().dim();
             fabro_util::printerr!(
                 printer,
-                "\n  {} No git remote found — skipping GitHub App check",
+                "\n  {} No git remote found — skipping GitHub check",
                 yellow.apply_to("!")
             );
             fabro_util::printerr!(
                 printer,
                 "  {}",
                 dim.apply_to(
-                    "Run `git remote add origin <url>` then `fabro install` to set up the GitHub App"
+                    "Run `git remote add origin <url>`, then `gh auth login` or `fabro install` to configure GitHub access"
                 )
             );
             return;
@@ -211,10 +211,7 @@ async fn check_github_app_installation(target: &ServerTargetArgs, printer: Print
     {
         Ok(response) => response.into_inner(),
         Err(err) => {
-            fabro_util::printerr!(
-                printer,
-                "\n  Warning: could not check GitHub App installation: {err}"
-            );
+            fabro_util::printerr!(printer, "\n  Warning: could not check GitHub access: {err}");
             return;
         }
     };
@@ -223,7 +220,7 @@ async fn check_github_app_installation(target: &ServerTargetArgs, printer: Print
         let green = console::Style::new().green();
         fabro_util::printerr!(
             printer,
-            "\n  {} GitHub App is installed for {owner}/{repo}",
+            "\n  {} GitHub access is configured for {owner}/{repo}",
             green.apply_to("✔")
         );
         return;
@@ -232,11 +229,16 @@ async fn check_github_app_installation(target: &ServerTargetArgs, printer: Print
     let yellow = console::Style::new().yellow();
     fabro_util::printerr!(
         printer,
-        "\n  {} GitHub App is not installed for {owner}/{repo}",
+        "\n  {} GitHub access is not available for {owner}/{repo}",
         yellow.apply_to("!")
     );
     if let Some(url) = &check.install_url {
         fabro_util::printerr!(printer, "  Install at: {url}");
+    } else {
+        fabro_util::printerr!(
+            printer,
+            "  Run `gh auth login` or `fabro install`, then try again."
+        );
     }
 
     if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
@@ -261,11 +263,11 @@ async fn check_github_app_installation(target: &ServerTargetArgs, printer: Print
                     let green = console::Style::new().green();
                     fabro_util::printerr!(
                         printer,
-                        "  {} GitHub App is installed for {owner}/{repo}",
+                        "  {} GitHub access is configured for {owner}/{repo}",
                         green.apply_to("✔")
                     );
                 } else {
-                    fabro_util::printerr!(printer, "  GitHub App is still not installed.");
+                    fabro_util::printerr!(printer, "  GitHub access is still unavailable.");
                     if let Some(url) = &check.install_url {
                         fabro_util::printerr!(printer, "  Install at: {url}");
                     }
@@ -274,7 +276,7 @@ async fn check_github_app_installation(target: &ServerTargetArgs, printer: Print
             Err(err) => {
                 fabro_util::printerr!(
                     printer,
-                    "  Warning: could not re-check GitHub App installation: {err}"
+                    "  Warning: could not re-check GitHub access: {err}"
                 );
             }
         }

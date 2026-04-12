@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use axum::extract::Query;
 use axum::response::Html;
 use axum::routing::get;
@@ -251,6 +251,56 @@ fn merge_server_settings(doc: &mut toml::Value, username: &str) -> Result<()> {
         toml::Value::Array(vec![toml::Value::String(username.to_string())]),
     );
 
+    Ok(())
+}
+
+fn github_integration_table(doc: &mut toml::Value) -> Result<&mut toml::Table> {
+    let root = doc
+        .as_table_mut()
+        .context("settings.toml root is not a table")?;
+    let server = root
+        .entry("server")
+        .or_insert(toml::Value::Table(toml::Table::default()));
+    let server_table = server
+        .as_table_mut()
+        .context("settings.toml [server] is not a table")?;
+    let integrations = server_table
+        .entry("integrations")
+        .or_insert(toml::Value::Table(toml::Table::default()));
+    let integrations_table = integrations
+        .as_table_mut()
+        .context("settings.toml [server.integrations] is not a table")?;
+    let github = integrations_table
+        .entry("github")
+        .or_insert(toml::Value::Table(toml::Table::default()));
+    github
+        .as_table_mut()
+        .context("settings.toml [server.integrations.github] is not a table")
+}
+
+fn write_github_cli_settings(doc: &mut toml::Value) -> Result<()> {
+    let github = github_integration_table(doc)?;
+    github.insert("strategy".into(), toml::Value::String("gh_cli".to_string()));
+    github.remove("app_id");
+    github.remove("slug");
+    github.remove("client_id");
+    Ok(())
+}
+
+fn write_github_app_settings(
+    doc: &mut toml::Value,
+    app_id: &str,
+    slug: &str,
+    client_id: &str,
+) -> Result<()> {
+    let github = github_integration_table(doc)?;
+    github.insert("strategy".into(), toml::Value::String("app".to_string()));
+    github.insert("app_id".into(), toml::Value::String(app_id.to_string()));
+    github.insert("slug".into(), toml::Value::String(slug.to_string()));
+    github.insert(
+        "client_id".into(),
+        toml::Value::String(client_id.to_string()),
+    );
     Ok(())
 }
 
@@ -595,18 +645,7 @@ async fn setup_github_app(
     } else {
         toml::from_str(&existing).context("failed to parse existing settings.toml")?
     };
-    let table = doc
-        .as_table_mut()
-        .context("settings.toml root is not a table")?;
-    let git = table
-        .entry("git")
-        .or_insert(toml::Value::Table(toml::Table::default()));
-    let git_table = git
-        .as_table_mut()
-        .context("settings.toml [git] is not a table")?;
-    git_table.insert("app_id".into(), toml::Value::String(app_id));
-    git_table.insert("slug".into(), toml::Value::String(slug.clone()));
-    git_table.insert("client_id".into(), toml::Value::String(client_id));
+    write_github_app_settings(&mut doc, &app_id, &slug, &client_id)?;
     std::fs::write(&user_toml_path, toml::to_string_pretty(&doc)?)?;
     fabro_util::printerr!(
         printer,
@@ -691,7 +730,7 @@ pub(crate) async fn run_install(
     fabro_util::printerr!(
         printer,
         "  {}",
-        s.dim.apply_to("LLM providers and GitHub App.")
+        s.dim.apply_to("LLM providers and GitHub access.")
     );
     fabro_util::printerr!(printer, "");
 
@@ -840,46 +879,72 @@ pub(crate) async fn run_install(
     }
     fabro_util::printerr!(printer, "");
 
-    // Step 2: GitHub App
-    fabro_util::printerr!(printer, "  {}", s.bold.apply_to("Step 2 · GitHub App"));
-    fabro_util::printerr!(printer, "  {}", s.dim.apply_to("───────────────────"));
+    // Step 2: GitHub
+    fabro_util::printerr!(printer, "  {}", s.bold.apply_to("Step 2 · GitHub"));
+    fabro_util::printerr!(printer, "  {}", s.dim.apply_to("───────────────"));
     fabro_util::printerr!(printer, "");
 
     {
-        let setup_github =
-            spawn_blocking(|| prompt_confirm("Set up a GitHub App? (Recommended)", true)).await??;
+        let strategy_options = vec![
+            "GitHub CLI — use your existing `gh` login".to_string(),
+            "GitHub App — recommended for teams".to_string(),
+        ];
+        let strategy = spawn_blocking({
+            let options = strategy_options.clone();
+            move || prompt_select("How should Fabro authenticate with GitHub?", &options)
+        })
+        .await??;
 
-        if setup_github {
-            let (owner, username) = prompt_github_app_owner(&s).await?;
-            let github_env_pairs = setup_github_app(
-                &fabro_dir,
-                &s,
-                web_url,
-                &owner,
-                username.as_deref(),
-                printer,
-            )
-            .await?;
-            let slug = {
+        match strategy {
+            0 => {
+                let token = fabro_github::gh_auth_token().map_err(|err| {
+                    anyhow!("{err}. Run `gh auth login` and rerun `fabro install`.")
+                })?;
                 let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
-                let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
-                let doc: toml::Value = toml::from_str(&toml_content)
-                    .unwrap_or(toml::Value::Table(toml::Table::default()));
-                doc.get("git")
-                    .and_then(|g| g.get("slug"))
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("unknown")
-                    .to_string()
-            };
-            fabro_util::printerr!(
-                printer,
-                "  {} GitHub App registered ({})",
-                s.green.apply_to("✔"),
-                slug
-            );
-            secret_pairs.extend(github_env_pairs);
-        } else {
-            fabro_util::printerr!(printer, "  Skipped");
+                let existing = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
+                let mut doc: toml::Value = if existing.is_empty() {
+                    toml::Value::Table(toml::Table::default())
+                } else {
+                    toml::from_str(&existing).context("failed to parse existing settings.toml")?
+                };
+                write_github_cli_settings(&mut doc)?;
+                std::fs::write(&user_toml_path, toml::to_string_pretty(&doc)?)?;
+                fabro_util::printerr!(printer, "  {} GitHub CLI configured", s.green.apply_to("✔"));
+                secret_pairs.push(("GITHUB_CLI_TOKEN".to_string(), token));
+            }
+            1 => {
+                let (owner, username) = prompt_github_app_owner(&s).await?;
+                let github_env_pairs = setup_github_app(
+                    &fabro_dir,
+                    &s,
+                    web_url,
+                    &owner,
+                    username.as_deref(),
+                    printer,
+                )
+                .await?;
+                let slug = {
+                    let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
+                    let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
+                    let doc: toml::Value = toml::from_str(&toml_content)
+                        .unwrap_or(toml::Value::Table(toml::Table::default()));
+                    doc.get("server")
+                        .and_then(|server| server.get("integrations"))
+                        .and_then(|integrations| integrations.get("github"))
+                        .and_then(|github| github.get("slug"))
+                        .and_then(|slug| slug.as_str())
+                        .unwrap_or("unknown")
+                        .to_string()
+                };
+                fabro_util::printerr!(
+                    printer,
+                    "  {} GitHub App registered ({})",
+                    s.green.apply_to("✔"),
+                    slug
+                );
+                secret_pairs.extend(github_env_pairs);
+            }
+            _ => unreachable!("prompt_select returned an out-of-range index"),
         }
     }
     fabro_util::printerr!(printer, "");
@@ -1271,6 +1336,74 @@ name = "custom"
                 .and_then(|u| u.first())
                 .and_then(toml::Value::as_str),
             Some("alice")
+        );
+    }
+
+    #[test]
+    fn write_github_cli_settings_uses_server_integrations_github() {
+        let mut doc: toml::Value = toml::from_str(
+            r#"
+_version = 1
+
+[server.integrations.github]
+strategy = "app"
+app_id = "123"
+slug = "fabro-app"
+client_id = "client-id"
+"#,
+        )
+        .unwrap();
+
+        write_github_cli_settings(&mut doc).unwrap();
+
+        let github = doc
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .and_then(|server| server.get("integrations"))
+            .and_then(toml::Value::as_table)
+            .and_then(|integrations| integrations.get("github"))
+            .and_then(toml::Value::as_table)
+            .expect("server.integrations.github should exist");
+
+        assert_eq!(
+            github.get("strategy").and_then(toml::Value::as_str),
+            Some("gh_cli")
+        );
+        assert!(!github.contains_key("app_id"));
+        assert!(!github.contains_key("slug"));
+        assert!(!github.contains_key("client_id"));
+    }
+
+    #[test]
+    fn write_github_app_settings_uses_server_integrations_github() {
+        let mut doc = toml::Value::Table(toml::Table::default());
+
+        write_github_app_settings(&mut doc, "123", "fabro-app", "client-id").unwrap();
+
+        let github = doc
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .and_then(|server| server.get("integrations"))
+            .and_then(toml::Value::as_table)
+            .and_then(|integrations| integrations.get("github"))
+            .and_then(toml::Value::as_table)
+            .expect("server.integrations.github should exist");
+
+        assert_eq!(
+            github.get("strategy").and_then(toml::Value::as_str),
+            Some("app")
+        );
+        assert_eq!(
+            github.get("app_id").and_then(toml::Value::as_str),
+            Some("123")
+        );
+        assert_eq!(
+            github.get("slug").and_then(toml::Value::as_str),
+            Some("fabro-app")
+        );
+        assert_eq!(
+            github.get("client_id").and_then(toml::Value::as_str),
+            Some("client-id")
         );
     }
 

@@ -375,7 +375,7 @@ pub struct PullRequestOptions {
     pub run_dir:    PathBuf,
     pub run_store:  RunStoreHandle,
     pub pr_config:  Option<PullRequestSettings>,
-    pub github_app: Option<fabro_github::GitHubAppCredentials>,
+    pub github_app: Option<fabro_github::GitHubCredentials>,
     pub origin_url: Option<String>,
     pub model:      String,
 }

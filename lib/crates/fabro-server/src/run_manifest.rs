@@ -336,6 +336,20 @@ async fn build_preflight_report(
     validated: &Validated,
 ) -> Result<(CheckReport, bool)> {
     let graph = validated.graph();
+    let mut checks = base_preflight_checks(prepared, graph);
+    if validated.has_errors() {
+        return Ok((
+            CheckReport {
+                title:    "Run Preflight".into(),
+                sections: vec![CheckSection {
+                    title: String::new(),
+                    checks,
+                }],
+            },
+            true,
+        ));
+    }
+
     let settings = &prepared.settings;
     let materialized = materialize_run(settings.clone(), graph, Catalog::builtin());
     let resolved_run = fabro_config::resolve_run_from_file(&materialized)
@@ -343,62 +357,22 @@ async fn build_preflight_report(
     let resolved_server = fabro_config::resolve_server_from_file(settings)
         .map_err(|errors| anyhow!(render_resolve_errors(&errors)))?;
     let sandbox_provider = resolve_sandbox_provider(&resolved_run)?;
-    let github_app = state
-        .github_app_credentials(
-            resolved_server
-                .integrations
-                .github
-                .app_id
-                .as_ref()
-                .map(InterpString::as_source)
-                .as_deref(),
-        )
-        .await
-        .map_err(|err| anyhow!(err))?;
-    let mut checks = Vec::new();
-
-    let setup_command_count = resolved_run.prepare.commands.len();
-    let repo_summary = prepared.git.as_ref().map_or_else(
-        || "unknown".to_string(),
-        |git| {
-            let https = fabro_github::ssh_url_to_https(&git.origin_url);
-            fabro_github::parse_github_owner_repo(&https).map_or_else(
-                |_| git.origin_url.clone(),
-                |(owner, repo)| format!("{owner}/{repo}"),
-            )
-        },
-    );
-    checks.push(CheckResult {
-        name:        "Repository".into(),
-        status:      CheckStatus::Pass,
-        summary:     repo_summary,
-        details:     vec![
-            CheckDetail::new(format!("Setup commands: {setup_command_count}")),
-            CheckDetail {
-                text: format!(
-                    "Git: {}",
-                    prepared.git.as_ref().map_or("unknown", |git| if git.clean {
-                        "clean"
-                    } else {
-                        "dirty"
-                    })
-                ),
-                warn: prepared.git.as_ref().is_some_and(|git| !git.clean),
-            },
-        ],
-        remediation: None,
-    });
-    checks.push(CheckResult {
-        name:        "Workflow".into(),
-        status:      CheckStatus::Pass,
-        summary:     graph.name.clone(),
-        details:     vec![
-            CheckDetail::new(format!("Nodes: {}", graph.nodes.len())),
-            CheckDetail::new(format!("Edges: {}", graph.edges.len())),
-            CheckDetail::new(format!("Goal: {}", graph.goal())),
-        ],
-        remediation: None,
-    });
+    let sandbox_provider =
+        if resolved_run.execution.mode == RunMode::DryRun && !sandbox_provider.is_local() {
+            SandboxProvider::Local
+        } else {
+            sandbox_provider
+        };
+    let needs_github_credentials = sandbox_provider == SandboxProvider::Daytona
+        || !resolved_server.integrations.github.permissions.is_empty();
+    let github_app = if needs_github_credentials {
+        state
+            .github_credentials(&resolved_server.integrations.github)
+            .await
+            .unwrap_or_default()
+    } else {
+        None
+    };
 
     let sandbox_ok = run_sandbox_check(
         &mut checks,
@@ -425,6 +399,56 @@ async fn build_preflight_report(
     ))
 }
 
+fn base_preflight_checks(prepared: &PreparedManifest, graph: &Graph) -> Vec<CheckResult> {
+    let setup_command_count = fabro_config::resolve_run_from_file(&prepared.settings)
+        .map(|settings| settings.prepare.commands.len())
+        .unwrap_or_default();
+    let repo_summary = prepared.git.as_ref().map_or_else(
+        || "unknown".to_string(),
+        |git| {
+            let https = fabro_github::ssh_url_to_https(&git.origin_url);
+            fabro_github::parse_github_owner_repo(&https).map_or_else(
+                |_| git.origin_url.clone(),
+                |(owner, repo)| format!("{owner}/{repo}"),
+            )
+        },
+    );
+
+    vec![
+        CheckResult {
+            name:        "Repository".into(),
+            status:      CheckStatus::Pass,
+            summary:     repo_summary,
+            details:     vec![
+                CheckDetail::new(format!("Setup commands: {setup_command_count}")),
+                CheckDetail {
+                    text: format!(
+                        "Git: {}",
+                        prepared.git.as_ref().map_or("unknown", |git| if git.clean {
+                            "clean"
+                        } else {
+                            "dirty"
+                        })
+                    ),
+                    warn: prepared.git.as_ref().is_some_and(|git| !git.clean),
+                },
+            ],
+            remediation: None,
+        },
+        CheckResult {
+            name:        "Workflow".into(),
+            status:      CheckStatus::Pass,
+            summary:     graph.name.clone(),
+            details:     vec![
+                CheckDetail::new(format!("Nodes: {}", graph.nodes.len())),
+                CheckDetail::new(format!("Edges: {}", graph.edges.len())),
+                CheckDetail::new(format!("Goal: {}", graph.goal())),
+            ],
+            remediation: None,
+        },
+    ]
+}
+
 fn resolve_sandbox_provider(settings: &RunSettings) -> Result<SandboxProvider> {
     Ok(Some(str::parse::<SandboxProvider>(
         settings.sandbox.provider.as_str(),
@@ -447,7 +471,7 @@ async fn run_sandbox_check(
     sandbox_provider: SandboxProvider,
     prepared: &PreparedManifest,
     resolved_run: &RunSettings,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
+    github_app: Option<fabro_github::GitHubCredentials>,
 ) -> bool {
     let daytona_config = resolve_daytona_config(resolved_run);
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
@@ -679,7 +703,7 @@ async fn run_github_token_check(
     checks: &mut Vec<CheckResult>,
     prepared: &PreparedManifest,
     settings: &ServerSettings,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
+    github_app: Option<fabro_github::GitHubCredentials>,
 ) {
     if settings.integrations.github.permissions.is_empty() {
         return;
@@ -723,19 +747,26 @@ async fn run_github_token_check(
             status:      CheckStatus::Warning,
             summary:     "skipped".into(),
             details:     vec![],
-            remediation: Some("No GitHub App credentials or origin URL available".to_string()),
+            remediation: Some("No GitHub credentials or origin URL available".to_string()),
         }),
     }
 }
 
 async fn mint_github_token(
-    creds: &fabro_github::GitHubAppCredentials,
+    creds: &fabro_github::GitHubCredentials,
     origin_url: &str,
     permissions: &HashMap<String, String>,
 ) -> Result<String> {
+    if let fabro_github::GitHubCredentials::Token(token) = creds {
+        return Ok(token.clone());
+    }
+
     let https_url = fabro_github::ssh_url_to_https(origin_url);
     let (owner, repo) =
         fabro_github::parse_github_owner_repo(&https_url).map_err(|err| anyhow!("{err}"))?;
+    let fabro_github::GitHubCredentials::App(creds) = creds else {
+        unreachable!("token credentials return early");
+    };
     let jwt = fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem)
         .map_err(|err| anyhow!("{err}"))?;
     let client = reqwest::Client::new();
@@ -854,6 +885,18 @@ mod tests {
                     "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
                         .to_string(),
             })]),
+        }
+    }
+
+    fn invalid_manifest() -> types::RunManifest {
+        types::RunManifest {
+            workflows: HashMap::from([("workflow.fabro".to_string(), types::ManifestWorkflow {
+                config: None,
+                files:  HashMap::new(),
+                source: "digraph Invalid { exit [shape=Msquare] orphan exit -> orphan }"
+                    .to_string(),
+            })]),
+            ..minimal_manifest()
         }
     }
 
@@ -987,5 +1030,100 @@ app_id = "snapshotted-app-id"
             Some("snapshotted-app-id")
         );
         assert_eq!(resolved_server.storage.root.as_source(), "/srv/fabro");
+    }
+
+    #[tokio::test]
+    async fn invalid_preflight_returns_diagnostics_without_runtime_checks() {
+        let state = crate::server::create_app_state();
+        let prepared =
+            prepare_manifest_with_mode(&SettingsLayer::default(), &invalid_manifest(), false)
+                .unwrap();
+        let validated = validate_prepared_manifest(&prepared).unwrap();
+
+        assert!(validated.has_errors());
+
+        let (response, ok) = run_preflight(state.as_ref(), &prepared, &validated)
+            .await
+            .unwrap();
+
+        assert!(!ok);
+        assert_eq!(response.workflow.name, "Invalid");
+        assert!(!response.workflow.diagnostics.is_empty());
+        assert_eq!(response.checks.title, "Run Preflight");
+        assert_eq!(response.checks.sections.len(), 1);
+        assert_eq!(response.checks.sections[0].checks.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn preflight_allows_pull_request_enabled_without_github_credentials() {
+        let state = crate::server::create_app_state();
+        let mut manifest = minimal_manifest();
+        manifest.configs.push(types::ManifestConfig {
+            path:   Some("/tmp/project/.fabro/project.toml".to_string()),
+            source: Some(
+                r#"
+_version = 1
+
+[run.pull_request]
+enabled = true
+"#
+                .to_string(),
+            ),
+            type_:  types::ManifestConfigType::Project,
+        });
+
+        let prepared =
+            prepare_manifest_with_mode(&SettingsLayer::default(), &manifest, false).unwrap();
+        let validated = validate_prepared_manifest(&prepared).unwrap();
+
+        assert!(!validated.has_errors());
+
+        let (response, ok) = run_preflight(state.as_ref(), &prepared, &validated)
+            .await
+            .unwrap();
+
+        assert!(!ok);
+        assert!(response.workflow.diagnostics.is_empty());
+        assert!(
+            response.checks.sections[0]
+                .checks
+                .iter()
+                .all(|check| check.name != "GitHub Token")
+        );
+    }
+
+    #[tokio::test]
+    async fn preflight_daytona_without_github_credentials_returns_report() {
+        let state = crate::server::create_app_state();
+        let mut manifest = minimal_manifest();
+        manifest.configs.push(types::ManifestConfig {
+            path:   Some("/tmp/project/.fabro/project.toml".to_string()),
+            source: Some(
+                r#"
+_version = 1
+
+[run.sandbox]
+provider = "daytona"
+"#
+                .to_string(),
+            ),
+            type_:  types::ManifestConfigType::Project,
+        });
+
+        let prepared =
+            prepare_manifest_with_mode(&SettingsLayer::default(), &manifest, false).unwrap();
+        let validated = validate_prepared_manifest(&prepared).unwrap();
+
+        let (response, _ok) = run_preflight(state.as_ref(), &prepared, &validated)
+            .await
+            .unwrap();
+
+        assert!(response.workflow.diagnostics.is_empty());
+        assert!(
+            response.checks.sections[0]
+                .checks
+                .iter()
+                .any(|check| check.name == "Sandbox")
+        );
     }
 }

@@ -405,7 +405,7 @@ Run IDs support prefix matching — you can use the first few characters instead
 
 ## `fabro pr`
 
-Manage GitHub pull requests created by workflow runs. Requires a [GitHub App](/integrations/github) to be configured.
+Manage GitHub pull requests created by workflow runs. Requires GitHub access to be configured via the default `gh_cli` strategy or a [GitHub App](/integrations/github).
 
 ### `fabro pr create`
 
@@ -659,7 +659,7 @@ The command must be run inside a git repository. It creates:
 - `.fabro/workflows/hello/workflow.fabro` — a simple greeting workflow
 - `.fabro/workflows/hello/workflow.toml` — run config for the hello workflow
 
-After creating files, it checks whether the GitHub App is installed for the repository. If the app is not installed and the repository owner differs from the app owner, it warns that the app may need to be [made public](/integrations/github#github-app-is-private-but-this-repo-belongs-to-a-different-owner) first.
+After creating files, it checks whether GitHub access is available for the repository. In GitHub App mode, if the app is not installed and the repository owner differs from the app owner, it warns that the app may need to be [made public](/integrations/github#github-app-is-private-but-this-repo-belongs-to-a-different-owner) first.
 
 ## `fabro repo deinit`
 

@@ -126,6 +126,6 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id
+    error: GitHub credentials required — run `gh auth login` or configure a GitHub App with `fabro install`
     ");
 }

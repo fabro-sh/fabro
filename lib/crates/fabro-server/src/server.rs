@@ -62,6 +62,7 @@ use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
 use fabro_types::settings::run::RunMode;
+use fabro_types::settings::server::{GithubIntegrationSettings, GithubIntegrationStrategy};
 use fabro_types::settings::{
     InterpString, ServerSettings as ResolvedServerSettings, SettingsLayer,
 };
@@ -624,28 +625,51 @@ impl AppState {
             .map(|value| Key::derive_from(value.as_bytes()))
     }
 
-    pub(crate) async fn github_app_credentials(
+    pub(crate) async fn github_credentials(
         &self,
-        app_id: Option<&str>,
-    ) -> Result<Option<fabro_github::GitHubAppCredentials>, String> {
-        let Some(app_id) = app_id else {
-            return Ok(None);
-        };
-        let raw = self
-            .secret_store
-            .read()
-            .await
-            .get("GITHUB_APP_PRIVATE_KEY")
-            .map(str::to_string)
-            .or_else(|| std::env::var("GITHUB_APP_PRIVATE_KEY").ok());
-        let Some(raw) = raw else {
-            return Ok(None);
-        };
-        let private_key_pem = decode_secret_pem("GITHUB_APP_PRIVATE_KEY", &raw)?;
-        Ok(Some(fabro_github::GitHubAppCredentials {
-            app_id: app_id.to_string(),
-            private_key_pem,
-        }))
+        settings: &GithubIntegrationSettings,
+    ) -> Result<Option<fabro_github::GitHubCredentials>, String> {
+        match settings.strategy {
+            GithubIntegrationStrategy::App => {
+                let Some(app_id) = settings.app_id.as_ref().map(InterpString::as_source) else {
+                    return Ok(None);
+                };
+                let raw = self
+                    .secret_store
+                    .read()
+                    .await
+                    .get("GITHUB_APP_PRIVATE_KEY")
+                    .map(str::to_string)
+                    .or_else(|| std::env::var("GITHUB_APP_PRIVATE_KEY").ok());
+                let Some(raw) = raw else {
+                    return Ok(None);
+                };
+                let private_key_pem = decode_secret_pem("GITHUB_APP_PRIVATE_KEY", &raw)?;
+                Ok(Some(fabro_github::GitHubCredentials::App(
+                    fabro_github::GitHubAppCredentials {
+                        app_id,
+                        private_key_pem,
+                    },
+                )))
+            }
+            GithubIntegrationStrategy::GhCli => {
+                let token = self
+                    .secret_store
+                    .read()
+                    .await
+                    .get("GITHUB_CLI_TOKEN")
+                    .map(str::trim)
+                    .filter(|token| !token.is_empty())
+                    .map(str::to_string);
+                match token {
+                    Some(token) => Ok(Some(fabro_github::GitHubCredentials::Token(token))),
+                    None => Err(
+                        "gh_cli strategy requires a stored token — run fabro install on the server host or manually provision GITHUB_CLI_TOKEN"
+                            .to_string(),
+                    ),
+                }
+            }
+        }
     }
 
     fn issue_artifact_upload_token(&self, run_id: &RunId) -> Result<String, ApiError> {
@@ -1490,15 +1514,10 @@ fn resolved_storage_dir(settings: &SettingsLayer) -> Result<PathBuf, String> {
         })
 }
 
-fn resolved_github_app_id(settings: &SettingsLayer) -> Result<Option<String>, String> {
+fn resolved_github_settings(settings: &SettingsLayer) -> Result<GithubIntegrationSettings, String> {
     let resolved =
         resolve_server_from_file(settings).map_err(|errors| render_resolve_errors(&errors))?;
-    Ok(resolved
-        .integrations
-        .github
-        .app_id
-        .as_ref()
-        .map(InterpString::as_source))
+    Ok(resolved.integrations.github)
 }
 
 fn parse_system_duration(raw: &str) -> anyhow::Result<chrono::Duration> {
@@ -1687,92 +1706,117 @@ async fn get_github_repo(
     Path((owner, name)): Path<(String, String)>,
 ) -> Response {
     let settings = state.server_settings();
-    let Some(app_id) = settings.integrations.github.app_id.as_ref() else {
-        return ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "server.integrations.github.app_id is not configured",
-        )
-        .into_response();
-    };
-    let app_id = match resolve_interp_string(app_id) {
-        Ok(app_id) => app_id,
-        Err(err) => {
-            return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string()).into_response();
-        }
-    };
-
-    let creds = match state.github_app_credentials(Some(&app_id)).await {
-        Ok(Some(creds)) => creds,
-        Ok(None) => {
-            return ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "GITHUB_APP_PRIVATE_KEY is not configured",
-            )
-            .into_response();
-        }
-        Err(err) => {
-            return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err).into_response();
-        }
-    };
-
-    let jwt = match fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem) {
-        Ok(jwt) => jwt,
-        Err(err) => {
-            return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err).into_response();
-        }
-    };
-
+    let github_settings = &settings.integrations.github;
     let base_url = fabro_github::github_api_base_url();
-    let client = reqwest::Client::new();
-    let install_url = match settings.integrations.github.slug.as_ref() {
-        Some(slug) => match resolve_interp_string(slug) {
-            Ok(slug) => format!("https://github.com/apps/{slug}/installations/new"),
-            Err(err) => {
+    let mut client = None;
+    let token = match github_settings.strategy {
+        GithubIntegrationStrategy::App => {
+            let Some(app_id) = github_settings.app_id.as_ref() else {
+                return ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "server.integrations.github.app_id is not configured",
+                )
+                .into_response();
+            };
+            if let Err(err) = resolve_interp_string(app_id) {
                 return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
                     .into_response();
             }
-        },
-        None => format!("https://github.com/organizations/{owner}/settings/installations"),
-    };
+            let creds = match state.github_credentials(github_settings).await {
+                Ok(Some(fabro_github::GitHubCredentials::App(creds))) => creds,
+                Ok(Some(_)) => unreachable!("app strategy should not return token credentials"),
+                Ok(None) => {
+                    return ApiError::new(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "GITHUB_APP_PRIVATE_KEY is not configured",
+                    )
+                    .into_response();
+                }
+                Err(err) => {
+                    return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err).into_response();
+                }
+            };
 
-    let installed =
-        match fabro_github::check_app_installed(&client, &jwt, &owner, &name, &base_url).await {
-            Ok(installed) => installed,
-            Err(err) => {
-                return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response();
+            let jwt = match fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem) {
+                Ok(jwt) => jwt,
+                Err(err) => {
+                    return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err).into_response();
+                }
+            };
+            let install_url = match github_settings.slug.as_ref() {
+                Some(slug) => match resolve_interp_string(slug) {
+                    Ok(slug) => format!("https://github.com/apps/{slug}/installations/new"),
+                    Err(err) => {
+                        return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
+                            .into_response();
+                    }
+                },
+                None => format!("https://github.com/organizations/{owner}/settings/installations"),
+            };
+
+            let client_ref = client.get_or_insert_with(reqwest::Client::new);
+            let installed = match fabro_github::check_app_installed(
+                &*client_ref,
+                &jwt,
+                &owner,
+                &name,
+                &base_url,
+            )
+            .await
+            {
+                Ok(installed) => installed,
+                Err(err) => {
+                    return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response();
+                }
+            };
+
+            if !installed {
+                return (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "owner": owner,
+                        "name": name,
+                        "accessible": false,
+                        "default_branch": null,
+                        "private": null,
+                        "permissions": null,
+                        "install_url": install_url,
+                    })),
+                )
+                    .into_response();
             }
-        };
 
-    if !installed {
-        return (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "owner": owner,
-                "name": name,
-                "accessible": false,
-                "default_branch": null,
-                "private": null,
-                "permissions": null,
-                "install_url": install_url,
-            })),
-        )
-            .into_response();
-    }
-
-    let token = match fabro_github::create_installation_access_token_with_permissions(
-        &client,
-        &jwt,
-        &owner,
-        &name,
-        &base_url,
-        serde_json::json!({ "contents": "write", "pull_requests": "write" }),
-    )
-    .await
-    {
-        Ok(token) => token,
-        Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+            match fabro_github::create_installation_access_token_with_permissions(
+                &*client_ref,
+                &jwt,
+                &owner,
+                &name,
+                &base_url,
+                serde_json::json!({ "contents": "write", "pull_requests": "write" }),
+            )
+            .await
+            {
+                Ok(token) => token,
+                Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+            }
+        }
+        GithubIntegrationStrategy::GhCli => match state.github_credentials(github_settings).await {
+            Ok(Some(fabro_github::GitHubCredentials::Token(token))) => token,
+            Ok(Some(_)) => unreachable!("gh_cli strategy should not return app credentials"),
+            Ok(None) => {
+                return ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "GITHUB_CLI_TOKEN is not configured",
+                )
+                .into_response();
+            }
+            Err(err) => {
+                return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err).into_response();
+            }
+        },
     };
 
+    let client = client.unwrap_or_else(reqwest::Client::new);
     let repo_response = match client
         .get(format!("{base_url}/repos/{owner}/{name}"))
         .header("Authorization", format!("Bearer {token}"))
@@ -1782,6 +1826,37 @@ async fn get_github_repo(
         .await
     {
         Ok(response) if response.status().is_success() => response,
+        Ok(response)
+            if github_settings.strategy == GithubIntegrationStrategy::GhCli
+                && matches!(
+                    response.status(),
+                    reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND
+                ) =>
+        {
+            return (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "owner": owner,
+                    "name": name,
+                    "accessible": false,
+                    "default_branch": null,
+                    "private": null,
+                    "permissions": null,
+                    "install_url": serde_json::Value::Null,
+                })),
+            )
+                .into_response();
+        }
+        Ok(response)
+            if github_settings.strategy == GithubIntegrationStrategy::GhCli
+                && response.status() == reqwest::StatusCode::UNAUTHORIZED =>
+        {
+            return ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Stored GitHub CLI token is invalid — run fabro install or update GITHUB_CLI_TOKEN",
+            )
+            .into_response();
+        }
         Ok(response) => {
             return ApiError::new(
                 StatusCode::BAD_GATEWAY,
@@ -3692,28 +3767,56 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
             return;
         }
     };
-    let github_app_id = match resolved_github_app_id(&persisted.run_record().settings) {
-        Ok(app_id) => app_id,
+    let github_settings = match resolved_github_settings(&persisted.run_record().settings) {
+        Ok(settings) => settings,
         Err(err) => {
-            tracing::error!(run_id = %run_id, error = %err, "Invalid GitHub App config");
+            tracing::error!(run_id = %run_id, error = %err, "Invalid GitHub integration config");
             let mut runs = state.runs.lock().expect("runs lock poisoned");
             if let Some(managed_run) = runs.get_mut(&run_id) {
                 managed_run.status = RunStatus::Failed;
-                managed_run.error = Some(format!("Invalid GitHub App config: {err}"));
+                managed_run.error = Some(format!("Invalid GitHub integration config: {err}"));
                 clear_live_run_state(managed_run);
             }
             state.scheduler_notify.notify_one();
             return;
         }
     };
-    let github_app = match state.github_app_credentials(github_app_id.as_deref()).await {
+    let github_app_result = match fabro_config::resolve_run_from_file(
+        &persisted.run_record().settings,
+    ) {
+        Ok(settings) => {
+            let required_github_credentials = (settings.execution.mode != RunMode::DryRun
+                && settings.sandbox.provider == "daytona")
+                || !github_settings.permissions.is_empty();
+            if required_github_credentials {
+                state.github_credentials(&github_settings).await
+            } else if settings.execution.mode != RunMode::DryRun && settings.pull_request.is_some()
+            {
+                match state.github_credentials(&github_settings).await {
+                    Ok(github_app) => Ok(github_app),
+                    Err(err) => {
+                        tracing::warn!(
+                            run_id = %run_id,
+                            error = %err,
+                            "GitHub credentials unavailable; pull request creation will be skipped"
+                        );
+                        Ok(None)
+                    }
+                }
+            } else {
+                Ok(None)
+            }
+        }
+        Err(_) => Ok(None),
+    };
+    let github_app = match github_app_result {
         Ok(github_app) => github_app,
         Err(e) => {
-            tracing::error!(run_id = %run_id, error = %e, "Invalid GitHub App credentials");
+            tracing::error!(run_id = %run_id, error = %e, "Invalid GitHub credentials");
             let mut runs = state.runs.lock().expect("runs lock poisoned");
             if let Some(managed_run) = runs.get_mut(&run_id) {
                 managed_run.status = RunStatus::Failed;
-                managed_run.error = Some(format!("Invalid GitHub App credentials: {e}"));
+                managed_run.error = Some(format!("Invalid GitHub credentials: {e}"));
                 clear_live_run_state(managed_run);
             }
             state.scheduler_notify.notify_one();

@@ -162,10 +162,18 @@ Customize the git author identity used for checkpoint commits. When not set, def
 
 ### `[server.integrations.github]` section
 
-Configure a GitHub App integration. Required fields include `app_id`, `client_id`, and `slug`. Webhook delivery is configured under `[server.integrations.github.webhooks]`:
+Configure GitHub integration auth. `strategy = "gh_cli"` is the default and uses a stored `GITHUB_CLI_TOKEN` from the server secret store. `strategy = "app"` enables the GitHub App flow, browser OAuth, and webhooks.
 
 ```toml title="settings.toml"
 [server.integrations.github]
+strategy = "gh_cli"
+```
+
+For GitHub App mode, set `strategy = "app"` and include `app_id`, `client_id`, and `slug`. Webhook delivery is configured under `[server.integrations.github.webhooks]`:
+
+```toml title="settings.toml"
+[server.integrations.github]
+strategy = "app"
 app_id = "123456"
 client_id = "Iv1.abc123"
 slug = "fabro-app"
@@ -227,7 +235,13 @@ Fabro stores server-managed credentials in `<data_dir>/secrets.json` and also ho
 | `FABRO_JWT_PUBLIC_KEY` | Ed25519 public key (base64-encoded PEM) for JWT verification |
 | `SESSION_SECRET` | Session encryption secret (64-character hex string) |
 
-### GitHub App (optional)
+### GitHub integration (optional)
+
+| Variable | Description |
+|---|---|
+| `GITHUB_CLI_TOKEN` | Token captured from `gh auth token` and stored by `fabro install` when `strategy = "gh_cli"` |
+
+### GitHub App extras (optional)
 
 | Variable | Description |
 |---|---|

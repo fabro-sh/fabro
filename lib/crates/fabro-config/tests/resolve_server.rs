@@ -1,5 +1,7 @@
 use fabro_config::parse_settings_layer;
-use fabro_types::settings::server::{ObjectStoreSettings, ServerListenSettings};
+use fabro_types::settings::server::{
+    GithubIntegrationStrategy, ObjectStoreSettings, ServerListenSettings,
+};
 use fabro_types::settings::{InterpString, SettingsLayer};
 use fabro_util::Home;
 
@@ -137,5 +139,45 @@ slug = "fabro-app"
     assert_eq!(
         settings.integrations.github.slug,
         Some(InterpString::parse("fabro-app"))
+    );
+}
+
+#[test]
+fn resolves_github_integration_strategy_from_settings() {
+    let file = parse(
+        r#"
+_version = 1
+
+[server.integrations.github]
+strategy = "app"
+"#,
+    );
+
+    let settings =
+        fabro_config::resolve_server_from_file(&file).expect("server settings should resolve");
+
+    assert_eq!(
+        settings.integrations.github.strategy,
+        GithubIntegrationStrategy::App
+    );
+}
+
+#[test]
+fn defaults_github_integration_strategy_to_gh_cli() {
+    let file = parse(
+        r#"
+_version = 1
+
+[server.integrations.github]
+enabled = true
+"#,
+    );
+
+    let settings =
+        fabro_config::resolve_server_from_file(&file).expect("server settings should resolve");
+
+    assert_eq!(
+        settings.integrations.github.strategy,
+        GithubIntegrationStrategy::GhCli
     );
 }

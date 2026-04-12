@@ -15,7 +15,6 @@ use crate::shared::repo::ensure_matching_repo_origin;
 
 pub(super) async fn create_command(
     args: PrCreateArgs,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
     printer: Printer,
 ) -> Result<()> {
@@ -72,9 +71,7 @@ pub(super) async fn create_command(
     let (owner, repo) = fabro_github::parse_github_owner_repo(&https_url)
         .map_err(|err| anyhow::anyhow!("{err}"))?;
 
-    let creds = github_app.context(
-        "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
-    )?;
+    let creds = super::load_github_credentials_required(printer)?;
 
     let branch_found = fabro_github::branch_exists(
         &creds,

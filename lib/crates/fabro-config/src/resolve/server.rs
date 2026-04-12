@@ -259,6 +259,7 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
             .and_then(|integrations| integrations.github.as_ref())
             .map(|github| GithubIntegrationSettings {
                 enabled:     github.enabled.unwrap_or(true),
+                strategy:    github.strategy.unwrap_or_default(),
                 app_id:      github.app_id.clone(),
                 client_id:   github.client_id.clone(),
                 slug:        github.slug.clone(),

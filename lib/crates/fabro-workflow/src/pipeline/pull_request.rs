@@ -1,4 +1,4 @@
-use fabro_github::{self as github_app, GitHubAppCredentials, ssh_url_to_https};
+use fabro_github::{self as github_app, GitHubCredentials, ssh_url_to_https};
 use fabro_graphviz::parser;
 use fabro_llm::generate::{GenerateParams, generate};
 use fabro_retro::retro::Retro;
@@ -400,7 +400,7 @@ pub struct AutoMergeOptions {
 /// the diff was empty, or `Err` on failure.
 #[allow(clippy::too_many_arguments)]
 pub async fn maybe_open_pull_request(
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     origin_url: &str,
     base_branch: &str,
     head_branch: &str,
@@ -1338,10 +1338,10 @@ mod tests {
     async fn empty_diff_returns_none() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        let creds = GitHubAppCredentials {
+        let creds = GitHubCredentials::App(fabro_github::GitHubAppCredentials {
             app_id:          "123".to_string(),
             private_key_pem: "unused".to_string(),
-        };
+        });
         let result = maybe_open_pull_request(
             &creds,
             "https://github.com/owner/repo.git",

@@ -4,7 +4,7 @@ use std::sync::Arc;
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use anyhow::anyhow;
 #[cfg(feature = "daytona")]
-use fabro_github::GitHubAppCredentials;
+use fabro_github::GitHubCredentials;
 use fabro_types::RunId;
 
 use crate::config::WorktreeMode;
@@ -28,7 +28,7 @@ pub enum SandboxSpec {
     #[cfg(feature = "daytona")]
     Daytona {
         config:       DaytonaConfig,
-        github_app:   Option<GitHubAppCredentials>,
+        github_app:   Option<GitHubCredentials>,
         run_id:       Option<RunId>,
         clone_branch: Option<String>,
     },

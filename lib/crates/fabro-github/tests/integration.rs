@@ -1,5 +1,5 @@
 use fabro_github::{
-    AutoMergeMethod, GitHubAppCredentials, close_pull_request,
+    AutoMergeMethod, GitHubAppCredentials, GitHubCredentials, close_pull_request,
     create_installation_access_token_for_pr, create_pull_request, enable_auto_merge,
     get_pull_request, merge_pull_request, resolve_authenticated_url, sign_app_jwt,
 };
@@ -7,11 +7,11 @@ use fabro_test::{GitHubAppOptions, GitHubAppState, TwinGitHub};
 
 const TEST_RSA_KEY: &str = include_str!("../src/testdata/rsa_private.pem");
 
-fn github_credentials() -> GitHubAppCredentials {
-    GitHubAppCredentials {
+fn github_credentials() -> GitHubCredentials {
+    GitHubCredentials::App(GitHubAppCredentials {
         app_id:          "42".to_string(),
         private_key_pem: TEST_RSA_KEY.to_string(),
-    }
+    })
 }
 
 fn standard_app_state() -> GitHubAppState {
@@ -167,7 +167,10 @@ async fn enable_auto_merge_persists() {
     .await
     .unwrap();
 
-    let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem).unwrap();
+    let GitHubCredentials::App(app_creds) = &creds else {
+        panic!("expected app credentials");
+    };
+    let jwt = sign_app_jwt(&app_creds.app_id, &app_creds.private_key_pem).unwrap();
     let client = fabro_test::test_http_client();
     let token =
         create_installation_access_token_for_pr(&client, &jwt, "acme", "widgets", &twin.base_url)

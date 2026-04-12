@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use daytona_sdk::api_types::SignedPortPreviewUrl;
-use fabro_github::GitHubAppCredentials;
+use fabro_github::GitHubCredentials;
 use fabro_types::RunId;
 use rand::Rng;
 use tokio::sync::OnceCell;
@@ -30,7 +30,7 @@ pub use crate::config::{
 pub struct DaytonaSandbox {
     config:         DaytonaConfig,
     client:         daytona_sdk::Client,
-    github_app:     Option<GitHubAppCredentials>,
+    github_app:     Option<GitHubCredentials>,
     sandbox:        OnceCell<daytona_sdk::Sandbox>,
     rg_available:   OnceCell<bool>,
     event_callback: Option<SandboxEventCallback>,
@@ -48,7 +48,7 @@ impl DaytonaSandbox {
     /// Create a new `DaytonaSandbox`, creating the Daytona client internally.
     pub async fn new(
         config: DaytonaConfig,
-        github_app: Option<GitHubAppCredentials>,
+        github_app: Option<GitHubCredentials>,
         run_id: Option<RunId>,
         clone_branch: Option<String>,
     ) -> Result<Self, String> {

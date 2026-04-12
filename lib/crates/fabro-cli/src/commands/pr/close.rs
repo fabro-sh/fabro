@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use fabro_util::printer::Printer;
 use tracing::info;
 
@@ -7,15 +7,12 @@ use crate::shared::print_json_pretty;
 
 pub(super) async fn close_command(
     args: PrCloseArgs,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
     printer: Printer,
 ) -> Result<()> {
     let (record, _run_id) = super::load_pr_record(&args.server, &args.run_id, printer).await?;
 
-    let creds = github_app.context(
-        "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
-    )?;
+    let creds = super::load_github_credentials_required(printer)?;
 
     fabro_github::close_pull_request(
         &creds,
