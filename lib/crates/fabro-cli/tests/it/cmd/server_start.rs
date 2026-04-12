@@ -199,8 +199,10 @@ fn start_with_tcp_host_only_bind_warns_and_falls_back_when_default_port_is_unava
     let storage_root = isolated_storage_dir();
     let storage_dir = storage_root.path().join("storage");
     let occupied = match std::net::TcpListener::bind(("127.0.0.1", 32276)) {
-        Ok(listener) => Some(listener),
-        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => None,
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+            return;
+        }
         Err(error) => panic!("failed to bind default TCP port 32276: {error}"),
     };
 
