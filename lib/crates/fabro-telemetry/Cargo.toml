@@ -18,13 +18,13 @@ base64.workspace = true
 chrono.workspace = true
 dirs.workspace = true
 exec.workspace = true
+fabro-http.workspace = true
 fabro-util = { path = "../fabro-util" }
 fork.workspace = true
 git2.workspace = true
 mac_address.workspace = true
 md5.workspace = true
 regex.workspace = true
-reqwest = { workspace = true, features = ["blocking"] }
 sentry.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -605,6 +605,7 @@ fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &P
     let output = std::process::Command::new(fabro_bin)
         .env("NO_COLOR", "1")
         .env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled")
         .env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64")
         .env(TEST_IN_MEMORY_STORE_ENV, "1")
         .env("FABRO_HOME", &server.root)
@@ -930,7 +931,8 @@ impl TestContext {
         }
         cmd.env("NO_COLOR", "1");
         cmd.env("HOME", &self.home_dir);
-        cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+        cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+            .env("FABRO_HTTP_PROXY_POLICY", "disabled");
         cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
         cmd.env(TEST_IN_MEMORY_STORE_ENV, "1");
         cmd
@@ -1385,8 +1387,8 @@ pub struct TwinGitHub {
     server:       twin_github::TestServer,
 }
 
-pub fn test_http_client() -> reqwest::Client {
-    reqwest::Client::builder().no_proxy().build().unwrap()
+pub fn test_http_client() -> fabro_http::HttpClient {
+    fabro_http::test_http_client().unwrap()
 }
 
 impl TwinGitHub {

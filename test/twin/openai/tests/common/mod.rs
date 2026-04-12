@@ -6,9 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use fabro_http::{HttpClient as Client, HttpClientBuilder};
+use fabro_http::header::AUTHORIZATION;
 use futures_util::StreamExt;
-use reqwest::Client;
-use reqwest::header::AUTHORIZATION;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -31,7 +31,7 @@ pub struct ApiClient {
 }
 
 pub struct RecordedResponse {
-    pub status:  reqwest::StatusCode,
+    pub status:  fabro_http::StatusCode,
     pub headers: HashMap<String, String>,
     pub body:    Vec<u8>,
 }
@@ -43,7 +43,7 @@ pub struct RawStreamResponse {
 }
 
 pub struct TimedStreamResponse {
-    pub status:              reqwest::StatusCode,
+    pub status:              fabro_http::StatusCode,
     pub first_event_elapsed: Duration,
     pub chunks:              Vec<String>,
 }
@@ -64,7 +64,7 @@ pub struct ParsedSseEvent {
 static NEXT_BEARER_TOKEN: AtomicU64 = AtomicU64::new(1);
 
 pub fn test_http_client() -> Result<Client> {
-    Client::builder().no_proxy().build().map_err(Into::into)
+    fabro_http::test_http_client().map_err(Into::into)
 }
 
 pub async fn spawn_server() -> Result<TestServer> {
@@ -95,8 +95,8 @@ fn authorization_header_value(bearer_token: &str) -> String {
 }
 
 fn build_authenticated_client(bearer_token: &str) -> Result<Client> {
-    Client::builder()
-        .no_proxy()
+    HttpClientBuilder::new()
+        .proxy_policy(fabro_http::ProxyPolicy::Disabled)
         .default_headers(
             [(
                 AUTHORIZATION,
@@ -120,8 +120,8 @@ impl ApiClient {
     ) -> Result<Self> {
         Ok(Self {
             base_url: base_url.into(),
-            client: Client::builder()
-                .no_proxy()
+            client: HttpClientBuilder::new()
+                .proxy_policy(fabro_http::ProxyPolicy::Disabled)
                 .timeout(Duration::from_secs(30))
                 .build()?,
             bearer_token,
@@ -146,7 +146,7 @@ impl ApiClient {
         }
     }
 
-    pub async fn post_json(&self, path: &str, body: &Value) -> reqwest::Response {
+    pub async fn post_json(&self, path: &str, body: &Value) -> fabro_http::Response {
         self.post(path)
             .json(body)
             .send()
@@ -168,15 +168,15 @@ impl ApiClient {
         .await
     }
 
-    pub fn post(&self, path: &str) -> reqwest::RequestBuilder {
+    pub fn post(&self, path: &str) -> fabro_http::RequestBuilder {
         self.request(self.client.post(format!("{}{}", self.base_url, path)))
     }
 
-    pub fn get(&self, path: &str) -> reqwest::RequestBuilder {
+    pub fn get(&self, path: &str) -> fabro_http::RequestBuilder {
         self.request(self.client.get(format!("{}{}", self.base_url, path)))
     }
 
-    fn request(&self, mut request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    fn request(&self, mut request: fabro_http::RequestBuilder) -> fabro_http::RequestBuilder {
         if let Some(token) = &self.bearer_token {
             request = request.bearer_auth(token);
         }
@@ -224,7 +224,7 @@ impl TestServer {
 }
 
 impl TestServer {
-    pub async fn post_responses(&self, body: Value) -> reqwest::Response {
+    pub async fn post_responses(&self, body: Value) -> fabro_http::Response {
         self.auth_client
             .post(format!("{}/v1/responses", self.base_url))
             .json(&body)
@@ -238,7 +238,7 @@ impl TestServer {
         body: Value,
         org: Option<&str>,
         project: Option<&str>,
-    ) -> reqwest::Response {
+    ) -> fabro_http::Response {
         let mut request = self
             .auth_client
             .post(format!("{}/v1/responses", self.base_url));
@@ -258,7 +258,10 @@ impl TestServer {
             .expect("request should complete")
     }
 
-    pub async fn post_responses_stream(&self, body: Value) -> (reqwest::StatusCode, Vec<String>) {
+    pub async fn post_responses_stream(
+        &self,
+        body: Value,
+    ) -> (fabro_http::StatusCode, Vec<String>) {
         let response = self
             .auth_client
             .post(format!("{}/v1/responses", self.base_url))
@@ -280,7 +283,7 @@ impl TestServer {
         (status, chunks)
     }
 
-    pub async fn post_chat(&self, body: Value) -> reqwest::Response {
+    pub async fn post_chat(&self, body: Value) -> fabro_http::Response {
         self.auth_client
             .post(format!("{}/v1/chat/completions", self.base_url))
             .json(&body)
@@ -289,7 +292,7 @@ impl TestServer {
             .expect("request should complete")
     }
 
-    pub async fn post_chat_stream(&self, body: Value) -> (reqwest::StatusCode, Vec<String>) {
+    pub async fn post_chat_stream(&self, body: Value) -> (fabro_http::StatusCode, Vec<String>) {
         let response = self.post_chat(body).await;
         let status = response.status();
         let mut stream = response.bytes_stream();
@@ -308,7 +311,7 @@ impl TestServer {
         &self,
         body: Value,
         authorization: Option<&str>,
-    ) -> reqwest::Response {
+    ) -> fabro_http::Response {
         let mut request = self
             .client
             .post(format!("{}/v1/chat/completions", self.base_url));
@@ -491,7 +494,7 @@ fn parse_sse_block(block: &str) -> Result<ParsedSseEvent, String> {
     })
 }
 
-pub async fn record_response(response: reqwest::Response) -> RecordedResponse {
+pub async fn record_response(response: fabro_http::Response) -> RecordedResponse {
     let status = response.status();
     let headers = response
         .headers()

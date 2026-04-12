@@ -62,11 +62,11 @@ fn build_client(
     ca_cert_path: &Path,
     client_cert_path: Option<&Path>,
     client_key_path: Option<&Path>,
-) -> reqwest::Client {
+) -> fabro_http::HttpClient {
     let ca_pem = std::fs::read(ca_cert_path).unwrap();
-    let ca_cert = reqwest::tls::Certificate::from_pem(&ca_pem).unwrap();
+    let ca_cert = fabro_http::tls::Certificate::from_pem(&ca_pem).unwrap();
 
-    let mut builder = reqwest::Client::builder()
+    let mut builder = fabro_http::HttpClientBuilder::new()
         .add_root_certificate(ca_cert)
         .no_proxy()
         .use_rustls_tls();
@@ -76,7 +76,7 @@ fn build_client(
         let key_pem = std::fs::read(key_path).unwrap();
         let mut identity_pem = cert_pem;
         identity_pem.extend_from_slice(&key_pem);
-        let identity = reqwest::tls::Identity::from_pem(&identity_pem).unwrap();
+        let identity = fabro_http::tls::Identity::from_pem(&identity_pem).unwrap();
         builder = builder.identity(identity);
     }
 

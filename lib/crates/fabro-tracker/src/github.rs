@@ -8,7 +8,7 @@ use crate::{Issue, Tracker, execute_graphql_request};
 
 /// Execute a GitHub GraphQL request and return the response JSON.
 async fn execute_github_graphql(
-    client: &reqwest::Client,
+    client: &fabro_http::HttpClient,
     token: &str,
     endpoint: &str,
     query: &str,
@@ -30,7 +30,7 @@ async fn execute_github_graphql(
 /// Scoped to a single project board identified by `project_number`.
 pub struct GitHubTracker {
     creds:           GitHubCredentials,
-    client:          reqwest::Client,
+    client:          fabro_http::HttpClient,
     owner:           String,
     repo:            String,
     project_number:  u64,
@@ -41,7 +41,7 @@ pub struct GitHubTracker {
 impl GitHubTracker {
     pub fn new(
         creds: GitHubCredentials,
-        client: reqwest::Client,
+        client: fabro_http::HttpClient,
         owner: String,
         repo: String,
         project_number: u64,
@@ -206,7 +206,7 @@ fn normalize_github_item(item: &serde_json::Value) -> Option<Issue> {
 
 /// Fetch one page of project items. Returns (items, has_next_page, end_cursor).
 async fn fetch_project_items_page(
-    client: &reqwest::Client,
+    client: &fabro_http::HttpClient,
     token: &str,
     graphql_url: &str,
     project_node_id: &str,
@@ -502,8 +502,8 @@ mod tests {
 
     use super::*;
     use crate::Issue;
-    fn test_http_client() -> reqwest::Client {
-        reqwest::Client::builder().no_proxy().build().unwrap()
+    fn test_http_client() -> fabro_http::HttpClient {
+        fabro_http::test_http_client().unwrap()
     }
 
     fn test_rsa_key() -> String {

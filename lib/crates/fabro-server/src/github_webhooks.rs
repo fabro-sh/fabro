@@ -255,7 +255,7 @@ async fn update_github_app_webhook(
     let jwt =
         fabro_github::sign_app_jwt(app_id, private_key_pem).map_err(|e| anyhow::anyhow!(e))?;
 
-    let client = reqwest::Client::new();
+    let client = fabro_http::http_client()?;
     let body = serde_json::json!({
         "url": webhook_url,
         "content_type": "json",
@@ -287,8 +287,8 @@ mod tests {
 
     use super::*;
 
-    fn test_http_client() -> reqwest::Client {
-        reqwest::Client::builder().no_proxy().build().unwrap()
+    fn test_http_client() -> fabro_http::HttpClient {
+        fabro_http::test_http_client().unwrap()
     }
 
     // -----------------------------------------------------------------------

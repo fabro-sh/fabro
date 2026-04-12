@@ -467,7 +467,7 @@ pub(crate) fn make_web_search_tool() -> RegisteredTool {
 
 fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool {
     use std::sync::OnceLock;
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    static CLIENT: OnceLock<fabro_http::HttpClient> = OnceLock::new();
 
     RegisteredTool {
         definition: ToolDefinition {
@@ -490,7 +490,11 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool 
                 })?;
 
                 let query = required_str(&args, "query")?;
-                let client = CLIENT.get_or_init(reqwest::Client::new).clone();
+                let client = CLIENT
+                    .get_or_init(|| {
+                        fabro_http::http_client().expect("Brave Search HTTP client should build")
+                    })
+                    .clone();
                 let count = args
                     .get("max_results")
                     .and_then(serde_json::Value::as_u64)

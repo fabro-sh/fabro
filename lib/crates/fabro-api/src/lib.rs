@@ -2,6 +2,8 @@
     clippy::absolute_paths,
     clippy::all,
     clippy::derivable_impls,
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
     clippy::needless_lifetimes,
     unreachable_pub,
     unused_imports

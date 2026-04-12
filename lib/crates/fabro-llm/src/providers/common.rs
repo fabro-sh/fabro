@@ -1,6 +1,6 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use reqwest::header::HeaderMap;
+use fabro_http::HeaderMap;
 use tokio::time;
 use tracing::warn;
 
@@ -169,7 +169,7 @@ pub fn parse_rate_limit_headers(headers: &HeaderMap) -> Option<RateLimitInfo> {
 /// Returns `Error::Network` on connection failure or `Error::Provider` on
 /// non-success status.
 pub async fn send_and_read_response(
-    request: reqwest::RequestBuilder,
+    request: fabro_http::RequestBuilder,
     provider: &str,
     error_code_field: &str,
 ) -> Result<(String, HeaderMap), Error> {
@@ -209,18 +209,18 @@ pub async fn send_and_read_response(
 
 /// Shared line reader for SSE streams.
 ///
-/// Buffers bytes from a `reqwest::Response` and splits them by a configurable
-/// delimiter (e.g. `"\n"` for Gemini/OpenAI-compatible, `"\n\n"` for
-/// Anthropic/OpenAI SSE event blocks).
+/// Buffers bytes from a `fabro_http::Response` and splits them by a
+/// configurable delimiter (e.g. `"\n"` for Gemini/OpenAI-compatible, `"\n\n"`
+/// for Anthropic/OpenAI SSE event blocks).
 pub struct LineReader {
-    response:            reqwest::Response,
+    response:            fabro_http::Response,
     buffer:              String,
     stream_read_timeout: Option<std::time::Duration>,
 }
 
 impl LineReader {
     pub fn new(
-        response: reqwest::Response,
+        response: fabro_http::Response,
         stream_read_timeout: Option<std::time::Duration>,
     ) -> Self {
         Self {

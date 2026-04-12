@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
+
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;

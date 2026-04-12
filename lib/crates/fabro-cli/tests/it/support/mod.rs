@@ -91,7 +91,8 @@ impl LightweightCli {
         }
         cmd.env("HOME", self.home_dir.path());
         cmd.env("NO_COLOR", "1");
-        cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+        cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+            .env("FABRO_HTTP_PROXY_POLICY", "disabled");
         cmd.current_dir(self.home_dir.path());
         cmd
     }

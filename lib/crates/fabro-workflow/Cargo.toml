@@ -37,6 +37,7 @@ fabro-retro = { path = "../fabro-retro" }
 fabro-core = { path = "../fabro-core" }
 fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../fabro-types" }
+fabro-http.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -61,7 +62,6 @@ git2.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
-reqwest.workspace = true
 tempfile = "3"
 toml.workspace = true
 [dev-dependencies]

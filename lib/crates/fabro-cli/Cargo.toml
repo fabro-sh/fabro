@@ -41,6 +41,7 @@ fabro-telemetry = { path = "../fabro-telemetry" }
 fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
+fabro-http.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 cli-table.workspace = true
@@ -60,7 +61,6 @@ toml.workspace = true
 futures.workspace = true
 regex.workspace = true
 semver.workspace = true
-reqwest.workspace = true
 progenitor-client = "0.13"
 async-trait.workspace = true
 jsonwebtoken.workspace = true

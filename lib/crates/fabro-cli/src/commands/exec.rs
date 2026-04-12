@@ -198,7 +198,7 @@ pub(crate) async fn execute(
                 user_config::build_server_client(tls.as_ref())?,
             ),
             user_config::ServerTarget::UnixSocket(path) => {
-                let http_client = reqwest::ClientBuilder::new()
+                let http_client = fabro_http::HttpClientBuilder::new()
                     .unix_socket(path.as_path())
                     .no_proxy()
                     .build()?;

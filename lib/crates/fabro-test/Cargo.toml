@@ -18,9 +18,9 @@ axum = { workspace = true }
 fabro-config = { path = "../fabro-config" }
 fabro-proc = { path = "../fabro-proc" }
 fabro-types = { path = "../fabro-types" }
+fabro-http.workspace = true
 insta = { workspace = true, features = ["filters"] }
 regex = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"

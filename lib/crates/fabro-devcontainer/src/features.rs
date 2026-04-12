@@ -248,7 +248,10 @@ async fn fetch_feature_https(
 
     info!(feature_id, "downloading feature from HTTPS");
 
-    let response = reqwest::get(feature_id)
+    let response = fabro_http::http_client()
+        .map_err(|e| DevcontainerError::Feature(format!("failed to build HTTP client: {e}")))?
+        .get(feature_id)
+        .send()
         .await
         .map_err(|e| DevcontainerError::Feature(format!("failed to download {feature_id}: {e}")))?;
 

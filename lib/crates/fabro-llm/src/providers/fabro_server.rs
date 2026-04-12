@@ -10,14 +10,14 @@ use crate::types::{FinishReason, Message, Request, Response, StreamEvent, TokenC
 /// `/completions` endpoint, delegating to whatever real provider the server
 /// is configured with.
 pub struct Adapter {
-    client:        reqwest::Client,
+    client:        fabro_http::HttpClient,
     base_url:      String,
     provider_name: String,
 }
 
 impl Adapter {
     pub fn new(
-        client: reqwest::Client,
+        client: fabro_http::HttpClient,
         base_url: impl Into<String>,
         provider_name: impl Into<String>,
     ) -> Self {
@@ -74,11 +74,11 @@ fn build_body(request: &Request, stream: bool) -> Result<serde_json::Value, Erro
 ///
 /// Handles timeout/network error mapping and non-2xx status codes.
 async fn send_request(
-    client: &reqwest::Client,
+    client: &fabro_http::HttpClient,
     url: &str,
     body: &serde_json::Value,
     provider: &str,
-) -> Result<reqwest::Response, Error> {
+) -> Result<fabro_http::Response, Error> {
     let http_resp = client.post(url).json(body).send().await.map_err(|e| {
         if e.is_timeout() {
             Error::request_timeout(e.to_string(), e)
@@ -228,8 +228,8 @@ mod tests {
     use crate::error::ProviderErrorKind;
     use crate::types::Message;
 
-    fn test_http_client() -> reqwest::Client {
-        reqwest::Client::builder().no_proxy().build().unwrap()
+    fn test_http_client() -> fabro_http::HttpClient {
+        fabro_http::test_http_client().unwrap()
     }
 
     fn make_request() -> Request {

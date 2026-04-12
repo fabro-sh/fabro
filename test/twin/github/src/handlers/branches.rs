@@ -96,7 +96,7 @@ mod tests {
     use crate::test_support::{sign_test_jwt, test_http_client, test_rsa_private_key};
 
     async fn get_installation_token(
-        client: &reqwest::Client,
+        client: &fabro_http::HttpClient,
         jwt: &str,
         owner: &str,
         repo: &str,
