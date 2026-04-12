@@ -13,7 +13,7 @@ use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::{CreateSecretRequest, SecretType as ApiSecretType};
 use fabro_config::user::SETTINGS_CONFIG_FILENAME;
-use fabro_config::{Storage, legacy_env};
+use fabro_config::{Storage, envfile, legacy_env};
 use fabro_model::Provider;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -729,7 +729,7 @@ fn persist_server_env_secrets(storage_dir: &Path, secrets: &[(String, String)]) 
         return Ok(());
     }
 
-    fabro_config::envfile::merge_env_file(
+    envfile::merge_env_file(
         &Storage::new(storage_dir).server_state().env_path(),
         secrets.iter().cloned(),
     )?;

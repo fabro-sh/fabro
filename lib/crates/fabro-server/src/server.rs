@@ -613,12 +613,12 @@ impl AppState {
         self.server_secrets.get(name)
     }
 
-    pub(crate) async fn session_key(&self) -> Option<Key> {
+    pub(crate) fn session_key(&self) -> Option<Key> {
         self.server_secret("SESSION_SECRET")
             .map(|value| Key::derive_from(value.as_bytes()))
     }
 
-    pub(crate) async fn github_credentials(
+    pub(crate) fn github_credentials(
         &self,
         settings: &GithubIntegrationSettings,
     ) -> Result<Option<fabro_github::GitHubCredentials>, String> {
@@ -1723,7 +1723,7 @@ async fn get_github_repo(
                 return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
                     .into_response();
             }
-            let creds = match state.github_credentials(github_settings).await {
+            let creds = match state.github_credentials(github_settings) {
                 Ok(Some(fabro_github::GitHubCredentials::App(creds))) => creds,
                 Ok(Some(_)) => unreachable!("app strategy should not return token credentials"),
                 Ok(None) => {
@@ -1805,7 +1805,7 @@ async fn get_github_repo(
                 Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
             }
         }
-        GithubIntegrationStrategy::GhCli => match state.github_credentials(github_settings).await {
+        GithubIntegrationStrategy::GhCli => match state.github_credentials(github_settings) {
             Ok(Some(fabro_github::GitHubCredentials::Token(token))) => token,
             Ok(Some(_)) => unreachable!("gh_cli strategy should not return app credentials"),
             Ok(None) => {
@@ -1938,7 +1938,7 @@ async fn cookie_and_demo_middleware(
         req.headers_mut()
             .insert("x-fabro-demo", HeaderValue::from_static("1"));
     }
-    if let Some(key) = state.session_key().await {
+    if let Some(key) = state.session_key() {
         if let Some(session) = web_auth::read_private_session(req.headers(), &key) {
             req.extensions_mut().insert(session);
         }
@@ -2127,7 +2127,7 @@ pub fn create_app_state_with_settings_and_registry_factory(
         5,
         store,
         artifact_store,
-        test_secret_store_path(),
+        &test_secret_store_path(),
         test_config_path(),
         false,
     )
@@ -2171,7 +2171,7 @@ pub fn create_app_state_with_store(
         max_concurrent_runs,
         store,
         artifact_store,
-        test_secret_store_path(),
+        &test_secret_store_path(),
         test_config_path(),
         false,
     )
@@ -2184,11 +2184,11 @@ pub(crate) fn build_app_state_with_path(
     max_concurrent_runs: usize,
     store: Arc<Database>,
     artifact_store: ArtifactStore,
-    vault_path: PathBuf,
+    vault_path: &std::path::Path,
     config_path: PathBuf,
     local_daemon_mode: bool,
 ) -> anyhow::Result<Arc<AppState>> {
-    let vault = Arc::new(AsyncRwLock::new(Vault::load(vault_path.clone())?));
+    let vault = Arc::new(AsyncRwLock::new(Vault::load(vault_path.to_path_buf())?));
     let server_env_path = vault_path.parent().map_or_else(
         || PathBuf::from("server.env"),
         |parent| parent.join("server.env"),
@@ -3811,10 +3811,10 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
                 && settings.sandbox.provider == "daytona")
                 || !github_settings.permissions.is_empty();
             if required_github_credentials {
-                state.github_credentials(&github_settings).await
+                state.github_credentials(&github_settings)
             } else if settings.execution.mode != RunMode::DryRun && settings.pull_request.is_some()
             {
-                match state.github_credentials(&github_settings).await {
+                match state.github_credentials(&github_settings) {
                     Ok(github_app) => Ok(github_app),
                     Err(err) => {
                         tracing::warn!(

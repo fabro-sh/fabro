@@ -337,7 +337,7 @@ where
         max_concurrent_runs,
         store,
         artifact_store,
-        vault_path,
+        &vault_path,
         active_config_path,
         matches!(&auth_mode, AuthMode::Disabled),
     )?;
@@ -377,7 +377,6 @@ where
                     let secret = server_secrets.get("GITHUB_APP_WEBHOOK_SECRET");
                     let github_app = state
                         .github_credentials(&resolved_server_settings.integrations.github)
-                        .await
                         .unwrap_or_else(|err| {
                             warn!(
                                 error = %err,

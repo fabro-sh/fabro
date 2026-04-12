@@ -40,7 +40,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-      - run: cargo fmt --check --all
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - run: cargo +nightly fmt --check --all
 
   clippy:
     name: Clippy

@@ -240,7 +240,7 @@ async fn callback_github(
     Query(params): Query<OAuthCallbackParams>,
     headers: HeaderMap,
 ) -> Response {
-    let Some(session_key) = state.session_key().await else {
+    let Some(session_key) = state.session_key() else {
         error!("OAuth callback failed: SESSION_SECRET not configured");
         return json_response(
             StatusCode::CONFLICT,
@@ -449,7 +449,7 @@ async fn callback_github(
 async fn logout(State(state): State<Arc<AppState>>) -> Response {
     info!("User logged out");
     let mut jar = CookieJar::new();
-    if let Some(key) = state.session_key().await {
+    if let Some(key) = state.session_key() {
         jar.private_mut(&key).remove(
             Cookie::build((SESSION_COOKIE_NAME, ""))
                 .path("/")
@@ -464,7 +464,7 @@ async fn logout(State(state): State<Arc<AppState>>) -> Response {
 
 async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     let has_cookie = headers.get(header::COOKIE).is_some();
-    let Some(session_key) = state.session_key().await else {
+    let Some(session_key) = state.session_key() else {
         warn!(
             has_cookie,
             "Auth check failed: SESSION_SECRET not available"

@@ -77,7 +77,7 @@ impl std::fmt::Debug for ServerSecrets {
                 "file_entries",
                 &self.file_entries.keys().collect::<Vec<_>>(),
             )
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

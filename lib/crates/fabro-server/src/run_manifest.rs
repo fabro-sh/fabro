@@ -368,7 +368,6 @@ async fn build_preflight_report(
     let github_app = if needs_github_credentials {
         state
             .github_credentials(&resolved_server.integrations.github)
-            .await
             .unwrap_or_default()
     } else {
         None

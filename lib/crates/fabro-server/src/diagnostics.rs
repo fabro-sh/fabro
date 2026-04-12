@@ -306,10 +306,7 @@ async fn probe_llm_provider(client: &LlmClient, provider: Provider) -> Result<()
 async fn check_github_app(state: &AppState) -> CheckResult {
     let settings = state.server_settings();
     if settings.integrations.github.strategy == GithubIntegrationStrategy::GhCli {
-        let token = match state
-            .github_credentials(&settings.integrations.github)
-            .await
-        {
+        let token = match state.github_credentials(&settings.integrations.github) {
             Ok(Some(fabro_github::GitHubCredentials::Token(token))) => token,
             Ok(Some(_)) => unreachable!("gh_cli strategy should not return app credentials"),
             Ok(None) => {
