@@ -3,9 +3,8 @@ use std::convert::TryFrom;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use indicatif::ProgressBar;
-
 use fabro_workflow::outcome::{StageStatus, format_cost};
+use indicatif::ProgressBar;
 
 use super::event::ProgressUsage;
 use super::renderer::ProgressRenderer;
@@ -25,18 +24,18 @@ pub(super) enum ToolCallStatus {
 pub(super) struct ToolCallEntry {
     pub(super) display_name: String,
     pub(super) tool_call_id: String,
-    pub(super) status: ToolCallStatus,
-    pub(super) bar: ProgressBar,
-    pub(super) is_branch: bool,
-    pub(super) started_at: Option<DateTime<Utc>>,
+    pub(super) status:       ToolCallStatus,
+    pub(super) bar:          ProgressBar,
+    pub(super) is_branch:    bool,
+    pub(super) started_at:   Option<DateTime<Utc>>,
 }
 
 #[derive(Debug)]
 pub(super) struct ActiveStage {
-    pub(super) display_name: String,
-    pub(super) has_model: bool,
-    pub(super) spinner: ProgressBar,
-    pub(super) tool_calls: VecDeque<ToolCallEntry>,
+    pub(super) display_name:   String,
+    pub(super) has_model:      bool,
+    pub(super) spinner:        ProgressBar,
+    pub(super) tool_calls:     VecDeque<ToolCallEntry>,
     pub(super) compaction_bar: Option<ProgressBar>,
 }
 
@@ -49,12 +48,12 @@ impl ActiveStage {
 }
 
 pub(super) struct StageDisplay {
-    verbose: bool,
-    pub(super) active_stages: HashMap<String, ActiveStage>,
-    pub(super) stage_counts: HashMap<String, (u64, u64)>,
+    verbose:                    bool,
+    pub(super) active_stages:   HashMap<String, ActiveStage>,
+    pub(super) stage_counts:    HashMap<String, (u64, u64)>,
     pub(super) parallel_parent: Option<String>,
-    any_stage_started: bool,
-    working_directory: Option<String>,
+    any_stage_started:          bool,
+    working_directory:          Option<String>,
 }
 
 impl StageDisplay {
@@ -118,16 +117,13 @@ impl StageDisplay {
         if renderer.is_tty() {
             bar.enable_steady_tick(Duration::from_millis(100));
         }
-        self.active_stages.insert(
-            node_id.to_string(),
-            ActiveStage {
-                display_name,
-                has_model: false,
-                spinner: bar,
-                tool_calls: VecDeque::new(),
-                compaction_bar: None,
-            },
-        );
+        self.active_stages.insert(node_id.to_string(), ActiveStage {
+            display_name,
+            has_model: false,
+            spinner: bar,
+            tool_calls: VecDeque::new(),
+            compaction_bar: None,
+        });
     }
 
     pub(super) fn on_stage_completed(

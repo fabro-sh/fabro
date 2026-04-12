@@ -15,6 +15,7 @@ workspace = true
 fabro-types = { path = "../fabro-types" }
 slatedb.workspace = true
 object_store.workspace = true
+percent-encoding.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
@@ -29,3 +30,4 @@ futures.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = "3"
+ulid.workspace = true

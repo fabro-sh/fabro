@@ -1,15 +1,14 @@
+use fabro_model::Provider;
+
+use super::EnvContext;
 use crate::agent_profile::AgentProfile;
-use crate::config::SessionConfig;
-use crate::profiles::BaseProfile;
-use crate::profiles::assemble_system_prompt;
+use crate::config::SessionOptions;
+use crate::profiles::{BaseProfile, assemble_system_prompt};
 use crate::sandbox::Sandbox;
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{WebFetchSummarizer, register_core_tools};
 use crate::v4a_patch::make_apply_patch_tool;
-use fabro_model::Provider;
-
-use super::EnvContext;
 
 pub struct OpenAiProfile {
     base: BaseProfile,
@@ -26,7 +25,7 @@ impl OpenAiProfile {
         model: impl Into<String>,
         summarizer: Option<WebFetchSummarizer>,
     ) -> Self {
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
         let mut registry = ToolRegistry::new();
 
         register_core_tools(&mut registry, &config, summarizer);
@@ -199,11 +198,13 @@ in the project.");
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use tokio::sync::Mutex as AsyncMutex;
+
     use super::*;
     use crate::subagent::{SessionFactory, SubAgentManager};
     use crate::test_support::MockSandbox;
-    use std::sync::Arc;
-    use tokio::sync::Mutex as AsyncMutex;
 
     #[test]
     fn openai_profile_identity() {

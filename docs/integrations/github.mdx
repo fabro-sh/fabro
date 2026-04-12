@@ -3,18 +3,36 @@ title: "GitHub"
 description: "Integrate Fabro with GitHub for repository access and OAuth login"
 ---
 
-Fabro uses a [GitHub App](https://docs.github.com/en/apps/overview) to authenticate users in the web UI and to clone private repositories into remote sandboxes. The GitHub App is created automatically through a guided setup flow — no manual app configuration required.
+Fabro supports two GitHub integration strategies:
 
-## What the GitHub App enables
+- `gh_cli` — the default for local and individual use. Fabro captures `gh auth token` during `fabro install`, stores it as `GITHUB_CLI_TOKEN`, and uses that token directly for repo access, pull requests, and sandbox `GITHUB_TOKEN` injection.
+- `app` — the team-oriented option. Fabro registers a [GitHub App](https://docs.github.com/en/apps/overview), uses installation tokens for repo access, and enables browser OAuth and webhooks.
+
+`gh_cli` changes GitHub integration auth only. It does not provide browser sign-in, so the embedded web UI is disabled when `strategy = "gh_cli"`.
+
+## Strategy matrix
+
+| Capability | `gh_cli` | `app` |
+|---|---|---|
+| CLI pull requests | Yes | Yes |
+| Private repo cloning | Yes | Yes |
+| Sandbox `GITHUB_TOKEN` | Direct CLI token | Scoped installation token |
+| Browser sign-in | No | Yes |
+| Web UI routes | Disabled | Enabled |
+| Webhooks | No | Yes |
+
+## GitHub App mode
+
+The rest of this page describes the `app` strategy, which is required for browser auth and webhooks.
 
 | Feature | How it's used |
 |---|---|
 | **OAuth login** | Users sign in to the web UI with their GitHub account |
 | **Private repo cloning** | Daytona and Docker sandboxes clone private repositories using short-lived Installation Access Tokens |
 | **Checkpoint pushing** | After each workflow stage, Fabro pushes the run branch and metadata branch back to origin from inside the sandbox |
-| **Auto-PR** | When `[pull_request] enabled = true` in the [run config](/execution/run-configuration#pull_request), Fabro opens a PR from the agent's working branch after a successful run |
-| **Auto-merge** | When `[pull_request] auto_merge = true`, Fabro enables GitHub's auto-merge on created PRs so they merge automatically once required checks pass |
-| **Sandbox GITHUB_TOKEN** | When `[github] permissions` are declared in the run config, Fabro mints a scoped Installation Access Token and injects it as `GITHUB_TOKEN` in the sandbox |
+| **Auto-PR** | When `[run.pull_request] enabled = true` in the [run config](/execution/run-configuration#runpull_request), Fabro opens a PR from the agent's working branch after a successful run |
+| **Auto-merge** | When `[run.pull_request] auto_merge = true`, Fabro enables GitHub's auto-merge on created PRs so they merge automatically once required checks pass |
+| **Sandbox GITHUB_TOKEN** | When `[server.integrations.github.permissions]` are declared in the server config, Fabro mints a scoped Installation Access Token and injects it as `GITHUB_TOKEN` in the sandbox |
 
 ## Setup
 
@@ -25,7 +43,7 @@ Fabro uses a [GitHub App](https://docs.github.com/en/apps/overview) to authentic
 
 ### Register the GitHub App
 
-1. Navigate to the web app (default `http://localhost:5173`). If no GitHub App is configured, you'll be redirected to the setup page automatically.
+1. Navigate to the web app (default `http://localhost:3000`). If no GitHub App is configured, you'll be redirected to the setup page automatically.
 
 2. Click **Register GitHub App**. This takes you to GitHub with a pre-filled [App Manifest](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) containing:
 
@@ -42,10 +60,9 @@ Fabro uses a [GitHub App](https://docs.github.com/en/apps/overview) to authentic
 
 4. GitHub redirects back to Fabro, which automatically:
    - Exchanges the temporary code for permanent app credentials
-   - Writes `app_id`, `client_id`, and `slug` to `~/.fabro/server.toml`
-   - Writes `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` to `.env`
-   - Generates a `SESSION_SECRET` for web app sessions
-   - Redirects you to the login page
+   - Writes `app_id`, `client_id`, and `slug` to `~/.fabro/settings.toml`
+   - Stores `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` in `<data_dir>/server.env`
+   - Marks the change as restart-bound so the server must be restarted before login
 
 5. **Install the app** on your GitHub account or organization. Go to `https://github.com/settings/apps/<your-app-slug>/installations` and install it on the repositories Fabro should access.
 
@@ -61,11 +78,11 @@ The GitHub App check verifies five fields:
 
 | Field | Source |
 |---|---|
-| `git.app_id` | `~/.fabro/server.toml` |
-| `git.client_id` | `~/.fabro/server.toml` |
-| `GITHUB_APP_CLIENT_SECRET` | `.env` |
-| `GITHUB_APP_WEBHOOK_SECRET` | `.env` |
-| `GITHUB_APP_PRIVATE_KEY` | `.env` |
+| `server.integrations.github.app_id` | `~/.fabro/settings.toml` |
+| `server.integrations.github.client_id` | `~/.fabro/settings.toml` |
+| `GITHUB_APP_CLIENT_SECRET` | `<data_dir>/server.env` |
+| `GITHUB_APP_WEBHOOK_SECRET` | `<data_dir>/server.env` |
+| `GITHUB_APP_PRIVATE_KEY` | `<data_dir>/server.env` |
 
 If all five are set, the check passes. If none are set, it warns (GitHub integration is optional). If some are set but others are missing, it errors with the specific missing fields.
 
@@ -73,11 +90,10 @@ If all five are set, the check passes. If none are set, it warns (GitHub integra
 
 The GitHub App configuration lives in two places:
 
-### `~/.fabro/server.toml`
+### `~/.fabro/settings.toml`
 
-```toml title="server.toml"
-[git]
-provider = "github"
+```toml title="settings.toml"
+[server.integrations.github]
 app_id = "123456"
 client_id = "Iv1.abc123def"
 slug = "fabro-a3f2"
@@ -85,20 +101,29 @@ slug = "fabro-a3f2"
 
 | Field | Description |
 |---|---|
-| `provider` | Always `"github"` (the only supported provider) |
 | `app_id` | Numeric GitHub App ID |
 | `client_id` | OAuth Client ID for the app |
 | `slug` | App slug, used for linking to the GitHub App settings page |
 
-### `.env`
+### `server.env`
 
-```bash
-GITHUB_APP_CLIENT_SECRET=...       # OAuth client secret
-GITHUB_APP_WEBHOOK_SECRET=...      # Webhook validation secret (reserved for future use)
-GITHUB_APP_PRIVATE_KEY=...         # RSA private key, base64-encoded PEM
-```
+Fabro stores the GitHub App secrets in `<data_dir>/server.env` under these keys:
+
+- `GITHUB_APP_CLIENT_SECRET`
+- `GITHUB_APP_WEBHOOK_SECRET`
+- `GITHUB_APP_PRIVATE_KEY`
 
 The private key is stored as base64-encoded PEM. Fabro also accepts raw PEM format (starting with `-----BEGIN`).
+
+## `gh_cli` mode
+
+Choose **GitHub CLI** in `fabro install` to use the default local-user flow. The installer:
+
+1. Runs `gh auth token`
+2. Stores the token as `GITHUB_CLI_TOKEN`
+3. Writes `strategy = "gh_cli"` under `[server.integrations.github]`
+
+In this mode, Fabro disables the embedded web UI and browser auth routes. Machine API routes and `/health` continue to work.
 
 ## How it works
 
@@ -111,11 +136,11 @@ The web app uses the GitHub App's OAuth credentials to authenticate users:
 3. User authorizes the app on GitHub
 4. GitHub redirects back with an authorization code
 5. Fabro exchanges the code for an access token and fetches the user's profile and verified email
-6. Fabro checks the username against the `allowed_usernames` list in `server.toml`
+6. Fabro checks the username against the `allowed_usernames` list in `settings.toml`
 
-Configure allowed users in `server.toml`:
+Configure allowed users in `settings.toml`:
 
-```toml title="server.toml"
+```toml title="settings.toml"
 [web.auth]
 provider = "github"
 allowed_usernames = ["alice", "bob"]
@@ -147,7 +172,7 @@ permissions = { contents = "write", pull_requests = "write" }
 
 Only the listed permissions are requested — the token is scoped to the minimum access needed. If the GitHub App isn't configured or the repository lacks an installation, the run logs a warning and continues without the token.
 
-This also works in `fabro.toml` as a project-level default, so all workflows in the project automatically get a `GITHUB_TOKEN` without repeating the config in each run TOML.
+This also works in `.fabro/project.toml` as a project-level default, so all workflows in the project automatically get a `GITHUB_TOKEN` without repeating the config in each run TOML.
 
 ### Checkpoint pushing
 
@@ -191,7 +216,7 @@ The app is installed but doesn't have access to this specific repository. Update
 
 ### "GitHub App authentication failed"
 
-The `app_id` in `server.toml` or the `GITHUB_APP_PRIVATE_KEY` environment variable is incorrect. Re-run the setup flow or verify the values match your GitHub App.
+The `app_id` in `settings.toml` or the `GITHUB_APP_PRIVATE_KEY` environment variable is incorrect. Re-run the setup flow or verify the values match your GitHub App.
 
 ### Clone fails for private repositories
 

@@ -15,19 +15,20 @@ static GLOBAL_CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FallbackTarget {
     pub provider: String,
-    pub model: String,
+    pub model:    String,
 }
 
 /// Typed model catalog backed by a `Vec<Model>`.
 ///
-/// Use [`Catalog::builtin()`] for the embedded catalog, or [`Catalog::from_models()`]
-/// for testing with custom model sets.
+/// Use [`Catalog::builtin()`] for the embedded catalog, or
+/// [`Catalog::from_models()`] for testing with custom model sets.
 pub struct Catalog {
     models: Vec<Model>,
 }
 
 impl Catalog {
-    /// Returns a reference to the global built-in catalog (loaded once from catalog.json).
+    /// Returns a reference to the global built-in catalog (loaded once from
+    /// catalog.json).
     #[must_use]
     pub fn builtin() -> &'static Self {
         &GLOBAL_CATALOG
@@ -83,8 +84,9 @@ impl Catalog {
             .unwrap_or_else(|| self.default_model())
     }
 
-    /// Probe model for a provider — the cheapest model suitable for connectivity checks.
-    /// Falls back to the provider's default when no explicit override is configured.
+    /// Probe model for a provider — the cheapest model suitable for
+    /// connectivity checks. Falls back to the provider's default when no
+    /// explicit override is configured.
     #[must_use]
     pub fn probe_for_provider(&self, p: Provider) -> Option<&Model> {
         let override_id: Option<&str> = match p {
@@ -99,10 +101,12 @@ impl Catalog {
         self.default_for_provider(p)
     }
 
-    /// Find the closest model on a target provider matching the reference's capabilities.
+    /// Find the closest model on a target provider matching the reference's
+    /// capabilities.
     ///
-    /// Hard-filters on `features.tools`, `features.vision`, and `features.reasoning`.
-    /// Among matches, picks the closest by `costs.input_cost_per_mtok` (absolute diff).
+    /// Hard-filters on `features.tools`, `features.vision`, and
+    /// `features.reasoning`. Among matches, picks the closest by
+    /// `costs.input_cost_per_mtok` (absolute diff).
     #[must_use]
     pub fn closest(&self, target: Provider, reference: &Model) -> Option<&Model> {
         self.models
@@ -125,8 +129,9 @@ impl Catalog {
 
     /// Build an ordered fallback chain for a primary provider/model.
     ///
-    /// For each fallback provider, finds the closest matching model. Providers where
-    /// no capability match exists (or the provider string doesn't parse) are skipped.
+    /// For each fallback provider, finds the closest matching model. Providers
+    /// where no capability match exists (or the provider string doesn't
+    /// parse) are skipped.
     #[must_use]
     pub fn build_fallback_chain(
         &self,
@@ -148,7 +153,7 @@ impl Catalog {
                 let provider = provider_str.parse::<Provider>().ok()?;
                 self.closest(provider, reference).map(|m| FallbackTarget {
                     provider: provider_str.clone(),
-                    model: m.id.clone(),
+                    model:    m.id.clone(),
                 })
             })
             .collect()
@@ -157,9 +162,10 @@ impl Catalog {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::provider::Provider;
-    use std::str::FromStr;
 
     // ---- Catalog struct tests ----
 
@@ -268,10 +274,10 @@ mod tests {
 
     #[test]
     fn builtin_build_fallback_chain() {
-        let fallbacks = HashMap::from([(
-            "anthropic".to_string(),
-            vec!["gemini".to_string(), "openai".to_string()],
-        )]);
+        let fallbacks = HashMap::from([("anthropic".to_string(), vec![
+            "gemini".to_string(),
+            "openai".to_string(),
+        ])]);
         let chain = Catalog::builtin().build_fallback_chain(
             Provider::Anthropic,
             "claude-opus-4-6",
@@ -305,10 +311,10 @@ mod tests {
 
     #[test]
     fn builtin_build_fallback_chain_skips_no_capability_match() {
-        let fallbacks = HashMap::from([(
-            "anthropic".to_string(),
-            vec!["openai".to_string(), "kimi".to_string()],
-        )]);
+        let fallbacks = HashMap::from([("anthropic".to_string(), vec![
+            "openai".to_string(),
+            "kimi".to_string(),
+        ])]);
         let chain = Catalog::builtin().build_fallback_chain(
             Provider::Anthropic,
             "claude-haiku-4-5",
@@ -335,30 +341,30 @@ mod tests {
         use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits};
 
         let models = vec![Model {
-            id: "test-model".to_string(),
-            provider: Provider::Anthropic,
-            family: "test".to_string(),
-            display_name: "Test Model".to_string(),
-            limits: ModelLimits {
+            id:                   "test-model".to_string(),
+            provider:             Provider::Anthropic,
+            family:               "test".to_string(),
+            display_name:         "Test Model".to_string(),
+            limits:               ModelLimits {
                 context_window: 100_000,
-                max_output: Some(4096),
+                max_output:     Some(4096),
             },
-            training: None,
-            knowledge_cutoff: None,
-            features: ModelFeatures {
-                tools: true,
-                vision: false,
+            training:             None,
+            knowledge_cutoff:     None,
+            features:             ModelFeatures {
+                tools:     true,
+                vision:    false,
                 reasoning: false,
-                effort: false,
+                effort:    false,
             },
-            costs: ModelCosts {
-                input_cost_per_mtok: Some(1.0),
-                output_cost_per_mtok: Some(5.0),
+            costs:                ModelCosts {
+                input_cost_per_mtok:       Some(1.0),
+                output_cost_per_mtok:      Some(5.0),
                 cache_input_cost_per_mtok: None,
             },
             estimated_output_tps: None,
-            aliases: vec!["test".to_string()],
-            default: true,
+            aliases:              vec!["test".to_string()],
+            default:              true,
         }];
 
         let catalog = Catalog::from_models(models);
@@ -458,13 +464,13 @@ mod tests {
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
-                    15.0,
+                    5.0,
                 ),
                 output_cost_per_mtok: Some(
-                    75.0,
+                    25.0,
                 ),
                 cache_input_cost_per_mtok: Some(
-                    1.5,
+                    0.5,
                 ),
             },
             estimated_output_tps: Some(
@@ -874,8 +880,8 @@ mod tests {
     #[test]
     fn model_info_costs() {
         let claude = Catalog::builtin().get("claude-opus-4-6").unwrap();
-        assert_eq!(claude.costs.input_cost_per_mtok, Some(15.0));
-        assert_eq!(claude.costs.output_cost_per_mtok, Some(75.0));
+        assert_eq!(claude.costs.input_cost_per_mtok, Some(5.0));
+        assert_eq!(claude.costs.output_cost_per_mtok, Some(25.0));
 
         let sonnet = Catalog::builtin().get("claude-sonnet-4-5").unwrap();
         assert_eq!(sonnet.costs.input_cost_per_mtok, Some(3.0));

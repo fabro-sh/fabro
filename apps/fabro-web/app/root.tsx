@@ -1,62 +1,24 @@
-import {
-  isRouteErrorResponse,
-  Links,
-  Meta,
-  Outlet,
-  Scripts,
-  ScrollRestoration,
-} from "react-router";
-
-import type { Route } from "./+types/root";
+import { isRouteErrorResponse, Outlet } from "react-router";
 import { ThemeProvider } from "./lib/theme";
+import { buildThemeBootScript } from "./lib/theme-selection";
 import "./app.css";
 
-const themeScript = `(function(){try{var t=localStorage.getItem("fabro-theme");if(t!=="light"&&t!=="dark")t=window.matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light";document.documentElement.classList.add(t)}catch(e){document.documentElement.classList.add("dark")}})()`;
+const themeScript = buildThemeBootScript();
 
-export const links: Route.LinksFunction = () => [
-  { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
-  { rel: "icon", href: "/favicon.ico", sizes: "32x32" },
-  { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
-  { rel: "preconnect", href: "https://fonts.googleapis.com" },
-  {
-    rel: "preconnect",
-    href: "https://fonts.gstatic.com",
-    crossOrigin: "anonymous",
-  },
-  {
-    rel: "stylesheet",
-    href: "https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@400;500;600&display=swap",
-  },
-];
-
-export function Layout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en" className="h-full bg-atmosphere" suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <Meta />
-        <Links />
-      </head>
-      <body className="h-full">
-        {children}
-        <ScrollRestoration />
-        <Scripts />
-      </body>
-    </html>
-  );
-}
-
-export default function App() {
+export default function Root() {
   return (
     <ThemeProvider>
+      <ThemeBoot />
       <Outlet />
     </ThemeProvider>
   );
 }
 
-export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
+function ThemeBoot() {
+  return <script dangerouslySetInnerHTML={{ __html: themeScript }} />;
+}
+
+export function ErrorBoundary({ error }: any) {
   let status = 500;
   let heading = "Something went wrong";
   let message = "An unexpected error occurred. Please try again.";
@@ -72,16 +34,14 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       message = error.statusText || message;
     }
   } else if (error instanceof Error) {
-    if (import.meta.env.DEV) {
-      message = error.message;
-      stack = error.stack;
-    }
+    message = error.message;
+    stack = error.stack;
   }
 
   const is404 = status === 404;
 
   return (
-    <main className="flex min-h-full flex-col items-center justify-center px-6 py-24">
+    <main className="flex min-h-screen flex-col items-center justify-center px-6 py-24">
       <div className="text-center">
         <p
           className="font-mono text-[8rem] font-bold leading-none tracking-tighter"

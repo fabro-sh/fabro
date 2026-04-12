@@ -22,6 +22,8 @@ import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObj
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
 // @ts-ignore
+import type { DiagnosticsReport } from '../models';
+// @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { HealthResponse } from '../models';
@@ -161,6 +163,43 @@ export const DiscoveryApiAxiosParamCreator = function (configuration?: Configura
                 options: localVarRequestOptions,
             };
         },
+        /**
+         * Probes external services and server configuration. May be slow.
+         * @summary Run server health diagnostics
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        runDiagnostics: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/health/diagnostics`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -218,6 +257,18 @@ export const DiscoveryApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['DiscoveryApi.getUser']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
+        /**
+         * Probes external services and server configuration. May be slow.
+         * @summary Run server health diagnostics
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async runDiagnostics(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DiagnosticsReport>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.runDiagnostics(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DiscoveryApi.runDiagnostics']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
     }
 };
 
@@ -262,6 +313,15 @@ export const DiscoveryApiFactory = function (configuration?: Configuration, base
          */
         getUser(options?: RawAxiosRequestConfig): AxiosPromise<UserResponse> {
             return localVarFp.getUser(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Probes external services and server configuration. May be slow.
+         * @summary Run server health diagnostics
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        runDiagnostics(options?: RawAxiosRequestConfig): AxiosPromise<DiagnosticsReport> {
+            return localVarFp.runDiagnostics(options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -308,6 +368,16 @@ export class DiscoveryApi extends BaseAPI {
      */
     public getUser(options?: RawAxiosRequestConfig) {
         return DiscoveryApiFp(this.configuration).getUser(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Probes external services and server configuration. May be slow.
+     * @summary Run server health diagnostics
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public runDiagnostics(options?: RawAxiosRequestConfig) {
+        return DiscoveryApiFp(this.configuration).runDiagnostics(options).then((request) => request(this.axios, this.basePath));
     }
 }
 

@@ -6,14 +6,14 @@ use crate::event::Track;
 #[derive(Clone, Copy)]
 pub(crate) struct BufferPolicy {
     pub count_threshold: usize,
-    pub time_threshold: Duration,
+    pub time_threshold:  Duration,
 }
 
 impl Default for BufferPolicy {
     fn default() -> Self {
         Self {
             count_threshold: 20,
-            time_threshold: Duration::from_secs(60),
+            time_threshold:  Duration::from_secs(60),
         }
     }
 }
@@ -61,20 +61,22 @@ pub(crate) fn consumer_loop(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex, mpsc};
+
+    use serde_json::json;
+
     use super::*;
     use crate::event::User;
-    use serde_json::json;
-    use std::sync::{Arc, Mutex, mpsc};
 
     fn make_track(event: &str) -> Track {
         Track {
-            user: User::AnonymousId {
+            user:       User::AnonymousId {
                 anonymous_id: "test".to_string(),
             },
-            event: event.to_string(),
+            event:      event.to_string(),
             properties: json!({}),
-            context: None,
-            timestamp: None,
+            context:    None,
+            timestamp:  None,
             message_id: format!("msg-{event}"),
         }
     }
@@ -96,7 +98,7 @@ mod tests {
             &rx,
             BufferPolicy {
                 count_threshold: 2,
-                time_threshold: Duration::from_secs(60),
+                time_threshold:  Duration::from_secs(60),
             },
             move |tracks| {
                 let events: Vec<String> = tracks.iter().map(|t| t.event.clone()).collect();
@@ -131,7 +133,7 @@ mod tests {
             &rx,
             BufferPolicy {
                 count_threshold: 2,
-                time_threshold: Duration::from_secs(60),
+                time_threshold:  Duration::from_secs(60),
             },
             move |_| {
                 *mid.lock().unwrap() = true;
@@ -146,6 +148,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This sync test needs a dedicated OS thread to let the blocking consumer loop flush on its own timer."
+    )]
     fn flushes_on_time_threshold() {
         let (tx, rx) = mpsc::channel();
         let mid_flushes: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
@@ -162,7 +168,7 @@ mod tests {
                 &rx,
                 BufferPolicy {
                     count_threshold: 100, // won't trigger
-                    time_threshold: Duration::from_millis(50),
+                    time_threshold:  Duration::from_millis(50),
                 },
                 move |tracks| {
                     let events: Vec<String> = tracks.iter().map(|t| t.event.clone()).collect();
@@ -204,7 +210,7 @@ mod tests {
             &rx,
             BufferPolicy {
                 count_threshold: 100, // won't trigger
-                time_threshold: Duration::from_secs(60),
+                time_threshold:  Duration::from_secs(60),
             },
             move |tracks| {
                 let events: Vec<String> = tracks.iter().map(|t| t.event.clone()).collect();

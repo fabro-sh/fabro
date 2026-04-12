@@ -1,76 +1,103 @@
 ---
 title: "Variables"
-description: "Using variables in workflows"
+description: "Using templates in workflows"
 ---
 
-Fabro supports `$variable` placeholders that let you parameterize workflows without editing the Graphviz file.
+Fabro uses `{{ ... }}` templates for workflow strings and prompts.
 
-## Run config variables
+## Template context
 
-Define variables in the `[vars]` section of a run config TOML file:
+Workflow and prompt templates can reference:
+
+| Expression | Resolves to |
+|---|---|
+| `{{ goal }}` | The workflow goal |
+| `{{ inputs.name }}` | A value from `[run.inputs]` |
+
+Environment variables are **not** available in workflow or prompt templates. Use `{{ env.NAME }}` only in config strings and HTTP hook headers.
+
+## Run config inputs
+
+Define typed inputs in `[run.inputs]`:
 
 ```toml title="run.toml"
-version = 1
-goal = "Run tests for $repo_name"
+_version = 1
+
+[workflow]
 graph = "check.fabro"
 
-[vars]
+[run]
+goal = "Run repository checks"
+
+[run.inputs]
 repo_name = "fabro"
 repo_url = "https://github.com/fabro-sh/fabro"
 language = "rust"
 ```
 
-These variables are expanded into the Graphviz source **before** the graph is parsed. You can use `$variable` anywhere in the Graphviz file — goals, prompts, labels, scripts, or any other attribute:
+These values are available throughout the workflow as `{{ inputs.* }}`:
 
 ```dot title="check.fabro"
 digraph Check {
-    graph [goal="Run tests for $repo_name"]
+    graph [goal="Run tests for {{ inputs.repo_name }}"]
 
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    clone [label="Clone", shape=parallelogram, script="git clone $repo_url repo"]
-    test  [label="Test", prompt="Run the $language test suite in the repo/ directory."]
+    clone [label="Clone", shape=parallelogram, script="git clone {{ inputs.repo_url }} repo"]
+    test  [label="Test", prompt="Run the {{ inputs.language }} test suite in the repo/ directory."]
 
     start -> clone -> test -> exit
 }
 ```
 
-When launched with `fabro run run.toml`, Fabro replaces `$repo_name`, `$repo_url`, and `$language` with their values before parsing the graph.
+## `goal`
 
-### Undefined variables
-
-If a `$variable` in the Graphviz file has no matching entry in `[vars]`, Fabro raises an error. This catches typos early — a misspelled `$langauge` fails immediately rather than passing a literal `$langauge` to the LLM.
-
-### Escaping `$`
-
-To include a literal `$` in the output, write `$$`:
-
-```dot
-test [prompt="The env var is $$HOME"]
-```
-
-This produces `The env var is $HOME` without treating `$HOME` as a variable reference. A bare `$` not followed by an identifier character (e.g. `costs $5`) does not need escaping.
-
-## The `$goal` variable
-
-Inside agent and prompt node prompts, Fabro automatically expands `$goal` to the workflow's `goal` attribute. This happens at runtime, after graph parsing:
+Agent and prompt nodes also receive the workflow goal at runtime:
 
 ```dot title="example.fabro"
 digraph Example {
     graph [goal="Implement the login feature"]
 
-    plan [label="Plan", prompt="Create a plan for: $goal"]
+    plan [label="Plan", prompt="Create a plan for: {{ goal }}"]
 }
 ```
 
-The plan node's prompt becomes `"Create a plan for: Implement the login feature"`.
+That prompt becomes `Create a plan for: Implement the login feature`.
 
-## Variable merging
+## Expansion timing
 
-When using server-level run defaults alongside a run config TOML, variables are merged. Task config vars override default vars when keys collide:
+Fabro expands templates in multiple passes:
+
+1. Before DOT parsing, `{{ inputs.* }}` can parameterize structural parts of the graph, including imported `.fabro` files.
+2. After parsing, all string graph, node, and edge attributes are rendered again with the real `{ goal, inputs }` context.
+3. Agent and prompt handlers do a final runtime render pass as a safety net.
+
+`{{ goal }}` is preserved through the pre-parse step so it can be resolved later. That means goal-dependent MiniJinja control flow such as `{% if goal %}` is not useful in structural pre-parse templates.
+
+## Undefined variables
+
+Fabro uses strict undefined-variable handling. If a workflow template references an unknown value such as `{{ inputs.langauge }}`, validation fails instead of passing the literal text through to the model.
+
+## Escaping
+
+To emit literal template syntax, use MiniJinja escaping:
+
+```dot
+test [prompt="{% raw %}{{ goal }}{% endraw %}"]
+```
+
+You can also emit literal braces with expressions such as `{{ '{{' }}` when needed.
+
+## Input merging
+
+`[run.inputs]` intentionally replaces the inherited map wholesale rather than merging by key. Whichever layer has the highest precedence and sets `[run.inputs]` wins its entire map.
 
 | Source | Priority |
 |---|---|
-| Run config TOML `[vars]` | Highest — wins on collision |
-| Server defaults `[vars]` | Lowest — provides fallback values |
+| CLI flags (`-V key=value`, repeated) | Highest |
+| `workflow.toml` `[run.inputs]` | |
+| `.fabro/project.toml` `[run.inputs]` | |
+| `~/.fabro/settings.toml` `[run.inputs]` | Lowest |
+
+If you need per-key overrides on top of inherited defaults, set each input explicitly in the winning layer.

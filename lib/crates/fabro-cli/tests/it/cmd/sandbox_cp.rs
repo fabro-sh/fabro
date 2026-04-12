@@ -20,14 +20,14 @@ fn help() {
       <DST>  Destination: <run-id>:<path> or local path
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-      -r, --recursive                  Recurse into directories
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+      -r, --recursive         Recurse into directories
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -45,8 +45,7 @@ fn sandbox_cp_run_without_sandbox_json_errors_cleanly() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: Failed to load sandbox.json — was this run started with a recent version of arc?
-      > failed to read [DRY_RUN_DIR]/sandbox.json: No such file or directory (os error 2)
+    error: Run has no active sandbox.
     ");
 }
 
@@ -55,6 +54,26 @@ fn sandbox_cp_downloads_file_from_run() {
     let context = test_context!();
     let setup = setup_local_sandbox_run(&context);
     let dest = context.temp_dir.join("downloaded-root.txt");
+    let mut cmd = context.cp();
+    cmd.args([
+        &format!("{}:sandbox_dir/download_me/root.txt", setup.run.run_id),
+        dest.to_str().unwrap(),
+    ]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    ");
+    assert_eq!(read_text(&dest), "keep");
+}
+
+#[test]
+fn sandbox_cp_downloads_file_from_store_without_sandbox_json() {
+    let context = test_context!();
+    let setup = setup_local_sandbox_run(&context);
+    let dest = context.temp_dir.join("downloaded-from-store.txt");
     let mut cmd = context.cp();
     cmd.args([
         &format!("{}:sandbox_dir/download_me/root.txt", setup.run.run_id),

@@ -171,7 +171,8 @@ pub mod combinators {
         }
     }
 
-    /// Parse a float: optional sign, optional integer part, `.`, fractional digits.
+    /// Parse a float: optional sign, optional integer part, `.`, fractional
+    /// digits.
     pub fn float_value(input: &str) -> IResult<&str, f64> {
         let (rest, raw) = recognize(pair(
             pair(opt(char('-')), take_while(|c: char| c.is_ascii_digit())),
@@ -183,7 +184,8 @@ pub mod combinators {
         Ok((rest, val))
     }
 
-    /// Parse an integer: optional sign, digits. Not followed by `.` (that's a float).
+    /// Parse an integer: optional sign, digits. Not followed by `.` (that's a
+    /// float).
     pub fn integer_value(input: &str) -> IResult<&str, i64> {
         let (rest, raw) = recognize(pair(
             opt(char('-')),
@@ -215,7 +217,8 @@ pub mod combinators {
         Ok((rest, AstValue::Str(format!("{num}{unit}"))))
     }
 
-    /// Parse a bare string value containing hyphens and dots (e.g., `gpt-5.2-codex`).
+    /// Parse a bare string value containing hyphens and dots (e.g.,
+    /// `gpt-5.2-codex`).
     ///
     /// Must start with an alpha/underscore character, then may continue with
     /// alphanumeric, underscore, hyphen, or dot characters. Must contain at
@@ -231,8 +234,8 @@ pub mod combinators {
         Ok((rest, raw.to_string()))
     }
 
-    /// Parse an AST value: duration, float, integer, boolean, quoted string, bare identifier,
-    /// or bare string (e.g., `gpt-5.2-codex`).
+    /// Parse an AST value: duration, float, integer, boolean, quoted string,
+    /// bare identifier, or bare string (e.g., `gpt-5.2-codex`).
     pub fn value(input: &str) -> IResult<&str, AstValue> {
         let input = input.trim_start();
         alt((

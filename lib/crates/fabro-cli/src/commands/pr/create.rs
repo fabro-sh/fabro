@@ -1,80 +1,50 @@
-use std::path::Path;
-
 use anyhow::{Context, Result, bail};
-use fabro_config::FabroSettingsExt;
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
+use fabro_util::printer::Printer;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::pull_request::maybe_open_pull_request;
-use fabro_workflow::records::{
-    Conclusion, ConclusionExt, RunRecord, RunRecordExt, StartRecord, StartRecordExt,
-};
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrCreateArgs};
+use crate::command_context::CommandContext;
+use crate::commands::store::rebuild::rebuild_run_store;
+use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
-use crate::store;
-use crate::user_config::load_user_settings_with_globals;
+use crate::shared::repo::ensure_matching_repo_origin;
 
 pub(super) async fn create_command(
     args: PrCreateArgs,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> Result<()> {
-    let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    create_from(&base, args, github_app, globals).await
-}
+    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
+    let run = lookup.resolve(&args.run_id)?;
+    let run_id = run.run_id();
+    let events = lookup.client().list_run_events(&run_id, None, None).await?;
+    let run_store = rebuild_run_store(&run_id, &events).await?;
+    let state = run_store.state().await?;
 
-async fn create_from(
-    base: &Path,
-    args: PrCreateArgs,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
-    globals: &GlobalArgs,
-) -> Result<()> {
-    let storage_dir = base.parent().unwrap_or(base);
-    let store = store::build_store(storage_dir)?;
-    let run = resolve_run_combined(store.as_ref(), base, &args.run_id).await?;
-    let run_dir = run.path.clone();
-    let run_store = store::open_run_reader(storage_dir, &run.run_id).await?;
+    let record = state.run.context("Failed to load run record from store")?;
+    ensure_matching_repo_origin(
+        record.repo_origin_url.as_deref(),
+        "create a pull request for",
+    )?;
 
-    let record = match run_store.as_ref() {
-        Some(run_store) => run_store
-            .get_run()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| RunRecord::load(&run_dir).ok())
-            .context("Failed to load run.json")?,
-        None => RunRecord::load(&run_dir).context("Failed to load run.json")?,
-    };
+    let start = state
+        .start
+        .context("Failed to load start record from store")?;
 
-    let start = match run_store.as_ref() {
-        Some(run_store) => run_store
-            .get_start()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| StartRecord::load(&run_dir).ok())
-            .context("Failed to load start.json")?,
-        None => StartRecord::load(&run_dir).context("Failed to load start.json")?,
-    };
-
-    let conclusion = match run_store.as_ref() {
-        Some(run_store) => run_store
-            .get_conclusion()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| Conclusion::load(&run_dir.join("conclusion.json")).ok())
-            .context("Failed to load conclusion.json — is the run finished?")?,
-        None => Conclusion::load(&run_dir.join("conclusion.json"))
-            .context("Failed to load conclusion.json — is the run finished?")?,
-    };
+    let conclusion = state
+        .conclusion
+        .context("Failed to load conclusion from store — is the run finished?")?;
 
     match conclusion.status {
         StageStatus::Success | StageStatus::PartialSuccess => {}
+        status if args.force => {
+            tracing::warn!("Run status is '{status}', proceeding because --force was specified");
+        }
         status => bail!("Run status is '{status}', expected success or partial_success"),
     }
 
@@ -83,10 +53,11 @@ async fn create_from(
         .as_deref()
         .context("Run has no run_branch — was it run with git push enabled?")?;
 
-    let diff = std::fs::read_to_string(run_dir.join("final.patch"))
-        .context("Failed to read final.patch — no diff available")?;
+    let diff = state
+        .final_patch
+        .context("Failed to load final patch from store — no diff available")?;
     if diff.trim().is_empty() {
-        bail!("final.patch is empty — nothing to create a PR for");
+        bail!("Stored diff is empty — nothing to create a PR for");
     }
 
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
@@ -103,9 +74,7 @@ async fn create_from(
     let (owner, repo) = fabro_github::parse_github_owner_repo(&https_url)
         .map_err(|err| anyhow::anyhow!("{err}"))?;
 
-    let creds = github_app.context(
-        "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
-    )?;
+    let creds = super::load_github_credentials_required(printer).await?;
 
     let branch_found = fabro_github::branch_exists(
         &creds,
@@ -133,13 +102,12 @@ async fn create_from(
         &origin_url,
         base_branch,
         run_branch,
-        record.goal(),
+        record.graph.goal(),
         &diff,
         &model,
         true,
         None,
-        run_store.as_deref(),
-        &run_dir,
+        &run_store.clone().into(),
         None,
     )
     .await
@@ -148,20 +116,17 @@ async fn create_from(
     match record {
         Some(record) => {
             info!(pr_url = %record.html_url, "Pull request created");
-            if let Err(err) = record.save(&run_dir.join("pull_request.json")) {
-                tracing::warn!(error = %err, "Failed to save pull_request.json");
-            }
             if globals.json {
                 print_json_pretty(&record)?;
             } else {
-                println!("{}", record.html_url);
+                fabro_util::printout!(printer, "{}", record.html_url);
             }
         }
         None => {
             if globals.json {
                 print_json_pretty(&serde_json::Value::Null)?;
             } else {
-                println!("No pull request created (empty diff).");
+                fabro_util::printout!(printer, "No pull request created (empty diff).");
             }
         }
     }

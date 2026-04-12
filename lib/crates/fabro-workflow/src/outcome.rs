@@ -1,23 +1,50 @@
 pub use fabro_core::outcome::{FailureCategory, FailureDetail, OutcomeMeta, StageStatus};
-pub use fabro_types::usage::StageUsage;
+use fabro_llm::types::TokenCounts as LlmTokenCounts;
+use fabro_model::{
+    AnthropicBillingFacts, Catalog, ModelBillingFacts, ModelBillingInput, ModelRef, ModelUsage,
+    Provider, Speed, TokenCounts,
+};
+pub use fabro_types::BilledModelUsage;
 
 use crate::error::classify_failure_reason;
-use fabro_llm::types::Usage as LlmUsage;
 
-pub fn stage_usage_to_llm(u: &StageUsage) -> LlmUsage {
-    LlmUsage {
-        input_tokens: u.input_tokens,
-        output_tokens: u.output_tokens,
-        total_tokens: u.input_tokens + u.output_tokens,
-        cache_read_tokens: u.cache_read_tokens,
-        cache_write_tokens: u.cache_write_tokens,
-        reasoning_tokens: u.reasoning_tokens,
-        speed: u.speed.clone(),
-        raw: None,
+pub type Outcome = fabro_core::Outcome<Option<BilledModelUsage>>;
+
+#[must_use]
+pub fn billed_model_usage_from_llm(
+    model_id: &str,
+    provider: Provider,
+    requested_speed: Option<&str>,
+    usage: &LlmTokenCounts,
+) -> BilledModelUsage {
+    let speed = parse_speed(requested_speed);
+    let model = ModelRef {
+        provider,
+        model_id: model_id.to_string(),
+        speed,
+    };
+    let tokens = token_counts_from_llm_usage(usage);
+    let facts = billing_facts_for_stage_usage(provider, &tokens);
+    let input = ModelBillingInput {
+        usage: ModelUsage {
+            model: model.clone(),
+            tokens,
+        },
+        facts,
+    };
+
+    let total_usd_micros = Catalog::builtin()
+        .get(model_id)
+        .filter(|candidate| candidate.provider == provider)
+        .and_then(|candidate| candidate.pricing_for(speed))
+        .and_then(|pricing| pricing.bill(&input))
+        .map(|amount| amount.0);
+
+    BilledModelUsage {
+        input,
+        total_usd_micros,
     }
 }
-
-pub type Outcome = fabro_core::Outcome<Option<StageUsage>>;
 
 pub trait OutcomeExt: Sized {
     fn fail_deterministic(reason: impl Into<String>) -> Self;
@@ -68,18 +95,20 @@ impl OutcomeExt for Outcome {
     }
 
     fn with_signature(mut self, sig: Option<impl Into<String>>) -> Self {
-        if let Some(ref mut f) = self.failure {
-            f.signature = sig.map(Into::into);
+        if let Some(ref mut failure) = self.failure {
+            failure.signature = sig.map(Into::into);
         }
         self
     }
 
     fn failure_reason(&self) -> Option<&str> {
-        self.failure.as_ref().map(|f| f.message.as_str())
+        self.failure
+            .as_ref()
+            .map(|failure| failure.message.as_str())
     }
 
     fn failure_category(&self) -> Option<FailureCategory> {
-        self.failure.as_ref().map(|f| f.category)
+        self.failure.as_ref().map(|failure| failure.category)
     }
 
     fn classified_failure_category(&self) -> Option<FailureCategory> {
@@ -93,23 +122,82 @@ impl OutcomeExt for Outcome {
 }
 
 #[must_use]
-pub fn compute_stage_cost(usage: &StageUsage) -> Option<f64> {
-    let info = fabro_model::Catalog::builtin().get(&usage.model)?;
-    let input_rate = info.costs.input_cost_per_mtok?;
-    let output_rate = info.costs.output_cost_per_mtok?;
-    let multiplier = if usage.speed.as_deref() == Some("fast") {
-        6.0
-    } else {
-        1.0
-    };
-    Some(
-        (usage.input_tokens as f64 * input_rate / 1_000_000.0
-            + usage.output_tokens as f64 * output_rate / 1_000_000.0)
-            * multiplier,
-    )
-}
-
-#[must_use]
 pub fn format_cost(cost: f64) -> String {
     format!("${cost:.2}")
+}
+
+fn parse_speed(speed: Option<&str>) -> Option<Speed> {
+    speed.and_then(|value| value.parse::<Speed>().ok())
+}
+
+fn token_counts_from_llm_usage(usage: &LlmTokenCounts) -> TokenCounts {
+    usage.clone()
+}
+
+fn billing_facts_for_stage_usage(provider: Provider, tokens: &TokenCounts) -> ModelBillingFacts {
+    match provider {
+        Provider::Anthropic => ModelBillingFacts::Anthropic(AnthropicBillingFacts {
+            cache_write_5m_tokens: tokens.cache_write_tokens,
+            cache_write_1h_tokens: 0,
+        }),
+        other => ModelBillingFacts::for_provider(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fabro_llm::types::TokenCounts;
+    use fabro_model::Provider;
+
+    use super::billed_model_usage_from_llm;
+
+    #[test]
+    fn billed_model_usage_from_llm_bills_openai_cached_input_and_reasoning_output() {
+        let usage = TokenCounts {
+            input_tokens: 500_000,
+            output_tokens: 125_000,
+            reasoning_tokens: 25_000,
+            cache_read_tokens: 250_000,
+            ..TokenCounts::default()
+        };
+        let billed = billed_model_usage_from_llm("gpt-5.4", Provider::OpenAi, None, &usage);
+
+        assert_eq!(billed.total_usd_micros, Some(3_562_500));
+        assert_eq!(billed.tokens().output_tokens, 125_000);
+        assert_eq!(billed.tokens().reasoning_tokens, 25_000);
+    }
+
+    #[test]
+    fn billed_model_usage_from_llm_bills_anthropic_fast_mode_cache_write_pricing() {
+        let usage = TokenCounts {
+            input_tokens:       100_000,
+            output_tokens:      10_000,
+            reasoning_tokens:   5_000,
+            cache_read_tokens:  20_000,
+            cache_write_tokens: 30_000,
+        };
+        let billed = billed_model_usage_from_llm(
+            "claude-opus-4-6",
+            Provider::Anthropic,
+            Some("fast"),
+            &usage,
+        );
+
+        assert_eq!(billed.total_usd_micros, Some(6_435_000));
+    }
+
+    #[test]
+    fn billed_model_usage_round_trips_dense_token_counts() {
+        let usage = TokenCounts {
+            input_tokens:       100,
+            output_tokens:      40,
+            reasoning_tokens:   5,
+            cache_read_tokens:  20,
+            cache_write_tokens: 10,
+        };
+        let billed =
+            billed_model_usage_from_llm("claude-opus-4-6", Provider::Anthropic, None, &usage);
+
+        assert_eq!(billed.tokens().clone(), usage);
+    }
 }

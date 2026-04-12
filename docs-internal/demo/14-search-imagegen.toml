@@ -6,14 +6,14 @@ graph = "14-search-imagegen.fabro"
 provider = "daytona"
 
 [sandbox.env]
-GEMINI_API_KEY = "${env.GEMINI_API_KEY}"
+GEMINI_API_KEY = "{{ env.GEMINI_API_KEY }}"
 
 [sandbox.daytona.snapshot]
 name = "imagegen-tools-v3"
 cpu = 4
 memory = 8
 disk = 10
-dockerfile = { path = "../../fabro/workflows/imagegen/Dockerfile.imagegen" }
+dockerfile = { path = "../../.fabro/workflows/imagegen/Dockerfile.imagegen" }
 
 [assets]
 include = ["output/**"]

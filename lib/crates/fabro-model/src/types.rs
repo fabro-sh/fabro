@@ -7,44 +7,45 @@ use crate::provider::Provider;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelLimits {
     pub context_window: i64,
-    pub max_output: Option<i64>,
+    pub max_output:     Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelFeatures {
-    pub tools: bool,
-    pub vision: bool,
+    pub tools:     bool,
+    pub vision:    bool,
     pub reasoning: bool,
     /// Whether the model supports the `reasoning_effort` / `effort` parameter
-    /// directly (e.g. Anthropic `output_config.effort`, OpenAI `reasoning.effort`).
-    /// Models with `reasoning=true` but `effort=false` (e.g. claude-sonnet-4-5)
-    /// need the older `thinking` API with `budget_tokens` instead.
+    /// directly (e.g. Anthropic `output_config.effort`, OpenAI
+    /// `reasoning.effort`). Models with `reasoning=true` but `effort=false`
+    /// (e.g. claude-sonnet-4-5) need the older `thinking` API with
+    /// `budget_tokens` instead.
     #[serde(default)]
-    pub effort: bool,
+    pub effort:    bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelCosts {
-    pub input_cost_per_mtok: Option<f64>,
-    pub output_cost_per_mtok: Option<f64>,
+    pub input_cost_per_mtok:       Option<f64>,
+    pub output_cost_per_mtok:      Option<f64>,
     pub cache_input_cost_per_mtok: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Model {
-    pub id: String,
-    pub provider: Provider,
-    pub family: String,
-    pub display_name: String,
-    pub limits: ModelLimits,
-    pub training: Option<String>,
-    pub knowledge_cutoff: Option<String>,
-    pub features: ModelFeatures,
-    pub costs: ModelCosts,
+    pub id:                   String,
+    pub provider:             Provider,
+    pub family:               String,
+    pub display_name:         String,
+    pub limits:               ModelLimits,
+    pub training:             Option<String>,
+    pub knowledge_cutoff:     Option<String>,
+    pub features:             ModelFeatures,
+    pub costs:                ModelCosts,
     pub estimated_output_tps: Option<f64>,
-    pub aliases: Vec<String>,
+    pub aliases:              Vec<String>,
     #[serde(default)]
-    pub default: bool,
+    pub default:              bool,
 }
 
 impl Model {
@@ -141,9 +142,9 @@ mod tests {
         assert!(info.supports_effort());
         assert_eq!(info.training(), Some("2025-08-01"));
         assert_eq!(info.knowledge_cutoff(), Some("May 2025"));
-        assert_eq!(info.input_cost_per_mtok(), Some(15.0));
-        assert_eq!(info.output_cost_per_mtok(), Some(75.0));
-        assert_eq!(info.cache_input_cost_per_mtok(), Some(1.5));
+        assert_eq!(info.input_cost_per_mtok(), Some(5.0));
+        assert_eq!(info.output_cost_per_mtok(), Some(25.0));
+        assert_eq!(info.cache_input_cost_per_mtok(), Some(0.5));
         assert_eq!(info.estimated_output_tps(), Some(25.0));
         assert!(!info.aliases().is_empty());
         assert!(!info.is_default());

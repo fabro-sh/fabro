@@ -15,12 +15,12 @@
 
 
 /**
- * Request body for starting a new run from a Graphviz graph source.
+ * Request body for starting or resuming a run.
  */
 export interface StartRunRequest {
     /**
-     * Graphviz DOT language source defining the workflow graph.
+     * Resume from checkpoint instead of starting from submitted state.
      */
-    'dot_source': string;
+    'resume'?: boolean;
 }
 

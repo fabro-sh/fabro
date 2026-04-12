@@ -1,13 +1,13 @@
-use axum::{
-    Json, Router,
-    extract::State,
-    http::HeaderMap,
-    response::{IntoResponse, Response},
-    routing::{get, post},
-};
+use axum::extract::State;
+use axum::http::HeaderMap;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde_json::json;
 
-use crate::{engine::scenario::ScenarioEnvelope, openai::auth, state::AppState};
+use crate::engine::scenario::ScenarioEnvelope;
+use crate::openai::auth;
+use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()

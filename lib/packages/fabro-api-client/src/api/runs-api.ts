@@ -26,9 +26,17 @@ import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { PaginatedRunList } from '../models';
 // @ts-ignore
+import type { PreflightResponse } from '../models';
+// @ts-ignore
+import type { RenderWorkflowGraphRequest } from '../models';
+// @ts-ignore
+import type { RunManifest } from '../models';
+// @ts-ignore
 import type { RunStatusResponse } from '../models';
 // @ts-ignore
 import type { StartRunRequest } from '../models';
+// @ts-ignore
+import type { StoreRunSummary } from '../models';
 /**
  * RunsApi - axios parameter creator
  */
@@ -76,15 +84,98 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Returns a paginated list of runs for the board view, ordered by recency.
-         * @summary List Runs
+         * Creates a new workflow run in `submitted` status from a self-contained manifest.
+         * @summary Create Run
+         * @param {RunManifest} runManifest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createRun: async (runManifest: RunManifest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'runManifest' is not null or undefined
+            assertParamExists('createRun', 'runManifest', runManifest)
+            const localVarPath = `/api/v1/runs`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(runManifest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Deletes durable store state for a run. This does not remove any local run directory.
+         * @summary Delete Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        deleteRun: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('deleteRun', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves.
+         * @summary List Board Runs
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRuns: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/v1/runs`;
+        listBoardRuns: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/boards/runs`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -110,6 +201,43 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             if (pageOffset !== undefined) {
                 localVarQueryParameter['page[offset]'] = pageOffset;
             }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns durable run summaries from the backing store, including runs persisted before the current server boot.
+         * @summary List Runs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listRuns: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/runs`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -164,7 +292,49 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Returns the current status of a run, including error details and queue position if applicable.
+         * Validates and renders a workflow manifest as SVG or PNG without creating a run.
+         * @summary Render Workflow Graph
+         * @param {RenderWorkflowGraphRequest} renderWorkflowGraphRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        renderWorkflowGraph: async (renderWorkflowGraphRequest: RenderWorkflowGraphRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'renderWorkflowGraphRequest' is not null or undefined
+            assertParamExists('renderWorkflowGraph', 'renderWorkflowGraphRequest', renderWorkflowGraphRequest)
+            const localVarPath = `/api/v1/graph/render`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'image/svg+xml,image/png,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(renderWorkflowGraphRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns the durable run summary for a run.
          * @summary Retrieve Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -246,16 +416,60 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
-         * @summary Start Run
-         * @param {StartRunRequest} startRunRequest 
+         * Validates a workflow manifest without creating a run.
+         * @summary Validate Workflow Manifest
+         * @param {RunManifest} runManifest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        startRun: async (startRunRequest: StartRunRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'startRunRequest' is not null or undefined
-            assertParamExists('startRun', 'startRunRequest', startRunRequest)
-            const localVarPath = `/api/v1/runs`;
+        runPreflight: async (runManifest: RunManifest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'runManifest' is not null or undefined
+            assertParamExists('runPreflight', 'runManifest', runManifest)
+            const localVarPath = `/api/v1/preflight`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(runManifest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Starts a submitted run, queuing it for execution. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
+         * @summary Start Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {StartRunRequest} [startRunRequest] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        startRun: async (id: string, startRunRequest?: StartRunRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('startRun', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/start`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -281,47 +495,6 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(startRunRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Opens a server-sent event (SSE) stream for real-time run updates. Returns 410 if the stream has been closed.
-         * @summary Stream Run Events
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        streamRunEvents: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('streamRunEvents', 'id', id)
-            const localVarPath = `/api/v1/runs/{id}/events`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication mTLS required
-            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            localVarHeaderParameter['Accept'] = 'text/event-stream,application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -392,15 +565,53 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns a paginated list of runs for the board view, ordered by recency.
-         * @summary List Runs
+         * Creates a new workflow run in `submitted` status from a self-contained manifest.
+         * @summary Create Run
+         * @param {RunManifest} runManifest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async createRun(runManifest: RunManifest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunStatusResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.createRun(runManifest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.createRun']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Deletes durable store state for a run. This does not remove any local run directory.
+         * @summary Delete Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async deleteRun(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.deleteRun(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.deleteRun']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves.
+         * @summary List Board Runs
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listRuns(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedRunList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listRuns(pageLimit, pageOffset, options);
+        async listBoardRuns(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedRunList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listBoardRuns(pageLimit, pageOffset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.listBoardRuns']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns durable run summaries from the backing store, including runs persisted before the current server boot.
+         * @summary List Runs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listRuns(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Array<StoreRunSummary>>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listRuns(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.listRuns']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -419,13 +630,26 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns the current status of a run, including error details and queue position if applicable.
+         * Validates and renders a workflow manifest as SVG or PNG without creating a run.
+         * @summary Render Workflow Graph
+         * @param {RenderWorkflowGraphRequest} renderWorkflowGraphRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async renderWorkflowGraph(renderWorkflowGraphRequest: RenderWorkflowGraphRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.renderWorkflowGraph(renderWorkflowGraphRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.renderWorkflowGraph']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns the durable run summary for a run.
          * @summary Retrieve Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async retrieveRun(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunStatusResponse>> {
+        async retrieveRun(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<StoreRunSummary>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRun(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.retrieveRun']?.[localVarOperationServerIndex]?.url;
@@ -445,29 +669,30 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
-         * @summary Start Run
-         * @param {StartRunRequest} startRunRequest 
+         * Validates a workflow manifest without creating a run.
+         * @summary Validate Workflow Manifest
+         * @param {RunManifest} runManifest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async startRun(startRunRequest: StartRunRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunStatusResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.startRun(startRunRequest, options);
+        async runPreflight(runManifest: RunManifest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PreflightResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.runPreflight(runManifest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunsApi.startRun']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.runPreflight']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Opens a server-sent event (SSE) stream for real-time run updates. Returns 410 if the stream has been closed.
-         * @summary Stream Run Events
+         * Starts a submitted run, queuing it for execution. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
+         * @summary Start Run
          * @param {string} id Unique run identifier (ULID).
+         * @param {StartRunRequest} [startRunRequest] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async streamRunEvents(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.streamRunEvents(id, options);
+        async startRun(id: string, startRunRequest?: StartRunRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunStatusResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.startRun(id, startRunRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunsApi.streamRunEvents']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.startRun']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -503,15 +728,44 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.cancelRun(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns a paginated list of runs for the board view, ordered by recency.
-         * @summary List Runs
+         * Creates a new workflow run in `submitted` status from a self-contained manifest.
+         * @summary Create Run
+         * @param {RunManifest} runManifest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createRun(runManifest: RunManifest, options?: RawAxiosRequestConfig): AxiosPromise<RunStatusResponse> {
+            return localVarFp.createRun(runManifest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Deletes durable store state for a run. This does not remove any local run directory.
+         * @summary Delete Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        deleteRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.deleteRun(id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves.
+         * @summary List Board Runs
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRuns(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedRunList> {
-            return localVarFp.listRuns(pageLimit, pageOffset, options).then((request) => request(axios, basePath));
+        listBoardRuns(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedRunList> {
+            return localVarFp.listBoardRuns(pageLimit, pageOffset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns durable run summaries from the backing store, including runs persisted before the current server boot.
+         * @summary List Runs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listRuns(options?: RawAxiosRequestConfig): AxiosPromise<Array<StoreRunSummary>> {
+            return localVarFp.listRuns(options).then((request) => request(axios, basePath));
         },
         /**
          * Pauses a running run. Returns 409 if the run is not running.
@@ -524,13 +778,23 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.pauseRun(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns the current status of a run, including error details and queue position if applicable.
+         * Validates and renders a workflow manifest as SVG or PNG without creating a run.
+         * @summary Render Workflow Graph
+         * @param {RenderWorkflowGraphRequest} renderWorkflowGraphRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        renderWorkflowGraph(renderWorkflowGraphRequest: RenderWorkflowGraphRequest, options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.renderWorkflowGraph(renderWorkflowGraphRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns the durable run summary for a run.
          * @summary Retrieve Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunStatusResponse> {
+        retrieveRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<StoreRunSummary> {
             return localVarFp.retrieveRun(id, options).then((request) => request(axios, basePath));
         },
         /**
@@ -544,24 +808,25 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.retrieveRunGraph(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
-         * @summary Start Run
-         * @param {StartRunRequest} startRunRequest 
+         * Validates a workflow manifest without creating a run.
+         * @summary Validate Workflow Manifest
+         * @param {RunManifest} runManifest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        startRun(startRunRequest: StartRunRequest, options?: RawAxiosRequestConfig): AxiosPromise<RunStatusResponse> {
-            return localVarFp.startRun(startRunRequest, options).then((request) => request(axios, basePath));
+        runPreflight(runManifest: RunManifest, options?: RawAxiosRequestConfig): AxiosPromise<PreflightResponse> {
+            return localVarFp.runPreflight(runManifest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Opens a server-sent event (SSE) stream for real-time run updates. Returns 410 if the stream has been closed.
-         * @summary Stream Run Events
+         * Starts a submitted run, queuing it for execution. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
+         * @summary Start Run
          * @param {string} id Unique run identifier (ULID).
+         * @param {StartRunRequest} [startRunRequest] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        streamRunEvents(id: string, options?: RawAxiosRequestConfig): AxiosPromise<string> {
-            return localVarFp.streamRunEvents(id, options).then((request) => request(axios, basePath));
+        startRun(id: string, startRunRequest?: StartRunRequest, options?: RawAxiosRequestConfig): AxiosPromise<RunStatusResponse> {
+            return localVarFp.startRun(id, startRunRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Resumes a paused run. Returns 409 if the run is not paused.
@@ -592,15 +857,47 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Returns a paginated list of runs for the board view, ordered by recency.
-     * @summary List Runs
+     * Creates a new workflow run in `submitted` status from a self-contained manifest.
+     * @summary Create Run
+     * @param {RunManifest} runManifest 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public createRun(runManifest: RunManifest, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).createRun(runManifest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Deletes durable store state for a run. This does not remove any local run directory.
+     * @summary Delete Run
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public deleteRun(id: string, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).deleteRun(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves.
+     * @summary List Board Runs
      * @param {number} [pageLimit] Maximum number of items to return per page.
      * @param {number} [pageOffset] Number of items to skip before returning results.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public listRuns(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
-        return RunsApiFp(this.configuration).listRuns(pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
+    public listBoardRuns(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).listBoardRuns(pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns durable run summaries from the backing store, including runs persisted before the current server boot.
+     * @summary List Runs
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listRuns(options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).listRuns(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -615,7 +912,18 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Returns the current status of a run, including error details and queue position if applicable.
+     * Validates and renders a workflow manifest as SVG or PNG without creating a run.
+     * @summary Render Workflow Graph
+     * @param {RenderWorkflowGraphRequest} renderWorkflowGraphRequest 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public renderWorkflowGraph(renderWorkflowGraphRequest: RenderWorkflowGraphRequest, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).renderWorkflowGraph(renderWorkflowGraphRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns the durable run summary for a run.
      * @summary Retrieve Run
      * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.
@@ -637,25 +945,26 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
-     * @summary Start Run
-     * @param {StartRunRequest} startRunRequest 
+     * Validates a workflow manifest without creating a run.
+     * @summary Validate Workflow Manifest
+     * @param {RunManifest} runManifest 
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public startRun(startRunRequest: StartRunRequest, options?: RawAxiosRequestConfig) {
-        return RunsApiFp(this.configuration).startRun(startRunRequest, options).then((request) => request(this.axios, this.basePath));
+    public runPreflight(runManifest: RunManifest, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).runPreflight(runManifest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
-     * Opens a server-sent event (SSE) stream for real-time run updates. Returns 410 if the stream has been closed.
-     * @summary Stream Run Events
+     * Starts a submitted run, queuing it for execution. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
+     * @summary Start Run
      * @param {string} id Unique run identifier (ULID).
+     * @param {StartRunRequest} [startRunRequest] 
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public streamRunEvents(id: string, options?: RawAxiosRequestConfig) {
-        return RunsApiFp(this.configuration).streamRunEvents(id, options).then((request) => request(this.axios, this.basePath));
+    public startRun(id: string, startRunRequest?: StartRunRequest, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).startRun(id, startRunRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

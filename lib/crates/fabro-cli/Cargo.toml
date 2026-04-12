@@ -12,7 +12,6 @@ path = "src/main.rs"
 
 [features]
 default = []
-server = ["dep:fabro-server"]
 sleep_inhibitor = ["dep:core-foundation"]
 
 [lints]
@@ -29,18 +28,21 @@ fabro-devcontainer = { path = "../fabro-devcontainer" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-interview = { path = "../fabro-interview" }
 fabro-mcp = { path = "../fabro-mcp" }
-fabro-proctitle = { path = "../fabro-proctitle" }
+fabro-proc = { path = "../fabro-proc" }
 fabro-retro = { path = "../fabro-retro" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-checkpoint = { path = "../fabro-checkpoint" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-workflow = { path = "../fabro-workflow" }
-fabro-server = { path = "../fabro-server", optional = true }
+fabro-server = { path = "../fabro-server" }
+fabro-api = { path = "../fabro-api" }
 fabro-telemetry = { path = "../fabro-telemetry" }
 fabro-store = { path = "../fabro-store" }
+fabro-vault = { path = "../fabro-vault" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
+fabro-http.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 cli-table.workspace = true
@@ -60,7 +62,7 @@ toml.workspace = true
 futures.workspace = true
 regex.workspace = true
 semver.workspace = true
-reqwest.workspace = true
+progenitor-client = "0.13"
 async-trait.workspace = true
 jsonwebtoken.workspace = true
 base64.workspace = true
@@ -81,9 +83,8 @@ sha2.workspace = true
 shlex = "1"
 walkdir.workspace = true
 object_store.workspace = true
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
+bytes.workspace = true
+tokio-util.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = { version = "0.9", optional = true }

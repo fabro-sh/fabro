@@ -19,15 +19,18 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 clap = { workspace = true, optional = true }
+chrono.workspace = true
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 dirs.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 strsim = "0.11"
 toml.workspace = true
 tracing.workspace = true
+thiserror.workspace = true
+ulid.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tempfile = "3"
 toml.workspace = true

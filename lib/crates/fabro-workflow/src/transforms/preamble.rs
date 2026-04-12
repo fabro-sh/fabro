@@ -1,12 +1,14 @@
 use fabro_graphviz::graph::{AttrValue, Graph};
 
 use super::Transform;
+use crate::error::Error;
 
-/// For nodes whose fidelity is not `Full`, prepend a context mode preamble to the prompt.
+/// For nodes whose fidelity is not `Full`, prepend a context mode preamble to
+/// the prompt.
 pub struct PreambleTransform;
 
 impl Transform for PreambleTransform {
-    fn apply(&self, graph: Graph) -> Graph {
+    fn apply(&self, graph: Graph) -> Result<Graph, Error> {
         use crate::context::keys::Fidelity;
 
         let mut graph = graph;
@@ -30,7 +32,7 @@ impl Transform for PreambleTransform {
             }
         }
 
-        graph
+        Ok(graph)
     }
 }
 
@@ -54,7 +56,7 @@ mod tests {
         );
         graph.nodes.insert("work".to_string(), node);
 
-        let graph = PreambleTransform.apply(graph);
+        let graph = PreambleTransform.apply(graph).unwrap();
 
         let prompt = graph.nodes["work"]
             .attrs
@@ -78,7 +80,7 @@ mod tests {
         );
         graph.nodes.insert("work".to_string(), node);
 
-        let graph = PreambleTransform.apply(graph);
+        let graph = PreambleTransform.apply(graph).unwrap();
 
         let prompt = graph.nodes["work"]
             .attrs
@@ -102,7 +104,7 @@ mod tests {
         );
         graph.nodes.insert("work".to_string(), node);
 
-        let graph = PreambleTransform.apply(graph);
+        let graph = PreambleTransform.apply(graph).unwrap();
 
         let prompt = graph.nodes["work"]
             .attrs
@@ -122,7 +124,7 @@ mod tests {
         );
         graph.nodes.insert("work".to_string(), node);
 
-        let graph = PreambleTransform.apply(graph);
+        let graph = PreambleTransform.apply(graph).unwrap();
 
         assert!(!graph.nodes["work"].attrs.contains_key("prompt"));
     }

@@ -1,14 +1,16 @@
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
-
-use crate::error::{SdkError, error_from_status_code};
-use crate::types::{Message, RateLimitInfo, Role};
-use reqwest::header::HeaderMap;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use fabro_http::HeaderMap;
 use tokio::time;
 use tracing::warn;
 
+use crate::error::{Error, error_from_status_code};
+use crate::types::{Message, RateLimitInfo, Role};
+
 /// Parse an error response body, extracting the message and error code.
 ///
-/// `error_code_field` is the JSON field name for the error code (e.g. "type" or "status").
+/// `error_code_field` is the JSON field name for the error code (e.g. "type" or
+/// "status").
 #[must_use]
 pub fn parse_error_body(
     body: &str,
@@ -157,25 +159,27 @@ pub fn parse_rate_limit_headers(headers: &HeaderMap) -> Option<RateLimitInfo> {
     })
 }
 
-/// Send an HTTP request, read the response body, and return it along with the response headers.
+/// Send an HTTP request, read the response body, and return it along with the
+/// response headers.
 ///
 /// Returns an error on non-success status.
 ///
 /// # Errors
 ///
-/// Returns `SdkError::Network` on connection failure or `SdkError::Provider` on non-success status.
+/// Returns `Error::Network` on connection failure or `Error::Provider` on
+/// non-success status.
 pub async fn send_and_read_response(
-    request: reqwest::RequestBuilder,
+    request: fabro_http::RequestBuilder,
     provider: &str,
     error_code_field: &str,
-) -> Result<(String, HeaderMap), SdkError> {
+) -> Result<(String, HeaderMap), Error> {
     let http_resp = request.send().await.map_err(|e| {
         if e.is_timeout() {
             warn!(provider = %provider, error = %e, "Provider request timed out");
-            SdkError::request_timeout(format!("{provider}: {e}"), e)
+            Error::request_timeout(format!("{provider}: {e}"), e)
         } else {
             warn!(provider = %provider, error = %e, "Provider network error");
-            SdkError::network(e.to_string(), e)
+            Error::network(e.to_string(), e)
         }
     })?;
 
@@ -185,7 +189,7 @@ pub async fn send_and_read_response(
     let body = http_resp
         .text()
         .await
-        .map_err(|e| SdkError::network(e.to_string(), e))?;
+        .map_err(|e| Error::network(e.to_string(), e))?;
 
     if !status.is_success() {
         warn!(provider = %provider, status = status.as_u16(), "Provider returned error");
@@ -205,18 +209,18 @@ pub async fn send_and_read_response(
 
 /// Shared line reader for SSE streams.
 ///
-/// Buffers bytes from a `reqwest::Response` and splits them by a configurable
-/// delimiter (e.g. `"\n"` for Gemini/OpenAI-compatible, `"\n\n"` for
-/// Anthropic/OpenAI SSE event blocks).
+/// Buffers bytes from a `fabro_http::Response` and splits them by a
+/// configurable delimiter (e.g. `"\n"` for Gemini/OpenAI-compatible, `"\n\n"`
+/// for Anthropic/OpenAI SSE event blocks).
 pub struct LineReader {
-    response: reqwest::Response,
-    buffer: String,
+    response:            fabro_http::Response,
+    buffer:              String,
     stream_read_timeout: Option<std::time::Duration>,
 }
 
 impl LineReader {
     pub fn new(
-        response: reqwest::Response,
+        response: fabro_http::Response,
         stream_read_timeout: Option<std::time::Duration>,
     ) -> Self {
         Self {
@@ -232,7 +236,7 @@ impl LineReader {
     /// the stream is exhausted, or `Err` on I/O or timeout errors.  When the
     /// stream ends with data remaining in the buffer, the leftover is returned
     /// as a final segment.
-    pub async fn read_next_chunk(&mut self, delimiter: &str) -> Result<Option<String>, SdkError> {
+    pub async fn read_next_chunk(&mut self, delimiter: &str) -> Result<Option<String>, Error> {
         loop {
             if let Some(pos) = self.buffer.find(delimiter) {
                 let segment = self.buffer[..pos].to_string();
@@ -257,13 +261,13 @@ impl LineReader {
                     return Ok(Some(remaining));
                 }
                 Ok(Err(e)) => {
-                    return Err(SdkError::stream_error(e.to_string(), e));
+                    return Err(Error::stream_error(e.to_string(), e));
                 }
                 Err(_) => {
                     warn!("Stream read timed out waiting for next event");
-                    return Err(SdkError::Stream {
+                    return Err(Error::Stream {
                         message: "stream read timed out waiting for next event".to_string(),
-                        source: None,
+                        source:  None,
                     });
                 }
             }
@@ -463,9 +467,9 @@ mod tests {
     #[test]
     fn extract_system_prompt_developer_role() {
         let dev = Message {
-            role: Role::Developer,
-            content: vec![ContentPart::text("dev instructions")],
-            name: None,
+            role:         Role::Developer,
+            content:      vec![ContentPart::text("dev instructions")],
+            name:         None,
             tool_call_id: None,
         };
         let msgs = vec![dev, Message::user("hi")];
@@ -477,9 +481,9 @@ mod tests {
     #[test]
     fn extract_system_prompt_ignores_whitespace_system_and_developer() {
         let dev = Message {
-            role: Role::Developer,
-            content: vec![ContentPart::text(" \n\t ")],
-            name: None,
+            role:         Role::Developer,
+            content:      vec![ContentPart::text(" \n\t ")],
+            name:         None,
             tool_call_id: None,
         };
         let msgs = vec![Message::system("   "), dev, Message::user("hi")];

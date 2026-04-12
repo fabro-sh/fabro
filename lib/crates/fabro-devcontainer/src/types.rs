@@ -1,5 +1,6 @@
-use serde::Deserialize;
 use std::collections::HashMap;
+
+use serde::Deserialize;
 
 /// Top-level devcontainer.json schema (subset of the spec we support).
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -9,7 +10,7 @@ pub struct DevcontainerJson {
     pub image: Option<String>,
 
     /// Dockerfile build config
-    pub build: Option<BuildConfig>,
+    pub build: Option<BuildSpec>,
 
     /// Docker Compose file path(s) (compose mode)
     pub docker_compose_file: Option<ComposeFileRef>,
@@ -63,7 +64,7 @@ pub struct DevcontainerJson {
 
 /// Build configuration for Dockerfile mode.
 #[derive(Debug, Clone, Deserialize)]
-pub struct BuildConfig {
+pub struct BuildSpec {
     /// Path to Dockerfile (relative to devcontainer.json)
     pub dockerfile: Option<String>,
 
@@ -95,7 +96,8 @@ impl ComposeFileRef {
     }
 }
 
-/// A lifecycle command can be a string, array of strings, or object of named commands.
+/// A lifecycle command can be a string, array of strings, or object of named
+/// commands.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum LifecycleCommand {
@@ -108,8 +110,8 @@ pub enum LifecycleCommand {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FeatureMetadata {
-    pub id: Option<String>,
-    pub name: Option<String>,
+    pub id:      Option<String>,
+    pub name:    Option<String>,
     pub version: Option<String>,
 
     #[serde(default)]
@@ -119,7 +121,8 @@ pub(crate) struct FeatureMetadata {
     #[serde(default)]
     pub installs_after: Vec<String>,
 
-    /// Hard dependencies: feature IDs that must be present (auto-installed if missing)
+    /// Hard dependencies: feature IDs that must be present (auto-installed if
+    /// missing)
     #[serde(default)]
     pub depends_on: HashMap<String, serde_json::Value>,
 
@@ -128,9 +131,9 @@ pub(crate) struct FeatureMetadata {
     pub container_env: HashMap<String, String>,
 
     /// Lifecycle hooks contributed by this feature
-    pub on_create_command: Option<LifecycleCommand>,
+    pub on_create_command:   Option<LifecycleCommand>,
     pub post_create_command: Option<LifecycleCommand>,
-    pub post_start_command: Option<LifecycleCommand>,
+    pub post_start_command:  Option<LifecycleCommand>,
 }
 
 /// A single option for a devcontainer feature.
@@ -138,7 +141,7 @@ pub(crate) struct FeatureMetadata {
 pub(crate) struct FeatureOption {
     #[serde(rename = "type")]
     pub option_type: Option<String>,
-    pub default: Option<serde_json::Value>,
+    pub default:     Option<serde_json::Value>,
     pub description: Option<String>,
 }
 
@@ -225,10 +228,9 @@ mod tests {
             "workspaceFolder": "/workspace"
         }"#;
         let config: DevcontainerJson = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            config.docker_compose_file.as_ref().unwrap().paths(),
-            vec!["docker-compose.yml"]
-        );
+        assert_eq!(config.docker_compose_file.as_ref().unwrap().paths(), vec![
+            "docker-compose.yml"
+        ]);
         assert_eq!(config.service.as_deref(), Some("app"));
         assert_eq!(config.workspace_folder.as_deref(), Some("/workspace"));
     }
@@ -240,10 +242,10 @@ mod tests {
             "service": "app"
         }"#;
         let config: DevcontainerJson = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            config.docker_compose_file.as_ref().unwrap().paths(),
-            vec!["docker-compose.yml", "docker-compose.override.yml"]
-        );
+        assert_eq!(config.docker_compose_file.as_ref().unwrap().paths(), vec![
+            "docker-compose.yml",
+            "docker-compose.override.yml"
+        ]);
     }
 
     #[test]

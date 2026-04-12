@@ -1,22 +1,20 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use fabro_types::{RunId, settings::WorktreeMode};
-
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use anyhow::anyhow;
+#[cfg(feature = "daytona")]
+use fabro_github::GitHubCredentials;
+use fabro_types::RunId;
 
-use crate::sandbox_record::SandboxRecord;
-use crate::{Sandbox, SandboxEventCallback};
-
+use crate::config::WorktreeMode;
 #[cfg(feature = "daytona")]
 use crate::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 #[cfg(feature = "docker")]
-use crate::docker::{DockerSandbox, DockerSandboxConfig};
+use crate::docker::{DockerSandbox, DockerSandboxOptions};
 use crate::local::LocalSandbox;
-
-#[cfg(feature = "daytona")]
-use fabro_github::GitHubAppCredentials;
+use crate::sandbox_record::SandboxRecord;
+use crate::{Sandbox, SandboxEventCallback};
 
 /// Options for sandbox initialization and construction.
 pub enum SandboxSpec {
@@ -25,13 +23,13 @@ pub enum SandboxSpec {
     },
     #[cfg(feature = "docker")]
     Docker {
-        config: DockerSandboxConfig,
+        config: DockerSandboxOptions,
     },
     #[cfg(feature = "daytona")]
     Daytona {
-        config: DaytonaConfig,
-        github_app: Option<GitHubAppCredentials>,
-        run_id: Option<RunId>,
+        config:       DaytonaConfig,
+        github_app:   Option<GitHubCredentials>,
+        run_id:       Option<RunId>,
         clone_branch: Option<String>,
     },
 }
@@ -157,16 +155,16 @@ impl SandboxSpec {
             }
             #[cfg(feature = "docker")]
             Self::Docker { config } => {
-                let mut sandbox = DockerSandbox::new(DockerSandboxConfig {
-                    image: config.image.clone(),
+                let mut sandbox = DockerSandbox::new(DockerSandboxOptions {
+                    image:                  config.image.clone(),
                     host_working_directory: config.host_working_directory.clone(),
-                    container_mount_point: config.container_mount_point.clone(),
-                    network_mode: config.network_mode.clone(),
-                    extra_mounts: config.extra_mounts.clone(),
-                    memory_limit: config.memory_limit,
-                    cpu_quota: config.cpu_quota,
-                    auto_pull: config.auto_pull,
-                    env_vars: config.env_vars.clone(),
+                    container_mount_point:  config.container_mount_point.clone(),
+                    network_mode:           config.network_mode.clone(),
+                    extra_mounts:           config.extra_mounts.clone(),
+                    memory_limit:           config.memory_limit,
+                    cpu_quota:              config.cpu_quota,
+                    auto_pull:              config.auto_pull,
+                    env_vars:               config.env_vars.clone(),
                 })
                 .map_err(|e| anyhow!("Failed to create Docker sandbox: {e}"))?;
                 if let Some(callback) = event_callback {

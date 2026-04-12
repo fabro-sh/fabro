@@ -1,3 +1,5 @@
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 use std::env;
 
 use fabro_oauth::run_browser_flow;

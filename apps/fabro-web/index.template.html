@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" class="h-full bg-atmosphere">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fabro</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    />
+    <script>
+      (function(){try{var t=localStorage.getItem("fabro-theme");if(t!=="light"&&t!=="dark")t="dark";document.documentElement.classList.add(t)}catch(e){document.documentElement.classList.add("dark")}})()
+    </script>
+    {{styles}}
+  </head>
+  <body class="h-full font-sans antialiased">
+    <div id="root"></div>
+    {{scripts}}
+  </body>
+</html>

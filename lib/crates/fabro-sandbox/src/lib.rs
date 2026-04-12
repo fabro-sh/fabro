@@ -1,3 +1,4 @@
+pub mod config;
 pub mod sandbox;
 pub mod sandbox_spec;
 
@@ -22,24 +23,17 @@ pub mod daytona;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
+#[cfg(feature = "daytona")]
+pub use daytona::detect_clone_params;
+#[cfg(feature = "docker")]
+pub use docker::{DockerSandbox, DockerSandboxOptions};
+pub use local::LocalSandbox;
+pub use read_guard::ReadBeforeWriteSandbox;
 pub use sandbox::{
     DirEntry, ExecResult, GitRunInfo, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
     format_lines_numbered, git_push_via_exec, setup_git_via_exec, shell_quote,
 };
-pub use sandbox_spec::{SandboxSpec, WorkdirStrategy};
-
-pub use read_guard::ReadBeforeWriteSandbox;
-
 pub use sandbox_provider::SandboxProvider;
-
-pub use worktree::{WorktreeConfig, WorktreeEvent, WorktreeEventCallback, WorktreeSandbox};
-
-pub use local::LocalSandbox;
-
-#[cfg(feature = "docker")]
-pub use docker::{DockerSandbox, DockerSandboxConfig};
-
-pub use sandbox_record::{SandboxRecord, SandboxRecordExt};
-
-#[cfg(feature = "daytona")]
-pub use daytona::detect_clone_params;
+pub use sandbox_record::SandboxRecord;
+pub use sandbox_spec::{SandboxSpec, WorkdirStrategy};
+pub use worktree::{WorktreeEvent, WorktreeEventCallback, WorktreeOptions, WorktreeSandbox};

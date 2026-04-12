@@ -18,7 +18,7 @@ description: "Run Fabro workflows in sandboxed Daytona cloud environments"
 ## Prerequisites
 
 - A `DAYTONA_API_KEY` environment variable (get one from [app.daytona.io](https://app.daytona.io))
-- A [GitHub App](/integrations/github) configured via the web UI (required for private repository cloning and checkpoint pushing)
+- GitHub access configured via the default `gh_cli` strategy or a [GitHub App](/integrations/github) (required for private repository cloning and checkpoint pushing)
 
 ## Configuration
 
@@ -29,30 +29,30 @@ fabro run workflow.fabro --sandbox daytona
 ```
 
 ```toml title="run.toml"
-[sandbox]
+[run.sandbox]
 provider = "daytona"
 ```
 
 A full configuration example with all Daytona-specific options:
 
 ```toml title="run.toml"
-[sandbox]
+[run.sandbox]
 provider = "daytona"
 preserve = false
 
-[sandbox.daytona]
+[run.sandbox.daytona]
 auto_stop_interval = 60
 
-[sandbox.daytona.labels]
+[run.sandbox.daytona.labels]
 project = "fabro"
 env = "staging"
 team = "platform"
 
-[sandbox.daytona.snapshot]
+[run.sandbox.daytona.snapshot]
 name = "rust-dev"
 cpu = 4
-memory = 8
-disk = 20
+memory = "8GB"
+disk = "20GB"
 dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update && apt-get install -y git ripgrep"
 ```
 
@@ -64,15 +64,15 @@ Control outbound network access with the `network` field. Three modes are availa
 
 ```toml title="run.toml"
 # Full access (default)
-[sandbox.daytona]
+[run.sandbox.daytona]
 network = "allow_all"
 
 # Block all egress
-[sandbox.daytona]
+[run.sandbox.daytona]
 network = "block"
 
 # CIDR-based allow list
-[sandbox.daytona]
+[run.sandbox.daytona]
 network = { allow_list = ["208.80.154.232/32", "10.0.0.0/8"] }
 ```
 
@@ -99,14 +99,13 @@ If a snapshot is configured by name but doesn't exist and no `dockerfile` is pro
 
 ## Private repositories
 
-Fabro automatically clones the current repository into the sandbox at `/home/daytona/workspace`. Public repositories work without extra configuration. Private repositories require a [GitHub App](/integrations/github) — Fabro uses short-lived Installation Access Tokens scoped to the specific repository.
+Fabro automatically clones the current repository into the sandbox at `/home/daytona/workspace`. Public repositories work without extra configuration. Private repositories require GitHub access. In `gh_cli` mode, Fabro uses the stored CLI token directly. In `app` mode, Fabro uses short-lived Installation Access Tokens scoped to the specific repository.
 
-If the clone fails without a GitHub App configured, Fabro suggests running the setup flow:
+If the clone fails without GitHub access configured, Fabro suggests running the setup flow:
 
 ```
 Git clone failed: ... If this is a private repository,
-configure a GitHub App with `fabro install` and install it
-for your organization.
+run `gh auth login` or `fabro install` to configure GitHub access.
 ```
 
 ## SSH access
@@ -138,7 +137,7 @@ fabro run workflow.fabro --sandbox daytona --preserve-sandbox
 Or in the run config:
 
 ```toml title="run.toml"
-[sandbox]
+[run.sandbox]
 provider = "daytona"
 preserve = true
 ```
@@ -150,13 +149,13 @@ When preserved, Fabro prints the sandbox name so you can find it in the [Daytona
 The `auto_stop_interval` setting tells Daytona to stop the sandbox after a period of inactivity, saving costs for preserved or long-running sandboxes:
 
 ```toml title="run.toml"
-[sandbox.daytona]
+[run.sandbox.daytona]
 auto_stop_interval = 30
 ```
 
 ## Server defaults
 
-When running via `fabro server start`, the server config at `~/.fabro/server.toml` can set default Daytona settings for all runs. Run config TOML values override server defaults. Labels are **merged** — run config labels win on key collisions. The `network` setting uses simple override (run config replaces the server default entirely).
+When running via `fabro server start`, the server config at `~/.fabro/settings.toml` can set default Daytona settings for all runs. Run config TOML values override server defaults. Labels are **merged** — run config labels win on key collisions. The `network` setting uses simple override (run config replaces the server default entirely).
 
 See [Server Configuration](/administration/server-configuration) for details.
 
@@ -164,7 +163,7 @@ See [Server Configuration](/administration/server-configuration) for details.
 
 ### "Failed to create Daytona sandbox"
 
-The `DAYTONA_API_KEY` environment variable is missing or invalid. Verify it's set in your `.env` file and check that it's a valid key from [app.daytona.io](https://app.daytona.io).
+The `DAYTONA_API_KEY` environment variable is missing or invalid. Store it with `fabro secret set DAYTONA_API_KEY ...` or export it in the server process environment, then check that it's a valid key from [app.daytona.io](https://app.daytona.io).
 
 ### "Snapshot does not exist and no dockerfile provided"
 

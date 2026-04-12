@@ -11,75 +11,42 @@ import {
   Bars3Icon,
   BeakerIcon,
   ChartBarIcon,
-  CheckBadgeIcon,
-  Cog6ToothIcon,
-  LightBulbIcon,
   MoonIcon,
   PlayIcon,
   RectangleStackIcon,
-  SparklesIcon,
   SunIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { Form, Link, Outlet, redirect, useLocation, useMatches } from "react-router";
+import { Form, Link, Outlet, redirect, useLocation, useMatches, useRevalidator } from "react-router";
+import { getAuthMe } from "../api";
+import { DemoModeProvider } from "../lib/demo-mode";
 import { useTheme } from "../lib/theme";
-import { getAppConfig } from "../lib/config.server";
-import { isDemoMode, demoCookieHeader } from "../lib/demo-mode.server";
-import { isGitHubAppConfigured } from "../lib/github.server";
-import { requireUser } from "../lib/session.server";
-import type { Route } from "./+types/app-shell";
 
-const DEMO_USER = {
-  userUrl: "",
-  login: "demo",
-  name: "Demo User",
-  email: "demo@example.com",
-  avatarUrl: "https://github.githubassets.com/assets/GitHub-Mark-ea2971cee799.png",
-};
-
-export async function loader({ request }: Route.LoaderArgs) {
-  const config = getAppConfig();
-  const { provider } = config.web.auth;
-  const demoMode = isDemoMode(request);
-  if (provider === "insecure_disabled") {
-    return { user: DEMO_USER, demoMode, features: config.features };
-  }
-  if (provider === "github" && !isGitHubAppConfigured()) {
-    throw redirect("/setup");
-  }
-  const user = await requireUser(request);
-  return { user, provider, demoMode, features: config.features };
+export async function loader() {
+  return getAuthMe();
 }
 
-export async function action({ request }: Route.ActionArgs) {
-  const form = await request.formData();
-  if (form.get("intent") === "toggle-demo") {
-    const enabled = !isDemoMode(request);
-    const referer = request.headers.get("Referer") ?? "/start";
-    const url = new URL(referer);
-    return redirect(url.pathname + url.search, {
-      headers: { "Set-Cookie": demoCookieHeader(enabled) },
-    });
-  }
-}
-
-const navigation = [
-  { name: "Workflows", href: "/workflows", icon: RectangleStackIcon },
-  { name: "Runs", href: "/runs", icon: PlayIcon },
-  { name: "Verification", href: "/verification/criteria", icon: CheckBadgeIcon },
-  { name: "Retros", href: "/retros", icon: LightBulbIcon },
-  { name: "Insights", href: "/insights", icon: ChartBarIcon },
+const allNavigation = [
+  { name: "Workflows", href: "/workflows", icon: RectangleStackIcon, demoOnly: true },
+  { name: "Runs", href: "/runs", icon: PlayIcon, demoOnly: false },
+  { name: "Insights", href: "/insights", icon: ChartBarIcon, demoOnly: true },
 ];
+
+export function getVisibleNavigation(demoMode: boolean) {
+  return allNavigation.filter((item) => !item.demoOnly || demoMode);
+}
 
 function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-export default function AppShell({ loaderData }: Route.ComponentProps) {
+export default function AppShell({ loaderData }: any) {
   const { user, provider, demoMode } = loaderData;
   const { pathname } = useLocation();
   const matches = useMatches();
+  const revalidator = useRevalidator();
   const { theme, toggle } = useTheme();
+  const navigation = getVisibleNavigation(demoMode);
   const currentNav = navigation.find((item) => pathname.startsWith(item.href));
   const title = currentNav?.name ?? "";
   const lastMatch = matches[matches.length - 1];
@@ -91,7 +58,18 @@ export default function AppShell({ loaderData }: Route.ComponentProps) {
 
   const ThemeIcon = theme === "dark" ? SunIcon : MoonIcon;
 
+  async function toggleDemoMode() {
+    await fetch("/api/v1/demo/toggle", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !demoMode }),
+    });
+    revalidator.revalidate();
+  }
+
   return (
+    <DemoModeProvider value={demoMode}>
     <div className="min-h-full">
       <Disclosure as="nav" className="bg-panel/50">
         <div className="px-4 sm:px-6 lg:px-8">
@@ -128,20 +106,18 @@ export default function AppShell({ loaderData }: Route.ComponentProps) {
             </div>
             <div className="hidden md:block">
               <div className="ml-4 flex items-center gap-3 md:ml-6">
-                <Form method="POST" className="flex">
-                  <input type="hidden" name="intent" value="toggle-demo" />
-                  <button
-                    type="submit"
-                    className={classNames(
-                      "rounded-full p-1.5 transition-colors hover:bg-overlay hover:text-fg",
-                      demoMode ? "text-teal-500" : "text-fg-muted",
-                    )}
-                    title={demoMode ? "Switch to live data" : "Switch to demo data"}
-                  >
-                    <BeakerIcon className="size-5" aria-hidden="true" />
-                    <span className="sr-only">Toggle demo mode</span>
-                  </button>
-                </Form>
+                <button
+                  type="button"
+                  onClick={toggleDemoMode}
+                  className={classNames(
+                    "rounded-full p-1.5 transition-colors hover:bg-overlay hover:text-fg",
+                    demoMode ? "text-teal-500" : "text-fg-muted",
+                  )}
+                  title={demoMode ? "Switch to live data" : "Switch to demo data"}
+                >
+                  <BeakerIcon className="size-5" aria-hidden="true" />
+                  <span className="sr-only">Toggle demo mode</span>
+                </button>
                 <button
                   type="button"
                   onClick={toggle}
@@ -151,35 +127,33 @@ export default function AppShell({ loaderData }: Route.ComponentProps) {
                   <ThemeIcon className="size-5" aria-hidden="true" />
                   <span className="sr-only">Toggle theme</span>
                 </button>
-                {provider !== "tailscale" && (
-                  <Menu as="div" className="relative">
-                    <MenuButton className="relative flex max-w-xs items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500">
-                      <span className="absolute -inset-1.5" />
-                      <span className="sr-only">Open user menu</span>
-                      <img
-                        alt=""
-                        src={user.avatarUrl}
-                        className="size-8 rounded-full outline -outline-offset-1 outline-line-strong"
-                      />
-                    </MenuButton>
+                <Menu as="div" className="relative">
+                  <MenuButton className="relative flex max-w-xs items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500">
+                    <span className="absolute -inset-1.5" />
+                    <span className="sr-only">Open user menu</span>
+                    <img
+                      alt=""
+                      src={user.avatarUrl}
+                      className="size-8 rounded-full outline -outline-offset-1 outline-line-strong"
+                    />
+                  </MenuButton>
 
-                    <MenuItems
-                      transition
-                      className="absolute right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
-                    >
-                      <MenuItem>
-                        <Form method="POST" action="/auth/logout">
-                          <button
-                            type="submit"
-                            className="block w-full px-4 py-2 text-left text-sm text-fg-3 data-focus:bg-overlay data-focus:outline-hidden"
-                          >
-                            Sign out
-                          </button>
-                        </Form>
-                      </MenuItem>
-                    </MenuItems>
-                  </Menu>
-                )}
+                  <MenuItems
+                    transition
+                    className="absolute right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
+                  >
+                    <MenuItem>
+                      <Form method="POST" action="/auth/logout">
+                        <button
+                          type="submit"
+                          className="block w-full px-4 py-2 text-left text-sm text-fg-3 data-focus:bg-overlay data-focus:outline-hidden"
+                        >
+                          Sign out
+                        </button>
+                      </Form>
+                    </MenuItem>
+                  </MenuItems>
+                </Menu>
               </div>
             </div>
             <div className="-mr-2 flex md:hidden">
@@ -240,20 +214,18 @@ export default function AppShell({ loaderData }: Route.ComponentProps) {
                 </div>
               </div>
               <div className="ml-auto flex items-center gap-2">
-                <Form method="POST" className="flex">
-                  <input type="hidden" name="intent" value="toggle-demo" />
-                  <button
-                    type="submit"
-                    className={classNames(
-                      "rounded-full p-1.5 transition-colors hover:bg-overlay hover:text-fg",
-                      demoMode ? "text-teal-500" : "text-fg-muted",
-                    )}
-                    title={demoMode ? "Switch to live data" : "Switch to demo data"}
-                  >
-                    <BeakerIcon className="size-5" aria-hidden="true" />
-                    <span className="sr-only">Toggle demo mode</span>
-                  </button>
-                </Form>
+                <button
+                  type="button"
+                  onClick={toggleDemoMode}
+                  className={classNames(
+                    "rounded-full p-1.5 transition-colors hover:bg-overlay hover:text-fg",
+                    demoMode ? "text-teal-500" : "text-fg-muted",
+                  )}
+                  title={demoMode ? "Switch to live data" : "Switch to demo data"}
+                >
+                  <BeakerIcon className="size-5" aria-hidden="true" />
+                  <span className="sr-only">Toggle demo mode</span>
+                </button>
                 <button
                   type="button"
                   onClick={toggle}
@@ -298,5 +270,6 @@ export default function AppShell({ loaderData }: Route.ComponentProps) {
         </div>
       </main>
     </div>
+    </DemoModeProvider>
   );
 }

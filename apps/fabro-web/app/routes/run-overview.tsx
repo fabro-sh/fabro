@@ -5,10 +5,9 @@ import { CheckCircleIcon, ArrowPathIcon, PauseCircleIcon, XCircleIcon } from "@h
 import { DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { useTheme } from "../lib/theme";
 import { getGraphTheme } from "../lib/graph-theme";
-import { apiJson } from "../api-client";
+import { apiJsonOrNull } from "../api";
 import { formatDurationSecs } from "../lib/format";
-import type { PaginatedRunStageList, PaginatedRunList, WorkflowDetail } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/run-overview";
+import type { PaginatedRunStageList } from "@qltysh/fabro-api-client";
 
 export const handle = { wide: true };
 
@@ -21,28 +20,18 @@ interface Stage {
   duration: string;
 }
 
-export async function loader({ request, params }: Route.LoaderArgs) {
-  const [{ data: apiStages }, response] = await Promise.all([
-    apiJson<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
-    apiJson<PaginatedRunList>("/runs", { request }),
-  ]);
-  const stages: Stage[] = apiStages.map((s) => ({
+export async function loader({ request, params }: any) {
+  const stagesResult = await apiJsonOrNull<PaginatedRunStageList>(
+    `/runs/${params.id}/stages`,
+    { request },
+  );
+  const stages: Stage[] = (stagesResult?.data ?? []).map((s) => ({
     id: s.id,
     name: s.name,
     status: s.status as StageStatus,
     duration: s.duration_secs != null ? formatDurationSecs(s.duration_secs) : "--",
   }));
-  const run = response.data.find((r) => r.id === params.id);
-  let graphDot: string | null = null;
-  if (run) {
-    try {
-      const workflow = await apiJson<WorkflowDetail>(`/workflows/${run.workflow}`, { request });
-      graphDot = workflow.graph;
-    } catch {
-      // workflow not found — leave graphDot null
-    }
-  }
-  return { stages, graphDot };
+  return { stages, graphDot: null };
 }
 
 const statusConfig: Record<StageStatus, { icon: typeof CheckCircleIcon; color: string }> = {
@@ -286,7 +275,7 @@ function DotDiagram({ dot }: { dot: string }) {
   );
 }
 
-export default function RunOverview({ loaderData }: Route.ComponentProps) {
+export default function RunOverview({ loaderData }: any) {
   const { id } = useParams();
   const { stages, graphDot } = loaderData;
 

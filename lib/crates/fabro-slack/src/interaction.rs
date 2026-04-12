@@ -1,52 +1,61 @@
 use fabro_interview::Answer;
 use serde_json::Value;
 
-/// Parses a Slack interaction payload and returns (question_id, Answer).
-///
-/// Action IDs follow the format `{question_id}:{action}` as set by `blocks::question_to_blocks`.
-pub fn parse_interaction(payload: &Value) -> Option<(String, Answer)> {
+use crate::payload::{SlackActionPayload, SlackAnswerSubmission};
+
+const MULTI_SELECT_BLOCK_ID: &str = "interview.checkboxes";
+const MULTI_SELECT_ACTION_ID: &str = "interview.select";
+const ANSWER_ACTION_ID: &str = "interview.answer";
+const MULTI_SELECT_SUBMIT_ACTION_ID: &str = "interview.submit";
+
+/// Parses a Slack interaction payload and returns a server-routable answer
+/// submission.
+pub fn parse_interaction(payload: &Value) -> Option<SlackAnswerSubmission> {
     if payload["type"].as_str()? != "block_actions" {
         return None;
     }
 
     let action = payload["actions"].as_array()?.first()?;
     let action_id = action["action_id"].as_str()?;
-    let (question_id, action_key) = action_id.split_once(':')?;
+    let value = action["value"].as_str()?;
+    let routed: SlackActionPayload = serde_json::from_str(value).ok()?;
+    let question_ref = routed.question_ref();
 
     let action_type = action["type"].as_str().unwrap_or("button");
 
     let answer = match action_type {
-        "button" => match action_key {
-            "yes" => Answer::yes(),
-            "no" => Answer::no(),
-            "submit" => extract_checkbox_selections(question_id, payload),
-            key => {
-                let value = action["value"].as_str().unwrap_or(key);
-                Answer::text(value.to_string())
-            }
+        "button" if action_id == ANSWER_ACTION_ID => match routed {
+            SlackActionPayload::Yes { .. } => Answer::yes(),
+            SlackActionPayload::No { .. } => Answer::no(),
+            SlackActionPayload::Selected { key, .. } => Answer {
+                value:           fabro_interview::AnswerValue::Selected(key),
+                selected_option: None,
+                text:            None,
+            },
+            SlackActionPayload::SubmitMulti { .. } => return None,
         },
+        "button" if action_id == MULTI_SELECT_SUBMIT_ACTION_ID => {
+            extract_checkbox_selections(payload)
+        }
         "checkboxes" => {
             // Ignore checkbox toggle events — wait for Submit button
             return None;
         }
-        "plain_text_input" => {
-            let value = action["value"].as_str()?;
-            Answer::text(value.to_string())
-        }
         _ => return None,
     };
 
-    Some((question_id.to_string(), answer))
+    Some(SlackAnswerSubmission {
+        run_id: question_ref.run_id,
+        qid: question_ref.qid,
+        answer,
+    })
 }
 
 /// Extract selected checkbox values from `payload.state.values`.
-/// The checkbox block has block_id `{question_id}:checkboxes` and
-/// action_id `{question_id}:select`.
-fn extract_checkbox_selections(question_id: &str, payload: &Value) -> Answer {
-    let block_id = format!("{question_id}:checkboxes");
-    let action_id = format!("{question_id}:select");
-
-    let selected = payload["state"]["values"][&block_id][&action_id]["selected_options"].as_array();
+fn extract_checkbox_selections(payload: &Value) -> Answer {
+    let selected =
+        payload["state"]["values"][MULTI_SELECT_BLOCK_ID][MULTI_SELECT_ACTION_ID]["selected_options"]
+            .as_array();
 
     match selected {
         Some(options) if !options.is_empty() => {
@@ -54,7 +63,7 @@ fn extract_checkbox_selections(question_id: &str, payload: &Value) -> Answer {
                 .iter()
                 .filter_map(|opt| opt["value"].as_str().map(String::from))
                 .collect();
-            Answer::text(values.join(", "))
+            Answer::multi_selected(values)
         }
         _ => Answer::skipped(),
     }
@@ -62,22 +71,24 @@ fn extract_checkbox_selections(question_id: &str, payload: &Value) -> Answer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_interview::AnswerValue;
+
+    use super::*;
 
     #[test]
     fn parse_yes_button_click() {
         let payload = serde_json::json!({
             "type": "block_actions",
             "actions": [{
-                "action_id": "q-1:yes",
+                "action_id": "interview.answer",
                 "type": "button",
-                "value": "yes"
+                "value": "{\"kind\":\"yes\",\"run_id\":\"run-1\",\"qid\":\"q-1\"}"
             }]
         });
         let result = parse_interaction(&payload).unwrap();
-        assert_eq!(result.0, "q-1");
-        assert_eq!(result.1.value, AnswerValue::Yes);
+        assert_eq!(result.run_id, "run-1");
+        assert_eq!(result.qid, "q-1");
+        assert_eq!(result.answer.value, AnswerValue::Yes);
     }
 
     #[test]
@@ -85,14 +96,15 @@ mod tests {
         let payload = serde_json::json!({
             "type": "block_actions",
             "actions": [{
-                "action_id": "q-2:no",
+                "action_id": "interview.answer",
                 "type": "button",
-                "value": "no"
+                "value": "{\"kind\":\"no\",\"run_id\":\"run-1\",\"qid\":\"q-2\"}"
             }]
         });
         let result = parse_interaction(&payload).unwrap();
-        assert_eq!(result.0, "q-2");
-        assert_eq!(result.1.value, AnswerValue::No);
+        assert_eq!(result.run_id, "run-1");
+        assert_eq!(result.qid, "q-2");
+        assert_eq!(result.answer.value, AnswerValue::No);
     }
 
     #[test]
@@ -100,14 +112,14 @@ mod tests {
         let payload = serde_json::json!({
             "type": "block_actions",
             "actions": [{
-                "action_id": "q-3:rs",
+                "action_id": "interview.answer",
                 "type": "button",
-                "value": "rs"
+                "value": "{\"kind\":\"selected\",\"run_id\":\"run-1\",\"qid\":\"q-3\",\"key\":\"rs\"}"
             }]
         });
         let result = parse_interaction(&payload).unwrap();
-        assert_eq!(result.0, "q-3");
-        assert_eq!(result.1.value, AnswerValue::Text("rs".to_string()));
+        assert_eq!(result.qid, "q-3");
+        assert_eq!(result.answer.value, AnswerValue::Selected("rs".to_string()));
     }
 
     #[test]
@@ -115,7 +127,7 @@ mod tests {
         let payload = serde_json::json!({
             "type": "block_actions",
             "actions": [{
-                "action_id": "q-5:select",
+                "action_id": "interview.select",
                 "type": "checkboxes",
                 "selected_options": [
                     { "value": "a" },
@@ -131,14 +143,14 @@ mod tests {
         let payload = serde_json::json!({
             "type": "block_actions",
             "actions": [{
-                "action_id": "q-5:submit",
+                "action_id": "interview.submit",
                 "type": "button",
-                "value": "submit"
+                "value": "{\"kind\":\"submit_multi\",\"run_id\":\"run-1\",\"qid\":\"q-5\"}"
             }],
             "state": {
                 "values": {
-                    "q-5:checkboxes": {
-                        "q-5:select": {
+                    "interview.checkboxes": {
+                        "interview.select": {
                             "type": "checkboxes",
                             "selected_options": [
                                 { "value": "auth" },
@@ -150,10 +162,10 @@ mod tests {
             }
         });
         let result = parse_interaction(&payload).unwrap();
-        assert_eq!(result.0, "q-5");
+        assert_eq!(result.qid, "q-5");
         assert_eq!(
-            result.1.value,
-            AnswerValue::Text("auth, billing".to_string())
+            result.answer.value,
+            AnswerValue::MultiSelected(vec!["auth".to_string(), "billing".to_string()])
         );
     }
 
@@ -162,14 +174,14 @@ mod tests {
         let payload = serde_json::json!({
             "type": "block_actions",
             "actions": [{
-                "action_id": "q-5:submit",
+                "action_id": "interview.submit",
                 "type": "button",
-                "value": "submit"
+                "value": "{\"kind\":\"submit_multi\",\"run_id\":\"run-1\",\"qid\":\"q-5\"}"
             }],
             "state": {
                 "values": {
-                    "q-5:checkboxes": {
-                        "q-5:select": {
+                    "interview.checkboxes": {
+                        "interview.select": {
                             "type": "checkboxes",
                             "selected_options": []
                         }
@@ -178,8 +190,8 @@ mod tests {
             }
         });
         let result = parse_interaction(&payload).unwrap();
-        assert_eq!(result.0, "q-5");
-        assert_eq!(result.1.value, AnswerValue::Skipped);
+        assert_eq!(result.qid, "q-5");
+        assert_eq!(result.answer.value, AnswerValue::Skipped);
     }
 
     #[test]
@@ -187,17 +199,12 @@ mod tests {
         let payload = serde_json::json!({
             "type": "block_actions",
             "actions": [{
-                "action_id": "q-6:input",
+                "action_id": "interview.answer",
                 "type": "plain_text_input",
-                "value": "https://github.com/org/repo"
+                "value": "{\"kind\":\"selected\",\"run_id\":\"run-1\",\"qid\":\"q-6\",\"key\":\"input\"}"
             }]
         });
-        let result = parse_interaction(&payload).unwrap();
-        assert_eq!(result.0, "q-6");
-        assert_eq!(
-            result.1.value,
-            AnswerValue::Text("https://github.com/org/repo".to_string())
-        );
+        assert!(parse_interaction(&payload).is_none());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 mod common;
 
+use fabro_http::header::AUTHORIZATION;
 use serde_json::json;
 
 #[tokio::test]
@@ -244,7 +245,7 @@ async fn admin_routes_accept_no_auth_but_reject_invalid_authorization_headers() 
         let response = server
             .client
             .get(format!("{}/__admin/requests", server.base_url))
-            .header(reqwest::header::AUTHORIZATION, authorization)
+            .header(AUTHORIZATION, authorization)
             .send()
             .await
             .expect("admin logs should complete");
@@ -377,20 +378,17 @@ async fn responses_stream_supports_tool_only_turn_without_fabricated_text() {
         .collect::<Vec<_>>();
 
     assert_eq!(status, 200);
-    assert_eq!(
-        events,
-        vec![
-            "response.created",
-            "response.in_progress",
-            "response.output_item.added",
-            "response.output_item.done",
-            "response.output_item.added",
-            "response.function_call_arguments.delta",
-            "response.function_call_arguments.done",
-            "response.output_item.done",
-            "response.completed",
-        ]
-    );
+    assert_eq!(events, vec![
+        "response.created",
+        "response.in_progress",
+        "response.output_item.added",
+        "response.output_item.done",
+        "response.output_item.added",
+        "response.function_call_arguments.delta",
+        "response.function_call_arguments.done",
+        "response.output_item.done",
+        "response.completed",
+    ]);
     assert!(joined.contains("\"id\":\"fc_call_weather\""));
     assert!(joined.contains("\"call_id\":\"call_weather\""));
     assert!(joined.contains("\"arguments\":\"{\\\"city\\\":\\\"Boston\\\"}\""));

@@ -15,18 +15,14 @@ workspace = true
 [dependencies]
 fabro-interview = { path = "../fabro-interview" }
 fabro-workflow = { path = "../fabro-workflow" }
+fabro-http.workspace = true
 futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 tokio-tungstenite.workspace = true
-reqwest.workspace = true
 tracing.workspace = true
-
-[[example]]
-name = "slack-e2e"
-path = "examples/slack_e2e.rs"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

@@ -1,16 +1,17 @@
-use crate::error::SdkError;
-use crate::types::{Request, Response, StreamEvent, ToolChoice};
-use futures::Stream;
 use std::pin::Pin;
 
-pub use fabro_model::{ModelRef, Provider};
+pub use fabro_model::{ModelHandle, Provider};
+use futures::Stream;
+
+use crate::error::Error;
+use crate::types::{Request, Response, StreamEvent, ToolChoice};
 
 // ---------------------------------------------------------------------------
 // ProviderAdapter trait
 // ---------------------------------------------------------------------------
 
 /// Async stream of `StreamEvents` returned by streaming providers.
-pub type StreamEventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent, SdkError>> + Send>>;
+pub type StreamEventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent, Error>> + Send>>;
 
 /// The contract that every provider adapter must implement (Section 2.4).
 #[async_trait::async_trait]
@@ -19,18 +20,18 @@ pub trait ProviderAdapter: Send + Sync {
     fn name(&self) -> &str;
 
     /// Send a request and block until the model finishes (Section 4.1).
-    async fn complete(&self, request: &Request) -> Result<Response, SdkError>;
+    async fn complete(&self, request: &Request) -> Result<Response, Error>;
 
     /// Send a request and return an async stream of events (Section 4.2).
-    async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError>;
+    async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error>;
 
     /// Release resources. Called by `Client::close()`.
-    async fn close(&self) -> Result<(), SdkError> {
+    async fn close(&self) -> Result<(), Error> {
         Ok(())
     }
 
     /// Validate configuration on startup. Called by Client on registration.
-    async fn initialize(&self) -> Result<(), SdkError> {
+    async fn initialize(&self) -> Result<(), Error> {
         Ok(())
     }
 
@@ -42,20 +43,20 @@ pub trait ProviderAdapter: Send + Sync {
 
 /// Validate that the adapter supports the requested tool choice mode.
 ///
-/// Returns `Err(SdkError::UnsupportedToolChoice)` if the adapter does not
+/// Returns `Err(Error::UnsupportedToolChoice)` if the adapter does not
 /// support the given mode.
 ///
 /// # Errors
 ///
-/// Returns `SdkError::UnsupportedToolChoice` when the adapter does not
+/// Returns `Error::UnsupportedToolChoice` when the adapter does not
 /// support the requested tool choice mode.
 pub fn validate_tool_choice(
     adapter: &dyn ProviderAdapter,
     tool_choice: &ToolChoice,
-) -> Result<(), SdkError> {
+) -> Result<(), Error> {
     let mode = tool_choice.mode_str();
     if !adapter.supports_tool_choice(mode) {
-        return Err(SdkError::UnsupportedToolChoice {
+        return Err(Error::UnsupportedToolChoice {
             message: format!(
                 "provider '{}' does not support tool_choice mode '{mode}'",
                 adapter.name()
@@ -77,10 +78,10 @@ mod tests {
         fn name(&self) -> &'static str {
             "mock"
         }
-        async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
+        async fn complete(&self, _request: &Request) -> Result<Response, Error> {
             unimplemented!()
         }
-        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, Error> {
             unimplemented!()
         }
     }
@@ -93,10 +94,10 @@ mod tests {
         fn name(&self) -> &'static str {
             "restricted"
         }
-        async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
+        async fn complete(&self, _request: &Request) -> Result<Response, Error> {
             unimplemented!()
         }
-        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, Error> {
             unimplemented!()
         }
         fn supports_tool_choice(&self, mode: &str) -> bool {
@@ -124,7 +125,7 @@ mod tests {
         let result = validate_tool_choice(&RestrictedAdapter, &ToolChoice::named("my_tool"));
         assert!(result.is_err());
         match result.unwrap_err() {
-            SdkError::UnsupportedToolChoice { message } => {
+            Error::UnsupportedToolChoice { message } => {
                 assert!(message.contains("restricted"));
                 assert!(message.contains("named"));
             }

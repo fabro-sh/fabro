@@ -4,8 +4,9 @@ use crate::state::{AppState, PermissionLevel, TokenInfo, TokenPermission};
 
 /// Verify a GitHub App JWT (RS256) and return the `iss` claim (app_id).
 ///
-/// Accepts a **public** key PEM. The caller obtains this from `RegisteredApp::public_key_pem`,
-/// which is derived from the private key during `AppState::register_app`.
+/// Accepts a **public** key PEM. The caller obtains this from
+/// `RegisteredApp::public_key_pem`, which is derived from the private key
+/// during `AppState::register_app`.
 pub fn verify_app_jwt(jwt: &str, public_key_pem: &str) -> Result<String, String> {
     use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
     use serde::Deserialize;
@@ -116,59 +117,22 @@ pub fn ensure_permission(
 mod tests {
     use super::*;
     use crate::state::derive_public_key_pem;
-
-    fn test_rsa_key() -> String {
-        use std::process::Command;
-        let output = Command::new("openssl")
-            .args([
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-            ])
-            .output()
-            .expect("openssl should be available");
-        assert!(output.status.success());
-        String::from_utf8(output.stdout).unwrap()
-    }
-
-    fn sign_test_jwt(app_id: &str, private_key_pem: &str) -> String {
-        use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-        use serde::Serialize;
-
-        #[derive(Serialize)]
-        struct Claims {
-            iss: String,
-            iat: i64,
-            exp: i64,
-        }
-
-        let now = chrono::Utc::now().timestamp();
-        let claims = Claims {
-            iss: app_id.to_string(),
-            iat: now - 60,
-            exp: now + 600,
-        };
-        let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).unwrap();
-        encode(&Header::new(Algorithm::RS256), &claims, &key).unwrap()
-    }
+    use crate::test_support::{sign_test_jwt, test_rsa_private_key, test_rsa_public_key};
 
     #[test]
     fn verify_valid_jwt() {
-        let private_pem = test_rsa_key();
-        let public_pem = derive_public_key_pem(&private_pem);
-        let jwt = sign_test_jwt("12345", &private_pem);
-        let result = verify_app_jwt(&jwt, &public_pem);
+        let private_pem = test_rsa_private_key();
+        let jwt = sign_test_jwt("12345", private_pem);
+        let result = verify_app_jwt(&jwt, test_rsa_public_key());
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "12345");
     }
 
     #[test]
     fn reject_invalid_jwt() {
-        let private_pem = test_rsa_key();
-        let public_pem = derive_public_key_pem(&private_pem);
-        let result = verify_app_jwt("invalid.jwt.token", &public_pem);
+        let derived_public_pem = derive_public_key_pem(test_rsa_private_key());
+        assert_eq!(derived_public_pem, test_rsa_public_key());
+        let result = verify_app_jwt("invalid.jwt.token", test_rsa_public_key());
         assert!(result.is_err());
     }
 }

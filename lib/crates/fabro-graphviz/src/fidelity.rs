@@ -1,7 +1,8 @@
 use std::fmt;
 use std::str::FromStr;
 
-/// Fidelity mode controlling how much prior context is provided to LLM sessions.
+/// Fidelity mode controlling how much prior context is provided to LLM
+/// sessions.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Fidelity {
     /// Complete context, no summarization — sessions share a thread.

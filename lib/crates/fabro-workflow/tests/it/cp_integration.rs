@@ -2,12 +2,13 @@
 //!
 //! Local tests run without `#[ignore]` (no external dependencies).
 //! Docker tests require a Docker daemon and are marked `#[ignore]`.
-//! Run Docker tests with: `cargo test --package arc-workflows --test cp_integration -- --ignored`
+//! Run Docker tests with: `cargo test --package arc-workflows --test
+//! cp_integration -- --ignored`
 
 #![allow(clippy::ignore_without_reason)]
 
+use fabro_sandbox::SandboxRecord;
 use fabro_sandbox::reconnect::reconnect;
-use fabro_sandbox::{SandboxRecord, SandboxRecordExt};
 
 // ---------------------------------------------------------------------------
 // Local sandbox
@@ -15,11 +16,11 @@ use fabro_sandbox::{SandboxRecord, SandboxRecordExt};
 
 fn local_record(working_directory: &std::path::Path) -> SandboxRecord {
     SandboxRecord {
-        provider: "local".to_string(),
-        working_directory: working_directory.to_string_lossy().to_string(),
-        identifier: None,
+        provider:               "local".to_string(),
+        working_directory:      working_directory.to_string_lossy().to_string(),
+        identifier:             None,
         host_working_directory: None,
-        container_mount_point: None,
+        container_mount_point:  None,
     }
 }
 
@@ -111,36 +112,17 @@ async fn local_cp_creates_parent_dirs() {
     assert_eq!(std::fs::read(&local_dst).unwrap(), content);
 }
 
-#[tokio::test]
-async fn local_cp_record_save_load_round_trip() {
-    let sandbox_dir = tempfile::tempdir().unwrap();
-    let scratch = tempfile::tempdir().unwrap();
-
-    let record = local_record(sandbox_dir.path());
-    let path = scratch.path().join("sandbox.json");
-    record.save(&path).unwrap();
-
-    let loaded = SandboxRecord::load(&path).unwrap();
-    assert_eq!(loaded.provider, "local");
-    assert_eq!(loaded.working_directory, record.working_directory);
-    assert!(loaded.identifier.is_none());
-
-    // Reconnect from the loaded record still works
-    let sandbox = reconnect(&loaded).await.expect("reconnect from loaded");
-    assert_eq!(sandbox.working_directory(), record.working_directory);
-}
-
 // ---------------------------------------------------------------------------
 // Docker sandbox
 // ---------------------------------------------------------------------------
 
 fn docker_record(host_dir: &std::path::Path, mount_point: &str) -> SandboxRecord {
     SandboxRecord {
-        provider: "docker".to_string(),
-        working_directory: mount_point.to_string(),
-        identifier: None,
+        provider:               "docker".to_string(),
+        working_directory:      mount_point.to_string(),
+        identifier:             None,
         host_working_directory: Some(host_dir.to_string_lossy().to_string()),
-        container_mount_point: Some(mount_point.to_string()),
+        container_mount_point:  Some(mount_point.to_string()),
     }
 }
 
@@ -264,40 +246,4 @@ async fn docker_cp_custom_mount_point() {
         .expect("download with custom mount");
 
     assert_eq!(std::fs::read(&local_dst).unwrap(), content);
-}
-
-#[tokio::test]
-#[ignore] // requires Docker daemon
-async fn docker_cp_record_save_load_round_trip() {
-    let host_dir = tempfile::tempdir().unwrap();
-    let scratch = tempfile::tempdir().unwrap();
-
-    let record = docker_record(host_dir.path(), "/workspace");
-    let path = scratch.path().join("sandbox.json");
-    record.save(&path).unwrap();
-
-    let loaded = SandboxRecord::load(&path).unwrap();
-    assert_eq!(loaded.provider, "docker");
-    assert_eq!(
-        loaded.host_working_directory.as_deref(),
-        Some(host_dir.path().to_str().unwrap())
-    );
-    assert_eq!(loaded.container_mount_point.as_deref(), Some("/workspace"));
-
-    // Reconnect from the loaded record still works
-    let sandbox = reconnect(&loaded).await.expect("reconnect from loaded");
-
-    let content = b"from loaded record\n";
-    let local_src = scratch.path().join("loaded.txt");
-    std::fs::write(&local_src, content).unwrap();
-
-    sandbox
-        .upload_file_from_local(&local_src, "loaded.txt")
-        .await
-        .expect("upload via loaded record");
-
-    assert_eq!(
-        std::fs::read(host_dir.path().join("loaded.txt")).unwrap(),
-        content
-    );
 }

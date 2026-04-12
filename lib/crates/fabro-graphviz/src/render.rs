@@ -1,7 +1,6 @@
 use std::fmt;
 use std::io::Write;
 use std::process::Command;
-
 use std::sync::LazyLock;
 
 use anyhow::bail;
@@ -25,7 +24,8 @@ impl fmt::Display for GraphFormat {
     }
 }
 
-/// Dark mode CSS injected into SVG output (leading newline included for insertion).
+/// Dark mode CSS injected into SVG output (leading newline included for
+/// insertion).
 const DARK_MODE_STYLE: &str = r##"
 <style>
   @media (prefers-color-scheme: dark) {
@@ -89,6 +89,10 @@ pub fn postprocess_svg(raw: Vec<u8>) -> Vec<u8> {
 }
 
 /// Render styled DOT source into the given format via the `dot` command.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This synchronous rendering helper is intentionally called behind spawn_blocking from async server code."
+)]
 pub fn render_dot(source: &str, format: GraphFormat) -> anyhow::Result<Vec<u8>> {
     let styled_source = inject_dot_style_defaults(source);
     let mut child = match Command::new("dot")
@@ -127,6 +131,10 @@ pub fn render_dot(source: &str, format: GraphFormat) -> anyhow::Result<Vec<u8>> 
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This synchronous test probe checks whether dot is installed before running render assertions."
+)]
 fn dot_is_available() -> bool {
     Command::new("dot")
         .arg("-V")

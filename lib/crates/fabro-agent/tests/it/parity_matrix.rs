@@ -6,46 +6,46 @@ use std::sync::Arc;
 use fabro_agent::subagent::SessionFactory;
 use fabro_agent::{
     AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile, Session,
-    SessionConfig, SubAgentManager, WebFetchSummarizer,
+    SessionOptions, SubAgentManager, WebFetchSummarizer,
 };
 use fabro_llm::client::Client;
 use fabro_llm::provider::{Provider, ProviderAdapter};
 use fabro_llm::providers::OpenAiAdapter;
-use fabro_model::ModelRef;
+use fabro_model::ModelHandle;
 use fabro_test::{TwinScenario, TwinScenarios, TwinToolCall, twin_openai};
 use tokio::sync::Mutex as AsyncMutex;
 
 #[derive(Clone)]
-struct OpenAiTwinConfig {
+struct OpenAiTwinOptions {
     base_url: String,
-    api_key: String,
+    api_key:  String,
 }
 
-fn summarizer_model_id(provider: Provider) -> ModelRef {
+fn summarizer_model_id(provider: Provider) -> ModelHandle {
     match provider {
         Provider::OpenAi
         | Provider::Kimi
         | Provider::Zai
         | Provider::Minimax
         | Provider::Inception
-        | Provider::OpenAiCompatible => ModelRef::ByName {
+        | Provider::OpenAiCompatible => ModelHandle::ByName {
             provider: Provider::OpenAi,
-            model: "gpt-5.4-mini".to_string(),
+            model:    "gpt-5.4-mini".to_string(),
         },
-        Provider::Gemini => ModelRef::ByName {
+        Provider::Gemini => ModelHandle::ByName {
             provider: Provider::Gemini,
-            model: "gemini-3-flash-preview".to_string(),
+            model:    "gemini-3-flash-preview".to_string(),
         },
-        Provider::Anthropic => ModelRef::ByName {
+        Provider::Anthropic => ModelHandle::ByName {
             provider: Provider::Anthropic,
-            model: "claude-haiku-4-5".to_string(),
+            model:    "claude-haiku-4-5".to_string(),
         },
     }
 }
 
 fn build_summarizer(provider: Provider, client: &Client) -> WebFetchSummarizer {
     WebFetchSummarizer {
-        client: client.clone(),
+        client:   client.clone(),
         model_id: summarizer_model_id(provider),
     }
 }
@@ -70,13 +70,14 @@ async fn make_session(
     provider: Provider,
     model: &str,
     cwd: &Path,
-    twin: Option<OpenAiTwinConfig>,
+    twin: Option<OpenAiTwinOptions>,
 ) -> Session {
     let client = make_client(provider, twin.as_ref()).await;
     let mut profile = build_profile(provider, model, &client);
     let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
 
-    // Register subagent tools so spawn_agent / wait / send_input / close_agent are available
+    // Register subagent tools so spawn_agent / wait / send_input / close_agent are
+    // available
     let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
     let factory_client = client.clone();
     let factory_model: String = model.to_string();
@@ -110,16 +111,16 @@ async fn make_session(
             factory_client.clone(),
             sub_profile,
             sub_env,
-            SessionConfig::default(),
+            SessionOptions::default(),
             None,
         )
     });
     profile.register_subagent_tools(manager, factory, 0);
 
     let profile: Arc<dyn AgentProfile> = Arc::from(profile);
-    let config = SessionConfig {
+    let config = SessionOptions {
         max_turns: 20,
-        ..SessionConfig::default()
+        ..SessionOptions::default()
     };
     Session::new(client, profile, env, config, None)
 }
@@ -128,8 +129,8 @@ async fn make_session_with_config(
     provider: Provider,
     model: &str,
     cwd: &Path,
-    config: SessionConfig,
-    twin: Option<OpenAiTwinConfig>,
+    config: SessionOptions,
+    twin: Option<OpenAiTwinOptions>,
 ) -> Session {
     let client = make_client(provider, twin.as_ref()).await;
     let profile: Arc<dyn AgentProfile> = Arc::from(build_profile(provider, model, &client));
@@ -137,15 +138,15 @@ async fn make_session_with_config(
     Session::new(client, profile, env, config, None)
 }
 
-async fn make_client(provider: Provider, twin: Option<&OpenAiTwinConfig>) -> Client {
+async fn make_client(provider: Provider, twin: Option<&OpenAiTwinOptions>) -> Client {
     if provider == Provider::OpenAi && fabro_test::TestMode::from_env().is_twin() {
-        return make_twin_client(twin.expect("openai twin config should be provided")).await;
+        return make_twin_client(twin.expect("openai twin config should be provided"));
     }
 
     Client::from_env().await.expect("Client::from_env failed")
 }
 
-async fn make_twin_client(twin: &OpenAiTwinConfig) -> Client {
+fn make_twin_client(twin: &OpenAiTwinOptions) -> Client {
     let adapter: Arc<dyn ProviderAdapter> =
         Arc::new(OpenAiAdapter::new(twin.api_key.clone()).with_base_url(twin.base_url.clone()));
     let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
@@ -174,7 +175,7 @@ macro_rules! openai_twin_provider_test {
             async fn [<openai_twin_ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
                 let (base_url, api_key) = fabro_test::e2e_openai!();
-                let twin = OpenAiTwinConfig { base_url, api_key };
+                let twin = OpenAiTwinOptions { base_url, api_key };
                 if fabro_test::TestMode::from_env().is_twin() {
                     load_openai_twin_scenario(stringify!($scenario), &twin.api_key, tmp.path())
                         .await;
@@ -369,15 +370,18 @@ provider_test!(
 );
 
 // Scenarios below are only generated for providers where they are supported.
-// - multi_step_read_analyze_edit / provider_specific_editing: gpt-4o-mini is too
-//   weak to reliably apply precise file edits (uses apply_patch, not edit_file).
-// - reasoning_effort: gpt-4o-mini doesn't support the reasoning.effort parameter.
+// - multi_step_read_analyze_edit / provider_specific_editing: gpt-4o-mini is
+//   too weak to reliably apply precise file edits (uses apply_patch, not
+//   edit_file).
+// - reasoning_effort: gpt-4o-mini doesn't support the reasoning.effort
+//   parameter.
 // - loop_detection: needs custom config, tested separately below.
 
 provider_tests!(error_recovery);
 openai_twin_provider_test!(error_recovery);
 
-// gpt-5-mini is too weak to reliably apply precise file edits (uses apply_patch, not edit_file).
+// gpt-5-mini is too weak to reliably apply precise file edits (uses
+// apply_patch, not edit_file).
 macro_rules! non_openai_provider_tests {
     ($scenario:ident) => {
         provider_test!(
@@ -650,10 +654,10 @@ macro_rules! reasoning_effort_tests {
         #[fabro_macros::e2e_test($(live($key)),+)]
         async fn $test_name() {
             let tmp = tempfile::tempdir().expect("failed to create tempdir");
-            let config = SessionConfig {
+            let config = SessionOptions {
                 max_turns: 20,
                 reasoning_effort: Some(fabro_llm::types::ReasoningEffort::Low),
-                ..SessionConfig::default()
+                ..SessionOptions::default()
             };
             let mut session =
                 make_session_with_config($provider, $model, tmp.path(), config, None).await;
@@ -672,7 +676,8 @@ reasoning_effort_tests!(
     anthropic_reasoning_effort,
     keys = ["ANTHROPIC_API_KEY"]
 );
-// gpt-5-mini does not support the reasoning.effort parameter, so no OpenAI test.
+// gpt-5-mini does not support the reasoning.effort parameter, so no OpenAI
+// test.
 reasoning_effort_tests!(
     Provider::Gemini,
     "gemini-3-flash-preview",
@@ -728,10 +733,10 @@ macro_rules! loop_detection_tests {
         #[fabro_macros::e2e_test($(live($key)),+)]
         async fn $test_name() {
             let tmp = tempfile::tempdir().expect("failed to create tempdir");
-            let config = SessionConfig {
+            let config = SessionOptions {
                 max_turns: 20,
                 loop_detection_window: 3,
-                ..SessionConfig::default()
+                ..SessionOptions::default()
             };
             let mut session =
                 make_session_with_config($provider, $model, tmp.path(), config, None).await;

@@ -13,37 +13,56 @@ pub mod wait;
 
 use std::any::Any;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
-use fabro_store::RunStore;
-
-use crate::context::Context;
-use crate::error::FabroError;
-use crate::event::EventEmitter;
-use crate::outcome::{Outcome, OutcomeExt};
-use crate::sandbox_git::GitState;
 use fabro_graphviz::graph::{Graph, Node, shape_to_handler_type};
 use fabro_hooks::{HookContext, HookDecision, HookRunner};
 use fabro_interview::Interviewer;
+#[cfg(test)]
+use fabro_store::Database;
+#[cfg(test)]
+use object_store::memory::InMemory;
+use tokio::time;
+use tokio_util::sync::CancellationToken;
+
+use crate::context::Context;
+use crate::error::Error;
+use crate::event::Emitter;
+use crate::outcome::{Outcome, OutcomeExt};
+use crate::runtime_store::RunStoreHandle;
+use crate::sandbox_git::GitState;
+use crate::workflow_bundle::WorkflowBundle;
 
 /// Shared services available to all handlers during execution.
 pub struct EngineServices {
-    pub registry: Arc<HandlerRegistry>,
-    pub emitter: Arc<EventEmitter>,
-    pub sandbox: Arc<dyn Sandbox>,
-    pub run_store: Option<Arc<dyn RunStore>>,
+    pub registry:         Arc<HandlerRegistry>,
+    pub emitter:          Arc<Emitter>,
+    pub sandbox:          Arc<dyn Sandbox>,
+    pub run_store:        RunStoreHandle,
     /// Git state for the current run. Set via `set_git_state` at the start of
     /// `run_via_core` and read by parallel/fan-in handlers.
     pub(crate) git_state: std::sync::RwLock<Option<Arc<GitState>>>,
     /// Hook runner for user-defined lifecycle hooks.
-    pub hook_runner: Option<Arc<HookRunner>>,
-    /// Environment variables from `[sandbox.env]` config, injected into command nodes.
-    pub env: HashMap<String, String>,
-    /// When true, handlers should skip real execution and return simulated results.
-    pub dry_run: bool,
+    pub hook_runner:      Option<Arc<HookRunner>>,
+    /// Environment variables from `[sandbox.env]` config, injected into command
+    /// nodes.
+    pub env:              HashMap<String, String>,
+    /// Typed values from `[run.inputs]`, available to prompt templates.
+    pub inputs:           HashMap<String, toml::Value>,
+    /// When true, handlers should skip real execution and return simulated
+    /// results.
+    pub dry_run:          bool,
+    /// Optional run-scoped cancellation flag from the core executor.
+    pub cancel_requested: Option<Arc<AtomicBool>>,
+    /// Logical path of the current workflow when running from a bundle.
+    pub workflow_path:    Option<PathBuf>,
+    /// Bundled workflows available for child-workflow resolution.
+    pub workflow_bundle:  Option<Arc<WorkflowBundle>>,
 }
 
 impl EngineServices {
@@ -57,6 +76,12 @@ impl EngineServices {
         *self.git_state.write().unwrap() = state;
     }
 
+    /// Bridge the core executor's atomic cancel flag to sandbox command
+    /// cancellation.
+    pub fn sandbox_cancel_token(&self) -> Option<CancellationToken> {
+        sandbox_cancel_token(self.cancel_requested.clone())
+    }
+
     /// Run lifecycle hooks and return the merged decision.
     /// Returns `Proceed` if no hook runner is configured.
     pub async fn run_hooks(&self, hook_context: &HookContext) -> HookDecision {
@@ -68,20 +93,77 @@ impl EngineServices {
 
     /// Test-only default: empty registry, no hooks, local sandbox at cwd.
     #[cfg(test)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This test helper must initialize a current-thread runtime safely from both sync tests and #[tokio::test]."
+    )]
     pub fn test_default() -> Self {
+        let store = Arc::new(Database::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ));
         Self {
-            registry: Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
-            emitter: Arc::new(EventEmitter::default()),
-            sandbox: Arc::new(fabro_agent::LocalSandbox::new(
+            registry:         Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
+            emitter:          Arc::new(Emitter::default()),
+            sandbox:          Arc::new(fabro_agent::LocalSandbox::new(
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),
-            run_store: None,
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            dry_run: false,
+            // Build the test run store on a dedicated runtime so this helper
+            // remains safe to call from both sync tests and #[tokio::test].
+            run_store:        std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("test runtime should initialize")
+                    .block_on(async {
+                        store
+                            .create_run(&fabro_types::RunId::new())
+                            .await
+                            .expect("slate-backed test run store should initialize")
+                    })
+            })
+            .join()
+            .expect("test run store thread should join")
+            .into(),
+            git_state:        std::sync::RwLock::new(None),
+            hook_runner:      None,
+            env:              HashMap::new(),
+            inputs:           HashMap::new(),
+            dry_run:          false,
+            cancel_requested: None,
+            workflow_path:    None,
+            workflow_bundle:  None,
         }
     }
+}
+
+pub(crate) fn sandbox_cancel_token(
+    cancel_requested: Option<Arc<AtomicBool>>,
+) -> Option<CancellationToken> {
+    let cancel_requested = cancel_requested?;
+    let token = CancellationToken::new();
+
+    if cancel_requested.load(Ordering::Relaxed) {
+        token.cancel();
+        return Some(token);
+    }
+
+    let token_clone = token.clone();
+    tokio::spawn(async move {
+        loop {
+            if token_clone.is_cancelled() {
+                return;
+            }
+            if cancel_requested.load(Ordering::Relaxed) {
+                token_clone.cancel();
+                return;
+            }
+            time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+
+    Some(token)
 }
 
 /// The handler interface for node execution.
@@ -94,7 +176,7 @@ pub trait Handler: Send + Sync {
         graph: &Graph,
         run_dir: &Path,
         services: &EngineServices,
-    ) -> Result<Outcome, FabroError>;
+    ) -> Result<Outcome, Error>;
 
     /// Produce a simulated result for dry-run mode.
     /// Override for handlers that need custom context updates.
@@ -105,13 +187,13 @@ pub trait Handler: Send + Sync {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         Ok(Outcome::simulated(&node.id))
     }
 
     /// Determines whether an error should be retried.
     /// Default implementation retries transient errors only.
-    fn should_retry(&self, err: &FabroError) -> bool {
+    fn should_retry(&self, err: &Error) -> bool {
         err.is_retryable()
     }
 }
@@ -136,7 +218,7 @@ pub async fn dispatch_handler(
     graph: &Graph,
     run_dir: &Path,
     services: &EngineServices,
-) -> Result<Outcome, FabroError> {
+) -> Result<Outcome, Error> {
     if services.dry_run {
         handler
             .simulate(node, context, graph, run_dir, services)
@@ -150,7 +232,7 @@ pub async fn dispatch_handler(
 
 /// Maps handler type strings to handler implementations.
 pub struct HandlerRegistry {
-    handlers: HashMap<String, Box<dyn Handler>>,
+    handlers:        HashMap<String, Box<dyn Handler>>,
     default_handler: Box<dyn Handler>,
 }
 
@@ -194,7 +276,8 @@ impl HandlerRegistry {
 /// Build a [`HandlerRegistry`] with all built-in handler types registered.
 ///
 /// The `make_backend` closure is called for each handler that needs a backend
-/// (default, `"agent"`, `"agent_loop"`, `"prompt"`, `"one_shot"`, and `"parallel.fan_in"`).
+/// (default, `"agent"`, `"agent_loop"`, `"prompt"`, `"one_shot"`, and
+/// `"parallel.fan_in"`).
 #[must_use]
 pub fn default_registry(
     interviewer: Arc<dyn Interviewer>,
@@ -237,8 +320,9 @@ pub fn default_registry(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_graphviz::graph::AttrValue;
+
+    use super::*;
 
     struct TestHandler {
         _name: String,
@@ -253,7 +337,7 @@ mod tests {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &EngineServices,
-        ) -> Result<Outcome, FabroError> {
+        ) -> Result<Outcome, Error> {
             Ok(Outcome::success())
         }
     }
@@ -315,8 +399,8 @@ mod tests {
         let handler = TestHandler {
             _name: "test".to_string(),
         };
-        assert!(handler.should_retry(&FabroError::handler("timeout".to_string())));
-        assert!(!handler.should_retry(&FabroError::Parse("bad".to_string())));
+        assert!(handler.should_retry(&Error::handler("timeout".to_string())));
+        assert!(!handler.should_retry(&Error::Parse("bad".to_string())));
     }
 
     struct NeverRetryHandler;
@@ -330,11 +414,11 @@ mod tests {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &EngineServices,
-        ) -> Result<Outcome, FabroError> {
+        ) -> Result<Outcome, Error> {
             Ok(Outcome::success())
         }
 
-        fn should_retry(&self, _err: &FabroError) -> bool {
+        fn should_retry(&self, _err: &Error) -> bool {
             false
         }
     }
@@ -342,8 +426,8 @@ mod tests {
     #[test]
     fn custom_should_retry_override() {
         let handler = NeverRetryHandler;
-        assert!(!handler.should_retry(&FabroError::handler("timeout".to_string())));
-        assert!(!handler.should_retry(&FabroError::Io("connection reset".to_string())));
+        assert!(!handler.should_retry(&Error::handler("timeout".to_string())));
+        assert!(!handler.should_retry(&Error::Io("connection reset".to_string())));
     }
 
     #[test]

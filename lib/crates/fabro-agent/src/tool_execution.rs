@@ -1,17 +1,20 @@
-use crate::config::{SessionConfig, ToolHookCallback, ToolHookDecision};
-use crate::event::EventEmitter;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use fabro_llm::types::{ToolCall, ToolResult};
+use futures::future;
+use tokio_util::sync::CancellationToken;
+use tracing::debug;
+
+use crate::config::{SessionOptions, ToolHookCallback, ToolHookDecision};
+use crate::event::Emitter;
 use crate::sandbox::Sandbox;
 use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
 use crate::truncation::truncate_tool_output;
 use crate::types::AgentEvent;
-use fabro_llm::types::{ToolCall, ToolResult};
-use futures::future;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio_util::sync::CancellationToken;
-use tracing::debug;
 
-/// Execute tool calls, choosing parallel or sequential based on `parallel` flag.
+/// Execute tool calls, choosing parallel or sequential based on `parallel`
+/// flag.
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_tool_calls(
     tool_calls: &[ToolCall],
@@ -20,8 +23,8 @@ pub async fn execute_tool_calls(
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: &CancellationToken,
-    config: &SessionConfig,
-    emitter: &EventEmitter,
+    config: &SessionOptions,
+    emitter: &Emitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
 ) -> Vec<ToolResult> {
@@ -61,8 +64,8 @@ async fn execute_tool_calls_sequential(
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: &CancellationToken,
-    config: &SessionConfig,
-    emitter: &EventEmitter,
+    config: &SessionOptions,
+    emitter: &Emitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
 ) -> Vec<ToolResult> {
@@ -97,8 +100,8 @@ async fn execute_tool_calls_parallel(
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: &CancellationToken,
-    config: &SessionConfig,
-    emitter: &EventEmitter,
+    config: &SessionOptions,
+    emitter: &Emitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
 ) -> Vec<ToolResult> {
@@ -144,8 +147,8 @@ pub async fn execute_and_emit_one_tool(
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: CancellationToken,
-    config: &SessionConfig,
-    emitter: &EventEmitter,
+    config: &SessionOptions,
+    emitter: &Emitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
 ) -> ToolResult {
@@ -163,7 +166,8 @@ pub async fn execute_and_emit_one_tool(
     .await
 }
 
-/// Execute a single tool call with event emission, using a pre-looked-up tool reference.
+/// Execute a single tool call with event emission, using a pre-looked-up tool
+/// reference.
 #[allow(clippy::too_many_arguments)]
 async fn execute_and_emit_one_tool_with_lookup(
     tc: &ToolCall,
@@ -171,19 +175,16 @@ async fn execute_and_emit_one_tool_with_lookup(
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: CancellationToken,
-    config: &SessionConfig,
-    emitter: &EventEmitter,
+    config: &SessionOptions,
+    emitter: &Emitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
 ) -> ToolResult {
-    emitter.emit(
-        session_id.to_owned(),
-        AgentEvent::ToolCallStarted {
-            tool_name: tc.name.clone(),
-            tool_call_id: tc.id.clone(),
-            arguments: tc.arguments.clone(),
-        },
-    );
+    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallStarted {
+        tool_name:    tc.name.clone(),
+        tool_call_id: tc.id.clone(),
+        arguments:    tc.arguments.clone(),
+    });
 
     // Pre-tool-use hook
     if let Some(hooks) = tool_hooks {
@@ -196,21 +197,15 @@ async fn execute_and_emit_one_tool_with_lookup(
         if let ToolHookDecision::Block { reason } = decision {
             let result = ToolResult::error(&tc.id, &reason);
 
-            emitter.emit(
-                session_id.to_owned(),
-                AgentEvent::ToolCallOutputDelta {
-                    delta: result.content.to_string(),
-                },
-            );
-            emitter.emit(
-                session_id.to_owned(),
-                AgentEvent::ToolCallCompleted {
-                    tool_name: tc.name.clone(),
-                    tool_call_id: tc.id.clone(),
-                    output: result.content.clone(),
-                    is_error: true,
-                },
-            );
+            emitter.emit(session_id.to_owned(), AgentEvent::ToolCallOutputDelta {
+                delta: result.content.to_string(),
+            });
+            emitter.emit(session_id.to_owned(), AgentEvent::ToolCallCompleted {
+                tool_name:    tc.name.clone(),
+                tool_call_id: tc.id.clone(),
+                output:       result.content.clone(),
+                is_error:     true,
+            });
 
             return truncate_tool_result(&result, &tc.name, config);
         }
@@ -218,22 +213,16 @@ async fn execute_and_emit_one_tool_with_lookup(
 
     let result = execute_one_tool(tc, registered_tool, env, cancel_token, tool_env).await;
 
-    emitter.emit(
-        session_id.to_owned(),
-        AgentEvent::ToolCallOutputDelta {
-            delta: result.content.to_string(),
-        },
-    );
+    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallOutputDelta {
+        delta: result.content.to_string(),
+    });
 
-    emitter.emit(
-        session_id.to_owned(),
-        AgentEvent::ToolCallCompleted {
-            tool_name: tc.name.clone(),
-            tool_call_id: tc.id.clone(),
-            output: result.content.clone(),
-            is_error: result.is_error,
-        },
-    );
+    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallCompleted {
+        tool_name:    tc.name.clone(),
+        tool_call_id: tc.id.clone(),
+        output:       result.content.clone(),
+        is_error:     result.is_error,
+    });
 
     // Post-tool-use hooks
     if let Some(hooks) = tool_hooks {
@@ -294,7 +283,7 @@ async fn execute_one_tool(
 fn truncate_tool_result(
     result: &ToolResult,
     tool_name: &str,
-    config: &SessionConfig,
+    config: &SessionOptions,
 ) -> ToolResult {
     let truncated_content = match &result.content {
         serde_json::Value::String(s) => {
@@ -304,10 +293,10 @@ fn truncate_tool_result(
     };
 
     ToolResult {
-        tool_call_id: result.tool_call_id.clone(),
-        content: truncated_content,
-        is_error: result.is_error,
-        image_data: result.image_data.clone(),
+        tool_call_id:     result.tool_call_id.clone(),
+        content:          truncated_content,
+        is_error:         result.is_error,
+        image_data:       result.image_data.clone(),
         image_media_type: result.image_media_type.clone(),
     }
 }
@@ -343,9 +332,13 @@ pub fn validate_tool_args(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
+    use fabro_llm::types::{ToolCall, ToolDefinition};
+
     use super::*;
     use crate::config::{ToolHookCallback, ToolHookDecision};
-    use crate::event::EventEmitter;
+    use crate::event::Emitter;
     use crate::local_sandbox::LocalSandbox;
     use crate::read_before_write_sandbox::ReadBeforeWriteSandbox;
     use crate::test_support::MutableMockSandbox;
@@ -353,15 +346,13 @@ mod tests {
     use crate::tools::{
         make_edit_file_tool, make_grep_tool, make_read_file_tool, make_write_file_tool,
     };
-    use fabro_llm::types::{ToolCall, ToolDefinition};
-    use std::sync::Mutex;
 
     fn make_echo_tool() -> RegisteredTool {
         RegisteredTool {
             definition: ToolDefinition {
-                name: "echo".to_string(),
+                name:        "echo".to_string(),
                 description: "Echo input".to_string(),
-                parameters: serde_json::json!({
+                parameters:  serde_json::json!({
                     "type": "object",
                     "properties": {
                         "text": {"type": "string"}
@@ -369,7 +360,7 @@ mod tests {
                     "required": ["text"]
                 }),
             },
-            executor: Arc::new(|args: serde_json::Value, _ctx: ToolContext| {
+            executor:   Arc::new(|args: serde_json::Value, _ctx: ToolContext| {
                 Box::pin(async move {
                     let text = args["text"].as_str().unwrap_or("").to_string();
                     Ok(format!("echo: {text}"))
@@ -381,11 +372,11 @@ mod tests {
     fn make_fail_tool() -> RegisteredTool {
         RegisteredTool {
             definition: ToolDefinition {
-                name: "fail_tool".to_string(),
+                name:        "fail_tool".to_string(),
                 description: "Always fails".to_string(),
-                parameters: serde_json::json!({}),
+                parameters:  serde_json::json!({}),
             },
-            executor: Arc::new(|_args: serde_json::Value, _ctx: ToolContext| {
+            executor:   Arc::new(|_args: serde_json::Value, _ctx: ToolContext| {
                 Box::pin(async move { Err("tool failed".to_string()) })
             }),
         }
@@ -393,26 +384,26 @@ mod tests {
 
     fn make_tool_call(name: &str, id: &str, args: serde_json::Value) -> ToolCall {
         ToolCall {
-            id: id.to_string(),
-            name: name.to_string(),
-            tool_type: "function".to_string(),
-            arguments: args,
-            raw_arguments: None,
+            id:                id.to_string(),
+            name:              name.to_string(),
+            tool_type:         "function".to_string(),
+            arguments:         args,
+            raw_arguments:     None,
             provider_metadata: None,
         }
     }
 
     struct MockHookCallback {
-        pre_decision: ToolHookDecision,
-        post_calls: Arc<Mutex<Vec<(String, String, String)>>>,
+        pre_decision:       ToolHookDecision,
+        post_calls:         Arc<Mutex<Vec<(String, String, String)>>>,
         post_failure_calls: Arc<Mutex<Vec<(String, String, String)>>>,
     }
 
     impl MockHookCallback {
         fn new(decision: ToolHookDecision) -> Self {
             Self {
-                pre_decision: decision,
-                post_calls: Arc::new(Mutex::new(Vec::new())),
+                pre_decision:       decision,
+                post_calls:         Arc::new(Mutex::new(Vec::new())),
                 post_failure_calls: Arc::new(Mutex::new(Vec::new())),
             }
         }
@@ -460,8 +451,8 @@ mod tests {
             }));
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
-        let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let emitter = Emitter::new();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,
@@ -490,8 +481,8 @@ mod tests {
             Arc::new(MockHookCallback::new(ToolHookDecision::Proceed));
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
-        let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let emitter = Emitter::new();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,
@@ -520,8 +511,8 @@ mod tests {
         let hooks: Arc<dyn ToolHookCallback> = mock.clone();
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
-        let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let emitter = Emitter::new();
+        let config = SessionOptions::default();
 
         execute_and_emit_one_tool(
             &tc,
@@ -555,8 +546,8 @@ mod tests {
         let hooks: Arc<dyn ToolHookCallback> = mock.clone();
 
         let tc = make_tool_call("fail_tool", "call_1", serde_json::json!({}));
-        let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let emitter = Emitter::new();
+        let config = SessionOptions::default();
 
         execute_and_emit_one_tool(
             &tc,
@@ -587,8 +578,8 @@ mod tests {
         registry.register(make_echo_tool());
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
-        let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let emitter = Emitter::new();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,
@@ -627,8 +618,8 @@ mod tests {
             "call_1",
             serde_json::json!({"file_path": "a.ts", "content": "new"}),
         );
-        let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let emitter = Emitter::new();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,
@@ -654,8 +645,8 @@ mod tests {
         registry.register(make_write_file_tool());
 
         let sandbox = make_guarded_sandbox(HashMap::from([("a.ts".into(), "content".into())]));
-        let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let emitter = Emitter::new();
+        let config = SessionOptions::default();
 
         // First read the file
         let read_tc = make_tool_call(
@@ -706,8 +697,8 @@ mod tests {
         registry.register(make_write_file_tool());
 
         let sandbox = make_guarded_sandbox(HashMap::from([("a.ts".into(), "content".into())]));
-        let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let emitter = Emitter::new();
+        let config = SessionOptions::default();
 
         // Grep matching a.ts
         let grep_tc = make_tool_call("grep", "call_1", serde_json::json!({"pattern": "content"}));
@@ -758,8 +749,8 @@ mod tests {
             "call_1",
             serde_json::json!({"file_path": "a.ts", "old_string": "content", "new_string": "updated"}),
         );
-        let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let emitter = Emitter::new();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,
@@ -789,8 +780,8 @@ mod tests {
             "call_1",
             serde_json::json!({"file_path": "new.ts", "content": "hello"}),
         );
-        let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let emitter = Emitter::new();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,

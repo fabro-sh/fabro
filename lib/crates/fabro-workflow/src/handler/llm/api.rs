@@ -2,28 +2,24 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-
+use fabro_agent::subagent::{SessionFactory, SubAgentManager};
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session,
-    SessionConfig, Turn,
-    subagent::{SessionFactory, SubAgentManager},
+    SessionOptions, Turn,
 };
+use fabro_graphviz::graph::Node;
 use fabro_llm::client::Client;
-use fabro_llm::types::{Message, Request, Usage};
-use fabro_mcp::config::McpServerConfig;
-use fabro_model::FallbackTarget;
-use fabro_model::Provider;
-use tokio::fs;
+use fabro_llm::types::{Message, Request, TokenCounts};
+use fabro_mcp::config::McpServerSettings;
+use fabro_model::{FallbackTarget, Provider};
 use tokio::sync::Mutex as TokioMutex;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::keys::Fidelity;
 use crate::context::{Context, WorkflowContext};
-use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
-use crate::outcome::StageUsage;
-use crate::outcome::compute_stage_cost;
-use fabro_graphviz::graph::Node;
+use crate::error::Error;
+use crate::event::{Emitter, Event, StageScope};
+use crate::outcome::billed_model_usage_from_llm;
 
 fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
     match provider {
@@ -45,7 +41,7 @@ struct FileTracking {
     /// Set of all file paths successfully written/edited.
     touched: HashSet<String>,
     /// Most recently modified file path.
-    last: Option<String>,
+    last:    Option<String>,
 }
 
 fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
@@ -83,7 +79,8 @@ fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
 fn spawn_event_forwarder(
     session: &Session,
     node_id: String,
-    emitter: Arc<EventEmitter>,
+    scope: StageScope,
+    emitter: Arc<Emitter>,
     file_tracking: Arc<Mutex<FileTracking>>,
 ) {
     let mut rx = session.subscribe();
@@ -96,24 +93,19 @@ fn spawn_event_forwarder(
             track_file_event(&event.event, &mut file_tracking.lock().unwrap());
 
             // Forward non-streaming agent events to pipeline
-            if !matches!(
-                &event.event,
-                AgentEvent::SessionStarted
-                    | AgentEvent::SessionEnded
-                    | AgentEvent::ProcessingEnd
-                    | AgentEvent::AssistantTextStart
-                    | AgentEvent::AssistantOutputReplace { .. }
-                    | AgentEvent::TextDelta { .. }
-                    | AgentEvent::ReasoningDelta { .. }
-                    | AgentEvent::ToolCallOutputDelta { .. }
-                    | AgentEvent::SkillExpanded { .. }
-            ) {
-                emitter.emit(&WorkflowRunEvent::Agent {
-                    stage: node_id.clone(),
-                    event: event.event.clone(),
-                    session_id: Some(event.session_id.clone()),
-                    parent_session_id: event.parent_session_id.clone(),
-                });
+            if !event.event.is_streaming_noise()
+                && !matches!(&event.event, AgentEvent::ProcessingEnd)
+            {
+                emitter.emit_scoped(
+                    &Event::Agent {
+                        stage:             node_id.clone(),
+                        visit:             scope.visit,
+                        event:             event.event.clone(),
+                        session_id:        Some(event.session_id.clone()),
+                        parent_session_id: event.parent_session_id.clone(),
+                    },
+                    &scope,
+                );
             }
         }
     });
@@ -124,12 +116,12 @@ fn spawn_event_forwarder(
 /// For `full` fidelity nodes sharing a thread key, sessions are cached
 /// and reused so the LLM sees the full conversation history.
 pub struct AgentApiBackend {
-    model: String,
-    provider: Provider,
+    model:          String,
+    provider:       Provider,
     fallback_chain: Vec<FallbackTarget>,
-    sessions: Mutex<HashMap<String, Session>>,
-    env: HashMap<String, String>,
-    mcp_servers: Vec<McpServerConfig>,
+    sessions:       Mutex<HashMap<String, Session>>,
+    env:            HashMap<String, String>,
+    mcp_servers:    Vec<McpServerSettings>,
 }
 
 impl AgentApiBackend {
@@ -152,7 +144,7 @@ impl AgentApiBackend {
     }
 
     #[must_use]
-    pub fn with_mcp_servers(mut self, servers: Vec<McpServerConfig>) -> Self {
+    pub fn with_mcp_servers(mut self, servers: Vec<McpServerSettings>) -> Self {
         self.mcp_servers = servers;
         self
     }
@@ -162,7 +154,7 @@ impl AgentApiBackend {
         node: &Node,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-    ) -> Result<Session, FabroError> {
+    ) -> Result<Session, Error> {
         let model = node.model().unwrap_or(&self.model);
         let provider = node
             .provider()
@@ -187,21 +179,21 @@ impl AgentApiBackend {
         sandbox: &Arc<dyn Sandbox>,
         env: &HashMap<String, String>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        mcp_servers: Vec<McpServerConfig>,
-    ) -> Result<Session, FabroError> {
+        mcp_servers: Vec<McpServerSettings>,
+    ) -> Result<Session, Error> {
         let client = Client::from_env()
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to create LLM client: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to create LLM client: {e}")))?;
 
         let mut profile = build_profile(model, provider);
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             max_tokens: node.max_tokens(),
             reasoning_effort: node.reasoning_effort().parse().ok(),
             speed: node.speed().map(String::from),
             tool_hooks,
             mcp_servers,
-            ..SessionConfig::default()
+            ..SessionOptions::default()
         };
 
         let manager = Arc::new(TokioMutex::new(SubAgentManager::new(
@@ -231,7 +223,7 @@ impl AgentApiBackend {
                 factory_client.clone(),
                 child_profile,
                 Arc::clone(&factory_env),
-                SessionConfig::default(),
+                SessionOptions::default(),
                 None,
             );
             if !factory_tool_env.is_empty() {
@@ -271,11 +263,10 @@ impl CodergenBackend for AgentApiBackend {
         node: &Node,
         prompt: &str,
         system_prompt: Option<&str>,
-        stage_dir: &std::path::Path,
-    ) -> Result<CodergenResult, FabroError> {
+    ) -> Result<CodergenResult, Error> {
         let client = Client::from_env()
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to create LLM client: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to create LLM client: {e}")))?;
 
         let model = node.model().unwrap_or(&self.model);
         let provider = node
@@ -311,11 +302,6 @@ impl CodergenBackend for AgentApiBackend {
             metadata: None,
             provider_options: None,
         };
-
-        let _ = fs::create_dir_all(stage_dir).await;
-        if let Ok(json) = serde_json::to_string_pretty(&request) {
-            let _ = fs::write(stage_dir.join("api_request.json"), json).await;
-        }
 
         // Build per-request fallback chain: if the node overrides the provider,
         // no failover is available; otherwise use the backend's.
@@ -381,47 +367,30 @@ impl CodergenBackend for AgentApiBackend {
                         Err(err) if err.failover_eligible() => {
                             last_err = err;
                         }
-                        Err(err) => return Err(FabroError::Llm(err)),
+                        Err(err) => return Err(Error::Llm(err)),
                     }
                 }
 
                 match found {
                     Some(triple) => triple,
-                    None => return Err(FabroError::Llm(last_err)),
+                    None => return Err(Error::Llm(last_err)),
                 }
             }
-            Err(sdk_err) => return Err(FabroError::Llm(sdk_err)),
+            Err(sdk_err) => return Err(Error::Llm(sdk_err)),
         };
 
-        if let Ok(json) = serde_json::to_string_pretty(&response) {
-            let _ = fs::write(stage_dir.join("api_response.json"), json).await;
-        }
-
-        let provider_used = serde_json::json!({
-            "mode": "prompt",
-            "provider": &actual_provider,
-            "model": &actual_model,
-        });
-        if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
-            let _ = fs::write(stage_dir.join("provider_used.json"), json).await;
-        }
-
-        let mut stage_usage = StageUsage {
-            model: actual_model,
-            input_tokens: response.usage.input_tokens,
-            output_tokens: response.usage.output_tokens,
-            cache_read_tokens: response.usage.cache_read_tokens,
-            cache_write_tokens: response.usage.cache_write_tokens,
-            reasoning_tokens: response.usage.reasoning_tokens,
-            speed: response.usage.speed.clone(),
-            cost: None,
-        };
-        stage_usage.cost = compute_stage_cost(&stage_usage);
+        let actual_provider = actual_provider.parse::<Provider>().unwrap_or(self.provider);
+        let stage_usage = billed_model_usage_from_llm(
+            &actual_model,
+            actual_provider,
+            node.speed(),
+            &response.usage,
+        );
 
         Ok(CodergenResult::Text {
-            text: response.text(),
-            usage: Some(stage_usage),
-            files_touched: Vec::new(),
+            text:              response.text(),
+            usage:             Some(stage_usage),
+            files_touched:     Vec::new(),
             last_file_touched: None,
         })
     }
@@ -432,13 +401,12 @@ impl CodergenBackend for AgentApiBackend {
         prompt: &str,
         context: &Context,
         thread_id: Option<&str>,
-        emitter: &Arc<EventEmitter>,
-        stage_dir: &std::path::Path,
+        emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-    ) -> Result<CodergenResult, FabroError> {
+    ) -> Result<CodergenResult, Error> {
         let actual_model = node.model().unwrap_or(&self.model).to_string();
-        let actual_provider = node
+        let _actual_provider = node
             .provider()
             .and_then(|p| p.parse::<Provider>().ok())
             .unwrap_or(self.provider);
@@ -481,22 +449,18 @@ impl CodergenBackend for AgentApiBackend {
         let file_tracking = Arc::new(Mutex::new(FileTracking {
             pending: HashMap::new(),
             touched: HashSet::new(),
-            last: None,
+            last:    None,
         }));
+        let stage_scope = StageScope::for_handler(context, &node.id);
 
         // Subscribe to session events: forward to pipeline emitter + track files.
         spawn_event_forwarder(
             &session,
             node.id.clone(),
+            stage_scope.clone(),
             Arc::clone(emitter),
             Arc::clone(&file_tracking),
         );
-
-        // Emit Prompt event before processing
-        emitter.emit(&WorkflowRunEvent::Prompt {
-            stage: node.id.clone(),
-            text: prompt.to_string(),
-        });
 
         // Record turn count before processing so we only aggregate new usage.
         let turns_before = session.history().turns().len();
@@ -510,25 +474,28 @@ impl CodergenBackend for AgentApiBackend {
         // On failover-eligible error, try fallback providers.
         let result = match result {
             Ok(()) => Ok(()),
-            Err(fabro_agent::AgentError::Llm(ref sdk_err))
+            Err(fabro_agent::Error::Llm(ref sdk_err))
                 if sdk_err.failover_eligible() && !self.fallback_chain.is_empty() =>
             {
                 let error_msg = sdk_err.to_string();
                 let from_provider = self.provider.as_str().to_string();
                 let from_model = self.model.clone();
 
-                let mut last_err = FabroError::Llm(sdk_err.clone());
+                let mut last_err = Error::Llm(sdk_err.clone());
                 let mut succeeded = false;
 
                 for target in &self.fallback_chain {
-                    emitter.emit(&WorkflowRunEvent::Failover {
-                        stage: node.id.clone(),
-                        from_provider: from_provider.clone(),
-                        from_model: from_model.clone(),
-                        to_provider: target.provider.clone(),
-                        to_model: target.model.clone(),
-                        error: error_msg.clone(),
-                    });
+                    emitter.emit_scoped(
+                        &Event::Failover {
+                            stage:         node.id.clone(),
+                            from_provider: from_provider.clone(),
+                            from_model:    from_model.clone(),
+                            to_provider:   target.provider.clone(),
+                            to_model:      target.model.clone(),
+                            error:         error_msg.clone(),
+                        },
+                        &stage_scope,
+                    );
 
                     let target_provider: Provider = match target.provider.parse() {
                         Ok(p) => p,
@@ -558,6 +525,7 @@ impl CodergenBackend for AgentApiBackend {
                     spawn_event_forwarder(
                         &session,
                         node.id.clone(),
+                        stage_scope.clone(),
                         Arc::clone(emitter),
                         Arc::clone(&file_tracking),
                     );
@@ -568,52 +536,44 @@ impl CodergenBackend for AgentApiBackend {
                             succeeded = true;
                             break;
                         }
-                        Err(fabro_agent::AgentError::Llm(err)) if err.failover_eligible() => {
-                            last_err = FabroError::Llm(err);
+                        Err(fabro_agent::Error::Llm(err)) if err.failover_eligible() => {
+                            last_err = Error::Llm(err);
                         }
-                        Err(fabro_agent::AgentError::Llm(err)) => return Err(FabroError::Llm(err)),
-                        Err(fabro_agent::AgentError::Aborted(_)) => {
-                            return Err(FabroError::Cancelled);
+                        Err(fabro_agent::Error::Llm(err)) => return Err(Error::Llm(err)),
+                        Err(fabro_agent::Error::Interrupted(_)) => {
+                            return Err(Error::Cancelled);
                         }
                         Err(other) => {
-                            return Err(FabroError::handler(format!(
-                                "Agent session failed: {other}"
-                            )));
+                            return Err(Error::handler(format!("Agent session failed: {other}")));
                         }
                     }
                 }
 
                 if succeeded { Ok(()) } else { Err(last_err) }
             }
-            Err(fabro_agent::AgentError::Llm(sdk_err)) => Err(FabroError::Llm(sdk_err)),
-            Err(fabro_agent::AgentError::Aborted(_)) => Err(FabroError::Cancelled),
-            Err(other) => Err(FabroError::handler(format!(
-                "Agent session failed: {other}"
-            ))),
+            Err(fabro_agent::Error::Llm(sdk_err)) => Err(Error::Llm(sdk_err)),
+            Err(fabro_agent::Error::Interrupted(_)) => Err(Error::Cancelled),
+            Err(other) => Err(Error::handler(format!("Agent session failed: {other}"))),
         };
 
         // On error, drop the session (don't cache failed state).
         result?;
 
-        // Aggregate token usage only from new turns (prevents double-counting on reuse).
-        let mut total_usage = Usage::default();
+        // Aggregate token usage only from new turns (prevents double-counting on
+        // reuse).
+        let mut total_usage = TokenCounts::default();
         for turn in &session.history().turns()[turns_before..] {
             if let Turn::Assistant { usage, .. } = turn {
-                total_usage = total_usage + *usage.clone();
+                total_usage += *usage.clone();
             }
         }
 
-        let mut stage_usage = StageUsage {
-            model: actual_model.clone(),
-            input_tokens: total_usage.input_tokens,
-            output_tokens: total_usage.output_tokens,
-            cache_read_tokens: total_usage.cache_read_tokens,
-            cache_write_tokens: total_usage.cache_write_tokens,
-            reasoning_tokens: total_usage.reasoning_tokens,
-            speed: total_usage.speed.clone(),
-            cost: None,
-        };
-        stage_usage.cost = compute_stage_cost(&stage_usage);
+        let stage_usage = billed_model_usage_from_llm(
+            &actual_model,
+            _actual_provider,
+            node.speed(),
+            &total_usage,
+        );
 
         // Extract last assistant response from the session history.
         let response = session
@@ -639,15 +599,6 @@ impl CodergenBackend for AgentApiBackend {
             (v, s.last.clone())
         };
 
-        let provider_used = serde_json::json!({
-            "mode": "agent",
-            "provider": actual_provider.as_str(),
-            "model": &actual_model,
-        });
-        if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
-            let _ = std::fs::write(stage_dir.join("provider_used.json"), json);
-        }
-
         // Cache session back for reuse on success.
         if let Some(key) = reuse_key {
             self.sessions.lock().unwrap().insert(key, session);
@@ -664,8 +615,9 @@ impl CodergenBackend for AgentApiBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_agent::subagent::SessionFactory;
+
+    use super::*;
 
     #[test]
     fn agent_backend_stores_config() {
@@ -689,7 +641,7 @@ mod tests {
         FileTracking {
             pending: HashMap::new(),
             touched: HashSet::new(),
-            last: None,
+            last:    None,
         }
     }
 
@@ -705,9 +657,9 @@ mod tests {
 
         track_file_event(
             &AgentEvent::ToolCallStarted {
-                tool_name: "write_file".to_string(),
+                tool_name:    "write_file".to_string(),
                 tool_call_id: "tc1".to_string(),
-                arguments: serde_json::Value::Object(args),
+                arguments:    serde_json::Value::Object(args),
             },
             &mut state,
         );
@@ -716,9 +668,9 @@ mod tests {
         track_file_event(
             &AgentEvent::ToolCallCompleted {
                 tool_call_id: "tc1".to_string(),
-                tool_name: "write_file".to_string(),
-                is_error: false,
-                output: serde_json::Value::String("ok".to_string()),
+                tool_name:    "write_file".to_string(),
+                is_error:     false,
+                output:       serde_json::Value::String("ok".to_string()),
             },
             &mut state,
         );
@@ -738,9 +690,9 @@ mod tests {
 
         track_file_event(
             &AgentEvent::ToolCallStarted {
-                tool_name: "edit_file".to_string(),
+                tool_name:    "edit_file".to_string(),
                 tool_call_id: "tc-sub".to_string(),
-                arguments: serde_json::Value::Object(args),
+                arguments:    serde_json::Value::Object(args),
             },
             &mut state,
         );
@@ -749,9 +701,9 @@ mod tests {
         track_file_event(
             &AgentEvent::ToolCallCompleted {
                 tool_call_id: "tc-sub".to_string(),
-                tool_name: "edit_file".to_string(),
-                is_error: false,
-                output: serde_json::Value::String("ok".to_string()),
+                tool_name:    "edit_file".to_string(),
+                is_error:     false,
+                output:       serde_json::Value::String("ok".to_string()),
             },
             &mut state,
         );
@@ -771,9 +723,9 @@ mod tests {
 
         track_file_event(
             &AgentEvent::ToolCallStarted {
-                tool_name: "edit_file".to_string(),
+                tool_name:    "edit_file".to_string(),
                 tool_call_id: "tc-err".to_string(),
-                arguments: serde_json::Value::Object(args),
+                arguments:    serde_json::Value::Object(args),
             },
             &mut state,
         );
@@ -781,9 +733,9 @@ mod tests {
         track_file_event(
             &AgentEvent::ToolCallCompleted {
                 tool_call_id: "tc-err".to_string(),
-                tool_name: "edit_file".to_string(),
-                is_error: true,
-                output: serde_json::Value::String("failed".to_string()),
+                tool_name:    "edit_file".to_string(),
+                is_error:     true,
+                output:       serde_json::Value::String("failed".to_string()),
             },
             &mut state,
         );

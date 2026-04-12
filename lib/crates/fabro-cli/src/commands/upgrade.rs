@@ -3,12 +3,12 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use fabro_util::printer::Printer;
 use semver::Version;
 use sha2::{Digest, Sha256};
-use tracing::debug;
-
 use tokio::process::Command as TokioCommand;
 use tokio::task::JoinHandle;
+use tracing::debug;
 
 use crate::args::{GlobalArgs, UpgradeArgs};
 use crate::shared::print_json_pretty;
@@ -19,11 +19,11 @@ const GITHUB_REPO: &str = "fabro-sh/fabro";
 
 enum Backend {
     Gh,
-    Http(reqwest::Client),
+    Http(fabro_http::HttpClient),
 }
 
-fn http_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+fn http_client() -> Result<fabro_http::HttpClient> {
+    fabro_http::HttpClientBuilder::new()
         .user_agent("fabro-cli")
         .build()
         .context("failed to build HTTP client")
@@ -194,7 +194,7 @@ const LAST_CHECK_FILE: &str = "last_upgrade_check.json";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct UpgradeCheckState {
-    checked_at: u64,
+    checked_at:     u64,
     latest_version: String,
 }
 
@@ -224,7 +224,11 @@ impl UpgradeCheckState {
 
 // ── Main upgrade command ───────────────────────────────────────────────────
 
-pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn run_upgrade(
+    args: UpgradeArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let backend = select_backend().await;
 
     let current =
@@ -250,7 +254,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
                 );
             }
             // Explicit --version: warn + prompt
-            eprintln!("Warning: downgrading from {current} to {target}");
+            fabro_util::printerr!(printer, "Warning: downgrading from {current} to {target}");
             if std::io::stdin().is_terminal() {
                 let confirm = dialoguer::Confirm::new()
                     .with_prompt("Continue with downgrade?")
@@ -270,7 +274,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
                     "installed_version": current.to_string(),
                 }))?;
             } else {
-                eprintln!("Already on version {current}");
+                fabro_util::printerr!(printer, "Already on version {current}");
             }
             return Ok(());
         }
@@ -285,9 +289,9 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
                 "dry_run": true,
             }))?;
         } else {
-            eprintln!("Would upgrade fabro from {current} to {target}");
-            eprintln!("  tag: {tag}");
-            eprintln!("  target: {}", detect_target()?);
+            fabro_util::printerr!(printer, "Would upgrade fabro from {current} to {target}");
+            fabro_util::printerr!(printer, "  tag: {tag}");
+            fabro_util::printerr!(printer, "  target: {}", detect_target()?);
         }
         return Ok(());
     }
@@ -306,7 +310,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
         .context("failed to create temp directory")?;
 
     // Download tarball and checksum in parallel
-    eprintln!("Downloading fabro {target}...");
+    fabro_util::printerr!(printer, "Downloading fabro {target}...");
     let (tarball_path, checksum_path) = tokio::try_join!(
         backend.download_release(&tag, &tarball_name, tmp_dir.path()),
         backend.download_release(&tag, &checksum_name, tmp_dir.path()),
@@ -318,7 +322,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
     debug!("SHA256 checksum verified");
 
     // Extract tarball
-    let status = std::process::Command::new("tar")
+    let status = TokioCommand::new("tar")
         .args([
             "xzf",
             &tarball_path.to_string_lossy(),
@@ -326,6 +330,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
             &tmp_dir.path().to_string_lossy(),
         ])
         .status()
+        .await
         .context("failed to run tar")?;
     if !status.success() {
         bail!("tar extraction failed");
@@ -359,7 +364,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
             "installed_version": target.to_string(),
         }))?;
     } else {
-        eprintln!("Upgraded fabro to {target}");
+        fabro_util::printerr!(printer, "Upgraded fabro to {target}");
     }
     Ok(())
 }
@@ -372,22 +377,20 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
 pub(crate) fn spawn_upgrade_check(
     no_upgrade_check: bool,
     upgrade_check_enabled: bool,
+    printer: Printer,
 ) -> Option<JoinHandle<()>> {
     if no_upgrade_check || !upgrade_check_enabled {
         return None;
     }
-    Some(tokio::spawn(async {
-        if let Err(e) = check_and_print_notice().await {
+    Some(tokio::spawn(async move {
+        if let Err(e) = check_and_print_notice(printer).await {
             debug!(%e, "Upgrade check failed (silently swallowed)");
         }
     }))
 }
 
-async fn check_and_print_notice() -> Result<()> {
-    let Some(home) = dirs::home_dir() else {
-        return Ok(());
-    };
-    let state_path = home.join(".fabro").join(LAST_CHECK_FILE);
+async fn check_and_print_notice(printer: Printer) -> Result<()> {
+    let state_path = fabro_util::Home::from_env().root().join(LAST_CHECK_FILE);
 
     let current = Version::parse(env!("CARGO_PKG_VERSION"))?;
 
@@ -396,7 +399,7 @@ async fn check_and_print_notice() -> Result<()> {
         if !state.is_stale() {
             if let Ok(latest) = Version::parse(&state.latest_version) {
                 if latest > current {
-                    print_notice(&current, &latest);
+                    print_notice(&current, &latest, printer);
                 }
             }
             return Ok(());
@@ -414,21 +417,24 @@ async fn check_and_print_notice() -> Result<()> {
         .unwrap_or_default()
         .as_secs();
     let state = UpgradeCheckState {
-        checked_at: now,
+        checked_at:     now,
         latest_version: latest.to_string(),
     };
     let _ = state.save(&state_path);
 
     if latest > current {
-        print_notice(&current, &latest);
+        print_notice(&current, &latest, printer);
     }
 
     Ok(())
 }
 
-fn print_notice(current: &Version, latest: &Version) {
-    eprintln!("A new version of fabro is available: {latest} (current: {current})");
-    eprintln!("Run `fabro upgrade` to update.");
+fn print_notice(current: &Version, latest: &Version, printer: Printer) {
+    fabro_util::printerr!(
+        printer,
+        "A new version of fabro is available: {latest} (current: {current})"
+    );
+    fabro_util::printerr!(printer, "Run `fabro upgrade` to update.");
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -507,7 +513,7 @@ mod tests {
     #[test]
     fn upgrade_check_state_roundtrip() {
         let state = UpgradeCheckState {
-            checked_at: 1_710_000_000,
+            checked_at:     1_710_000_000,
             latest_version: "0.5.0".to_string(),
         };
         let json = serde_json::to_string(&state).unwrap();
@@ -519,7 +525,7 @@ mod tests {
     #[test]
     fn upgrade_check_state_stale() {
         let old = UpgradeCheckState {
-            checked_at: 0, // epoch — definitely stale
+            checked_at:     0, // epoch — definitely stale
             latest_version: "0.1.0".to_string(),
         };
         assert!(old.is_stale());
@@ -532,7 +538,7 @@ mod tests {
             .unwrap()
             .as_secs();
         let fresh = UpgradeCheckState {
-            checked_at: now,
+            checked_at:     now,
             latest_version: "0.5.0".to_string(),
         };
         assert!(!fresh.is_stale());
@@ -543,7 +549,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
         let state = UpgradeCheckState {
-            checked_at: 1_710_000_000,
+            checked_at:     1_710_000_000,
             latest_version: "0.5.0".to_string(),
         };
         state.save(&path).unwrap();

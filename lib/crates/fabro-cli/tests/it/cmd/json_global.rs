@@ -1,9 +1,14 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "These CLI integration tests synchronously probe for dot before exercising JSON output paths."
+)]
+
 use std::process::Command;
 
 use fabro_test::test_context;
 use serde_json::Value;
 
-use super::support::{fixture, output_stderr, output_stdout, setup_completed_dry_run};
+use super::support::{fixture, output_stderr, output_stdout, setup_completed_fast_dry_run};
 
 fn dot_is_available() -> bool {
     Command::new("dot")
@@ -46,11 +51,12 @@ fn settings_json_outputs_parseable_json() {
 #[test]
 fn ps_supports_global_flag_and_env_var() {
     let context = test_context!();
-    setup_completed_dry_run(&context);
+    setup_completed_fast_dry_run(&context);
+    let test_case_label = context.test_case_label();
 
     let global_output = context
         .command()
-        .args(["--json", "ps", "-a"])
+        .args(["--json", "ps", "-a", "--label", &test_case_label])
         .output()
         .expect("command should run");
     assert!(global_output.status.success());
@@ -61,19 +67,50 @@ fn ps_supports_global_flag_and_env_var() {
     let env_output = context
         .command()
         .env("FABRO_JSON", "1")
-        .args(["ps", "-a"])
+        .args(["ps", "-a", "--label", &test_case_label])
         .output()
         .expect("command should run");
     assert!(env_output.status.success());
     let env_runs: Value =
         serde_json::from_slice(&env_output.stdout).expect("FABRO_JSON output should parse");
-    assert_eq!(global_runs, env_runs);
+
+    let normalize = |runs: &Value| {
+        let mut rows = runs
+            .as_array()
+            .expect("ps output should be an array")
+            .iter()
+            .map(|run| {
+                (
+                    run["run_id"]
+                        .as_str()
+                        .expect("run_id should be present")
+                        .to_string(),
+                    run["workflow_name"]
+                        .as_str()
+                        .expect("workflow_name should be present")
+                        .to_string(),
+                    run["workflow_slug"]
+                        .as_str()
+                        .expect("workflow_slug should be present")
+                        .to_string(),
+                    run["goal"]
+                        .as_str()
+                        .expect("goal should be present")
+                        .to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
+        rows.sort_unstable();
+        rows
+    };
+
+    assert_eq!(normalize(&global_runs), normalize(&env_runs));
 }
 
 #[test]
 fn logs_json_wins_over_pretty() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
 
     let output = context
         .command()

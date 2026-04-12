@@ -1,8 +1,9 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use crate::support::{example_fixture, fabro_json_snapshot, read_json};
-
 use super::support::{output_stdout, resolve_run, wait_for_status, write_gated_workflow};
+use crate::support::{example_fixture, fabro_json_snapshot, unique_run_id};
+
+const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[test]
 fn help() {
@@ -13,7 +14,7 @@ fn help() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Start a created workflow run (spawn engine process)
+    Start a created workflow run on the server
 
     Usage: fabro start [OPTIONS] <RUN>
 
@@ -21,13 +22,13 @@ fn help() {
       <RUN>  Run ID prefix or workflow name
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -35,7 +36,7 @@ fn help() {
 #[test]
 fn start_by_run_id_starts_created_run() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAC";
+    let run_id = unique_run_id();
 
     context
         .command()
@@ -44,117 +45,86 @@ fn start_by_run_id_starts_created_run() {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    context.command().args(["start", run_id]).assert().success();
     context
         .command()
-        .args(["wait", run_id])
-        .timeout(std::time::Duration::from_secs(10))
+        .args(["start", &run_id])
+        .assert()
+        .success();
+    context
+        .command()
+        .args(["wait", &run_id])
+        .timeout(SHARED_DAEMON_TIMEOUT)
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
-    let status = read_json(run_dir.join("status.json"));
-    let conclusion = read_json(run_dir.join("conclusion.json"));
+    let output = context
+        .command()
+        .args(["wait", "--json", &run_id])
+        .output()
+        .expect("wait should execute");
+    assert!(output.status.success(), "wait should succeed");
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("wait JSON");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "status": status["status"],
-            "reason": status["reason"],
-            "conclusion_status": conclusion["status"],
+            "status": value["status"],
         }),
         @r#"
         {
-          "status": "succeeded",
-          "reason": "completed",
-          "conclusion_status": "success"
+          "status": "succeeded"
         }
         "#
     );
 }
 
 #[test]
-fn start_by_workflow_name_prefers_newly_created_submitted_run() {
+fn start_by_run_id_starts_created_run_without_run_json_or_status_json() {
     let context = test_context!();
-    let workflow_path = context.temp_dir.join("smoke/workflow.fabro");
-    let old_run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAD";
-    let new_run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAE";
+    let run_id = unique_run_id();
 
-    context.write_temp(
-        "smoke/workflow.fabro",
-        "\
-digraph Smoke {
-  start [shape=Mdiamond, label=\"Start\"]
-  work  [label=\"Work\", prompt=\"Do the work.\"]
-  exit  [shape=Msquare, label=\"Exit\"]
-  start -> work -> exit
-}
-",
+    context
+        .command()
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            run_id.as_str(),
+            example_fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    context
+        .command()
+        .args(["start", &run_id])
+        .assert()
+        .success();
+    let output = context
+        .command()
+        .args(["wait", "--json", &run_id])
+        .timeout(SHARED_DAEMON_TIMEOUT)
+        .output()
+        .expect("wait should execute");
+    assert!(output.status.success(), "wait should succeed");
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("wait JSON");
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "status": value["status"],
+        }),
+        @r#"
+        {
+          "status": "succeeded"
+        }
+        "#
     );
-
-    context
-        .command()
-        .args([
-            "create",
-            "--dry-run",
-            "--auto-approve",
-            "--run-id",
-            old_run_id,
-            workflow_path.to_str().unwrap(),
-        ])
-        .assert()
-        .success();
-    context
-        .command()
-        .args(["start", old_run_id])
-        .assert()
-        .success();
-    context
-        .command()
-        .args(["wait", old_run_id])
-        .timeout(std::time::Duration::from_secs(10))
-        .assert()
-        .success();
-
-    context
-        .command()
-        .args([
-            "create",
-            "--dry-run",
-            "--auto-approve",
-            "--run-id",
-            new_run_id,
-            workflow_path.to_str().unwrap(),
-        ])
-        .assert()
-        .success();
-
-    context
-        .command()
-        .args(["start", "smoke"])
-        .assert()
-        .success();
-    context
-        .command()
-        .args(["attach", new_run_id])
-        .timeout(std::time::Duration::from_secs(10))
-        .assert()
-        .success();
-
-    let new_run_dir = context.find_run_dir(new_run_id);
-    let status = read_json(new_run_dir.join("status.json"));
-    fabro_json_snapshot!(context, &status, @r#"
-    {
-      "status": "succeeded",
-      "reason": "completed",
-      "updated_at": "[TIMESTAMP]"
-    }
-    "#);
 }
 
 #[test]
@@ -212,4 +182,58 @@ fn start_rejects_already_active_or_completed_run() {
     ----- stderr -----
     error: cannot start run: status is Succeeded, expected submitted
     ");
+}
+
+#[test]
+fn start_runs_under_server_ownership_without_launcher_record() {
+    let context = test_context!();
+    let gate = write_gated_workflow(
+        &context.temp_dir.join("owned-by-server.fabro"),
+        "owned-by-server",
+        "Run under daemon ownership",
+    );
+
+    let output = context
+        .command()
+        .args([
+            "create",
+            "--provider",
+            "openai",
+            "--sandbox",
+            "local",
+            "--no-retro",
+            "owned-by-server.fabro",
+        ])
+        .env("OPENAI_API_KEY", "test")
+        .output()
+        .expect("create should execute");
+    assert!(
+        output.status.success(),
+        "create failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let run_id = output_stdout(&output).trim().to_string();
+    let run = resolve_run(&context, &run_id);
+
+    context
+        .command()
+        .args(["start", &run_id])
+        .env("OPENAI_API_KEY", "test")
+        .assert()
+        .success();
+
+    wait_for_status(&run.run_dir, &["running"]);
+    assert!(
+        !context
+            .storage_dir
+            .join("launchers")
+            .join(format!("{run_id}.json"))
+            .exists(),
+        "server-owned execution should not create a launcher record"
+    );
+
+    gate.release();
+    wait_for_status(&run.run_dir, &["succeeded"]);
 }

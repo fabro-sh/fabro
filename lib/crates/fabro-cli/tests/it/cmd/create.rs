@@ -1,11 +1,24 @@
+use fabro_test::{fabro_snapshot, test_context};
+use httpmock::MockServer;
 use insta::assert_snapshot;
 use serde_json::json;
 
-use fabro_test::{fabro_snapshot, test_context};
+use super::support::{fixture, output_stdout, resolve_run, run_count_for_test_case, run_state};
+use crate::support::{fabro_json_snapshot, unique_run_id};
 
-use crate::support::{fabro_json_snapshot, read_json};
+fn resolved_run(
+    settings: &fabro_types::settings::SettingsLayer,
+) -> fabro_types::settings::RunSettings {
+    fabro_config::resolve_run_from_file(settings).expect("run settings should resolve")
+}
 
-use super::support::{fixture, output_stdout, resolve_run};
+fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": run_id,
+        "status": status,
+        "created_at": "2026-04-05T12:00:00Z"
+    })
+}
 
 #[test]
 fn help() {
@@ -24,32 +37,169 @@ fn help() {
       <WORKFLOW>  Path to a .fabro workflow file or .toml task config
 
     Options:
-          --dry-run                    Execute with simulated LLM backend
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --auto-approve               Auto-approve all human gates
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --goal <GOAL>                Override the workflow goal (exposed as $goal in prompts)
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --goal-file <GOAL_FILE>      Read the workflow goal from a file
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --model <MODEL>              Override default LLM model
-          --provider <PROVIDER>        Override default LLM provider
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -v, --verbose                    Enable verbose output
-          --sandbox <SANDBOX>          Sandbox for agent tools [possible values: local, docker, daytona]
-          --label <KEY=VALUE>          Attach a label to this run (repeatable, format: KEY=VALUE)
-          --no-retro                   Skip retro generation after the run
-          --preserve-sandbox           Keep the sandbox alive after the run finishes (for debugging)
-      -d, --detach                     Run the workflow in the background and print the run ID
-      -h, --help                       Print help
+          --json                   Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>        Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug                  Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --dry-run                Execute with simulated LLM backend
+          --auto-approve           Auto-approve all human gates
+          --no-upgrade-check       Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --goal <GOAL>            Override the workflow goal (available as {{ goal }} in prompts)
+          --quiet                  Suppress non-essential output [env: FABRO_QUIET=]
+          --goal-file <GOAL_FILE>  Read the workflow goal from a file
+          --model <MODEL>          Override default LLM model
+          --provider <PROVIDER>    Override default LLM provider
+      -v, --verbose                Enable verbose output
+          --sandbox <SANDBOX>      Sandbox for agent tools [possible values: local, docker, daytona]
+          --label <KEY=VALUE>      Attach a label to this run (repeatable, format: KEY=VALUE)
+          --no-retro               Skip retro generation after the run
+          --preserve-sandbox       Keep the sandbox alive after the run finishes (for debugging)
+      -d, --detach                 Run the workflow in the background and print the run ID
+      -h, --help                   Print help
     ----- stderr -----
     ");
 }
 
 #[test]
+fn create_uses_explicit_server_target_and_prints_remote_run_id() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(201)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "submitted").to_string());
+    });
+
+    let output = context
+        .create_cmd()
+        .args([
+            "--server",
+            &format!("{}/api/v1", server.base_url()),
+            "--dry-run",
+            fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    mock.assert();
+    assert_eq!(output_stdout(&output).trim(), run_id.as_str());
+}
+
+#[test]
+fn create_uses_configured_server_target_without_server_flag() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(201)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "submitted").to_string());
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
+    );
+
+    let output = context
+        .create_cmd()
+        .args(["--dry-run", fixture("simple.fabro").to_str().unwrap()])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    mock.assert();
+    assert_eq!(output_stdout(&output).trim(), run_id.as_str());
+}
+
+#[test]
+fn create_rejects_storage_dir_flag() {
+    let context = test_context!();
+    let output = context
+        .create_cmd()
+        .args([
+            "--storage-dir",
+            "/tmp/fabro-create",
+            "--dry-run",
+            fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        !output.status.success(),
+        "command should reject --storage-dir"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unexpected argument '--storage-dir'"));
+}
+
+#[test]
+fn create_cli_server_target_overrides_configured_server_target() {
+    let context = test_context!();
+    let config_server = MockServer::start();
+    let config_mock = config_server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(500)
+            .body("configured-server-should-not-be-used");
+    });
+    let cli_server = MockServer::start();
+    let run_id = unique_run_id();
+    let cli_mock = cli_server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(201)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "submitted").to_string());
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            config_server.base_url()
+        ),
+    );
+
+    let output = context
+        .create_cmd()
+        .args([
+            "--server",
+            &format!("{}/api/v1", cli_server.base_url()),
+            "--dry-run",
+            fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    cli_mock.assert();
+    config_mock.assert_calls(0);
+    assert_eq!(output_stdout(&output).trim(), run_id.as_str());
+}
+
+#[test]
 fn create_persists_directory_workflow_slug_and_cached_graph() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAA";
+    let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("sluggy/workflow.fabro");
 
     context.write_temp(
@@ -70,21 +220,21 @@ digraph BarBaz {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             workflow_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
-    let run_record = read_json(run_dir.join("run.json"));
-    let cached_graph = std::fs::read_to_string(run_dir.join("workflow.fabro")).unwrap();
+    let run_dir = context.find_run_dir(&run_id);
+    let state = run_state(&run_dir);
+    let run = state.run.as_ref().expect("run record should exist");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "workflow_slug": run_record["workflow_slug"],
-            "graph_name": run_record["graph"]["name"],
-            "cached_graph_lines": cached_graph.lines().collect::<Vec<_>>(),
+            "workflow_slug": run.workflow_slug,
+            "graph_name": run.graph.name,
+            "cached_graph_lines": state.graph_source.as_ref().expect("graph should exist").lines().collect::<Vec<_>>(),
         }),
         @r#"
         {
@@ -105,7 +255,7 @@ digraph BarBaz {
 #[test]
 fn create_persists_file_stem_slug_for_standalone_file() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAB";
+    let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("alpha.fabro");
 
     context.write_temp(
@@ -126,21 +276,21 @@ digraph FooWorkflow {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             workflow_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
-    let run_record = read_json(run_dir.join("run.json"));
-    let cached_graph = std::fs::read_to_string(run_dir.join("workflow.fabro")).unwrap();
+    let run_dir = context.find_run_dir(&run_id);
+    let state = run_state(&run_dir);
+    let run = state.run.as_ref().expect("run record should exist");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "workflow_slug": run_record["workflow_slug"],
-            "graph_name": run_record["graph"]["name"],
-            "cached_graph_lines": cached_graph.lines().collect::<Vec<_>>(),
+            "workflow_slug": run.workflow_slug,
+            "graph_name": run.graph.name,
+            "cached_graph_lines": state.graph_source.as_ref().expect("graph should exist").lines().collect::<Vec<_>>(),
         }),
         @r#"
         {
@@ -159,7 +309,7 @@ digraph FooWorkflow {
 }
 
 #[test]
-fn create_persists_requested_overrides_into_run_json() {
+fn create_persists_requested_overrides_into_store() {
     let context = test_context!();
     let workflow = fixture("simple.fabro");
     let mut cmd = context.command();
@@ -200,26 +350,33 @@ fn create_persists_requested_overrides_into_run_json() {
         .expect("create should print a run ID")
         .to_string();
     let run = resolve_run(&context, &run_id);
-    let run_json = read_json(run.run_dir.join("run.json"));
+    let state = run_state(&run.run_dir);
+    let run_record = state.run.as_ref().expect("run record should exist");
     let labels = json!({
-        "env": run_json.pointer("/labels/env"),
-        "team": run_json.pointer("/labels/team"),
+        "env": run_record.labels.get("env"),
+        "team": run_record.labels.get("team"),
     });
+    let settings = &run_record.settings;
+    let resolved_run = resolved_run(settings);
+    let cli_settings = fabro_config::resolve_cli_from_file(settings).expect("cli settings");
     let compact = json!({
-        "workflow_slug": run_json["workflow_slug"],
+        "workflow_slug": run_record.workflow_slug,
         "settings": {
-            "goal": run_json.pointer("/settings/goal"),
-            "dry_run": run_json.pointer("/settings/dry_run"),
-            "auto_approve": run_json.pointer("/settings/auto_approve"),
-            "no_retro": run_json.pointer("/settings/no_retro"),
-            "verbose": run_json.pointer("/settings/verbose"),
+            "goal": match resolved_run.goal.as_ref() {
+                Some(fabro_types::settings::run::RunGoal::Inline(value)) => Some(value.as_source()),
+                _ => None,
+            },
+            "dry_run": resolved_run.execution.mode == fabro_types::settings::run::RunMode::DryRun,
+            "auto_approve": resolved_run.execution.approval == fabro_types::settings::run::ApprovalMode::Auto,
+            "no_retro": !resolved_run.execution.retros,
+            "verbose": cli_settings.output.verbosity == fabro_types::settings::cli::OutputVerbosity::Verbose,
             "llm": {
-                "model": run_json.pointer("/settings/llm/model"),
-                "provider": run_json.pointer("/settings/llm/provider"),
+                "model": resolved_run.model.name.as_ref().map(fabro_types::settings::InterpString::as_source),
+                "provider": resolved_run.model.provider.as_ref().map(fabro_types::settings::InterpString::as_source),
             },
             "sandbox": {
-                "provider": run_json.pointer("/settings/sandbox/provider"),
-                "preserve": run_json.pointer("/settings/sandbox/preserve"),
+                "provider": resolved_run.sandbox.provider,
+                "preserve": resolved_run.sandbox.preserve,
             },
         },
         "labels": labels,
@@ -274,11 +431,18 @@ fn create_json_implies_auto_approve() {
         .as_str()
         .expect("create JSON should include run_id");
     let run = resolve_run(&context, run_id);
-    let run_json = read_json(run.run_dir.join("run.json"));
 
-    assert_eq!(
-        run_json.pointer("/settings/auto_approve"),
-        Some(&json!(true))
+    assert!(
+        resolved_run(
+            &run_state(&run.run_dir)
+                .run
+                .as_ref()
+                .expect("run record should exist")
+                .settings,
+        )
+        .execution
+        .approval
+            == fabro_types::settings::run::ApprovalMode::Auto
     );
 }
 
@@ -286,8 +450,9 @@ fn create_json_implies_auto_approve() {
 fn create_invalid_workflow_fails_without_creating_run() {
     let context = test_context!();
     let workflow = fixture("invalid.fabro");
-    let mut cmd = context.command();
-    cmd.args(["create", workflow.to_str().unwrap()]);
+    let initial_run_count = run_count_for_test_case(&context);
+    let mut cmd = context.create_cmd();
+    cmd.arg(workflow.to_str().unwrap());
 
     fabro_snapshot!(context.filters(), cmd, @"
     success: false
@@ -297,10 +462,9 @@ fn create_invalid_workflow_fails_without_creating_run() {
     error: Validation failed
     ");
 
-    let runs_dir = context.storage_dir.join("runs");
-    let run_count = std::fs::read_dir(&runs_dir)
-        .ok()
-        .map(|entries| entries.flatten().count())
-        .unwrap_or(0);
-    assert_eq!(run_count, 0, "invalid create should not persist a run");
+    let run_count = run_count_for_test_case(&context);
+    assert_eq!(
+        run_count, initial_run_count,
+        "invalid create should not persist a run for this test case"
+    );
 }

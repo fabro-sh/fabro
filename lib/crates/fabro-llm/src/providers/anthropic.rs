@@ -1,7 +1,8 @@
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use futures::stream;
 
-use crate::error::{SdkError, error_from_status_code};
+use crate::error::{Error, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream, validate_tool_choice};
 use crate::providers::common::{
     self as common, extract_system_prompt, parse_error_body, parse_rate_limit_headers,
@@ -9,21 +10,21 @@ use crate::providers::common::{
 };
 use crate::types::{
     AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
-    ResponseFormatType, Role, StreamEvent, ThinkingData, ToolCall, ToolChoice, ToolDefinition,
-    Usage,
+    ResponseFormatType, Role, StreamEvent, ThinkingData, TokenCounts, ToolCall, ToolChoice,
+    ToolDefinition,
 };
 
 /// Provider adapter for the Anthropic Messages API.
 pub struct Adapter {
     pub(crate) http: super::http_api::HttpApi,
-    provider_name: String,
+    provider_name:   String,
 }
 
 impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            http: super::http_api::HttpApi::new(api_key, DEFAULT_BASE_URL),
+            http:          super::http_api::HttpApi::new(api_key, DEFAULT_BASE_URL),
             provider_name: "anthropic".to_string(),
         }
     }
@@ -63,7 +64,7 @@ impl Adapter {
     /// Collect a streaming response into a single [`Response`].
     ///
     /// Used by non-Anthropic providers (e.g. Kimi) that require `stream=true`.
-    async fn complete_via_stream(&self, request: &Request) -> Result<Response, SdkError> {
+    async fn complete_via_stream(&self, request: &Request) -> Result<Response, Error> {
         use futures::StreamExt;
 
         let mut stream = self.stream(request).await?;
@@ -75,9 +76,9 @@ impl Adapter {
             }
         }
 
-        response.ok_or_else(|| SdkError::Stream {
+        response.ok_or_else(|| Error::Stream {
             message: "complete_via_stream: stream ended without a Finish event".to_string(),
-            source: None,
+            source:  None,
         })
     }
 }
@@ -88,50 +89,51 @@ const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
 
 #[derive(serde::Serialize)]
 struct ApiRequest {
-    model: String,
-    messages: Vec<ApiMessage>,
-    max_tokens: i64,
+    model:          String,
+    messages:       Vec<ApiMessage>,
+    max_tokens:     i64,
     /// System prompt: either a plain string or an array of content blocks
     /// (with optional `cache_control` annotations for prompt caching).
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<serde_json::Value>,
+    system:         Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f64>,
+    temperature:    Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f64>,
+    top_p:          Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stop_sequences: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<ApiToolDef>>,
+    tools:          Option<Vec<ApiToolDef>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_choice: Option<serde_json::Value>,
-    /// Extended thinking configuration (e.g. `{"type": "enabled", "budget_tokens": 10000}`).
-    /// Passed through from `provider_options.anthropic.thinking`.
+    tool_choice:    Option<serde_json::Value>,
+    /// Extended thinking configuration (e.g. `{"type": "enabled",
+    /// "budget_tokens": 10000}`). Passed through from
+    /// `provider_options.anthropic.thinking`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    thinking: Option<serde_json::Value>,
+    thinking:       Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    output_config: Option<serde_json::Value>,
+    output_config:  Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    speed: Option<String>,
+    speed:          Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    metadata: Option<std::collections::HashMap<String, String>>,
+    metadata:       Option<std::collections::HashMap<String, String>>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
-    stream: bool,
+    stream:         bool,
 }
 
 /// Anthropic messages use structured content blocks, not plain strings.
 #[derive(serde::Serialize)]
 struct ApiMessage {
-    role: String,
+    role:    String,
     content: Vec<serde_json::Value>,
 }
 
 /// Anthropic tool definition format.
 #[derive(serde::Serialize)]
 struct ApiToolDef {
-    name: String,
-    description: String,
-    input_schema: serde_json::Value,
+    name:          String,
+    description:   String,
+    input_schema:  serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     cache_control: Option<CacheControl>,
 }
@@ -155,23 +157,22 @@ impl CacheControl {
 
 #[derive(serde::Deserialize)]
 struct ApiResponse {
-    id: String,
-    model: String,
-    content: Vec<serde_json::Value>,
+    id:          String,
+    model:       String,
+    content:     Vec<serde_json::Value>,
     stop_reason: Option<String>,
-    usage: ApiUsage,
+    usage:       ApiUsage,
 }
 
 #[derive(serde::Deserialize)]
+#[allow(clippy::struct_field_names)] // Match Anthropic's API usage payload field names.
 struct ApiUsage {
-    input_tokens: i64,
-    output_tokens: i64,
+    input_tokens:                i64,
+    output_tokens:               i64,
     #[serde(default)]
-    cache_read_input_tokens: Option<i64>,
+    cache_read_input_tokens:     Option<i64>,
     #[serde(default)]
     cache_creation_input_tokens: Option<i64>,
-    #[serde(default)]
-    speed: Option<String>,
 }
 
 /// Estimate reasoning tokens from thinking content blocks.
@@ -210,21 +211,21 @@ fn parse_content_block(block: &serde_json::Value) -> Option<ContentPart> {
             block.get("input")?.clone(),
         ))),
         "thinking" => Some(ContentPart::Thinking(ThinkingData {
-            text: block.get("thinking")?.as_str()?.to_string(),
+            text:      block.get("thinking")?.as_str()?.to_string(),
             signature: block
                 .get("signature")
                 .and_then(serde_json::Value::as_str)
                 .map(String::from),
-            redacted: false,
+            redacted:  false,
         })),
         "redacted_thinking" => Some(ContentPart::Thinking(ThinkingData {
-            text: block
+            text:      block
                 .get("data")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("")
                 .to_string(),
             signature: None,
-            redacted: true,
+            redacted:  true,
         })),
         _ => None,
     }
@@ -336,7 +337,8 @@ fn translate_messages(messages: &[&Message]) -> Vec<ApiMessage> {
             continue;
         }
 
-        // Enforce strict user/assistant alternation by merging consecutive same-role messages
+        // Enforce strict user/assistant alternation by merging consecutive same-role
+        // messages
         if let Some(last) = api_messages.last_mut() {
             if last.role == role {
                 last.content.extend(content);
@@ -358,9 +360,9 @@ fn translate_tools(tools: &[ToolDefinition]) -> Vec<ApiToolDef> {
     tools
         .iter()
         .map(|t| ApiToolDef {
-            name: t.name.clone(),
-            description: t.description.clone(),
-            input_schema: t.parameters.clone(),
+            name:          t.name.clone(),
+            description:   t.description.clone(),
+            input_schema:  t.parameters.clone(),
             cache_control: None,
         })
         .collect()
@@ -384,11 +386,12 @@ fn translate_tool_choice(choice: &ToolChoice) -> Option<serde_json::Value> {
 
 const SYNTHETIC_TOOL_NAME: &str = "json_output";
 
-/// Apply `response_format` to the Anthropic API request by mutating tools, `tool_choice`, and system.
+/// Apply `response_format` to the Anthropic API request by mutating tools,
+/// `tool_choice`, and system.
 ///
-/// For `JsonSchema`: injects a synthetic tool with the given schema and forces the model to call it.
-/// For `JsonObject`: appends a JSON instruction to the system prompt.
-/// For `Text`: no-op.
+/// For `JsonSchema`: injects a synthetic tool with the given schema and forces
+/// the model to call it. For `JsonObject`: appends a JSON instruction to the
+/// system prompt. For `Text`: no-op.
 fn apply_response_format(
     request: &Request,
     api_tools: &mut Option<Vec<ApiToolDef>>,
@@ -406,9 +409,9 @@ fn apply_response_format(
                 .clone()
                 .unwrap_or_else(|| serde_json::json!({"type": "object"}));
             let synthetic_tool = ApiToolDef {
-                name: SYNTHETIC_TOOL_NAME.to_string(),
-                description: "Output the requested structured data".to_string(),
-                input_schema: schema,
+                name:          SYNTHETIC_TOOL_NAME.to_string(),
+                description:   "Output the requested structured data".to_string(),
+                input_schema:  schema,
                 cache_control: None,
             };
             match api_tools {
@@ -451,8 +454,9 @@ fn apply_response_format(
 
 /// Convert synthetic `tool_use` content blocks back to text content parts.
 ///
-/// When `response_format` uses `JsonSchema` mode, the model responds with a `tool_use` block
-/// for our synthetic tool. We extract its arguments as a JSON text string.
+/// When `response_format` uses `JsonSchema` mode, the model responds with a
+/// `tool_use` block for our synthetic tool. We extract its arguments as a JSON
+/// text string.
 fn convert_synthetic_tool_to_text(content_parts: Vec<ContentPart>) -> Vec<ContentPart> {
     content_parts
         .into_iter()
@@ -473,8 +477,9 @@ fn uses_json_schema_format(request: &Request) -> bool {
         .is_some_and(|f| matches!(f.kind, ResponseFormatType::JsonSchema))
 }
 
-/// Convert a streaming event for `JsonSchema` mode: `tool_use` events for the synthetic tool
-/// become text events, and the Finish event gets its content parts and `finish_reason` adjusted.
+/// Convert a streaming event for `JsonSchema` mode: `tool_use` events for the
+/// synthetic tool become text events, and the Finish event gets its content
+/// parts and `finish_reason` adjusted.
 fn convert_stream_event_for_json_schema(event: StreamEvent) -> StreamEvent {
     match event {
         StreamEvent::ToolCallStart { tool_call } if tool_call.name == SYNTHETIC_TOOL_NAME => {
@@ -520,8 +525,9 @@ const FAST_MODE_BETA_HEADER: &str = "fast-mode-2026-02-01";
 /// Check whether auto-caching is disabled via `provider_options`.
 ///
 /// Returns `true` if caching should be applied (the default).
-/// Only returns `false` if `provider_options.anthropic.auto_cache` is explicitly `false`.
-/// Extract the `thinking` configuration from `provider_options.anthropic.thinking`.
+/// Only returns `false` if `provider_options.anthropic.auto_cache` is
+/// explicitly `false`. Extract the `thinking` configuration from
+/// `provider_options.anthropic.thinking`.
 fn extract_thinking_config(
     provider_options: Option<&serde_json::Value>,
 ) -> Option<serde_json::Value> {
@@ -532,7 +538,8 @@ fn extract_thinking_config(
 }
 
 /// Map a reasoning effort level to a thinking `budget_tokens` value for models
-/// that don't support the `output_config.effort` parameter (e.g. claude-sonnet-4-5).
+/// that don't support the `output_config.effort` parameter (e.g.
+/// claude-sonnet-4-5).
 fn effort_to_budget_tokens(effort: &str, max_tokens: i64) -> i64 {
     let budget = match effort {
         "low" => max_tokens / 4,
@@ -551,8 +558,8 @@ fn is_auto_cache_enabled(provider_options: Option<&serde_json::Value>) -> bool {
         .unwrap_or(true)
 }
 
-/// Wrap a system prompt string as an array of content blocks with `cache_control`
-/// on the last block.
+/// Wrap a system prompt string as an array of content blocks with
+/// `cache_control` on the last block.
 fn system_with_cache_control(system: &str) -> serde_json::Value {
     serde_json::json!([{
         "type": "text",
@@ -568,11 +575,12 @@ fn apply_cache_control_to_last_tool(tools: &mut [ApiToolDef]) {
     }
 }
 
-/// Add `cache_control` to the last content block of the second-to-last user message.
+/// Add `cache_control` to the last content block of the second-to-last user
+/// message.
 ///
-/// In a multi-turn conversation, the conversation prefix (everything before the latest
-/// user turn) is stable and benefits from caching. We find the last user message before
-/// the final one and annotate its last content block.
+/// In a multi-turn conversation, the conversation prefix (everything before the
+/// latest user turn) is stable and benefits from caching. We find the last user
+/// message before the final one and annotate its last content block.
 fn apply_cache_control_to_conversation_prefix(messages: &mut [ApiMessage]) {
     // Find all user message indices
     let user_indices: Vec<usize> = messages
@@ -597,8 +605,8 @@ fn apply_cache_control_to_conversation_prefix(messages: &mut [ApiMessage]) {
     }
 }
 
-/// Collect beta headers from `provider_options` and merge with the caching header
-/// when auto-caching is active.
+/// Collect beta headers from `provider_options` and merge with the caching
+/// header when auto-caching is active.
 const CONTEXT_1M_BETA_HEADER: &str = "context-1m-2025-08-07";
 
 fn build_beta_header(
@@ -657,21 +665,21 @@ enum ContentBlockKind {
 
 /// Accumulated state across SSE events during streaming.
 struct StreamAccumulator {
-    id: String,
-    model: String,
-    content_parts: Vec<ContentPart>,
-    usage: Usage,
-    finish_reason: FinishReason,
+    id:                String,
+    model:             String,
+    content_parts:     Vec<ContentPart>,
+    usage:             TokenCounts,
+    finish_reason:     FinishReason,
     /// The kind of the current content block, set by `content_block_start`.
-    current_block: Option<ContentBlockKind>,
+    current_block:     Option<ContentBlockKind>,
     /// Accumulated text for the current text block.
-    current_text: String,
+    current_text:      String,
     /// Accumulated thinking text for the current thinking block.
-    current_thinking: String,
+    current_thinking:  String,
     /// Accumulated raw JSON arguments for the current `tool_use` block.
     current_tool_args: String,
     /// Rate limit info parsed from the initial HTTP response headers.
-    rate_limit: Option<RateLimitInfo>,
+    rate_limit:        Option<RateLimitInfo>,
 }
 
 impl StreamAccumulator {
@@ -680,7 +688,7 @@ impl StreamAccumulator {
             id: String::new(),
             model: String::new(),
             content_parts: Vec::new(),
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             finish_reason: FinishReason::Stop,
             current_block: None,
             current_text: String::new(),
@@ -690,24 +698,25 @@ impl StreamAccumulator {
         }
     }
 
-    /// Build the final `Response` from accumulated state, consuming content parts.
+    /// Build the final `Response` from accumulated state, consuming content
+    /// parts.
     fn take_response(&mut self) -> Response {
         let content_parts = std::mem::take(&mut self.content_parts);
         Response {
-            id: self.id.clone(),
-            model: self.model.clone(),
-            provider: "anthropic".to_string(),
-            message: Message {
-                role: Role::Assistant,
-                content: content_parts,
-                name: None,
+            id:            self.id.clone(),
+            model:         self.model.clone(),
+            provider:      "anthropic".to_string(),
+            message:       Message {
+                role:         Role::Assistant,
+                content:      content_parts,
+                name:         None,
                 tool_call_id: None,
             },
             finish_reason: self.finish_reason.clone(),
-            usage: self.usage.clone(),
-            raw: None,
-            warnings: vec![],
-            rate_limit: self.rate_limit.clone(),
+            usage:         self.usage.clone(),
+            raw:           None,
+            warnings:      vec![],
+            rate_limit:    self.rate_limit.clone(),
         }
     }
 }
@@ -728,14 +737,12 @@ impl StreamAccumulator {
                     .unwrap_or(0);
                 self.usage.cache_read_tokens = usage
                     .get("cache_read_input_tokens")
-                    .and_then(serde_json::Value::as_i64);
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
                 self.usage.cache_write_tokens = usage
                     .get("cache_creation_input_tokens")
-                    .and_then(serde_json::Value::as_i64);
-                self.usage.speed = usage
-                    .get("speed")
-                    .and_then(serde_json::Value::as_str)
-                    .map(String::from);
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
             }
         }
         vec![StreamEvent::StreamStart]
@@ -773,7 +780,7 @@ impl StreamAccumulator {
                     .unwrap_or("")
                     .to_string();
                 self.current_block = Some(ContentBlockKind::ToolUse {
-                    id: id.clone(),
+                    id:   id.clone(),
                     name: name.clone(),
                 });
                 self.current_tool_args.clear();
@@ -816,7 +823,7 @@ impl StreamAccumulator {
                     .unwrap_or(0);
 
                 vec![StreamEvent::TextDelta {
-                    delta: text.to_string(),
+                    delta:   text.to_string(),
                     text_id: Some(format!("block_{index}")),
                 }]
             }
@@ -902,9 +909,9 @@ impl StreamAccumulator {
                     .and_then(serde_json::Value::as_str)
                     .map(String::from);
                 self.content_parts.push(ContentPart::Thinking(ThinkingData {
-                    text: thinking_text,
+                    text:      thinking_text,
                     signature: stop_signature.or(signature),
-                    redacted: false,
+                    redacted:  false,
                 }));
                 vec![StreamEvent::ReasoningEnd]
             }
@@ -922,17 +929,18 @@ impl StreamAccumulator {
                 .get("output_tokens")
                 .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0);
-            self.usage.total_tokens = self.usage.input_tokens + self.usage.output_tokens;
         }
     }
 
     fn handle_message_stop(&mut self) -> Vec<StreamEvent> {
-        self.usage.reasoning_tokens = estimate_reasoning_tokens(&self.content_parts);
+        let reasoning_tokens = estimate_reasoning_tokens(&self.content_parts).unwrap_or(0);
+        self.usage.reasoning_tokens = reasoning_tokens;
+        self.usage.output_tokens = self.usage.output_tokens.saturating_sub(reasoning_tokens);
         let response = self.take_response();
         vec![StreamEvent::Finish {
             finish_reason: response.finish_reason.clone(),
-            usage: response.usage.clone(),
-            response: Box::new(response),
+            usage:         response.usage.clone(),
+            response:      Box::new(response),
         }]
     }
 }
@@ -960,22 +968,26 @@ fn process_sse_event(
 // --- SSE reader ---
 
 enum SseResult {
-    Event { event_type: String, data: String },
+    Event {
+        event_type: String,
+        data:       String,
+    },
     Done,
-    Error(SdkError),
+    Error(Error),
 }
 
 struct SseReaderState {
-    line_reader: super::common::LineReader,
-    accumulator: StreamAccumulator,
-    pending_events: std::collections::VecDeque<StreamEvent>,
-    /// When true, `tool_use` events for the synthetic tool are converted to text events.
+    line_reader:      super::common::LineReader,
+    accumulator:      StreamAccumulator,
+    pending_events:   std::collections::VecDeque<StreamEvent>,
+    /// When true, `tool_use` events for the synthetic tool are converted to
+    /// text events.
     json_schema_mode: bool,
 }
 
 impl SseReaderState {
     fn new(
-        http_resp: reqwest::Response,
+        http_resp: fabro_http::Response,
         rate_limit: Option<RateLimitInfo>,
         json_schema_mode: bool,
         stream_read_timeout: Option<std::time::Duration>,
@@ -999,7 +1011,8 @@ impl SseReaderState {
                     if let Some(result) = Self::parse_event_block(&event_block) {
                         return result;
                     }
-                    // No data in this block (e.g. heartbeat comment); keep reading.
+                    // No data in this block (e.g. heartbeat comment); keep
+                    // reading.
                 }
                 Ok(None) => return SseResult::Done,
                 Err(e) => return SseResult::Error(e),
@@ -1009,7 +1022,8 @@ impl SseReaderState {
 
     /// Parse an SSE event block into an `SseResult`.
     ///
-    /// Returns `None` for blocks with no `data:` lines (e.g. heartbeat comments).
+    /// Returns `None` for blocks with no `data:` lines (e.g. heartbeat
+    /// comments).
     fn parse_event_block(event_block: &str) -> Option<SseResult> {
         let mut event_type = String::new();
         let mut data_parts: Vec<String> = Vec::new();
@@ -1033,11 +1047,12 @@ impl SseReaderState {
     }
 }
 
-/// Known `provider_options.anthropic` keys that are already handled by the adapter
-/// and should not be merged into the request body a second time.
+/// Known `provider_options.anthropic` keys that are already handled by the
+/// adapter and should not be merged into the request body a second time.
 const KNOWN_ANTHROPIC_OPTION_KEYS: &[&str] = &["thinking", "auto_cache", "beta_headers"];
 
-/// Serialize the API request and merge any unknown `provider_options.anthropic` keys.
+/// Serialize the API request and merge any unknown `provider_options.anthropic`
+/// keys.
 fn merge_provider_options(
     api_request: &ApiRequest,
     provider_options: Option<&serde_json::Value>,
@@ -1057,12 +1072,13 @@ fn merge_provider_options(
     body
 }
 
-/// Build an Anthropic API request and HTTP request builder for the given unified request.
+/// Build an Anthropic API request and HTTP request builder for the given
+/// unified request.
 fn build_api_request(
     adapter: &Adapter,
     request: &Request,
     stream: bool,
-) -> (ApiRequest, reqwest::RequestBuilder) {
+) -> (ApiRequest, fabro_http::RequestBuilder) {
     let (system, other_messages) = extract_system_prompt(&request.messages);
     let mut api_messages = translate_messages(&other_messages);
 
@@ -1214,7 +1230,7 @@ impl ProviderAdapter for Adapter {
         &self.provider_name
     }
 
-    async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+    async fn complete(&self, request: &Request) -> Result<Response, Error> {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
@@ -1234,7 +1250,7 @@ impl ProviderAdapter for Adapter {
         let (body, headers) = send_and_read_response(req, &self.provider_name, "type").await?;
 
         let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| {
-            SdkError::network(
+            Error::network(
                 format!("failed to parse {} response: {e}", self.provider_name),
                 e,
             )
@@ -1260,29 +1276,28 @@ impl ProviderAdapter for Adapter {
         } else {
             map_finish_reason(api_resp.stop_reason.as_deref())
         };
-        let total = api_resp.usage.input_tokens + api_resp.usage.output_tokens;
-        let reasoning_tokens = estimate_reasoning_tokens(&content_parts);
+        let reasoning_tokens = estimate_reasoning_tokens(&content_parts).unwrap_or(0);
 
         Ok(Response {
             id: api_resp.id,
             model: api_resp.model,
             provider: self.provider_name.clone(),
             message: Message {
-                role: Role::Assistant,
-                content: content_parts,
-                name: None,
+                role:         Role::Assistant,
+                content:      content_parts,
+                name:         None,
                 tool_call_id: None,
             },
             finish_reason,
-            usage: Usage {
+            usage: TokenCounts {
                 input_tokens: api_resp.usage.input_tokens,
-                output_tokens: api_resp.usage.output_tokens,
-                total_tokens: total,
+                output_tokens: api_resp
+                    .usage
+                    .output_tokens
+                    .saturating_sub(reasoning_tokens),
                 reasoning_tokens,
-                cache_read_tokens: api_resp.usage.cache_read_input_tokens,
-                cache_write_tokens: api_resp.usage.cache_creation_input_tokens,
-                speed: api_resp.usage.speed,
-                ..Usage::default()
+                cache_read_tokens: api_resp.usage.cache_read_input_tokens.unwrap_or(0),
+                cache_write_tokens: api_resp.usage.cache_creation_input_tokens.unwrap_or(0),
             },
             raw: serde_json::from_str(&body).ok(),
             warnings: vec![],
@@ -1290,7 +1305,7 @@ impl ProviderAdapter for Adapter {
         })
     }
 
-    async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+    async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
@@ -1299,7 +1314,7 @@ impl ProviderAdapter for Adapter {
         let http_resp = req_builder
             .send()
             .await
-            .map_err(|e| SdkError::network(e.to_string(), e))?;
+            .map_err(|e| Error::network(e.to_string(), e))?;
 
         let status = http_resp.status();
         if !status.is_success() {
@@ -1307,7 +1322,7 @@ impl ProviderAdapter for Adapter {
             let body = http_resp
                 .text()
                 .await
-                .map_err(|e| SdkError::network(e.to_string(), e))?;
+                .map_err(|e| Error::network(e.to_string(), e))?;
             let (msg, code, raw) = parse_error_body(&body, "type");
             return Err(error_from_status_code(
                 status.as_u16(),
@@ -1344,7 +1359,7 @@ impl ProviderAdapter for Adapter {
                                 Ok(v) => v,
                                 Err(e) => {
                                     return Some((
-                                        Err(SdkError::stream_error(
+                                        Err(Error::stream_error(
                                             format!("failed to parse SSE data: {e}"),
                                             e,
                                         )),
@@ -1432,15 +1447,15 @@ mod tests {
     fn tool_cache_control_applied_to_last_tool() {
         let mut tools = vec![
             ApiToolDef {
-                name: "tool_a".to_string(),
-                description: "first".to_string(),
-                input_schema: serde_json::json!({}),
+                name:          "tool_a".to_string(),
+                description:   "first".to_string(),
+                input_schema:  serde_json::json!({}),
                 cache_control: None,
             },
             ApiToolDef {
-                name: "tool_b".to_string(),
-                description: "second".to_string(),
-                input_schema: serde_json::json!({}),
+                name:          "tool_b".to_string(),
+                description:   "second".to_string(),
+                input_schema:  serde_json::json!({}),
                 cache_control: None,
             },
         ];
@@ -1461,9 +1476,9 @@ mod tests {
     #[test]
     fn tool_cache_control_single_tool() {
         let mut tools = vec![ApiToolDef {
-            name: "only_tool".to_string(),
-            description: "the one".to_string(),
-            input_schema: serde_json::json!({}),
+            name:          "only_tool".to_string(),
+            description:   "the one".to_string(),
+            input_schema:  serde_json::json!({}),
             cache_control: None,
         }];
         apply_cache_control_to_last_tool(&mut tools);
@@ -1474,15 +1489,15 @@ mod tests {
     fn conversation_prefix_cache_control_with_two_user_messages() {
         let mut messages = vec![
             ApiMessage {
-                role: "user".to_string(),
+                role:    "user".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "Hello"})],
             },
             ApiMessage {
-                role: "assistant".to_string(),
+                role:    "assistant".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "Hi there"})],
             },
             ApiMessage {
-                role: "user".to_string(),
+                role:    "user".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "How are you?"})],
             },
         ];
@@ -1501,25 +1516,26 @@ mod tests {
     fn conversation_prefix_cache_control_with_multiple_content_blocks() {
         let mut messages = vec![
             ApiMessage {
-                role: "user".to_string(),
+                role:    "user".to_string(),
                 content: vec![
                     serde_json::json!({"type": "text", "text": "Part 1"}),
                     serde_json::json!({"type": "text", "text": "Part 2"}),
                 ],
             },
             ApiMessage {
-                role: "assistant".to_string(),
+                role:    "assistant".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "Reply"})],
             },
             ApiMessage {
-                role: "user".to_string(),
+                role:    "user".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "Follow up"})],
             },
         ];
 
         apply_cache_control_to_conversation_prefix(&mut messages);
 
-        // Only the LAST content block of the first user message should have cache_control
+        // Only the LAST content block of the first user message should have
+        // cache_control
         assert!(messages[0].content[0].get("cache_control").is_none());
         assert_eq!(messages[0].content[1]["cache_control"]["type"], "ephemeral");
     }
@@ -1527,7 +1543,7 @@ mod tests {
     #[test]
     fn conversation_prefix_cache_control_single_user_message() {
         let mut messages = vec![ApiMessage {
-            role: "user".to_string(),
+            role:    "user".to_string(),
             content: vec![serde_json::json!({"type": "text", "text": "Hello"})],
         }];
 
@@ -1548,23 +1564,23 @@ mod tests {
     fn conversation_prefix_cache_control_three_user_messages() {
         let mut messages = vec![
             ApiMessage {
-                role: "user".to_string(),
+                role:    "user".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "First"})],
             },
             ApiMessage {
-                role: "assistant".to_string(),
+                role:    "assistant".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "Reply 1"})],
             },
             ApiMessage {
-                role: "user".to_string(),
+                role:    "user".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "Second"})],
             },
             ApiMessage {
-                role: "assistant".to_string(),
+                role:    "assistant".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "Reply 2"})],
             },
             ApiMessage {
-                role: "user".to_string(),
+                role:    "user".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "Third"})],
             },
         ];
@@ -1631,9 +1647,9 @@ mod tests {
     #[test]
     fn tool_serialization_includes_cache_control() {
         let tool = ApiToolDef {
-            name: "test_tool".to_string(),
-            description: "A test tool".to_string(),
-            input_schema: serde_json::json!({"type": "object"}),
+            name:          "test_tool".to_string(),
+            description:   "A test tool".to_string(),
+            input_schema:  serde_json::json!({"type": "object"}),
             cache_control: Some(CacheControl::ephemeral()),
         };
         let json = serde_json::to_value(&tool).expect("should serialize");
@@ -1643,9 +1659,9 @@ mod tests {
     #[test]
     fn tool_serialization_omits_cache_control_when_none() {
         let tool = ApiToolDef {
-            name: "test_tool".to_string(),
-            description: "A test tool".to_string(),
-            input_schema: serde_json::json!({"type": "object"}),
+            name:          "test_tool".to_string(),
+            description:   "A test tool".to_string(),
+            input_schema:  serde_json::json!({"type": "object"}),
             cache_control: None,
         };
         let json = serde_json::to_value(&tool).expect("should serialize");
@@ -1662,23 +1678,23 @@ mod tests {
     #[test]
     fn api_request_serialization_with_cached_system() {
         let api_request = ApiRequest {
-            model: "claude-sonnet-4-20250514".to_string(),
-            messages: vec![ApiMessage {
-                role: "user".to_string(),
+            model:          "claude-sonnet-4-20250514".to_string(),
+            messages:       vec![ApiMessage {
+                role:    "user".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "Hello"})],
             }],
-            max_tokens: 4096,
-            system: Some(system_with_cache_control("You are helpful.")),
-            temperature: None,
-            top_p: None,
+            max_tokens:     4096,
+            system:         Some(system_with_cache_control("You are helpful.")),
+            temperature:    None,
+            top_p:          None,
             stop_sequences: None,
-            tools: None,
-            tool_choice: None,
-            thinking: None,
-            output_config: None,
-            speed: None,
-            metadata: None,
-            stream: false,
+            tools:          None,
+            tool_choice:    None,
+            thinking:       None,
+            output_config:  None,
+            speed:          None,
+            metadata:       None,
+            stream:         false,
         };
 
         let json = serde_json::to_value(&api_request).expect("should serialize");
@@ -1705,19 +1721,19 @@ mod tests {
 
     fn make_base_request() -> Request {
         Request {
-            model: "claude-sonnet-4-20250514".to_string(),
-            messages: vec![Message::user("Hello")],
-            provider: Some("anthropic".to_string()),
-            tools: None,
-            tool_choice: None,
-            response_format: None,
-            temperature: None,
-            top_p: None,
-            max_tokens: Some(128),
-            stop_sequences: None,
+            model:            "claude-sonnet-4-20250514".to_string(),
+            messages:         vec![Message::user("Hello")],
+            provider:         Some("anthropic".to_string()),
+            tools:            None,
+            tool_choice:      None,
+            response_format:  None,
+            temperature:      None,
+            top_p:            None,
+            max_tokens:       Some(128),
+            stop_sequences:   None,
             reasoning_effort: None,
-            speed: None,
-            metadata: None,
+            speed:            None,
+            metadata:         None,
             provider_options: None,
         }
     }
@@ -1739,9 +1755,9 @@ mod tests {
             "required": ["name"]
         });
         let request = make_request_with_format(ResponseFormat {
-            kind: ResponseFormatType::JsonSchema,
+            kind:        ResponseFormatType::JsonSchema,
             json_schema: Some(schema.clone()),
-            strict: false,
+            strict:      false,
         });
 
         let mut tools: Option<Vec<ApiToolDef>> = None;
@@ -1767,14 +1783,14 @@ mod tests {
     fn response_format_json_schema_appends_to_existing_tools() {
         let schema = serde_json::json!({"type": "object"});
         let mut request = make_request_with_format(ResponseFormat {
-            kind: ResponseFormatType::JsonSchema,
+            kind:        ResponseFormatType::JsonSchema,
             json_schema: Some(schema),
-            strict: false,
+            strict:      false,
         });
         request.tools = Some(vec![ToolDefinition {
-            name: "existing_tool".to_string(),
+            name:        "existing_tool".to_string(),
             description: "An existing tool".to_string(),
-            parameters: serde_json::json!({}),
+            parameters:  serde_json::json!({}),
         }]);
 
         let mut tools: Option<Vec<ApiToolDef>> =
@@ -1793,9 +1809,9 @@ mod tests {
     #[test]
     fn response_format_json_object_appends_to_string_system() {
         let request = make_request_with_format(ResponseFormat {
-            kind: ResponseFormatType::JsonObject,
+            kind:        ResponseFormatType::JsonObject,
             json_schema: None,
-            strict: false,
+            strict:      false,
         });
 
         let mut tools: Option<Vec<ApiToolDef>> = None;
@@ -1817,9 +1833,9 @@ mod tests {
     #[test]
     fn response_format_json_object_sets_system_when_none() {
         let request = make_request_with_format(ResponseFormat {
-            kind: ResponseFormatType::JsonObject,
+            kind:        ResponseFormatType::JsonObject,
             json_schema: None,
-            strict: false,
+            strict:      false,
         });
 
         let mut tools: Option<Vec<ApiToolDef>> = None;
@@ -1836,9 +1852,9 @@ mod tests {
     #[test]
     fn response_format_json_object_appends_to_array_system() {
         let request = make_request_with_format(ResponseFormat {
-            kind: ResponseFormatType::JsonObject,
+            kind:        ResponseFormatType::JsonObject,
             json_schema: None,
-            strict: false,
+            strict:      false,
         });
 
         let mut tools: Option<Vec<ApiToolDef>> = None;
@@ -1857,9 +1873,9 @@ mod tests {
     #[test]
     fn response_format_text_is_noop() {
         let request = make_request_with_format(ResponseFormat {
-            kind: ResponseFormatType::Text,
+            kind:        ResponseFormatType::Text,
             json_schema: None,
-            strict: false,
+            strict:      false,
         });
 
         let mut tools: Option<Vec<ApiToolDef>> = None;
@@ -1942,28 +1958,28 @@ mod tests {
     #[test]
     fn convert_stream_event_converts_finish_reason() {
         let response = Box::new(Response {
-            id: "test".to_string(),
-            model: "claude".to_string(),
-            provider: "anthropic".to_string(),
-            message: Message {
-                role: Role::Assistant,
-                content: vec![ContentPart::ToolCall(ToolCall::new(
+            id:            "test".to_string(),
+            model:         "claude".to_string(),
+            provider:      "anthropic".to_string(),
+            message:       Message {
+                role:         Role::Assistant,
+                content:      vec![ContentPart::ToolCall(ToolCall::new(
                     "id1",
                     SYNTHETIC_TOOL_NAME,
                     serde_json::json!({"data": "value"}),
                 ))],
-                name: None,
+                name:         None,
                 tool_call_id: None,
             },
             finish_reason: FinishReason::ToolCalls,
-            usage: Usage::default(),
-            raw: None,
-            warnings: vec![],
-            rate_limit: None,
+            usage:         TokenCounts::default(),
+            raw:           None,
+            warnings:      vec![],
+            rate_limit:    None,
         });
         let event = StreamEvent::Finish {
             finish_reason: FinishReason::ToolCalls,
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             response,
         };
         let result = convert_stream_event_for_json_schema(event);
@@ -1985,10 +2001,10 @@ mod tests {
     #[test]
     fn document_url_translates_to_url_source() {
         let part = ContentPart::Document(DocumentData {
-            url: Some("https://example.com/doc.pdf".to_string()),
-            data: None,
+            url:        Some("https://example.com/doc.pdf".to_string()),
+            data:       None,
             media_type: None,
-            file_name: None,
+            file_name:  None,
         });
         let result = content_part_to_api(&part).expect("should produce JSON");
         assert_eq!(result["type"], "document");
@@ -1999,10 +2015,10 @@ mod tests {
     #[test]
     fn document_base64_data_translates_to_base64_source() {
         let part = ContentPart::Document(DocumentData {
-            url: None,
-            data: Some(vec![0x25, 0x50, 0x44, 0x46]),
+            url:        None,
+            data:       Some(vec![0x25, 0x50, 0x44, 0x46]),
             media_type: Some("application/pdf".to_string()),
-            file_name: Some("test.pdf".to_string()),
+            file_name:  Some("test.pdf".to_string()),
         });
         let result = content_part_to_api(&part).expect("should produce JSON");
         assert_eq!(result["type"], "document");
@@ -2014,10 +2030,10 @@ mod tests {
     #[test]
     fn document_base64_defaults_to_pdf_mime() {
         let part = ContentPart::Document(DocumentData {
-            url: None,
-            data: Some(vec![1, 2, 3]),
+            url:        None,
+            data:       Some(vec![1, 2, 3]),
             media_type: None,
-            file_name: None,
+            file_name:  None,
         });
         let result = content_part_to_api(&part).expect("should produce JSON");
         assert_eq!(result["source"]["media_type"], "application/pdf");
@@ -2059,23 +2075,23 @@ mod tests {
     #[test]
     fn merge_provider_options_passes_through_unknown_keys() {
         let api_request = ApiRequest {
-            model: "claude-sonnet-4-20250514".to_string(),
-            messages: vec![ApiMessage {
-                role: "user".to_string(),
+            model:          "claude-sonnet-4-20250514".to_string(),
+            messages:       vec![ApiMessage {
+                role:    "user".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "Hello"})],
             }],
-            max_tokens: 4096,
-            system: None,
-            temperature: None,
-            top_p: None,
+            max_tokens:     4096,
+            system:         None,
+            temperature:    None,
+            top_p:          None,
             stop_sequences: None,
-            tools: None,
-            tool_choice: None,
-            thinking: None,
-            output_config: None,
-            speed: None,
-            metadata: None,
-            stream: false,
+            tools:          None,
+            tool_choice:    None,
+            thinking:       None,
+            output_config:  None,
+            speed:          None,
+            metadata:       None,
+            stream:         false,
         };
 
         let opts = serde_json::json!({
@@ -2092,23 +2108,23 @@ mod tests {
     #[test]
     fn merge_provider_options_skips_known_keys() {
         let api_request = ApiRequest {
-            model: "claude-sonnet-4-20250514".to_string(),
-            messages: vec![ApiMessage {
-                role: "user".to_string(),
+            model:          "claude-sonnet-4-20250514".to_string(),
+            messages:       vec![ApiMessage {
+                role:    "user".to_string(),
                 content: vec![serde_json::json!({"type": "text", "text": "Hello"})],
             }],
-            max_tokens: 4096,
-            system: None,
-            temperature: None,
-            top_p: None,
+            max_tokens:     4096,
+            system:         None,
+            temperature:    None,
+            top_p:          None,
             stop_sequences: None,
-            tools: None,
-            tool_choice: None,
-            thinking: None,
-            output_config: None,
-            speed: None,
-            metadata: None,
-            stream: false,
+            tools:          None,
+            tool_choice:    None,
+            thinking:       None,
+            output_config:  None,
+            speed:          None,
+            metadata:       None,
+            stream:         false,
         };
 
         let opts = serde_json::json!({
@@ -2123,7 +2139,8 @@ mod tests {
         // Known keys should not be merged (they are handled separately)
         assert!(body.get("auto_cache").is_none());
         assert!(body.get("beta_headers").is_none());
-        // thinking is handled by the ApiRequest struct directly, should not be double-merged
+        // thinking is handled by the ApiRequest struct directly, should not be
+        // double-merged
         assert!(body["thinking"].is_null());
         // Unknown keys should be merged
         assert_eq!(body["top_k"], 40);
@@ -2132,8 +2149,8 @@ mod tests {
     #[test]
     fn audio_produces_text_fallback() {
         let part = ContentPart::Audio(AudioData {
-            url: Some("https://example.com/audio.wav".to_string()),
-            data: None,
+            url:        Some("https://example.com/audio.wav".to_string()),
+            data:       None,
             media_type: None,
         });
         let result = content_part_to_api(&part).expect("should produce JSON");
@@ -2201,7 +2218,6 @@ mod tests {
             "beta header should contain fast-mode header, got: {beta}"
         );
     }
-
     #[test]
     fn beta_header_includes_both_cache_and_fast_mode() {
         let result = build_beta_header(None, true, true, false);

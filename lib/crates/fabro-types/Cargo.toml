@@ -19,7 +19,16 @@ workspace = true
 [dependencies]
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, optional = true }
+dirs.workspace = true
 fabro-macros = { path = "../fabro-macros" }
+fabro-model = { path = "../fabro-model" }
+fabro-util = { path = "../fabro-util" }
+hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+toml.workspace = true
 ulid.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

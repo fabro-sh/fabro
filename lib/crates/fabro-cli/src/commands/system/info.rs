@@ -1,0 +1,74 @@
+use anyhow::Result;
+use fabro_util::printer::Printer;
+
+use crate::args::{GlobalArgs, SystemInfoArgs};
+use crate::command_context::CommandContext;
+use crate::server_client;
+use crate::shared::print_json_pretty;
+
+pub(super) async fn info_command(
+    args: &SystemInfoArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::for_connection(&args.connection, printer)?;
+    let server = ctx.server().await?;
+    let response = server
+        .api()
+        .get_system_info()
+        .send()
+        .await
+        .map_err(server_client::map_api_error)?
+        .into_inner();
+
+    if globals.json {
+        print_json_pretty(&response)?;
+        return Ok(());
+    }
+
+    #[allow(clippy::print_stdout)]
+    {
+        println!(
+            "Version: {}",
+            response
+                .version
+                .as_deref()
+                .unwrap_or(env!("CARGO_PKG_VERSION"))
+        );
+        println!(
+            "Build: {} {}",
+            response.git_sha.as_deref().unwrap_or("unknown"),
+            response.build_date.as_deref().unwrap_or("unknown")
+        );
+        println!(
+            "Platform: {}/{}",
+            response.os.as_deref().unwrap_or("unknown"),
+            response.arch.as_deref().unwrap_or("unknown")
+        );
+        println!(
+            "Storage: {} ({})",
+            response.storage_dir.as_deref().unwrap_or("unknown"),
+            response.storage_engine.as_deref().unwrap_or("unknown")
+        );
+        println!(
+            "Runs: total={} active={}",
+            response
+                .runs
+                .as_ref()
+                .and_then(|runs| runs.total)
+                .unwrap_or_default(),
+            response
+                .runs
+                .as_ref()
+                .and_then(|runs| runs.active)
+                .unwrap_or_default()
+        );
+        println!(
+            "Sandbox: {}",
+            response.sandbox_provider.as_deref().unwrap_or("unknown")
+        );
+        println!("Uptime: {}s", response.uptime_secs.unwrap_or_default());
+    }
+
+    Ok(())
+}

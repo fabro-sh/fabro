@@ -10,17 +10,13 @@ pub(crate) mod types;
 mod validate;
 
 pub use execute::execute;
+pub use fabro_types::PullRequestRecord;
 pub(crate) use finalize::build_conclusion_from_store;
-pub use finalize::{
-    build_conclusion, classify_engine_result, finalize, persist_terminal_outcome,
-    write_finalize_commit,
-};
+pub use finalize::{classify_engine_result, finalize, write_finalize_commit};
 pub use initialize::initialize;
 pub use parse::parse;
 pub(crate) use persist::persist;
-pub use pull_request::{
-    AutoMergeOptions, PullRequestRecord, build_pr_body, maybe_open_pull_request, pull_request,
-};
+pub use pull_request::{AutoMergeOptions, build_pr_body, maybe_open_pull_request, pull_request};
 pub use retro::{retro, run_retro};
 pub use transform::transform;
 pub use types::{

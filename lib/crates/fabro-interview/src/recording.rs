@@ -7,7 +7,7 @@ use crate::{Answer, Interviewer, Question};
 
 /// Wraps another interviewer and records all question-answer pairs.
 pub struct RecordingInterviewer {
-    inner: Box<dyn Interviewer>,
+    inner:      Box<dyn Interviewer>,
     recordings: Mutex<Vec<(Question, Answer)>>,
 }
 
@@ -82,8 +82,7 @@ impl Interviewer for RecordingInterviewer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AutoApproveInterviewer;
-    use crate::{AnswerValue, QuestionType};
+    use crate::{AnswerValue, AutoApproveInterviewer, QuestionType};
 
     #[tokio::test]
     async fn records_question_answer_pairs() {

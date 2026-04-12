@@ -4,21 +4,22 @@ use std::sync::Arc;
 
 use fabro_agent::Sandbox;
 
-use crate::config::{HookConfig, HookDefinition};
+use crate::config::{HookDefinition, HookSettings};
 use crate::executor::{HookExecutor, HookExecutorImpl};
 use crate::types::{HookContext, HookDecision};
 
-/// Central orchestrator: filters matching hooks, executes them, merges decisions.
+/// Central orchestrator: filters matching hooks, executes them, merges
+/// decisions.
 pub struct HookRunner {
-    config: HookConfig,
-    executor: Arc<dyn HookExecutor>,
+    config:            HookSettings,
+    executor:          Arc<dyn HookExecutor>,
     /// Pre-compiled regexes keyed by matcher pattern string.
     compiled_matchers: HashMap<String, regex::Regex>,
 }
 
 impl HookRunner {
     #[must_use]
-    pub fn new(config: HookConfig) -> Self {
+    pub fn new(config: HookSettings) -> Self {
         let compiled_matchers = Self::compile_matchers(&config);
         Self {
             config,
@@ -29,7 +30,7 @@ impl HookRunner {
 
     /// Create a HookRunner with a custom executor (for testing).
     #[cfg(test)]
-    pub fn with_executor(config: HookConfig, executor: Arc<dyn HookExecutor>) -> Self {
+    pub fn with_executor(config: HookSettings, executor: Arc<dyn HookExecutor>) -> Self {
         let compiled_matchers = Self::compile_matchers(&config);
         Self {
             config,
@@ -38,7 +39,7 @@ impl HookRunner {
         }
     }
 
-    fn compile_matchers(config: &HookConfig) -> HashMap<String, regex::Regex> {
+    fn compile_matchers(config: &HookSettings) -> HashMap<String, regex::Regex> {
         let mut map = HashMap::new();
         for hook in &config.hooks {
             if let Some(ref pattern) = hook.matcher {
@@ -52,7 +53,8 @@ impl HookRunner {
         map
     }
 
-    /// Run all matching hooks for the given event and return the merged decision.
+    /// Run all matching hooks for the given event and return the merged
+    /// decision.
     pub async fn run(
         &self,
         context: &HookContext,
@@ -209,10 +211,11 @@ impl HookRunner {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::config::HookConfig;
-    use crate::types::{HookContext, HookEvent, HookResult};
     use fabro_types::fixtures;
+
+    use super::*;
+    use crate::config::HookSettings;
+    use crate::types::{HookContext, HookEvent, HookResult};
 
     struct MockExecutor {
         decision: HookDecision,
@@ -228,8 +231,8 @@ mod tests {
             _work_dir: Option<&Path>,
         ) -> HookResult {
             HookResult {
-                hook_name: definition.name.clone(),
-                decision: self.decision.clone(),
+                hook_name:   definition.name.clone(),
+                decision:    self.decision.clone(),
                 duration_ms: 1,
             }
         }
@@ -260,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_hooks_returns_proceed() {
-        let runner = HookRunner::new(HookConfig::default());
+        let runner = HookRunner::new(HookSettings::default());
         let ctx = make_context(HookEvent::RunStart);
         let sandbox = make_sandbox();
         let decision = runner.run(&ctx, sandbox.clone(), None).await;
@@ -269,7 +272,7 @@ mod tests {
 
     #[tokio::test]
     async fn filters_by_event() {
-        let config = HookConfig {
+        let config = HookSettings {
             hooks: vec![
                 make_hook(HookEvent::RunStart, "a"),
                 make_hook(HookEvent::StageStart, "b"),
@@ -291,7 +294,7 @@ mod tests {
     async fn matcher_filters_by_node_id() {
         let mut hook = make_hook(HookEvent::StageStart, "filtered");
         hook.matcher = Some("agent".into());
-        let config = HookConfig { hooks: vec![hook] };
+        let config = HookSettings { hooks: vec![hook] };
         let runner = HookRunner::with_executor(
             config,
             Arc::new(MockExecutor {
@@ -318,7 +321,7 @@ mod tests {
     async fn matcher_filters_by_handler_type() {
         let mut hook = make_hook(HookEvent::StageStart, "filtered");
         hook.matcher = Some("^agent$".into());
-        let config = HookConfig { hooks: vec![hook] };
+        let config = HookSettings { hooks: vec![hook] };
         let runner = HookRunner::with_executor(
             config,
             Arc::new(MockExecutor {
@@ -339,7 +342,7 @@ mod tests {
     async fn matcher_filters_by_tool_name() {
         let mut hook = make_hook(HookEvent::PreToolUse, "tool-filter");
         hook.matcher = Some("shell".into());
-        let config = HookConfig { hooks: vec![hook] };
+        let config = HookSettings { hooks: vec![hook] };
         let runner = HookRunner::with_executor(
             config,
             Arc::new(MockExecutor {
@@ -360,7 +363,7 @@ mod tests {
 
     #[tokio::test]
     async fn blocking_hook_block_decision() {
-        let config = HookConfig {
+        let config = HookSettings {
             hooks: vec![make_hook(HookEvent::RunStart, "blocker")],
         };
         let runner = HookRunner::with_executor(
@@ -381,7 +384,7 @@ mod tests {
     async fn blocking_hook_skip_decision() {
         let mut hook = make_hook(HookEvent::StageStart, "skipper");
         hook.blocking = Some(true);
-        let config = HookConfig { hooks: vec![hook] };
+        let config = HookSettings { hooks: vec![hook] };
         let runner = HookRunner::with_executor(
             config,
             Arc::new(MockExecutor {
@@ -400,7 +403,7 @@ mod tests {
     async fn non_blocking_hook_doesnt_block() {
         let mut hook = make_hook(HookEvent::StageComplete, "observer");
         hook.blocking = Some(false);
-        let config = HookConfig { hooks: vec![hook] };
+        let config = HookSettings { hooks: vec![hook] };
         let runner = HookRunner::with_executor(
             config,
             Arc::new(MockExecutor {
@@ -418,7 +421,7 @@ mod tests {
 
     #[tokio::test]
     async fn executor_integration_success() {
-        let config = HookConfig {
+        let config = HookSettings {
             hooks: vec![{
                 let mut h = make_hook(HookEvent::RunStart, "echo-hook");
                 h.command = Some("exit 0".into());
@@ -434,7 +437,7 @@ mod tests {
 
     #[tokio::test]
     async fn executor_integration_block() {
-        let config = HookConfig {
+        let config = HookSettings {
             hooks: vec![{
                 let mut h = make_hook(HookEvent::RunStart, "fail-hook");
                 h.command = Some("exit 1".into());

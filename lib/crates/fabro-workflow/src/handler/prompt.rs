@@ -1,22 +1,17 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-
-use fabro_model::Provider;
-use fabro_store::NodeVisitRef;
-
-use crate::context::keys;
-use crate::context::{Context, WorkflowContext};
-use crate::error::FabroError;
-use crate::outcome::Outcome;
-use crate::run_dir::{node_dir, visit_from_context};
 use fabro_graphviz::graph::{Graph, Node};
-use tokio::fs;
+use fabro_model::Provider;
 
 use super::agent::{
     CodergenBackend, CodergenResult, expand_variables, extract_status_fields, truncate,
 };
 use super::{EngineServices, Handler};
+use crate::context::{Context, WorkflowContext, keys};
+use crate::error::Error;
+use crate::event::{Event, StageScope};
+use crate::outcome::Outcome;
 
 /// Handler for single-shot LLM calls (no tools, no agent loop).
 pub struct PromptHandler {
@@ -39,7 +34,7 @@ impl Handler for PromptHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         Ok(super::agent::simulate_llm_handler(node))
     }
 
@@ -48,15 +43,15 @@ impl Handler for PromptHandler {
         node: &Node,
         context: &Context,
         graph: &Graph,
-        run_dir: &Path,
+        _run_dir: &Path,
         services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         // 1. Build prompt (prepend fidelity preamble if present)
         let raw_prompt = node
             .prompt()
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| node.label());
-        let expanded = expand_variables(raw_prompt, graph)?;
+        let expanded = expand_variables(raw_prompt, graph, &services.inputs)?;
         let preamble = context.preamble();
         let prompt = if preamble.is_empty() {
             expanded
@@ -88,36 +83,32 @@ impl Handler for PromptHandler {
             None
         };
 
-        // 2. Write prompt to logs
-        let visit = visit_from_context(context);
-        let stage_dir = node_dir(run_dir, &node.id, visit);
-        fs::create_dir_all(&stage_dir).await?;
-        let node_ref = NodeVisitRef {
-            node_id: &node.id,
-            visit: u32::try_from(visit).unwrap_or(u32::MAX),
-        };
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_prompt(&node_ref, &prompt)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        } else {
-            fs::write(stage_dir.join("prompt.md"), &prompt).await?;
-        }
+        let prompt_provider = node
+            .provider()
+            .map(String::from)
+            .or_else(|| Some(Provider::default_from_env().as_str().to_string()));
+        let prompt_model = node.model().map(String::from);
+        let stage_scope = StageScope::for_handler(context, &node.id);
+        services.emitter.emit_scoped(
+            &Event::Prompt {
+                stage:    node.id.clone(),
+                visit:    stage_scope.visit,
+                text:     prompt.clone(),
+                mode:     Some("prompt".to_string()),
+                provider: prompt_provider.clone(),
+                model:    prompt_model.clone(),
+            },
+            &stage_scope,
+        );
 
         // 3. Call LLM backend (one_shot)
         let (response_text, stage_usage, backend_files_touched) =
             if let Some(backend) = &self.backend {
                 let result = backend
-                    .one_shot(node, &prompt, system_prompt.as_deref(), &stage_dir)
+                    .one_shot(node, &prompt, system_prompt.as_deref())
                     .await;
                 match result {
-                    Ok(CodergenResult::Full(outcome)) => {
-                        let status_json = serde_json::to_string_pretty(&outcome)
-                            .unwrap_or_else(|_| "{}".to_string());
-                        fs::write(stage_dir.join("status.json"), &status_json).await?;
-                        return Ok(outcome);
-                    }
+                    Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
                     Ok(CodergenResult::Text {
                         text,
                         usage,
@@ -139,17 +130,29 @@ impl Handler for PromptHandler {
                 )
             };
 
-        // 4. Write response to logs
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_response(&node_ref, &response_text)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        } else {
-            fs::write(stage_dir.join("response.md"), &response_text).await?;
-        }
+        let response_model = stage_usage
+            .as_ref()
+            .map(|usage| usage.model_id().to_string())
+            .or_else(|| node.model().map(String::from))
+            .unwrap_or_default();
+        let response_provider = node
+            .provider()
+            .map(String::from)
+            .or_else(|| Some(Provider::default_from_env().as_str().to_string()))
+            .unwrap_or_default();
 
-        // 5. Build and write status
+        services.emitter.emit_scoped(
+            &Event::PromptCompleted {
+                node_id:  node.id.clone(),
+                response: response_text.clone(),
+                model:    response_model,
+                provider: response_provider,
+                billing:  stage_usage.clone(),
+            },
+            &stage_scope,
+        );
+
+        // 4. Build and write status
         let mut outcome = Outcome::success();
         outcome.notes = Some(format!("Stage completed: {}", node.id));
         outcome
@@ -168,23 +171,50 @@ impl Handler for PromptHandler {
         outcome.usage = stage_usage;
         outcome.files_touched = backend_files_touched;
 
-        let status_json =
-            serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
-        fs::write(stage_dir.join("status.json"), &status_json).await?;
-
         Ok(outcome)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use fabro_graphviz::graph::AttrValue;
     use std::sync::Arc;
+    use std::time::Duration;
+
+    use fabro_graphviz::graph::AttrValue;
+    use fabro_store::{Database, RunDatabase, StageId};
+    use fabro_types::fixtures;
+    use object_store::memory::InMemory;
     use tempfile::TempDir;
+
+    use super::*;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
+    }
+
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
+    }
+
+    async fn make_services_with_run_store() -> (
+        EngineServices,
+        RunDatabase,
+        crate::event::StoreProgressLogger,
+    ) {
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let services = EngineServices {
+            emitter: Arc::new(crate::event::Emitter::new(fixtures::RUN_1)),
+            run_store: run_store.clone().into(),
+            ..EngineServices::test_default()
+        };
+        let logger = crate::event::StoreProgressLogger::new(run_store.clone());
+        logger.register(services.emitter.as_ref());
+        (services, run_store, logger)
     }
 
     #[tokio::test]
@@ -236,11 +266,10 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<crate::event::EventEmitter>,
-                _stage_dir: &Path,
+                _emitter: &Arc<crate::event::Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 panic!("run() should not be called for prompt handler");
             }
 
@@ -249,12 +278,11 @@ mod tests {
                 _node: &Node,
                 _prompt: &str,
                 _system_prompt: Option<&str>,
-                _stage_dir: &Path,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
-                    text: "one-shot response".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "one-shot response".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -276,18 +304,74 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
 
-        let response_content = std::fs::read_to_string(
-            tmp.path()
-                .join("nodes")
-                .join("classify")
-                .join("response.md"),
-        )
-        .unwrap();
-        assert_eq!(response_content, "one-shot response");
+        assert_eq!(
+            outcome
+                .context_updates
+                .get(&crate::context::keys::response_key("classify")),
+            Some(&serde_json::json!("one-shot response"))
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_handler_projects_provider_used_from_prompt_events() {
+        use fabro_agent::Sandbox;
+
+        struct ProviderOneShotBackend;
+
+        #[async_trait]
+        impl CodergenBackend for ProviderOneShotBackend {
+            async fn run(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                _context: &Context,
+                _thread_id: Option<&str>,
+                _emitter: &Arc<crate::event::Emitter>,
+                _sandbox: &Arc<dyn Sandbox>,
+                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+            ) -> Result<CodergenResult, Error> {
+                panic!("run() should not be called for prompt handler");
+            }
+
+            async fn one_shot(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                _system_prompt: Option<&str>,
+            ) -> Result<CodergenResult, Error> {
+                Ok(CodergenResult::Text {
+                    text:              "one-shot response".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
+                    last_file_touched: None,
+                })
+            }
+        }
+
+        let handler = PromptHandler::new(Some(Box::new(ProviderOneShotBackend)));
+        let mut node = Node::new("classify");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Classify this".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
+
+        handler
+            .execute(&node, &context, &graph, tmp.path(), &services)
+            .await
+            .unwrap();
+        logger.flush().await;
+
+        let state = run_store.state().await.unwrap();
+        let node_state = state.node(&StageId::new("classify", 1)).unwrap();
+        assert_eq!(node_state.provider_used.as_ref().unwrap()["mode"], "prompt");
     }
 
     struct OneShotCapturingBackend {
-        captured_prompt: Arc<std::sync::Mutex<Option<String>>>,
+        captured_prompt:        Arc<std::sync::Mutex<Option<String>>>,
         captured_system_prompt: Arc<std::sync::Mutex<Option<Option<String>>>>,
     }
 
@@ -299,11 +383,10 @@ mod tests {
             _prompt: &str,
             _context: &Context,
             _thread_id: Option<&str>,
-            _emitter: &Arc<crate::event::EventEmitter>,
-            _stage_dir: &Path,
+            _emitter: &Arc<crate::event::Emitter>,
             _sandbox: &Arc<dyn fabro_agent::Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        ) -> Result<CodergenResult, FabroError> {
+        ) -> Result<CodergenResult, Error> {
             panic!("run() should not be called for prompt handler");
         }
 
@@ -312,14 +395,13 @@ mod tests {
             _node: &Node,
             prompt: &str,
             system_prompt: Option<&str>,
-            _stage_dir: &Path,
-        ) -> Result<CodergenResult, FabroError> {
+        ) -> Result<CodergenResult, Error> {
             *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
             *self.captured_system_prompt.lock().unwrap() = Some(system_prompt.map(String::from));
             Ok(CodergenResult::Text {
-                text: "classified".to_string(),
-                usage: None,
-                files_touched: Vec::new(),
+                text:              "classified".to_string(),
+                usage:             None,
+                files_touched:     Vec::new(),
                 last_file_touched: None,
             })
         }
@@ -331,7 +413,7 @@ mod tests {
 
         let captured = Arc::new(Mutex::new(None));
         let backend = OneShotCapturingBackend {
-            captured_prompt: captured.clone(),
+            captured_prompt:        captured.clone(),
             captured_system_prompt: Arc::new(Mutex::new(None)),
         };
         let handler = PromptHandler::new(Some(Box::new(backend)));
@@ -368,7 +450,7 @@ mod tests {
 
         let captured_sys = Arc::new(Mutex::new(None));
         let backend = OneShotCapturingBackend {
-            captured_prompt: Arc::new(Mutex::new(None)),
+            captured_prompt:        Arc::new(Mutex::new(None)),
             captured_system_prompt: captured_sys.clone(),
         };
         let handler = PromptHandler::new(Some(Box::new(backend)));
@@ -389,7 +471,8 @@ mod tests {
             .await
             .unwrap();
 
-        // With project_memory=true (default), one_shot is called (system_prompt captured)
+        // With project_memory=true (default), one_shot is called (system_prompt
+        // captured)
         let sys = captured_sys.lock().unwrap().clone();
         assert!(sys.is_some(), "one_shot should have been called");
     }
@@ -400,7 +483,7 @@ mod tests {
 
         let captured_sys = Arc::new(Mutex::new(None));
         let backend = OneShotCapturingBackend {
-            captured_prompt: Arc::new(Mutex::new(None)),
+            captured_prompt:        Arc::new(Mutex::new(None)),
             captured_system_prompt: captured_sys.clone(),
         };
         let handler = PromptHandler::new(Some(Box::new(backend)));

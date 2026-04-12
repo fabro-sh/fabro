@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::error::Result;
 use crate::graph::Graph;
 use crate::outcome::{NodeResult, Outcome, OutcomeMeta};
-use crate::state::RunState;
+use crate::state::ExecutionState;
 
 #[derive(Debug, Clone)]
 pub enum NodeDecision<M: OutcomeMeta = ()> {
@@ -22,31 +22,31 @@ pub enum EdgeDecision {
 }
 
 pub struct AttemptContext<'a, G: Graph> {
-    pub node: &'a G::Node,
-    pub attempt: u32,
+    pub node:         &'a G::Node,
+    pub attempt:      u32,
     pub max_attempts: u32,
 }
 
 pub struct AttemptResultContext<'a, G: Graph> {
-    pub node: &'a G::Node,
-    pub result: &'a NodeResult<G::Meta>,
-    pub attempt: u32,
-    pub will_retry: bool,
+    pub node:          &'a G::Node,
+    pub result:        &'a NodeResult<G::Meta>,
+    pub attempt:       u32,
+    pub will_retry:    bool,
     pub backoff_delay: Option<Duration>,
 }
 
 pub struct EdgeContext<'a, G: Graph> {
-    pub from: &'a str,
-    pub to: &'a str,
-    pub edge: Option<G::Edge>,
+    pub from:    &'a str,
+    pub to:      &'a str,
+    pub edge:    Option<G::Edge>,
     pub is_jump: bool,
     pub outcome: &'a Outcome<G::Meta>,
-    pub reason: &'a str,
+    pub reason:  &'a str,
 }
 
 #[async_trait]
 pub trait RunLifecycle<G: Graph>: Send + Sync {
-    async fn on_run_start(&self, _graph: &G, _state: &RunState<G::Meta>) -> Result<()> {
+    async fn on_run_start(&self, _graph: &G, _state: &ExecutionState<G::Meta>) -> Result<()> {
         Ok(())
     }
 
@@ -54,14 +54,14 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
         &self,
         _node: &G::Node,
         _goal_gates_passed: bool,
-        _state: &RunState<G::Meta>,
+        _state: &ExecutionState<G::Meta>,
     ) {
     }
 
     async fn before_node(
         &self,
         _node: &G::Node,
-        _state: &RunState<G::Meta>,
+        _state: &ExecutionState<G::Meta>,
     ) -> Result<NodeDecision<G::Meta>> {
         Ok(NodeDecision::Continue)
     }
@@ -69,7 +69,7 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
     async fn before_attempt(
         &self,
         _ctx: &AttemptContext<'_, G>,
-        _state: &RunState<G::Meta>,
+        _state: &ExecutionState<G::Meta>,
     ) -> Result<NodeDecision<G::Meta>> {
         Ok(NodeDecision::Continue)
     }
@@ -77,7 +77,7 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
     async fn after_attempt(
         &self,
         _ctx: &AttemptResultContext<'_, G>,
-        _state: &RunState<G::Meta>,
+        _state: &ExecutionState<G::Meta>,
     ) -> Result<()> {
         Ok(())
     }
@@ -86,7 +86,7 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
         &self,
         _node: &G::Node,
         _result: &mut NodeResult<G::Meta>,
-        _state: &RunState<G::Meta>,
+        _state: &ExecutionState<G::Meta>,
     ) -> Result<()> {
         Ok(())
     }
@@ -95,7 +95,7 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
         &self,
         _node: &G::Node,
         _result: &NodeResult<G::Meta>,
-        _state: &RunState<G::Meta>,
+        _state: &ExecutionState<G::Meta>,
     ) -> Result<()> {
         Ok(())
     }
@@ -103,7 +103,7 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
     async fn on_edge_selected(
         &self,
         _ctx: &EdgeContext<'_, G>,
-        _state: &RunState<G::Meta>,
+        _state: &ExecutionState<G::Meta>,
     ) -> Result<EdgeDecision> {
         Ok(EdgeDecision::Continue)
     }
@@ -113,12 +113,12 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
         _node: &G::Node,
         _result: &NodeResult<G::Meta>,
         _next_node_id: Option<&str>,
-        _state: &RunState<G::Meta>,
+        _state: &ExecutionState<G::Meta>,
     ) -> Result<()> {
         Ok(())
     }
 
-    async fn on_run_end(&self, _outcome: &Outcome<G::Meta>, _state: &RunState<G::Meta>) {}
+    async fn on_run_end(&self, _outcome: &Outcome<G::Meta>, _state: &ExecutionState<G::Meta>) {}
 }
 
 /// No-op lifecycle that passes through everything.
@@ -141,7 +141,7 @@ impl<G: Graph> CompositeLifecycle<G> {
 
 #[async_trait]
 impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
-    async fn on_run_start(&self, graph: &G, state: &RunState<G::Meta>) -> Result<()> {
+    async fn on_run_start(&self, graph: &G, state: &ExecutionState<G::Meta>) -> Result<()> {
         for child in &self.children {
             child.on_run_start(graph, state).await?;
         }
@@ -152,7 +152,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
         &self,
         node: &G::Node,
         goal_gates_passed: bool,
-        state: &RunState<G::Meta>,
+        state: &ExecutionState<G::Meta>,
     ) {
         for child in &self.children {
             child
@@ -164,7 +164,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
     async fn before_node(
         &self,
         node: &G::Node,
-        state: &RunState<G::Meta>,
+        state: &ExecutionState<G::Meta>,
     ) -> Result<NodeDecision<G::Meta>> {
         for child in &self.children {
             match child.before_node(node, state).await? {
@@ -178,7 +178,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
     async fn before_attempt(
         &self,
         ctx: &AttemptContext<'_, G>,
-        state: &RunState<G::Meta>,
+        state: &ExecutionState<G::Meta>,
     ) -> Result<NodeDecision<G::Meta>> {
         for child in &self.children {
             match child.before_attempt(ctx, state).await? {
@@ -192,7 +192,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
     async fn after_attempt(
         &self,
         ctx: &AttemptResultContext<'_, G>,
-        state: &RunState<G::Meta>,
+        state: &ExecutionState<G::Meta>,
     ) -> Result<()> {
         for child in &self.children {
             child.after_attempt(ctx, state).await?;
@@ -204,7 +204,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
         &self,
         node: &G::Node,
         result: &mut NodeResult<G::Meta>,
-        state: &RunState<G::Meta>,
+        state: &ExecutionState<G::Meta>,
     ) -> Result<()> {
         for child in &self.children {
             child.after_node(node, result, state).await?;
@@ -216,7 +216,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
         &self,
         node: &G::Node,
         result: &NodeResult<G::Meta>,
-        state: &RunState<G::Meta>,
+        state: &ExecutionState<G::Meta>,
     ) -> Result<()> {
         for child in &self.children {
             child.after_record(node, result, state).await?;
@@ -227,7 +227,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
     async fn on_edge_selected(
         &self,
         ctx: &EdgeContext<'_, G>,
-        state: &RunState<G::Meta>,
+        state: &ExecutionState<G::Meta>,
     ) -> Result<EdgeDecision> {
         for child in &self.children {
             match child.on_edge_selected(ctx, state).await? {
@@ -243,7 +243,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
         node: &G::Node,
         result: &NodeResult<G::Meta>,
         next_node_id: Option<&str>,
-        state: &RunState<G::Meta>,
+        state: &ExecutionState<G::Meta>,
     ) -> Result<()> {
         for child in &self.children {
             child
@@ -253,7 +253,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
         Ok(())
     }
 
-    async fn on_run_end(&self, outcome: &Outcome<G::Meta>, state: &RunState<G::Meta>) {
+    async fn on_run_end(&self, outcome: &Outcome<G::Meta>, state: &ExecutionState<G::Meta>) {
         for child in &self.children {
             child.on_run_end(outcome, state).await;
         }
@@ -272,11 +272,11 @@ mod tests {
 
     /// A lifecycle that records which callbacks were called.
     struct RecordingLifecycle {
-        name: String,
-        log: Arc<Mutex<Vec<String>>>,
-        before_node_decision: Mutex<Option<NodeDecision>>,
+        name:                    String,
+        log:                     Arc<Mutex<Vec<String>>>,
+        before_node_decision:    Mutex<Option<NodeDecision>>,
         before_attempt_decision: Mutex<Option<NodeDecision>>,
-        edge_decision: Mutex<Option<EdgeDecision>>,
+        edge_decision:           Mutex<Option<EdgeDecision>>,
     }
 
     impl RecordingLifecycle {
@@ -308,7 +308,7 @@ mod tests {
 
     #[async_trait]
     impl RunLifecycle<TestGraph> for RecordingLifecycle {
-        async fn on_run_start(&self, _graph: &TestGraph, _state: &RunState) -> Result<()> {
+        async fn on_run_start(&self, _graph: &TestGraph, _state: &ExecutionState) -> Result<()> {
             self.log
                 .lock()
                 .unwrap()
@@ -320,7 +320,7 @@ mod tests {
             &self,
             _node: &TestNode,
             _goal_gates_passed: bool,
-            _state: &RunState,
+            _state: &ExecutionState,
         ) {
             self.log
                 .lock()
@@ -328,7 +328,11 @@ mod tests {
                 .push(format!("{}:on_terminal_reached", self.name));
         }
 
-        async fn before_node(&self, _node: &TestNode, _state: &RunState) -> Result<NodeDecision> {
+        async fn before_node(
+            &self,
+            _node: &TestNode,
+            _state: &ExecutionState,
+        ) -> Result<NodeDecision> {
             self.log
                 .lock()
                 .unwrap()
@@ -344,7 +348,7 @@ mod tests {
         async fn before_attempt(
             &self,
             _ctx: &AttemptContext<'_, TestGraph>,
-            _state: &RunState,
+            _state: &ExecutionState,
         ) -> Result<NodeDecision> {
             self.log
                 .lock()
@@ -361,7 +365,7 @@ mod tests {
         async fn after_attempt(
             &self,
             _ctx: &AttemptResultContext<'_, TestGraph>,
-            _state: &RunState,
+            _state: &ExecutionState,
         ) -> Result<()> {
             self.log
                 .lock()
@@ -374,7 +378,7 @@ mod tests {
             &self,
             _node: &TestNode,
             _result: &mut NodeResult,
-            _state: &RunState,
+            _state: &ExecutionState,
         ) -> Result<()> {
             self.log
                 .lock()
@@ -387,7 +391,7 @@ mod tests {
             &self,
             _node: &TestNode,
             _result: &NodeResult,
-            _state: &RunState,
+            _state: &ExecutionState,
         ) -> Result<()> {
             self.log
                 .lock()
@@ -399,7 +403,7 @@ mod tests {
         async fn on_edge_selected(
             &self,
             _ctx: &EdgeContext<'_, TestGraph>,
-            _state: &RunState,
+            _state: &ExecutionState,
         ) -> Result<EdgeDecision> {
             self.log
                 .lock()
@@ -418,7 +422,7 @@ mod tests {
             _node: &TestNode,
             _result: &NodeResult,
             _next_node_id: Option<&str>,
-            _state: &RunState,
+            _state: &ExecutionState,
         ) -> Result<()> {
             self.log
                 .lock()
@@ -427,7 +431,7 @@ mod tests {
             Ok(())
         }
 
-        async fn on_run_end(&self, _outcome: &Outcome, _state: &RunState) {
+        async fn on_run_end(&self, _outcome: &Outcome, _state: &ExecutionState) {
             self.log
                 .lock()
                 .unwrap()
@@ -439,7 +443,7 @@ mod tests {
     async fn default_lifecycle_is_noop() {
         let lc = NoopLifecycle;
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         assert!(
             <NoopLifecycle as RunLifecycle<TestGraph>>::on_run_start(&lc, &g, &state)
                 .await
@@ -462,7 +466,7 @@ mod tests {
             Box::new(RecordingLifecycle::new("b", log.clone())),
         ]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         lc.on_run_start(&g, &state).await.unwrap();
         let calls = log.lock().unwrap().clone();
         assert_eq!(calls, vec!["a:on_run_start", "b:on_run_start"]);
@@ -479,7 +483,7 @@ mod tests {
             Box::new(RecordingLifecycle::new("b", log.clone())),
         ]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
         let decision = lc.before_node(&node, &state).await.unwrap();
         assert!(matches!(decision, NodeDecision::Skip(_)));
@@ -499,7 +503,7 @@ mod tests {
             Box::new(RecordingLifecycle::new("b", log.clone())),
         ]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
         let decision = lc.before_node(&node, &state).await.unwrap();
         assert!(matches!(decision, NodeDecision::Block(_)));
@@ -518,11 +522,11 @@ mod tests {
             Box::new(RecordingLifecycle::new("b", log.clone())),
         ]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
         let ctx = AttemptContext {
-            node: &node,
-            attempt: 1,
+            node:         &node,
+            attempt:      1,
             max_attempts: 1,
         };
         let decision = lc.before_attempt(&ctx, &state).await.unwrap();
@@ -542,11 +546,11 @@ mod tests {
             Box::new(RecordingLifecycle::new("b", log.clone())),
         ]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
         let ctx = AttemptContext {
-            node: &node,
-            attempt: 1,
+            node:         &node,
+            attempt:      1,
             max_attempts: 1,
         };
         let decision = lc.before_attempt(&ctx, &state).await.unwrap();
@@ -561,14 +565,14 @@ mod tests {
             Box::new(RecordingLifecycle::new("b", log.clone())),
         ]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
         let result = NodeResult::new(Outcome::success(), Duration::ZERO, 1, 1);
         let ctx = AttemptResultContext {
-            node: &node,
-            result: &result,
-            attempt: 1,
-            will_retry: false,
+            node:          &node,
+            result:        &result,
+            attempt:       1,
+            will_retry:    false,
             backoff_delay: None,
         };
         lc.after_attempt(&ctx, &state).await.unwrap();
@@ -587,16 +591,16 @@ mod tests {
             Box::new(RecordingLifecycle::new("b", log.clone())),
         ]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let outcome = Outcome::success();
         let edge = g.outgoing_edges("start").into_iter().next().unwrap();
         let ctx = EdgeContext {
-            from: "start",
-            to: "end",
-            edge: Some(edge),
+            from:    "start",
+            to:      "end",
+            edge:    Some(edge),
             is_jump: false,
             outcome: &outcome,
-            reason: "unconditional",
+            reason:  "unconditional",
         };
         let decision = lc.on_edge_selected(&ctx, &state).await.unwrap();
         assert!(matches!(decision, EdgeDecision::Override(ref t) if t == "other"));
@@ -615,15 +619,15 @@ mod tests {
             Box::new(RecordingLifecycle::new("b", log.clone())),
         ]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let outcome = Outcome::success();
         let ctx = EdgeContext {
-            from: "start",
-            to: "end",
-            edge: None,
+            from:    "start",
+            to:      "end",
+            edge:    None,
             is_jump: false,
             outcome: &outcome,
-            reason: "unconditional",
+            reason:  "unconditional",
         };
         let decision = lc.on_edge_selected(&ctx, &state).await.unwrap();
         assert!(matches!(decision, EdgeDecision::Block(_)));
@@ -634,15 +638,15 @@ mod tests {
         let log = Arc::new(Mutex::new(Vec::new()));
         let lc = CompositeLifecycle::new(vec![Box::new(RecordingLifecycle::new("a", log.clone()))]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let outcome = Outcome::success();
         let ctx = EdgeContext::<TestGraph> {
-            from: "start",
-            to: "target",
-            edge: None,
+            from:    "start",
+            to:      "target",
+            edge:    None,
             is_jump: true,
             outcome: &outcome,
-            reason: "jump",
+            reason:  "jump",
         };
         let decision = lc.on_edge_selected(&ctx, &state).await.unwrap();
         assert!(matches!(decision, EdgeDecision::Continue));
@@ -658,7 +662,7 @@ mod tests {
             Box::new(RecordingLifecycle::new("b", log.clone())),
         ]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
         let mut result = NodeResult::new(Outcome::success(), Duration::ZERO, 1, 1);
         lc.after_node(&node, &mut result, &state).await.unwrap();
@@ -674,7 +678,7 @@ mod tests {
             Box::new(RecordingLifecycle::new("b", log.clone())),
         ]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
         let result = NodeResult::new(Outcome::success(), Duration::ZERO, 1, 1);
         lc.after_record(&node, &result, &state).await.unwrap();
@@ -688,14 +692,14 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
 
         struct OrderedLifecycle {
-            name: String,
-            log: Arc<Mutex<Vec<String>>>,
+            name:    String,
+            log:     Arc<Mutex<Vec<String>>>,
             counter: Arc<AtomicU32>,
         }
 
         #[async_trait]
         impl RunLifecycle<TestGraph> for OrderedLifecycle {
-            async fn on_run_start(&self, _g: &TestGraph, _s: &RunState) -> Result<()> {
+            async fn on_run_start(&self, _g: &TestGraph, _s: &ExecutionState) -> Result<()> {
                 let order = self.counter.fetch_add(1, Ordering::SeqCst);
                 self.log
                     .lock()
@@ -707,23 +711,23 @@ mod tests {
 
         let lc = CompositeLifecycle::new(vec![
             Box::new(OrderedLifecycle {
-                name: "first".into(),
-                log: log.clone(),
+                name:    "first".into(),
+                log:     log.clone(),
                 counter: counter.clone(),
             }),
             Box::new(OrderedLifecycle {
-                name: "second".into(),
-                log: log.clone(),
+                name:    "second".into(),
+                log:     log.clone(),
                 counter: counter.clone(),
             }),
             Box::new(OrderedLifecycle {
-                name: "third".into(),
-                log: log.clone(),
+                name:    "third".into(),
+                log:     log.clone(),
                 counter: counter.clone(),
             }),
         ]);
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::new(&g).unwrap();
+        let state = ExecutionState::new(&g).unwrap();
         lc.on_run_start(&g, &state).await.unwrap();
         let calls = log.lock().unwrap().clone();
         assert_eq!(calls, vec!["first:0", "second:1", "third:2"]);

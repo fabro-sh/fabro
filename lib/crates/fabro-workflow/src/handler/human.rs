@@ -1,25 +1,26 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use async_trait::async_trait;
-
-use crate::context::Context;
-use crate::context::keys;
-use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
-use crate::millis_u64;
-use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_interview::{Answer, AnswerValue, Interviewer, Question, QuestionOption, QuestionType};
+use fabro_types::run_event::InterviewOption;
+use ulid::Ulid;
 
 use super::{EngineServices, Handler};
+use crate::context::{Context, keys};
+use crate::error::Error;
+use crate::event::{Emitter, Event, StageScope};
+use crate::millis_u64;
+use crate::outcome::{Outcome, OutcomeExt};
 
 /// A choice derived from an outgoing edge.
 struct Choice {
-    key: String,
+    key:   String,
     label: String,
-    to: String,
+    to:    String,
 }
 
 /// Parse an accelerator key from a label.
@@ -68,7 +69,7 @@ fn parse_accelerator_key(label: &str) -> String {
 /// Blocks until a human selects an option derived from outgoing edges.
 pub struct HumanHandler {
     interviewer: Arc<dyn Interviewer>,
-    emitter: Option<Arc<EventEmitter>>,
+    emitter:     Option<Arc<Emitter>>,
 }
 
 impl HumanHandler {
@@ -80,14 +81,15 @@ impl HumanHandler {
     }
 
     #[must_use]
-    pub fn with_emitter(mut self, emitter: Arc<EventEmitter>) -> Self {
+    pub fn with_emitter(mut self, emitter: Arc<Emitter>) -> Self {
         self.emitter = Some(emitter);
         self
     }
 
-    fn emit(&self, event: &WorkflowRunEvent) {
-        if let Some(emitter) = &self.emitter {
-            emitter.emit(event);
+    fn emit(&self, default_emitter: &Arc<Emitter>, event: &Event, scope: &StageScope) {
+        match &self.emitter {
+            Some(emitter) => emitter.emit_scoped(event, scope),
+            None => default_emitter.emit_scoped(event, scope),
         }
     }
 }
@@ -101,7 +103,7 @@ impl Handler for HumanHandler {
         graph: &Graph,
         _run_dir: &Path,
         _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let edges = graph.outgoing_edges(&node.id);
         let first_choice = edges.iter().find(|e| !e.freeform());
 
@@ -143,8 +145,8 @@ impl Handler for HumanHandler {
         context: &Context,
         graph: &Graph,
         _run_dir: &Path,
-        _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+        services: &EngineServices,
+    ) -> Result<Outcome, Error> {
         // 1. Derive choices from outgoing edges
         let edges = graph.outgoing_edges(&node.id);
         let mut freeform_target: Option<String> = None;
@@ -174,7 +176,7 @@ impl Handler for HumanHandler {
         let options: Vec<QuestionOption> = choices
             .iter()
             .map(|c| QuestionOption {
-                key: c.key.clone(),
+                key:   c.key.clone(),
                 label: c.label.clone(),
             })
             .collect();
@@ -185,6 +187,7 @@ impl Handler for HumanHandler {
             QuestionType::MultipleChoice
         };
         let mut question = Question::new(node.label(), question_type);
+        question.id = Ulid::new().to_string();
         question.options = options;
         question.allow_freeform = freeform_target.is_some();
         question.stage.clone_from(&node.id);
@@ -203,21 +206,44 @@ impl Handler for HumanHandler {
 
         // 3. Present to interviewer
         let question_text = node.label().to_string();
-        self.emit(&WorkflowRunEvent::InterviewStarted {
-            question: question_text.clone(),
-            stage: node.id.clone(),
-            question_type: question.question_type.to_string(),
-        });
+        let question_id = question.id.clone();
+        let stage_scope = StageScope::for_handler(context, &node.id);
+        self.emit(
+            &services.emitter,
+            &Event::InterviewStarted {
+                question_id:     question_id.clone(),
+                question:        question_text.clone(),
+                stage:           node.id.clone(),
+                question_type:   question.question_type.to_string(),
+                options:         question
+                    .options
+                    .iter()
+                    .map(|option| InterviewOption {
+                        key:   option.key.clone(),
+                        label: option.label.clone(),
+                    })
+                    .collect(),
+                allow_freeform:  question.allow_freeform,
+                timeout_seconds: question.timeout_seconds,
+                context_display: question.context_display.clone(),
+            },
+            &stage_scope,
+        );
         let interview_start = Instant::now();
         let answer = self.interviewer.ask(question).await;
 
         // 4. Handle timeout
         if answer.value == AnswerValue::Timeout {
-            self.emit(&WorkflowRunEvent::InterviewTimeout {
-                question: question_text,
-                stage: node.id.clone(),
-                duration_ms: millis_u64(interview_start.elapsed()),
-            });
+            self.emit(
+                &services.emitter,
+                &Event::InterviewTimeout {
+                    question_id: question_id.clone(),
+                    question:    question_text,
+                    stage:       node.id.clone(),
+                    duration_ms: millis_u64(interview_start.elapsed()),
+                },
+                &stage_scope,
+            );
             let default_choice = node
                 .attrs
                 .get("human.default_choice")
@@ -232,22 +258,59 @@ impl Handler for HumanHandler {
             return Ok(Outcome::retry_classify("human gate timeout, no default"));
         }
 
-        // 5. Handle unanswered / aborted interview sessions.
-        if answer.value == AnswerValue::Aborted {
+        if answer.value == AnswerValue::Cancelled {
+            return Err(Error::Cancelled);
+        }
+
+        // 5. Handle unanswered / interrupted interview sessions.
+        if answer.value == AnswerValue::Interrupted {
+            if services
+                .cancel_requested
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::SeqCst))
+            {
+                return Err(Error::Cancelled);
+            }
+            self.emit(
+                &services.emitter,
+                &Event::InterviewInterrupted {
+                    question_id: question_id.clone(),
+                    question:    question_text,
+                    stage:       node.id.clone(),
+                    reason:      "interrupted".to_string(),
+                    duration_ms: millis_u64(interview_start.elapsed()),
+                },
+                &stage_scope,
+            );
             return Ok(unanswered_human_gate(
-                "human interaction aborted before an answer was provided",
+                "human interaction interrupted before an answer was provided",
             ));
         }
         if answer.value == AnswerValue::Skipped {
+            self.emit(
+                &services.emitter,
+                &Event::InterviewCompleted {
+                    question_id,
+                    question: question_text,
+                    answer: answer_text(&answer),
+                    duration_ms: millis_u64(interview_start.elapsed()),
+                },
+                &stage_scope,
+            );
             return Ok(unanswered_human_gate("human skipped interaction"));
         }
 
         // Emit interview completed for successful interactions
-        self.emit(&WorkflowRunEvent::InterviewCompleted {
-            question: question_text,
-            answer: answer_text(&answer),
-            duration_ms: millis_u64(interview_start.elapsed()),
-        });
+        self.emit(
+            &services.emitter,
+            &Event::InterviewCompleted {
+                question_id,
+                question: question_text,
+                answer: answer_text(&answer),
+                duration_ms: millis_u64(interview_start.elapsed()),
+            },
+            &stage_scope,
+        );
 
         // 6. Try fixed-choice match
         if let Some(selected) = find_choice_match(&answer, &choices) {
@@ -326,7 +389,8 @@ fn answer_text(answer: &Answer) -> String {
         AnswerValue::MultiSelected(keys) => keys.join(", "),
         AnswerValue::Yes => "yes".to_string(),
         AnswerValue::No => "no".to_string(),
-        AnswerValue::Aborted => "aborted".to_string(),
+        AnswerValue::Cancelled => "cancelled".to_string(),
+        AnswerValue::Interrupted => "interrupted".to_string(),
         AnswerValue::Skipped => "skipped".to_string(),
         AnswerValue::Timeout => "timeout".to_string(),
     }
@@ -334,12 +398,29 @@ fn answer_text(answer: &Answer) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Mutex;
+
     use fabro_graphviz::graph::{AttrValue, Edge};
     use fabro_interview::{AutoApproveInterviewer, CallbackInterviewer, RecordingInterviewer};
 
+    use super::*;
+    use crate::event::EventBody;
+
     fn make_services() -> EngineServices {
         EngineServices::test_default()
+    }
+
+    fn make_services_with_events(events: Arc<Mutex<Vec<fabro_types::RunEvent>>>) -> EngineServices {
+        let mut services = EngineServices::test_default();
+        let emitter = Arc::new(Emitter::default());
+        emitter.on_event(move |event| {
+            events
+                .lock()
+                .expect("event log lock poisoned")
+                .push(event.clone());
+        });
+        services.emitter = emitter;
+        services
     }
 
     fn build_graph_with_human_gate() -> Graph {
@@ -443,8 +524,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wait_human_aborted_returns_fail_without_routing_hints() {
-        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::aborted()));
+    async fn wait_human_interrupted_returns_fail_without_routing_hints() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::interrupted()));
         let handler = HumanHandler::new(interviewer);
         let graph = build_graph_with_human_gate();
         let node = graph.nodes.get("gate").unwrap();
@@ -461,8 +542,25 @@ mod tests {
         assert!(outcome.suggested_next_ids.is_empty());
         assert_eq!(
             outcome.failure_reason(),
-            Some("human interaction aborted before an answer was provided")
+            Some("human interaction interrupted before an answer was provided")
         );
+    }
+
+    #[tokio::test]
+    async fn wait_human_cancelled_returns_cancelled_error() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::cancelled()));
+        let handler = HumanHandler::new(interviewer);
+        let graph = build_graph_with_human_gate();
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+
+        let error = handler
+            .execute(node, &context, &graph, run_dir, &make_services())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, Error::Cancelled));
     }
 
     #[tokio::test]
@@ -483,6 +581,74 @@ mod tests {
         assert!(outcome.preferred_label.is_none());
         assert!(outcome.suggested_next_ids.is_empty());
         assert_eq!(outcome.failure_reason(), Some("human skipped interaction"));
+    }
+
+    #[tokio::test]
+    async fn wait_human_interrupted_emits_interview_interrupted_event() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::interrupted()));
+        let handler = HumanHandler::new(interviewer);
+        let graph = build_graph_with_human_gate();
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        let _ = handler
+            .execute(
+                node,
+                &context,
+                &graph,
+                run_dir,
+                &make_services_with_events(Arc::clone(&events)),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            events
+                .lock()
+                .expect("event log lock poisoned")
+                .iter()
+                .any(|event| matches!(
+                    &event.body,
+                    EventBody::InterviewInterrupted(props)
+                        if props.reason == "interrupted"
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_human_skipped_emits_interview_completed_event() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::skipped()));
+        let handler = HumanHandler::new(interviewer);
+        let graph = build_graph_with_human_gate();
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        let _ = handler
+            .execute(
+                node,
+                &context,
+                &graph,
+                run_dir,
+                &make_services_with_events(Arc::clone(&events)),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            events
+                .lock()
+                .expect("event log lock poisoned")
+                .iter()
+                .any(|event| matches!(
+                    &event.body,
+                    EventBody::InterviewCompleted(props)
+                        if props.answer == "skipped"
+                ))
+        );
     }
 
     #[tokio::test]

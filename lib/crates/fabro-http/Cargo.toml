@@ -1,0 +1,20 @@
+[package]
+name = "fabro-http"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Shared HTTP client utilities and reqwest wrappers for Fabro"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+reqwest = { workspace = true, features = ["blocking"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+http = "1"

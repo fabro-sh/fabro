@@ -45,7 +45,8 @@ impl Context {
     }
 
     /// Deep copy for parallel branch isolation.
-    /// `.clone()` shares state (Arc clone); `.fork()` creates an independent copy.
+    /// `.clone()` shares state (Arc clone); `.fork()` creates an independent
+    /// copy.
     #[must_use]
     pub fn fork(&self) -> Self {
         Self {
@@ -71,8 +72,9 @@ impl Context {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn context_set_and_get() {

@@ -16,13 +16,12 @@ fn help() {
     Usage: fabro workflow list [OPTIONS]
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -38,7 +37,7 @@ fn workflow_list_errors_without_project_config() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: No fabro.toml found in [TEMP_DIR] or any parent directory
+    error: No .fabro/project.toml found in [TEMP_DIR] or any parent directory
     ");
 }
 
@@ -70,7 +69,7 @@ fn workflow_list_shows_project_and_user_sections() {
       NAME           DESCRIPTION
       user-beta      User beta goal
 
-    Project Workflows (fabro/workflows)
+    Project Workflows (.fabro/workflows)
 
       NAME           DESCRIPTION
       project-alpha  Project alpha goal

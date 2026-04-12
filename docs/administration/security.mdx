@@ -29,14 +29,14 @@ Fabro is single-tenant software designed for small, trusted teams. The following
 ### Authentication
 
 - **Enable authentication.** Fabro supports GitHub OAuth and Tailscale header-based auth for the web app. Do not use `insecure_disabled` outside of local development.
-- **Configure a username allowlist.** Both GitHub and Tailscale auth support `allowed_usernames` in `server.toml`. An empty allowlist rejects all requests.
+- **Configure a username allowlist.** Both GitHub and Tailscale auth support `allowed_usernames` in `settings.toml`. An empty allowlist rejects all requests.
 - **Use JWT to connect the web app to the API.** Configure `FABRO_JWT_PRIVATE_KEY` on the web app and `FABRO_JWT_PUBLIC_KEY` on the API server. JWT tokens are Ed25519-signed and short-lived (30 seconds).
-- **Use mTLS for machine-to-machine API access.** Configure `[api.tls]` in `server.toml` with server cert, key, and CA. Set client auth to `Required` for programmatic clients (CI, scripts).
+- **Use mTLS for machine-to-machine API access.** Configure `[api.tls]` in `settings.toml` with server cert, key, and CA. Set client auth to `Required` for programmatic clients (CI, scripts).
 
 ### Secrets
 
 - **Keep API keys out of sandboxes.** The local sandbox strips environment variables ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL`, but Docker and Daytona sandboxes provide stronger isolation — only explicitly configured variables are passed through.
-- **Use `.env` files for credentials.** Fabro loads credentials from `~/.fabro/.env` and the project-root `.env`. Do not commit these files to version control.
+- **Use server-owned secrets or process env vars for credentials.** For server-backed workflows, persist credentials with `fabro provider login` / `fabro secret set`, which stores them under the server data directory. Do not commit secrets to version control.
 - **Rotate the session secret.** The `SESSION_SECRET` environment variable encrypts web app sessions. Rotate it periodically and use a strong random value.
 
 ### Execution

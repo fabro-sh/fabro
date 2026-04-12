@@ -1,14 +1,14 @@
 use fabro_graphviz::parser;
 
 use super::types::Parsed;
-use crate::error::FabroError;
+use crate::error::Error;
 
 /// PARSE phase: parse DOT source into a `Parsed` graph.
 ///
 /// # Errors
 ///
-/// Returns `FabroError::Parse` if the DOT source is invalid.
-pub fn parse(dot_source: &str) -> Result<Parsed, FabroError> {
+/// Returns `Error::Parse` if the DOT source is invalid.
+pub fn parse(dot_source: &str) -> Result<Parsed, Error> {
     let graph = parser::parse(dot_source)?;
     Ok(Parsed {
         graph,

@@ -5,9 +5,9 @@ use crate::error::Result;
 use crate::graph::{Graph, NodeSpec};
 use crate::outcome::{NodeResult, Outcome, OutcomeMeta};
 
-impl<M: OutcomeMeta> std::fmt::Debug for RunState<M> {
+impl<M: OutcomeMeta> std::fmt::Debug for ExecutionState<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RunState")
+        f.debug_struct("ExecutionState")
             .field("current_node_id", &self.current_node_id)
             .field("completed_nodes", &self.completed_nodes)
             .field("stage_index", &self.stage_index)
@@ -16,31 +16,31 @@ impl<M: OutcomeMeta> std::fmt::Debug for RunState<M> {
     }
 }
 
-pub struct RunState<M: OutcomeMeta = ()> {
-    pub context: Context,
-    pub current_node_id: String,
-    pub completed_nodes: Vec<String>,
-    pub node_outcomes: HashMap<String, Outcome<M>>,
-    pub node_retries: HashMap<String, u32>,
-    pub node_visits: HashMap<String, usize>,
-    pub stage_index: usize,
+pub struct ExecutionState<M: OutcomeMeta = ()> {
+    pub context:          Context,
+    pub current_node_id:  String,
+    pub completed_nodes:  Vec<String>,
+    pub node_outcomes:    HashMap<String, Outcome<M>>,
+    pub node_retries:     HashMap<String, u32>,
+    pub node_visits:      HashMap<String, usize>,
+    pub stage_index:      usize,
     pub previous_node_id: Option<String>,
-    pub cancelled: bool,
+    pub cancelled:        bool,
 }
 
-impl<M: OutcomeMeta> RunState<M> {
+impl<M: OutcomeMeta> ExecutionState<M> {
     pub fn new<G: Graph>(graph: &G) -> Result<Self> {
         let start = graph.find_start_node()?;
         Ok(Self {
-            context: Context::new(),
-            current_node_id: start.id().to_string(),
-            completed_nodes: Vec::new(),
-            node_outcomes: HashMap::new(),
-            node_retries: HashMap::new(),
-            node_visits: HashMap::new(),
-            stage_index: 0,
+            context:          Context::new(),
+            current_node_id:  start.id().to_string(),
+            completed_nodes:  Vec::new(),
+            node_outcomes:    HashMap::new(),
+            node_retries:     HashMap::new(),
+            node_visits:      HashMap::new(),
+            stage_index:      0,
             previous_node_id: None,
-            cancelled: false,
+            cancelled:        false,
         })
     }
 
@@ -71,7 +71,8 @@ impl<M: OutcomeMeta> RunState<M> {
         if let Some(ctx) = new_context {
             self.context = ctx;
         }
-        // node_visits is NOT cleared — preserves total visit counts across restarts
+        // node_visits is NOT cleared — preserves total visit counts across
+        // restarts
     }
 
     pub fn current_node<G: Graph>(&self, graph: &G) -> Option<G::Node> {
@@ -98,7 +99,7 @@ mod tests {
     #[test]
     fn run_state_new_from_graph() {
         let g = linear_graph(&["start", "work", "end"]);
-        let state = RunState::<()>::new(&g).unwrap();
+        let state = ExecutionState::<()>::new(&g).unwrap();
         assert_eq!(state.current_node_id, "start");
         assert!(state.completed_nodes.is_empty());
         assert!(state.node_outcomes.is_empty());
@@ -109,7 +110,7 @@ mod tests {
     #[test]
     fn run_state_record_updates_all_fields() {
         let g = linear_graph(&["start", "end"]);
-        let mut state = RunState::<()>::new(&g).unwrap();
+        let mut state = ExecutionState::<()>::new(&g).unwrap();
         let result = NodeResult::new(Outcome::success(), Duration::from_millis(50), 2, 3);
         state.record("start", &result);
 
@@ -122,7 +123,7 @@ mod tests {
     #[test]
     fn run_state_record_applies_context_updates() {
         let g = linear_graph(&["start", "end"]);
-        let mut state = RunState::<()>::new(&g).unwrap();
+        let mut state = ExecutionState::<()>::new(&g).unwrap();
         let mut outcome = Outcome::success();
         outcome.context_updates.insert("key".into(), json!("value"));
         let result = NodeResult::new(outcome, Duration::ZERO, 1, 1);
@@ -133,7 +134,7 @@ mod tests {
     #[test]
     fn run_state_advance_updates_current_and_previous() {
         let g = linear_graph(&["start", "mid", "end"]);
-        let mut state = RunState::<()>::new(&g).unwrap();
+        let mut state = ExecutionState::<()>::new(&g).unwrap();
         assert_eq!(state.current_node_id, "start");
         assert!(state.previous_node_id.is_none());
 
@@ -149,7 +150,7 @@ mod tests {
     #[test]
     fn run_state_restart_clears_progress_keeps_visits() {
         let g = linear_graph(&["start", "work", "end"]);
-        let mut state = RunState::<()>::new(&g).unwrap();
+        let mut state = ExecutionState::<()>::new(&g).unwrap();
         state.increment_visits("start");
         state.increment_visits("work");
         state.record(
@@ -174,7 +175,7 @@ mod tests {
     #[test]
     fn run_state_current_node_from_graph() {
         let g = linear_graph(&["start", "end"]);
-        let state = RunState::<()>::new(&g).unwrap();
+        let state = ExecutionState::<()>::new(&g).unwrap();
         let node = state.current_node(&g).unwrap();
         assert_eq!(node.id(), "start");
     }
@@ -182,7 +183,7 @@ mod tests {
     #[test]
     fn run_state_increment_visits() {
         let g = linear_graph(&["start", "end"]);
-        let mut state = RunState::<()>::new(&g).unwrap();
+        let mut state = ExecutionState::<()>::new(&g).unwrap();
         assert_eq!(state.increment_visits("start"), 1);
         assert_eq!(state.increment_visits("start"), 2);
         assert_eq!(state.increment_visits("other"), 1);
@@ -191,7 +192,7 @@ mod tests {
     #[test]
     fn run_state_restart_with_new_context() {
         let g = linear_graph(&["start", "end"]);
-        let mut state = RunState::<()>::new(&g).unwrap();
+        let mut state = ExecutionState::<()>::new(&g).unwrap();
         state.context.set("key", json!("old_value"));
         state.increment_visits("start");
 
@@ -210,7 +211,7 @@ mod tests {
     #[test]
     fn run_state_restart_without_context_preserves() {
         let g = linear_graph(&["start", "end"]);
-        let mut state = RunState::<()>::new(&g).unwrap();
+        let mut state = ExecutionState::<()>::new(&g).unwrap();
         state.context.set("key", json!("value"));
 
         state.restart("start", None);

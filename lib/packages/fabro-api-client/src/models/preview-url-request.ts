@@ -26,5 +26,9 @@ export interface PreviewUrlRequest {
      * Time-to-live for the preview URL in seconds.
      */
     'expires_in_secs': number;
+    /**
+     * When true, return a signed URL that does not require a preview token header.
+     */
+    'signed'?: boolean;
 }
 

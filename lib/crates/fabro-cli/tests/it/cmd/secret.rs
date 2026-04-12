@@ -1,5 +1,7 @@
+#![allow(clippy::absolute_paths, clippy::single_char_pattern)]
+
 use fabro_test::{fabro_snapshot, test_context};
-use predicates;
+use predicates::prelude::*;
 
 #[test]
 fn help() {
@@ -10,25 +12,24 @@ fn help() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Manage secrets in ~/.fabro/.env
+    Manage server-owned secrets
 
     Usage: fabro secret [OPTIONS] <COMMAND>
 
     Commands:
-      get   Get a secret value
       list  List secret names
       rm    Remove a secret
       set   Set a secret value
       help  Print this message or the help of the given subcommand(s)
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -43,49 +44,39 @@ fn test_secret_lifecycle() {
     // 1. set FOO=bar
     secret(&["set", "FOO", "bar"]).success();
 
-    // 2. get FOO -> stdout is "bar\n"
-    secret(&["get", "FOO"]).success().stdout("bar\n");
-
-    // 3. list -> contains FOO
+    // 2. list -> contains FOO
     secret(&["list"])
         .success()
-        .stdout(predicates::str::contains("FOO"));
+        .stdout(predicates::str::contains("FOO\tenvironment"));
 
-    // 4. update FOO
+    // 3. update FOO
     secret(&["set", "FOO", "updated"]).success();
 
-    // 5. get FOO -> "updated\n"
-    secret(&["get", "FOO"]).success().stdout("updated\n");
-
-    // 6. rm FOO
+    // 4. rm FOO
     secret(&["rm", "FOO"]).success();
 
-    // 7. get FOO -> fails
-    secret(&["get", "FOO"]).failure();
+    // 5. list no longer contains FOO
+    let output = secret(&["list"]).success().get_output().stdout.clone();
+    let stdout = String::from_utf8(output).unwrap();
+    assert!(!stdout.contains("FOO"));
 }
 
 #[test]
-fn test_secret_list_show_values() {
+fn test_secret_list_is_write_only() {
     let context = test_context!();
 
     let secret =
         |args: &[&str]| -> assert_cmd::assert::Assert { context.secret().args(args).assert() };
 
-    secret(&["set", "A", "1"]).success();
-    secret(&["set", "B", "2"]).success();
+    secret(&["set", "A", "alpha-secret"]).success();
+    secret(&["set", "B", "beta-secret"]).success();
 
-    // Without --show-values: just keys
     let out = secret(&["list"]).success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     assert!(stdout.contains("A"));
     assert!(stdout.contains("B"));
-    assert!(!stdout.contains("A=1"));
-
-    // With --show-values: KEY=VALUE
-    secret(&["list", "--show-values"])
-        .success()
-        .stdout(predicates::str::contains("A=1"))
-        .stdout(predicates::str::contains("B=2"));
+    assert!(!stdout.contains("alpha-secret"));
+    assert!(!stdout.contains("beta-secret"));
 }
 
 #[test]
@@ -99,21 +90,7 @@ fn test_secret_list_alias_ls() {
         .args(["ls"])
         .assert()
         .success()
-        .stdout(predicates::str::contains("X"));
-}
-
-#[test]
-fn test_secret_get_missing_key() {
-    let context = test_context!();
-    let mut cmd = context.secret();
-    cmd.args(["get", "NOPE"]);
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
-    ----- stdout -----
-    ----- stderr -----
-    error: secret not found: NOPE
-    ");
+        .stdout(predicates::str::contains("X\tenvironment"));
 }
 
 #[test]
@@ -142,8 +119,39 @@ fn test_secret_value_with_equals() {
 
     context
         .secret()
-        .args(["get", "URL"])
+        .args(["list"])
         .assert()
         .success()
-        .stdout("https://x.com?a=1&b=2\n");
+        .stdout(predicates::str::contains("URL\tenvironment"))
+        .stdout(predicates::str::contains("https://x.com?a=1&b=2").not());
+}
+
+#[test]
+fn test_file_secret_lifecycle() {
+    let context = test_context!();
+
+    let secret =
+        |args: &[&str]| -> assert_cmd::assert::Assert { context.secret().args(args).assert() };
+
+    secret(&[
+        "set",
+        "/tmp/test.pem",
+        "pem-data",
+        "--type",
+        "file",
+        "--description",
+        "Test certificate",
+    ])
+    .success();
+
+    secret(&["list"])
+        .success()
+        .stdout(predicates::str::contains("/tmp/test.pem\tfile"))
+        .stdout(predicates::str::contains("pem-data").not());
+
+    secret(&["rm", "/tmp/test.pem"]).success();
+
+    secret(&["list"])
+        .success()
+        .stdout(predicates::str::contains("/tmp/test.pem").not());
 }

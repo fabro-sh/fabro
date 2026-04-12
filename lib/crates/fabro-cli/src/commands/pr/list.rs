@@ -1,59 +1,36 @@
-use std::path::Path;
-
-use anyhow::{Context, Result};
-use fabro_config::FabroSettingsExt;
-use fabro_workflow::pull_request::PullRequestRecord;
-use fabro_workflow::run_lookup::{runs_base, scan_runs_combined};
+use anyhow::Result;
+use fabro_util::printer::Printer;
 use futures::future::join_all;
 use serde::Serialize;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrListArgs};
+use crate::command_context::CommandContext;
+use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
-use crate::store;
-use crate::user_config::load_user_settings_with_globals;
 
 #[derive(Serialize)]
 struct PrRow {
     run_id: String,
     number: u64,
-    state: String,
-    title: String,
-    url: String,
+    state:  String,
+    title:  String,
+    url:    String,
 }
 
 pub(super) async fn list_command(
     args: PrListArgs,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> Result<()> {
-    let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    list_from(store.as_ref(), &base, args, github_app, globals).await
-}
+    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
 
-async fn list_from(
-    store: &dyn fabro_store::Store,
-    base: &Path,
-    args: PrListArgs,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
-    globals: &GlobalArgs,
-) -> Result<()> {
-    let creds = github_app.context(
-        "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
-    )?;
-
-    let runs = scan_runs_combined(store, base)
-        .await
-        .context("Failed to scan runs")?;
-
-    let mut entries: Vec<(String, PullRequestRecord)> = Vec::new();
-    for run in &runs {
-        let pr_path = run.path.join("pull_request.json");
-        if let Ok(content) = std::fs::read_to_string(&pr_path) {
-            if let Ok(record) = serde_json::from_str::<PullRequestRecord>(&content) {
-                entries.push((run.run_id.to_string(), record));
+    let mut entries = Vec::new();
+    for run in lookup.runs() {
+        if let Ok(state) = lookup.client().get_run_state(&run.run_id()).await {
+            if let Some(record) = state.pull_request {
+                entries.push((run.run_id().to_string(), record));
             }
         }
     }
@@ -63,9 +40,11 @@ async fn list_from(
             print_json_pretty(&Vec::<PrRow>::new())?;
             return Ok(());
         }
-        println!("No pull requests found.");
+        fabro_util::printout!(printer, "No pull requests found.");
         return Ok(());
     }
+
+    let creds = super::load_github_credentials_required(printer).await?;
 
     let futures: Vec<_> = entries
         .iter()
@@ -125,13 +104,20 @@ async fn list_from(
     }
 
     if rows.is_empty() {
-        println!("No open pull requests found. Use --all to include closed/merged.");
+        fabro_util::printout!(
+            printer,
+            "No open pull requests found. Use --all to include closed/merged."
+        );
         return Ok(());
     }
 
-    println!(
+    fabro_util::printout!(
+        printer,
         "{:<12} {:<6} {:<8} {:<50} URL",
-        "RUN", "#", "STATE", "TITLE"
+        "RUN",
+        "#",
+        "STATE",
+        "TITLE"
     );
     for row in &rows {
         let short_id = if row.run_id.len() > 12 {
@@ -144,9 +130,14 @@ async fn list_from(
         } else {
             row.title.clone()
         };
-        println!(
+        fabro_util::printout!(
+            printer,
             "{:<12} {:<6} {:<8} {:<50} {}",
-            short_id, row.number, row.state, short_title, row.url
+            short_id,
+            row.number,
+            row.state,
+            short_title,
+            row.url
         );
     }
 

@@ -13,9 +13,9 @@ use crate::types::{FeatureMetadata, LifecycleCommand};
 #[derive(Debug, Clone)]
 pub(crate) struct FeatureLayer {
     /// Feature identifier (e.g. "ghcr.io/devcontainers/features/node:1")
-    pub id: String,
+    pub id:                 String,
     /// Directory name for COPY
-    pub dir_name: String,
+    pub dir_name:           String,
     /// Dockerfile snippet for this feature
     pub dockerfile_snippet: String,
 }
@@ -23,11 +23,11 @@ pub(crate) struct FeatureLayer {
 /// All resolved feature data: layers, environment, and lifecycle hooks.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ResolvedFeatures {
-    pub layers: Vec<FeatureLayer>,
-    pub container_env: HashMap<String, String>,
-    pub on_create_commands: Vec<LifecycleCommand>,
+    pub layers:               Vec<FeatureLayer>,
+    pub container_env:        HashMap<String, String>,
+    pub on_create_commands:   Vec<LifecycleCommand>,
     pub post_create_commands: Vec<LifecycleCommand>,
-    pub post_start_commands: Vec<LifecycleCommand>,
+    pub post_start_commands:  Vec<LifecycleCommand>,
 }
 
 /// Extract the directory name from a feature ID.
@@ -210,7 +210,8 @@ async fn fetch_feature_oci(feature_id: &str, output_dir: &Path) -> crate::Result
         )));
     }
 
-    // OCI registries may name the tgz with a feature suffix (e.g. devcontainer-feature-node.tgz)
+    // OCI registries may name the tgz with a feature suffix (e.g.
+    // devcontainer-feature-node.tgz)
     if let Some(tgz) = find_tgz(&feature_dir).await {
         extract_tgz(&feature_dir, &tgz, feature_id).await?;
     }
@@ -247,7 +248,10 @@ async fn fetch_feature_https(
 
     info!(feature_id, "downloading feature from HTTPS");
 
-    let response = reqwest::get(feature_id)
+    let response = fabro_http::http_client()
+        .map_err(|e| DevcontainerError::Feature(format!("failed to build HTTP client: {e}")))?
+        .get(feature_id)
+        .send()
         .await
         .map_err(|e| DevcontainerError::Feature(format!("failed to download {feature_id}: {e}")))?;
 
@@ -326,8 +330,9 @@ async fn copy_dir_recursive(src: &Path, dst: &Path) -> crate::Result<()> {
     Ok(())
 }
 
-/// Topological sort of features based on `installsAfter` and `dependsOn` dependencies.
-/// Uses Kahn's algorithm. Features without ordering constraints maintain input order.
+/// Topological sort of features based on `installsAfter` and `dependsOn`
+/// dependencies. Uses Kahn's algorithm. Features without ordering constraints
+/// maintain input order.
 fn topo_sort(
     feature_ids: &[String],
     metadata_map: &HashMap<String, FeatureMetadata>,
@@ -422,9 +427,9 @@ fn topo_sort(
     sorted
 }
 
-/// Convert an option ID to an environment variable name per the dev container spec.
-/// Replaces non-alphanumeric, non-underscore chars with `_`, strips leading digits/underscores,
-/// and uppercases the result.
+/// Convert an option ID to an environment variable name per the dev container
+/// spec. Replaces non-alphanumeric, non-underscore chars with `_`, strips
+/// leading digits/underscores, and uppercases the result.
 fn option_id_to_env_name(id: &str) -> String {
     let replaced: String = id
         .chars()
@@ -626,16 +631,16 @@ pub(crate) async fn resolve_features(
             .get(id)
             .cloned()
             .unwrap_or_else(|| FeatureMetadata {
-                id: None,
-                name: None,
-                version: None,
-                options: HashMap::new(),
-                installs_after: Vec::new(),
-                depends_on: HashMap::new(),
-                container_env: HashMap::new(),
-                on_create_command: None,
+                id:                  None,
+                name:                None,
+                version:             None,
+                options:             HashMap::new(),
+                installs_after:      Vec::new(),
+                depends_on:          HashMap::new(),
+                container_env:       HashMap::new(),
+                on_create_command:   None,
                 post_create_command: None,
-                post_start_command: None,
+                post_start_command:  None,
             });
 
         // Collect feature containerEnv (later features override earlier)
@@ -752,21 +757,18 @@ mod tests {
         let metadata: HashMap<String, FeatureMetadata> = ids
             .iter()
             .map(|id| {
-                (
-                    id.clone(),
-                    FeatureMetadata {
-                        id: Some(id.clone()),
-                        name: None,
-                        version: None,
-                        options: HashMap::new(),
-                        installs_after: Vec::new(),
-                        depends_on: HashMap::new(),
-                        container_env: HashMap::new(),
-                        on_create_command: None,
-                        post_create_command: None,
-                        post_start_command: None,
-                    },
-                )
+                (id.clone(), FeatureMetadata {
+                    id:                  Some(id.clone()),
+                    name:                None,
+                    version:             None,
+                    options:             HashMap::new(),
+                    installs_after:      Vec::new(),
+                    depends_on:          HashMap::new(),
+                    container_env:       HashMap::new(),
+                    on_create_command:   None,
+                    post_create_command: None,
+                    post_start_command:  None,
+                })
             })
             .collect();
 
@@ -779,36 +781,30 @@ mod tests {
         // A depends on B (A installs after B), so B should come first
         let ids = vec!["a".to_string(), "b".to_string()];
         let mut metadata: HashMap<String, FeatureMetadata> = HashMap::new();
-        metadata.insert(
-            "a".to_string(),
-            FeatureMetadata {
-                id: Some("a".to_string()),
-                name: None,
-                version: None,
-                options: HashMap::new(),
-                installs_after: vec!["b".to_string()],
-                depends_on: HashMap::new(),
-                container_env: HashMap::new(),
-                on_create_command: None,
-                post_create_command: None,
-                post_start_command: None,
-            },
-        );
-        metadata.insert(
-            "b".to_string(),
-            FeatureMetadata {
-                id: Some("b".to_string()),
-                name: None,
-                version: None,
-                options: HashMap::new(),
-                installs_after: Vec::new(),
-                depends_on: HashMap::new(),
-                container_env: HashMap::new(),
-                on_create_command: None,
-                post_create_command: None,
-                post_start_command: None,
-            },
-        );
+        metadata.insert("a".to_string(), FeatureMetadata {
+            id:                  Some("a".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      vec!["b".to_string()],
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
+            post_create_command: None,
+            post_start_command:  None,
+        });
+        metadata.insert("b".to_string(), FeatureMetadata {
+            id:                  Some("b".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      Vec::new(),
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
+            post_create_command: None,
+            post_start_command:  None,
+        });
 
         let sorted = topo_sort(&ids, &metadata);
         assert_eq!(sorted, vec!["b", "a"]);
@@ -817,7 +813,8 @@ mod tests {
     #[test]
     fn topo_sort_diamond() {
         // D depends on B and C; B and C depend on A
-        // Expected: A, B, C, D (or A, C, B, D — both valid, but we preserve input order for ties)
+        // Expected: A, B, C, D (or A, C, B, D — both valid, but we preserve input order
+        // for ties)
         let ids = vec![
             "d".to_string(),
             "b".to_string(),
@@ -825,66 +822,54 @@ mod tests {
             "a".to_string(),
         ];
         let mut metadata: HashMap<String, FeatureMetadata> = HashMap::new();
-        metadata.insert(
-            "a".to_string(),
-            FeatureMetadata {
-                id: Some("a".to_string()),
-                name: None,
-                version: None,
-                options: HashMap::new(),
-                installs_after: Vec::new(),
-                depends_on: HashMap::new(),
-                container_env: HashMap::new(),
-                on_create_command: None,
-                post_create_command: None,
-                post_start_command: None,
-            },
-        );
-        metadata.insert(
-            "b".to_string(),
-            FeatureMetadata {
-                id: Some("b".to_string()),
-                name: None,
-                version: None,
-                options: HashMap::new(),
-                installs_after: vec!["a".to_string()],
-                depends_on: HashMap::new(),
-                container_env: HashMap::new(),
-                on_create_command: None,
-                post_create_command: None,
-                post_start_command: None,
-            },
-        );
-        metadata.insert(
-            "c".to_string(),
-            FeatureMetadata {
-                id: Some("c".to_string()),
-                name: None,
-                version: None,
-                options: HashMap::new(),
-                installs_after: vec!["a".to_string()],
-                depends_on: HashMap::new(),
-                container_env: HashMap::new(),
-                on_create_command: None,
-                post_create_command: None,
-                post_start_command: None,
-            },
-        );
-        metadata.insert(
-            "d".to_string(),
-            FeatureMetadata {
-                id: Some("d".to_string()),
-                name: None,
-                version: None,
-                options: HashMap::new(),
-                installs_after: vec!["b".to_string(), "c".to_string()],
-                depends_on: HashMap::new(),
-                container_env: HashMap::new(),
-                on_create_command: None,
-                post_create_command: None,
-                post_start_command: None,
-            },
-        );
+        metadata.insert("a".to_string(), FeatureMetadata {
+            id:                  Some("a".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      Vec::new(),
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
+            post_create_command: None,
+            post_start_command:  None,
+        });
+        metadata.insert("b".to_string(), FeatureMetadata {
+            id:                  Some("b".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      vec!["a".to_string()],
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
+            post_create_command: None,
+            post_start_command:  None,
+        });
+        metadata.insert("c".to_string(), FeatureMetadata {
+            id:                  Some("c".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      vec!["a".to_string()],
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
+            post_create_command: None,
+            post_start_command:  None,
+        });
+        metadata.insert("d".to_string(), FeatureMetadata {
+            id:                  Some("d".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      vec!["b".to_string(), "c".to_string()],
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
+            post_create_command: None,
+            post_start_command:  None,
+        });
 
         let sorted = topo_sort(&ids, &metadata);
         // A must come before B and C; B and C must come before D
@@ -902,25 +887,22 @@ mod tests {
     fn generate_layer_with_options() {
         let options = serde_json::json!({"version": "20"});
         let mut meta_options = HashMap::new();
-        meta_options.insert(
-            "version".to_string(),
-            FeatureOption {
-                option_type: Some("string".to_string()),
-                default: Some(serde_json::Value::String("lts".to_string())),
-                description: Some("Node.js version".to_string()),
-            },
-        );
+        meta_options.insert("version".to_string(), FeatureOption {
+            option_type: Some("string".to_string()),
+            default:     Some(serde_json::Value::String("lts".to_string())),
+            description: Some("Node.js version".to_string()),
+        });
         let metadata = FeatureMetadata {
-            id: Some("node".to_string()),
-            name: Some("Node.js".to_string()),
-            version: Some("1.0.0".to_string()),
-            options: meta_options,
-            installs_after: Vec::new(),
-            depends_on: HashMap::new(),
-            container_env: HashMap::new(),
-            on_create_command: None,
+            id:                  Some("node".to_string()),
+            name:                Some("Node.js".to_string()),
+            version:             Some("1.0.0".to_string()),
+            options:             meta_options,
+            installs_after:      Vec::new(),
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
             post_create_command: None,
-            post_start_command: None,
+            post_start_command:  None,
         };
 
         let snippet = generate_layer(
@@ -949,25 +931,22 @@ mod tests {
     fn generate_layer_with_defaults() {
         let options = serde_json::json!({});
         let mut meta_options = HashMap::new();
-        meta_options.insert(
-            "version".to_string(),
-            FeatureOption {
-                option_type: Some("string".to_string()),
-                default: Some(serde_json::Value::String("lts".to_string())),
-                description: Some("Node.js version".to_string()),
-            },
-        );
+        meta_options.insert("version".to_string(), FeatureOption {
+            option_type: Some("string".to_string()),
+            default:     Some(serde_json::Value::String("lts".to_string())),
+            description: Some("Node.js version".to_string()),
+        });
         let metadata = FeatureMetadata {
-            id: Some("node".to_string()),
-            name: None,
-            version: None,
-            options: meta_options,
-            installs_after: Vec::new(),
-            depends_on: HashMap::new(),
-            container_env: HashMap::new(),
-            on_create_command: None,
+            id:                  Some("node".to_string()),
+            name:                None,
+            version:             None,
+            options:             meta_options,
+            installs_after:      Vec::new(),
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
             post_create_command: None,
-            post_start_command: None,
+            post_start_command:  None,
         };
 
         let snippet = generate_layer(
@@ -996,16 +975,16 @@ mod tests {
     fn generate_layer_no_options() {
         let options = serde_json::json!({});
         let metadata = FeatureMetadata {
-            id: Some("common-utils".to_string()),
-            name: None,
-            version: None,
-            options: HashMap::new(),
-            installs_after: Vec::new(),
-            depends_on: HashMap::new(),
-            container_env: HashMap::new(),
-            on_create_command: None,
+            id:                  Some("common-utils".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      Vec::new(),
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
             post_create_command: None,
-            post_start_command: None,
+            post_start_command:  None,
         };
 
         let snippet = generate_layer(
@@ -1036,36 +1015,30 @@ mod tests {
         let mut metadata: HashMap<String, FeatureMetadata> = HashMap::new();
         let mut depends = HashMap::new();
         depends.insert("b".to_string(), serde_json::json!({}));
-        metadata.insert(
-            "a".to_string(),
-            FeatureMetadata {
-                id: Some("a".to_string()),
-                name: None,
-                version: None,
-                options: HashMap::new(),
-                installs_after: Vec::new(),
-                depends_on: depends,
-                container_env: HashMap::new(),
-                on_create_command: None,
-                post_create_command: None,
-                post_start_command: None,
-            },
-        );
-        metadata.insert(
-            "b".to_string(),
-            FeatureMetadata {
-                id: Some("b".to_string()),
-                name: None,
-                version: None,
-                options: HashMap::new(),
-                installs_after: Vec::new(),
-                depends_on: HashMap::new(),
-                container_env: HashMap::new(),
-                on_create_command: None,
-                post_create_command: None,
-                post_start_command: None,
-            },
-        );
+        metadata.insert("a".to_string(), FeatureMetadata {
+            id:                  Some("a".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      Vec::new(),
+            depends_on:          depends,
+            container_env:       HashMap::new(),
+            on_create_command:   None,
+            post_create_command: None,
+            post_start_command:  None,
+        });
+        metadata.insert("b".to_string(), FeatureMetadata {
+            id:                  Some("b".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      Vec::new(),
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
+            post_create_command: None,
+            post_start_command:  None,
+        });
 
         let sorted = topo_sort(&ids, &metadata);
         assert_eq!(sorted, vec!["b", "a"]);
@@ -1078,36 +1051,30 @@ mod tests {
         let mut metadata: HashMap<String, FeatureMetadata> = HashMap::new();
         let mut depends = HashMap::new();
         depends.insert("b".to_string(), serde_json::json!({}));
-        metadata.insert(
-            "a".to_string(),
-            FeatureMetadata {
-                id: Some("a".to_string()),
-                name: None,
-                version: None,
-                options: HashMap::new(),
-                installs_after: vec!["b".to_string()],
-                depends_on: depends,
-                container_env: HashMap::new(),
-                on_create_command: None,
-                post_create_command: None,
-                post_start_command: None,
-            },
-        );
-        metadata.insert(
-            "b".to_string(),
-            FeatureMetadata {
-                id: Some("b".to_string()),
-                name: None,
-                version: None,
-                options: HashMap::new(),
-                installs_after: Vec::new(),
-                depends_on: HashMap::new(),
-                container_env: HashMap::new(),
-                on_create_command: None,
-                post_create_command: None,
-                post_start_command: None,
-            },
-        );
+        metadata.insert("a".to_string(), FeatureMetadata {
+            id:                  Some("a".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      vec!["b".to_string()],
+            depends_on:          depends,
+            container_env:       HashMap::new(),
+            on_create_command:   None,
+            post_create_command: None,
+            post_start_command:  None,
+        });
+        metadata.insert("b".to_string(), FeatureMetadata {
+            id:                  Some("b".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      Vec::new(),
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
+            post_create_command: None,
+            post_start_command:  None,
+        });
 
         let sorted = topo_sort(&ids, &metadata);
         assert_eq!(sorted, vec!["b", "a"]);
@@ -1117,9 +1084,6 @@ mod tests {
     #[ignore = "requires oras"]
     async fn fetch_feature_oci_integration() {
         if std::env::var_os("FABRO_ENABLE_FETCH_FEATURE_OCI_INTEGRATION").is_none() {
-            eprintln!(
-                "temporarily disabled: fetch_feature_oci_integration depends on live oras/ghcr.io access and is timing out under current nextest ignored-test settings; returning early until the root cause is addressed"
-            );
             return;
         }
 
@@ -1152,41 +1116,42 @@ mod tests {
 
     #[test]
     fn feature_container_env_collected() {
-        // Simulate what resolve_features does: collect container_env from metadata in sort order
+        // Simulate what resolve_features does: collect container_env from metadata in
+        // sort order
         let mut resolved = ResolvedFeatures::default();
 
         let meta_a = FeatureMetadata {
-            id: Some("a".to_string()),
-            name: None,
-            version: None,
-            options: HashMap::new(),
-            installs_after: Vec::new(),
-            depends_on: HashMap::new(),
-            container_env: {
+            id:                  Some("a".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      Vec::new(),
+            depends_on:          HashMap::new(),
+            container_env:       {
                 let mut env = HashMap::new();
                 env.insert("FOO".to_string(), "from_a".to_string());
                 env.insert("BAR".to_string(), "from_a".to_string());
                 env
             },
-            on_create_command: None,
+            on_create_command:   None,
             post_create_command: None,
-            post_start_command: None,
+            post_start_command:  None,
         };
         let meta_b = FeatureMetadata {
-            id: Some("b".to_string()),
-            name: None,
-            version: None,
-            options: HashMap::new(),
-            installs_after: Vec::new(),
-            depends_on: HashMap::new(),
-            container_env: {
+            id:                  Some("b".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      Vec::new(),
+            depends_on:          HashMap::new(),
+            container_env:       {
                 let mut env = HashMap::new();
                 env.insert("FOO".to_string(), "from_b".to_string());
                 env
             },
-            on_create_command: None,
+            on_create_command:   None,
             post_create_command: None,
-            post_start_command: None,
+            post_start_command:  None,
         };
 
         // A is sorted first, then B — B's FOO overrides A's
@@ -1250,25 +1215,22 @@ mod tests {
     fn generate_layer_shorthand_version() {
         let options = serde_json::json!("20");
         let mut meta_options = HashMap::new();
-        meta_options.insert(
-            "version".to_string(),
-            FeatureOption {
-                option_type: Some("string".to_string()),
-                default: Some(serde_json::Value::String("lts".to_string())),
-                description: Some("Node.js version".to_string()),
-            },
-        );
+        meta_options.insert("version".to_string(), FeatureOption {
+            option_type: Some("string".to_string()),
+            default:     Some(serde_json::Value::String("lts".to_string())),
+            description: Some("Node.js version".to_string()),
+        });
         let metadata = FeatureMetadata {
-            id: Some("node".to_string()),
-            name: None,
-            version: None,
-            options: meta_options,
-            installs_after: Vec::new(),
-            depends_on: HashMap::new(),
-            container_env: HashMap::new(),
-            on_create_command: None,
+            id:                  Some("node".to_string()),
+            name:                None,
+            version:             None,
+            options:             meta_options,
+            installs_after:      Vec::new(),
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
             post_create_command: None,
-            post_start_command: None,
+            post_start_command:  None,
         };
 
         let snippet = generate_layer(
@@ -1286,16 +1248,16 @@ mod tests {
     fn generate_layer_install_env_vars() {
         let options = serde_json::json!({});
         let metadata = FeatureMetadata {
-            id: Some("node".to_string()),
-            name: None,
-            version: None,
-            options: HashMap::new(),
-            installs_after: Vec::new(),
-            depends_on: HashMap::new(),
-            container_env: HashMap::new(),
-            on_create_command: None,
+            id:                  Some("node".to_string()),
+            name:                None,
+            version:             None,
+            options:             HashMap::new(),
+            installs_after:      Vec::new(),
+            depends_on:          HashMap::new(),
+            container_env:       HashMap::new(),
+            on_create_command:   None,
             post_create_command: None,
-            post_start_command: None,
+            post_start_command:  None,
         };
 
         let snippet = generate_layer(

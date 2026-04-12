@@ -1,18 +1,19 @@
 use std::fmt::Write;
 
-use fabro_types::settings::server::GitAuthorSettings;
+use fabro_types::settings::InterpString;
+use fabro_types::settings::run::{GitAuthorLayer, GitAuthorSettings};
 
 /// Resolved git author identity for checkpoint commits.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GitAuthor {
-    pub name: String,
+    pub name:  String,
     pub email: String,
 }
 
 impl Default for GitAuthor {
     fn default() -> Self {
         Self {
-            name: "Fabro".into(),
+            name:  "Fabro".into(),
             email: "noreply@fabro.sh".into(),
         }
     }
@@ -23,7 +24,7 @@ impl GitAuthor {
     pub fn from_options(name: Option<String>, email: Option<String>) -> Self {
         let defaults = Self::default();
         Self {
-            name: name.unwrap_or(defaults.name),
+            name:  name.unwrap_or(defaults.name),
             email: email.unwrap_or(defaults.email),
         }
     }
@@ -49,8 +50,20 @@ impl GitAuthor {
     }
 }
 
+impl From<&GitAuthorLayer> for GitAuthor {
+    fn from(value: &GitAuthorLayer) -> Self {
+        Self::from_options(
+            value.name.as_ref().map(InterpString::as_source),
+            value.email.as_ref().map(InterpString::as_source),
+        )
+    }
+}
+
 impl From<&GitAuthorSettings> for GitAuthor {
     fn from(value: &GitAuthorSettings) -> Self {
-        Self::from_options(value.name.clone(), value.email.clone())
+        Self::from_options(
+            value.name.as_ref().map(InterpString::as_source),
+            value.email.as_ref().map(InterpString::as_source),
+        )
     }
 }

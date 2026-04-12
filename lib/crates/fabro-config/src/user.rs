@@ -1,88 +1,66 @@
+//! User config loading.
+//!
+//! Exposes machine-level settings loading plus path helpers for the
+//! `~/.fabro/settings.toml` file. Runtime types that used to be
+//! re-exported from here live in `fabro_types::settings::user` now.
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use anyhow::anyhow;
-use serde::{Deserialize, Serialize};
+use fabro_types::settings::SettingsLayer;
 
-use crate::config::ConfigLayer;
+use crate::Result;
+use crate::home::Home;
+use crate::load::load_settings_path;
 
-pub use fabro_types::settings::user::{
-    ClientTlsSettings, ExecSettings, ExecutionMode, OutputFormat, PermissionLevel, ServerSettings,
-};
-
-pub const USER_CONFIG_FILENAME: &str = "user.toml";
+pub const SETTINGS_CONFIG_FILENAME: &str = "settings.toml";
 pub const LEGACY_USER_CONFIG_FILENAME: &str = "cli.toml";
+pub const LEGACY_OLD_USER_CONFIG_FILENAME: &str = "user.toml";
+pub const LEGACY_SERVER_CONFIG_FILENAME: &str = "server.toml";
+pub const FABRO_CONFIG_ENV: &str = "FABRO_CONFIG";
 
 static WARNED_LEGACY_USER_CONFIGS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct ClientTlsConfig {
-    pub cert: Option<PathBuf>,
-    pub key: Option<PathBuf>,
-    pub ca: Option<PathBuf>,
+pub fn default_settings_path() -> PathBuf {
+    Home::from_env().user_config()
 }
 
-impl TryFrom<ClientTlsConfig> for ClientTlsSettings {
-    type Error = anyhow::Error;
-
-    fn try_from(value: ClientTlsConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
-            cert: value.cert.ok_or_else(|| {
-                anyhow!("server.tls.cert is required when server.tls is configured")
-            })?,
-            key: value.key.ok_or_else(|| {
-                anyhow!("server.tls.key is required when server.tls is configured")
-            })?,
-            ca: value.ca.ok_or_else(|| {
-                anyhow!("server.tls.ca is required when server.tls is configured")
-            })?,
-        })
-    }
+pub fn default_socket_path() -> PathBuf {
+    Home::from_env().root().join("fabro.sock")
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct ServerConfig {
-    pub base_url: Option<String>,
-    pub tls: Option<ClientTlsConfig>,
+pub fn legacy_default_storage_root() -> PathBuf {
+    Home::from_env().root().to_path_buf()
 }
 
-impl TryFrom<ServerConfig> for ServerSettings {
-    type Error = anyhow::Error;
-
-    fn try_from(value: ServerConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
-            base_url: value.base_url,
-            tls: value.tls.map(TryInto::try_into).transpose()?,
-        })
-    }
+pub fn active_settings_path(path: Option<&Path>) -> PathBuf {
+    active_settings_path_with_lookup(path, |name| std::env::var_os(name))
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct ExecConfig {
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub permissions: Option<PermissionLevel>,
-    pub output_format: Option<OutputFormat>,
-}
-
-impl From<ExecConfig> for ExecSettings {
-    fn from(value: ExecConfig) -> Self {
-        Self {
-            provider: value.provider,
-            model: value.model,
-            permissions: value.permissions,
-            output_format: value.output_format,
-        }
-    }
-}
-
-pub fn default_user_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".fabro").join(USER_CONFIG_FILENAME))
+fn active_settings_path_with_lookup(
+    path: Option<&Path>,
+    lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> PathBuf {
+    path.map(Path::to_path_buf)
+        .or_else(|| lookup(FABRO_CONFIG_ENV).map(PathBuf::from))
+        .unwrap_or_else(default_settings_path)
 }
 
 pub fn legacy_user_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".fabro").join(LEGACY_USER_CONFIG_FILENAME))
+    Some(Home::from_env().root().join(LEGACY_USER_CONFIG_FILENAME))
+}
+
+pub fn legacy_old_user_config_path() -> Option<PathBuf> {
+    Some(
+        Home::from_env()
+            .root()
+            .join(LEGACY_OLD_USER_CONFIG_FILENAME),
+    )
+}
+
+pub fn legacy_server_config_path() -> Option<PathBuf> {
+    Some(Home::from_env().root().join(LEGACY_SERVER_CONFIG_FILENAME))
 }
 
 fn warned_legacy_user_configs() -> &'static Mutex<HashSet<PathBuf>> {
@@ -96,18 +74,28 @@ fn should_warn_about_legacy_user_config(path: &Path) -> bool {
         .insert(path.to_path_buf())
 }
 
-/// Load user config from an explicit path or `~/.fabro/user.toml`, returning defaults if the
-/// default file doesn't exist. An explicit path that doesn't exist is an error.
+/// Load settings config from an explicit path or `~/.fabro/settings.toml`,
+/// returning defaults if the default file doesn't exist. An explicit path that
+/// doesn't exist is an error.
 #[allow(clippy::print_stderr)]
-pub fn load_user_config(path: Option<&Path>) -> anyhow::Result<ConfigLayer> {
-    if let Some(explicit) = path {
-        return crate::load_config_file(Some(explicit), USER_CONFIG_FILENAME);
+pub fn load_settings_config(path: Option<&Path>) -> Result<SettingsLayer> {
+    if let Some(explicit) = path
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::var_os(FABRO_CONFIG_ENV).map(PathBuf::from))
+    {
+        return load_v2_layer_from_path(&explicit);
     }
 
-    if let Some(legacy_path) = legacy_user_config_path() {
+    for legacy_path in [
+        legacy_user_config_path(),
+        legacy_old_user_config_path(),
+        legacy_server_config_path(),
+    ]
+    .into_iter()
+    .flatten()
+    {
         if legacy_path.is_file() && should_warn_about_legacy_user_config(&legacy_path) {
-            let target = default_user_config_path()
-                .unwrap_or_else(|| PathBuf::from(format!("~/.fabro/{USER_CONFIG_FILENAME}")));
+            let target = default_settings_path();
             eprintln!(
                 "Warning: ignoring legacy config file {}. Rename it to {}.",
                 legacy_path.display(),
@@ -116,12 +104,26 @@ pub fn load_user_config(path: Option<&Path>) -> anyhow::Result<ConfigLayer> {
         }
     }
 
-    crate::load_config_file(None, USER_CONFIG_FILENAME)
+    let default = Home::from_env().root().join(SETTINGS_CONFIG_FILENAME);
+    if default.is_file() {
+        load_v2_layer_from_path(&default)
+    } else {
+        Ok(SettingsLayer::default())
+    }
+}
+
+fn load_v2_layer_from_path(path: &Path) -> Result<SettingsLayer> {
+    load_settings_path(path)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::should_warn_about_legacy_user_config;
+    use super::{
+        LEGACY_OLD_USER_CONFIG_FILENAME, LEGACY_SERVER_CONFIG_FILENAME,
+        LEGACY_USER_CONFIG_FILENAME, SETTINGS_CONFIG_FILENAME, active_settings_path_with_lookup,
+        default_settings_path, default_socket_path, legacy_old_user_config_path,
+        legacy_server_config_path, legacy_user_config_path, should_warn_about_legacy_user_config,
+    };
 
     #[test]
     fn should_warn_about_legacy_user_config_once_per_path() {
@@ -132,5 +134,53 @@ mod tests {
         assert!(should_warn_about_legacy_user_config(&first));
         assert!(!should_warn_about_legacy_user_config(&first));
         assert!(should_warn_about_legacy_user_config(&second));
+    }
+
+    #[test]
+    fn settings_paths_use_expected_filenames() {
+        let home = dirs::home_dir().unwrap();
+
+        assert_eq!(
+            default_settings_path(),
+            home.join(".fabro").join(SETTINGS_CONFIG_FILENAME)
+        );
+        assert_eq!(default_socket_path(), home.join(".fabro/fabro.sock"));
+        assert_eq!(
+            legacy_user_config_path(),
+            Some(home.join(".fabro").join(LEGACY_USER_CONFIG_FILENAME))
+        );
+        assert_eq!(
+            legacy_old_user_config_path(),
+            Some(home.join(".fabro").join(LEGACY_OLD_USER_CONFIG_FILENAME))
+        );
+        assert_eq!(
+            legacy_server_config_path(),
+            Some(home.join(".fabro").join(LEGACY_SERVER_CONFIG_FILENAME))
+        );
+    }
+
+    #[test]
+    fn should_warn_once_per_legacy_path_even_with_multiple_filenames() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join("user.toml");
+        let server = dir.path().join("server.toml");
+        let cli = dir.path().join("cli.toml");
+
+        assert!(should_warn_about_legacy_user_config(&user));
+        assert!(!should_warn_about_legacy_user_config(&user));
+        assert!(should_warn_about_legacy_user_config(&server));
+        assert!(!should_warn_about_legacy_user_config(&server));
+        assert!(should_warn_about_legacy_user_config(&cli));
+    }
+
+    #[test]
+    fn active_settings_path_honors_fabro_config_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let custom_path = dir.path().join("custom-settings.toml");
+        let custom_os = custom_path.clone().into_os_string();
+        assert_eq!(
+            active_settings_path_with_lookup(None, |_| Some(custom_os.clone())),
+            custom_path,
+        );
     }
 }

@@ -2,12 +2,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandboxRecord {
-    pub provider: String,
-    pub working_directory: String,
+    pub provider:               String,
+    pub working_directory:      String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identifier: Option<String>,
+    pub identifier:             Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_working_directory: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub container_mount_point: Option<String>,
+    pub container_mount_point:  Option<String>,
 }

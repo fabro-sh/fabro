@@ -66,6 +66,36 @@ export function mapRunListItem(item: RunListItem): RunItem {
   };
 }
 
+export interface RunSummaryResponse {
+  run_id: string;
+  goal: string | null;
+  workflow_slug: string | null;
+  workflow_name: string | null;
+  host_repo_path: string | null;
+  status: string | null;
+  status_reason: string | null;
+  pending_control: string | null;
+  duration_ms: number | null;
+  total_usd_micros: number | null;
+  labels: Record<string, string>;
+  start_time: string | null;
+}
+
+export function mapRunSummaryToRunItem(summary: RunSummaryResponse): RunItem {
+  const repoPath = summary.host_repo_path ?? "";
+  const repoName = repoPath.split("/").pop() || "unknown";
+  return {
+    id: summary.run_id,
+    repo: repoName,
+    title: summary.goal ?? "Untitled run",
+    workflow: summary.workflow_slug ?? "unknown",
+    elapsed:
+      summary.duration_ms != null
+        ? formatElapsedSecs(summary.duration_ms / 1000)
+        : undefined,
+  };
+}
+
 export function deriveCiStatus(checks: CheckRun[]): CiStatus {
   if (checks.some((c) => c.status === "failure")) return "failing";
   if (checks.some((c) => c.status === "pending" || c.status === "queued")) return "pending";

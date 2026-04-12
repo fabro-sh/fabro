@@ -1,43 +1,18 @@
-use std::path::Path;
-
-use fabro_config::run::MergeStrategy;
-use fabro_store::RunStore;
-use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
-
-use fabro_github::{self as github_app, GitHubAppCredentials, ssh_url_to_https};
+use fabro_github::{self as github_app, GitHubCredentials, ssh_url_to_https};
 use fabro_graphviz::parser;
 use fabro_llm::generate::{GenerateParams, generate};
-use fabro_retro::RetroExt;
-use fabro_util::text::strip_goal_decoration;
-
-use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
-use crate::outcome::{StageStatus, format_cost as outcome_format_cost};
-use crate::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use fabro_retro::retro::Retro;
-use tokio::fs::read_to_string;
+use fabro_store::RunProjection;
+use fabro_types::PullRequestRecord;
+use fabro_types::settings::run::MergeStrategy;
+use fabro_util::text::strip_goal_decoration;
+use tracing::{debug, info};
 
 use super::types::{Concluded, Finalized, PullRequestOptions};
-
-/// Record of a pull request created for a workflow run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PullRequestRecord {
-    pub html_url: String,
-    pub number: u64,
-    pub owner: String,
-    pub repo: String,
-    pub base_branch: String,
-    pub head_branch: String,
-    pub title: String,
-}
-
-impl PullRequestRecord {
-    pub fn save(&self, path: &Path) -> Result<(), String> {
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("Failed to serialize pull_request.json: {e}"))?;
-        std::fs::write(path, json).map_err(|e| format!("Failed to write pull_request.json: {e}"))
-    }
-}
+use crate::event::{Emitter, Event, RunNoticeLevel};
+use crate::outcome::{StageStatus, format_cost as outcome_format_cost};
+use crate::records::{Conclusion, RunRecord};
+use crate::runtime_store::RunStoreHandle;
 
 /// Derive a PR title from the workflow goal.
 ///
@@ -64,8 +39,10 @@ fn truncate_pr_body(body: &str) -> String {
 }
 
 /// Format an optional cost as `$X.XX` or an en-dash when absent.
-fn format_cost(cost: Option<f64>) -> String {
-    cost.map_or_else(|| "\u{2013}".to_string(), outcome_format_cost)
+fn format_cost(cost_usd_micros: Option<i64>) -> String {
+    cost_usd_micros
+        .map(|value| value as f64 / 1_000_000.0)
+        .map_or_else(|| "\u{2013}".to_string(), outcome_format_cost)
 }
 
 /// Format a duration in milliseconds as a human-readable string.
@@ -80,7 +57,8 @@ fn format_duration_ms(ms: u64) -> String {
 
 /// Format the Retro section of the PR body.
 ///
-/// Renders stats, friction points, and open items. Omits sub-sections when empty.
+/// Renders stats, friction points, and open items. Omits sub-sections when
+/// empty.
 fn format_retro_section(retro: &Retro) -> String {
     let mut parts = Vec::new();
     parts.push("### Retro".to_string());
@@ -138,7 +116,7 @@ fn format_arc_details_section(
 
     // Cost table
     let total_duration = format_duration_ms(conclusion.duration_ms);
-    let total_cost_str = format_cost(conclusion.total_cost);
+    let total_cost_str = format_cost(conclusion.billing.as_ref().and_then(|b| b.total_usd_micros));
     let stage_count = conclusion.stages.len();
     parts.push(format!(
         "<details>\n<summary>Ran {stage_count} {} in {total_duration} for {total_cost_str}</summary>",
@@ -150,7 +128,7 @@ fn format_arc_details_section(
     parts.push("|---|---|---|---|".to_string());
     for stage in &conclusion.stages {
         let dur = format_duration_ms(stage.duration_ms);
-        let cost = format_cost(stage.cost);
+        let cost = format_cost(stage.billing_usd_micros);
         parts.push(format!(
             "| {} | {} | {} | {} |",
             stage.stage_label, dur, cost, stage.retries
@@ -167,9 +145,14 @@ fn format_arc_details_section(
 
     // Workflow graph summary — prefer RunRecord's graph, fall back to DOT parsing
     if let Some(record) = run_record {
-        let graph_name = format!("{}.fabro", record.workflow_name());
-        let node_count = record.node_count();
-        let edge_count = record.edge_count();
+        let workflow_name = if record.graph.name.is_empty() {
+            "unnamed"
+        } else {
+            &record.graph.name
+        };
+        let graph_name = format!("{workflow_name}.fabro");
+        let node_count = record.graph.nodes.len();
+        let edge_count = record.graph.edges.len();
 
         parts.push(String::new());
         parts.push(format!(
@@ -219,46 +202,30 @@ fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
     }
 }
 
-/// Read the workflow graph source from `run_dir/workflow.fabro`.
-/// Falls back to `graph.fabro` / `graph.dot` for older runs.
-fn read_dot_source(run_dir: &Path) -> Option<String> {
-    let workflow_fabro_path = run_dir.join("workflow.fabro");
-    if let Ok(content) = std::fs::read_to_string(&workflow_fabro_path) {
-        debug!(path = %workflow_fabro_path.display(), "Read workflow graph for PR body");
-        return Some(content);
-    }
-
-    let legacy_fabro_path = run_dir.join("graph.fabro");
-    if let Ok(content) = std::fs::read_to_string(&legacy_fabro_path) {
-        debug!(path = %legacy_fabro_path.display(), "Read workflow graph for PR body (legacy)");
-        return Some(content);
-    }
-    let dot_path = run_dir.join("graph.dot");
-    match std::fs::read_to_string(&dot_path) {
-        Ok(content) => {
-            debug!(path = %dot_path.display(), "Read workflow graph for PR body (dot fallback)");
-            Some(content)
-        }
-        Err(_) => None,
-    }
-}
-
-/// Read plan text from the first `nodes/plan*/response.md` found in run_dir.
+/// Read plan text from the first `plan*` node response in run state.
 ///
-/// Entries are sorted alphabetically so `plan` is preferred over `planning`.
-fn read_plan_text(run_dir: &Path) -> Option<String> {
-    let nodes_dir = run_dir.join("nodes");
-    let mut entries: Vec<_> = std::fs::read_dir(&nodes_dir).ok()?.flatten().collect();
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-    for entry in entries {
-        let dir_name = entry.file_name();
-        let dir_name_str = dir_name.to_string_lossy();
-        if dir_name_str.starts_with("plan") && entry.file_type().is_ok_and(|ft| ft.is_dir()) {
-            let response_path = entry.path().join("response.md");
-            if let Ok(content) = std::fs::read_to_string(&response_path) {
-                debug!(node_dir = %dir_name_str, "Found plan node response for PR body");
-                return Some(content);
-            }
+/// Nodes are sorted alphabetically so `plan` is preferred over `planning`.
+/// For repeated visits, earlier visits sort first to match the prior on-disk
+/// directory scan behavior.
+fn read_plan_text(state: &RunProjection) -> Option<String> {
+    let mut plan_nodes = state
+        .iter_nodes()
+        .filter_map(|(stage_id, node)| {
+            stage_id.node_id().starts_with("plan").then_some((
+                stage_id.node_id(),
+                stage_id.visit(),
+                node.response.as_deref(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    plan_nodes.sort_by(|left, right| left.0.cmp(right.0).then(left.1.cmp(&right.1)));
+    for (node_id, visit, response) in plan_nodes {
+        if let Some(response) = response {
+            debug!(
+                node_id,
+                visit, "Found plan node response for PR body from run state"
+            );
+            return Some(response.to_string());
         }
     }
     None
@@ -304,16 +271,28 @@ fn assemble_pr_body(
 }
 
 fn emit_run_notice(
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     level: RunNoticeLevel,
     code: impl Into<String>,
     message: impl Into<String>,
 ) {
-    emitter.emit(&WorkflowRunEvent::RunNotice {
+    emitter.emit(&Event::RunNotice {
         level,
         code: code.into(),
         message: message.into(),
     });
+}
+
+async fn load_pull_request_diff(run_store: &RunStoreHandle) -> String {
+    run_store
+        .state()
+        .await
+        .inspect_err(|err| {
+            tracing::warn!(error = %err, "Failed to load final patch from store for PR");
+        })
+        .ok()
+        .and_then(|state| state.final_patch)
+        .unwrap_or_default()
 }
 
 /// Build a complete PR body by combining LLM-generated narrative with
@@ -322,66 +301,37 @@ pub async fn build_pr_body(
     diff: &str,
     goal: &str,
     model: &str,
-    run_store: Option<&dyn RunStore>,
-    run_dir: &Path,
+    run_store: &RunStoreHandle,
     conclusion: Option<&Conclusion>,
 ) -> Result<String, String> {
     debug!("Building PR body");
 
-    let plan_text = read_plan_text(run_dir);
     let loaded_conclusion = if conclusion.is_none() {
-        match run_store {
-            Some(run_store) => run_store
-                .get_conclusion()
-                .await
-                .inspect_err(|err| {
-                    tracing::warn!(error = %err, "Failed to load conclusion from store for PR body");
-                })
-                .ok()
-                .flatten()
-                .or_else(|| Conclusion::load(&run_dir.join("conclusion.json")).ok()),
-            None => Conclusion::load(&run_dir.join("conclusion.json")).ok(),
-        }
+        run_store
+            .state()
+            .await
+            .inspect_err(|err| {
+                tracing::warn!(error = %err, "Failed to load conclusion from store for PR body");
+            })
+            .ok()
+            .and_then(|state| state.conclusion)
     } else {
         None
     };
     let conclusion = conclusion.or(loaded_conclusion.as_ref());
-    let retro = match run_store {
-        Some(run_store) => run_store
-            .get_retro()
-            .await
-            .inspect_err(|err| {
-                tracing::warn!(error = %err, "Failed to load retro from store for PR body");
-            })
-            .ok()
-            .flatten()
-            .or_else(|| Retro::load(run_dir).ok()),
-        None => Retro::load(run_dir).ok(),
-    };
-    let run_record = match run_store {
-        Some(run_store) => run_store
-            .get_run()
-            .await
-            .inspect_err(|err| {
-                tracing::warn!(error = %err, "Failed to load run record from store for PR body");
-            })
-            .ok()
-            .flatten()
-            .or_else(|| RunRecord::load(run_dir).ok()),
-        None => RunRecord::load(run_dir).ok(),
-    };
-    let dot_source = match run_store {
-        Some(run_store) => run_store
-            .get_graph()
-            .await
-            .inspect_err(|err| {
-                tracing::warn!(error = %err, "Failed to load graph from store for PR body");
-            })
-            .ok()
-            .flatten()
-            .or_else(|| read_dot_source(run_dir)),
-        None => read_dot_source(run_dir),
-    };
+    let run_state = run_store
+        .state()
+        .await
+        .inspect_err(|err| {
+            tracing::warn!(error = %err, "Failed to load run state from store for PR body");
+        })
+        .ok();
+    let plan_text = run_state.as_ref().and_then(read_plan_text);
+    let retro = run_state.as_ref().and_then(|state| state.retro.clone());
+    let run_record = run_state.as_ref().and_then(|state| state.run.clone());
+    let dot_source = run_state
+        .as_ref()
+        .and_then(|state| state.graph_source.clone());
 
     // Build LLM prompt
     let system = if plan_text.is_some() {
@@ -450,7 +400,7 @@ pub struct AutoMergeOptions {
 /// the diff was empty, or `Err` on failure.
 #[allow(clippy::too_many_arguments)]
 pub async fn maybe_open_pull_request(
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     origin_url: &str,
     base_branch: &str,
     head_branch: &str,
@@ -459,8 +409,7 @@ pub async fn maybe_open_pull_request(
     model: &str,
     draft: bool,
     auto_merge: Option<AutoMergeOptions>,
-    run_store: Option<&dyn RunStore>,
-    run_dir: &Path,
+    run_store: &RunStoreHandle,
     conclusion: Option<&Conclusion>,
 ) -> Result<Option<PullRequestRecord>, String> {
     if diff.is_empty() {
@@ -471,7 +420,7 @@ pub async fn maybe_open_pull_request(
     let https_url = ssh_url_to_https(origin_url);
     let (owner, repo) = github_app::parse_github_owner_repo(&https_url)?;
 
-    let body = build_pr_body(diff, goal, model, run_store, run_dir, conclusion).await?;
+    let body = build_pr_body(diff, goal, model, run_store, conclusion).await?;
     let body = truncate_pr_body(&body);
 
     let title = pr_title_from_goal(goal);
@@ -520,7 +469,7 @@ pub async fn maybe_open_pull_request(
         }
     }
 
-    Ok(Some(PullRequestRecord {
+    let record = PullRequestRecord {
         html_url: created.html_url,
         number: created.number,
         owner,
@@ -528,12 +477,15 @@ pub async fn maybe_open_pull_request(
         base_branch: base_branch.to_string(),
         head_branch: head_branch.to_string(),
         title,
-    }))
+    };
+
+    Ok(Some(record))
 }
 
 /// PULL_REQUEST phase: optionally create a pull request after finalize.
 ///
-/// This stage is infallible: failures are emitted and logged, but the pipeline completes.
+/// This stage is infallible: failures are emitted and logged, but the pipeline
+/// completes.
 pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) -> Finalized {
     let Concluded {
         run_id,
@@ -556,9 +508,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                 result.status,
                 StageStatus::Success | StageStatus::PartialSuccess
             ) {
-                let diff = read_to_string(options.run_dir.join("final.patch"))
-                    .await
-                    .unwrap_or_default();
+                let diff = load_pull_request_diff(&options.run_store).await;
                 if let (Some(base_branch), Some(run_branch), Some(creds), Some(origin)) = (
                     &run_options.base_branch,
                     pushed_branch.as_deref(),
@@ -583,27 +533,27 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                         &options.model,
                         pr_cfg.draft,
                         auto_merge,
-                        options.run_store.as_deref(),
-                        &options.run_dir,
+                        &options.run_store,
                         Some(&conclusion),
                     )
                     .await
                     {
                         Ok(Some(record)) => {
-                            emitter.emit(&WorkflowRunEvent::PullRequestCreated {
-                                pr_url: record.html_url.clone(),
-                                pr_number: record.number,
-                                draft: pr_cfg.draft,
+                            emitter.emit(&Event::PullRequestCreated {
+                                pr_url:      record.html_url.clone(),
+                                pr_number:   record.number,
+                                owner:       record.owner.clone(),
+                                repo:        record.repo.clone(),
+                                base_branch: record.base_branch.clone(),
+                                head_branch: record.head_branch.clone(),
+                                title:       record.title.clone(),
+                                draft:       pr_cfg.draft,
                             });
                             pr_url = Some(record.html_url.clone());
-                            if let Err(e) = record.save(&options.run_dir.join("pull_request.json"))
-                            {
-                                tracing::warn!(error = %e, "Failed to save pull_request.json");
-                            }
                         }
                         Ok(None) => {}
                         Err(e) => {
-                            emitter.emit(&WorkflowRunEvent::PullRequestFailed { error: e.clone() });
+                            emitter.emit(&Event::PullRequestFailed { error: e.clone() });
                             emit_run_notice(
                                 &emitter,
                                 RunNoticeLevel::Warn,
@@ -629,21 +579,28 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::PathBuf;
     use std::sync::{Arc, Once};
+    use std::time::Duration;
 
-    use super::*;
-    use crate::records::StageSummary;
     use chrono::Utc;
+    use fabro_graphviz::graph::Graph;
     use fabro_llm::client::Client;
-    use fabro_llm::error::SdkError;
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
-    use fabro_llm::set_default_client;
-    use fabro_llm::types::{FinishReason, Message, Request, Response, StreamEvent, Usage};
+    use fabro_llm::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
+    use fabro_llm::{Error as LlmError, set_default_client};
     use fabro_retro::retro::{
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
-    use fabro_types::fixtures;
+    use fabro_store::Database;
+    use fabro_types::settings::SettingsLayer;
+    use fabro_types::{BilledTokenCounts, RunRecord, fixtures};
     use futures::stream;
+    use object_store::memory::InMemory;
+
+    use super::*;
+    use crate::event::{Event, append_event};
+    use crate::records::StageSummary;
 
     struct MockProvider {
         response_text: String,
@@ -663,57 +620,62 @@ mod tests {
             "mock"
         }
 
-        async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
+        async fn complete(&self, _request: &Request) -> Result<Response, LlmError> {
             Ok(Response {
-                id: "resp_1".into(),
-                model: "mock-model".into(),
-                provider: "mock".into(),
-                message: Message::assistant(&self.response_text),
+                id:            "resp_1".into(),
+                model:         "mock-model".into(),
+                provider:      "mock".into(),
+                message:       Message::assistant(&self.response_text),
                 finish_reason: FinishReason::Stop,
-                usage: Usage {
+                usage:         TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
-                    total_tokens: 30,
                     ..Default::default()
                 },
-                raw: None,
-                warnings: vec![],
-                rate_limit: None,
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
             })
         }
 
-        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
             let text = self.response_text.clone();
             let events = vec![
                 Ok(StreamEvent::text_delta(&text, Some("t1".into()))),
                 Ok(StreamEvent::finish(
                     FinishReason::Stop,
-                    Usage {
+                    TokenCounts {
                         input_tokens: 10,
                         output_tokens: 20,
-                        total_tokens: 30,
                         ..Default::default()
                     },
                     Response {
-                        id: "resp_1".into(),
-                        model: "mock-model".into(),
-                        provider: "mock".into(),
-                        message: Message::assistant(&text),
+                        id:            "resp_1".into(),
+                        model:         "mock-model".into(),
+                        provider:      "mock".into(),
+                        message:       Message::assistant(&text),
                         finish_reason: FinishReason::Stop,
-                        usage: Usage {
+                        usage:         TokenCounts {
                             input_tokens: 10,
                             output_tokens: 20,
-                            total_tokens: 30,
                             ..Default::default()
                         },
-                        raw: None,
-                        warnings: vec![],
-                        rate_limit: None,
+                        raw:           None,
+                        warnings:      vec![],
+                        rate_limit:    None,
                     },
                 )),
             ];
             Ok(Box::pin(stream::iter(events)))
         }
+    }
+
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     fn install_mock_llm() {
@@ -731,112 +693,109 @@ mod tests {
 
     fn make_test_conclusion() -> Conclusion {
         Conclusion {
-            timestamp: Utc::now(),
-            status: crate::outcome::StageStatus::Success,
-            duration_ms: 150_000,
-            failure_reason: None,
+            timestamp:            Utc::now(),
+            status:               crate::outcome::StageStatus::Success,
+            duration_ms:          150_000,
+            failure_reason:       None,
             final_git_commit_sha: None,
-            stages: vec![
+            stages:               vec![
                 StageSummary {
-                    stage_id: "plan".to_string(),
-                    stage_label: "plan".to_string(),
-                    duration_ms: 45_000,
-                    cost: Some(0.12),
-                    retries: 0,
+                    stage_id:           "plan".to_string(),
+                    stage_label:        "plan".to_string(),
+                    duration_ms:        45_000,
+                    billing_usd_micros: Some(120_000),
+                    retries:            0,
                 },
                 StageSummary {
-                    stage_id: "implement".to_string(),
-                    stage_label: "implement".to_string(),
-                    duration_ms: 90_000,
-                    cost: Some(0.25),
-                    retries: 0,
+                    stage_id:           "implement".to_string(),
+                    stage_label:        "implement".to_string(),
+                    duration_ms:        90_000,
+                    billing_usd_micros: Some(250_000),
+                    retries:            0,
                 },
                 StageSummary {
-                    stage_id: "simplify".to_string(),
-                    stage_label: "simplify".to_string(),
-                    duration_ms: 15_000,
-                    cost: Some(0.05),
-                    retries: 0,
+                    stage_id:           "simplify".to_string(),
+                    stage_label:        "simplify".to_string(),
+                    duration_ms:        15_000,
+                    billing_usd_micros: Some(50_000),
+                    retries:            0,
                 },
             ],
-            total_cost: Some(0.42),
-            total_retries: 0,
-            total_input_tokens: 0,
-            total_output_tokens: 0,
-            total_cache_read_tokens: 0,
-            total_cache_write_tokens: 0,
-            total_reasoning_tokens: 0,
-            has_pricing: true,
+            billing:              Some(BilledTokenCounts {
+                total_usd_micros: Some(420_000),
+                ..BilledTokenCounts::default()
+            }),
+            total_retries:        0,
         }
     }
 
     fn make_test_retro() -> Retro {
         Retro {
-            run_id: fixtures::RUN_1,
-            workflow_name: "implement".to_string(),
-            goal: "Fix the bug".to_string(),
-            timestamp: Utc::now(),
-            smoothness: None,
-            stages: vec![
+            run_id:          fixtures::RUN_1,
+            workflow_name:   "implement".to_string(),
+            goal:            "Fix the bug".to_string(),
+            timestamp:       Utc::now(),
+            smoothness:      None,
+            stages:          vec![
                 StageRetro {
-                    stage_id: "plan".to_string(),
-                    stage_label: "plan".to_string(),
-                    status: "success".to_string(),
-                    duration_ms: 45_000,
-                    retries: 0,
-                    cost: Some(0.12),
-                    notes: None,
-                    failure_reason: None,
-                    files_touched: vec![],
+                    stage_id:           "plan".to_string(),
+                    stage_label:        "plan".to_string(),
+                    status:             "success".to_string(),
+                    duration_ms:        45_000,
+                    retries:            0,
+                    billing_usd_micros: Some(120_000),
+                    notes:              None,
+                    failure_reason:     None,
+                    files_touched:      vec![],
                 },
                 StageRetro {
-                    stage_id: "implement".to_string(),
-                    stage_label: "implement".to_string(),
-                    status: "success".to_string(),
-                    duration_ms: 90_000,
-                    retries: 0,
-                    cost: Some(0.25),
-                    notes: None,
-                    failure_reason: None,
-                    files_touched: vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
+                    stage_id:           "implement".to_string(),
+                    stage_label:        "implement".to_string(),
+                    status:             "success".to_string(),
+                    duration_ms:        90_000,
+                    retries:            0,
+                    billing_usd_micros: Some(250_000),
+                    notes:              None,
+                    failure_reason:     None,
+                    files_touched:      vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
                 },
                 StageRetro {
-                    stage_id: "simplify".to_string(),
-                    stage_label: "simplify".to_string(),
-                    status: "success".to_string(),
-                    duration_ms: 15_000,
-                    retries: 0,
-                    cost: Some(0.05),
-                    notes: None,
-                    failure_reason: None,
-                    files_touched: vec![],
+                    stage_id:           "simplify".to_string(),
+                    stage_label:        "simplify".to_string(),
+                    status:             "success".to_string(),
+                    duration_ms:        15_000,
+                    retries:            0,
+                    billing_usd_micros: Some(50_000),
+                    notes:              None,
+                    failure_reason:     None,
+                    files_touched:      vec![],
                 },
             ],
-            stats: AggregateStats {
-                total_duration_ms: 150_000,
-                total_cost: Some(0.42),
-                total_retries: 0,
-                files_touched: vec!["src/lib.rs".to_string(), "src/main.rs".to_string()],
-                stages_completed: 3,
-                stages_failed: 0,
+            stats:           AggregateStats {
+                total_duration_ms:        150_000,
+                total_billing_usd_micros: Some(420_000),
+                total_retries:            0,
+                files_touched:            vec!["src/lib.rs".to_string(), "src/main.rs".to_string()],
+                stages_completed:         3,
+                stages_failed:            0,
             },
-            intent: None,
-            outcome: None,
-            learnings: None,
+            intent:          None,
+            outcome:         None,
+            learnings:       None,
             friction_points: Some(vec![
                 FrictionPoint {
-                    kind: FrictionKind::ToolFailure,
+                    kind:        FrictionKind::ToolFailure,
                     description: "Daytona sandbox didn't have cargo on PATH".to_string(),
-                    stage_id: None,
+                    stage_id:    None,
                 },
                 FrictionPoint {
-                    kind: FrictionKind::Timeout,
+                    kind:        FrictionKind::Timeout,
                     description: "Proxy timeouts during cold compilations".to_string(),
-                    stage_id: None,
+                    stage_id:    None,
                 },
             ]),
-            open_items: Some(vec![OpenItem {
-                kind: OpenItemKind::TechDebt,
+            open_items:      Some(vec![OpenItem {
+                kind:        OpenItemKind::TechDebt,
                 description: "`ToolApprovalFn` type alias still exists".to_string(),
             }]),
         }
@@ -875,25 +834,25 @@ mod tests {
     #[test]
     fn format_retro_section_empty_stats() {
         let retro = Retro {
-            run_id: fixtures::RUN_2,
-            workflow_name: "test".to_string(),
-            goal: "test".to_string(),
-            timestamp: Utc::now(),
-            smoothness: None,
-            stages: vec![],
-            stats: AggregateStats {
-                total_duration_ms: 0,
-                total_cost: None,
-                total_retries: 0,
-                files_touched: vec![],
-                stages_completed: 0,
-                stages_failed: 0,
+            run_id:          fixtures::RUN_2,
+            workflow_name:   "test".to_string(),
+            goal:            "test".to_string(),
+            timestamp:       Utc::now(),
+            smoothness:      None,
+            stages:          vec![],
+            stats:           AggregateStats {
+                total_duration_ms:        0,
+                total_billing_usd_micros: None,
+                total_retries:            0,
+                files_touched:            vec![],
+                stages_completed:         0,
+                stages_failed:            0,
             },
-            intent: None,
-            outcome: None,
-            learnings: None,
+            intent:          None,
+            outcome:         None,
+            learnings:       None,
             friction_points: None,
-            open_items: None,
+            open_items:      None,
         };
         let section = format_retro_section(&retro);
 
@@ -920,9 +879,9 @@ mod tests {
     fn format_arc_details_no_cost() {
         let mut conclusion = make_test_conclusion();
         for stage in &mut conclusion.stages {
-            stage.cost = None;
+            stage.billing_usd_micros = None;
         }
-        conclusion.total_cost = None;
+        conclusion.billing = None;
         let section = format_arc_details_section(&conclusion, None, None);
 
         // En-dash for missing costs
@@ -946,40 +905,72 @@ mod tests {
 
     #[test]
     fn read_plan_text_found() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plan_dir = tmp.path().join("nodes").join("plan");
-        std::fs::create_dir_all(&plan_dir).unwrap();
-        std::fs::write(plan_dir.join("response.md"), "This is the plan").unwrap();
+        let mut state = RunProjection::default();
+        state.set_node(
+            fabro_store::StageId::new("plan", 1),
+            fabro_store::NodeState {
+                response: Some("This is the plan".to_string()),
+                ..Default::default()
+            },
+        );
 
-        let result = read_plan_text(tmp.path());
+        let result = read_plan_text(&state);
         assert_eq!(result, Some("This is the plan".to_string()));
     }
 
     #[test]
     fn read_plan_text_prefix_match() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plan_dir = tmp.path().join("nodes").join("planning");
-        std::fs::create_dir_all(&plan_dir).unwrap();
-        std::fs::write(plan_dir.join("response.md"), "Planning content").unwrap();
+        let mut state = RunProjection::default();
+        state.set_node(
+            fabro_store::StageId::new("planning", 1),
+            fabro_store::NodeState {
+                response: Some("Planning content".to_string()),
+                ..Default::default()
+            },
+        );
 
-        let result = read_plan_text(tmp.path());
+        let result = read_plan_text(&state);
         assert_eq!(result, Some("Planning content".to_string()));
     }
 
     #[test]
-    fn read_plan_text_not_found() {
-        let tmp = tempfile::tempdir().unwrap();
-        let nodes_dir = tmp.path().join("nodes").join("implement");
-        std::fs::create_dir_all(nodes_dir).unwrap();
+    fn read_plan_text_prefers_alphabetically_first_plan_node() {
+        let mut state = RunProjection::default();
+        state.set_node(
+            fabro_store::StageId::new("planning", 1),
+            fabro_store::NodeState {
+                response: Some("Planning content".to_string()),
+                ..Default::default()
+            },
+        );
+        state.set_node(
+            fabro_store::StageId::new("plan", 1),
+            fabro_store::NodeState {
+                response: Some("Plan content".to_string()),
+                ..Default::default()
+            },
+        );
 
-        let result = read_plan_text(tmp.path());
+        let result = read_plan_text(&state);
+        assert_eq!(result, Some("Plan content".to_string()));
+    }
+
+    #[test]
+    fn read_plan_text_not_found() {
+        let mut state = RunProjection::default();
+        state.set_node(
+            fabro_store::StageId::new("implement", 1),
+            fabro_store::NodeState::default(),
+        );
+
+        let result = read_plan_text(&state);
         assert_eq!(result, None);
     }
 
     #[test]
-    fn read_plan_text_no_nodes_dir() {
-        let tmp = tempfile::tempdir().unwrap();
-        let result = read_plan_text(tmp.path());
+    fn read_plan_text_empty_state() {
+        let state = RunProjection::default();
+        let result = read_plan_text(&state);
         assert_eq!(result, None);
     }
 
@@ -1065,14 +1056,14 @@ mod tests {
     async fn build_pr_body_uses_in_memory_conclusion() {
         install_mock_llm();
 
-        let tmp = tempfile::tempdir().unwrap();
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let conclusion = make_test_conclusion();
         let body = build_pr_body(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
-            None,
-            tmp.path(),
+            &run_store.clone().into(),
             Some(&conclusion),
         )
         .await
@@ -1082,6 +1073,150 @@ mod tests {
         assert!(body.contains("### Fabro Details"));
         assert!(body.contains("Ran 3 stages in 2m 30s for $0.42"));
         assert!(body.contains("| **Total** | **2m 30s** | **$0.42** | **0** |"));
+    }
+
+    #[tokio::test]
+    async fn build_pr_body_uses_store_records_without_legacy_files() {
+        install_mock_llm();
+
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+
+        let run_record = RunRecord {
+            run_id:            fixtures::RUN_1,
+            settings:          SettingsLayer::default(),
+            graph:             Graph::new("test"),
+            workflow_slug:     Some("test".to_string()),
+            working_directory: PathBuf::from("/tmp/project"),
+            host_repo_path:    Some("/tmp/project".to_string()),
+            repo_origin_url:   None,
+            base_branch:       Some("main".to_string()),
+            labels:            HashMap::new(),
+            provenance:        None,
+            manifest_blob:     None,
+            definition_blob:   None,
+        };
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
+            run_id:            fixtures::RUN_1,
+            settings:          serde_json::to_value(&run_record.settings).unwrap(),
+            graph:             serde_json::to_value(&run_record.graph).unwrap(),
+            workflow_source:   Some("digraph test { plan -> code }".to_string()),
+            workflow_config:   None,
+            labels:            run_record.labels.clone().into_iter().collect(),
+            run_dir:           run_record.working_directory.display().to_string(),
+            working_directory: run_record.working_directory.display().to_string(),
+            host_repo_path:    run_record.host_repo_path.clone(),
+            repo_origin_url:   run_record.repo_origin_url.clone(),
+            base_branch:       run_record.base_branch.clone(),
+            workflow_slug:     run_record.workflow_slug.clone(),
+            db_prefix:         None,
+            provenance:        run_record.provenance.clone(),
+            manifest_blob:     None,
+        })
+        .await
+        .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::RetroCompleted {
+            duration_ms: 1,
+            response:    Some(String::new()),
+            retro:       Some(serde_json::to_value(make_test_retro()).unwrap()),
+        })
+        .await
+        .unwrap();
+
+        let conclusion = make_test_conclusion();
+        let body = build_pr_body(
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
+            "Implement feature",
+            "mock-model",
+            &run_store.clone().into(),
+            Some(&conclusion),
+        )
+        .await
+        .unwrap();
+
+        assert!(body.contains("Narrative from mock."));
+        assert!(body.contains("### Retro"));
+        assert!(body.contains("### Fabro Details"));
+        assert!(body.contains("test.fabro"));
+    }
+
+    #[tokio::test]
+    async fn build_pr_body_uses_plan_text_from_store_without_response_md() {
+        install_mock_llm();
+
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+
+        let run_record = RunRecord {
+            run_id:            fixtures::RUN_1,
+            settings:          SettingsLayer::default(),
+            graph:             Graph::new("test"),
+            workflow_slug:     Some("test".to_string()),
+            working_directory: PathBuf::from("/tmp/project"),
+            host_repo_path:    Some("/tmp/project".to_string()),
+            repo_origin_url:   None,
+            base_branch:       Some("main".to_string()),
+            labels:            HashMap::new(),
+            provenance:        None,
+            manifest_blob:     None,
+            definition_blob:   None,
+        };
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
+            run_id:            fixtures::RUN_1,
+            settings:          serde_json::to_value(&run_record.settings).unwrap(),
+            graph:             serde_json::to_value(&run_record.graph).unwrap(),
+            workflow_source:   Some("digraph test { plan -> code }".to_string()),
+            workflow_config:   None,
+            labels:            run_record.labels.clone().into_iter().collect(),
+            run_dir:           run_record.working_directory.display().to_string(),
+            working_directory: run_record.working_directory.display().to_string(),
+            host_repo_path:    run_record.host_repo_path.clone(),
+            repo_origin_url:   run_record.repo_origin_url.clone(),
+            base_branch:       run_record.base_branch.clone(),
+            workflow_slug:     run_record.workflow_slug.clone(),
+            db_prefix:         None,
+            provenance:        run_record.provenance.clone(),
+            manifest_blob:     None,
+        })
+        .await
+        .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::StageCompleted {
+            node_id: "plan".to_string(),
+            name: "plan".to_string(),
+            index: 0,
+            duration_ms: 1,
+            status: "success".to_string(),
+            preferred_label: None,
+            suggested_next_ids: vec![],
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: vec![],
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: Some("Plan from store".to_string()),
+            attempt: 1,
+            max_attempts: 1,
+        })
+        .await
+        .unwrap();
+
+        let body = build_pr_body(
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
+            "Implement feature",
+            "mock-model",
+            &run_store.clone().into(),
+            Some(&make_test_conclusion()),
+        )
+        .await
+        .unwrap();
+
+        assert!(body.contains("<summary>Full plan</summary>"));
+        assert!(body.contains("Plan from store"));
     }
 
     // ── parse_dot_summary tests ─────────────────────────────────────────
@@ -1122,39 +1257,6 @@ mod tests {
     #[test]
     fn format_duration_zero() {
         assert_eq!(format_duration_ms(0), "0s");
-    }
-
-    // ── read_dot_source tests ───────────────────────────────────────────
-
-    #[test]
-    fn read_dot_source_found() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("workflow.fabro"), "digraph test {}").unwrap();
-        let result = read_dot_source(tmp.path());
-        assert_eq!(result, Some("digraph test {}".to_string()));
-    }
-
-    #[test]
-    fn read_dot_source_legacy_fabro_fallback() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("graph.fabro"), "digraph legacy {}").unwrap();
-        let result = read_dot_source(tmp.path());
-        assert_eq!(result, Some("digraph legacy {}".to_string()));
-    }
-
-    #[test]
-    fn read_dot_source_dot_fallback() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("graph.dot"), "digraph old {}").unwrap();
-        let result = read_dot_source(tmp.path());
-        assert_eq!(result, Some("digraph old {}".to_string()));
-    }
-
-    #[test]
-    fn read_dot_source_not_found() {
-        let tmp = tempfile::tempdir().unwrap();
-        let result = read_dot_source(tmp.path());
-        assert_eq!(result, None);
     }
 
     // ── Existing tests ─────────────────────────────────────────────────
@@ -1232,39 +1334,14 @@ mod tests {
         assert_eq!(pr_title_from_goal("Fix bug"), "Fix bug");
     }
 
-    #[test]
-    fn pull_request_record_save_writes_json() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("pull_request.json");
-        let record = PullRequestRecord {
-            html_url: "https://github.com/owner/repo/pull/42".to_string(),
-            number: 42,
-            owner: "owner".to_string(),
-            repo: "repo".to_string(),
-            base_branch: "main".to_string(),
-            head_branch: "fabro/run/abc".to_string(),
-            title: "Fix the thing".to_string(),
-        };
-        record.save(&path).unwrap();
-
-        let content: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(content["html_url"], "https://github.com/owner/repo/pull/42");
-        assert_eq!(content["number"], 42);
-        assert_eq!(content["owner"], "owner");
-        assert_eq!(content["repo"], "repo");
-        assert_eq!(content["base_branch"], "main");
-        assert_eq!(content["head_branch"], "fabro/run/abc");
-        assert_eq!(content["title"], "Fix the thing");
-    }
-
     #[tokio::test]
     async fn empty_diff_returns_none() {
-        let tmp = tempfile::tempdir().unwrap();
-        let creds = GitHubAppCredentials {
-            app_id: "123".to_string(),
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let creds = GitHubCredentials::App(fabro_github::GitHubAppCredentials {
+            app_id:          "123".to_string(),
             private_key_pem: "unused".to_string(),
-        };
+        });
         let result = maybe_open_pull_request(
             &creds,
             "https://github.com/owner/repo.git",
@@ -1275,12 +1352,69 @@ mod tests {
             "claude-sonnet-4-20250514",
             false,
             None,
-            None,
-            tmp.path(),
+            &run_store.clone().into(),
             None,
         )
         .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn load_pull_request_diff_uses_store_without_disk_patch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let run_record = RunRecord {
+            run_id:            fixtures::RUN_1,
+            settings:          SettingsLayer::default(),
+            graph:             Graph::new("test"),
+            workflow_slug:     None,
+            working_directory: tmp.path().to_path_buf(),
+            host_repo_path:    None,
+            repo_origin_url:   None,
+            base_branch:       None,
+            labels:            std::collections::HashMap::new(),
+            provenance:        None,
+            manifest_blob:     None,
+            definition_blob:   None,
+        };
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
+            run_id:            fixtures::RUN_1,
+            settings:          serde_json::to_value(&run_record.settings).unwrap(),
+            graph:             serde_json::to_value(&run_record.graph).unwrap(),
+            workflow_source:   None,
+            workflow_config:   None,
+            labels:            run_record.labels.clone().into_iter().collect(),
+            run_dir:           run_record.working_directory.display().to_string(),
+            working_directory: tmp.path().display().to_string(),
+            host_repo_path:    None,
+            repo_origin_url:   run_record.repo_origin_url.clone(),
+            base_branch:       None,
+            workflow_slug:     None,
+            db_prefix:         None,
+            provenance:        run_record.provenance.clone(),
+            manifest_blob:     None,
+        })
+        .await
+        .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
+            duration_ms:          1,
+            artifact_count:       0,
+            status:               "success".to_string(),
+            reason:               None,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          Some(
+                "diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n".to_string(),
+            ),
+            billing:              None,
+        })
+        .await
+        .unwrap();
+
+        let diff = load_pull_request_diff(&run_store.clone().into()).await;
+
+        assert!(diff.contains("from_store"));
     }
 }

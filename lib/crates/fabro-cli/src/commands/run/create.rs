@@ -1,34 +1,43 @@
 use std::path::PathBuf;
 
-use crate::args::RunArgs;
-use fabro_config::{ConfigLayer, FabroSettings};
+use fabro_config::Storage;
+use fabro_config::load::load_settings_user;
+use fabro_config::user::active_settings_path;
 use fabro_types::RunId;
+use fabro_types::settings::SettingsLayer;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
-use fabro_workflow::error::FabroError;
-use fabro_workflow::operations::{CreateRunInput, WorkflowInput, create};
 
-use super::output::{print_diagnostics_from_error, print_workflow_report_from_persisted};
+use super::output::{api_diagnostics_to_local, print_preflight_workflow_summary};
+use super::overrides::run_args_layer;
+use crate::args::RunArgs;
+use crate::command_context::CommandContext;
+use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, run_manifest_args};
+use crate::user_config::{self, ServerTarget};
 
-/// Create a workflow run: allocate run directory, persist RunRecord, return (run_id, run_dir).
+pub(crate) struct CreatedRun {
+    pub(crate) run_id:        RunId,
+    pub(crate) local_run_dir: Option<PathBuf>,
+}
+
+/// Create a workflow run: allocate run directory, persist RunRecord, return
+/// (run_id, run_dir).
 ///
 /// This does NOT execute the workflow — it only prepares the run directory.
-pub(crate) fn create_run(
+pub(crate) async fn create_run(
+    ctx: &CommandContext,
     args: &RunArgs,
-    cli_defaults: ConfigLayer,
+    _cli_defaults: SettingsLayer,
     styles: &Styles,
     quiet: bool,
-) -> anyhow::Result<(RunId, PathBuf)> {
+    printer: Printer,
+) -> anyhow::Result<CreatedRun> {
     let workflow_path = args
         .workflow
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
-    let cli_args_config = ConfigLayer::try_from(args)?;
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let settings: FabroSettings = cli_args_config
-        .combine(ConfigLayer::for_workflow(workflow_path, &cwd)?)
-        .combine(cli_defaults)
-        .resolve()?;
-
+    let cli_args_config = run_args_layer(args)?;
+    let cwd = ctx.cwd().to_path_buf();
     let run_id = args
         .run_id
         .as_deref()
@@ -36,33 +45,46 @@ pub(crate) fn create_run(
         .transpose()
         .map_err(|err| anyhow::anyhow!("invalid run ID: {err}"))?;
 
-    let created = match create(CreateRunInput {
-        workflow: WorkflowInput::Path(workflow_path.clone()),
-        settings,
+    let built = build_run_manifest(ManifestBuildInput {
+        workflow: workflow_path.clone(),
         cwd,
-        workflow_slug: None,
-        run_dir: None,
+        args_layer: cli_args_config,
+        args: run_manifest_args(args),
         run_id,
-        base_branch: None,
-        host_repo_path: None,
-    }) {
-        Ok(created) => created,
-        Err(FabroError::ValidationFailed { diagnostics }) => {
-            if !quiet {
-                print_diagnostics_from_error(&diagnostics, styles);
-            }
-            anyhow::bail!("Validation failed");
-        }
-        Err(err) => return Err(err.into()),
-    };
-
+        user_layer: load_settings_user()?,
+        user_settings_path: Some(active_settings_path(None)),
+    })?;
+    let target = user_config::resolve_server_target(&args.target, ctx.machine_settings())?;
+    let client = ctx.server().await?;
     if !quiet {
-        print_workflow_report_from_persisted(
-            &created.persisted,
-            created.dot_path.as_deref(),
-            styles,
-        );
+        let preflight = client.run_preflight(built.manifest.clone()).await?;
+        let diagnostics = api_diagnostics_to_local(&preflight.workflow.diagnostics);
+        if !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
+        {
+            print_preflight_workflow_summary(
+                &preflight.workflow,
+                Some(&built.target_path),
+                styles,
+                printer,
+            );
+        }
     }
 
-    Ok((created.run_id, created.run_dir))
+    let created_run_id = client.create_run_from_manifest(built.manifest).await?;
+    let local_run_dir = match &target {
+        ServerTarget::UnixSocket(_) => Some(
+            Storage::new(user_config::storage_dir(ctx.machine_settings())?)
+                .run_scratch(&created_run_id)
+                .root()
+                .to_path_buf(),
+        ),
+        ServerTarget::HttpUrl { .. } => None,
+    };
+
+    Ok(CreatedRun {
+        run_id: created_run_id,
+        local_run_dir,
+    })
 }

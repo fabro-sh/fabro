@@ -1,15 +1,14 @@
 use async_trait::async_trait;
-use tokio::sync::OnceCell;
-
 use fabro_github::{
-    GitHubAppCredentials, create_installation_access_token_for_projects, sign_app_jwt,
+    GitHubCredentials, create_installation_access_token_for_projects, sign_app_jwt,
 };
+use tokio::sync::OnceCell;
 
 use crate::{Issue, Tracker, execute_graphql_request};
 
 /// Execute a GitHub GraphQL request and return the response JSON.
 async fn execute_github_graphql(
-    client: &reqwest::Client,
+    client: &fabro_http::HttpClient,
     token: &str,
     endpoint: &str,
     query: &str,
@@ -30,19 +29,19 @@ async fn execute_github_graphql(
 ///
 /// Scoped to a single project board identified by `project_number`.
 pub struct GitHubTracker {
-    creds: GitHubAppCredentials,
-    client: reqwest::Client,
-    owner: String,
-    repo: String,
-    project_number: u64,
-    base_url: String,
+    creds:           GitHubCredentials,
+    client:          fabro_http::HttpClient,
+    owner:           String,
+    repo:            String,
+    project_number:  u64,
+    base_url:        String,
     project_node_id: OnceCell<String>,
 }
 
 impl GitHubTracker {
     pub fn new(
-        creds: GitHubAppCredentials,
-        client: reqwest::Client,
+        creds: GitHubCredentials,
+        client: fabro_http::HttpClient,
         owner: String,
         repo: String,
         project_number: u64,
@@ -64,15 +63,20 @@ impl GitHubTracker {
     }
 
     async fn fresh_token(&self) -> Result<String, String> {
-        let jwt = sign_app_jwt(&self.creds.app_id, &self.creds.private_key_pem)?;
-        create_installation_access_token_for_projects(
-            &self.client,
-            &jwt,
-            &self.owner,
-            &self.repo,
-            &self.base_url,
-        )
-        .await
+        match &self.creds {
+            GitHubCredentials::App(creds) => {
+                let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
+                create_installation_access_token_for_projects(
+                    &self.client,
+                    &jwt,
+                    &self.owner,
+                    &self.repo,
+                    &self.base_url,
+                )
+                .await
+            }
+            GitHubCredentials::Token(token) => Ok(token.clone()),
+        }
     }
 
     async fn resolve_project_node_id(&self, token: &str) -> Result<&str, String> {
@@ -202,7 +206,7 @@ fn normalize_github_item(item: &serde_json::Value) -> Option<Issue> {
 
 /// Fetch one page of project items. Returns (items, has_next_page, end_cursor).
 async fn fetch_project_items_page(
-    client: &reqwest::Client,
+    client: &fabro_http::HttpClient,
     token: &str,
     graphql_url: &str,
     project_node_id: &str,
@@ -494,25 +498,16 @@ impl Tracker for GitHubTracker {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use fabro_github::{GitHubAppCredentials, GitHubCredentials};
 
+    use super::*;
     use crate::Issue;
-    use fabro_github::GitHubAppCredentials;
+    fn test_http_client() -> fabro_http::HttpClient {
+        fabro_http::test_http_client().unwrap()
+    }
 
     fn test_rsa_key() -> String {
-        use std::process::Command;
-        let output = Command::new("openssl")
-            .args([
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-            ])
-            .output()
-            .expect("openssl should be available");
-        assert!(output.status.success(), "openssl keygen failed");
-        String::from_utf8(output.stdout).unwrap()
+        include_str!("fixtures/github-app-test-key.pem").to_string()
     }
 
     // -----------------------------------------------------------------------
@@ -535,7 +530,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let result = execute_github_graphql(
             &client,
             "test-token",
@@ -561,7 +556,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = execute_github_graphql(
             &client,
             "bad-token",
@@ -587,7 +582,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = execute_github_graphql(
             &client,
             "token",
@@ -616,7 +611,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         execute_github_graphql(
             &client,
             "my-token",
@@ -636,11 +631,11 @@ mod tests {
 
     fn mock_github_tracker(server_url: &str, pem: String) -> GitHubTracker {
         GitHubTracker::new(
-            GitHubAppCredentials {
-                app_id: "test-app".to_string(),
+            GitHubCredentials::App(GitHubAppCredentials {
+                app_id:          "test-app".to_string(),
                 private_key_pem: pem,
-            },
-            reqwest::Client::new(),
+            }),
+            test_http_client(),
             "owner".to_string(),
             "repo".to_string(),
             1,
@@ -650,20 +645,20 @@ mod tests {
 
     fn make_test_issue(state: &str) -> Issue {
         Issue {
-            id: "I_issue1".to_string(),
+            id:              "I_issue1".to_string(),
             project_item_id: Some("PVTI_item1".to_string()),
-            identifier: "#42".to_string(),
-            title: "Fix bug".to_string(),
-            description: None,
-            priority: None,
-            state: state.to_string(),
-            branch_name: None,
-            url: "https://github.com/owner/repo/issues/42".to_string(),
-            assignee_id: None,
-            labels: vec![],
-            blocked_by: vec![],
-            created_at: None,
-            updated_at: None,
+            identifier:      "#42".to_string(),
+            title:           "Fix bug".to_string(),
+            description:     None,
+            priority:        None,
+            state:           state.to_string(),
+            branch_name:     None,
+            url:             "https://github.com/owner/repo/issues/42".to_string(),
+            assignee_id:     None,
+            labels:          vec![],
+            blocked_by:      vec![],
+            created_at:      None,
+            updated_at:      None,
         }
     }
 
@@ -768,7 +763,6 @@ mod tests {
                 then.status(201).body(r#"{"token": "ghs_test"}"#);
             })
             .await;
-        // Org query returns null → fall back to user
         server
             .mock_async(|when, then| {
                 when.method("POST")
@@ -777,7 +771,6 @@ mod tests {
                 then.status(200).body(r#"{"data": {"organization": null}}"#);
             })
             .await;
-        // User query succeeds
         server
             .mock_async(|when, then| {
                 when.method("POST")
@@ -787,7 +780,6 @@ mod tests {
                     .body(r#"{"data": {"user": {"projectV2": {"id": "PVT_user1"}}}}"#);
             })
             .await;
-        // Items page (empty)
         server
             .mock_async(|when, then| {
                 when.method("POST")
@@ -894,7 +886,6 @@ mod tests {
                 then.status(201).body(r#"{"token": "ghs_test"}"#);
             })
             .await;
-        // Resolve project node ID (org path)
         server
             .mock_async(|when, then| {
                 when.method("POST")
@@ -908,7 +899,6 @@ mod tests {
             when.method("POST").path("/graphql").body_includes("field(name:");
             then.status(200).body(r#"{"data": {"node": {"field": {"id": "FLD_1", "options": [{"id": "opt-done", "name": "Done"}, {"id": "opt-todo", "name": "Todo"}]}}}}"#);
         }).await;
-        // Update mutation
         server.mock_async(|when, then| {
             when.method("POST").path("/graphql").body_includes("updateProjectV2ItemFieldValue");
             then.status(200).body(r#"{"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}}"#);
@@ -937,7 +927,6 @@ mod tests {
                 then.status(201).body(r#"{"token": "ghs_test"}"#);
             })
             .await;
-        // Resolve project node ID
         server
             .mock_async(|when, then| {
                 when.method("POST")
@@ -1208,7 +1197,8 @@ mod tests {
             })
             .await;
 
-        // Request in A, B order — should get back in A, B order despite page returning B, A
+        // Request in A, B order — should get back in A, B order despite page returning
+        // B, A
         let issues = tracker.fetch_issues_by_ids(&["I_a", "I_b"]).await.unwrap();
 
         assert_eq!(issues.len(), 2);

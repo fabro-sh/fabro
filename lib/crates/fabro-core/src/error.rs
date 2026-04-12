@@ -17,13 +17,14 @@ impl fmt::Display for VisitLimitSource {
     }
 }
 
-/// Structured failure data on handler errors. Maps to FabroError's
-/// is_retryable(), failure_class(), failure_signature_hint(), to_fail_outcome().
+/// Structured failure data on handler errors. Maps to workflow error's
+/// is_retryable(), failure_class(), failure_signature_hint(),
+/// to_fail_outcome().
 #[derive(Debug, Clone)]
 pub struct HandlerErrorDetail {
-    pub message: String,
+    pub message:   String,
     pub retryable: bool,
-    pub category: Option<FailureCategory>,
+    pub category:  Option<FailureCategory>,
     pub signature: Option<String>,
 }
 
@@ -34,7 +35,7 @@ impl fmt::Display for HandlerErrorDetail {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum CoreError {
+pub enum Error {
     #[error("node not found: {id}")]
     NodeNotFound { id: String },
     #[error("no start node found in graph")]
@@ -47,9 +48,9 @@ pub enum CoreError {
         "node \"{node_id}\" visited {visits} times ({limit_source} limit {limit}); run is stuck in a cycle"
     )]
     VisitLimitExceeded {
-        node_id: String,
-        visits: usize,
-        limit: usize,
+        node_id:      String,
+        visits:       usize,
+        limit:        usize,
         limit_source: VisitLimitSource,
     },
     #[error("stall timeout on node \"{node_id}\"")]
@@ -60,7 +61,7 @@ pub enum CoreError {
     Other(String),
 }
 
-impl CoreError {
+impl Error {
     pub fn handler(detail: HandlerErrorDetail) -> Self {
         Self::Handler { detail }
     }
@@ -80,8 +81,8 @@ impl CoreError {
             Self::Handler { detail } => Outcome {
                 status: StageStatus::Fail,
                 failure: Some(FailureDetail {
-                    message: detail.message.clone(),
-                    category: detail.category.unwrap_or(FailureCategory::Deterministic),
+                    message:   detail.message.clone(),
+                    category:  detail.category.unwrap_or(FailureCategory::Deterministic),
                     signature: detail.signature.clone(),
                 }),
                 ..Outcome::default()
@@ -91,7 +92,7 @@ impl CoreError {
     }
 }
 
-pub type Result<T> = std::result::Result<T, CoreError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 mod tests {
@@ -100,58 +101,58 @@ mod tests {
     #[test]
     fn core_error_display() {
         assert_eq!(
-            CoreError::NodeNotFound { id: "n1".into() }.to_string(),
+            Error::NodeNotFound { id: "n1".into() }.to_string(),
             "node not found: n1"
         );
         assert_eq!(
-            CoreError::NoStartNode.to_string(),
+            Error::NoStartNode.to_string(),
             "no start node found in graph"
         );
-        assert_eq!(CoreError::Cancelled.to_string(), "run cancelled");
+        assert_eq!(Error::Cancelled.to_string(), "run cancelled");
         assert_eq!(
-            CoreError::Blocked {
-                message: "hook denied".into()
+            Error::Blocked {
+                message: "hook denied".into(),
             }
             .to_string(),
             "blocked: hook denied"
         );
         assert_eq!(
-            CoreError::VisitLimitExceeded {
-                node_id: "n1".into(),
-                visits: 5,
-                limit: 3,
+            Error::VisitLimitExceeded {
+                node_id:      "n1".into(),
+                visits:       5,
+                limit:        3,
                 limit_source: VisitLimitSource::Node,
             }
             .to_string(),
             "node \"n1\" visited 5 times (node limit 3); run is stuck in a cycle"
         );
         assert_eq!(
-            CoreError::StallTimeout {
-                node_id: "work".into()
+            Error::StallTimeout {
+                node_id: "work".into(),
             }
             .to_string(),
             "stall timeout on node \"work\""
         );
         assert_eq!(
-            CoreError::Other("something broke".into()).to_string(),
+            Error::Other("something broke".into()).to_string(),
             "something broke"
         );
     }
 
     #[test]
     fn core_error_handler_is_retryable() {
-        let retryable = CoreError::handler(HandlerErrorDetail {
-            message: "timeout".into(),
+        let retryable = Error::handler(HandlerErrorDetail {
+            message:   "timeout".into(),
             retryable: true,
-            category: None,
+            category:  None,
             signature: None,
         });
         assert!(retryable.is_retryable());
 
-        let not_retryable = CoreError::handler(HandlerErrorDetail {
-            message: "bad input".into(),
+        let not_retryable = Error::handler(HandlerErrorDetail {
+            message:   "bad input".into(),
             retryable: false,
-            category: None,
+            category:  None,
             signature: None,
         });
         assert!(!not_retryable.is_retryable());
@@ -160,10 +161,10 @@ mod tests {
     #[test]
     fn core_error_handler_to_fail_outcome() {
         use crate::outcome::FailureCategory;
-        let err = CoreError::handler(HandlerErrorDetail {
-            message: "api down".into(),
+        let err = Error::handler(HandlerErrorDetail {
+            message:   "api down".into(),
             retryable: true,
-            category: Some(FailureCategory::TransientInfra),
+            category:  Some(FailureCategory::TransientInfra),
             signature: Some("sig123".into()),
         });
         let outcome: Outcome = err.to_fail_outcome();
@@ -176,15 +177,15 @@ mod tests {
 
     #[test]
     fn core_error_non_handler_not_retryable() {
-        assert!(!CoreError::NodeNotFound { id: "x".into() }.is_retryable());
-        assert!(!CoreError::Cancelled.is_retryable());
-        assert!(!CoreError::NoStartNode.is_retryable());
+        assert!(!Error::NodeNotFound { id: "x".into() }.is_retryable());
+        assert!(!Error::Cancelled.is_retryable());
+        assert!(!Error::NoStartNode.is_retryable());
         assert!(
-            !CoreError::Blocked {
-                message: "no".into()
+            !Error::Blocked {
+                message: "no".into(),
             }
             .is_retryable()
         );
-        assert!(!CoreError::Other("err".into()).is_retryable());
+        assert!(!Error::Other("err".into()).is_retryable());
     }
 }

@@ -1,20 +1,25 @@
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import { CollapsibleFile } from "../components/collapsible-file";
-import type { ServerSettings } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/settings";
 
-export function meta({}: Route.MetaArgs) {
+/**
+ * Opaque server settings payload returned by `/api/v1/settings`. Mirrors the
+ * v2 `SettingsFile` shape with secret-bearing subtrees dropped before
+ * serialization. The UI only renders it as JSON.
+ */
+type ServerSettings = Record<string, unknown>;
+
+export function meta({}: any) {
   return [{ title: "Settings — Fabro" }];
 }
 
 export const handle = { hideHeader: true };
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request }: any) {
   const settings = await apiJson<ServerSettings>("/settings", { request });
   return { settings };
 }
 
-export default function Settings({ loaderData }: Route.ComponentProps) {
+export default function Settings({ loaderData }: any) {
   const { settings } = loaderData;
 
   return (

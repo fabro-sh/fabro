@@ -17,14 +17,15 @@ fabro-agent = { path = "../fabro-agent" }
 fabro-config = { path = "../fabro-config" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }
+fabro-template = { path = "../fabro-template" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
+fabro-http.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 regex.workspace = true
-reqwest.workspace = true
 tracing.workspace = true
 tokio-util.workspace = true
 

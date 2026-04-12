@@ -1,116 +1,157 @@
 ---
 title: "Server Configuration"
-description: "Server config file, CLI overrides, and environment variables"
+description: "Server-owned settings.toml sections, CLI overrides, and environment variables"
 ---
 
 ## Config file
 
-The server config file at `~/.fabro/server.toml` controls how `fabro server start` behaves — API binding, authentication, run defaults, and more. The [Quick Start](/getting-started/quick-start) doesn't require one, but production deployments should configure it explicitly.
+`fabro server start` reads `~/.fabro/settings.toml` by default. This is the same file schema used by the CLI.
+
+On a same-machine setup, the CLI and server share one `settings.toml`. On a remote deployment, the server machine has its own `settings.toml`, and the client machine keeps a separate local `settings.toml` for CLI-only values such as `[cli.target]`.
+
+<Note>
+Legacy `server.toml`, `user.toml`, and `cli.toml` are ignored with a warning. Rename them to `settings.toml`.
+</Note>
+
+### Which sections are server-owned
+
+| Scope | Examples |
+|---|---|
+| Server-owned (runtime-only from local `settings.toml`) | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]`, `[features]` |
+| Shared run defaults (layered through `.fabro/project.toml`/`workflow.toml`) | `[run.model]`, `[run.prepare]`, `[run.sandbox]`, `[run.checkpoint]`, `[run.inputs]`, `[run.pull_request]`, `[run.git]`, `[run.hooks]`, `[run.agent]` |
+
+The CLI-only `[cli.*]` sections (including `[cli.target]`) belong in the client machine's `settings.toml`. They tell CLI commands how to reach a server. The server process does not read `[cli.*]` for its own binding or routing.
 
 ### Full reference
 
-```toml title="server.toml"
-# Maximum concurrent workflow runs (default: 5)
-max_concurrent_runs = 8
+```toml title="settings.toml"
+_version = 1
 
-# Override the default data directory (default: ~/.fabro)
-data_dir = "/var/lib/fabro"
+[server.listen]
+type = "tcp"
+address = "0.0.0.0:3000"
 
-[api]
-base_url = "https://fabro.example.com/api/v1"
-
-[api.tls]
+[server.listen.tls]
 cert = "/etc/fabro/tls/cert.pem"
 key = "/etc/fabro/tls/key.pem"
 ca = "/etc/fabro/tls/ca.pem"
 
-# Authentication strategies (array of Jwt or Mtls)
-[[api.authentication_strategies]]
-type = "Jwt"
+[server.api]
+url = "https://fabro.example.com/api/v1"
 
-[web]
+[server.auth.api.jwt]
+enabled = true
+
+[server.web]
+enabled = true
 url = "https://fabro-web.example.com"
 
-[web.auth]
-provider = "Github"
+[server.auth.web]
 allowed_usernames = ["alice", "bob"]
 
-[git]
-provider = "Github"
+[server.auth.web.providers.github]
+enabled = true
+client_id = "Iv1.abc123"
+
+[server.integrations.github]
 app_id = "123456"
 client_id = "Iv1.abc123"
 
-[log]
+[server.integrations.github.webhooks]
+strategy = "tailscale_funnel"
+
+[server.storage]
+root = "/var/lib/fabro"
+
+[server.scheduler]
+max_concurrent_runs = 8
+
+[server.logging]
 level = "info"
 
-[git.author]
+# Run defaults — applied to every run unless overridden by workflow/project config
+[run.model]
+name = "claude-sonnet-4-5"
+provider = "anthropic"
+fallbacks = ["gemini", "openai"]
+
+[[run.prepare.steps]]
+script = "npm install"
+
+[run.sandbox]
+provider = "daytona"
+
+[run.sandbox.daytona]
+auto_stop_interval = 60
+
+[run.sandbox.daytona.labels]
+team = "platform"
+
+[run.checkpoint]
+exclude_globs = ["**/node_modules/**", "**/.cache/**"]
+
+[run.inputs]
+default_branch = "main"
+
+[run.git.author]
 name = "fabro-bot"
 email = "fabro-bot@company.com"
 
-[git.webhooks]
-strategy = "tailscale_funnel"
-
-# Run defaults — applied to every run unless overridden by the run config
-[llm]
-model = "claude-sonnet-4-5"
-provider = "anthropic"
-
-[llm.fallbacks]
-anthropic = ["gemini", "openai"]
-
-[setup]
-commands = ["npm install"]
-timeout_ms = 120000
-
-[sandbox]
-provider = "daytona"
-
-[sandbox.daytona]
-auto_stop_interval = 60
-
-[sandbox.daytona.labels]
-team = "platform"
-
 [features]
-retros = true
-
-[checkpoint]
-exclude_globs = ["**/node_modules/**", "**/.cache/**"]
-
-[vars]
-default_branch = "main"
+session_sandboxes = true
 ```
 
 ### CLI overrides
 
-Several `server.toml` settings can be overridden via `fabro server start` flags:
+Several `settings.toml` settings can be overridden via `fabro server start` flags:
 
 | Flag | Default | Description |
 |---|---|---|
-| `--port` | `3000` | Port to listen on |
-| `--host` | `127.0.0.1` | Host address to bind to |
+| `--bind` | `~/.fabro/fabro.sock` | Address to bind: `IP` or `IP:port` for TCP, or a path for Unix socket |
+| `--web` | enabled | Enable the embedded web UI, browser auth routes, and web-only helper endpoints |
+| `--no-web` | disabled | Disable the embedded web UI, browser auth routes, and web-only helper endpoints |
+| `--foreground` | — | Run in the foreground instead of daemonizing |
 | `--model` | — | Override default LLM model |
 | `--provider` | — | Override default LLM provider |
 | `--sandbox` | — | Override default sandbox provider |
 | `--max-concurrent-runs` | `5` | Maximum concurrent run executions |
-| `--config` | `~/.fabro/server.toml` | Path to server config file |
+| `--config` | `~/.fabro/settings.toml` | Path to server config file |
 | `--dry-run` | — | Execute with simulated LLM backend |
 
-CLI flags take precedence over `server.toml` values. See [Run Configuration — Precedence](/execution/run-configuration#precedence) for the full resolution order.
+CLI flags take precedence over `settings.toml` values. See [Run Configuration — Precedence](/execution/run-configuration#precedence) for the full resolution order.
+
+### `[server.web]` section
+
+Control the embedded SPA and browser-oriented routes.
+
+| Key | Description | Default |
+|---|---|---|
+| `enabled` | Serve the embedded SPA, `/auth/*`, and the web-only helper endpoints under `/api/v1` | `true` |
+| `url` | External web UI URL used for OAuth redirects | none (no implicit derivation from `server.listen`) |
+
+When `enabled = false`, the server still exposes the machine API and `/health`, but `/`, `/auth/*`, SPA client routes, `/api/v1/auth/me`, `/api/v1/setup/*`, and `/api/v1/demo/toggle` all return `404`.
 
 ### Run defaults
 
-The `[llm]`, `[setup]`, `[sandbox]`, `[checkpoint]`, and `[vars]` sections in `server.toml` act as defaults for every run. A run config TOML can override any of these. For `[vars]`, Daytona labels, and checkpoint exclude globs, values are **merged** — the run config wins on key collisions. All other fields use "first non-empty wins" precedence.
+The `[run.*]` sections in `settings.toml` act as defaults for every run.
 
-### `[log]` section
+On a same-machine setup, `settings.toml` is the shared machine-default layer under `workflow.toml` and `.fabro/project.toml`.
 
-Configure the default log level without environment variables. Precedence: `FABRO_LOG` env var > `--debug` flag > `[log]` level > `"info"`.
+On a remote setup, the client bundles workflow, project, and user config into the run manifest. The server then layers those bundled client configs over its own local defaults for run-shaped fields. Server-owned values like `[server.storage]`, `[server.api]`, `[server.web]`, `[features]`, and `[server.scheduler]` always come from the server machine's own `settings.toml` or `fabro server start` flags.
+
+Merge rules follow the normative matrix: `[run.inputs]` replaces wholesale, `[run.sandbox.env]` and `[run.sandbox.daytona.labels]` merge by key, `[run.prepare.steps]` replaces whole-list, and `[[run.hooks]]` merge by optional `id`. Most other fields use "higher-precedence wins" field-wise merging.
+
+### `[server.logging]` section
+
+Configure the default server log level. Precedence: `FABRO_LOG` env var > `--debug` flag > `[server.logging].level` > `"info"`.
 
 | Key | Description | Default |
 |---|---|---|
 | `level` | Log level: `error`, `warn`, `info`, `debug`, `trace` | `"info"` |
 
-### `[git.author]` section
+The CLI has its own `[cli.logging]` section.
+
+### `[run.git.author]` section
 
 Customize the git author identity used for checkpoint commits. When not set, defaults to `fabro` / `fabro@local`.
 
@@ -119,27 +160,39 @@ Customize the git author identity used for checkpoint commits. When not set, def
 | `name` | Git author name | `"fabro"` |
 | `email` | Git author email | `"fabro@local"` |
 
-The CLI can also set `[git.author]` in `user.toml` to override the server default.
+### `[server.integrations.github]` section
 
-### `[git.webhooks]` section
+Configure GitHub integration auth. `strategy = "gh_cli"` is the default and uses a stored `GITHUB_CLI_TOKEN` from the vault. `strategy = "app"` enables the GitHub App flow, browser OAuth, and webhooks.
 
-Enable automatic GitHub webhook delivery via Tailscale funnel. When configured, `fabro server start` binds a local HTTP listener, exposes it through `tailscale funnel`, and updates the GitHub App's webhook URL on startup. Incoming webhooks are verified with HMAC-SHA256.
+```toml title="settings.toml"
+[server.integrations.github]
+strategy = "gh_cli"
+```
 
-| Key | Description | Values |
-|---|---|---|
-| `strategy` | Webhook delivery method | `"tailscale_funnel"` |
+For GitHub App mode, set `strategy = "app"` and include `app_id`, `client_id`, and `slug`. Webhook delivery is configured under `[server.integrations.github.webhooks]`:
 
-Requires a configured GitHub App (`[git]` section with `app_id` and `client_id`) and the `GITHUB_APP_WEBHOOK_SECRET` environment variable.
+```toml title="settings.toml"
+[server.integrations.github]
+strategy = "app"
+app_id = "123456"
+client_id = "Iv1.abc123"
+slug = "fabro-app"
 
-### `[checkpoint]` section
+[server.integrations.github.webhooks]
+strategy = "tailscale_funnel"
+```
+
+When `webhooks.strategy = "tailscale_funnel"` is configured, `fabro server start` binds a local HTTP listener, exposes it through `tailscale funnel`, and updates the GitHub App's webhook URL on startup. Incoming webhooks are verified with HMAC-SHA256. Requires the `GITHUB_APP_WEBHOOK_SECRET` environment variable.
+
+### `[run.checkpoint]` section
 
 Configure checkpoint behavior for all runs.
 
 | Key | Description |
 |---|---|
-| `exclude_globs` | Glob patterns for files to exclude from checkpoint commits (e.g. `["**/node_modules/**"]`) |
+| `exclude_globs` | Glob patterns for files to exclude from checkpoint commits (for example, `["**/node_modules/**"]`) |
 
-Exclude globs from `server.toml` and run configs are merged (union, deduplicated). See [Run Configuration — Checkpoint](/execution/run-configuration#checkpoint) for per-run configuration.
+`exclude_globs` replaces across layers — the highest-precedence layer wins wholesale. See [Run Configuration — Checkpoint](/execution/run-configuration#runcheckpoint) for per-run configuration.
 
 ### `[features]` section
 
@@ -147,16 +200,22 @@ Toggle experimental or opt-in features. All features default to `false`.
 
 | Key | Description |
 |---|---|
-| `retros` | Enable automatic [retro](/execution/retros) generation after workflow runs (experimental) |
 | `session_sandboxes` | Enable session sandboxes in the web UI |
 
-The same `[features]` section can be set in `fabro.toml` (project-level) to enable features per-project.
+The same `[features]` section can be set in `.fabro/project.toml` (project-level) to enable features per-project.
 
-## Environment variables
+## Secrets and environment variables
 
-Fabro reads environment variables from a `.env` file in the working directory (if present) and from the shell environment. Provider API keys are required for the models you want to use; everything else is optional.
+Fabro splits secrets into two scopes:
+
+- Server runtime secrets live in `<data_dir>/server.env` and resolve with precedence `process env -> server.env`.
+- Workflow-visible secrets live in `<data_dir>/secrets.json` (the vault). Anything stored in the vault may be used by workflows.
+
+Fabro no longer auto-loads `.env` files. Provider API keys are required for the models you want to use; everything else is optional.
 
 ### LLM provider keys
+
+Fabro's built-in provider access resolves these from `process env -> vault`.
 
 | Variable | Provider |
 |---|---|
@@ -177,13 +236,23 @@ Fabro reads environment variables from a `.env` file in the working directory (i
 
 ### Server authentication
 
+Fabro resolves these from `process env -> server.env`.
+
 | Variable | Description |
 |---|---|
 | `FABRO_JWT_PRIVATE_KEY` | Ed25519 private key (base64-encoded PEM) for JWT signing |
 | `FABRO_JWT_PUBLIC_KEY` | Ed25519 public key (base64-encoded PEM) for JWT verification |
 | `SESSION_SECRET` | Session encryption secret (64-character hex string) |
 
-### GitHub App (optional)
+### GitHub integration (optional)
+
+| Variable | Description |
+|---|---|
+| `GITHUB_CLI_TOKEN` | Token captured from `gh auth token` and stored by `fabro install` when `strategy = "gh_cli"` |
+
+### GitHub App extras (optional)
+
+Fabro resolves these from `process env -> server.env`.
 
 | Variable | Description |
 |---|---|

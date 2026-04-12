@@ -6,99 +6,100 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::state::{
-    AppConfig, AppState, Comment, Installation, IssueContent, ManifestConversion, OwnerType,
-    Project, ProjectItem, PullRequest, Release, Repository, StatusOption, TokenInfo, WebhookConfig,
+    AppOptions, AppState, Comment, Installation, IssueContent, ManifestConversion, OwnerType,
+    Project, ProjectItem, PullRequest, Release, Repository, StatusOption, TokenInfo,
+    WebhookOptions,
 };
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct FixtureState {
     #[serde(default)]
-    pub apps: Vec<FixtureApp>,
+    pub apps:                 Vec<FixtureApp>,
     #[serde(default)]
-    pub installations: Vec<FixtureInstallation>,
+    pub installations:        Vec<FixtureInstallation>,
     #[serde(default)]
-    pub repositories: Vec<FixtureRepository>,
+    pub repositories:         Vec<FixtureRepository>,
     #[serde(default)]
-    pub pull_requests: Vec<FixturePullRequest>,
+    pub pull_requests:        Vec<FixturePullRequest>,
     #[serde(default)]
-    pub active_tokens: Vec<FixtureActiveToken>,
+    pub active_tokens:        Vec<FixtureActiveToken>,
     #[serde(default)]
-    pub projects: Vec<FixtureProject>,
+    pub projects:             Vec<FixtureProject>,
     #[serde(default)]
-    pub releases: Vec<FixtureRelease>,
+    pub releases:             Vec<FixtureRelease>,
     #[serde(default)]
     pub manifest_conversions: Vec<FixtureManifestConversion>,
     #[serde(default)]
-    pub comments: Vec<FixtureComment>,
+    pub comments:             Vec<FixtureComment>,
     #[serde(default)]
-    pub webhook_config: FixtureWebhookConfig,
+    pub webhook_config:       FixtureWebhookOptions,
     pub next_installation_id: Option<u64>,
-    pub next_pr_number: Option<u64>,
-    pub viewer_id: Option<String>,
+    pub next_pr_number:       Option<u64>,
+    pub viewer_id:            Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureApp {
-    pub app_id: String,
-    pub slug: String,
-    pub owner_login: String,
-    pub public: bool,
+    pub app_id:          String,
+    pub slug:            String,
+    pub owner_login:     String,
+    pub public:          bool,
     pub private_key_pem: String,
-    pub webhook_secret: Option<String>,
+    pub webhook_secret:  Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureInstallation {
-    pub id: u64,
-    pub app_id: String,
-    pub owner: String,
+    pub id:           u64,
+    pub app_id:       String,
+    pub owner:        String,
     #[serde(default)]
     pub repositories: Vec<String>,
     #[serde(default)]
-    pub suspended: bool,
+    pub suspended:    bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureRepository {
-    pub owner: String,
-    pub name: String,
+    pub owner:          String,
+    pub name:           String,
     #[serde(default)]
-    pub branches: Vec<String>,
+    pub branches:       Vec<String>,
     pub default_branch: Option<String>,
     #[serde(default)]
-    pub private: bool,
+    pub private:        bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixturePullRequest {
-    pub owner: String,
-    pub repo: String,
+    pub owner:        String,
+    pub repo:         String,
     #[serde(flatten)]
     pub pull_request: PullRequest,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureActiveToken {
-    pub token: String,
-    pub app_id: String,
+    pub token:           String,
+    pub app_id:          String,
     pub installation_id: u64,
     #[serde(default)]
-    pub repositories: Vec<String>,
+    pub repositories:    Vec<String>,
     #[serde(default = "empty_json_object")]
-    pub permissions: serde_json::Value,
+    pub permissions:     serde_json::Value,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureProject {
-    pub node_id: String,
-    pub number: u64,
-    pub owner: String,
-    pub owner_type: FixtureOwnerType,
+    pub node_id:         String,
+    pub number:          u64,
+    pub owner:           String,
+    pub owner_type:      FixtureOwnerType,
     pub status_field_id: String,
     #[serde(default)]
-    pub status_options: Vec<FixtureStatusOption>,
+    pub status_options:  Vec<FixtureStatusOption>,
     #[serde(default)]
-    pub items: Vec<FixtureProjectItem>,
+    pub items:           Vec<FixtureProjectItem>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -110,59 +111,59 @@ pub enum FixtureOwnerType {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureStatusOption {
-    pub id: String,
+    pub id:   String,
     pub name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureProjectItem {
-    pub id: String,
-    pub status: String,
+    pub id:      String,
+    pub status:  String,
     pub content: FixtureIssueContent,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureIssueContent {
-    pub id: String,
-    pub number: u64,
-    pub title: String,
-    pub body: String,
-    pub url: String,
-    pub created_at: String,
-    pub updated_at: String,
+    pub id:           String,
+    pub number:       u64,
+    pub title:        String,
+    pub body:         String,
+    pub url:          String,
+    pub created_at:   String,
+    pub updated_at:   String,
     #[serde(default)]
     pub assignee_ids: Vec<String>,
     #[serde(default)]
-    pub labels: Vec<String>,
+    pub labels:       Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureRelease {
-    pub owner: String,
-    pub repo: String,
+    pub owner:    String,
+    pub repo:     String,
     pub tag_name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureManifestConversion {
-    pub code: String,
-    pub app_id: i64,
-    pub slug: String,
-    pub client_id: String,
-    pub client_secret: String,
+    pub code:           String,
+    pub app_id:         i64,
+    pub slug:           String,
+    pub client_id:      String,
+    pub client_secret:  String,
     pub webhook_secret: Option<String>,
-    pub pem: String,
+    pub pem:            String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureComment {
     pub issue_node_id: String,
-    pub body: String,
+    pub body:          String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct FixtureWebhookConfig {
-    pub url: Option<String>,
+pub struct FixtureWebhookOptions {
+    pub url:          Option<String>,
     pub content_type: Option<String>,
 }
 
@@ -180,13 +181,13 @@ impl FixtureState {
 
         for app in self.apps {
             let app_id = app.app_id.clone();
-            let config = AppConfig {
-                app_id: app.app_id,
-                slug: app.slug,
-                owner_login: app.owner_login,
-                public: app.public,
+            let config = AppOptions {
+                app_id:          app.app_id,
+                slug:            app.slug,
+                owner_login:     app.owner_login,
+                public:          app.public,
                 private_key_pem: app.private_key_pem,
-                webhook_secret: app.webhook_secret,
+                webhook_secret:  app.webhook_secret,
             };
 
             catch_unwind(AssertUnwindSafe(|| state.register_app(config)))
@@ -197,11 +198,11 @@ impl FixtureState {
             .installations
             .into_iter()
             .map(|installation| Installation {
-                id: installation.id,
-                app_id: installation.app_id,
-                owner: installation.owner,
+                id:           installation.id,
+                app_id:       installation.app_id,
+                owner:        installation.owner,
                 repositories: installation.repositories,
-                suspended: installation.suspended,
+                suspended:    installation.suspended,
             })
             .collect();
 
@@ -209,14 +210,14 @@ impl FixtureState {
             .repositories
             .into_iter()
             .map(|repository| Repository {
-                owner: repository.owner,
-                name: repository.name,
-                branches: repository.branches,
+                owner:          repository.owner,
+                name:           repository.name,
+                branches:       repository.branches,
                 default_branch: repository
                     .default_branch
                     .unwrap_or_else(|| "main".to_string()),
-                private: repository.private,
-                git_dir: None,
+                private:        repository.private,
+                git_dir:        None,
             })
             .collect();
 
@@ -232,15 +233,12 @@ impl FixtureState {
             .active_tokens
             .into_iter()
             .map(|token| {
-                (
-                    token.token,
-                    TokenInfo {
-                        app_id: token.app_id,
-                        installation_id: token.installation_id,
-                        repositories: token.repositories,
-                        permissions: token.permissions,
-                    },
-                )
+                (token.token, TokenInfo {
+                    app_id:          token.app_id,
+                    installation_id: token.installation_id,
+                    repositories:    token.repositories,
+                    permissions:     token.permissions,
+                })
             })
             .collect();
 
@@ -248,38 +246,38 @@ impl FixtureState {
             .projects
             .into_iter()
             .map(|project| Project {
-                node_id: project.node_id,
-                number: project.number,
-                owner: project.owner,
-                owner_type: match project.owner_type {
+                node_id:         project.node_id,
+                number:          project.number,
+                owner:           project.owner,
+                owner_type:      match project.owner_type {
                     FixtureOwnerType::Organization => OwnerType::Organization,
                     FixtureOwnerType::User => OwnerType::User,
                 },
                 status_field_id: project.status_field_id,
-                status_options: project
+                status_options:  project
                     .status_options
                     .into_iter()
                     .map(|option| StatusOption {
-                        id: option.id,
+                        id:   option.id,
                         name: option.name,
                     })
                     .collect(),
-                items: project
+                items:           project
                     .items
                     .into_iter()
                     .map(|item| ProjectItem {
-                        id: item.id,
-                        status: item.status,
+                        id:      item.id,
+                        status:  item.status,
                         content: IssueContent {
-                            id: item.content.id,
-                            number: item.content.number,
-                            title: item.content.title,
-                            body: item.content.body,
-                            url: item.content.url,
-                            created_at: item.content.created_at,
-                            updated_at: item.content.updated_at,
+                            id:           item.content.id,
+                            number:       item.content.number,
+                            title:        item.content.title,
+                            body:         item.content.body,
+                            url:          item.content.url,
+                            created_at:   item.content.created_at,
+                            updated_at:   item.content.updated_at,
                             assignee_ids: item.content.assignee_ids,
-                            labels: item.content.labels,
+                            labels:       item.content.labels,
                         },
                     })
                     .collect(),
@@ -290,12 +288,9 @@ impl FixtureState {
             .releases
             .into_iter()
             .map(|release| {
-                (
-                    (release.owner, release.repo),
-                    Release {
-                        tag_name: release.tag_name,
-                    },
-                )
+                ((release.owner, release.repo), Release {
+                    tag_name: release.tag_name,
+                })
             })
             .collect::<HashMap<_, _>>();
 
@@ -304,18 +299,15 @@ impl FixtureState {
             .into_iter()
             .map(|conversion| {
                 let code = conversion.code.clone();
-                (
-                    code,
-                    ManifestConversion {
-                        code: conversion.code,
-                        app_id: conversion.app_id,
-                        slug: conversion.slug,
-                        client_id: conversion.client_id,
-                        client_secret: conversion.client_secret,
-                        webhook_secret: conversion.webhook_secret,
-                        pem: conversion.pem,
-                    },
-                )
+                (code, ManifestConversion {
+                    code:           conversion.code,
+                    app_id:         conversion.app_id,
+                    slug:           conversion.slug,
+                    client_id:      conversion.client_id,
+                    client_secret:  conversion.client_secret,
+                    webhook_secret: conversion.webhook_secret,
+                    pem:            conversion.pem,
+                })
             })
             .collect::<HashMap<_, _>>();
 
@@ -324,12 +316,12 @@ impl FixtureState {
             .into_iter()
             .map(|comment| Comment {
                 issue_node_id: comment.issue_node_id,
-                body: comment.body,
+                body:          comment.body,
             })
             .collect();
 
-        state.webhook_config = WebhookConfig {
-            url: self.webhook_config.url,
+        state.webhook_config = WebhookOptions {
+            url:          self.webhook_config.url,
             content_type: self.webhook_config.content_type,
         };
 
@@ -371,21 +363,25 @@ fn next_pr_number(pull_requests: &HashMap<(String, String), Vec<PullRequest>>) -
 }
 
 #[cfg(test)]
-fn test_rsa_key() -> String {
-    use std::process::Command;
+impl FixtureState {
+    fn single_app_fixture_for_test() -> Self {
+        Self {
+            apps: vec![FixtureApp {
+                app_id:          "100".to_string(),
+                slug:            "fixture-app".to_string(),
+                owner_login:     "acme".to_string(),
+                public:          true,
+                private_key_pem: test_rsa_key().to_string(),
+                webhook_secret:  Some("whsec".to_string()),
+            }],
+            ..Self::default()
+        }
+    }
+}
 
-    let output = Command::new("openssl")
-        .args([
-            "genpkey",
-            "-algorithm",
-            "RSA",
-            "-pkeyopt",
-            "rsa_keygen_bits:2048",
-        ])
-        .output()
-        .expect("openssl should be available");
-    assert!(output.status.success());
-    String::from_utf8(output.stdout).unwrap()
+#[cfg(test)]
+fn test_rsa_key() -> &'static str {
+    crate::test_support::test_rsa_private_key()
 }
 
 #[cfg(test)]
@@ -535,22 +531,5 @@ mod tests {
         let fixture = FixtureState::single_app_fixture_for_test();
         let state = fixture.into_app_state().unwrap();
         assert!(state.apps["100"].public_key_pem.contains("PUBLIC KEY"));
-    }
-}
-
-#[cfg(test)]
-impl FixtureState {
-    fn single_app_fixture_for_test() -> Self {
-        Self {
-            apps: vec![FixtureApp {
-                app_id: "100".to_string(),
-                slug: "fixture-app".to_string(),
-                owner_login: "acme".to_string(),
-                public: true,
-                private_key_pem: test_rsa_key(),
-                webhook_secret: Some("whsec".to_string()),
-            }],
-            ..Self::default()
-        }
     }
 }

@@ -1,11 +1,11 @@
 const service = process.argv[2];
 
-type ServiceConfig = {
+type ServiceOptions = {
   command: string[];
   cwd?: string;
 };
 
-const services: Record<string, ServiceConfig> = {
+const services: Record<string, ServiceOptions> = {
   api: {
     command: ["fabro", "serve", "--host", "0.0.0.0"],
   },

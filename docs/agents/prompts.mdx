@@ -47,23 +47,24 @@ File references are resolved relative to the Graphviz file's directory first, th
 
 ### Variable expansion
 
-Prompts support `$variable` placeholders that expand at runtime. Currently the only built-in variable is `$goal`, which resolves to the graph-level `goal` attribute:
+Prompts support MiniJinja-style templates. Prompt rendering has access to the workflow goal and typed run inputs:
 
 ```dot title="pipeline.fabro"
 digraph Pipeline {
     graph [goal="Add a /health endpoint to the API server"]
 
-    implement [prompt="Implement the following: $goal"]
+    implement [prompt="Implement the following: {{ goal }}"]
 }
 ```
 
-At runtime, `$goal` becomes `Add a /health endpoint to the API server`.
+At runtime, `{{ goal }}` becomes `Add a /health endpoint to the API server`.
 
-| Variable | Resolves to |
+| Expression | Resolves to |
 |---|---|
-| `$goal` | The graph-level `goal` attribute |
+| `{{ goal }}` | The graph-level `goal` attribute |
+| `{{ inputs.name }}` | A value from `[run.inputs]` |
 
-A `$` not followed by an identifier character (e.g. `$5`) is left as-is. An undefined variable like `$foo` produces a runtime error, catching typos early.
+Prompt templates use strict undefined handling, so an expression like `{{ inputs.foo }}` fails fast if `foo` is not defined. Environment variables are not available in prompt templates.
 
 ### Fallback to label
 

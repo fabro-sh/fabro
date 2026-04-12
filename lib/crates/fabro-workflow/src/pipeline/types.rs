@@ -3,35 +3,38 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fabro_agent::Sandbox;
-use fabro_config::sandbox::WorktreeMode;
 use fabro_graphviz::graph::Graph;
 use fabro_hooks::HookRunner;
 use fabro_interview::Interviewer;
 use fabro_llm::Provider;
-use fabro_mcp::config::McpServerConfig;
+use fabro_llm::client::Client;
+use fabro_mcp::config::McpServerSettings;
 use fabro_model::FallbackTarget;
+use fabro_retro::retro::Retro;
 use fabro_sandbox::SandboxSpec;
-use fabro_store::RunStore;
+use fabro_sandbox::config::WorktreeMode;
 use fabro_types::RunId;
-use fabro_validate::Diagnostic;
+use fabro_types::settings::run::PullRequestSettings;
+use fabro_validate::{Diagnostic, Severity};
 
+use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
-use crate::error::FabroError;
-use crate::event::EventEmitter;
+use crate::error::Error;
+use crate::event::Emitter;
+use crate::file_resolver::FileResolver;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::records::{Checkpoint, Conclusion, RunRecord};
+use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
+use crate::runtime_store::RunStoreHandle;
 use crate::transforms::Transform;
-use fabro_config::run::PullRequestSettings;
-use fabro_llm::client::Client;
-use fabro_retro::retro::Retro;
-use fabro_validate::Severity;
+use crate::workflow_bundle::WorkflowBundle;
 
 /// Output of the PARSE phase.
 #[non_exhaustive]
 pub struct Parsed {
-    pub graph: Graph,
+    pub graph:  Graph,
     pub source: String,
 }
 
@@ -39,7 +42,7 @@ pub struct Parsed {
 /// post-transform adjustments (e.g. goal override) before validation.
 #[non_exhaustive]
 pub struct Transformed {
-    pub graph: Graph,
+    pub graph:  Graph,
     pub source: String,
 }
 
@@ -48,8 +51,8 @@ pub struct Transformed {
 /// Graph is read-only — use accessors, not direct field access.
 #[non_exhaustive]
 pub struct Validated {
-    graph: Graph,
-    source: String,
+    graph:       Graph,
+    source:      String,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -83,9 +86,10 @@ impl Validated {
             .any(|d| d.severity == Severity::Error)
     }
 
-    /// Returns `Err(FabroError::Validation)` if any Error-severity diagnostics exist.
-    /// Diagnostics remain accessible via `diagnostics()` for printing before this call.
-    pub fn raise_on_errors(&self) -> Result<(), FabroError> {
+    /// Returns `Err(Error::Validation)` if any Error-severity diagnostics
+    /// exist. Diagnostics remain accessible via `diagnostics()` for
+    /// printing before this call.
+    pub fn raise_on_errors(&self) -> Result<(), Error> {
         if self.has_errors() {
             let message = self
                 .diagnostics
@@ -94,7 +98,7 @@ impl Validated {
                 .map(|d| d.message.as_str())
                 .collect::<Vec<_>>()
                 .join("; ");
-            return Err(FabroError::Validation(message));
+            return Err(Error::Validation(message));
         }
         Ok(())
     }
@@ -107,19 +111,20 @@ impl Validated {
 
 /// Options for the PERSIST phase.
 pub(crate) struct PersistOptions {
-    pub run_dir: PathBuf,
+    pub run_dir:    PathBuf,
     pub run_record: RunRecord,
 }
 
-/// Output of the PERSIST phase. Run directory created, run.json and workflow.fabro written.
+/// Output of the PERSIST phase. Run directory created and the validated
+/// workflow is persisted into the durable run record.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Persisted {
-    graph: Graph,
-    source: String,
+    graph:       Graph,
+    source:      String,
     diagnostics: Vec<Diagnostic>,
-    run_dir: PathBuf,
-    run_record: RunRecord,
+    run_dir:     PathBuf,
+    run_record:  RunRecord,
 }
 
 impl Persisted {
@@ -168,8 +173,9 @@ impl Persisted {
             .any(|d| d.severity == Severity::Error)
     }
 
-    /// Returns `Err(FabroError::Validation)` if any Error-severity diagnostics exist.
-    pub fn raise_on_errors(&self) -> Result<(), FabroError> {
+    /// Returns `Err(Error::Validation)` if any Error-severity diagnostics
+    /// exist.
+    pub fn raise_on_errors(&self) -> Result<(), Error> {
         if self.has_errors() {
             let message = self
                 .diagnostics
@@ -178,7 +184,7 @@ impl Persisted {
                 .map(|d| d.message.as_str())
                 .collect::<Vec<_>>()
                 .join("; ");
-            return Err(FabroError::Validation(message));
+            return Err(Error::Validation(message));
         }
         Ok(())
     }
@@ -194,176 +200,182 @@ impl Persisted {
         )
     }
 
-    /// Load a previously persisted run from disk.
-    pub fn load(run_dir: &Path) -> Result<Self, FabroError> {
-        super::persist::load(run_dir)
-    }
-
     pub async fn load_from_store(
-        run_store: &dyn RunStore,
+        run_store: &RunStoreHandle,
         run_dir: &Path,
-    ) -> Result<Self, FabroError> {
+    ) -> Result<Self, Error> {
         super::persist::load_from_store(run_store, run_dir).await
     }
 }
 
 #[derive(Clone)]
 pub struct LlmSpec {
-    pub model: String,
-    pub provider: Provider,
+    pub model:          String,
+    pub provider:       Provider,
     pub fallback_chain: Vec<FallbackTarget>,
-    pub mcp_servers: Vec<McpServerConfig>,
-    pub dry_run: bool,
+    pub mcp_servers:    Vec<McpServerSettings>,
+    pub dry_run:        bool,
 }
 
 #[derive(Clone)]
 pub struct SandboxEnvSpec {
-    pub devcontainer_env: HashMap<String, String>,
-    pub toml_env: HashMap<String, String>,
+    pub devcontainer_env:   HashMap<String, String>,
+    pub toml_env:           HashMap<String, String>,
     pub github_permissions: Option<HashMap<String, String>>,
-    pub origin_url: Option<String>,
+    pub origin_url:         Option<String>,
 }
 
 #[derive(Clone)]
 pub struct DevcontainerSpec {
-    pub enabled: bool,
+    pub enabled:     bool,
     pub resolve_dir: PathBuf,
 }
 
 pub struct InitOptions {
-    pub run_id: RunId,
-    pub run_store: Arc<dyn RunStore>,
-    pub dry_run: bool,
-    pub emitter: Arc<EventEmitter>,
-    pub sandbox: SandboxSpec,
-    pub llm: LlmSpec,
-    pub interviewer: Arc<dyn Interviewer>,
-    pub lifecycle: LifecycleOptions,
-    pub run_options: RunOptions,
-    pub hooks: fabro_hooks::HookConfig,
-    pub sandbox_env: SandboxEnvSpec,
-    pub devcontainer: Option<DevcontainerSpec>,
-    pub git: Option<GitCheckpointOptions>,
-    pub worktree_mode: Option<WorktreeMode>,
+    pub run_id:            RunId,
+    pub run_store:         RunStoreHandle,
+    pub dry_run:           bool,
+    pub emitter:           Arc<Emitter>,
+    pub sandbox:           SandboxSpec,
+    pub llm:               LlmSpec,
+    pub interviewer:       Arc<dyn Interviewer>,
+    pub lifecycle:         LifecycleOptions,
+    pub run_options:       RunOptions,
+    pub workflow_path:     Option<PathBuf>,
+    pub workflow_bundle:   Option<Arc<WorkflowBundle>>,
+    pub hooks:             fabro_hooks::HookSettings,
+    pub sandbox_env:       SandboxEnvSpec,
+    pub devcontainer:      Option<DevcontainerSpec>,
+    pub git:               Option<GitCheckpointOptions>,
+    pub worktree_mode:     Option<WorktreeMode>,
     pub registry_override: Option<Arc<HandlerRegistry>>,
-    pub checkpoint: Option<Checkpoint>,
-    pub seed_context: Option<Context>,
+    pub artifact_sink:     Option<ArtifactSink>,
+    pub run_control:       Option<Arc<RunControlState>>,
+    pub checkpoint:        Option<Checkpoint>,
+    pub seed_context:      Option<Context>,
 }
 
 /// Output of the INITIALIZE phase.
 #[non_exhaustive]
 pub struct Initialized {
-    pub graph: Graph,
-    pub source: String,
-    pub run_options: RunOptions,
-    pub run_store: Arc<dyn RunStore>,
-    pub(crate) checkpoint: Option<Checkpoint>,
+    pub graph:               Graph,
+    pub source:              String,
+    pub inputs:              HashMap<String, toml::Value>,
+    pub run_options:         RunOptions,
+    pub workflow_path:       Option<PathBuf>,
+    pub workflow_bundle:     Option<Arc<WorkflowBundle>>,
+    pub run_store:           RunStoreHandle,
+    pub(crate) checkpoint:   Option<Checkpoint>,
     pub(crate) seed_context: Option<Context>,
-    pub emitter: Arc<EventEmitter>,
-    pub sandbox: Arc<dyn Sandbox>,
-    pub registry: Arc<HandlerRegistry>,
-    pub on_node: crate::OnNodeCallback,
-    pub hook_runner: Option<Arc<HookRunner>>,
-    pub env: HashMap<String, String>,
-    pub dry_run: bool,
-    pub llm_client: Option<Client>,
-    pub model: String,
-    pub provider: Provider,
+    pub emitter:             Arc<Emitter>,
+    pub sandbox:             Arc<dyn Sandbox>,
+    pub registry:            Arc<HandlerRegistry>,
+    pub on_node:             crate::OnNodeCallback,
+    pub artifact_sink:       Option<ArtifactSink>,
+    pub run_control:         Option<Arc<RunControlState>>,
+    pub hook_runner:         Option<Arc<HookRunner>>,
+    pub env:                 HashMap<String, String>,
+    pub dry_run:             bool,
+    pub llm_client:          Option<Client>,
+    pub model:               String,
+    pub provider:            Provider,
 }
 
 /// Output of the EXECUTE phase.
 #[non_exhaustive]
 pub struct Executed {
-    pub graph: Graph,
-    pub outcome: Result<Outcome, FabroError>,
-    pub run_options: RunOptions,
-    pub run_store: Arc<dyn RunStore>,
-    pub hook_runner: Option<Arc<HookRunner>>,
-    pub emitter: Arc<EventEmitter>,
-    pub sandbox: Arc<dyn Sandbox>,
-    pub duration_ms: u64,
+    pub graph:         Graph,
+    pub outcome:       Result<Outcome, Error>,
+    pub run_options:   RunOptions,
+    pub run_store:     RunStoreHandle,
+    pub hook_runner:   Option<Arc<HookRunner>>,
+    pub emitter:       Arc<Emitter>,
+    pub sandbox:       Arc<dyn Sandbox>,
+    pub duration_ms:   u64,
     pub final_context: Context,
-    pub llm_client: Option<Client>,
-    pub model: String,
-    pub provider: Provider,
+    pub llm_client:    Option<Client>,
+    pub model:         String,
+    pub provider:      Provider,
 }
 
 /// Output of the RETRO phase.
 #[non_exhaustive]
 pub struct Retroed {
-    pub graph: Graph,
-    pub outcome: Result<Outcome, FabroError>,
+    pub graph:       Graph,
+    pub outcome:     Result<Outcome, Error>,
     pub run_options: RunOptions,
-    pub run_store: Arc<dyn RunStore>,
+    pub run_store:   RunStoreHandle,
     pub hook_runner: Option<Arc<HookRunner>>,
-    pub emitter: Arc<EventEmitter>,
-    pub sandbox: Arc<dyn Sandbox>,
+    pub emitter:     Arc<Emitter>,
+    pub sandbox:     Arc<dyn Sandbox>,
     pub duration_ms: u64,
-    pub retro: Option<Retro>,
+    pub retro:       Option<Retro>,
 }
 
 /// Output of the FINALIZE phase.
 #[non_exhaustive]
 pub struct Concluded {
-    pub run_id: RunId,
-    pub outcome: Result<Outcome, FabroError>,
-    pub conclusion: Conclusion,
+    pub run_id:        RunId,
+    pub outcome:       Result<Outcome, Error>,
+    pub conclusion:    Conclusion,
     pub pushed_branch: Option<String>,
-    pub graph: Graph,
-    pub run_options: RunOptions,
-    pub emitter: Arc<EventEmitter>,
+    pub graph:         Graph,
+    pub run_options:   RunOptions,
+    pub emitter:       Arc<Emitter>,
 }
 
 /// Output of the PULL_REQUEST phase.
 #[non_exhaustive]
 pub struct Finalized {
-    pub run_id: RunId,
-    pub outcome: Result<Outcome, FabroError>,
-    pub conclusion: Conclusion,
+    pub run_id:        RunId,
+    pub outcome:       Result<Outcome, Error>,
+    pub conclusion:    Conclusion,
     pub pushed_branch: Option<String>,
-    pub pr_url: Option<String>,
+    pub pr_url:        Option<String>,
 }
 
 /// Options for the TRANSFORM phase.
 pub struct TransformOptions {
-    pub base_dir: Option<PathBuf>,
+    pub current_dir:       Option<PathBuf>,
+    pub file_resolver:     Option<Arc<dyn FileResolver>>,
+    pub inputs:            HashMap<String, toml::Value>,
     pub custom_transforms: Vec<Box<dyn Transform>>,
 }
 
 /// Options for the RETRO phase.
 pub struct RetroOptions {
-    pub run_id: RunId,
-    pub run_store: Arc<dyn RunStore>,
-    pub workflow_name: String,
-    pub goal: String,
-    pub run_dir: PathBuf,
-    pub sandbox: Arc<dyn Sandbox>,
-    pub emitter: Option<Arc<EventEmitter>>,
-    pub failed: bool,
+    pub run_id:          RunId,
+    pub run_store:       RunStoreHandle,
+    pub workflow_name:   String,
+    pub goal:            String,
+    pub run_dir:         PathBuf,
+    pub sandbox:         Arc<dyn Sandbox>,
+    pub emitter:         Option<Arc<Emitter>>,
+    pub failed:          bool,
     pub run_duration_ms: u64,
-    pub enabled: bool,
-    pub llm_client: Option<Client>,
-    pub provider: Provider,
-    pub model: String,
+    pub enabled:         bool,
+    pub llm_client:      Option<Client>,
+    pub provider:        Provider,
+    pub model:           String,
 }
 
 /// Options for the FINALIZE phase.
 pub struct FinalizeOptions {
-    pub run_dir: PathBuf,
-    pub run_id: RunId,
-    pub run_store: Arc<dyn RunStore>,
-    pub workflow_name: String,
-    pub hook_runner: Option<Arc<HookRunner>>,
+    pub run_dir:          PathBuf,
+    pub run_id:           RunId,
+    pub run_store:        RunStoreHandle,
+    pub workflow_name:    String,
+    pub hook_runner:      Option<Arc<HookRunner>>,
     pub preserve_sandbox: bool,
-    pub last_git_sha: Option<String>,
+    pub last_git_sha:     Option<String>,
 }
 
 /// Options for the PULL_REQUEST phase.
 pub struct PullRequestOptions {
-    pub run_dir: PathBuf,
-    pub run_store: Option<Arc<dyn RunStore>>,
-    pub pr_config: Option<PullRequestSettings>,
-    pub github_app: Option<fabro_github::GitHubAppCredentials>,
+    pub run_dir:    PathBuf,
+    pub run_store:  RunStoreHandle,
+    pub pr_config:  Option<PullRequestSettings>,
+    pub github_app: Option<fabro_github::GitHubCredentials>,
     pub origin_url: Option<String>,
-    pub model: String,
+    pub model:      String,
 }

@@ -1,5 +1,6 @@
-use axum::Router;
 use std::sync::Arc;
+
+use axum::Router;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
@@ -11,10 +12,10 @@ pub type SharedState = Arc<RwLock<AppState>>;
 
 /// A running test server instance.
 pub struct TestServer {
-    url: String,
+    url:         String,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
-    handle: Option<tokio::task::JoinHandle<()>>,
-    _git_root: TempDir, // Kept alive for the server's lifetime; cleaned up on drop
+    handle:      Option<tokio::task::JoinHandle<()>>,
+    _git_root:   TempDir, // Kept alive for the server's lifetime; cleaned up on drop
 }
 
 impl TestServer {
@@ -75,7 +76,9 @@ mod tests {
     async fn server_starts_and_responds() {
         let state = AppState::new();
         let server = TestServer::start(state).await;
-        let resp = reqwest::get(&format!("{}/nonexistent", server.url()))
+        let resp = crate::test_support::test_http_client()
+            .get(format!("{}/nonexistent", server.url()))
+            .send()
             .await
             .unwrap();
         assert_eq!(resp.status(), 404);

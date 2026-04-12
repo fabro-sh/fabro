@@ -2,25 +2,23 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-
-use fabro_core::error::{CoreError, Result as CoreResult};
+use fabro_core::error::{Error as CoreError, Result as CoreResult};
 use fabro_core::lifecycle::{EdgeContext, EdgeDecision, RunLifecycle};
 use fabro_core::outcome::NodeResult;
-use fabro_core::state::RunState;
+use fabro_core::state::ExecutionState;
 
 use crate::error::{FailureCategory, FailureSignature, FailureSignatureExt};
-use crate::graph::WorkflowGraph;
-use crate::graph::WorkflowNode;
-use crate::outcome::{OutcomeExt, StageStatus, StageUsage};
+use crate::graph::{WorkflowGraph, WorkflowNode};
+use crate::outcome::{BilledModelUsage, OutcomeExt, StageStatus};
 
-type WfRunState = RunState<Option<StageUsage>>;
-type WfNodeResult = NodeResult<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<BilledModelUsage>>;
+type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
 
 /// Sub-lifecycle responsible for tracking failure signatures and tripping the
 /// circuit breaker when deterministic failure cycles are detected.
 pub(crate) struct CircuitBreakerLifecycle {
-    loop_failure_signatures: Mutex<HashMap<FailureSignature, usize>>,
-    restart_failure_signatures: Mutex<HashMap<FailureSignature, usize>>,
+    loop_failure_signatures:      Mutex<HashMap<FailureSignature, usize>>,
+    restart_failure_signatures:   Mutex<HashMap<FailureSignature, usize>>,
     loop_restart_signature_limit: usize,
 }
 

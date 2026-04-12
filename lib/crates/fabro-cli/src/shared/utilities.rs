@@ -1,9 +1,9 @@
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
-use std::{io::Write, path::PathBuf};
 
-use anyhow::{Result, bail};
 use cli_table::Color;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_validate::{Diagnostic, Severity};
 use serde::Serialize;
@@ -24,7 +24,7 @@ where
     Ok(())
 }
 
-pub(crate) fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
+pub(crate) fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles, printer: Printer) {
     for d in diagnostics {
         let location = match (&d.node_id, &d.edge) {
             (Some(node), _) => format!(" [node: {node}]"),
@@ -32,19 +32,22 @@ pub(crate) fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
             _ => String::new(),
         };
         match d.severity {
-            Severity::Error => eprintln!(
+            Severity::Error => fabro_util::printerr!(
+                printer,
                 "{}{location}: {} ({})",
                 styles.red.apply_to("error"),
                 d.message,
                 styles.dim.apply_to(&d.rule),
             ),
-            Severity::Warning => eprintln!(
+            Severity::Warning => fabro_util::printerr!(
+                printer,
                 "{}{location}: {} ({})",
                 styles.yellow.apply_to("warning"),
                 d.message,
                 styles.dim.apply_to(&d.rule),
             ),
-            Severity::Info => eprintln!(
+            Severity::Info => fabro_util::printerr!(
+                printer,
                 "{}",
                 styles
                     .dim
@@ -71,6 +74,10 @@ pub(crate) fn format_tokens_human(tokens: i64) -> String {
     } else {
         tokens.to_string()
     }
+}
+
+pub(crate) fn format_usd_micros(usd_micros: i64) -> String {
+    format!("${:.2}", usd_micros as f64 / 1_000_000.0)
 }
 
 pub(crate) fn tilde_path(path: &Path) -> String {
@@ -103,19 +110,6 @@ pub(crate) fn split_run_path(s: &str) -> Option<(&str, &str)> {
     s.split_once(':')
 }
 
-pub(crate) fn validate_daytona_provider(
-    record: &fabro_sandbox::SandboxRecord,
-    feature: &str,
-) -> Result<()> {
-    if record.provider != "daytona" {
-        bail!(
-            "{feature} is only supported for Daytona sandboxes (this run uses '{}')",
-            record.provider
-        );
-    }
-    Ok(())
-}
-
 pub(crate) fn format_duration_ms(ms: u64) -> String {
     let duration = Duration::from_millis(ms);
     let secs = duration.as_secs();
@@ -146,7 +140,7 @@ pub(crate) fn format_size(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::format_tokens_human;
+    use super::{format_tokens_human, format_usd_micros};
 
     #[test]
     fn format_tokens_human_zero() {
@@ -176,5 +170,10 @@ mod tests {
     #[test]
     fn format_tokens_human_mid_millions() {
         assert_eq!(format_tokens_human(3_456_789), "3.5m");
+    }
+
+    #[test]
+    fn format_usd_micros_two_decimals() {
+        assert_eq!(format_usd_micros(570_000), "$0.57");
     }
 }

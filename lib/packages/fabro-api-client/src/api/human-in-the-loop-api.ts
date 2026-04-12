@@ -30,7 +30,11 @@ import type { PreviewUrlRequest } from '../models';
 // @ts-ignore
 import type { PreviewUrlResponse } from '../models';
 // @ts-ignore
-import type { SteerRequest } from '../models';
+import type { SandboxFileListResponse } from '../models';
+// @ts-ignore
+import type { SshAccessRequest } from '../models';
+// @ts-ignore
+import type { SshAccessResponse } from '../models';
 // @ts-ignore
 import type { SubmitAnswerRequest } from '../models';
 /**
@@ -39,7 +43,53 @@ import type { SubmitAnswerRequest } from '../models';
 export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Generates a time-limited preview URL for a port exposed by the run\'s sandbox environment.
+         * Creates a time-limited SSH command for the run\'s sandbox environment.
+         * @summary SSH Access
+         * @param {string} id Unique run identifier (ULID).
+         * @param {SshAccessRequest} sshAccessRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createRunSshAccess: async (id: string, sshAccessRequest: SshAccessRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('createRunSshAccess', 'id', id)
+            // verify required parameter 'sshAccessRequest' is not null or undefined
+            assertParamExists('createRunSshAccess', 'sshAccessRequest', sshAccessRequest)
+            const localVarPath = `/api/v1/runs/{id}/ssh`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(sshAccessRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Generates a preview URL for a port exposed by the run\'s sandbox environment.
          * @summary Preview URL
          * @param {string} id Unique run identifier (ULID).
          * @param {PreviewUrlRequest} previewUrlRequest 
@@ -78,6 +128,54 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(previewUrlRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Downloads a file from the run\'s sandbox environment.
+         * @summary Download Sandbox File
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} path 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getSandboxFile: async (id: string, path: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('getSandboxFile', 'id', id)
+            // verify required parameter 'path' is not null or undefined
+            assertParamExists('getSandboxFile', 'path', path)
+            const localVarPath = `/api/v1/runs/{id}/sandbox/file`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (path !== undefined) {
+                localVarQueryParameter['path'] = path;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/octet-stream,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -136,19 +234,20 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Sends inline guidance to a running agent, targeting a specific file and line. The guidance is delivered asynchronously.
-         * @summary Steer Run
+         * Lists directory entries from the run\'s sandbox environment.
+         * @summary List Sandbox Files
          * @param {string} id Unique run identifier (ULID).
-         * @param {SteerRequest} steerRequest 
+         * @param {string} path 
+         * @param {number} [depth] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        steerRun: async (id: string, steerRequest: SteerRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listSandboxFiles: async (id: string, path: string, depth?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
-            assertParamExists('steerRun', 'id', id)
-            // verify required parameter 'steerRequest' is not null or undefined
-            assertParamExists('steerRun', 'steerRequest', steerRequest)
-            const localVarPath = `/api/v1/runs/{id}/steer`
+            assertParamExists('listSandboxFiles', 'id', id)
+            // verify required parameter 'path' is not null or undefined
+            assertParamExists('listSandboxFiles', 'path', path)
+            const localVarPath = `/api/v1/runs/{id}/sandbox/files`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -157,7 +256,7 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
                 baseOptions = configuration.baseOptions;
             }
 
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -168,13 +267,72 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
-            localVarHeaderParameter['Content-Type'] = 'application/json';
+            if (path !== undefined) {
+                localVarQueryParameter['path'] = path;
+            }
+
+            if (depth !== undefined) {
+                localVarQueryParameter['depth'] = depth;
+            }
+
             localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(steerRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Uploads a file into the run\'s sandbox environment.
+         * @summary Upload Sandbox File
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} path 
+         * @param {File} body 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putSandboxFile: async (id: string, path: string, body: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('putSandboxFile', 'id', id)
+            // verify required parameter 'path' is not null or undefined
+            assertParamExists('putSandboxFile', 'path', path)
+            // verify required parameter 'body' is not null or undefined
+            assertParamExists('putSandboxFile', 'body', body)
+            const localVarPath = `/api/v1/runs/{id}/sandbox/file`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (path !== undefined) {
+                localVarQueryParameter['path'] = path;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/octet-stream';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -241,7 +399,21 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = HumanInTheLoopApiAxiosParamCreator(configuration)
     return {
         /**
-         * Generates a time-limited preview URL for a port exposed by the run\'s sandbox environment.
+         * Creates a time-limited SSH command for the run\'s sandbox environment.
+         * @summary SSH Access
+         * @param {string} id Unique run identifier (ULID).
+         * @param {SshAccessRequest} sshAccessRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async createRunSshAccess(id: string, sshAccessRequest: SshAccessRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SshAccessResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.createRunSshAccess(id, sshAccessRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.createRunSshAccess']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Generates a preview URL for a port exposed by the run\'s sandbox environment.
          * @summary Preview URL
          * @param {string} id Unique run identifier (ULID).
          * @param {PreviewUrlRequest} previewUrlRequest 
@@ -252,6 +424,20 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.generatePreviewUrl(id, previewUrlRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.generatePreviewUrl']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Downloads a file from the run\'s sandbox environment.
+         * @summary Download Sandbox File
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} path 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getSandboxFile(id: string, path: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getSandboxFile(id, path, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.getSandboxFile']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -270,17 +456,33 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Sends inline guidance to a running agent, targeting a specific file and line. The guidance is delivered asynchronously.
-         * @summary Steer Run
+         * Lists directory entries from the run\'s sandbox environment.
+         * @summary List Sandbox Files
          * @param {string} id Unique run identifier (ULID).
-         * @param {SteerRequest} steerRequest 
+         * @param {string} path 
+         * @param {number} [depth] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async steerRun(id: string, steerRequest: SteerRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.steerRun(id, steerRequest, options);
+        async listSandboxFiles(id: string, path: string, depth?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SandboxFileListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listSandboxFiles(id, path, depth, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.steerRun']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.listSandboxFiles']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Uploads a file into the run\'s sandbox environment.
+         * @summary Upload Sandbox File
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} path 
+         * @param {File} body 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async putSandboxFile(id: string, path: string, body: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.putSandboxFile(id, path, body, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.putSandboxFile']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -308,7 +510,18 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
     const localVarFp = HumanInTheLoopApiFp(configuration)
     return {
         /**
-         * Generates a time-limited preview URL for a port exposed by the run\'s sandbox environment.
+         * Creates a time-limited SSH command for the run\'s sandbox environment.
+         * @summary SSH Access
+         * @param {string} id Unique run identifier (ULID).
+         * @param {SshAccessRequest} sshAccessRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createRunSshAccess(id: string, sshAccessRequest: SshAccessRequest, options?: RawAxiosRequestConfig): AxiosPromise<SshAccessResponse> {
+            return localVarFp.createRunSshAccess(id, sshAccessRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Generates a preview URL for a port exposed by the run\'s sandbox environment.
          * @summary Preview URL
          * @param {string} id Unique run identifier (ULID).
          * @param {PreviewUrlRequest} previewUrlRequest 
@@ -317,6 +530,17 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
          */
         generatePreviewUrl(id: string, previewUrlRequest: PreviewUrlRequest, options?: RawAxiosRequestConfig): AxiosPromise<PreviewUrlResponse> {
             return localVarFp.generatePreviewUrl(id, previewUrlRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Downloads a file from the run\'s sandbox environment.
+         * @summary Download Sandbox File
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} path 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getSandboxFile(id: string, path: string, options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.getSandboxFile(id, path, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns pending human-in-the-loop questions for a run. Questions are generated when the workflow needs user input to proceed.
@@ -331,15 +555,28 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
             return localVarFp.listRunQuestions(id, pageLimit, pageOffset, options).then((request) => request(axios, basePath));
         },
         /**
-         * Sends inline guidance to a running agent, targeting a specific file and line. The guidance is delivered asynchronously.
-         * @summary Steer Run
+         * Lists directory entries from the run\'s sandbox environment.
+         * @summary List Sandbox Files
          * @param {string} id Unique run identifier (ULID).
-         * @param {SteerRequest} steerRequest 
+         * @param {string} path 
+         * @param {number} [depth] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        steerRun(id: string, steerRequest: SteerRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.steerRun(id, steerRequest, options).then((request) => request(axios, basePath));
+        listSandboxFiles(id: string, path: string, depth?: number, options?: RawAxiosRequestConfig): AxiosPromise<SandboxFileListResponse> {
+            return localVarFp.listSandboxFiles(id, path, depth, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Uploads a file into the run\'s sandbox environment.
+         * @summary Upload Sandbox File
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} path 
+         * @param {File} body 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putSandboxFile(id: string, path: string, body: File, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.putSandboxFile(id, path, body, options).then((request) => request(axios, basePath));
         },
         /**
          * Submits an answer to a pending question. The answer can be freeform text or a selected option key, depending on the question type.
@@ -361,7 +598,19 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
  */
 export class HumanInTheLoopApi extends BaseAPI {
     /**
-     * Generates a time-limited preview URL for a port exposed by the run\'s sandbox environment.
+     * Creates a time-limited SSH command for the run\'s sandbox environment.
+     * @summary SSH Access
+     * @param {string} id Unique run identifier (ULID).
+     * @param {SshAccessRequest} sshAccessRequest 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public createRunSshAccess(id: string, sshAccessRequest: SshAccessRequest, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).createRunSshAccess(id, sshAccessRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Generates a preview URL for a port exposed by the run\'s sandbox environment.
      * @summary Preview URL
      * @param {string} id Unique run identifier (ULID).
      * @param {PreviewUrlRequest} previewUrlRequest 
@@ -370,6 +619,18 @@ export class HumanInTheLoopApi extends BaseAPI {
      */
     public generatePreviewUrl(id: string, previewUrlRequest: PreviewUrlRequest, options?: RawAxiosRequestConfig) {
         return HumanInTheLoopApiFp(this.configuration).generatePreviewUrl(id, previewUrlRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Downloads a file from the run\'s sandbox environment.
+     * @summary Download Sandbox File
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} path 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getSandboxFile(id: string, path: string, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).getSandboxFile(id, path, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -386,15 +647,29 @@ export class HumanInTheLoopApi extends BaseAPI {
     }
 
     /**
-     * Sends inline guidance to a running agent, targeting a specific file and line. The guidance is delivered asynchronously.
-     * @summary Steer Run
+     * Lists directory entries from the run\'s sandbox environment.
+     * @summary List Sandbox Files
      * @param {string} id Unique run identifier (ULID).
-     * @param {SteerRequest} steerRequest 
+     * @param {string} path 
+     * @param {number} [depth] 
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public steerRun(id: string, steerRequest: SteerRequest, options?: RawAxiosRequestConfig) {
-        return HumanInTheLoopApiFp(this.configuration).steerRun(id, steerRequest, options).then((request) => request(this.axios, this.basePath));
+    public listSandboxFiles(id: string, path: string, depth?: number, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).listSandboxFiles(id, path, depth, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Uploads a file into the run\'s sandbox environment.
+     * @summary Upload Sandbox File
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} path 
+     * @param {File} body 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public putSandboxFile(id: string, path: string, body: File, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).putSandboxFile(id, path, body, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

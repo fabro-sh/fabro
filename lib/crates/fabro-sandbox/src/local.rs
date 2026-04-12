@@ -1,20 +1,21 @@
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use async_trait::async_trait;
+use tokio::io::AsyncReadExt;
+use tokio::process::{Child, Command};
+use tokio::{fs, time};
+use tokio_util::sync::CancellationToken;
+
 use crate::{
     DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
     format_lines_numbered,
 };
-use async_trait::async_trait;
-use std::path::{Path, PathBuf};
-use std::time::Instant;
-use tokio::fs;
-use tokio::io::AsyncReadExt;
-use tokio::process::{Child, Command};
-use tokio::time;
-use tokio_util::sync::CancellationToken;
 
 pub struct LocalSandbox {
     working_directory: PathBuf,
-    event_callback: Option<SandboxEventCallback>,
-    rg_available: std::sync::OnceLock<bool>,
+    event_callback:    Option<SandboxEventCallback>,
+    rg_available:      std::sync::OnceLock<bool>,
 }
 
 impl LocalSandbox {
@@ -70,6 +71,43 @@ impl LocalSandbox {
         } else {
             self.working_directory.join(p)
         }
+    }
+
+    fn binary_on_path(binary: &str) -> bool {
+        let Some(paths) = std::env::var_os("PATH") else {
+            return false;
+        };
+
+        #[cfg(windows)]
+        let extensions: Vec<String> = std::env::var_os("PATHEXT")
+            .map(|value| {
+                value
+                    .to_string_lossy()
+                    .split(';')
+                    .map(|ext| ext.to_ascii_lowercase())
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![".exe".to_string(), ".cmd".to_string(), ".bat".to_string()]);
+
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join(binary);
+            if candidate.is_file() {
+                return true;
+            }
+
+            #[cfg(windows)]
+            {
+                if candidate.extension().is_none() {
+                    for ext in &extensions {
+                        if dir.join(format!("{binary}{ext}")).is_file() {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
     }
 }
 
@@ -197,15 +235,7 @@ impl Sandbox for LocalSandbox {
             .stderr(std::process::Stdio::piped());
 
         #[cfg(unix)]
-        // SAFETY: setpgid(0, 0) is safe to call in a pre_exec hook — it places
-        // the child into its own process group so we can signal the whole group.
-        #[allow(unsafe_code)]
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setpgid(0, 0);
-                Ok(())
-            });
-        }
+        fabro_proc::pre_exec_setpgid(cmd.as_std_mut());
 
         let mut child = cmd
             .spawn()
@@ -274,15 +304,7 @@ impl Sandbox for LocalSandbox {
         let full_path = self.resolve_path(path);
 
         // Try rg (ripgrep) first, fall back to grep
-        let use_rg = *self.rg_available.get_or_init(|| {
-            std::process::Command::new("rg")
-                .arg("--version")
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-        });
+        let use_rg = *self.rg_available.get_or_init(|| Self::binary_on_path("rg"));
 
         let output = if use_rg {
             let mut args = vec!["-n".to_string()];
@@ -300,9 +322,10 @@ impl Sandbox for LocalSandbox {
             args.push(pattern.into());
             args.push(full_path.to_string_lossy().into_owned());
 
-            std::process::Command::new("rg")
+            Command::new("rg")
                 .args(&args)
                 .output()
+                .await
                 .map_err(|e| format!("Failed to run rg: {e}"))?
         } else {
             let mut args = vec!["-rn".to_string()];
@@ -320,9 +343,10 @@ impl Sandbox for LocalSandbox {
             args.push(pattern.into());
             args.push(full_path.to_string_lossy().into_owned());
 
-            std::process::Command::new("grep")
+            Command::new("grep")
                 .args(&args)
                 .output()
+                .await
                 .map_err(|e| format!("Failed to run grep: {e}"))?
         };
 
@@ -461,6 +485,10 @@ impl Sandbox for LocalSandbox {
         }
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This synchronous host metadata probe only runs uname once while building the sandbox platform string."
+    )]
     fn os_version(&self) -> String {
         #[cfg(unix)]
         {
@@ -480,16 +508,12 @@ impl Sandbox for LocalSandbox {
     }
 }
 
-/// Send SIGTERM to the process group, wait 2s for graceful shutdown, then SIGKILL.
-#[allow(unsafe_code)]
+/// Send SIGTERM to the process group, wait 2s for graceful shutdown, then
+/// SIGKILL.
 async fn sigterm_then_kill(child: &mut Child) {
     #[cfg(unix)]
     if let Some(pid) = child.id() {
-        // SAFETY: kill with a negative pid signals the entire process group.
-        // The pid is valid because we just obtained it from child.id().
-        unsafe {
-            libc::kill(-i32::try_from(pid).unwrap(), libc::SIGTERM);
-        }
+        fabro_proc::sigterm_process_group(pid);
         if time::timeout(std::time::Duration::from_secs(2), child.wait())
             .await
             .is_err()
@@ -510,8 +534,9 @@ async fn sigterm_then_kill(child: &mut Child) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("local_env_test_{}", uuid::Uuid::new_v4()));
@@ -722,8 +747,9 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_emits_events() {
-        use crate::SandboxEvent;
         use std::sync::{Arc, Mutex};
+
+        use crate::SandboxEvent;
 
         let dir = std::env::temp_dir().join(format!("init_event_test_{}", uuid::Uuid::new_v4()));
         let events: Arc<Mutex<Vec<SandboxEvent>>> = Arc::new(Mutex::new(Vec::new()));
@@ -750,8 +776,9 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_emits_events() {
-        use crate::SandboxEvent;
         use std::sync::{Arc, Mutex};
+
+        use crate::SandboxEvent;
 
         let dir = temp_dir();
         let events: Arc<Mutex<Vec<SandboxEvent>>> = Arc::new(Mutex::new(Vec::new()));
@@ -803,14 +830,10 @@ mod tests {
 
         let env = LocalSandbox::new(dir.clone());
         let results = env
-            .grep(
-                "hello",
-                "test.txt",
-                &GrepOptions {
-                    case_insensitive: true,
-                    ..Default::default()
-                },
-            )
+            .grep("hello", "test.txt", &GrepOptions {
+                case_insensitive: true,
+                ..Default::default()
+            })
             .await
             .unwrap();
 
@@ -825,14 +848,10 @@ mod tests {
 
         let env = LocalSandbox::new(dir.clone());
         let results = env
-            .grep(
-                "match",
-                "test.txt",
-                &GrepOptions {
-                    max_results: Some(2),
-                    ..Default::default()
-                },
-            )
+            .grep("match", "test.txt", &GrepOptions {
+                max_results: Some(2),
+                ..Default::default()
+            })
             .await
             .unwrap();
 

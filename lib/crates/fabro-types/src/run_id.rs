@@ -1,6 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 
+use chrono::{DateTime, Utc};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use ulid::Ulid;
@@ -11,6 +12,15 @@ pub struct RunId(Ulid);
 impl RunId {
     pub fn new() -> Self {
         Self(Ulid::new())
+    }
+
+    pub fn created_at(&self) -> DateTime<Utc> {
+        self.0.datetime().into()
+    }
+
+    #[cfg(test)]
+    pub fn from_datetime(dt: DateTime<Utc>) -> Self {
+        Self(Ulid::from_datetime(dt.into()))
     }
 }
 
@@ -78,8 +88,9 @@ impl<'de> Deserialize<'de> for RunId {
 }
 
 pub mod fixtures {
-    use super::RunId;
     use ulid::Ulid;
+
+    use super::RunId;
 
     macro_rules! define_run_ids {
         ($($name:ident = $value:expr),+ $(,)?) => {
@@ -157,6 +168,8 @@ pub mod fixtures {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{TimeZone, Utc};
+
     use super::{RunId, fixtures};
 
     #[test]
@@ -171,5 +184,21 @@ mod tests {
             serde_json::from_value(serde_json::json!("0000000000000000000000001A")).unwrap();
 
         assert_eq!(value, fixtures::RUN_42);
+    }
+
+    #[test]
+    fn exposes_created_at_from_ulid_timestamp() {
+        let dt = Utc.with_ymd_and_hms(2026, 3, 27, 12, 34, 56).unwrap();
+        let run_id = RunId::from_datetime(dt);
+
+        assert_eq!(run_id.created_at(), dt);
+    }
+
+    #[test]
+    fn creates_run_id_from_datetime() {
+        let dt = Utc.with_ymd_and_hms(2026, 3, 27, 12, 34, 56).unwrap();
+        let run_id = RunId::from_datetime(dt);
+
+        assert_eq!(run_id.created_at(), dt);
     }
 }

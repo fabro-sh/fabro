@@ -1,13 +1,15 @@
-use crate::types::{AgentEvent, SessionEvent};
 use std::time::SystemTime;
+
 use tokio::sync::broadcast;
 
+use crate::types::{AgentEvent, SessionEvent};
+
 #[derive(Clone)]
-pub struct EventEmitter {
+pub struct Emitter {
     sender: broadcast::Sender<SessionEvent>,
 }
 
-impl EventEmitter {
+impl Emitter {
     #[must_use]
     pub fn new() -> Self {
         let (sender, _) = broadcast::channel(1024);
@@ -36,7 +38,7 @@ impl EventEmitter {
     }
 }
 
-impl Default for EventEmitter {
+impl Default for Emitter {
     fn default() -> Self {
         Self::new()
     }
@@ -45,32 +47,35 @@ impl Default for EventEmitter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::AgentError;
+    use crate::error::Error;
 
     #[tokio::test]
     async fn emit_and_receive_event() {
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let mut receiver = emitter.subscribe();
 
-        emitter.emit("sess-1".into(), AgentEvent::SessionStarted);
+        emitter.emit("sess-1".into(), AgentEvent::SessionStarted {
+            provider: Some("anthropic".into()),
+            model:    Some("claude-opus".into()),
+        });
 
         let event = receiver.recv().await.unwrap();
-        assert!(matches!(event.event, AgentEvent::SessionStarted));
+        assert!(matches!(event.event, AgentEvent::SessionStarted {
+            provider: Some(_),
+            model:    Some(_),
+        }));
         assert_eq!(event.session_id, "sess-1");
         assert_eq!(event.parent_session_id, None);
     }
 
     #[tokio::test]
     async fn emit_with_data() {
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let mut receiver = emitter.subscribe();
 
-        emitter.emit(
-            "sess-2".into(),
-            AgentEvent::Error {
-                error: AgentError::ToolExecution("something went wrong".into()),
-            },
-        );
+        emitter.emit("sess-2".into(), AgentEvent::Error {
+            error: Error::ToolExecution("something went wrong".into()),
+        });
 
         let event = receiver.recv().await.unwrap();
         assert!(
@@ -81,7 +86,7 @@ mod tests {
 
     #[tokio::test]
     async fn multiple_subscribers() {
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let mut rx1 = emitter.subscribe();
         let mut rx2 = emitter.subscribe();
 
@@ -99,36 +104,39 @@ mod tests {
 
     #[test]
     fn emit_without_subscribers_does_not_panic() {
-        let emitter = EventEmitter::new();
-        emitter.emit(
-            "sess-4".into(),
-            AgentEvent::Error {
-                error: AgentError::ToolExecution("test".into()),
-            },
-        );
+        let emitter = Emitter::new();
+        emitter.emit("sess-4".into(), AgentEvent::Error {
+            error: Error::ToolExecution("test".into()),
+        });
     }
 
     #[test]
     fn default_creates_emitter() {
-        let emitter = EventEmitter::default();
+        let emitter = Emitter::default();
         let _rx = emitter.subscribe();
     }
 
     #[tokio::test]
     async fn forward_preserves_session_ids() {
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let mut receiver = emitter.subscribe();
 
         emitter.forward(SessionEvent {
-            event: AgentEvent::SessionStarted,
-            timestamp: SystemTime::now(),
-            session_id: "child".into(),
+            event:             AgentEvent::SessionStarted {
+                provider: Some("anthropic".into()),
+                model:    Some("claude-opus".into()),
+            },
+            timestamp:         SystemTime::now(),
+            session_id:        "child".into(),
             parent_session_id: Some("parent".into()),
         });
 
         let event = receiver.recv().await.unwrap();
         assert_eq!(event.session_id, "child");
         assert_eq!(event.parent_session_id.as_deref(), Some("parent"));
-        assert!(matches!(event.event, AgentEvent::SessionStarted));
+        assert!(matches!(event.event, AgentEvent::SessionStarted {
+            provider: Some(_),
+            model:    Some(_),
+        }));
     }
 }

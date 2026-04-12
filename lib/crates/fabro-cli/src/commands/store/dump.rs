@@ -1,56 +1,214 @@
-use std::io::{ErrorKind, Write};
-use std::path::{Component, Path, PathBuf};
+use std::io::ErrorKind;
+use std::path::Path;
 
-use anyhow::{Context, Result, bail};
-use fabro_config::FabroSettingsExt;
-use fabro_store::{NodeVisitRef, RunSnapshot, RunStore};
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
-use serde::Serialize;
+use anyhow::{Context, Result};
+use bytes::Bytes;
+#[cfg(test)]
+use fabro_store::{ArtifactStore, RunDatabase};
+use fabro_store::{EventEnvelope, RunProjection, StageId};
+use fabro_types::{RunBlobId, RunId};
+use fabro_util::printer::Printer;
+use fabro_workflow::run_dump::RunDump;
+use futures::future::BoxFuture;
 #[cfg(test)]
 use serde::de::DeserializeOwned;
 
 use crate::args::{GlobalArgs, StoreDumpArgs};
+use crate::server_client::ServerStoreClient;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::{absolute_or_current, print_json_pretty};
-use crate::store;
-use crate::user_config::load_user_settings_with_globals;
+use crate::user_config::{load_settings_with_storage_dir, storage_dir};
 
-pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id)
-        .await?
-        .with_context(|| {
-            format!(
-                "run {} is not in the store (it may be a legacy filesystem-only run)",
-                run.run_id
-            )
-        })?;
-
-    let file_count = export_run(run_store.as_ref(), &args.output).await?;
+pub(crate) async fn dump_command(
+    args: &StoreDumpArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let lookup = ServerRunLookup::connect(&storage_dir(&cli_settings)?).await?;
+    let run = lookup.resolve(&args.run)?;
+    let run_id = run.run_id();
+    let state = lookup.client().get_run_state(&run_id).await?;
+    let source = ServerDumpSource::new(lookup.client(), &run_id);
+    let file_count = export_run_from_source(&source, &state, &args.output).await?;
     if globals.json {
         print_json_pretty(&serde_json::json!({
-            "run_id": run.run_id,
+            "run_id": run_id,
             "output_dir": absolute_or_current(&args.output),
             "file_count": file_count,
         }))?;
     } else {
-        println!(
+        fabro_util::printout!(
+            printer,
             "Exported {file_count} files for run {} to {}",
-            run.run_id,
+            run_id,
             args.output.display()
         );
     }
     Ok(())
 }
 
-pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> Result<usize> {
-    let snapshot = run_store
-        .get_snapshot()
-        .await?
+#[cfg(test)]
+pub(crate) async fn export_run(
+    run_store: &RunDatabase,
+    artifact_store: &ArtifactStore,
+    output_dir: &Path,
+) -> Result<usize> {
+    let state = run_store.state().await?;
+    let run_id = state
+        .run
+        .as_ref()
+        .map(|run| run.run_id)
         .context("run has no data in the store")?;
+    let source = LocalDumpSource::new(run_store, artifact_store, run_id);
+    export_run_from_source(&source, &state, output_dir).await
+}
 
+fn finalize_export(
+    output_dir: &Path,
+    output_state: OutputDirState,
+    staging_dir: tempfile::TempDir,
+    staging_path: &Path,
+    file_count: usize,
+) -> Result<usize> {
+    if matches!(output_state, OutputDirState::ExistingEmpty) {
+        std::fs::remove_dir(output_dir)
+            .with_context(|| format!("failed to replace {}", output_dir.display()))?;
+    }
+    std::fs::rename(staging_path, output_dir).with_context(|| {
+        format!(
+            "failed to move staged export {} into {}",
+            staging_path.display(),
+            output_dir.display()
+        )
+    })?;
+    let _ = staging_dir.keep();
+
+    Ok(file_count)
+}
+
+struct DumpArtifact {
+    stage_id:      StageId,
+    relative_path: String,
+    data:          Vec<u8>,
+}
+
+trait DumpDataSource {
+    fn list_events(&self) -> BoxFuture<'_, Result<Vec<EventEnvelope>>>;
+
+    fn read_blob(&self, blob_id: RunBlobId) -> BoxFuture<'_, Result<Option<Bytes>>>;
+
+    fn list_artifacts(&self) -> BoxFuture<'_, Result<Vec<DumpArtifact>>>;
+}
+
+#[cfg(test)]
+struct LocalDumpSource<'a> {
+    run_store:      &'a RunDatabase,
+    artifact_store: &'a ArtifactStore,
+    run_id:         RunId,
+}
+
+#[cfg(test)]
+impl<'a> LocalDumpSource<'a> {
+    fn new(run_store: &'a RunDatabase, artifact_store: &'a ArtifactStore, run_id: RunId) -> Self {
+        Self {
+            run_store,
+            artifact_store,
+            run_id,
+        }
+    }
+}
+
+#[cfg(test)]
+impl DumpDataSource for LocalDumpSource<'_> {
+    fn list_events(&self) -> BoxFuture<'_, Result<Vec<EventEnvelope>>> {
+        Box::pin(async move { Ok(self.run_store.list_events().await?) })
+    }
+
+    fn read_blob(&self, blob_id: RunBlobId) -> BoxFuture<'_, Result<Option<Bytes>>> {
+        Box::pin(async move { Ok(self.run_store.read_blob(&blob_id).await?) })
+    }
+
+    fn list_artifacts(&self) -> BoxFuture<'_, Result<Vec<DumpArtifact>>> {
+        Box::pin(async move {
+            let mut artifacts = Vec::new();
+            for asset in self.artifact_store.list_for_run(&self.run_id).await? {
+                let data = self
+                    .artifact_store
+                    .get(&self.run_id, &asset.node, &asset.filename)
+                    .await?
+                    .with_context(|| {
+                        format!(
+                            "asset {:?} for node {:?} visit {} is missing from the store",
+                            asset.filename,
+                            asset.node.node_id(),
+                            asset.node.visit()
+                        )
+                    })?;
+                artifacts.push(DumpArtifact {
+                    stage_id:      asset.node,
+                    relative_path: asset.filename,
+                    data:          data.to_vec(),
+                });
+            }
+            Ok(artifacts)
+        })
+    }
+}
+
+struct ServerDumpSource<'a> {
+    client: &'a ServerStoreClient,
+    run_id: &'a RunId,
+}
+
+impl<'a> ServerDumpSource<'a> {
+    fn new(client: &'a ServerStoreClient, run_id: &'a RunId) -> Self {
+        Self { client, run_id }
+    }
+}
+
+impl DumpDataSource for ServerDumpSource<'_> {
+    fn list_events(&self) -> BoxFuture<'_, Result<Vec<EventEnvelope>>> {
+        Box::pin(async move { self.client.list_run_events(self.run_id, None, None).await })
+    }
+
+    fn read_blob(&self, blob_id: RunBlobId) -> BoxFuture<'_, Result<Option<Bytes>>> {
+        Box::pin(async move { self.client.read_run_blob(self.run_id, &blob_id).await })
+    }
+
+    fn list_artifacts(&self) -> BoxFuture<'_, Result<Vec<DumpArtifact>>> {
+        Box::pin(async move {
+            let mut artifacts = Vec::new();
+            for artifact in self.client.list_run_artifacts(self.run_id).await? {
+                let stage_id: StageId = artifact.stage_id.parse().with_context(|| {
+                    format!("server returned invalid stage id {:?}", artifact.stage_id)
+                })?;
+                let data = self
+                    .client
+                    .download_stage_artifact(self.run_id, &stage_id, &artifact.relative_path)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to download artifact {} for stage {}",
+                            artifact.relative_path, artifact.stage_id
+                        )
+                    })?;
+                artifacts.push(DumpArtifact {
+                    stage_id,
+                    relative_path: artifact.relative_path,
+                    data,
+                });
+            }
+            Ok(artifacts)
+        })
+    }
+}
+
+async fn export_run_from_source(
+    source: &impl DumpDataSource,
+    state: &RunProjection,
+    output_dir: &Path,
+) -> Result<usize> {
     let output_state = inspect_output_dir(output_dir)?;
     let staging_parent = output_parent_dir(output_dir);
     std::fs::create_dir_all(staging_parent)
@@ -67,159 +225,32 @@ pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> R
         })?;
     let staging_path = staging_dir.path().to_path_buf();
 
-    let file_count = export_run_to_dir(run_store, &snapshot, &staging_path).await?;
-
-    if matches!(output_state, OutputDirState::ExistingEmpty) {
-        std::fs::remove_dir(output_dir)
-            .with_context(|| format!("failed to replace {}", output_dir.display()))?;
-    }
-    std::fs::rename(&staging_path, output_dir).with_context(|| {
-        format!(
-            "failed to move staged export {} into {}",
-            staging_path.display(),
-            output_dir.display()
-        )
-    })?;
-    let _ = staging_dir.keep();
-
-    Ok(file_count)
+    let file_count = write_run_dump(source, state, &staging_path).await?;
+    finalize_export(
+        output_dir,
+        output_state,
+        staging_dir,
+        &staging_path,
+        file_count,
+    )
 }
 
-async fn export_run_to_dir(
-    run_store: &dyn RunStore,
-    snapshot: &RunSnapshot,
+async fn write_run_dump(
+    source: &impl DumpDataSource,
+    state: &RunProjection,
     output_dir: &Path,
 ) -> Result<usize> {
-    let mut file_count = 0;
+    let events = source.list_events().await?;
+    let mut dump = RunDump::from_store_state_and_events(state, &events)?;
 
-    write_json_file(&output_dir.join("run.json"), &snapshot.run)?;
-    file_count += 1;
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("start.json"),
-        snapshot.start.as_ref(),
-    )?);
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("status.json"),
-        snapshot.status.as_ref(),
-    )?);
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("checkpoint.json"),
-        snapshot.checkpoint.as_ref(),
-    )?);
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("conclusion.json"),
-        snapshot.conclusion.as_ref(),
-    )?);
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("retro.json"),
-        snapshot.retro.as_ref(),
-    )?);
-    file_count += usize::from(write_optional_text_file(
-        &output_dir.join("graph.fabro"),
-        snapshot.graph.as_deref(),
-    )?);
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("sandbox.json"),
-        snapshot.sandbox.as_ref(),
-    )?);
+    dump.hydrate_referenced_blobs_with_reader(|blob_id| source.read_blob(blob_id))
+        .await?;
 
-    for node in &snapshot.nodes {
-        let node_id = validate_single_path_segment("node id", &node.node_id)?;
-        let base = output_dir
-            .join("nodes")
-            .join(node_id)
-            .join(format!("visit-{}", node.visit));
-        file_count += usize::from(write_optional_text_file(
-            &base.join("prompt.md"),
-            node.prompt.as_deref(),
-        )?);
-        file_count += usize::from(write_optional_text_file(
-            &base.join("response.md"),
-            node.response.as_deref(),
-        )?);
-        file_count += usize::from(write_optional_json_file(
-            &base.join("status.json"),
-            node.status.as_ref(),
-        )?);
-        file_count += usize::from(write_optional_text_file(
-            &base.join("stdout.log"),
-            node.stdout.as_deref(),
-        )?);
-        file_count += usize::from(write_optional_text_file(
-            &base.join("stderr.log"),
-            node.stderr.as_deref(),
-        )?);
+    for artifact in source.list_artifacts().await? {
+        dump.add_artifact_bytes(&artifact.stage_id, &artifact.relative_path, artifact.data)?;
     }
 
-    file_count += usize::from(write_optional_text_file(
-        &output_dir.join("retro").join("prompt.md"),
-        run_store.get_retro_prompt().await?.as_deref(),
-    )?);
-    file_count += usize::from(write_optional_text_file(
-        &output_dir.join("retro").join("response.md"),
-        run_store.get_retro_response().await?.as_deref(),
-    )?);
-
-    write_events_jsonl(
-        &output_dir.join("events.jsonl"),
-        &run_store.list_events().await?,
-    )?;
-    file_count += 1;
-
-    for (seq, checkpoint) in run_store.list_checkpoints().await? {
-        write_json_file(
-            &output_dir
-                .join("checkpoints")
-                .join(format!("{seq:04}.json")),
-            &checkpoint,
-        )?;
-        file_count += 1;
-    }
-
-    for artifact_id in run_store.list_artifact_values().await? {
-        let artifact_id_segment = validate_single_path_segment("artifact id", &artifact_id)?;
-        let value = run_store
-            .get_artifact_value(&artifact_id)
-            .await?
-            .with_context(|| format!("artifact value {artifact_id:?} is missing from the store"))?;
-        write_json_file(
-            &output_dir
-                .join("artifacts")
-                .join("values")
-                .join(format!("{}.json", artifact_id_segment.display())),
-            &value,
-        )?;
-        file_count += 1;
-    }
-
-    for (node_id, visit, filename) in run_store.list_all_assets().await? {
-        let node_id_segment = validate_single_path_segment("node id", &node_id)?;
-        let filename_path = validate_relative_path("asset filename", &filename)?;
-        let node = NodeVisitRef {
-            node_id: &node_id,
-            visit,
-        };
-        let data = run_store
-            .get_asset(&node, &filename)
-            .await?
-            .with_context(|| {
-                format!(
-                    "asset {filename:?} for node {node_id:?} visit {visit} is missing from the store"
-                )
-            })?;
-        write_bytes_file(
-            &output_dir
-                .join("artifacts")
-                .join("nodes")
-                .join(node_id_segment)
-                .join(format!("visit-{visit}"))
-                .join(filename_path),
-            data.as_ref(),
-        )?;
-        file_count += 1;
-    }
-
-    Ok(file_count)
+    dump.write_to_dir(output_dir)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,108 +293,26 @@ fn output_parent_dir(path: &Path) -> &Path {
     }
 }
 
-fn validate_single_path_segment(kind: &str, value: &str) -> Result<PathBuf> {
-    let path = validate_relative_path(kind, value)?;
-    if path.components().count() != 1 {
-        bail!("{kind} {value:?} must be a single path segment");
-    }
-    Ok(path)
-}
-
-fn validate_relative_path(kind: &str, value: &str) -> Result<PathBuf> {
-    let mut normalized = PathBuf::new();
-    for component in Path::new(value).components() {
-        match component {
-            Component::Normal(part) => normalized.push(part),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                bail!("{kind} {value:?} must be a relative path without '..'");
-            }
-        }
-    }
-    if normalized.as_os_str().is_empty() {
-        bail!("{kind} {value:?} must not be empty");
-    }
-    Ok(normalized)
-}
-
-fn write_optional_json_file<T>(path: &Path, value: Option<&T>) -> Result<bool>
-where
-    T: Serialize,
-{
-    match value {
-        Some(value) => {
-            write_json_file(path, value)?;
-            Ok(true)
-        }
-        None => Ok(false),
-    }
-}
-
-fn write_json_file<T>(path: &Path, value: &T) -> Result<()>
-where
-    T: Serialize,
-{
-    ensure_parent_dir(path)?;
-    let bytes = serde_json::to_vec_pretty(value)?;
-    std::fs::write(path, bytes).with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_optional_text_file(path: &Path, value: Option<&str>) -> Result<bool> {
-    match value {
-        Some(value) => {
-            write_text_file(path, value)?;
-            Ok(true)
-        }
-        None => Ok(false),
-    }
-}
-
-fn write_text_file(path: &Path, value: &str) -> Result<()> {
-    write_bytes_file(path, value.as_bytes())
-}
-
-fn write_bytes_file(path: &Path, value: &[u8]) -> Result<()> {
-    ensure_parent_dir(path)?;
-    std::fs::write(path, value).with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_events_jsonl(path: &Path, events: &[fabro_store::EventEnvelope]) -> Result<()> {
-    ensure_parent_dir(path)?;
-    let mut file = std::fs::File::create(path)
-        .with_context(|| format!("failed to create {}", path.display()))?;
-    for event in events {
-        serde_json::to_writer(&mut file, event)?;
-        file.write_all(b"\n")?;
-    }
-    Ok(())
-}
-
-fn ensure_parent_dir(path: &Path) -> Result<()> {
-    let parent = path
-        .parent()
-        .with_context(|| format!("path {} has no parent", path.display()))?;
-    std::fs::create_dir_all(parent)
-        .with_context(|| format!("failed to create {}", parent.display()))?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use std::collections::HashMap;
     use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use chrono::{DateTime, Utc};
-    use fabro_store::{EventEnvelope, EventPayload, InMemoryStore, Store as _};
+    use fabro_store::{Database, EventEnvelope, EventPayload};
+    use fabro_types::settings::SettingsLayer;
     use fabro_types::{
-        AggregateStats, AttrValue, Checkpoint, Conclusion, FabroSettings, Graph, NodeStatusRecord,
-        Retro, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus,
-        StartRecord, StatusReason, fixtures,
+        AggregateStats, AttrValue, BilledTokenCounts, Checkpoint, Conclusion, Graph,
+        NodeStatusRecord, Retro, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord,
+        StageStatus, StartRecord, StatusReason, fixtures,
     };
+    use fabro_workflow::event::{Event, append_event};
+    use object_store::ObjectStore;
+    use object_store::memory::InMemory;
+
+    use super::*;
 
     fn dt(rfc3339: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(rfc3339)
@@ -375,7 +324,18 @@ mod tests {
         fixtures::RUN_1
     }
 
-    fn sample_run_record(run_id: RunId, created_at: DateTime<Utc>) -> RunRecord {
+    fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
+        let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let store = Arc::new(Database::new(
+            Arc::clone(&object_store),
+            "",
+            Duration::from_millis(1),
+        ));
+        let artifact_store = ArtifactStore::new(object_store, "artifacts");
+        (store, artifact_store)
+    }
+
+    fn sample_run_record(run_id: RunId, _created_at: DateTime<Utc>) -> RunRecord {
         let mut graph = Graph::new("night-sky");
         graph.attrs.insert(
             "goal".to_string(),
@@ -383,14 +343,17 @@ mod tests {
         );
         RunRecord {
             run_id,
-            created_at,
-            settings: FabroSettings::default(),
+            settings: SettingsLayer::default(),
             graph,
             workflow_slug: Some("night-sky".to_string()),
             working_directory: PathBuf::from("/tmp/night-sky"),
             host_repo_path: Some("github.com/fabro-sh/fabro".to_string()),
+            repo_origin_url: Some("https://github.com/fabro-sh/fabro".to_string()),
             base_branch: Some("main".to_string()),
             labels: HashMap::from([("team".to_string(), "infra".to_string())]),
+            provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         }
     }
 
@@ -405,47 +368,52 @@ mod tests {
 
     fn sample_status() -> RunStatusRecord {
         RunStatusRecord {
-            status: RunStatus::Running,
-            reason: Some(StatusReason::SandboxInitializing),
+            status:     RunStatus::Running,
+            reason:     Some(StatusReason::SandboxInitializing),
             updated_at: dt("2026-03-27T12:05:00Z"),
         }
     }
 
     fn sample_checkpoint(current_node: &str, visit: u32) -> Checkpoint {
         Checkpoint {
-            timestamp: dt("2026-03-27T12:10:00Z"),
-            current_node: current_node.to_string(),
-            completed_nodes: vec!["plan".to_string()],
-            node_retries: HashMap::from([(current_node.to_string(), visit.saturating_sub(1))]),
-            context_values: HashMap::from([(
+            timestamp:                  dt("2026-03-27T12:10:00Z"),
+            current_node:               current_node.to_string(),
+            completed_nodes:            vec!["plan".to_string()],
+            node_retries:               HashMap::from([(
+                current_node.to_string(),
+                visit.saturating_sub(1),
+            )]),
+            context_values:             HashMap::from([(
                 "artifact".to_string(),
                 serde_json::json!({"kind": "summary"}),
             )]),
-            node_outcomes: HashMap::new(),
-            next_node_id: Some("review".to_string()),
-            git_commit_sha: Some("def456".to_string()),
-            loop_failure_signatures: HashMap::new(),
+            node_outcomes:              HashMap::new(),
+            next_node_id:               Some("review".to_string()),
+            git_commit_sha:             Some("def456".to_string()),
+            loop_failure_signatures:    HashMap::new(),
             restart_failure_signatures: HashMap::new(),
-            node_visits: HashMap::from([(current_node.to_string(), visit as usize)]),
+            node_visits:                HashMap::from([(current_node.to_string(), visit as usize)]),
         }
     }
 
     fn sample_conclusion() -> Conclusion {
         Conclusion {
-            timestamp: dt("2026-03-27T12:15:00Z"),
-            status: StageStatus::Success,
-            duration_ms: 3210,
-            failure_reason: None,
+            timestamp:            dt("2026-03-27T12:15:00Z"),
+            status:               StageStatus::Success,
+            duration_ms:          3210,
+            failure_reason:       None,
             final_git_commit_sha: Some("feedbeef".to_string()),
-            stages: Vec::new(),
-            total_cost: Some(1.25),
-            total_retries: 2,
-            total_input_tokens: 10,
-            total_output_tokens: 20,
-            total_cache_read_tokens: 30,
-            total_cache_write_tokens: 40,
-            total_reasoning_tokens: 50,
-            has_pricing: true,
+            stages:               Vec::new(),
+            billing:              Some(BilledTokenCounts {
+                input_tokens:       10,
+                output_tokens:      20,
+                total_tokens:       150,
+                reasoning_tokens:   50,
+                cache_read_tokens:  30,
+                cache_write_tokens: 40,
+                total_usd_micros:   Some(1_250_000),
+            }),
+            total_retries:        2,
         }
     }
 
@@ -458,12 +426,12 @@ mod tests {
             smoothness: None,
             stages: Vec::new(),
             stats: AggregateStats {
-                total_duration_ms: 3210,
-                total_cost: Some(1.25),
-                total_retries: 2,
-                files_touched: vec!["src/lib.rs".to_string()],
-                stages_completed: 3,
-                stages_failed: 0,
+                total_duration_ms:        3210,
+                total_billing_usd_micros: Some(1_250_000),
+                total_retries:            2,
+                files_touched:            vec!["src/lib.rs".to_string()],
+                stages_completed:         3,
+                stages_failed:            0,
             },
             intent: Some("ship the fix".to_string()),
             outcome: Some("done".to_string()),
@@ -475,113 +443,257 @@ mod tests {
 
     fn sample_sandbox() -> SandboxRecord {
         SandboxRecord {
-            provider: "local".to_string(),
-            working_directory: "/tmp/night-sky".to_string(),
-            identifier: Some("sandbox-1".to_string()),
+            provider:               "local".to_string(),
+            working_directory:      "/tmp/night-sky".to_string(),
+            identifier:             Some("sandbox-1".to_string()),
             host_working_directory: Some("/tmp/night-sky".to_string()),
-            container_mount_point: None,
+            container_mount_point:  None,
         }
-    }
-
-    fn sample_node_status() -> NodeStatusRecord {
-        NodeStatusRecord {
-            status: StageStatus::PartialSuccess,
-            notes: Some("captured output".to_string()),
-            failure_reason: Some("minor lint".to_string()),
-            timestamp: dt("2026-03-27T12:12:00Z"),
-        }
-    }
-
-    fn event_payload(run_id: RunId, ts: &str, event: &str) -> EventPayload {
-        EventPayload::new(
-            serde_json::json!({
-                "id": format!("evt-{run_id}-{event}"),
-                "ts": ts,
-                "run_id": run_id.to_string(),
-                "event": event
-            }),
-            &run_id,
-        )
-        .unwrap()
     }
 
     fn read_json<T: DeserializeOwned>(path: &Path) -> T {
-        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+        let bytes = std::fs::read(path)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()))
     }
 
     #[tokio::test]
     async fn export_run_writes_expected_directory_tree() {
-        let store = InMemoryStore::default();
+        let (store, artifact_store) = test_store_bundle();
         let created_at = dt("2026-03-27T12:00:00Z");
         let run_id = test_run_id();
-        let run = store.create_run(&run_id, created_at, None).await.unwrap();
+        let run = store.create_run(&run_id).await.unwrap();
+        let run_record = sample_run_record(run_id, created_at);
+        let start_record = sample_start_record(run_id, created_at);
+        let status_record = sample_status();
+        let mut first_checkpoint = sample_checkpoint("plan", 1);
+        let mut second_checkpoint = sample_checkpoint("code", 2);
+        let conclusion = sample_conclusion();
+        let retro = sample_retro(run_id);
+        let sandbox = sample_sandbox();
+        let summary_blob = run.write_blob(br#"{"done":true}"#).await.unwrap();
+        let plan_blob = run.write_blob(br#"{"steps":3}"#).await.unwrap();
+        first_checkpoint.context_values.insert(
+            "artifact".to_string(),
+            serde_json::json!(fabro_types::format_blob_ref(&plan_blob)),
+        );
+        second_checkpoint.context_values.insert(
+            "artifact".to_string(),
+            serde_json::json!(fabro_types::format_blob_ref(&summary_blob)),
+        );
 
-        run.put_run(&sample_run_record(run_id, created_at))
-            .await
-            .unwrap();
-        run.put_start(&sample_start_record(run_id, created_at))
-            .await
-            .unwrap();
-        run.put_status(&sample_status()).await.unwrap();
-        run.append_checkpoint(&sample_checkpoint("plan", 1))
-            .await
-            .unwrap();
-        run.append_checkpoint(&sample_checkpoint("code", 2))
-            .await
-            .unwrap();
-        run.put_conclusion(&sample_conclusion()).await.unwrap();
-        run.put_retro(&sample_retro(run_id)).await.unwrap();
-        run.put_graph("digraph night_sky {}").await.unwrap();
-        run.put_sandbox(&sample_sandbox()).await.unwrap();
-
-        let node = NodeVisitRef {
-            node_id: "code",
-            visit: 2,
-        };
-        run.put_node_prompt(&node, "Plan the fix").await.unwrap();
-        run.put_node_response(&node, "Implemented").await.unwrap();
-        run.put_node_status(&node, &sample_node_status())
-            .await
-            .unwrap();
-        run.put_node_stdout(&node, "stdout line").await.unwrap();
-        run.put_node_stderr(&node, "").await.unwrap();
-        run.put_retro_prompt("How did it go?").await.unwrap();
-        run.put_retro_response("Smooth enough").await.unwrap();
-        run.append_event(&event_payload(
+        let node = StageId::new("code", 2);
+        append_event(&run, &run_id, &Event::RunCreated {
             run_id,
-            "2026-03-27T12:00:00.000Z",
-            "run.started",
-        ))
+            settings: serde_json::to_value(&run_record.settings).unwrap(),
+            graph: serde_json::to_value(&run_record.graph).unwrap(),
+            workflow_source: Some("digraph night_sky {}".to_string()),
+            workflow_config: None,
+            labels: run_record.labels.clone().into_iter().collect(),
+            run_dir: "/tmp/night-sky-run".to_string(),
+            working_directory: run_record.working_directory.display().to_string(),
+            host_repo_path: run_record.host_repo_path.clone(),
+            repo_origin_url: run_record.repo_origin_url.clone(),
+            base_branch: run_record.base_branch.clone(),
+            workflow_slug: run_record.workflow_slug.clone(),
+            db_prefix: None,
+            provenance: run_record.provenance.clone(),
+            manifest_blob: None,
+        })
         .await
         .unwrap();
-        run.append_event(&event_payload(
+        append_event(&run, &run_id, &Event::WorkflowRunStarted {
+            name: "night-sky".to_string(),
             run_id,
-            "2026-03-27T12:00:01.000Z",
-            "stage.completed",
-        ))
+            base_branch: run_record.base_branch.clone(),
+            base_sha: start_record.base_sha.clone(),
+            run_branch: start_record.run_branch.clone(),
+            worktree_dir: None,
+            goal: Some("map the constellations".to_string()),
+        })
         .await
         .unwrap();
-        run.put_artifact_value("summary", &serde_json::json!({"done": true}))
+        append_event(&run, &run_id, &Event::RunRunning {
+            reason: status_record.reason,
+        })
+        .await
+        .unwrap();
+        for checkpoint in [&first_checkpoint, &second_checkpoint] {
+            append_event(&run, &run_id, &Event::CheckpointCompleted {
+                node_id: checkpoint.current_node.clone(),
+                status: "success".to_string(),
+                current_node: checkpoint.current_node.clone(),
+                completed_nodes: checkpoint.completed_nodes.clone(),
+                node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+                context_values: checkpoint.context_values.clone().into_iter().collect(),
+                node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+                next_node_id: checkpoint.next_node_id.clone(),
+                git_commit_sha: checkpoint.git_commit_sha.clone(),
+                loop_failure_signatures: checkpoint
+                    .loop_failure_signatures
+                    .clone()
+                    .into_iter()
+                    .map(|(signature, count)| (signature.to_string(), count))
+                    .collect(),
+                restart_failure_signatures: checkpoint
+                    .restart_failure_signatures
+                    .clone()
+                    .into_iter()
+                    .map(|(signature, count)| (signature.to_string(), count))
+                    .collect(),
+                node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+                diff: None,
+            })
             .await
             .unwrap();
-        run.put_artifact_value("plan", &serde_json::json!({"steps": 3}))
-            .await
-            .unwrap();
-        run.put_asset(&node, "src/lib.rs", b"fn main() {}")
+        }
+        append_event(&run, &run_id, &Event::SandboxInitialized {
+            working_directory:      sandbox.working_directory.clone(),
+            provider:               sandbox.provider.clone(),
+            identifier:             sandbox.identifier.clone(),
+            host_working_directory: sandbox.host_working_directory.clone(),
+            container_mount_point:  sandbox.container_mount_point.clone(),
+        })
+        .await
+        .unwrap();
+        append_event(&run, &run_id, &Event::Prompt {
+            stage:    "code".to_string(),
+            visit:    2,
+            text:     "Plan the fix".to_string(),
+            mode:     None,
+            provider: None,
+            model:    None,
+        })
+        .await
+        .unwrap();
+        append_event(&run, &run_id, &Event::PromptCompleted {
+            node_id:  "code".to_string(),
+            response: "Implemented".to_string(),
+            model:    "gpt-5".to_string(),
+            provider: "openai".to_string(),
+            billing:  None,
+        })
+        .await
+        .unwrap();
+        append_event(&run, &run_id, &Event::StageCompleted {
+            node_id: "code".to_string(),
+            name: "Code".to_string(),
+            index: 1,
+            duration_ms: 250,
+            status: "partial_success".to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: Some("captured output".to_string()),
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: Some(std::collections::BTreeMap::from([(
+                "code".to_string(),
+                2usize,
+            )])),
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: Some("Implemented".to_string()),
+            attempt: 1,
+            max_attempts: 1,
+        })
+        .await
+        .unwrap();
+        append_event(&run, &run_id, &Event::CommandStarted {
+            node_id:    "code".to_string(),
+            script:     "echo hi".to_string(),
+            command:    "echo hi".to_string(),
+            language:   "sh".to_string(),
+            timeout_ms: None,
+        })
+        .await
+        .unwrap();
+        append_event(&run, &run_id, &Event::CommandCompleted {
+            node_id:     "code".to_string(),
+            stdout:      "stdout line".to_string(),
+            stderr:      String::new(),
+            exit_code:   Some(0),
+            duration_ms: 100,
+            timed_out:   false,
+        })
+        .await
+        .unwrap();
+        append_event(&run, &run_id, &Event::RetroStarted {
+            prompt:   Some("How did it go?".to_string()),
+            provider: None,
+            model:    None,
+        })
+        .await
+        .unwrap();
+        append_event(&run, &run_id, &Event::RetroCompleted {
+            duration_ms: 50,
+            response:    Some("Smooth enough".to_string()),
+            retro:       Some(serde_json::to_value(&retro).unwrap()),
+        })
+        .await
+        .unwrap();
+        append_event(&run, &run_id, &Event::WorkflowRunCompleted {
+            duration_ms:          conclusion.duration_ms,
+            artifact_count:       0,
+            status:               "success".to_string(),
+            reason:               None,
+            total_usd_micros:     conclusion
+                .billing
+                .as_ref()
+                .and_then(|billing| billing.total_usd_micros),
+            final_git_commit_sha: conclusion.final_git_commit_sha.clone(),
+            final_patch:          None,
+            billing:              conclusion.billing.clone(),
+        })
+        .await
+        .unwrap();
+        run.append_event(
+            &EventPayload::new(
+                serde_json::json!({
+                    "id": format!("evt-{run_id}-stage-completed"),
+                    "ts": "2026-03-27T12:00:01.000Z",
+                    "run_id": run_id.to_string(),
+                    "event": "stage.completed",
+                    "node_id": "code",
+                    "node_label": "Code",
+                    "properties": {
+                        "index": 1,
+                        "duration_ms": 1,
+                        "status": "success",
+                        "response": "Implemented",
+                        "notes": "all good",
+                        "files_touched": ["src/lib.rs"],
+                        "node_visits": {"code": 2},
+                        "attempt": 1,
+                        "max_attempts": 1
+                    }
+                }),
+                &run_id,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        artifact_store
+            .put(&run_id, &node, "src/lib.rs", b"fn main() {}")
             .await
             .unwrap();
 
-        let asset_only_node = NodeVisitRef {
-            node_id: "artifact-only",
-            visit: 7,
-        };
-        run.put_asset(&asset_only_node, "logs/output.txt", b"hello")
+        let artifact_only_node = StageId::new("artifact-only", 7);
+        artifact_store
+            .put(&run_id, &artifact_only_node, "logs/output.txt", b"hello")
             .await
             .unwrap();
 
         let output = tempfile::tempdir().unwrap();
-        let file_count = export_run(run.as_ref(), output.path()).await.unwrap();
-        assert_eq!(file_count, 22);
+        let file_count = export_run(&run, &artifact_store, output.path())
+            .await
+            .unwrap();
+        assert_eq!(file_count, 20);
 
         let exported_run: RunRecord = read_json(&output.path().join("run.json"));
         assert_eq!(exported_run.run_id, run_id);
@@ -590,10 +702,14 @@ mod tests {
         assert_eq!(exported_start.run_id, run_id);
 
         let exported_status: RunStatusRecord = read_json(&output.path().join("status.json"));
-        assert_eq!(exported_status.status, RunStatus::Running);
+        assert_eq!(exported_status.status, RunStatus::Succeeded);
 
         let exported_checkpoint: Checkpoint = read_json(&output.path().join("checkpoint.json"));
         assert_eq!(exported_checkpoint.current_node, "code");
+        assert_eq!(
+            exported_checkpoint.context_values.get("artifact"),
+            Some(&serde_json::json!({"done": true}))
+        );
         assert_eq!(
             std::fs::read_to_string(output.path().join("graph.fabro")).unwrap(),
             "digraph night_sky {}"
@@ -609,7 +725,7 @@ mod tests {
         );
         let node_status: NodeStatusRecord =
             read_json(&output.path().join("nodes/code/visit-2/status.json"));
-        assert_eq!(node_status.status, StageStatus::PartialSuccess);
+        assert_eq!(node_status.status, StageStatus::Success);
         assert_eq!(
             std::fs::read_to_string(output.path().join("nodes/code/visit-2/stdout.log")).unwrap(),
             "stdout line"
@@ -633,21 +749,23 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 15);
         assert_eq!(events[0].seq, 1);
-        assert_eq!(events[1].seq, 2);
+        assert_eq!(events.last().unwrap().seq, 15);
 
-        let first_checkpoint: Checkpoint = read_json(&output.path().join("checkpoints/0001.json"));
-        let second_checkpoint: Checkpoint = read_json(&output.path().join("checkpoints/0002.json"));
+        let first_checkpoint: Checkpoint = read_json(&output.path().join("checkpoints/0004.json"));
+        let second_checkpoint: Checkpoint = read_json(&output.path().join("checkpoints/0005.json"));
         assert_eq!(first_checkpoint.current_node, "plan");
         assert_eq!(second_checkpoint.current_node, "code");
-
-        let exported_plan: serde_json::Value =
-            read_json(&output.path().join("artifacts/values/plan.json"));
-        let exported_summary: serde_json::Value =
-            read_json(&output.path().join("artifacts/values/summary.json"));
-        assert_eq!(exported_plan, serde_json::json!({"steps": 3}));
-        assert_eq!(exported_summary, serde_json::json!({"done": true}));
+        assert_eq!(
+            first_checkpoint.context_values.get("artifact"),
+            Some(&serde_json::json!({"steps": 3}))
+        );
+        assert_eq!(
+            second_checkpoint.context_values.get("artifact"),
+            Some(&serde_json::json!({"done": true}))
+        );
+        assert!(!output.path().join("blobs").exists());
 
         assert_eq!(
             std::fs::read(
@@ -668,34 +786,6 @@ mod tests {
             b"hello"
         );
         assert!(!output.path().join("nodes/artifact-only").exists());
-    }
-
-    #[tokio::test]
-    async fn export_run_rejects_path_traversal_and_leaves_no_partial_output() {
-        let store = InMemoryStore::default();
-        let created_at = dt("2026-03-27T12:00:00Z");
-        let run_id = test_run_id();
-        let run = store.create_run(&run_id, created_at, None).await.unwrap();
-
-        run.put_run(&sample_run_record(run_id, created_at))
-            .await
-            .unwrap();
-        run.put_asset(
-            &NodeVisitRef {
-                node_id: "code",
-                visit: 1,
-            },
-            "../escape.txt",
-            b"boom",
-        )
-        .await
-        .unwrap();
-
-        let temp = tempfile::tempdir().unwrap();
-        let output = temp.path().join("dump");
-        let err = export_run(run.as_ref(), &output).await.unwrap_err();
-        assert!(err.to_string().contains("asset filename"));
-        assert!(!output.exists());
     }
 
     #[test]

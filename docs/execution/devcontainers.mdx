@@ -7,13 +7,15 @@ Fabro can use your project's [devcontainer](https://containers.dev/) configurati
 
 ## Enabling devcontainer support
 
-Set `devcontainer = true` in the `[sandbox]` section of your run config:
+Set `devcontainer = true` in the `[run.sandbox]` section of your run config:
 
 ```toml title="run.toml"
-version = 1
+_version = 1
+
+[workflow]
 graph = "workflow.fabro"
 
-[sandbox]
+[run.sandbox]
 provider = "daytona"
 devcontainer = true
 ```

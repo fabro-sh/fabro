@@ -1,6 +1,9 @@
+#![allow(clippy::absolute_paths)]
+
 use std::process::Output;
 
 use fabro_test::{fabro_snapshot, test_context};
+use httpmock::MockServer;
 
 async fn run_success_output(mut cmd: assert_cmd::Command) -> Output {
     tokio::task::spawn_blocking(move || cmd.assert().success().get_output().clone())
@@ -26,14 +29,14 @@ fn help() {
 
     Options:
           --json                           Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>                Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --provider <PROVIDER>            LLM provider (anthropic, openai, gemini, kimi, zai, minimax, inception)
           --model <MODEL>                  Model name (defaults per provider)
           --no-upgrade-check               Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --permissions <PERMISSIONS>      Permission level for tool execution [possible values: read-only, read-write, full]
-          --auto-approve                   Skip interactive prompts; deny tools outside permission level
           --quiet                          Suppress non-essential output [env: FABRO_QUIET=]
+          --auto-approve                   Skip interactive prompts; deny tools outside permission level
           --debug                          Print LLM request/response debug info to stderr
-          --storage-dir <STORAGE_DIR>      Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --verbose                        Print full LLM request/response JSON to stderr
           --skills-dir <SKILLS_DIR>        Directory containing skill files (overrides default discovery)
           --output-format <OUTPUT_FORMAT>  Output format (text for human-readable, json for NDJSON event stream) [possible values: text, json]
@@ -70,7 +73,7 @@ fn no_prompt() {
     error: the following required arguments were not provided:
       <PROMPT>
 
-    Usage: fabro exec --no-upgrade-check --storage-dir <STORAGE_DIR> <PROMPT>
+    Usage: fabro exec --no-upgrade-check <PROMPT>
 
     For more information, try '--help'.
     ");
@@ -96,8 +99,8 @@ fn exec_missing_api_key_exits_with_error() {
 fn exec_uses_user_config_defaults() {
     let context = test_context!();
     context.write_home(
-        ".fabro/user.toml",
-        "[exec]\nprovider = \"openai\"\nmodel = \"gpt-4.1-mini\"\npermissions = \"read-only\"\noutput_format = \"json\"\n",
+        ".fabro/settings.toml",
+        "_version = 1\n\n[cli.exec.model]\nprovider = \"openai\"\nname = \"gpt-4.1-mini\"\n\n[cli.exec.agent]\npermissions = \"read-only\"\n\n[cli.output]\nformat = \"json\"\n",
     );
 
     let mut cmd = context.exec_cmd();
@@ -105,7 +108,8 @@ fn exec_uses_user_config_defaults() {
     cmd.env_clear();
     cmd.env("HOME", &context.home_dir);
     cmd.env("FABRO_STORAGE_DIR", &context.storage_dir);
-    cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
 
     fabro_snapshot!(context.filters(), cmd, @"
     success: false
@@ -114,6 +118,135 @@ fn exec_uses_user_config_defaults() {
     ----- stderr -----
     error: API key not set for provider 'openai'
     ");
+}
+
+#[test]
+fn exec_server_target_uses_remote_transport_instead_of_local_api_key_resolution() {
+    let context = test_context!();
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("POST").path("/api/v1/completions");
+        // Use a non-retriable error so this test covers transport routing
+        // without paying the retry backoff cost of a 5xx response.
+        then.status(400).body("server-routed-marker");
+    });
+
+    let mut cmd = context.exec_cmd();
+    cmd.env_clear();
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
+    cmd.args([
+        "--server",
+        &format!("{}/api/v1", server.base_url()),
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-5.4-mini",
+        "test prompt",
+    ]);
+
+    let output = cmd.assert().failure().get_output().clone();
+    let stderr = String::from_utf8(output.stderr).expect("valid utf8");
+    assert!(
+        stderr.contains("server-routed-marker"),
+        "expected remote server failure marker, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("API key not set"),
+        "exec should not fail local API key validation when --server is set: {stderr}"
+    );
+}
+
+#[test]
+fn exec_configured_server_target_alone_does_not_reroute_exec() {
+    let context = test_context!();
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("POST").path("/api/v1/completions");
+        then.status(500).body("config-should-not-be-used");
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
+    );
+
+    let mut cmd = context.exec_cmd();
+    cmd.env_clear();
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
+    cmd.args([
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-5.4-mini",
+        "test prompt",
+    ]);
+
+    let output = cmd.assert().failure().get_output().clone();
+    let stderr = String::from_utf8(output.stderr).expect("valid utf8");
+    assert!(
+        stderr.contains("API key not set for provider 'openai'"),
+        "expected local API key validation failure, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("config-should-not-be-used"),
+        "exec should ignore configured server.target without --server: {stderr}"
+    );
+}
+
+#[test]
+fn exec_cli_server_target_overrides_configured_server_target() {
+    let context = test_context!();
+    let config_server = MockServer::start();
+    config_server.mock(|when, then| {
+        when.method("POST").path("/api/v1/completions");
+        then.status(500).body("config-should-not-be-used");
+    });
+    let cli_server = MockServer::start();
+    cli_server.mock(|when, then| {
+        when.method("POST").path("/api/v1/completions");
+        // Use a non-retriable error so this test covers target precedence
+        // without paying the retry backoff cost of a 5xx response.
+        then.status(400).body("cli-override-marker");
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            config_server.base_url()
+        ),
+    );
+
+    let mut cmd = context.exec_cmd();
+    cmd.env_clear();
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
+    cmd.args([
+        "--server",
+        &format!("{}/api/v1", cli_server.base_url()),
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-5.4-mini",
+        "test prompt",
+    ]);
+
+    let output = cmd.assert().failure().get_output().clone();
+    let stderr = String::from_utf8(output.stderr).expect("valid utf8");
+    assert!(
+        stderr.contains("cli-override-marker"),
+        "expected CLI server target to win, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("config-should-not-be-used"),
+        "configured server.target should not be used when --server is passed: {stderr}"
+    );
 }
 
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]

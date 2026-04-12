@@ -7,7 +7,8 @@ pub enum AstValue {
     Int(i64),
     Float(f64),
     Bool(bool),
-    /// A bare identifier used as a value (e.g., shape names, direction keywords).
+    /// A bare identifier used as a value (e.g., shape names, direction
+    /// keywords).
     Ident(String),
 }
 
@@ -17,7 +18,7 @@ pub type AttrBlock = Vec<(String, AstValue)>;
 /// A node statement: `id [attrs]?`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeStmt {
-    pub id: String,
+    pub id:    String,
     pub attrs: Option<AttrBlock>,
 }
 
@@ -32,7 +33,7 @@ pub struct EdgeStmt {
 /// A subgraph statement: `subgraph name? { stmts }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SubgraphStmt {
-    pub name: Option<String>,
+    pub name:       Option<String>,
     pub statements: Vec<Statement>,
 }
 
@@ -58,7 +59,7 @@ pub enum Statement {
 /// The top-level parsed DOT graph.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DotGraph {
-    pub name: String,
+    pub name:       String,
     pub statements: Vec<Statement>,
 }
 
@@ -84,11 +85,11 @@ mod tests {
     #[test]
     fn dot_graph_construction() {
         let graph = DotGraph {
-            name: "test".into(),
+            name:       "test".into(),
             statements: vec![
                 Statement::GraphAttrDecl("rankdir".into(), AstValue::Ident("LR".into())),
                 Statement::Node(NodeStmt {
-                    id: "start".into(),
+                    id:    "start".into(),
                     attrs: Some(vec![("shape".into(), AstValue::Ident("Mdiamond".into()))]),
                 }),
             ],
@@ -109,7 +110,7 @@ mod tests {
     #[test]
     fn subgraph_stmt() {
         let sub = SubgraphStmt {
-            name: Some("cluster_loop".into()),
+            name:       Some("cluster_loop".into()),
             statements: vec![Statement::NodeDefaults(vec![(
                 "timeout".into(),
                 AstValue::Str("900s".into()),

@@ -4,5 +4,6 @@ pub mod config;
 pub mod connection;
 pub mod dispatch;
 pub mod interaction;
+pub mod payload;
 pub mod socket;
 pub mod threads;

@@ -1,21 +1,19 @@
 use anyhow::Result;
-use fabro_config::FabroSettingsExt;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 
-use crate::args::{GlobalArgs, RunArgs, RunCommands};
+use crate::args::{AttachArgs, GlobalArgs, RunArgs, RunCommands, RunWorkerArgs, StartArgs};
+use crate::command_context::CommandContext;
+use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
-use crate::store;
-use crate::user_config::{load_user_settings_with_globals, user_layer_with_globals};
+use crate::user_config::settings_layer_with_storage_dir;
 
 pub(crate) mod attach;
 pub(crate) mod command;
 pub(crate) mod cp;
 pub(crate) mod create;
-pub(crate) mod detached;
 pub(crate) mod diff;
 pub(crate) mod fork;
-pub(crate) mod launcher;
 pub(crate) mod logs;
 pub(crate) mod output;
 pub(crate) mod overrides;
@@ -23,13 +21,10 @@ pub(crate) mod preview;
 pub(crate) mod resume;
 pub(crate) mod rewind;
 pub(crate) mod run_progress;
+pub(crate) mod runner;
 pub(crate) mod ssh;
 pub(crate) mod start;
 pub(crate) mod wait;
-
-pub(super) fn short_run_id(id: &str) -> &str {
-    if id.len() > 12 { &id[..12] } else { id }
-}
 
 fn apply_json_defaults(args: &mut RunArgs, globals: &GlobalArgs) {
     if globals.json {
@@ -37,50 +32,54 @@ fn apply_json_defaults(args: &mut RunArgs, globals: &GlobalArgs) {
     }
 }
 
-pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn dispatch(
+    cmd: RunCommands,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     match cmd {
         RunCommands::Run(mut args) => {
             apply_json_defaults(&mut args, globals);
-            command::execute(args, globals).await
+            Box::pin(command::execute(args, globals, printer)).await
         }
         RunCommands::Create(mut args) => {
             apply_json_defaults(&mut args, globals);
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let cli = user_layer_with_globals(globals)?;
-            let (run_id, _run_dir) = create::create_run(&args, cli, styles, true)?;
+            let cli = settings_layer_with_storage_dir(None)?;
+            let ctx = CommandContext::for_target(&args.target, printer)?;
+            let created_run =
+                Box::pin(create::create_run(&ctx, &args, cli, styles, true, printer)).await?;
+            if globals.json {
+                print_json_pretty(&serde_json::json!({ "run_id": created_run.run_id }))?;
+            } else {
+                fabro_util::printout!(printer, "{}", created_run.run_id);
+            }
+            Ok(())
+        }
+        RunCommands::Start(StartArgs { server, run }) => {
+            let ctx = CommandContext::for_target(&server, printer)?;
+            let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
+            let run_info = lookup.resolve(&run)?;
+            let run_id = run_info.run_id();
+            start::start_run_with_client(lookup.client(), &run_id, false).await?;
             if globals.json {
                 print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
-            } else {
-                println!("{run_id}");
             }
             Ok(())
         }
-        RunCommands::Start { run } => {
-            let cli_settings = load_user_settings_with_globals(globals)?;
-            let base = runs_base(&cli_settings.storage_dir());
-            let store = store::build_store(&cli_settings.storage_dir())?;
-            let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
-            let child = start::start_run(&run_info.path, false)?;
-            if globals.json {
-                print_json_pretty(&serde_json::json!({ "run_id": run_info.run_id }))?;
-            } else {
-                eprintln!("Started engine process (PID {})", child.id());
-            }
-            Ok(())
-        }
-        RunCommands::Attach { run } => {
+        RunCommands::Attach(AttachArgs { server, run }) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let cli_settings = load_user_settings_with_globals(globals)?;
-            let base = runs_base(&cli_settings.storage_dir());
-            let store = store::build_store(&cli_settings.storage_dir())?;
-            let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
-            let exit_code = attach::attach_run(
-                &run_info.path,
-                Some(&run_info.run_id),
+            let ctx = CommandContext::for_target(&server, printer)?;
+            let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
+            let run_info = lookup.resolve(&run)?;
+            let run_id = run_info.run_id();
+            let exit_code = attach::attach_run_with_client(
+                lookup.client(),
+                &run_id,
                 false,
                 styles,
-                None,
                 globals.json,
+                printer,
             )
             .await?;
             if exit_code != std::process::ExitCode::SUCCESS {
@@ -88,36 +87,38 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             }
             Ok(())
         }
-        RunCommands::Detached {
+        RunCommands::RunWorker(RunWorkerArgs {
+            server,
+            artifact_upload_token,
             run_dir,
-            launcher_path,
-            resume,
-        } => detached::execute(run_dir, launcher_path, resume).await,
-        RunCommands::Diff(args) => diff::run(args, globals).await,
+            run_id,
+            mode,
+        }) => runner::execute(run_id, server, artifact_upload_token, run_dir, mode).await,
+        RunCommands::Diff(args) => diff::run(args, globals, printer).await,
         RunCommands::Logs(args) => {
             let styles = Styles::detect_stdout();
-            logs::run(&args, &styles, globals).await
+            logs::run(&args, &styles, globals, printer).await
         }
         RunCommands::Resume(args) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
-                let cli_settings = load_user_settings_with_globals(globals)?;
-                crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled())
+                let ctx = CommandContext::for_target(&args.server, printer)?;
+                crate::sleep_inhibitor::guard(ctx.cli_settings().exec.prevent_idle_sleep)
             };
-            resume::resume_command(args, styles, globals).await
+            resume::resume_command(args, styles, globals, printer).await
         }
         RunCommands::Rewind(args) => {
             let styles = Styles::detect_stderr();
-            rewind::run(&args, &styles, globals).await
+            Box::pin(rewind::run(&args, &styles, globals, printer)).await
         }
         RunCommands::Fork(args) => {
             let styles = Styles::detect_stderr();
-            fork::run(&args, &styles, globals).await
+            Box::pin(fork::run(&args, &styles, globals, printer)).await
         }
         RunCommands::Wait(args) => {
             let styles = Styles::detect_stderr();
-            wait::run(&args, &styles, globals).await
+            wait::run(&args, &styles, globals, printer).await
         }
     }
 }

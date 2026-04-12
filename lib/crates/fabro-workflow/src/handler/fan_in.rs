@@ -3,22 +3,18 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
-use fabro_store::{NodeVisitRef, RunStore};
-
-use crate::context::Context;
-use crate::context::keys;
-use crate::error::FabroError;
-use crate::event::EventEmitter;
-use crate::outcome::{Outcome, OutcomeExt};
-use crate::run_dir::{node_dir, visit_from_context};
-use crate::sandbox_git::git_merge_ff_only;
 use fabro_graphviz::graph::{Graph, Node};
-use tokio::fs;
 
 use super::agent::{CodergenBackend, CodergenResult};
 use super::{EngineServices, Handler};
+use crate::context::{Context, keys};
+use crate::error::Error;
+use crate::event::{Emitter, Event, StageScope};
+use crate::outcome::{Outcome, OutcomeExt};
+use crate::sandbox_git::git_merge_ff_only;
 
-/// Consolidates results from a preceding parallel node and selects the best candidate.
+/// Consolidates results from a preceding parallel node and selects the best
+/// candidate.
 pub struct FanInHandler {
     backend: Option<Box<dyn CodergenBackend>>,
 }
@@ -39,7 +35,7 @@ impl Handler for FanInHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let results = context.get(keys::PARALLEL_RESULTS);
         let Some(results) = results else {
             return Ok(Outcome::fail_deterministic(
@@ -70,7 +66,7 @@ impl Handler for FanInHandler {
         _graph: &Graph,
         run_dir: &Path,
         services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let results = context.get(keys::PARALLEL_RESULTS);
         let Some(results) = results else {
             return Ok(Outcome::fail_deterministic(
@@ -90,7 +86,6 @@ impl Handler for FanInHandler {
                 &node.id,
                 &services.emitter,
                 &services.sandbox,
-                services.run_store.clone(),
             )
             .await?
         } else {
@@ -146,9 +141,9 @@ impl Handler for FanInHandler {
 }
 
 struct Candidate {
-    id: String,
+    id:     String,
     status: String,
-    score: f64,
+    score:  f64,
 }
 
 fn status_rank(status: &str) -> u32 {
@@ -166,16 +161,16 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
     let arr = results.as_array().unwrap_or(&empty_vec);
     if arr.is_empty() {
         return Candidate {
-            id: "unknown".to_string(),
+            id:     "unknown".to_string(),
             status: "fail".to_string(),
-            score: 0.0,
+            score:  0.0,
         };
     }
 
     let mut candidates: Vec<Candidate> = arr
         .iter()
         .map(|v| Candidate {
-            id: v
+            id:     v
                 .get("id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
@@ -185,7 +180,7 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
                 .and_then(|v| v.as_str())
                 .unwrap_or("fail")
                 .to_string(),
-            score: v
+            score:  v
                 .get("score")
                 .and_then(serde_json::Value::as_f64)
                 .unwrap_or(0.0),
@@ -209,9 +204,9 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
     });
 
     candidates.into_iter().next().unwrap_or_else(|| Candidate {
-        id: "unknown".to_string(),
+        id:     "unknown".to_string(),
         status: "fail".to_string(),
-        score: 0.0,
+        score:  0.0,
     })
 }
 
@@ -222,12 +217,11 @@ async fn llm_evaluate(
     prompt: &str,
     results: &serde_json::Value,
     context: &Context,
-    run_dir: &Path,
+    _run_dir: &Path,
     node_id: &str,
-    emitter: &Arc<EventEmitter>,
+    emitter: &Arc<Emitter>,
     sandbox: &Arc<dyn Sandbox>,
-    run_store: Option<Arc<dyn RunStore>>,
-) -> Result<Candidate, FabroError> {
+) -> Result<Candidate, Error> {
     let results_text =
         serde_json::to_string_pretty(results).unwrap_or_else(|_| results.to_string());
 
@@ -236,22 +230,19 @@ async fn llm_evaluate(
          Respond with the ID of the best candidate."
     );
 
-    // Write prompt to logs
-    let visit = visit_from_context(context);
-    let stage_dir = node_dir(run_dir, node_id, visit);
-    fs::create_dir_all(&stage_dir).await?;
-    let node_ref = NodeVisitRef {
-        node_id,
-        visit: u32::try_from(visit).unwrap_or(u32::MAX),
-    };
-    if let Some(ref store) = run_store {
-        store
-            .put_node_prompt(&node_ref, &full_prompt)
-            .await
-            .map_err(|err| FabroError::handler(err.to_string()))?;
-    } else {
-        fs::write(stage_dir.join("prompt.md"), &full_prompt).await?;
-    }
+    let stage_scope = StageScope::for_handler(context, node_id);
+
+    emitter.emit_scoped(
+        &Event::Prompt {
+            stage:    node_id.to_string(),
+            visit:    stage_scope.visit,
+            text:     full_prompt.clone(),
+            mode:     Some("fan_in".to_string()),
+            provider: None,
+            model:    None,
+        },
+        &stage_scope,
+    );
 
     // Build a synthetic node for the backend call
     let eval_node = Node::new("fan_in_eval");
@@ -264,7 +255,6 @@ async fn llm_evaluate(
             context,
             None,
             emitter,
-            &stage_dir,
             sandbox,
             None,
         )
@@ -281,30 +271,33 @@ async fn llm_evaluate(
                 .unwrap_or_else(|| "unknown".to_string());
             let response_text =
                 serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
-            if let Some(ref store) = run_store {
-                store
-                    .put_node_response(&node_ref, &response_text)
-                    .await
-                    .map_err(|err| FabroError::handler(err.to_string()))?;
-            } else {
-                fs::write(stage_dir.join("response.md"), &response_text).await?;
-            }
+            emitter.emit_scoped(
+                &Event::PromptCompleted {
+                    node_id:  node_id.to_string(),
+                    response: response_text.clone(),
+                    model:    String::new(),
+                    provider: String::new(),
+                    billing:  None,
+                },
+                &stage_scope,
+            );
             Ok(Candidate {
-                id: best_id,
+                id:     best_id,
                 status: outcome.status.to_string(),
-                score: 0.0,
+                score:  0.0,
             })
         }
         Ok(CodergenResult::Text { text, .. }) => {
-            // Write response to logs
-            if let Some(ref store) = run_store {
-                store
-                    .put_node_response(&node_ref, &text)
-                    .await
-                    .map_err(|err| FabroError::handler(err.to_string()))?;
-            } else {
-                fs::write(stage_dir.join("response.md"), &text).await?;
-            }
+            emitter.emit_scoped(
+                &Event::PromptCompleted {
+                    node_id:  node_id.to_string(),
+                    response: text.clone(),
+                    model:    String::new(),
+                    provider: String::new(),
+                    billing:  None,
+                },
+                &stage_scope,
+            );
 
             // The LLM responded with text; try to find a matching candidate ID
             let text = text.trim().to_string();
@@ -460,8 +453,9 @@ mod tests {
 
     #[tokio::test]
     async fn fan_in_with_backend_llm_eval() {
-        use crate::handler::agent::CodergenBackend;
         use tempfile::TempDir;
+
+        use crate::handler::agent::CodergenBackend;
 
         struct MockBackend;
 
@@ -473,16 +467,15 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                _stage_dir: &std::path::Path,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 // Return text that contains the ID "branch_b"
                 Ok(CodergenResult::Text {
-                    text: "The best candidate is branch_b".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "The best candidate is branch_b".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -515,17 +508,6 @@ mod tests {
             outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
             Some(&serde_json::json!("branch_b"))
         );
-
-        // Verify prompt and response files were written
-        let prompt_path = tmp.path().join("nodes").join("fan_in").join("prompt.md");
-        assert!(prompt_path.exists());
-        let prompt_content = std::fs::read_to_string(&prompt_path).unwrap();
-        assert!(prompt_content.contains("Pick the best branch"));
-
-        let response_path = tmp.path().join("nodes").join("fan_in").join("response.md");
-        assert!(response_path.exists());
-        let response_content = std::fs::read_to_string(&response_path).unwrap();
-        assert!(response_content.contains("branch_b"));
     }
 
     #[tokio::test]

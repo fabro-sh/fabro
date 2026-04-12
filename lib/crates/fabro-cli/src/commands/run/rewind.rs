@@ -1,74 +1,72 @@
-use anyhow::Context;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_checkpoint::git::Store;
-use fabro_config::FabroSettingsExt;
+use fabro_types::run_event::{CheckpointCompletedProps, RunRewoundProps, RunSubmittedProps};
+use fabro_types::{EventBody, RunEvent};
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{
-    RewindInput, RewindTarget, RunTimeline, build_timeline_or_rebuild,
-    find_run_id_by_prefix_or_store, rewind,
+    RewindInput, RewindTarget, RunTimeline, TimelineEntry, build_timeline_or_rebuild, rewind,
 };
-use fabro_workflow::records::CheckpointExt;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
-use fabro_workflow::run_status::{self, RunStatus};
 use git2::Repository;
 use serde::Serialize;
 
 use crate::args::{GlobalArgs, RewindArgs};
+use crate::command_context::CommandContext;
+use crate::commands::store::rebuild::rebuild_run_store;
+use crate::server_client::ServerStoreClient;
+use crate::server_runs::ServerSummaryLookup;
+use crate::shared::repo::ensure_matching_repo_origin;
 use crate::shared::{color_if, print_json_pretty};
-use crate::store::{build_store, open_run_reader};
-use crate::user_config::load_user_settings_with_globals;
 
 #[derive(Serialize)]
 pub(crate) struct TimelineEntryJson {
-    ordinal: usize,
-    node_name: String,
-    visit: usize,
+    ordinal:        usize,
+    node_name:      String,
+    visit:          usize,
     run_commit_sha: Option<String>,
 }
 
-pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn run(
+    args: &RewindArgs,
+    styles: &Styles,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let cli_settings = load_user_settings_with_globals(globals)?;
-    let durable_store = build_store(&cli_settings.storage_dir())?;
-    let run_id =
-        find_run_id_by_prefix_or_store(&repo, durable_store.as_ref(), &args.run_id).await?;
+    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
+    let run = lookup.resolve(&args.run_id)?;
+    let run_id = run.run_id();
+    let state = lookup.client().get_run_state(&run_id).await?;
+    let record = state.run.context("Failed to load run record from store")?;
+    ensure_matching_repo_origin(record.repo_origin_url.as_deref(), "rewind")?;
     let store = Store::new(repo);
-    let run_store = open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
-    let run_info = resolve_run_combined(
-        durable_store.as_ref(),
-        &runs_base(&cli_settings.storage_dir()),
-        &run_id.to_string(),
-    )
-    .await
-    .ok();
+    let events = lookup.client().list_run_events(&run_id, None, None).await?;
+    let run_store = rebuild_run_store(&run_id, &events).await?;
 
-    let timeline = build_timeline_or_rebuild(&store, run_store.as_deref(), &run_id).await?;
+    let timeline = build_timeline_or_rebuild(&store, Some(&run_store), &run_id).await?;
 
     if args.list || args.target.is_none() {
         if globals.json {
             print_json_pretty(&timeline_entries_json(&timeline))?;
             return Ok(());
         }
-        print_timeline(&timeline, styles);
+        print_timeline(&timeline, styles, printer);
         return Ok(());
     }
 
     let target = args.target.as_deref().unwrap().parse::<RewindTarget>()?;
 
-    rewind(
-        &store,
-        &RewindInput {
-            run_id,
-            target,
-            push: !args.no_push,
-        },
-    )?;
-    if let Some(run_info) = run_info.as_ref() {
-        reset_rewound_run_state(&store, durable_store.as_ref(), &run_id, &run_info.path).await?;
-    }
+    rewind(&store, &RewindInput {
+        run_id,
+        target: target.clone(),
+        push: !args.no_push,
+    })?;
+    let entry = timeline.resolve(&target)?;
+    reset_rewound_run_state(lookup.client(), &store, &run_id, entry).await?;
 
     let run_id_string = run_id.to_string();
 
@@ -78,7 +76,8 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
             "target": args.target.as_deref().unwrap(),
         }))?;
     } else {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "\nTo resume: fabro resume {}",
             &run_id_string[..8.min(run_id_string.len())]
         );
@@ -92,46 +91,130 @@ pub(crate) fn timeline_entries_json(timeline: &RunTimeline) -> Vec<TimelineEntry
         .entries
         .iter()
         .map(|entry| TimelineEntryJson {
-            ordinal: entry.ordinal,
-            node_name: entry.node_name.clone(),
-            visit: entry.visit,
+            ordinal:        entry.ordinal,
+            node_name:      entry.node_name.clone(),
+            visit:          entry.visit,
             run_commit_sha: entry.run_commit_sha.clone(),
         })
         .collect()
 }
 
 async fn reset_rewound_run_state(
+    client: &ServerStoreClient,
     git_store: &Store,
-    durable_store: &dyn fabro_store::Store,
     run_id: &fabro_types::RunId,
-    run_dir: &std::path::Path,
+    entry: &TimelineEntry,
 ) -> Result<()> {
+    let state = client.get_run_state(run_id).await.map_err(|err| {
+        anyhow::anyhow!("failed to load durable store state before rewind: {err}")
+    })?;
+
+    let definition_blob = state.run.as_ref().and_then(|run| run.definition_blob);
+    let _run_record = state
+        .run
+        .context("failed to restore run record after rewind: missing run metadata")?;
     let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
         .context("rewound metadata branch is missing checkpoint.json")?;
-    checkpoint.save(&run_dir.join("checkpoint.json"))?;
-    run_status::write_run_status(run_dir, RunStatus::Submitted, None);
+    let previous_status = state.status.map(|status| status.status.to_string());
 
-    for name in [
-        "conclusion.json",
-        "pull_request.json",
-        "detached_failure.json",
-        "progress.jsonl",
-        "retro.json",
-        "final.patch",
-    ] {
-        let _ = std::fs::remove_file(run_dir.join(name));
-    }
-
-    durable_store
-        .delete_run(run_id)
+    client
+        .append_run_event(
+            run_id,
+            &run_event(
+                *run_id,
+                None,
+                EventBody::RunRewound(RunRewoundProps {
+                    target_checkpoint_ordinal: entry.ordinal,
+                    target_node_id: entry.node_name.clone(),
+                    target_visit: entry.visit,
+                    previous_status,
+                    run_commit_sha: entry.run_commit_sha.clone(),
+                }),
+            ),
+        )
         .await
-        .map_err(|err| anyhow::anyhow!("failed to reset durable store run: {err}"))?;
+        .map_err(|err| anyhow::anyhow!("failed to append run rewound event: {err}"))?;
+    client
+        .append_run_event(run_id, &restored_checkpoint_event(*run_id, &checkpoint))
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to append restored checkpoint event: {err}"))?;
+    client
+        .append_run_event(
+            run_id,
+            &run_event(
+                *run_id,
+                None,
+                EventBody::RunSubmitted(RunSubmittedProps {
+                    reason: None,
+                    definition_blob,
+                }),
+            ),
+        )
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to append restored run status event: {err}"))?;
     Ok(())
 }
 
-pub(crate) fn print_timeline(timeline: &RunTimeline, styles: &Styles) {
+fn restored_checkpoint_event(
+    run_id: fabro_types::RunId,
+    checkpoint: &fabro_types::Checkpoint,
+) -> RunEvent {
+    let current_status = checkpoint
+        .node_outcomes
+        .get(&checkpoint.current_node)
+        .map_or_else(
+            || "success".to_string(),
+            |outcome| outcome.status.to_string(),
+        );
+    run_event(
+        run_id,
+        Some(checkpoint.current_node.clone()),
+        EventBody::CheckpointCompleted(CheckpointCompletedProps {
+            status: current_status,
+            current_node: checkpoint.current_node.clone(),
+            completed_nodes: checkpoint.completed_nodes.clone(),
+            node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+            context_values: checkpoint.context_values.clone().into_iter().collect(),
+            node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+            next_node_id: checkpoint.next_node_id.clone(),
+            git_commit_sha: checkpoint.git_commit_sha.clone(),
+            loop_failure_signatures: checkpoint
+                .loop_failure_signatures
+                .iter()
+                .map(|(sig, count)| (sig.to_string(), *count))
+                .collect(),
+            restart_failure_signatures: checkpoint
+                .restart_failure_signatures
+                .iter()
+                .map(|(sig, count)| (sig.to_string(), *count))
+                .collect(),
+            node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+            diff: None,
+        }),
+    )
+}
+
+fn run_event(run_id: fabro_types::RunId, node_id: Option<String>, body: EventBody) -> RunEvent {
+    RunEvent {
+        id: ulid::Ulid::new().to_string(),
+        ts: chrono::Utc::now(),
+        run_id,
+        node_id,
+        node_label: None,
+        stage_id: None,
+        parallel_group_id: None,
+        parallel_branch_id: None,
+        session_id: None,
+        parent_session_id: None,
+        tool_call_id: None,
+        actor: None,
+        body,
+    }
+}
+
+pub(crate) fn print_timeline(timeline: &RunTimeline, styles: &Styles, printer: Printer) {
     if timeline.entries.is_empty() {
-        eprintln!("No checkpoints found.");
+        fabro_util::printerr!(printer, "No checkpoints found.");
         return;
     }
 

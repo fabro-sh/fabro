@@ -1,34 +1,35 @@
 # Fabro Events Strategy
 
-Fabro emits structured **workflow run events** during execution for observability. Events are the durable audit trail for a run: they drive `progress.jsonl`, `live.json`, the run store, SSE streaming, CLI progress rendering, and retro analysis.
+Fabro emits structured **workflow run events** during execution for observability. Events are the durable audit trail for a run: they drive the run store, SSE streaming, CLI progress rendering, retro analysis, and optional JSONL sinks.
 
 Events are distinct from tracing logs. Tracing is developer diagnostics; events are product-facing state transitions and activity records that other systems consume.
 
-Detached runs rely on this distinction. If something needs to be visible after reattach, emit a `WorkflowRunEvent` rather than only logging to stderr or `detach.log`.
+Detached runs rely on this distinction. If something needs to be visible after reattach, emit a `Event` rather than only logging to stderr or `detach.log`.
 
 ## Architecture
 
 ```text
-Engine/Handler -> WorkflowRunEvent -> EventEmitter::emit()
-                                       |- trace(raw event)
-                                       |- canonicalize -> RunEventEnvelope
-                                       `- on_event(&RunEventEnvelope)
-                                             |- progress.jsonl + live.json
+Engine/Handler -> Event -> Emitter::emit()
+                                             |- trace(raw event)
+                                             |- canonicalize -> RunEvent
+                                             `- on_event(&RunEvent)
                                              |- run store
                                              |- SSE
+                                             |- optional JSONL/debug sinks
                                              `- CLI / tests / metrics listeners
 ```
 
-The canonical envelope is built exactly once in `fabro-workflow/src/event.rs`.
+The canonical `RunEvent` is built exactly once in `fabro-workflow/src/event.rs`.
 
-- `WorkflowRunEvent` remains the internal typed source of truth.
-- `EventEmitter` owns an immutable `run_id` and converts typed events into `RunEventEnvelope`.
-- Every listener receives `&RunEventEnvelope`, not `&WorkflowRunEvent`.
-- Bypass paths that cannot go through the emitter must call `canonicalize_event()` once and reuse the same envelope for every sink.
+- `Event` (in `fabro-workflow`) is the internal typed event emitted by engine and handlers.
+- `Emitter` owns an immutable `run_id` and converts `Event` into `RunEvent` via `to_run_event_at()`.
+- `RunEvent` (in `fabro-types`) holds envelope metadata plus a typed `body: EventBody`. It has no cached JSON fields; the wire format is produced only during serialization.
+- Every listener receives `&RunEvent`, not `&Event`.
+- Bypass paths that cannot go through the emitter must call `to_run_event()` once and reuse the same `RunEvent` for every sink.
 
 ## Canonical Envelope
 
-Each line in `progress.jsonl` is a `RunEventEnvelope`:
+Each serialized `RunEvent` uses this canonical envelope:
 
 ```json
 {
@@ -100,43 +101,48 @@ Agent events now use explicit session links:
 
 ## Direct-Write Paths
 
-Most events flow through `EventEmitter::emit()`. The remaining direct-write paths must use:
+Most events flow through `Emitter::emit()`. The remaining direct-write paths must use:
 
-1. `canonicalize_event(run_id, event)`
+1. `to_run_event(run_id, event)`
 2. Serialize and redact once
-3. Reuse that exact serialized envelope for every sink
+3. Reuse that exact `RunEvent` for every sink
 
-Never canonicalize the same logical event twice if multiple sinks receive it.
+Never build the same `RunEvent` twice if multiple sinks receive it.
 
 ## Adding A New Event
 
 ### 1. Add the typed event
 
-Add a variant to `WorkflowRunEvent`, `AgentEvent`, or `SandboxEvent` as appropriate.
+Add a variant to `Event`, `AgentEvent`, or `SandboxEvent` as appropriate.
 
 ### 2. Add tracing
 
-Extend `WorkflowRunEvent::trace()` so the raw event is observable in tracing output.
+Extend `Event::trace()` so the raw event is observable in tracing output.
 
 ### 3. Add an external name
 
 Extend `event_name()` with the new lowercase dot-notation string.
 
-### 4. Map envelope fields
+### 4. Add the `EventBody` variant
 
-Update `extract_envelope_fields()`:
+Add a variant to `EventBody` in `fabro-types/src/run_event/mod.rs` with a corresponding props struct. Use `#[serde(rename = "dotted.name")]` matching the external name from step 3.
+
+### 5. Map envelope fields and construct `EventBody`
+
+Update `stored_event_fields()` and `event_body_from_event()` in `fabro-workflow/src/event.rs`:
 
 - Move `node_id`, `node_label`, `session_id`, and `parent_session_id` into the envelope when appropriate.
-- Keep event-specific data in `properties`.
-- Flatten structured failure details into explicit property keys when needed.
+- Construct the `EventBody` variant directly from the `Event` fields.
+- For `Event::Agent` sub-variants, merge `visit` into the inner props and lift `stage` to `node_id`.
+- For `Event::Sandbox` sub-variants, unwrap and flatten into the corresponding `EventBody` variant.
 
-### 5. Emit it
+### 6. Emit it
 
-Prefer `EventEmitter::emit(&WorkflowRunEvent::...)`.
+Prefer `Emitter::emit(&Event::...)`.
 
-Use `canonicalize_event()` only for true bypass paths.
+Use `to_run_event()` only for true bypass paths.
 
-### 6. Update consumers
+### 7. Update consumers
 
 Check:
 
@@ -148,17 +154,23 @@ Check:
 
 ## Consumer Guidance
 
-When writing listeners:
+When writing Rust consumers (listeners, store projections, CLI progress):
 
-- Match on `envelope.event`, not Rust variant names.
-- Read event payload from `envelope.properties`.
-- Read stage/branch identity from `node_id` and `node_label`.
-- Read agent hierarchy from `session_id` and `parent_session_id`.
+- Match on `event.body` using `EventBody::*` variants. This gives you typed access to event-specific fields.
+- Use `event.node_id`, `event.node_label`, `event.session_id`, and `event.parent_session_id` for envelope metadata.
+- Only use `event.event_name()` or `event.properties()` for generic/display purposes (logging, forwarding). These involve serialization and should not be used on hot paths.
 
-Do not rebuild or mutate the envelope in downstream listeners.
+When writing external JSON consumers (SSE clients, JSONL parsers):
+
+- Match on the `"event"` field for the dot-notation event name.
+- Read event-specific data from `"properties"`.
+- Read stage/branch identity from `"node_id"` and `"node_label"`.
+- Read agent hierarchy from `"session_id"` and `"parent_session_id"`.
+
+Do not rebuild or mutate the `RunEvent` in downstream listeners.
 
 ## Bypass And Persistence Guarantees
 
-`progress.jsonl`, the run store, and SSE should reflect the same canonical envelope bytes after redaction.
+Any JSONL sink, the run store, and SSE should reflect the same canonical envelope bytes after redaction.
 
 `status.json` remains the authoritative completion signal for detached runs. Terminal run status should only be written after all post-run work is finished.

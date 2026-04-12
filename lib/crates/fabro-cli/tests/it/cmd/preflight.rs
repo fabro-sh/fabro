@@ -20,18 +20,18 @@ fn help() {
       <WORKFLOW>  Path to a .fabro workflow file or .toml task config
 
     Options:
-          --goal <GOAL>                Override the workflow goal (exposed as $goal in prompts)
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --goal-file <GOAL_FILE>      Read the workflow goal from a file
-          --model <MODEL>              Override default LLM model
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --provider <PROVIDER>        Override default LLM provider
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-      -v, --verbose                    Enable verbose output
-          --sandbox <SANDBOX>          Sandbox for agent tools [possible values: local, docker, daytona]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json                   Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>        Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug                  Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --goal <GOAL>            Override the workflow goal (available as {{ goal }} in prompts)
+          --goal-file <GOAL_FILE>  Read the workflow goal from a file
+          --no-upgrade-check       Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --model <MODEL>          Override default LLM model
+          --quiet                  Suppress non-essential output [env: FABRO_QUIET=]
+          --provider <PROVIDER>    Override default LLM provider
+      -v, --verbose                Enable verbose output
+          --sandbox <SANDBOX>      Sandbox for agent tools [possible values: local, docker, daytona]
+      -h, --help                   Print help
     ----- stderr -----
     ");
 }

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub bind_addr: SocketAddr,
+    pub bind_addr:    SocketAddr,
     pub require_auth: bool,
     pub enable_admin: bool,
 }
@@ -40,7 +40,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self::from_env().unwrap_or(Self {
-            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 3000),
+            bind_addr:    SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 3000),
             require_auth: true,
             enable_admin: true,
         })

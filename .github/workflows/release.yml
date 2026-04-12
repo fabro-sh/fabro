@@ -78,3 +78,46 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
         run: gh release create "$TAG_NAME" target/distrib/* --generate-notes
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: target/distrib
+          pattern: artifacts-fabro-*
+          merge-multiple: true
+
+      - name: Generate and push formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+
+          SHA_AARCH64_DARWIN=$(awk '{print $1}' target/distrib/fabro-aarch64-apple-darwin.tar.gz.sha256)
+          SHA_X86_64_LINUX=$(awk '{print $1}' target/distrib/fabro-x86_64-unknown-linux-gnu.tar.gz.sha256)
+          SHA_AARCH64_LINUX=$(awk '{print $1}' target/distrib/fabro-aarch64-unknown-linux-gnu.tar.gz.sha256)
+
+          sed \
+            -e "s/{{VERSION}}/$VERSION/g" \
+            -e "s/{{SHA_AARCH64_DARWIN}}/$SHA_AARCH64_DARWIN/g" \
+            -e "s/{{SHA_X86_64_LINUX}}/$SHA_X86_64_LINUX/g" \
+            -e "s/{{SHA_AARCH64_LINUX}}/$SHA_AARCH64_LINUX/g" \
+            installer/fabro.rb.template > fabro.rb
+
+          git clone https://x-access-token:${GH_TOKEN}@github.com/fabro-sh/homebrew-tap.git tap
+          cp fabro.rb tap/Formula/fabro.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/fabro.rb
+          git diff --cached --quiet || (git commit -m "Update fabro to ${TAG_NAME}" && git push)

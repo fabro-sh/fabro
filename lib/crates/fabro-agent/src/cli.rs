@@ -1,26 +1,27 @@
-use crate::config::{ToolApprovalAdapter, ToolApprovalFn, ToolHookCallback};
-use crate::error::AbortReason;
-use crate::tools::WebFetchSummarizer;
-use crate::truncation;
-use crate::{
-    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile,
-    Sandbox, Session, SessionConfig, Turn,
-    subagent::{SessionFactory, SubAgentManager},
-};
-use clap::{Args, Parser};
-use fabro_llm::client::Client;
-use fabro_llm::error::SdkError;
-use fabro_llm::middleware::{Middleware, NextFn, NextStreamFn};
-use fabro_llm::provider::StreamEventStream;
-use fabro_llm::types::{Request, Response};
-use fabro_mcp::config::McpServerConfig;
-use fabro_model::{Catalog, ModelRef, Provider};
-use fabro_util::terminal::Styles;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+use clap::{Args, Parser};
+use fabro_llm::Error as LlmError;
+use fabro_llm::client::Client;
+use fabro_llm::middleware::{Middleware, NextFn, NextStreamFn};
+use fabro_llm::provider::StreamEventStream;
+use fabro_llm::types::{Request, Response};
+use fabro_mcp::config::McpServerSettings;
+use fabro_model::{Catalog, ModelHandle, Provider};
+use fabro_util::terminal::Styles;
 use tokio::signal;
 use tokio::sync::Mutex as AsyncMutex;
+
+use crate::config::{ToolApprovalAdapter, ToolApprovalFn, ToolHookCallback};
+use crate::error::InterruptReason;
+use crate::subagent::{SessionFactory, SubAgentManager};
+use crate::tools::WebFetchSummarizer;
+use crate::{
+    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile,
+    Sandbox, Session, SessionOptions, Turn, truncation,
+};
 
 /// Public arguments for the agent command, usable from an external CLI.
 #[derive(Args)]
@@ -68,10 +69,29 @@ struct Cli {
     args: AgentArgs,
 }
 
-pub use fabro_config::user::{OutputFormat, PermissionLevel};
+/// Output format for the `fabro exec` / agent CLI.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, clap::ValueEnum,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutputFormat {
+    Text,
+    Json,
+}
+
+/// Agent tool permission level.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, clap::ValueEnum,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum PermissionLevel {
+    ReadOnly,
+    ReadWrite,
+    Full,
+}
 
 impl AgentArgs {
-    /// Fill `None` fields from user.toml values, then hardcoded defaults.
+    /// Fill `None` fields from settings.toml values, then hardcoded defaults.
     pub fn apply_cli_defaults(
         &mut self,
         provider: Option<&str>,
@@ -166,8 +186,8 @@ fn build_tool_approval(
     })
 }
 
-fn summarizer_model_id(provider: Provider) -> ModelRef {
-    ModelRef::ByName {
+fn summarizer_model_id(provider: Provider) -> ModelHandle {
+    ModelHandle::ByName {
         provider,
         model: match provider {
             Provider::OpenAi | Provider::OpenAiCompatible => "gpt-4o-mini",
@@ -257,7 +277,7 @@ fn print_summary(session: &Session, styles: &Styles) {
         {
             turn_count += 1;
             tool_call_count += tool_calls.len();
-            total_tokens += usage.total_tokens;
+            total_tokens += usage.total_tokens();
         }
     }
     let token_str = if total_tokens >= 1_000_000 {
@@ -283,7 +303,7 @@ struct DebugMiddleware {
 #[async_trait::async_trait]
 impl Middleware for DebugMiddleware {
     #[allow(clippy::print_stderr)]
-    async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, SdkError> {
+    async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, LlmError> {
         let s = self.styles;
         eprintln!(
             "{}",
@@ -303,7 +323,7 @@ impl Middleware for DebugMiddleware {
                 response.finish_reason,
                 response.usage.input_tokens,
                 response.usage.output_tokens,
-                response.usage.total_tokens,
+                response.usage.total_tokens(),
             )),
         );
         Ok(response)
@@ -313,7 +333,7 @@ impl Middleware for DebugMiddleware {
         &self,
         request: Request,
         next: NextStreamFn,
-    ) -> Result<StreamEventStream, SdkError> {
+    ) -> Result<StreamEventStream, LlmError> {
         next(request).await
     }
 }
@@ -326,7 +346,7 @@ struct VerboseMiddleware {
 #[async_trait::async_trait]
 impl Middleware for VerboseMiddleware {
     #[allow(clippy::print_stderr)]
-    async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, SdkError> {
+    async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, LlmError> {
         let s = self.styles;
         eprintln!(
             "{}\n{}",
@@ -348,14 +368,14 @@ impl Middleware for VerboseMiddleware {
         &self,
         request: Request,
         next: NextStreamFn,
-    ) -> Result<StreamEventStream, SdkError> {
+    ) -> Result<StreamEventStream, LlmError> {
         next(request).await
     }
 }
 
 pub async fn run_with_args(
     args: AgentArgs,
-    mcp_servers: Vec<McpServerConfig>,
+    mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
     run_with_args_and_client(args, None, mcp_servers).await
 }
@@ -364,9 +384,10 @@ pub async fn run_with_args(
 pub async fn run_with_args_and_client(
     args: AgentArgs,
     llm_client: Option<Client>,
-    mcp_servers: Vec<McpServerConfig>,
+    mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
-    // Resolve color support once, leak to get 'static lifetime for use across threads
+    // Resolve color support once, leak to get 'static lifetime for use across
+    // threads
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
 
     // Parse provider string to enum early for compile-time safety
@@ -420,11 +441,11 @@ pub async fn run_with_args_and_client(
     let tool_approval = build_tool_approval(permissions, is_interactive, styles);
     let tool_hooks: Arc<dyn ToolHookCallback> = Arc::new(ToolApprovalAdapter(tool_approval));
 
-    let config = SessionConfig {
+    let config = SessionOptions {
         tool_hooks: Some(tool_hooks.clone()),
         skill_dirs: args.skills_dir.map(|d| vec![d]),
         mcp_servers,
-        ..SessionConfig::default()
+        ..SessionOptions::default()
     };
 
     // Register subagent tools
@@ -464,9 +485,9 @@ pub async fn run_with_args_and_client(
             factory_client.clone(),
             child_profile,
             Arc::clone(&factory_env),
-            SessionConfig {
+            SessionOptions {
                 tool_hooks: factory_hooks.clone(),
-                ..SessionConfig::default()
+                ..SessionOptions::default()
             },
             None,
         )
@@ -490,15 +511,15 @@ pub async fn run_with_args_and_client(
 
     // SIGINT handler
     let cancel_token = session.cancel_token();
-    let abort_reason = session.abort_reason_handle();
+    let interrupt_reason = session.interrupt_reason_handle();
     tokio::spawn(async move {
         signal::ctrl_c().await.ok();
         {
-            let mut guard = abort_reason
+            let mut guard = interrupt_reason
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if guard.is_none() {
-                *guard = Some(AbortReason::Cancelled);
+                *guard = Some(InterruptReason::Cancelled);
             }
         }
         cancel_token.cancel();
@@ -652,9 +673,10 @@ pub async fn run() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_model::Provider;
     use serde_json::json;
+
+    use super::*;
 
     static NO_COLOR: std::sync::LazyLock<Styles> = std::sync::LazyLock::new(|| Styles::new(false));
 

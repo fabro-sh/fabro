@@ -9,10 +9,11 @@ Fabro captures a structured event for every significant action during a workflow
 
 Every workflow run emits a sequence of canonical **run event envelopes** that are:
 
-- Written to `progress.jsonl` in the run directory
+- Stored durably in the run store
 - Broadcast over SSE to connected API clients
 - Stored for later analysis and retro generation
 - Rendered by CLI progress and log tooling
+- Optionally materialized into JSONL by export/debug paths
 
 ### Event names
 
@@ -28,7 +29,7 @@ Event names use lowercase dot notation, for example:
 
 ### Envelope format
 
-Each line in `progress.jsonl` is a JSON object with a stable envelope:
+Each serialized event envelope has a stable JSON shape:
 
 ```json
 {
@@ -64,25 +65,23 @@ Envelope fields:
 
 Only `id`, `ts`, `run_id`, and `event` are always present. Optional fields are omitted when they do not apply.
 
-## Reading `progress.jsonl`
+## Reading the event stream
 
 Because event payload lives in `properties`, most shell queries should look there.
 
 ```bash
 # Count tool calls in a run
-jq -r 'select(.event == "agent.tool.started") | .properties.tool_name' \
-  ~/.fabro/runs/01JKXYZ.../progress.jsonl | wc -l
+fabro logs 01JKXYZ... | jq -r 'select(.event == "agent.tool.started") | .properties.tool_name' | wc -l
 
 # Find stage failures
-jq 'select(.event == "stage.failed")' \
-  ~/.fabro/runs/01JKXYZ.../progress.jsonl
+fabro logs 01JKXYZ... | jq 'select(.event == "stage.failed")'
 
 # See which edges were taken
 jq '{from: .properties.from_node, to: .properties.to_node, label: .properties.label}' \
-  ~/.fabro/runs/01JKXYZ.../progress.jsonl | head
+  <(fabro logs 01JKXYZ...) | head
 ```
 
-`live.json` is still a pretty-printed copy of the most recent event envelope.
+If you need files on disk for offline analysis, `fabro store dump` exports `events.jsonl` plus run-state projections.
 
 ## Event categories
 
@@ -111,7 +110,7 @@ Lifecycle events such as `agent.sub.spawned` and `agent.sub.completed` are emitt
 
 ### API: Server-Sent Events
 
-When running workflows through the API server, subscribe to the [run events endpoint](/api-reference/runs/stream-run-events). Each SSE payload is a serialized run event envelope in the same shape used by `progress.jsonl`.
+When running workflows through the API server, subscribe to the [run events endpoint](/api-reference/runs/stream-run-events). Each SSE payload is a serialized run event envelope in the same shape used by `fabro logs` and `events.jsonl` exports.
 
 ### Web UI
 
@@ -127,16 +126,12 @@ The CLI renders live progress from the same envelope format. This is written to 
 
 ## Post-run analysis
 
-Run artifacts still include:
+Post-run analysis surfaces include:
 
-| File | Description |
+| Surface | Description |
 |---|---|
-| `run.json` | Run metadata and graph |
-| `start.json` | Start record |
-| `progress.jsonl` | Full event envelope stream |
-| `live.json` | Latest event envelope |
-| `checkpoint.json` | Final execution state |
-| `retro.json` | Retrospective, when enabled |
-| `conclusion.json` | Terminal summary |
+| `fabro logs <RUN>` | Full event envelope stream as NDJSON |
+| `fabro inspect <RUN>` | Current durable run state, including run/start/checkpoint/conclusion records |
+| `fabro store dump --output <DIR> <RUN>` | Exported `events.jsonl` plus reconstructed JSON and node files |
 
 See [retros](/execution/retros), [stages](/api-reference/run-internals/list-run-stages), and [turns](/api-reference/run-internals/list-stage-turns) for higher-level analysis views built on top of this event stream.

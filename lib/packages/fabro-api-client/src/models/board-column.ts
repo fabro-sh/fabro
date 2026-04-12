@@ -22,7 +22,7 @@ export const BoardColumn = {
     WORKING: 'working',
     PENDING: 'pending',
     REVIEW: 'review',
-    MERGE: 'merge',
+    MERGE: 'merge'
 } as const;
 
 export type BoardColumn = typeof BoardColumn[keyof typeof BoardColumn];

@@ -11,13 +11,15 @@ license = "MIT"
 [workspace.dependencies]
 anyhow = "1"
 axum = { version = "0.8" }
+axum-extra = { version = "0.10", features = ["cookie-private"] }
+cookie = { version = "0.18", features = ["percent-encode", "private", "signed", "key-expansion"] }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls", "query", "form", "multipart"] }
 ulid = "1"
-uuid = { version = "1", features = ["v4", "v7"] }
+uuid = { version = "1", features = ["v4", "v7", "v8"] }
 rand = "0.8"
 dotenvy = "0.15"
 futures = "0.3"
@@ -39,12 +41,11 @@ git2 = { version = "0.20", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tracing-appender = "0.2"
-rmcp = { version = "0.15.0", default-features = false }
+rmcp = { version = "1.3", default-features = false }
 walkdir = "2"
 regex = "1"
 semver = "1"
 aho-corasick = "1"
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono"] }
 dirs = "6"
 mac_address = "1"
 md5 = "0.7"
@@ -52,6 +53,7 @@ mime_guess = "2"
 indicatif = "0.18"
 termimad = "0.34"
 toml = "0.8"
+toml_edit = "0.22"
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 hmac = "0.12"
 sha2 = "0.10"
@@ -68,10 +70,14 @@ sentry = { version = "0.35", default-features = false, features = ["backtrace", 
 fork = "0.2"
 exec = "0.3"
 slatedb = "0.11.2"
-object_store = "0.12.5"
+object_store = { version = "0.12.5", features = ["aws"] }
+rust-embed = "8"
+percent-encoding = "2"
+minijinja = "2"
+fabro-http = { path = "lib/crates/fabro-http" }
 
 [workspace.lints.rust]
-unsafe_code = "warn"
+unsafe_code = "deny"
 unreachable_pub = "warn"
 
 [workspace.lints.clippy]
@@ -94,6 +100,7 @@ print_stderr = "warn"
 dbg_macro = "warn"
 empty_drop = "warn"
 empty_structs_with_brackets = "warn"
+disallowed_methods = "deny"
 exit = "warn"
 get_unwrap = "warn"
 rc_buffer = "warn"

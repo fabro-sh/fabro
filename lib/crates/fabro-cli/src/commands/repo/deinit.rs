@@ -1,48 +1,37 @@
 use anyhow::{Context, Result, bail};
+use fabro_util::printer::Printer;
 
 use crate::args::GlobalArgs;
 
-pub(crate) fn run_deinit(globals: &GlobalArgs) -> Result<Vec<String>> {
+pub(crate) fn run_deinit(globals: &GlobalArgs, printer: Printer) -> Result<Vec<String>> {
     let repo_root = super::init::git_repo_root()?;
     let mut removed = Vec::new();
 
-    let fabro_toml = repo_root.join("fabro.toml");
+    let fabro_dir = repo_root.join(".fabro");
+    let project_toml = fabro_dir.join("project.toml");
 
     let green = console::Style::new().green();
     let dim = console::Style::new().dim();
 
-    match std::fs::remove_file(&fabro_toml) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            bail!("not initialized — fabro.toml not found");
-        }
-        Err(e) => bail!("failed to remove {}: {e}", fabro_toml.display()),
+    if !project_toml.exists() {
+        bail!("not initialized — .fabro/project.toml not found");
     }
-    removed.push("fabro.toml".to_string());
+
+    std::fs::remove_dir_all(&fabro_dir)
+        .with_context(|| format!("failed to remove {}", fabro_dir.display()))?;
+    removed.push(".fabro/".to_string());
     if !globals.json {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "  {} {}",
             green.apply_to("✔"),
-            dim.apply_to("removed fabro.toml")
+            dim.apply_to("removed .fabro/")
         );
     }
 
-    let fabro_dir = repo_root.join("fabro");
-    if fabro_dir.exists() {
-        std::fs::remove_dir_all(&fabro_dir)
-            .with_context(|| format!("failed to remove {}", fabro_dir.display()))?;
-        removed.push("fabro/".to_string());
-        if !globals.json {
-            eprintln!(
-                "  {} {}",
-                green.apply_to("✔"),
-                dim.apply_to("removed fabro/")
-            );
-        }
-    }
-
     if !globals.json {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "\n{}",
             console::Style::new()
                 .bold()

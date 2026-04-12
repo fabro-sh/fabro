@@ -35,7 +35,7 @@ devcontainer = true
 ```
 
 <Warning>
-**`--no-dotenv` flag removed.** Fabro now always loads `~/.fabro/.env` and never loads a local `./.env` file. If you were relying on project-local `.env` files, move those values to `~/.fabro/.env`.
+**Historical note.** This release temporarily standardized on `~/.fabro/.env`, but later releases removed automatic dotenv loading in favor of server-owned secrets plus explicit process environment variables.
 </Warning>
 
 ## Manage PRs with fabro pr
@@ -81,7 +81,7 @@ fabro preview <run-id>
 <Accordion title="CLI">
 - `fabro setup` renamed to `fabro install` for clarity
 - Added `fabro ssh` command for direct SSH access to Daytona sandboxes
-- `fabro doctor` now runs live service probes by default; use `--dry-run` to skip
+- `fabro doctor` now runs live service probes by default
 - `fabro doctor` now validates GitHub App configuration and private key
 - `fabro doctor` now hides unconfigured LLM providers for a cleaner output
 - `fabro doctor` sections reordered: Config, LLM, GitHub App, Cloud sandbox, Brave Search

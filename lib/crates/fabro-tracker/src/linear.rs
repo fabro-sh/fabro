@@ -10,12 +10,12 @@ pub const LINEAR_API_ENDPOINT: &str = "https://api.linear.app/graphql";
 const BLOCKS_RELATION_TYPE: &str = "blocks";
 
 #[derive(Clone, Debug)]
-pub struct LinearConfig {
-    pub api_key: String,
+pub struct LinearOptions {
+    pub api_key:  String,
     pub endpoint: String,
 }
 
-impl LinearConfig {
+impl LinearOptions {
     pub fn new(api_key: String) -> Self {
         Self {
             api_key,
@@ -93,9 +93,9 @@ fn normalize_issue(node: &Value) -> Result<Issue, String> {
                 .filter_map(|rel| {
                     let issue = &rel["issue"];
                     Some(BlockerRef {
-                        id: issue["id"].as_str()?.to_string(),
+                        id:         issue["id"].as_str()?.to_string(),
                         identifier: issue["identifier"].as_str()?.to_string(),
-                        state: issue["state"]["name"].as_str()?.to_string(),
+                        state:      issue["state"]["name"].as_str()?.to_string(),
                     })
                 })
                 .collect()
@@ -128,8 +128,8 @@ fn normalize_issue(node: &Value) -> Result<Issue, String> {
 }
 
 async fn execute_graphql(
-    client: &reqwest::Client,
-    config: &LinearConfig,
+    client: &fabro_http::HttpClient,
+    config: &LinearOptions,
     query: &str,
     variables: Value,
 ) -> Result<Value, String> {
@@ -154,13 +154,17 @@ fn extract_issues(response: &Value) -> Result<Vec<Issue>, String> {
 
 /// A `Tracker` implementation backed by Linear.
 pub struct LinearTracker {
-    config: LinearConfig,
-    client: reqwest::Client,
+    config:       LinearOptions,
+    client:       fabro_http::HttpClient,
     project_slug: String,
 }
 
 impl LinearTracker {
-    pub fn new(config: LinearConfig, client: reqwest::Client, project_slug: String) -> Self {
+    pub fn new(
+        config: LinearOptions,
+        client: fabro_http::HttpClient,
+        project_slug: String,
+    ) -> Self {
         Self {
             config,
             client,
@@ -355,30 +359,33 @@ impl Tracker for LinearTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn test_http_client() -> fabro_http::HttpClient {
+        fabro_http::test_http_client().unwrap()
+    }
 
-    fn mock_config(server_url: &str) -> LinearConfig {
-        LinearConfig {
-            api_key: "lin_api_test123".to_string(),
+    fn mock_config(server_url: &str) -> LinearOptions {
+        LinearOptions {
+            api_key:  "lin_api_test123".to_string(),
             endpoint: format!("{server_url}/graphql"),
         }
     }
 
     fn make_test_issue() -> Issue {
         Issue {
-            id: "issue-1".to_string(),
+            id:              "issue-1".to_string(),
             project_item_id: None,
-            identifier: "T-1".to_string(),
-            title: "Test".to_string(),
-            description: None,
-            priority: None,
-            state: "Todo".to_string(),
-            branch_name: None,
-            url: "https://linear.app/t".to_string(),
-            assignee_id: None,
-            labels: vec![],
-            blocked_by: vec![],
-            created_at: None,
-            updated_at: None,
+            identifier:      "T-1".to_string(),
+            title:           "Test".to_string(),
+            description:     None,
+            priority:        None,
+            state:           "Todo".to_string(),
+            branch_name:     None,
+            url:             "https://linear.app/t".to_string(),
+            assignee_id:     None,
+            labels:          vec![],
+            blocked_by:      vec![],
+            created_at:      None,
+            updated_at:      None,
         }
     }
 
@@ -591,7 +598,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let result = execute_graphql(
             &client,
             &config,
@@ -617,7 +624,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = execute_graphql(
             &client,
             &config,
@@ -642,7 +649,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = execute_graphql(
             &client,
             &config,
@@ -668,7 +675,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = execute_graphql(&client, &config, "query { bad }", serde_json::json!({}))
             .await
             .unwrap_err();
@@ -691,7 +698,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         execute_graphql(
             &client,
             &config,
@@ -721,7 +728,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let id = tracker.fetch_viewer_id().await.unwrap();
         assert_eq!(id, "user-abc");
     }
@@ -738,7 +745,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let err = tracker.fetch_viewer_id().await.unwrap_err();
         assert!(err.contains("401"), "got: {err}");
     }
@@ -760,7 +767,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issue = make_test_issue();
         tracker.create_comment(&issue, "Hello world").await.unwrap();
     }
@@ -778,7 +785,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issue = make_test_issue();
         let err = tracker.create_comment(&issue, "Hello").await.unwrap_err();
         assert!(err.contains("success: false"), "got: {err}");
@@ -811,7 +818,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issue = make_test_issue();
         tracker.update_issue_state(&issue, "Done").await.unwrap();
 
@@ -832,7 +839,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issue = make_test_issue();
         let err = tracker
             .update_issue_state(&issue, "Nonexistent")
@@ -868,7 +875,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "my-project".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "my-project".to_string());
         let issues = tracker
             .fetch_candidate_issues(&["In Progress"])
             .await
@@ -929,7 +936,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issues = tracker.fetch_candidate_issues(&["Todo"]).await.unwrap();
 
         assert_eq!(issues.len(), 2);
@@ -958,7 +965,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issues = tracker.fetch_candidate_issues(&["Todo"]).await.unwrap();
 
         assert!(issues.is_empty());
@@ -1000,7 +1007,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issues = tracker
             .fetch_issues_by_ids(&["id-a", "id-b"])
             .await
@@ -1060,7 +1067,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issues = tracker.fetch_issues_by_ids(&id_refs).await.unwrap();
 
         assert_eq!(issues.len(), 51);
@@ -1070,8 +1077,8 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_issues_by_ids_empty() {
-        let config = LinearConfig::new("unused".to_string());
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let config = LinearOptions::new("unused".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issues = tracker.fetch_issues_by_ids(&[]).await.unwrap();
         assert!(issues.is_empty());
     }

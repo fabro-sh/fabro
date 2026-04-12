@@ -113,7 +113,7 @@ Allowed setup:
 
 - checked-in workflow fixtures
 - temp `.fabro` workflow files
-- temp `workflow.toml` and `fabro.toml`
+- temp `workflow.toml` and `.fabro/project.toml`
 - temp git repositories
 - temp user config and environment variables
 - invoking commands to create runs, checkpoints, branches, and persisted state
@@ -209,7 +209,7 @@ Use the test helpers that reinforce the rules above.
 
 ### `TestContext`
 
-Use `TestContext` for CLI integration tests so each test gets isolated home, storage, and temp directories.
+Use `TestContext` for CLI integration tests so each test gets isolated home and temp directories, with storage shared per nextest run or per test process depending on the harness mode.
 
 Prefer helpers like:
 
@@ -227,12 +227,27 @@ Shared integration-test helpers may:
 - normalize output
 - compact structured events
 - poll for stable command-created conditions
+- centralize localhost HTTP client construction
 
 Shared integration-test helpers should not:
 
 - fabricate run internals
 - write runtime files the engine is supposed to own
 - hide broad scenario setup behind opaque helper functions
+
+### Local HTTP clients
+
+When test code talks to a local server or twin over HTTP, always create the client through a shared test helper that calls `.no_proxy()`.
+
+Do not open-code localhost clients with:
+
+- `reqwest::Client::new()`
+- bare `Client::builder().build()`
+- `reqwest::get(...)`
+
+Use a crate-local helper or a shared helper such as `fabro_test::test_http_client()` instead.
+
+This rule exists because macOS proxy discovery adds hidden startup overhead to repeated reqwest client creation. The result looks like random nextest timeouts even when the server under test is only talking to `127.0.0.1`.
 
 ### Fixtures
 

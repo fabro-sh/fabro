@@ -44,12 +44,14 @@ mod tests {
         );
         let server = TestServer::start(state).await;
 
-        let resp = reqwest::get(&format!(
-            "{}/repos/test-org/test-project/releases/latest",
-            server.url()
-        ))
-        .await
-        .unwrap();
+        let resp = crate::test_support::test_http_client()
+            .get(format!(
+                "{}/repos/test-org/test-project/releases/latest",
+                server.url()
+            ))
+            .send()
+            .await
+            .unwrap();
 
         assert_eq!(resp.status(), 200);
         let body: serde_json::Value = resp.json().await.unwrap();
@@ -62,12 +64,11 @@ mod tests {
         let state = AppState::new();
         let server = TestServer::start(state).await;
 
-        let resp = reqwest::get(&format!(
-            "{}/repos/owner/repo/releases/latest",
-            server.url()
-        ))
-        .await
-        .unwrap();
+        let resp = crate::test_support::test_http_client()
+            .get(format!("{}/repos/owner/repo/releases/latest", server.url()))
+            .send()
+            .await
+            .unwrap();
 
         assert_eq!(resp.status(), 404);
         server.shutdown().await;

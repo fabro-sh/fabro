@@ -255,22 +255,19 @@ async fn responses_stream_emits_expected_sse_sequence() {
         .collect::<Vec<_>>();
 
     assert_eq!(status, 200);
-    assert_eq!(
-        events,
-        vec![
-            "response.created",
-            "response.in_progress",
-            "response.output_item.added",
-            "response.output_item.done",
-            "response.output_item.added",
-            "response.content_part.added",
-            "response.output_text.delta",
-            "response.output_text.done",
-            "response.content_part.done",
-            "response.output_item.done",
-            "response.completed",
-        ]
-    );
+    assert_eq!(events, vec![
+        "response.created",
+        "response.in_progress",
+        "response.output_item.added",
+        "response.output_item.done",
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.output_text.delta",
+        "response.output_text.done",
+        "response.content_part.done",
+        "response.output_item.done",
+        "response.completed",
+    ]);
     assert!(!transcript.done);
     assert!(joined.contains("deterministic: stream this request"));
     assert!(
@@ -355,22 +352,19 @@ async fn responses_stream_emits_structured_output_events() {
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .expect("structured stream output text");
     assert_eq!(status, 200);
-    assert_eq!(
-        events,
-        vec![
-            "response.created",
-            "response.in_progress",
-            "response.output_item.added",
-            "response.output_item.done",
-            "response.output_item.added",
-            "response.content_part.added",
-            "response.output_text.delta",
-            "response.output_text.done",
-            "response.content_part.done",
-            "response.output_item.done",
-            "response.completed",
-        ]
-    );
+    assert_eq!(events, vec![
+        "response.created",
+        "response.in_progress",
+        "response.output_item.added",
+        "response.output_item.done",
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.output_text.delta",
+        "response.output_text.done",
+        "response.content_part.done",
+        "response.output_item.done",
+        "response.completed",
+    ]);
     assert!(!transcript.done);
     assert_eq!(
         streamed_json["message"],

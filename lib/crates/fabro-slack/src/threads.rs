@@ -3,9 +3,11 @@ use std::sync::Mutex;
 
 use serde_json::Value;
 
+use crate::payload::SlackQuestionRef;
+
 #[derive(Default)]
 pub struct ThreadRegistry {
-    ts_to_question: Mutex<HashMap<String, String>>,
+    ts_to_question: Mutex<HashMap<String, SlackQuestionRef>>,
 }
 
 impl ThreadRegistry {
@@ -13,14 +15,17 @@ impl ThreadRegistry {
         Self::default()
     }
 
-    pub fn register(&self, message_ts: &str, question_id: &str) {
+    pub fn register(&self, message_ts: &str, run_id: &str, question_id: &str) {
         self.ts_to_question
             .lock()
             .expect("thread registry lock poisoned")
-            .insert(message_ts.to_string(), question_id.to_string());
+            .insert(message_ts.to_string(), SlackQuestionRef {
+                run_id: run_id.to_string(),
+                qid:    question_id.to_string(),
+            });
     }
 
-    pub fn resolve(&self, thread_ts: &str) -> Option<String> {
+    pub fn resolve(&self, thread_ts: &str) -> Option<SlackQuestionRef> {
         self.ts_to_question
             .lock()
             .expect("thread registry lock poisoned")
@@ -52,7 +57,8 @@ pub fn parse_thread_reply(payload: &Value) -> Option<(String, String)> {
     }
     let thread_ts = event["thread_ts"].as_str()?;
     let mut text = event["text"].as_str()?.to_string();
-    // Strip the @mention prefix from app_mention events (e.g. "<@U123> my answer" → "my answer")
+    // Strip the @mention prefix from app_mention events (e.g. "<@U123> my answer" →
+    // "my answer")
     if event_type == "app_mention" {
         if let Some(rest) = text.strip_prefix('<') {
             if let Some(after_mention) = rest.split_once('>') {
@@ -73,8 +79,14 @@ mod tests {
     #[test]
     fn register_and_resolve() {
         let registry = ThreadRegistry::new();
-        registry.register("1234.5678", "q-1");
-        assert_eq!(registry.resolve("1234.5678"), Some("q-1".to_string()));
+        registry.register("1234.5678", "run-1", "q-1");
+        assert_eq!(
+            registry.resolve("1234.5678"),
+            Some(SlackQuestionRef {
+                run_id: "run-1".to_string(),
+                qid:    "q-1".to_string(),
+            })
+        );
     }
 
     #[test]
@@ -86,7 +98,7 @@ mod tests {
     #[test]
     fn remove_clears_mapping() {
         let registry = ThreadRegistry::new();
-        registry.register("1234.5678", "q-1");
+        registry.register("1234.5678", "run-1", "q-1");
         registry.remove("1234.5678");
         assert_eq!(registry.resolve("1234.5678"), None);
     }

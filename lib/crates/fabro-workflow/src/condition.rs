@@ -1,11 +1,11 @@
 /// Condition expression evaluator for edge guards (spec Section 10).
 ///
 /// The parser lives in `fabro_graphviz::condition`; this module re-exports
-/// `parse_condition` and provides runtime evaluation against `Outcome`/`Context`.
+/// `parse_condition` and provides runtime evaluation against
+/// `Outcome`/`Context`.
 use fabro_graphviz::condition::{Clause, ConditionExpr, Op};
 
-use crate::context::Context;
-use crate::context::keys;
+use crate::context::{Context, keys};
 use crate::outcome::Outcome;
 
 // ---------------------------------------------------------------------------

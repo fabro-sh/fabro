@@ -1,20 +1,18 @@
-use axum::{
-    Json,
-    extract::{State, rejection::JsonRejection},
-    http::{HeaderMap, header::RETRY_AFTER},
-    response::IntoResponse,
-};
+use axum::Json;
+use axum::extract::State;
+use axum::extract::rejection::JsonRejection;
+use axum::http::HeaderMap;
+use axum::http::header::RETRY_AFTER;
+use axum::response::IntoResponse;
 use futures_util::future;
 use tokio::time::{Duration, sleep};
 
-use crate::{
-    engine::{execute_responses_request, failures::ExecutionOutcome},
-    openai::auth,
-    sse::responses_sse_response,
-    state::AppState,
-};
-
 use super::models::ResponsesRequest;
+use crate::engine::execute_responses_request;
+use crate::engine::failures::ExecutionOutcome;
+use crate::openai::auth;
+use crate::sse::responses_sse_response;
+use crate::state::AppState;
 
 pub async fn create_response(
     State(state): State<AppState>,

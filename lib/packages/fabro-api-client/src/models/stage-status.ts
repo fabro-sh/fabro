@@ -23,7 +23,7 @@ export const StageStatus = {
     RUNNING: 'running',
     PENDING: 'pending',
     FAILED: 'failed',
-    CANCELLED: 'cancelled',
+    CANCELLED: 'cancelled'
 } as const;
 
 export type StageStatus = typeof StageStatus[keyof typeof StageStatus];

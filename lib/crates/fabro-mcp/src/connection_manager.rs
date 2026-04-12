@@ -7,12 +7,13 @@ use rmcp::model::{CallToolResult, RawContent};
 use tracing::{error, info};
 
 use crate::client::McpClient;
-use crate::config::McpServerConfig;
+use crate::config::McpServerSettings;
 
 const MCP_TOOL_NAME_DELIMITER: &str = "__";
 
 /// Produce a qualified tool name: `mcp__{server}__{tool}`.
-/// Non-alphanumeric characters in `server` and `tool` (except `_`) are replaced with `_`.
+/// Non-alphanumeric characters in `server` and `tool` (except `_`) are replaced
+/// with `_`.
 #[must_use]
 pub fn qualified_tool_name(server: &str, tool: &str) -> String {
     format!(
@@ -77,16 +78,16 @@ pub fn call_result_to_string(result: &CallToolResult) -> Result<String, String> 
 /// Tool info stored per-tool in the connection manager.
 #[derive(Debug, Clone)]
 pub struct ToolInfo {
-    pub server_name: String,
+    pub server_name:        String,
     pub original_tool_name: String,
-    pub description: String,
-    pub input_schema: serde_json::Value,
+    pub description:        String,
+    pub input_schema:       serde_json::Value,
 }
 
 /// Manages connections to multiple MCP servers and their tools.
 pub struct McpConnectionManager {
     clients: HashMap<String, Arc<McpClient>>,
-    tools: HashMap<String, ToolInfo>,
+    tools:   HashMap<String, ToolInfo>,
 }
 
 impl McpConnectionManager {
@@ -94,15 +95,16 @@ impl McpConnectionManager {
     pub fn new() -> Self {
         Self {
             clients: HashMap::new(),
-            tools: HashMap::new(),
+            tools:   HashMap::new(),
         }
     }
 
-    /// Start all configured MCP servers. Failed servers are logged but don't block others.
-    /// Returns a list of `(server_name, result)` for each server.
+    /// Start all configured MCP servers. Failed servers are logged but don't
+    /// block others. Returns a list of `(server_name, result)` for each
+    /// server.
     pub async fn start_servers(
         &mut self,
-        configs: &[McpServerConfig],
+        configs: &[McpServerSettings],
     ) -> Vec<(String, Result<usize>)> {
         let mut results = Vec::new();
 
@@ -122,7 +124,7 @@ impl McpConnectionManager {
         results
     }
 
-    async fn start_one_server(&mut self, config: &McpServerConfig) -> Result<usize> {
+    async fn start_one_server(&mut self, config: &McpServerSettings) -> Result<usize> {
         let client = McpClient::new(config)?;
         client.initialize(config.startup_timeout()).await?;
         let tools = client.list_tools().await?;
@@ -130,15 +132,12 @@ impl McpConnectionManager {
 
         for (name, description, input_schema) in tools {
             let qualified = qualified_tool_name(&config.name, &name);
-            self.tools.insert(
-                qualified,
-                ToolInfo {
-                    server_name: config.name.clone(),
-                    original_tool_name: name,
-                    description,
-                    input_schema,
-                },
-            );
+            self.tools.insert(qualified, ToolInfo {
+                server_name: config.name.clone(),
+                original_tool_name: name,
+                description,
+                input_schema,
+            });
         }
 
         self.clients.insert(config.name.clone(), Arc::new(client));
@@ -183,8 +182,9 @@ impl Default for McpConnectionManager {
 
 #[cfg(test)]
 mod tests {
+    use rmcp::model::Content;
+
     use super::*;
-    use rmcp::model::{Content, RawTextContent};
 
     #[test]
     fn qualified_tool_name_basic() {
@@ -242,21 +242,14 @@ mod tests {
     }
 
     fn make_text_content(text: &str) -> Content {
-        Content {
-            raw: RawContent::Text(RawTextContent {
-                text: text.to_string(),
-                meta: None,
-            }),
-            annotations: None,
-        }
+        Content::text(text)
     }
 
     fn make_call_result(content: Vec<Content>, is_error: Option<bool>) -> CallToolResult {
-        CallToolResult {
-            content,
-            structured_content: None,
-            is_error,
-            meta: None,
+        if is_error == Some(true) {
+            CallToolResult::error(content)
+        } else {
+            CallToolResult::success(content)
         }
     }
 
@@ -292,20 +285,7 @@ mod tests {
 
     #[test]
     fn call_result_to_string_image_placeholder() {
-        use rmcp::model::RawImageContent;
-        let result = CallToolResult {
-            content: vec![Content {
-                raw: RawContent::Image(RawImageContent {
-                    data: "base64data".to_string(),
-                    mime_type: "image/png".to_string(),
-                    meta: None,
-                }),
-                annotations: None,
-            }],
-            structured_content: None,
-            is_error: None,
-            meta: None,
-        };
+        let result = CallToolResult::success(vec![Content::image("base64data", "image/png")]);
         assert_eq!(
             call_result_to_string(&result),
             Ok("[image content]".to_string())

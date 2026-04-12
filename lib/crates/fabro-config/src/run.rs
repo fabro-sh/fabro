@@ -1,223 +1,159 @@
-use std::collections::HashMap;
+//! Workflow / run config loading helpers.
+//!
+//! Thin wrappers around `parse_settings_layer` / `load_settings_path` plus
+//! path resolution for the `[workflow] graph` override. Runtime types
+//! that used to be re-exported from here live under
+//! `fabro_types::settings::run` now.
+
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, bail};
-use serde::{Deserialize, Serialize};
-use tracing::debug;
+use fabro_types::settings::SettingsLayer;
+use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal, RunGoalLayer};
 
-use crate::combine::Combine;
-use crate::config::ConfigLayer;
-use crate::sandbox::DockerfileSource;
-pub use fabro_types::settings::run::{
-    AssetsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
-    PullRequestSettings, SetupSettings,
-};
+use crate::load::{load_settings_path, resolve_goal_file_path};
+use crate::parse::parse_settings_layer;
+use crate::{Error, Result};
 
-const SUPPORTED_VERSION: u32 = 1;
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct CheckpointConfig {
-    #[serde(default)]
-    pub exclude_globs: Vec<String>,
+/// Load and parse a run config from a TOML file.
+pub fn parse_run_config(contents: &str) -> Result<SettingsLayer> {
+    parse_settings_layer(contents)
+        .map_err(|err| Error::parse("Failed to parse run config TOML", err))
 }
 
-impl Combine for CheckpointConfig {
-    fn combine(mut self, other: Self) -> Self {
-        self.exclude_globs.extend(other.exclude_globs);
-        self.exclude_globs.sort();
-        self.exclude_globs.dedup();
-        self
-    }
-}
-
-impl From<CheckpointConfig> for CheckpointSettings {
-    fn from(value: CheckpointConfig) -> Self {
-        let mut exclude_globs = value.exclude_globs;
-        exclude_globs.sort();
-        exclude_globs.dedup();
-        Self { exclude_globs }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct PullRequestConfig {
-    pub enabled: Option<bool>,
-    pub draft: Option<bool>,
-    pub auto_merge: Option<bool>,
-    pub merge_strategy: Option<MergeStrategy>,
-}
-
-impl From<PullRequestConfig> for PullRequestSettings {
-    fn from(value: PullRequestConfig) -> Self {
-        Self {
-            enabled: value.enabled.unwrap_or(false),
-            draft: value.draft.unwrap_or(true),
-            auto_merge: value.auto_merge.unwrap_or(false),
-            merge_strategy: value.merge_strategy.unwrap_or_default(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct AssetsConfig {
-    #[serde(default)]
-    pub include: Vec<String>,
-}
-
-impl From<AssetsConfig> for AssetsSettings {
-    fn from(value: AssetsConfig) -> Self {
-        Self {
-            include: value.include,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct GitHubConfig {
-    #[serde(default)]
-    pub permissions: HashMap<String, String>,
-}
-
-impl From<GitHubConfig> for GitHubSettings {
-    fn from(value: GitHubConfig) -> Self {
-        Self {
-            permissions: value.permissions,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct LlmConfig {
-    pub model: Option<String>,
-    pub provider: Option<String>,
-    #[serde(default)]
-    pub fallbacks: Option<HashMap<String, Vec<String>>>,
-}
-
-impl From<LlmConfig> for LlmSettings {
-    fn from(value: LlmConfig) -> Self {
-        Self {
-            model: value.model,
-            provider: value.provider,
-            fallbacks: value.fallbacks,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct SetupConfig {
-    #[serde(default)]
-    pub commands: Vec<String>,
-    pub timeout_ms: Option<u64>,
-}
-
-impl From<SetupConfig> for SetupSettings {
-    fn from(value: SetupConfig) -> Self {
-        Self {
-            commands: value.commands,
-            timeout_ms: value.timeout_ms,
-        }
-    }
-}
-
-/// Load and validate a run config from a TOML file.
+/// Load and parse a run config from a TOML file.
 ///
-/// The `graph` path in the returned config is resolved relative to the
-/// TOML file's parent directory. Any `dockerfile = { path = "..." }` is
-/// resolved to inline content.
-///
-/// `${env.VARNAME}` references in `[sandbox.env]` are NOT resolved here —
-/// call [`resolve_sandbox_env`] separately after snapshotting, so that
-/// plaintext secrets are never written to disk.
-pub fn load_run_config(path: &Path) -> anyhow::Result<ConfigLayer> {
-    let contents = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
-    let mut config = parse_run_config(&contents)?;
-
-    let config_dir = path.parent().unwrap_or(Path::new("."));
-    resolve_dockerfile(&mut config, config_dir)?;
-
-    Ok(config)
+/// Goes through [`load_settings_path`] so that relative `run.goal.file`
+/// paths are anchored at the directory of `path` at load time.
+pub fn load_run_config(path: &Path) -> Result<SettingsLayer> {
+    load_settings_path(path)
 }
 
-/// Resolve `${env.VARNAME}` references in `[sandbox.env]` values.
-///
-/// Only whole-value references are supported (no partial interpolation).
-/// Missing host env vars produce a hard error.
-pub fn resolve_sandbox_env(config: &mut ConfigLayer) -> anyhow::Result<()> {
-    if let Some(env) = config.sandbox.as_mut().and_then(|s| s.env.as_mut()) {
-        resolve_env_refs(env)?;
-    }
-    Ok(())
+/// Resolve a graph path relative to a workflow.toml.
+#[must_use]
+pub fn resolve_graph_path(workflow_toml: &Path, graph_relative: &str) -> PathBuf {
+    workflow_toml
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(graph_relative)
 }
 
-/// Resolve `${env.VARNAME}` patterns in a map of env vars.
-///
-/// If the entire value is `${env.VARNAME}`, it is replaced with the host
-/// environment variable. Any other value is left as-is. Missing host
-/// variables produce an error.
-pub fn resolve_env_refs(env: &mut HashMap<String, String>) -> anyhow::Result<()> {
-    for (key, value) in env.iter_mut() {
-        if let Some(var_name) = value
-            .strip_prefix("${env.")
-            .and_then(|s| s.strip_suffix('}'))
-        {
-            *value = std::env::var(var_name).with_context(|| {
-                format!("sandbox.env.{key}: host environment variable {var_name:?} is not set")
-            })?;
+#[derive(Debug)]
+pub enum ResolveRunGoalError {
+    EnvLookup {
+        var: String,
+    },
+    Io {
+        path:   PathBuf,
+        source: std::io::Error,
+    },
+}
+
+impl std::fmt::Display for ResolveRunGoalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EnvLookup { var } => write!(
+                f,
+                "run.goal.file references env var `{var}` which is not set"
+            ),
+            Self::Io { path, source } => {
+                write!(f, "failed to read goal file {}: {source}", path.display())
+            }
         }
     }
-    Ok(())
 }
 
-/// If the config contains a `dockerfile = { path = "..." }`, read the file
-/// and replace it with `DockerfileSource::Inline(contents)`.
-fn resolve_dockerfile(config: &mut ConfigLayer, config_dir: &Path) -> anyhow::Result<()> {
-    let source = config
-        .sandbox
-        .as_mut()
-        .and_then(|s| s.daytona.as_mut())
-        .and_then(|d| d.snapshot.as_mut())
-        .and_then(|snap| snap.dockerfile.as_mut());
-
-    if let Some(DockerfileSource::Path { path: ref rel }) = source {
-        let path = config_dir.join(rel);
-        let contents = std::fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read dockerfile at {}", path.display()))?;
-        debug!(path = %path.display(), "Resolved dockerfile from path");
-        *source.unwrap() = DockerfileSource::Inline(contents);
-    }
-
-    Ok(())
-}
-
-/// Resolve the graph path relative to the TOML file's parent directory.
-pub fn resolve_graph_path(toml_path: &Path, graph: &str) -> PathBuf {
-    let graph_path = Path::new(graph);
-    if graph_path.is_absolute() {
-        graph_path.to_path_buf()
-    } else {
-        toml_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join(graph_path)
+impl std::error::Error for ResolveRunGoalError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::EnvLookup { .. } => None,
+            Self::Io { source, .. } => Some(source),
+        }
     }
 }
 
-pub fn parse_run_config(contents: &str) -> anyhow::Result<ConfigLayer> {
-    let mut config: ConfigLayer =
-        toml::from_str(contents).context("Failed to parse run config TOML")?;
+pub fn resolve_run_goal(
+    settings: &SettingsLayer,
+    base_dir: &Path,
+) -> std::result::Result<Option<ResolvedRunGoal>, ResolveRunGoalError> {
+    let Some(goal) = settings.run.as_ref().and_then(|run| run.goal.as_ref()) else {
+        return Ok(None);
+    };
 
-    if config.graph.is_none() {
-        config.graph = Some("workflow.fabro".to_string());
+    match goal {
+        RunGoalLayer::Inline(text) => Ok(Some(ResolvedRunGoal {
+            text:   text.as_source(),
+            source: ResolvedGoalSource::Inline,
+        })),
+        RunGoalLayer::File { file } => {
+            let resolved = file
+                .resolve(|name| std::env::var(name).ok())
+                .map_err(|err| ResolveRunGoalError::EnvLookup { var: err.name })?;
+            let path = resolve_goal_file_path(&resolved.value, base_dir);
+            let text =
+                std::fs::read_to_string(&path).map_err(|source| ResolveRunGoalError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+            Ok(Some(ResolvedRunGoal {
+                text,
+                source: ResolvedGoalSource::File { path },
+            }))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fabro_types::settings::run::RunGoalLayer;
+
+    use super::*;
+
+    #[test]
+    fn load_run_config_rewrites_relative_goal_file_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workflow_dir = tmp.path().join("fabro").join("workflows").join("demo");
+        std::fs::create_dir_all(&workflow_dir).unwrap();
+        let workflow_toml = workflow_dir.join("workflow.toml");
+        std::fs::write(
+            &workflow_toml,
+            r#"_version = 1
+
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+
+        let config = load_run_config(&workflow_toml).unwrap();
+        let Some(RunGoalLayer::File { file }) =
+            config.run.as_ref().and_then(|run| run.goal.as_ref())
+        else {
+            panic!("expected file variant");
+        };
+        let expected = workflow_dir.join("prompts").join("goal.md");
+        assert_eq!(file.as_source(), expected.to_string_lossy());
     }
 
-    let version = config.version.unwrap_or(0);
-    if version != SUPPORTED_VERSION {
-        bail!(
-            "Unsupported run config version {version}. Only version {SUPPORTED_VERSION} is supported.",
-        );
-    }
+    #[test]
+    fn load_run_config_leaves_absolute_goal_file_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workflow_toml = tmp.path().join("workflow.toml");
+        std::fs::write(
+            &workflow_toml,
+            r#"_version = 1
 
-    Ok(config)
+[run.goal]
+file = "/etc/fabro/goal.md"
+"#,
+        )
+        .unwrap();
+
+        let config = load_run_config(&workflow_toml).unwrap();
+        let Some(RunGoalLayer::File { file }) =
+            config.run.as_ref().and_then(|run| run.goal.as_ref())
+        else {
+            panic!("expected file variant");
+        };
+        assert_eq!(file.as_source(), "/etc/fabro/goal.md");
+    }
 }

@@ -2,9 +2,9 @@ use fabro_test::{fabro_snapshot, test_context};
 
 fn init_fabro_project(context: &fabro_test::TestContext) {
     context
-        .write_temp("fabro.toml", "version = 1\n")
-        .write_temp("fabro/workflows/hello/workflow.fabro", "digraph {}")
-        .write_temp("fabro/workflows/hello/workflow.toml", "version = 1\n");
+        .write_temp(".fabro/project.toml", "_version = 1\n")
+        .write_temp(".fabro/workflows/hello/workflow.fabro", "digraph {}")
+        .write_temp(".fabro/workflows/hello/workflow.toml", "_version = 1\n");
 }
 
 #[test]
@@ -22,17 +22,16 @@ fn help() {
 
     Commands:
       init    Initialize a new project
-      deinit  Remove fabro.toml and fabro/ directory
+      deinit  Remove .fabro/ project directory
       help    Print this message or the help of the given subcommand(s)
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -43,18 +42,18 @@ fn test_repo_deinit_removes_fabro_toml_and_dir() {
     context.git_init();
     init_fabro_project(&context);
 
-    assert!(context.temp_dir.join("fabro.toml").exists());
-    assert!(context.temp_dir.join("fabro").exists());
+    assert!(context.temp_dir.join(".fabro/project.toml").exists());
+    assert!(context.temp_dir.join(".fabro").exists());
 
     context.repo().arg("deinit").assert().success();
 
     assert!(
-        !context.temp_dir.join("fabro.toml").exists(),
-        "fabro.toml should be removed"
+        !context.temp_dir.join(".fabro/project.toml").exists(),
+        ".fabro/project.toml should be removed"
     );
     assert!(
-        !context.temp_dir.join("fabro").exists(),
-        "fabro/ directory should be removed"
+        !context.temp_dir.join(".fabro").exists(),
+        ".fabro/ directory should be removed"
     );
 }
 
@@ -70,49 +69,6 @@ fn test_repo_deinit_fails_when_not_initialized() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: not initialized — fabro.toml not found
-    ");
-}
-
-#[test]
-fn test_repo_init_skill_installs_skill_files() {
-    let context = test_context!();
-    context.git_init();
-
-    context.repo().args(["init", "--skill"]).assert().success();
-
-    // Skill files should be installed under .claude/skills/fabro-create-workflow/
-    let skill_dir = context
-        .temp_dir
-        .join(".claude/skills/fabro-create-workflow");
-    assert!(skill_dir.join("SKILL.md").exists(), "SKILL.md should exist");
-    assert!(
-        skill_dir.join("references/dot-language.md").exists(),
-        "dot-language.md should exist"
-    );
-}
-
-#[test]
-fn test_repo_init_help_does_not_show_skill() {
-    let context = test_context!();
-    let mut cmd = context.repo();
-    cmd.args(["init", "--help"]);
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    Initialize a new project
-
-    Usage: fabro repo init [OPTIONS]
-
-    Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
-    ----- stderr -----
+    error: not initialized — .fabro/project.toml not found
     ");
 }

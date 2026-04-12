@@ -1,6 +1,6 @@
 # Fabro Logging Strategy
 
-Fabro uses the `tracing` crate for structured, file-based logging. Logs write to `~/.fabro/logs/YYYY-MM-DD.log`, controlled by the `FABRO_LOG` env var (default: `info`). Logs are for **developers debugging issues after the fact** — they are not user-facing output.
+Fabro uses the `tracing` crate for structured, file-based logging. Logs write to `~/.fabro/logs/{prefix}.YYYY-MM-DD.log` (e.g. `cli.2026-04-06.log`, `server.2026-04-06.log`), rotated daily by `tracing-appender`. Logs older than 7 days are cleaned up on startup. Controlled by the `FABRO_LOG` env var (default: `info`). Logs are for **developers debugging issues after the fact** — they are not user-facing output.
 
 Production runs at INFO level. INFO should be low-volume and high-signal — the summary of what happened. When something goes wrong, developers enable `FABRO_LOG=debug` to get the full picture. DEBUG can be as verbose as needed since it's only turned on temporarily.
 
@@ -23,7 +23,7 @@ Production runs at INFO level. INFO should be low-volume and high-signal — the
 
 - Hot loops or per-token streaming events (use DEBUG only if truly needed for diagnosis)
 - Data that belongs in user-facing output (`eprintln!` for interactive CLI feedback, not tracing)
-- Detached user-visible warnings or errors that need to survive `attach`/`logs` (`detach.log` is debug-only; emit a `WorkflowRunEvent` into `progress.jsonl` instead)
+- Detached user-visible warnings or errors that need to survive `attach`/`logs` (`detach.log` is debug-only; emit an `Event` into the run event stream instead)
 - Redundant information already captured by a parent event (if you logged "starting X", you don't need to log every sub-step at the same level)
 - Events that are already traced via `EventEnum::trace()` — the event enums (`AgentEvent`, `PipelineEvent`, `ExecutionEnvEvent`) each have a `trace()` method called automatically at their emit site; do not add manual `info!`/`debug!` calls that duplicate what `trace()` already emits
 - Wrapper/forwarding variants that re-emit an inner event — `PipelineEvent::Agent`, `PipelineEvent::ExecutionEnv`, and `AgentEvent::SubAgentEvent` are no-ops in `trace()` because the inner event is already traced at its origin

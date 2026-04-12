@@ -1,19 +1,29 @@
 use anyhow::Result;
+use fabro_types::settings::cli::OutputVerbosity;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, RunArgs};
+use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
-use crate::user_config::{self, user_layer_with_globals};
+use crate::user_config::settings_layer_with_storage_dir;
 
-pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn execute(
+    mut args: RunArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli_settings = user_config::load_user_settings_with_globals(globals)?;
-    let cli = user_layer_with_globals(globals)?;
-    args.verbose = args.verbose || cli_settings.verbose_enabled();
+    let ctx = CommandContext::for_target(&args.target, printer)?;
+    let cli = settings_layer_with_storage_dir(None)?;
+    args.verbose = args.verbose || ctx.cli_settings().output.verbosity == OutputVerbosity::Verbose;
 
     let quiet = args.detach;
-    let prevent_idle_sleep = cli_settings.prevent_idle_sleep_enabled();
-    let (run_id, run_dir) = super::create::create_run(&args, cli, styles, quiet)?;
+    let prevent_idle_sleep = ctx.cli_settings().exec.prevent_idle_sleep;
+    let created_run = Box::pin(super::create::create_run(
+        &ctx, &args, cli, styles, quiet, printer,
+    ))
+    .await?;
 
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(prevent_idle_sleep);
@@ -21,26 +31,34 @@ pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<(
     #[cfg(not(feature = "sleep_inhibitor"))]
     let _ = prevent_idle_sleep;
 
-    let child = super::start::start_run(&run_dir, false)?;
+    let client = ctx.server().await?;
+    super::start::start_run_with_client(&client, &created_run.run_id, false).await?;
 
     if args.detach {
         if globals.json {
-            print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
+            print_json_pretty(&serde_json::json!({ "run_id": created_run.run_id }))?;
         } else {
-            println!("{run_id}");
+            fabro_util::printout!(printer, "{}", created_run.run_id);
         }
     } else {
-        let exit_code = super::attach::attach_run(
-            &run_dir,
-            Some(&run_id),
+        let exit_code = super::attach::attach_run_with_client(
+            &client,
+            &created_run.run_id,
             true,
             styles,
-            Some(child),
             globals.json,
+            printer,
         )
         .await?;
         if !globals.json {
-            super::output::print_run_summary(&run_dir, run_id, styles);
+            super::output::print_run_summary_with_client(
+                &client,
+                &created_run.run_id,
+                created_run.local_run_dir.as_deref(),
+                styles,
+                printer,
+            )
+            .await?;
         }
         if exit_code != std::process::ExitCode::SUCCESS {
             std::process::exit(1);

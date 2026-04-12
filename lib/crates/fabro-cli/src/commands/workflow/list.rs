@@ -1,30 +1,34 @@
 use anyhow::{Result, bail};
-use fabro_util::terminal::Styles;
-
 use fabro_config::project::{
     WorkflowInfo, WorkflowSource, discover_project_config, list_workflows_detailed,
     resolve_fabro_root,
 };
+use fabro_util::printer::Printer;
+use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, WorkflowListArgs};
 use crate::shared::{print_json_pretty, relative_path};
 
 const GOAL_MAX_LEN: usize = 60;
 
-pub(super) fn list_command(_args: &WorkflowListArgs, globals: &GlobalArgs) -> Result<()> {
+pub(super) fn list_command(
+    _args: &WorkflowListArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let styles = Styles::detect_stderr();
     let cwd = std::env::current_dir()?;
 
     let Some((config_path, config)) = discover_project_config(&cwd)? else {
         bail!(
-            "No fabro.toml found in {cwd} or any parent directory",
+            "No .fabro/project.toml found in {cwd} or any parent directory",
             cwd = cwd.display()
         );
     };
 
     let fabro_root = resolve_fabro_root(&config_path, &config);
     let project_wf_dir = fabro_root.join("workflows");
-    let user_wf_dir = dirs::home_dir().map(|h| h.join(".fabro").join("workflows"));
+    let user_wf_dir = Some(fabro_util::Home::from_env().workflows_dir());
 
     let workflows = list_workflows_detailed(Some(&project_wf_dir), user_wf_dir.as_deref());
 
@@ -44,7 +48,8 @@ pub(super) fn list_command(_args: &WorkflowListArgs, globals: &GlobalArgs) -> Re
 
     let name_width = workflows.iter().map(|w| w.name.len()).max().unwrap_or(0);
 
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "{} workflow(s) found\n",
         styles.bold.apply_to(workflows.len())
     );
@@ -52,9 +57,16 @@ pub(super) fn list_command(_args: &WorkflowListArgs, globals: &GlobalArgs) -> Re
     let user_path = user_wf_dir
         .as_deref()
         .map_or_else(|| "~/.fabro/workflows".to_string(), relative_path);
-    print_section("User Workflows", &user_path, &user, name_width, &styles);
+    print_section(
+        "User Workflows",
+        &user_path,
+        &user,
+        name_width,
+        &styles,
+        printer,
+    );
 
-    eprintln!();
+    fabro_util::printerr!(printer, "");
 
     print_section(
         "Project Workflows",
@@ -62,6 +74,7 @@ pub(super) fn list_command(_args: &WorkflowListArgs, globals: &GlobalArgs) -> Re
         &project,
         name_width,
         &styles,
+        printer,
     );
 
     Ok(())
@@ -73,18 +86,21 @@ fn print_section(
     workflows: &[&WorkflowInfo],
     name_width: usize,
     styles: &Styles,
+    printer: Printer,
 ) {
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "{} {}",
         styles.bold.apply_to(title),
         styles.dim.apply_to(format!("({path})")),
     );
     if workflows.is_empty() {
-        eprintln!("  {}", styles.dim.apply_to("(none)"));
+        fabro_util::printerr!(printer, "  {}", styles.dim.apply_to("(none)"));
         return;
     }
-    eprintln!();
-    eprintln!(
+    fabro_util::printerr!(printer, "");
+    fabro_util::printerr!(
+        printer,
         "  {:<name_width$}  {}",
         styles.bold_dim.apply_to("NAME"),
         styles.bold_dim.apply_to("DESCRIPTION"),
@@ -95,7 +111,8 @@ fn print_section(
             .as_deref()
             .map(|g| truncate_str(g, GOAL_MAX_LEN))
             .unwrap_or_default();
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "  {:<name_width$}  {}",
             styles.cyan.apply_to(&w.name),
             styles.dim.apply_to(goal_str),

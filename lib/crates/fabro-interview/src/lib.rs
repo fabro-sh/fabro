@@ -1,11 +1,11 @@
 mod auto_approve;
 mod callback;
 mod console;
-pub mod file;
+mod control;
+mod control_protocol;
 mod queue;
 mod recording;
 mod replay;
-mod web;
 
 use std::collections::HashMap;
 
@@ -38,21 +38,23 @@ impl std::fmt::Display for QuestionType {
 /// An option presented to the user for multiple-choice questions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuestionOption {
-    pub key: String,
+    pub key:   String,
     pub label: String,
 }
 
 /// A question presented to the user.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Question {
-    pub text: String,
-    pub question_type: QuestionType,
-    pub options: Vec<QuestionOption>,
-    pub allow_freeform: bool,
-    pub default: Option<Answer>,
+    #[serde(default)]
+    pub id:              String,
+    pub text:            String,
+    pub question_type:   QuestionType,
+    pub options:         Vec<QuestionOption>,
+    pub allow_freeform:  bool,
+    pub default:         Option<Answer>,
     pub timeout_seconds: Option<f64>,
-    pub stage: String,
-    pub metadata: HashMap<String, serde_json::Value>,
+    pub stage:           String,
+    pub metadata:        HashMap<String, serde_json::Value>,
     #[serde(default)]
     pub context_display: Option<String>,
 }
@@ -60,6 +62,7 @@ pub struct Question {
 impl Question {
     pub fn new(text: impl Into<String>, question_type: QuestionType) -> Self {
         Self {
+            id: String::new(),
             text: text.into(),
             question_type,
             options: Vec::new(),
@@ -78,7 +81,8 @@ impl Question {
 pub enum AnswerValue {
     Yes,
     No,
-    Aborted,
+    Cancelled,
+    Interrupted,
     Skipped,
     Timeout,
     Selected(String),
@@ -89,86 +93,96 @@ pub enum AnswerValue {
 /// An answer from the user.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Answer {
-    pub value: AnswerValue,
+    pub value:           AnswerValue,
     pub selected_option: Option<QuestionOption>,
-    pub text: Option<String>,
+    pub text:            Option<String>,
 }
 
 impl Answer {
     #[must_use]
     pub fn yes() -> Self {
         Self {
-            value: AnswerValue::Yes,
+            value:           AnswerValue::Yes,
             selected_option: None,
-            text: None,
+            text:            None,
         }
     }
 
     #[must_use]
     pub fn no() -> Self {
         Self {
-            value: AnswerValue::No,
+            value:           AnswerValue::No,
             selected_option: None,
-            text: None,
+            text:            None,
         }
     }
 
     #[must_use]
-    pub fn aborted() -> Self {
+    pub fn cancelled() -> Self {
         Self {
-            value: AnswerValue::Aborted,
+            value:           AnswerValue::Cancelled,
             selected_option: None,
-            text: None,
+            text:            None,
+        }
+    }
+
+    #[must_use]
+    pub fn interrupted() -> Self {
+        Self {
+            value:           AnswerValue::Interrupted,
+            selected_option: None,
+            text:            None,
         }
     }
 
     #[must_use]
     pub fn skipped() -> Self {
         Self {
-            value: AnswerValue::Skipped,
+            value:           AnswerValue::Skipped,
             selected_option: None,
-            text: None,
+            text:            None,
         }
     }
 
     #[must_use]
     pub fn timeout() -> Self {
         Self {
-            value: AnswerValue::Timeout,
+            value:           AnswerValue::Timeout,
             selected_option: None,
-            text: None,
+            text:            None,
         }
     }
 
     pub fn selected(key: impl Into<String>, option: QuestionOption) -> Self {
         let key = key.into();
         Self {
-            value: AnswerValue::Selected(key),
+            value:           AnswerValue::Selected(key),
             selected_option: Some(option),
-            text: None,
+            text:            None,
         }
     }
 
     pub fn multi_selected(keys: Vec<String>) -> Self {
         Self {
-            value: AnswerValue::MultiSelected(keys),
+            value:           AnswerValue::MultiSelected(keys),
             selected_option: None,
-            text: None,
+            text:            None,
         }
     }
 
     pub fn text(text: impl Into<String>) -> Self {
         let t = text.into();
         Self {
-            value: AnswerValue::Text(t.clone()),
+            value:           AnswerValue::Text(t.clone()),
             selected_option: None,
-            text: Some(t),
+            text:            Some(t),
         }
     }
 }
 
 /// Apply timeout enforcement to an interviewer ask call.
-/// Per spec 6.5: if `timeout_seconds` is set, returns default answer or `Answer::timeout()`.
+/// Per spec 6.5: if `timeout_seconds` is set, returns default answer or
+/// `Answer::timeout()`.
 pub async fn ask_with_timeout(interviewer: &dyn Interviewer, question: Question) -> Answer {
     let timeout_secs = question.timeout_seconds;
     let default_answer = question.default.clone();
@@ -206,16 +220,22 @@ pub trait Interviewer: Send + Sync {
 pub use auto_approve::AutoApproveInterviewer;
 pub use callback::CallbackInterviewer;
 pub use console::ConsoleInterviewer;
-pub use file::FileInterviewer;
+pub use control::{ControlInterviewer, SubmitError};
+pub use control_protocol::{
+    WORKER_CONTROL_PROTOCOL_VERSION, WorkerControlAnswer, WorkerControlEnvelope,
+    WorkerControlMessage,
+};
 pub use queue::QueueInterviewer;
 pub use recording::RecordingInterviewer;
 pub use replay::ReplayInterviewer;
-pub use web::{PendingQuestion, WebInterviewer};
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
     use tokio::time;
+
+    use super::*;
 
     #[test]
     fn question_type_display() {
@@ -229,6 +249,7 @@ mod tests {
     #[test]
     fn question_new() {
         let q = Question::new("Do you approve?", QuestionType::YesNo);
+        assert!(q.id.is_empty());
         assert_eq!(q.text, "Do you approve?");
         assert_eq!(q.question_type, QuestionType::YesNo);
         assert!(q.options.is_empty());
@@ -254,15 +275,21 @@ mod tests {
     }
 
     #[test]
+    fn answer_cancelled() {
+        let a = Answer::cancelled();
+        assert_eq!(a.value, AnswerValue::Cancelled);
+    }
+
+    #[test]
     fn answer_skipped() {
         let a = Answer::skipped();
         assert_eq!(a.value, AnswerValue::Skipped);
     }
 
     #[test]
-    fn answer_aborted() {
-        let a = Answer::aborted();
-        assert_eq!(a.value, AnswerValue::Aborted);
+    fn answer_interrupted() {
+        let a = Answer::interrupted();
+        assert_eq!(a.value, AnswerValue::Interrupted);
     }
 
     #[test]
@@ -274,7 +301,7 @@ mod tests {
     #[test]
     fn answer_selected() {
         let opt = QuestionOption {
-            key: "A".to_string(),
+            key:   "A".to_string(),
             label: "Approve".to_string(),
         };
         let a = Answer::selected("A", opt.clone());
@@ -292,11 +319,11 @@ mod tests {
     #[test]
     fn question_option_eq() {
         let a = QuestionOption {
-            key: "Y".to_string(),
+            key:   "Y".to_string(),
             label: "Yes".to_string(),
         };
         let b = QuestionOption {
-            key: "Y".to_string(),
+            key:   "Y".to_string(),
             label: "Yes".to_string(),
         };
         assert_eq!(a, b);
@@ -305,8 +332,9 @@ mod tests {
     #[test]
     fn answer_value_variants() {
         assert_ne!(AnswerValue::Yes, AnswerValue::No);
+        assert_ne!(AnswerValue::Cancelled, AnswerValue::Interrupted);
         assert_ne!(AnswerValue::Skipped, AnswerValue::Timeout);
-        assert_ne!(AnswerValue::Aborted, AnswerValue::Timeout);
+        assert_ne!(AnswerValue::Interrupted, AnswerValue::Timeout);
         assert_eq!(
             AnswerValue::Selected("x".to_string()),
             AnswerValue::Selected("x".to_string())
@@ -361,6 +389,23 @@ mod tests {
         let q = Question::new("approve?", QuestionType::YesNo);
 
         let answer = ask_with_timeout(&interviewer, q).await;
+        assert_eq!(answer.value, AnswerValue::Yes);
+    }
+
+    #[tokio::test]
+    async fn control_interviewer_routes_answers_by_question_id() {
+        let interviewer = Arc::new(ControlInterviewer::new());
+
+        let mut question = Question::new("Approve?", QuestionType::YesNo);
+        question.id = "q-1".to_string();
+
+        let ask_interviewer = Arc::clone(&interviewer);
+        let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
+
+        time::sleep(std::time::Duration::from_millis(10)).await;
+        interviewer.submit("q-1", Answer::yes()).await.unwrap();
+
+        let answer = ask.await.unwrap();
         assert_eq!(answer.value, AnswerValue::Yes);
     }
 }

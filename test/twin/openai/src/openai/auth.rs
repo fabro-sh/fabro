@@ -1,10 +1,9 @@
-use axum::{
-    Json,
-    extract::Request,
-    http::{HeaderMap, HeaderValue, StatusCode, header::AUTHORIZATION},
-    middleware::Next,
-    response::{IntoResponse, Response},
-};
+use axum::Json;
+use axum::extract::Request;
+use axum::http::header::AUTHORIZATION;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
 use crate::state::NamespaceKey;

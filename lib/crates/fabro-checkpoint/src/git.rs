@@ -34,14 +34,15 @@ impl FileMode {
 /// A single entry in a flat tree map.
 #[derive(Debug, Clone)]
 pub struct TreeEntry {
-    pub oid: Oid,
+    pub oid:      Oid,
     pub filemode: FileMode,
 }
 
 /// A flat, sorted map of paths to tree entries.
 ///
-/// Intermediate representation between reading an existing git tree and writing a new one.
-/// Paths use forward slashes and are relative to the tree root (e.g. `"src/main.rs"`).
+/// Intermediate representation between reading an existing git tree and writing
+/// a new one. Paths use forward slashes and are relative to the tree root (e.g.
+/// `"src/main.rs"`).
 #[derive(Debug, Clone, Default)]
 pub struct TreeEntries(BTreeMap<String, TreeEntry>);
 
@@ -92,7 +93,8 @@ impl TreeEntries {
     }
 }
 
-/// Wraps a `git2::Repository` with operations for creating blobs, trees, commits, and refs.
+/// Wraps a `git2::Repository` with operations for creating blobs, trees,
+/// commits, and refs.
 pub struct Store {
     repo: Repository,
 }
@@ -119,10 +121,11 @@ impl Store {
     }
 
     /// Read a file from disk, store as a blob.
-    /// Returns `(oid, filemode)` where filemode detects the executable bit on unix.
+    /// Returns `(oid, filemode)` where filemode detects the executable bit on
+    /// unix.
     pub fn write_blob_from_file(&self, path: &Path) -> Result<(Oid, FileMode)> {
         let content = std::fs::read(path).map_err(|e| Error::ReadFile {
-            path: path.to_path_buf(),
+            path:   path.to_path_buf(),
             source: e,
         })?;
         let mode = detect_filemode(path);
@@ -150,8 +153,8 @@ impl Store {
         Ok(builder.write()?)
     }
 
-    /// Create a commit. Does NOT update any ref — caller does that via `update_ref`.
-    /// `author` is used for both author and committer fields.
+    /// Create a commit. Does NOT update any ref — caller does that via
+    /// `update_ref`. `author` is used for both author and committer fields.
     pub fn write_commit(
         &self,
         tree_oid: Oid,
@@ -189,7 +192,8 @@ impl Store {
         }
     }
 
-    /// Read a blob from the tree of a specific commit. Returns `None` if the path doesn't exist.
+    /// Read a blob from the tree of a specific commit. Returns `None` if the
+    /// path doesn't exist.
     pub fn read_blob_at(&self, commit_oid: Oid, path: &str) -> Result<Option<Vec<u8>>> {
         let commit = self.repo.find_commit(commit_oid)?;
         let tree = commit.tree()?;
@@ -246,14 +250,14 @@ fn read_tree_recursive(
 /// Intermediate structure for building nested git trees from flat paths.
 struct DirNode {
     files: BTreeMap<String, TreeEntry>,
-    dirs: BTreeMap<String, Self>,
+    dirs:  BTreeMap<String, Self>,
 }
 
 impl DirNode {
     fn new() -> Self {
         Self {
             files: BTreeMap::new(),
-            dirs: BTreeMap::new(),
+            dirs:  BTreeMap::new(),
         }
     }
 }

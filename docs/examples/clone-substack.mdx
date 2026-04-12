@@ -75,7 +75,7 @@ GitHub to Railway validated by code review only — no live deployment execution
 
         expand_spec [
             label="Expand Spec",
-            prompt="Goal: $goal\n\n\
+            prompt="Goal: {{ goal }}\n\n\
 The project specification is at substack-spec-v01.md and the Definition of Done \
 is at substack-dod-v01.md. The UI flow diagram is at substack-spec-v01-ui.gv.\n\n\
 Read all three files. Scratch artifacts go under .workflow/.\n\n\
@@ -100,7 +100,7 @@ adequate, skip."
         plan_a [
             label="Plan A",
             class="branch-a",
-            prompt="Goal: $goal\n\n\
+            prompt="Goal: {{ goal }}\n\n\
 Read .workflow/spec.md and .workflow/definition_of_done.md. If those files do not \
 exist, fall back to reading substack-spec-v01.md and substack-dod-v01.md directly. \
 If .workflow/postmortem_latest.md exists, incorporate its lessons.\n\n\
@@ -126,7 +126,7 @@ Write to .workflow/plan_a.md."
         plan_b [
             label="Plan B",
             class="branch-b",
-            prompt="Goal: $goal\n\n\
+            prompt="Goal: {{ goal }}\n\n\
 Read .workflow/spec.md and .workflow/definition_of_done.md. If those files do not \
 exist, fall back to reading substack-spec-v01.md and substack-dod-v01.md directly. \
 If .workflow/postmortem_latest.md exists, incorporate its lessons.\n\n\
@@ -184,7 +184,7 @@ Write the final plan to .workflow/plan_final.md."
             class="hard",
             max_tokens=32768,
             label="Implement",
-            prompt="Goal: $goal\n\n\
+            prompt="Goal: {{ goal }}\n\n\
 Read .workflow/plan_final.md, .workflow/spec.md, and \
 .workflow/definition_of_done.md. If the spec or DoD files do not exist at those \
 paths, fall back to reading substack-spec-v01.md and substack-dod-v01.md directly.\n\n\

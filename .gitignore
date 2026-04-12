@@ -2,6 +2,7 @@ target
 .env
 .entire
 node_modules
+apps/fabro-web/dist/
 tmp
 evals/swe-bench/repos/
 evals/swe-bench/results/
@@ -12,3 +13,4 @@ __pycache__
 .ai/tmp
 .worktrees/
 **/*.pending-snap
+.worktrees

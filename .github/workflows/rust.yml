@@ -5,18 +5,22 @@ on:
     branches: [main]
     paths:
       - "lib/crates/**"
+      - "test/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
+      - ".config/**"
       - "openapi/**"
       - ".github/workflows/rust.yml"
   pull_request:
     branches: [main]
     paths:
       - "lib/crates/**"
+      - "test/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
+      - ".config/**"
       - "openapi/**"
       - ".github/workflows/rust.yml"
   workflow_dispatch:
@@ -40,7 +44,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-      - run: cargo fmt --check --all
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - run: cargo +nightly fmt --check --all
 
   clippy:
     name: Clippy
@@ -53,7 +60,7 @@ jobs:
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
           cache-on-failure: true
-      - run: cargo clippy --workspace -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: Test (Linux)

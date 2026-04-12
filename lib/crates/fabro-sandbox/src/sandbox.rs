@@ -1,9 +1,10 @@
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::Path;
 use std::sync::Arc;
+
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 /// Git command prefix that disables background maintenance.
@@ -11,8 +12,8 @@ const GIT: &str = "git -c maintenance.auto=0 -c gc.auto=0";
 
 /// Information returned when a sandbox sets up git for a workflow run.
 pub struct GitRunInfo {
-    pub base_sha: String,
-    pub run_branch: String,
+    pub base_sha:    String,
+    pub run_branch:  String,
     pub base_branch: Option<String>,
 }
 
@@ -187,28 +188,28 @@ pub enum SandboxEvent {
         provider: String,
     },
     Ready {
-        provider: String,
+        provider:    String,
         duration_ms: u64,
-        name: Option<String>,
-        cpu: Option<f64>,
-        memory: Option<f64>,
-        url: Option<String>,
+        name:        Option<String>,
+        cpu:         Option<f64>,
+        memory:      Option<f64>,
+        url:         Option<String>,
     },
     InitializeFailed {
-        provider: String,
-        error: String,
+        provider:    String,
+        error:       String,
         duration_ms: u64,
     },
     CleanupStarted {
         provider: String,
     },
     CleanupCompleted {
-        provider: String,
+        provider:    String,
         duration_ms: u64,
     },
     CleanupFailed {
         provider: String,
-        error: String,
+        error:    String,
     },
 
     // -- Docker --
@@ -216,7 +217,7 @@ pub enum SandboxEvent {
         name: String,
     },
     SnapshotPulled {
-        name: String,
+        name:        String,
         duration_ms: u64,
     },
 
@@ -228,25 +229,25 @@ pub enum SandboxEvent {
         name: String,
     },
     SnapshotReady {
-        name: String,
+        name:        String,
         duration_ms: u64,
     },
     SnapshotFailed {
-        name: String,
+        name:  String,
         error: String,
     },
 
     // -- Daytona git --
     GitCloneStarted {
-        url: String,
+        url:    String,
         branch: Option<String>,
     },
     GitCloneCompleted {
-        url: String,
+        url:         String,
         duration_ms: u64,
     },
     GitCloneFailed {
-        url: String,
+        url:   String,
         error: String,
     },
 }
@@ -324,8 +325,8 @@ pub type SandboxEventCallback = Arc<dyn Fn(SandboxEvent) + Send + Sync>;
 
 /// Formats file content with line numbers for display.
 ///
-/// Applies optional offset (0-based lines to skip) and limit (max lines to return).
-/// Line numbers are 1-based and right-aligned.
+/// Applies optional offset (0-based lines to skip) and limit (max lines to
+/// return). Line numbers are 1-based and right-aligned.
 #[must_use]
 pub fn format_lines_numbered(content: &str, offset: Option<usize>, limit: Option<usize>) -> String {
     let all_lines: Vec<&str> = content.lines().collect();
@@ -343,25 +344,25 @@ pub fn format_lines_numbered(content: &str, offset: Option<usize>, limit: Option
 
 #[derive(Debug, Clone)]
 pub struct ExecResult {
-    pub stdout: String,
-    pub stderr: String,
-    pub exit_code: i32,
-    pub timed_out: bool,
+    pub stdout:      String,
+    pub stderr:      String,
+    pub exit_code:   i32,
+    pub timed_out:   bool,
     pub duration_ms: u64,
 }
 
 #[derive(Debug, Clone)]
 pub struct DirEntry {
-    pub name: String,
+    pub name:   String,
     pub is_dir: bool,
-    pub size: Option<u64>,
+    pub size:   Option<u64>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct GrepOptions {
-    pub glob_filter: Option<String>,
+    pub glob_filter:      Option<String>,
     pub case_insensitive: bool,
-    pub max_results: Option<usize>,
+    pub max_results:      Option<usize>,
 }
 
 #[async_trait]
@@ -414,14 +415,16 @@ pub trait Sandbox: Send + Sync {
     fn working_directory(&self) -> &str;
     fn platform(&self) -> &str;
     fn os_version(&self) -> String;
-    /// Return a human-readable identifier for the sandbox (e.g. container ID, sandbox name).
-    /// Used when `--preserve-sandbox` is active to tell the user how to reconnect.
+    /// Return a human-readable identifier for the sandbox (e.g. container ID,
+    /// sandbox name). Used when `--preserve-sandbox` is active to tell the
+    /// user how to reconnect.
     fn sandbox_info(&self) -> String {
         String::new()
     }
 
     /// Refresh git push credentials (e.g. rotate an expiring GitHub App token).
-    /// Default is a no-op; Daytona overrides to update the remote URL with a fresh token.
+    /// Default is a no-op; Daytona overrides to update the remote URL with a
+    /// fresh token.
     async fn refresh_push_credentials(&self) -> Result<(), String> {
         Ok(())
     }
@@ -433,13 +436,15 @@ pub trait Sandbox: Send + Sync {
     }
 
     /// Set up git state for a new workflow run.
-    /// Sandboxes that manage their own git clone (e.g., remote VMs) should create
-    /// a run branch and return the git info. Local sandboxes return `None`.
+    /// Sandboxes that manage their own git clone (e.g., remote VMs) should
+    /// create a run branch and return the git info. Local sandboxes return
+    /// `None`.
     async fn setup_git_for_run(&self, _run_id: &str) -> Result<Option<GitRunInfo>, String> {
         Ok(None)
     }
 
-    /// Commands to run inside the sandbox when resuming on an existing run branch.
+    /// Commands to run inside the sandbox when resuming on an existing run
+    /// branch.
     fn resume_setup_commands(&self, _run_branch: &str) -> Vec<String> {
         Vec::new()
     }
@@ -474,7 +479,8 @@ pub trait Sandbox: Send + Sync {
             .into_owned()
     }
 
-    /// Return an SSH command string for connecting to this sandbox, if supported.
+    /// Return an SSH command string for connecting to this sandbox, if
+    /// supported.
     async fn ssh_access_command(&self) -> Result<Option<String>, String> {
         Ok(None)
     }
@@ -486,7 +492,8 @@ pub trait Sandbox: Send + Sync {
 
     /// Get an authenticated preview URL for a port exposed by this sandbox.
     /// Returns `Ok(None)` when the sandbox does not support port previews.
-    /// Used to connect to services (e.g. MCP servers) running inside the sandbox.
+    /// Used to connect to services (e.g. MCP servers) running inside the
+    /// sandbox.
     async fn get_preview_url(
         &self,
         _port: u16,
@@ -495,8 +502,9 @@ pub trait Sandbox: Send + Sync {
     }
 
     /// Record that the agent has explicitly read (seen) the given file path.
-    /// Called by tool executors after agent-visible reads (e.g. `read_file`, `grep`).
-    /// Default is a no-op; `ReadBeforeWriteSandbox` overrides to populate its read set.
+    /// Called by tool executors after agent-visible reads (e.g. `read_file`,
+    /// `grep`). Default is a no-op; `ReadBeforeWriteSandbox` overrides to
+    /// populate its read set.
     fn mark_agent_read(&self, _path: &str) {}
 }
 
@@ -511,7 +519,8 @@ pub(crate) fn resolve_path(path: &str, working_dir: &str) -> String {
     }
 }
 
-/// Shell-quote a string using `shlex::try_quote`, with a fallback for edge cases.
+/// Shell-quote a string using `shlex::try_quote`, with a fallback for edge
+/// cases.
 pub fn shell_quote(s: &str) -> String {
     shlex::try_quote(s).map_or_else(
         |_| format!("'{}'", s.replace('\'', "'\\''")),
@@ -603,10 +612,10 @@ mod tests {
     #[test]
     fn exec_result_fields() {
         let result = ExecResult {
-            stdout: "out".into(),
-            stderr: "err".into(),
-            exit_code: 1,
-            timed_out: true,
+            stdout:      "out".into(),
+            stderr:      "err".into(),
+            exit_code:   1,
+            timed_out:   true,
             duration_ms: 5000,
         };
         assert_eq!(result.exit_code, 1);
@@ -617,9 +626,9 @@ mod tests {
     #[test]
     fn dir_entry_fields() {
         let entry = DirEntry {
-            name: "src".into(),
+            name:   "src".into(),
             is_dir: true,
-            size: None,
+            size:   None,
         };
         assert_eq!(entry.name, "src");
         assert!(entry.is_dir);
@@ -641,34 +650,34 @@ mod tests {
                 provider: "local".into(),
             },
             SandboxEvent::Ready {
-                provider: "local".into(),
+                provider:    "local".into(),
                 duration_ms: 50,
-                name: None,
-                cpu: None,
-                memory: None,
-                url: None,
+                name:        None,
+                cpu:         None,
+                memory:      None,
+                url:         None,
             },
             SandboxEvent::InitializeFailed {
-                provider: "docker".into(),
-                error: "no daemon".into(),
+                provider:    "docker".into(),
+                error:       "no daemon".into(),
                 duration_ms: 100,
             },
             SandboxEvent::CleanupStarted {
                 provider: "daytona".into(),
             },
             SandboxEvent::CleanupCompleted {
-                provider: "daytona".into(),
+                provider:    "daytona".into(),
                 duration_ms: 200,
             },
             SandboxEvent::CleanupFailed {
                 provider: "docker".into(),
-                error: "container gone".into(),
+                error:    "container gone".into(),
             },
             SandboxEvent::SnapshotPulling {
                 name: "ubuntu:22.04".into(),
             },
             SandboxEvent::SnapshotPulled {
-                name: "ubuntu:22.04".into(),
+                name:        "ubuntu:22.04".into(),
                 duration_ms: 5000,
             },
             SandboxEvent::SnapshotEnsuring {
@@ -678,23 +687,23 @@ mod tests {
                 name: "my-snap".into(),
             },
             SandboxEvent::SnapshotReady {
-                name: "my-snap".into(),
+                name:        "my-snap".into(),
                 duration_ms: 30000,
             },
             SandboxEvent::SnapshotFailed {
-                name: "my-snap".into(),
+                name:  "my-snap".into(),
                 error: "build failed".into(),
             },
             SandboxEvent::GitCloneStarted {
-                url: "https://github.com/org/repo.git".into(),
+                url:    "https://github.com/org/repo.git".into(),
                 branch: Some("main".into()),
             },
             SandboxEvent::GitCloneCompleted {
-                url: "https://github.com/org/repo.git".into(),
+                url:         "https://github.com/org/repo.git".into(),
                 duration_ms: 8000,
             },
             SandboxEvent::GitCloneFailed {
-                url: "https://github.com/org/repo.git".into(),
+                url:   "https://github.com/org/repo.git".into(),
                 error: "auth failed".into(),
             },
         ];

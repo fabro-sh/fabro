@@ -1,21 +1,22 @@
 use console::Style;
 
 /// Pre-built [`console::Style`] instances for styled terminal output.
-/// Each style is forced on/off based on the `use_color` flag passed to [`Styles::new`].
+/// Each style is forced on/off based on the `use_color` flag passed to
+/// [`Styles::new`].
 pub struct Styles {
-    pub use_color: bool,
-    pub bold: Style,
-    pub dim: Style,
-    pub cyan: Style,
-    pub green: Style,
-    pub yellow: Style,
-    pub red: Style,
-    pub magenta: Style,
-    pub underline: Style,
-    pub bold_dim: Style,
-    pub bold_cyan: Style,
+    pub use_color:  bool,
+    pub bold:       Style,
+    pub dim:        Style,
+    pub cyan:       Style,
+    pub green:      Style,
+    pub yellow:     Style,
+    pub red:        Style,
+    pub magenta:    Style,
+    pub underline:  Style,
+    pub bold_dim:   Style,
+    pub bold_cyan:  Style,
     pub bold_green: Style,
-    pub bold_red: Style,
+    pub bold_red:   Style,
 }
 
 impl Styles {

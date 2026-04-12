@@ -1,41 +1,56 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-
-use fabro_core::error::Result as CoreResult;
+use fabro_agent::Sandbox;
+use fabro_core::error::{Error as CoreError, Result as CoreResult};
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{EdgeContext, EdgeDecision, NodeDecision, RunLifecycle};
-use fabro_core::state::RunState;
+use fabro_core::state::ExecutionState;
 use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvNode};
 
+use crate::artifact;
 use crate::context::keys;
-use crate::graph::WorkflowGraph;
-use crate::graph::WorkflowNode;
+use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::handler::llm::preamble::build_preamble;
-use crate::outcome::StageUsage;
+use crate::outcome::BilledModelUsage;
+use crate::runtime_store::RunStoreHandle;
 
-type WfRunState = RunState<Option<StageUsage>>;
-type WfNodeDecision = NodeDecision<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<BilledModelUsage>>;
+type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 
-/// Graphviz edge captured from edge selection, passed to the next node's before_node
-/// for fidelity/thread resolution.
+/// Graphviz edge captured from edge selection, passed to the next node's
+/// before_node for fidelity/thread resolution.
 #[derive(Debug, Clone)]
 struct IncomingEdgeData {
     edge: Arc<GvEdge>,
 }
 
-/// Sub-lifecycle responsible for fidelity/thread resolution and context key setup.
+/// Sub-lifecycle responsible for fidelity/thread resolution and context key
+/// setup.
 pub(crate) struct FidelityLifecycle {
-    pub graph: Arc<GvGraph>,
-    incoming_edge_data: Mutex<Option<IncomingEdgeData>>,
-    /// True on the first node after checkpoint resume when prior fidelity was Full.
+    pub graph:                  Arc<GvGraph>,
+    pub sandbox:                Arc<dyn Sandbox>,
+    pub run_store:              RunStoreHandle,
+    pub run_dir:                PathBuf,
+    incoming_edge_data:         Mutex<Option<IncomingEdgeData>>,
+    /// True on the first node after checkpoint resume when prior fidelity was
+    /// Full.
     degrade_fidelity_on_resume: Mutex<bool>,
 }
 
 impl FidelityLifecycle {
-    pub(crate) fn new(graph: Arc<GvGraph>) -> Self {
+    pub(crate) fn new(
+        graph: Arc<GvGraph>,
+        sandbox: Arc<dyn Sandbox>,
+        run_store: RunStoreHandle,
+        run_dir: PathBuf,
+    ) -> Self {
         Self {
             graph,
+            sandbox,
+            run_store,
+            run_dir,
             incoming_edge_data: Mutex::new(None),
             degrade_fidelity_on_resume: Mutex::new(false),
         }
@@ -62,7 +77,8 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         let incoming = self.incoming_edge_data.lock().unwrap().take();
         let gv_node = node.inner();
 
-        // 1. Fidelity resolution via resolve_fidelity: edge → node → graph default → Compact
+        // 1. Fidelity resolution via resolve_fidelity: edge → node → graph default →
+        //    Compact
         let incoming_edge_ref = incoming.as_ref().map(|d| d.edge.as_ref());
         let fidelity = resolve_fidelity(incoming_edge_ref, gv_node, &self.graph);
 
@@ -84,18 +100,36 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         );
 
         // 4. Preamble building: if Full, empty preamble; otherwise build from context
+        let resolved_context = artifact::resolve_context_for_execution(
+            &state.context,
+            &self.run_store,
+            &*self.sandbox,
+            &self.run_dir,
+        )
+        .await
+        .map_err(|err| CoreError::Other(err.to_string()))?;
+        let resolved_outcomes = artifact::resolve_outcomes_for_execution(
+            &state.node_outcomes,
+            &self.run_store,
+            &*self.sandbox,
+            &self.run_dir,
+        )
+        .await
+        .map_err(|err| CoreError::Other(err.to_string()))?;
+
         let preamble = build_preamble(
             fidelity,
-            &state.context,
+            &resolved_context,
             &self.graph,
             &state.completed_nodes,
-            &state.node_outcomes,
+            &resolved_outcomes,
         );
         state
             .context
             .set(keys::CURRENT_PREAMBLE, serde_json::json!(preamble));
 
-        // 5. Thread ID resolution via resolve_thread_id: edge → node → graph default → class → previous
+        // 5. Thread ID resolution via resolve_thread_id: edge → node → graph default →
+        //    class → previous
         let thread_id = resolve_thread_id(
             incoming_edge_ref,
             gv_node,
@@ -189,7 +223,8 @@ fn resolve_fidelity(
 /// 1. Incoming edge `thread_id` attribute
 /// 2. Target node `thread_id` attribute
 /// 3. Graph-level default thread
-/// 4. Derived class from enclosing subgraph (first class from the node's classes list)
+/// 4. Derived class from enclosing subgraph (first class from the node's
+///    classes list)
 /// 5. Fallback to previous node ID
 fn resolve_thread_id(
     incoming_edge: Option<&GvEdge>,

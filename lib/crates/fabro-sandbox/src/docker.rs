@@ -1,75 +1,76 @@
-use crate::{
-    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
-    format_lines_numbered,
-};
+use std::collections::HashMap;
+use std::time::Instant;
+
 use async_trait::async_trait;
 use bollard::Docker;
-use bollard::container::LogOutput;
 use bollard::container::{
-    Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
+    Config, CreateContainerOptions, LogOutput, RemoveContainerOptions, StartContainerOptions,
     StopContainerOptions, UploadToContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
 use bollard::models::HostConfig;
 use futures::StreamExt;
-use std::collections::HashMap;
-use std::time::Instant;
-use tokio::fs;
 use tokio::sync::OnceCell;
-use tokio::time;
+use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
+use crate::{
+    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
+    format_lines_numbered,
+};
+
 /// Configuration for a Docker-based sandbox.
-pub struct DockerSandboxConfig {
+pub struct DockerSandboxOptions {
     /// Docker image to use. Default: `"fabro-agent:latest"`.
-    pub image: String,
+    pub image:                  String,
     /// Host directory to bind-mount into the container.
     pub host_working_directory: String,
     /// Mount point inside the container. Default: `"/workspace"`.
-    pub container_mount_point: String,
+    pub container_mount_point:  String,
     /// Docker network mode. Default: `Some("bridge")`.
-    pub network_mode: Option<String>,
+    pub network_mode:           Option<String>,
     /// Additional `"host_path:container_path"` bind mounts.
-    pub extra_mounts: Vec<String>,
+    pub extra_mounts:           Vec<String>,
     /// Memory limit in bytes. `None` = unlimited.
-    pub memory_limit: Option<i64>,
+    pub memory_limit:           Option<i64>,
     /// CPU quota (microseconds per 100ms period). `None` = unlimited.
-    pub cpu_quota: Option<i64>,
+    pub cpu_quota:              Option<i64>,
     /// Whether to pull the image if not found locally. Default: `true`.
-    pub auto_pull: bool,
+    pub auto_pull:              bool,
     /// Additional `KEY=VALUE` environment variables for the container.
-    pub env_vars: Vec<String>,
+    pub env_vars:               Vec<String>,
 }
 
-impl Default for DockerSandboxConfig {
+impl Default for DockerSandboxOptions {
     fn default() -> Self {
         Self {
-            image: "fabro-agent:latest".to_string(),
+            image:                  "fabro-agent:latest".to_string(),
             host_working_directory: String::new(),
-            container_mount_point: "/workspace".to_string(),
-            network_mode: Some("bridge".to_string()),
-            extra_mounts: Vec::new(),
-            memory_limit: None,
-            cpu_quota: None,
-            auto_pull: true,
-            env_vars: Vec::new(),
+            container_mount_point:  "/workspace".to_string(),
+            network_mode:           Some("bridge".to_string()),
+            extra_mounts:           Vec::new(),
+            memory_limit:           None,
+            cpu_quota:              None,
+            auto_pull:              true,
+            env_vars:               Vec::new(),
         }
     }
 }
 
 /// Sandbox that runs all operations inside a Docker container.
 ///
-/// The host working directory is bind-mounted at `container_mount_point`. All file
-/// operations, commands, grep, and glob execute inside the container via `docker exec`.
+/// The host working directory is bind-mounted at `container_mount_point`. All
+/// file operations, commands, grep, and glob execute inside the container via
+/// `docker exec`.
 pub struct DockerSandbox {
-    docker: Docker,
-    config: DockerSandboxConfig,
-    container_id: OnceCell<String>,
-    cached_platform: std::sync::OnceLock<String>,
+    docker:            Docker,
+    config:            DockerSandboxOptions,
+    container_id:      OnceCell<String>,
+    cached_platform:   std::sync::OnceLock<String>,
     cached_os_version: std::sync::OnceLock<String>,
-    rg_available: OnceCell<bool>,
-    event_callback: Option<SandboxEventCallback>,
+    rg_available:      OnceCell<bool>,
+    event_callback:    Option<SandboxEventCallback>,
 }
 
 impl DockerSandbox {
@@ -77,7 +78,7 @@ impl DockerSandbox {
     ///
     /// Validates Docker daemon connectivity but does NOT create a container.
     /// Call `initialize()` to create and start the container.
-    pub fn new(config: DockerSandboxConfig) -> Result<Self, String> {
+    pub fn new(config: DockerSandboxOptions) -> Result<Self, String> {
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| format!("Failed to connect to Docker daemon: {e}"))?;
         Ok(Self {
@@ -110,7 +111,8 @@ impl DockerSandbox {
     }
 
     /// Resolves a path for use inside the container.
-    /// Absolute paths are used as-is; relative paths are prepended with the mount point.
+    /// Absolute paths are used as-is; relative paths are prepended with the
+    /// mount point.
     fn resolve_container_path(&self, path: &str) -> String {
         if path.starts_with('/') {
             path.to_string()
@@ -135,7 +137,8 @@ impl DockerSandbox {
         }
     }
 
-    /// Executes a command inside the container, returning `(stdout, stderr, exit_code)`.
+    /// Executes a command inside the container, returning `(stdout, stderr,
+    /// exit_code)`.
     async fn docker_exec(
         &self,
         cmd: Vec<String>,
@@ -193,7 +196,8 @@ impl DockerSandbox {
         Ok((stdout, stderr, exit_code))
     }
 
-    /// Runs a shell command inside the container with timeout and cancellation support.
+    /// Runs a shell command inside the container with timeout and cancellation
+    /// support.
     async fn docker_exec_shell(
         &self,
         command: &str,
@@ -256,7 +260,8 @@ impl DockerSandbox {
         }
     }
 
-    /// Pulls the configured image if `auto_pull` is enabled and the image is not found locally.
+    /// Pulls the configured image if `auto_pull` is enabled and the image is
+    /// not found locally.
     async fn ensure_image(&self) -> Result<(), String> {
         if !self.config.auto_pull {
             return Ok(());
@@ -356,7 +361,7 @@ impl Sandbox for DockerSandbox {
         }
         let pull_duration = u64::try_from(pull_start.elapsed().as_millis()).unwrap_or(u64::MAX);
         self.emit(SandboxEvent::SnapshotPulled {
-            name: self.config.image.clone(),
+            name:        self.config.image.clone(),
             duration_ms: pull_duration,
         });
 
@@ -427,12 +432,12 @@ impl Sandbox for DockerSandbox {
 
         let init_duration = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
         self.emit(SandboxEvent::Ready {
-            provider: "docker".into(),
+            provider:    "docker".into(),
             duration_ms: init_duration,
-            name: None,
-            cpu: None,
-            memory: None,
-            url: None,
+            name:        None,
+            cpu:         None,
+            memory:      None,
+            url:         None,
         });
 
         Ok(())
@@ -784,15 +789,16 @@ impl Sandbox for DockerSandbox {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::Arc;
+
+    use super::*;
 
     fn require_docker() -> Docker {
         Docker::connect_with_local_defaults().expect("Docker not available — skipping")
     }
 
-    fn test_config(host_dir: &str) -> DockerSandboxConfig {
-        DockerSandboxConfig {
+    fn test_config(host_dir: &str) -> DockerSandboxOptions {
+        DockerSandboxOptions {
             host_working_directory: host_dir.to_string(),
             auto_pull: false,
             ..Default::default()

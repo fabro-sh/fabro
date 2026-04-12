@@ -1,79 +1,65 @@
 use anyhow::{Context, Result};
-use fabro_config::FabroSettingsExt;
-use fabro_sandbox::SandboxRecordExt;
-use fabro_sandbox::daytona::DaytonaSandbox;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_util::printer::Printer;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PreviewArgs};
-use crate::shared::{print_json_pretty, validate_daytona_provider};
-use crate::store;
-use crate::user_config::load_user_settings_with_globals;
+use crate::command_context::CommandContext;
+use crate::server_runs::ServerSummaryLookup;
+use crate::shared::print_json_pretty;
 
-pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let sandbox_json = run.path.join("sandbox.json");
-    let record = match store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await? {
-        Some(run_store) => run_store
-            .get_sandbox()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| fabro_sandbox::SandboxRecord::load(&sandbox_json).ok())
-            .context(
-                "Failed to load sandbox.json — was this run started with a recent version of arc?",
-            )?,
-        None => fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
-            "Failed to load sandbox.json — was this run started with a recent version of arc?",
-        )?,
-    };
+pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs, printer: Printer) -> Result<()> {
+    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
+    let run = lookup.resolve(&args.run)?;
+    let run_id = run.run_id();
+    let expires_in_secs =
+        u64::try_from(args.ttl).map_err(|_| anyhow::anyhow!("--ttl must be positive"))?;
+    let response = lookup
+        .client()
+        .generate_preview_url(
+            &run_id,
+            args.port,
+            expires_in_secs,
+            args.signed || args.open,
+        )
+        .await?;
 
-    validate_daytona_provider(&record, "Preview URLs")?;
+    info!(run_id = %args.run, port = args.port, "Generating preview URL");
 
-    let name = record
-        .identifier
-        .as_deref()
-        .context("Daytona sandbox record missing identifier (sandbox name)")?;
-
-    info!(run_id = %args.run, provider = %record.provider, port = args.port, "Generating preview URL");
-
-    let daytona = DaytonaSandbox::reconnect(name)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    if args.signed || args.open {
-        let signed = daytona
-            .get_signed_preview_url(args.port, Some(args.ttl))
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        if globals.json {
-            print_json_pretty(&serde_json::json!({ "url": signed.url }))?;
-        } else {
-            print!("{}", format_signed_output(&signed.url));
+    if globals.json {
+        match response.token {
+            Some(token) => {
+                print_json_pretty(&serde_json::json!({ "url": response.url, "token": token }))?;
+            }
+            None => {
+                print_json_pretty(&serde_json::json!({ "url": response.url }))?;
+            }
         }
-
-        if args.open && !globals.json {
-            std::process::Command::new("open")
-                .arg(&signed.url)
-                .spawn()
-                .context("Failed to open browser")?;
+    } else if let Some(token) = response.token.as_deref() {
+        {
+            use std::fmt::Write as _;
+            let _ = write!(
+                printer.stdout(),
+                "{}",
+                format_standard_output(&response.url, token)
+            );
         }
     } else {
-        let preview = daytona
-            .get_preview_link(args.port)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        if globals.json {
-            print_json_pretty(&serde_json::json!({
-                "url": preview.url,
-                "token": preview.token,
-            }))?;
-        } else {
-            print!("{}", format_standard_output(&preview.url, &preview.token));
+        {
+            use std::fmt::Write as _;
+            let _ = write!(printer.stdout(), "{}", format_signed_output(&response.url));
         }
+    }
+
+    if args.open && !globals.json {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "Preview URL opening is a fire-and-forget OS integration, not a Tokio-managed child process."
+        )]
+        let _browser = std::process::Command::new("open")
+            .arg(&response.url)
+            .spawn()
+            .context("Failed to open browser")?;
     }
 
     Ok(())

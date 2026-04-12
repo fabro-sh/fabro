@@ -1,7 +1,9 @@
-/// Spawn a fully detached subprocess that survives parent exit and terminal close.
+/// Spawn a fully detached subprocess that survives parent exit and terminal
+/// close.
 ///
-/// On Unix this uses the double-fork pattern (fork → setsid → close_fd → fork → exec)
-/// so the child is reparented to init and cannot receive SIGHUP from the terminal.
+/// On Unix this uses the double-fork pattern (fork → setsid → close_fd → fork →
+/// exec) so the child is reparented to init and cannot receive SIGHUP from the
+/// terminal.
 ///
 /// `args` is the full argv (program + arguments).
 /// `env` is a list of (key, value) pairs to set in the child environment.
@@ -25,12 +27,12 @@ pub fn spawn_detached(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) 
 #[cfg(unix)]
 #[allow(clippy::exit)]
 fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) {
-    use fork::{Fork, fork, setsid};
-
     // Flush stdout/stderr before forking so the child process doesn't inherit
     // buffered data that would be flushed again on child exit, causing
     // duplicate or corrupted output.
     use std::io::Write;
+
+    use fork::{Fork, fork, setsid};
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
 
@@ -76,6 +78,10 @@ fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)], env_remove: &[&str])
 }
 
 #[cfg(windows)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Detached Windows subprocess creation requires std::process::Command creation_flags support."
+)]
 fn spawn_detached_windows(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) {
     use std::os::windows::process::CommandExt;
     const DETACHED_PROCESS: u32 = 0x00000008;
@@ -101,15 +107,14 @@ fn spawn_detached_windows(args: &[&str], env: &[(&str, &str)], env_remove: &[&st
 }
 
 /// Serialize data as JSON to a temp file and spawn `fabro <subcommand> <path>`
-/// as a fully detached subprocess. Sets `FABRO_TELEMETRY=off` to prevent recursion.
+/// as a fully detached subprocess. Sets `FABRO_TELEMETRY=off` to prevent
+/// recursion.
 ///
 /// This is the shared pattern used by both analytics and panic senders.
-/// No-ops silently if the exe path can't be resolved or the temp file can't be written.
+/// No-ops silently if the exe path can't be resolved or the temp file can't be
+/// written.
 pub fn spawn_fabro_subcommand(subcommand: &str, filename: &str, json: &[u8]) {
-    let Some(home) = dirs::home_dir() else {
-        return;
-    };
-    let tmp_dir = home.join(".fabro").join("tmp");
+    let tmp_dir = fabro_util::Home::from_env().tmp_dir();
     if std::fs::create_dir_all(&tmp_dir).is_err() {
         return;
     }
@@ -149,6 +154,10 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This sync test polls for detached child output without creating a Tokio runtime."
+    )]
     fn spawn_detached_unix_creates_marker_file() {
         fn wait_for_file(path: &std::path::Path) {
             for _ in 0..100 {

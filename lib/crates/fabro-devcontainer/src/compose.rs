@@ -3,18 +3,18 @@ use std::path::{Path, PathBuf};
 
 /// Extracted configuration from a Docker Compose service.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ComposeServiceConfig {
-    pub image: Option<String>,
-    pub build: Option<ComposeBuild>,
-    pub ports: Vec<u16>,
+pub(crate) struct ComposeServiceSpec {
+    pub image:       Option<String>,
+    pub build:       Option<ComposeBuild>,
+    pub ports:       Vec<u16>,
     pub environment: HashMap<String, String>,
-    pub user: Option<String>,
+    pub user:        Option<String>,
 }
 
 /// Build configuration from a Docker Compose service.
 #[derive(Debug, Clone)]
 pub(crate) struct ComposeBuild {
-    pub context: String,
+    pub context:    String,
     pub dockerfile: Option<String>,
 }
 
@@ -22,7 +22,7 @@ pub(crate) struct ComposeBuild {
 pub(crate) fn parse_compose(
     compose_path: &Path,
     service_name: &str,
-) -> Result<ComposeServiceConfig, String> {
+) -> Result<ComposeServiceSpec, String> {
     let contents = std::fs::read_to_string(compose_path)
         .map_err(|e| format!("failed to read compose file: {e}"))?;
 
@@ -48,7 +48,7 @@ pub(crate) fn parse_compose(
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    Ok(ComposeServiceConfig {
+    Ok(ComposeServiceSpec {
         image,
         build,
         ports,
@@ -62,7 +62,7 @@ fn parse_build(service: &serde_yaml::Value) -> Option<ComposeBuild> {
 
     if let Some(context) = build_val.as_str() {
         return Some(ComposeBuild {
-            context: context.to_string(),
+            context:    context.to_string(),
             dockerfile: None,
         });
     }
@@ -153,13 +153,13 @@ fn parse_environment(service: &serde_yaml::Value) -> HashMap<String, String> {
 }
 
 /// Parse multiple Docker Compose files and merge config for the named service.
-/// Later files override earlier files for image/build/user; ports accumulate (deduped);
-/// environment keys from later files override earlier ones.
+/// Later files override earlier files for image/build/user; ports accumulate
+/// (deduped); environment keys from later files override earlier ones.
 pub(crate) fn parse_compose_multi(
     compose_paths: &[PathBuf],
     service_name: &str,
-) -> Result<ComposeServiceConfig, String> {
-    let mut merged = ComposeServiceConfig::default();
+) -> Result<ComposeServiceSpec, String> {
+    let mut merged = ComposeServiceSpec::default();
     let mut found_service = false;
 
     for path in compose_paths {
@@ -208,8 +208,9 @@ pub(crate) fn parse_compose_multi(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Write;
+
+    use super::*;
 
     fn write_compose(content: &str) -> tempfile::NamedTempFile {
         let mut f = tempfile::NamedTempFile::new().unwrap();

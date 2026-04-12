@@ -19,8 +19,12 @@
  */
 export interface PreviewUrlResponse {
     /**
-     * Time-limited preview URL.
+     * Preview URL.
      */
     'url': string;
+    /**
+     * Preview token header value for unsigned preview URLs.
+     */
+    'token'?: string;
 }
 
