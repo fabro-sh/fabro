@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
+use crate::secret_store::SecretType;
 use crate::server::AppState;
 
 fn github_http_client(context: &str) -> Result<fabro_http::HttpClient, Response> {
@@ -653,7 +654,7 @@ async fn setup_register(
     {
         let mut store = state.secret_store.write().await;
         for (name, value) in secret_updates {
-            if let Err(err) = store.set(name, &value) {
+            if let Err(err) = store.set(name, &value, SecretType::Environment, None) {
                 error!(error = %err, secret = name, "Setup register failed: could not save secret");
                 return json_response(
                     StatusCode::INTERNAL_SERVER_ERROR,

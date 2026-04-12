@@ -11,7 +11,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use fabro_api::types::RunArtifactListResponse;
+use fabro_api::types::{CreateSecretRequest, DeleteSecretRequest, RunArtifactListResponse};
 use serde_json::json;
 
 use crate::error::ApiError;
@@ -316,11 +316,13 @@ pub(crate) async fn list_secrets(
             "data": [
                 {
                     "name": "OPENAI_API_KEY",
+                    "type": "environment",
                     "created_at": "2026-04-05T12:00:00Z",
                     "updated_at": "2026-04-05T12:00:00Z"
                 },
                 {
                     "name": "GITHUB_APP_PRIVATE_KEY",
+                    "type": "environment",
                     "created_at": "2026-04-05T12:05:00Z",
                     "updated_at": "2026-04-05T12:05:00Z"
                 }
@@ -330,26 +332,27 @@ pub(crate) async fn list_secrets(
         .into_response()
 }
 
-pub(crate) async fn set_secret(
+pub(crate) async fn create_secret(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
-    Path(name): Path<String>,
+    Json(body): Json<CreateSecretRequest>,
 ) -> Response {
-    (
-        StatusCode::OK,
-        Json(json!({
-            "name": name,
-            "created_at": "2026-04-05T12:00:00Z",
-            "updated_at": "2026-04-05T12:00:00Z"
-        })),
-    )
-        .into_response()
+    let mut payload = serde_json::Map::new();
+    payload.insert("name".to_string(), json!(body.name));
+    payload.insert("type".to_string(), json!(body.type_));
+    if let Some(description) = body.description {
+        payload.insert("description".to_string(), json!(description));
+    }
+    payload.insert("created_at".to_string(), json!("2026-04-05T12:00:00Z"));
+    payload.insert("updated_at".to_string(), json!("2026-04-05T12:00:00Z"));
+
+    (StatusCode::OK, Json(serde_json::Value::Object(payload))).into_response()
 }
 
-pub(crate) async fn delete_secret(
+pub(crate) async fn delete_secret_by_name(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
-    Path(_name): Path<String>,
+    Json(_body): Json<DeleteSecretRequest>,
 ) -> Response {
     StatusCode::NO_CONTENT.into_response()
 }

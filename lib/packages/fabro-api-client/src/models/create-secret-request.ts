@@ -18,26 +18,22 @@
 import type { SecretType } from './secret-type';
 
 /**
- * Metadata for a stored secret (value is never exposed).
+ * Request to store or update a secret.
  */
-export interface SecretMetadata {
+export interface CreateSecretRequest {
     /**
-     * Secret key name or destination path.
+     * Secret name or destination path for file secrets.
      */
     'name': string;
+    /**
+     * The secret value to store.
+     */
+    'value': string;
     'type': SecretType;
     /**
      * Optional operator-facing description of the secret.
      */
     'description'?: string;
-    /**
-     * When the secret was first stored.
-     */
-    'created_at': string;
-    /**
-     * When the secret was last updated.
-     */
-    'updated_at': string;
 }
 
 

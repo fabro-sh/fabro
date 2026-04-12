@@ -12,11 +12,11 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
-use fabro_api::types::SetSecretRequest;
+use fabro_api::types::{CreateSecretRequest, SecretType as ApiSecretType};
 use fabro_config::user::SETTINGS_CONFIG_FILENAME;
 use fabro_config::{Storage, legacy_env};
 use fabro_model::Provider;
-use fabro_server::secret_store::SecretStore;
+use fabro_server::secret_store::{SecretStore, SecretType};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use rand::Rng;
@@ -687,10 +687,12 @@ async fn persist_install_secrets(
         let client = server_client::connect_api_client(storage_dir).await?;
         for (name, value) in secrets {
             client
-                .set_secret()
-                .name(name.clone())
-                .body(SetSecretRequest {
-                    value: value.clone(),
+                .create_secret()
+                .body(CreateSecretRequest {
+                    name:        name.clone(),
+                    value:       value.clone(),
+                    type_:       ApiSecretType::Environment,
+                    description: None,
                 })
                 .send()
                 .await?;
@@ -700,7 +702,7 @@ async fn persist_install_secrets(
 
     let mut store = SecretStore::load(Storage::new(storage_dir).secrets_path())?;
     for (name, value) in secrets {
-        store.set(name, value)?;
+        store.set(name, value, SecretType::Environment, None)?;
     }
     Ok(())
 }

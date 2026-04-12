@@ -1,5 +1,5 @@
 use anyhow::Result;
-use fabro_api::Client;
+use fabro_api::{Client, types};
 use fabro_util::printer::Printer;
 
 use crate::args::{GlobalArgs, SecretRmArgs};
@@ -13,8 +13,10 @@ pub(super) async fn rm_command(
     printer: Printer,
 ) -> Result<()> {
     client
-        .delete_secret()
-        .name(args.key.clone())
+        .delete_secret_by_name()
+        .body(types::DeleteSecretRequest {
+            name: args.key.clone(),
+        })
         .send()
         .await
         .map_err(server_client::map_api_error)?;

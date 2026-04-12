@@ -1327,24 +1327,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SecretListResponse"
-
-  /api/v1/secrets/{name}:
-    put:
-      operationId: setSecret
+    post:
+      operationId: createSecret
       tags: [Secrets]
       summary: Store or update a secret
-      parameters:
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SetSecretRequest"
+              $ref: "#/components/schemas/CreateSecretRequest"
       responses:
         "200":
           description: Secret stored
@@ -1359,20 +1351,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
     delete:
-      operationId: deleteSecret
+      operationId: deleteSecretByName
       tags: [Secrets]
       summary: Delete a stored secret
-      parameters:
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteSecretRequest"
       responses:
         "204":
           description: Secret deleted
         "400":
-          description: Invalid secret name
+          description: Invalid secret name or request body
           content:
             application/json:
               schema:
@@ -4329,28 +4321,61 @@ components:
           description: Server version string.
           example: "0.176.2"
 
-    SetSecretRequest:
-      description: Request to store a secret value.
+    SecretType:
+      description: The way a secret is consumed by the sandbox.
+      type: string
+      enum:
+        - environment
+        - file
+
+    CreateSecretRequest:
+      description: Request to store or update a secret.
       type: object
       required:
+        - name
         - value
+        - type
       properties:
+        name:
+          type: string
+          description: Secret name or destination path for file secrets.
         value:
           type: string
           description: The secret value to store.
+        type:
+          $ref: "#/components/schemas/SecretType"
+        description:
+          type: string
+          description: Optional operator-facing description of the secret.
+
+    DeleteSecretRequest:
+      description: Request to delete a secret by name.
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Secret name or destination path for file secrets.
 
     SecretMetadata:
       description: Metadata for a stored secret (value is never exposed).
       type: object
       required:
         - name
+        - type
         - created_at
         - updated_at
       properties:
         name:
           type: string
-          description: Secret key name.
+          description: Secret key name or destination path.
           example: ANTHROPIC_API_KEY
+        type:
+          $ref: "#/components/schemas/SecretType"
+        description:
+          type: string
+          description: Optional operator-facing description of the secret.
         created_at:
           type: string
           format: date-time

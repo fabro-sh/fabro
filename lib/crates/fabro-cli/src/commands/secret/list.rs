@@ -24,7 +24,13 @@ pub(super) async fn list_command(
     }
     let _ = args;
     for secret in secrets {
-        fabro_util::printout!(printer, "{}\t{}", secret.name, secret.updated_at);
+        fabro_util::printout!(
+            printer,
+            "{}\t{}\t{}",
+            secret.name,
+            secret.type_,
+            secret.updated_at
+        );
     }
     Ok(())
 }

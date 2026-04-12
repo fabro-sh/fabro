@@ -47,6 +47,7 @@ fn secret_list_json_returns_metadata_only() {
         .iter()
         .find(|entry| entry["name"] == "ANTHROPIC_API_KEY")
         .expect("secret list should include the saved key");
+    assert_eq!(entry["type"], "environment");
     assert!(entry.get("updated_at").is_some());
     assert!(entry.get("value").is_none());
 }
