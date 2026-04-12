@@ -8152,13 +8152,13 @@ level = "debug"
         .await
         .unwrap();
         assert_eq!(terminated, 1);
-        assert!(!fabro_proc::process_group_alive(worker_pid));
 
         let exit_status = tokio::time::timeout(Duration::from_secs(2), child.wait())
             .await
             .expect("worker should exit after shutdown")
             .expect("wait should succeed");
         assert!(!exit_status.success());
+        assert!(!fabro_proc::process_group_alive(worker_pid));
 
         let run_state = state
             .store
