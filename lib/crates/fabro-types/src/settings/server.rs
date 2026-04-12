@@ -215,6 +215,7 @@ pub struct ServerIntegrationsSettings {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GithubIntegrationSettings {
     pub enabled:     bool,
+    pub strategy:    GithubIntegrationStrategy,
     pub app_id:      Option<InterpString>,
     pub client_id:   Option<InterpString>,
     pub slug:        Option<InterpString>,
@@ -506,6 +507,8 @@ pub struct GithubIntegrationLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled:     Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strategy:    Option<GithubIntegrationStrategy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_id:      Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id:   Option<InterpString>,
@@ -548,6 +551,14 @@ pub struct TeamsIntegrationLayer {
 pub struct IntegrationWebhooksLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strategy: Option<WebhookStrategy>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GithubIntegrationStrategy {
+    #[default]
+    GhCli,
+    App,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

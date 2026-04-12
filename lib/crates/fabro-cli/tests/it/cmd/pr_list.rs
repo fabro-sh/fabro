@@ -33,10 +33,10 @@ fn pr_list_missing_github_credentials_errors() {
     cmd.args(["pr", "list"]);
 
     fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
+    success: true
+    exit_code: 0
     ----- stdout -----
+    No pull requests found.
     ----- stderr -----
-    error: GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id
     ");
 }

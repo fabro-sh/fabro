@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use fabro_github::{
-    GitHubAppCredentials, create_installation_access_token_for_projects, sign_app_jwt,
+    GitHubCredentials, create_installation_access_token_for_projects, sign_app_jwt,
 };
 use tokio::sync::OnceCell;
 
@@ -29,7 +29,7 @@ async fn execute_github_graphql(
 ///
 /// Scoped to a single project board identified by `project_number`.
 pub struct GitHubTracker {
-    creds:           GitHubAppCredentials,
+    creds:           GitHubCredentials,
     client:          reqwest::Client,
     owner:           String,
     repo:            String,
@@ -40,7 +40,7 @@ pub struct GitHubTracker {
 
 impl GitHubTracker {
     pub fn new(
-        creds: GitHubAppCredentials,
+        creds: GitHubCredentials,
         client: reqwest::Client,
         owner: String,
         repo: String,
@@ -63,15 +63,20 @@ impl GitHubTracker {
     }
 
     async fn fresh_token(&self) -> Result<String, String> {
-        let jwt = sign_app_jwt(&self.creds.app_id, &self.creds.private_key_pem)?;
-        create_installation_access_token_for_projects(
-            &self.client,
-            &jwt,
-            &self.owner,
-            &self.repo,
-            &self.base_url,
-        )
-        .await
+        match &self.creds {
+            GitHubCredentials::App(creds) => {
+                let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
+                create_installation_access_token_for_projects(
+                    &self.client,
+                    &jwt,
+                    &self.owner,
+                    &self.repo,
+                    &self.base_url,
+                )
+                .await
+            }
+            GitHubCredentials::Token(token) => Ok(token.clone()),
+        }
     }
 
     async fn resolve_project_node_id(&self, token: &str) -> Result<&str, String> {
@@ -493,7 +498,7 @@ impl Tracker for GitHubTracker {
 
 #[cfg(test)]
 mod tests {
-    use fabro_github::GitHubAppCredentials;
+    use fabro_github::{GitHubAppCredentials, GitHubCredentials};
 
     use super::*;
     use crate::Issue;
@@ -626,10 +631,10 @@ mod tests {
 
     fn mock_github_tracker(server_url: &str, pem: String) -> GitHubTracker {
         GitHubTracker::new(
-            GitHubAppCredentials {
+            GitHubCredentials::App(GitHubAppCredentials {
                 app_id:          "test-app".to_string(),
                 private_key_pem: pem,
-            },
+            }),
             test_http_client(),
             "owner".to_string(),
             "repo".to_string(),

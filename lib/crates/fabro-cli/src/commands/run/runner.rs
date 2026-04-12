@@ -8,6 +8,7 @@ use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage};
 use fabro_store::{EventEnvelope, EventPayload, RunProjection};
+use fabro_types::settings::run::RunMode;
 use fabro_types::settings::{InterpString, SettingsLayer};
 use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, StatusReason};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
@@ -23,7 +24,7 @@ use tokio::time::sleep;
 
 use crate::args::RunWorkerMode;
 use crate::server_client;
-use crate::shared::github::build_github_app_credentials;
+use crate::shared::github::build_github_credentials;
 
 const RUN_STORE_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(50),
@@ -74,7 +75,7 @@ pub(crate) async fn execute(
     spawn_worker_control_stream(Arc::clone(&interviewer), Arc::clone(&cancel_token))?;
     let run_control = RunControlState::new();
     install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
-    let github_app = maybe_build_github_app_credentials(&run_record.settings)?;
+    let github_app = maybe_build_github_credentials(&run_record.settings)?;
     let services = StartServices {
         run_id,
         cancel_token: Some(Arc::clone(&cancel_token)),
@@ -465,32 +466,39 @@ fn update_worker_title_from_event(event: &RunEvent) {
     }
 }
 
-fn maybe_build_github_app_credentials(
+fn maybe_build_github_credentials(
     settings: &SettingsLayer,
-) -> Result<Option<fabro_github::GitHubAppCredentials>> {
+) -> Result<Option<fabro_github::GitHubCredentials>> {
     let resolved_run = fabro_config::resolve_run_from_file(settings).ok();
     let resolved_server = fabro_config::resolve_server_from_file(settings).ok();
-    let needs_github_app = resolved_run
+    let required_github_credentials = resolved_run.as_ref().is_some_and(|settings| {
+        settings.execution.mode != RunMode::DryRun && settings.sandbox.provider == "daytona"
+    }) || resolved_server
         .as_ref()
-        .is_some_and(|settings| settings.sandbox.provider == "daytona")
-        || resolved_run
-            .as_ref()
-            .is_some_and(|settings| settings.pull_request.is_some())
-        || resolved_server
-            .as_ref()
-            .is_some_and(|settings| !settings.integrations.github.permissions.is_empty());
+        .is_some_and(|settings| !settings.integrations.github.permissions.is_empty());
+    let pull_request_enabled = resolved_run.as_ref().is_some_and(|settings| {
+        settings.execution.mode != RunMode::DryRun && settings.pull_request.is_some()
+    });
+    let strategy = resolved_server
+        .as_ref()
+        .map(|settings| settings.integrations.github.strategy)
+        .unwrap_or_default();
+    let app_id = resolved_server
+        .as_ref()
+        .and_then(|settings| settings.integrations.github.app_id.as_ref())
+        .map(InterpString::as_source);
 
-    if needs_github_app {
-        build_github_app_credentials(
-            resolved_server
-                .as_ref()
-                .and_then(|settings| settings.integrations.github.app_id.as_ref())
-                .map(InterpString::as_source)
-                .as_deref(),
-        )
-    } else {
-        Ok(None)
+    if required_github_credentials {
+        return build_github_credentials(strategy, app_id.as_deref());
     }
+
+    if pull_request_enabled {
+        return Ok(build_github_credentials(strategy, app_id.as_deref())
+            .ok()
+            .flatten());
+    }
+
+    Ok(None)
 }
 
 fn install_signal_handlers(

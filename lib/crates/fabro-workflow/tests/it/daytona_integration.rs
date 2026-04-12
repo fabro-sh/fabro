@@ -156,14 +156,14 @@ fn test_artifact_store(run_dir: &Path) -> ArtifactStore {
 }
 
 async fn create_env_with_github_app(
-    github_app: Option<fabro_github::GitHubAppCredentials>,
+    github_app: Option<fabro_github::GitHubCredentials>,
 ) -> DaytonaSandbox {
     DaytonaSandbox::new(DaytonaConfig::default(), github_app, None, None)
         .await
         .expect("Failed to create Daytona client — is DAYTONA_API_KEY set?")
 }
 
-fn load_github_app_credentials() -> fabro_github::GitHubAppCredentials {
+fn load_github_app_credentials() -> fabro_github::GitHubCredentials {
     // Read app_id from ~/.fabro/settings.toml
     let home = dirs::home_dir().expect("No home directory");
     let config_path = home.join(".fabro/settings.toml");
@@ -194,10 +194,10 @@ fn load_github_app_credentials() -> fabro_github::GitHubAppCredentials {
             .expect("GITHUB_APP_PRIVATE_KEY is not valid base64");
         String::from_utf8(bytes).expect("GITHUB_APP_PRIVATE_KEY decoded to invalid UTF-8")
     };
-    fabro_github::GitHubAppCredentials {
+    fabro_github::GitHubCredentials::App(fabro_github::GitHubAppCredentials {
         app_id,
         private_key_pem,
-    }
+    })
 }
 
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]

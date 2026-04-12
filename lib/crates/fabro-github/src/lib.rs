@@ -83,6 +83,67 @@ impl GitHubAppCredentials {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum GitHubCredentials {
+    App(GitHubAppCredentials),
+    Token(String),
+}
+
+impl GitHubCredentials {
+    pub fn from_env(app_id: Option<&str>) -> Result<Option<Self>, String> {
+        Ok(GitHubAppCredentials::from_env(app_id)?.map(Self::App))
+    }
+
+    async fn resolve_bearer_token(
+        &self,
+        client: &impl HttpClient,
+        owner: &str,
+        repo: &str,
+        base_url: &str,
+        permissions: serde_json::Value,
+    ) -> Result<String, String> {
+        match self {
+            Self::App(creds) => {
+                let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
+                create_installation_access_token_with_permissions(
+                    client,
+                    &jwt,
+                    owner,
+                    repo,
+                    base_url,
+                    permissions,
+                )
+                .await
+            }
+            Self::Token(token) => Ok(token.clone()),
+        }
+    }
+}
+
+pub fn gh_auth_token() -> Result<String, String> {
+    let output = std::process::Command::new("gh")
+        .args(["auth", "token"])
+        .output()
+        .map_err(|err| format!("Failed to run `gh auth token`: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stderr.is_empty() {
+            format!("`gh auth token` exited with status {}", output.status)
+        } else {
+            stderr
+        };
+        return Err(format!("Failed to get GitHub CLI token: {message}"));
+    }
+
+    let token = String::from_utf8(output.stdout)
+        .map_err(|err| format!("`gh auth token` returned invalid UTF-8: {err}"))?;
+    let token = token.trim().to_string();
+    if token.is_empty() {
+        return Err("`gh auth token` returned an empty token".to_string());
+    }
+    Ok(token)
+}
+
 fn decode_pem_env(name: &str, raw: &str) -> Result<String, String> {
     if raw.starts_with("-----") {
         return Ok(raw.to_string());
@@ -396,7 +457,7 @@ pub struct CreatedPullRequest {
 /// GitHub pulls API.
 #[allow(clippy::too_many_arguments)]
 pub async fn create_pull_request(
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     owner: &str,
     repo: &str,
     base: &str,
@@ -413,11 +474,16 @@ pub async fn create_pull_request(
         node_id:  String,
     }
 
-    let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
     let client = reqwest::Client::new();
-
-    let token =
-        create_installation_access_token_for_pr(&client, &jwt, owner, repo, base_url).await?;
+    let token = creds
+        .resolve_bearer_token(
+            &client,
+            owner,
+            repo,
+            base_url,
+            serde_json::json!({ "contents": "write", "pull_requests": "write" }),
+        )
+        .await?;
 
     tracing::debug!(title = %title, head = %head, base = %base, draft, "Creating pull request");
 
@@ -498,18 +564,23 @@ impl AutoMergeMethod {
 /// Requires the PR's `node_id` (from the REST API response) and a merge method.
 /// The repository must have auto-merge enabled in its settings.
 pub async fn enable_auto_merge(
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     owner: &str,
     repo: &str,
     pr_node_id: &str,
     merge_method: AutoMergeMethod,
     base_url: &str,
 ) -> Result<(), String> {
-    let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
     let client = reqwest::Client::new();
-
-    let token =
-        create_installation_access_token_for_pr(&client, &jwt, owner, repo, base_url).await?;
+    let token = creds
+        .resolve_bearer_token(
+            &client,
+            owner,
+            repo,
+            base_url,
+            serde_json::json!({ "contents": "write", "pull_requests": "write" }),
+        )
+        .await?;
 
     let query = format!(
         r#"mutation {{
@@ -620,7 +691,7 @@ fn normalize_https_host_path(url: &str) -> String {
 /// Uses a GitHub App installation token to query the branches API.
 /// Returns `true` if the branch exists, `false` if it doesn't (404).
 pub async fn branch_exists(
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     owner: &str,
     repo: &str,
     branch: &str,
@@ -639,14 +710,21 @@ pub async fn branch_exists(
 
 async fn branch_exists_with_client(
     client: &impl HttpClient,
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     owner: &str,
     repo: &str,
     branch: &str,
     base_url: &str,
 ) -> Result<bool, String> {
-    let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
-    let token = create_installation_access_token(client, &jwt, owner, repo, base_url).await?;
+    let token = creds
+        .resolve_bearer_token(
+            client,
+            owner,
+            repo,
+            base_url,
+            serde_json::json!({ "contents": "write" }),
+        )
+        .await?;
 
     let url = format!("{base_url}/repos/{owner}/{repo}/branches/{branch}");
     let auth = format!("Bearer {token}");
@@ -768,15 +846,26 @@ pub async fn is_app_public(
 /// Always generates a token regardless of repo visibility, since the token
 /// is needed for pushing from the sandbox.
 pub async fn resolve_clone_credentials(
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     owner: &str,
     repo: &str,
     base_url: &str,
 ) -> Result<(Option<String>, Option<String>), String> {
-    let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
-    let client = reqwest::Client::new();
-
-    let token = create_installation_access_token(&client, &jwt, owner, repo, base_url).await?;
+    let token = match creds {
+        GitHubCredentials::Token(token) => token.clone(),
+        GitHubCredentials::App(_) => {
+            let client = reqwest::Client::new();
+            creds
+                .resolve_bearer_token(
+                    &client,
+                    owner,
+                    repo,
+                    base_url,
+                    serde_json::json!({ "contents": "write" }),
+                )
+                .await?
+        }
+    };
     Ok((Some("x-access-token".to_string()), Some(token)))
 }
 
@@ -793,7 +882,7 @@ pub fn embed_token_in_url(url: &str, token: &str) -> String {
 /// Parses owner/repo from the URL, obtains a fresh installation access token,
 /// and returns the URL with embedded credentials.
 pub async fn resolve_authenticated_url(
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     url: &str,
     base_url: &str,
 ) -> Result<String, String> {
@@ -807,7 +896,7 @@ pub async fn resolve_authenticated_url(
 
 /// Fetch detailed information about a pull request.
 pub async fn get_pull_request(
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     owner: &str,
     repo: &str,
     number: u64,
@@ -826,7 +915,7 @@ pub async fn get_pull_request(
 
 async fn get_pull_request_with_client(
     client: &impl HttpClient,
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     owner: &str,
     repo: &str,
     number: u64,
@@ -834,9 +923,15 @@ async fn get_pull_request_with_client(
 ) -> Result<PullRequestDetail, String> {
     tracing::debug!(owner, repo, number, "Fetching pull request");
 
-    let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
-    let token =
-        create_installation_access_token_for_pr(client, &jwt, owner, repo, base_url).await?;
+    let token = creds
+        .resolve_bearer_token(
+            client,
+            owner,
+            repo,
+            base_url,
+            serde_json::json!({ "contents": "write", "pull_requests": "write" }),
+        )
+        .await?;
 
     let url = format!("{base_url}/repos/{owner}/{repo}/pulls/{number}");
     let auth = format!("Bearer {token}");
@@ -872,7 +967,7 @@ async fn get_pull_request_with_client(
 
 /// Merge a pull request.
 pub async fn merge_pull_request(
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     owner: &str,
     repo: &str,
     number: u64,
@@ -894,7 +989,7 @@ pub async fn merge_pull_request(
 #[allow(clippy::too_many_arguments)]
 async fn merge_pull_request_with_client(
     client: &impl HttpClient,
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     owner: &str,
     repo: &str,
     number: u64,
@@ -903,9 +998,15 @@ async fn merge_pull_request_with_client(
 ) -> Result<(), String> {
     tracing::debug!(owner, repo, number, method, "Merging pull request");
 
-    let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
-    let token =
-        create_installation_access_token_for_pr(client, &jwt, owner, repo, base_url).await?;
+    let token = creds
+        .resolve_bearer_token(
+            client,
+            owner,
+            repo,
+            base_url,
+            serde_json::json!({ "contents": "write", "pull_requests": "write" }),
+        )
+        .await?;
 
     let url = format!("{base_url}/repos/{owner}/{repo}/pulls/{number}/merge");
     let body = serde_json::json!({ "merge_method": method });
@@ -938,7 +1039,7 @@ async fn merge_pull_request_with_client(
 
 /// Close a pull request.
 pub async fn close_pull_request(
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     owner: &str,
     repo: &str,
     number: u64,
@@ -957,7 +1058,7 @@ pub async fn close_pull_request(
 
 async fn close_pull_request_with_client(
     client: &impl HttpClient,
-    creds: &GitHubAppCredentials,
+    creds: &GitHubCredentials,
     owner: &str,
     repo: &str,
     number: u64,
@@ -965,9 +1066,15 @@ async fn close_pull_request_with_client(
 ) -> Result<(), String> {
     tracing::debug!(owner, repo, number, "Closing pull request");
 
-    let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
-    let token =
-        create_installation_access_token_for_pr(client, &jwt, owner, repo, base_url).await?;
+    let token = creds
+        .resolve_bearer_token(
+            client,
+            owner,
+            repo,
+            base_url,
+            serde_json::json!({ "contents": "write", "pull_requests": "write" }),
+        )
+        .await?;
 
     let url = format!("{base_url}/repos/{owner}/{repo}/pulls/{number}");
     let body = serde_json::json!({ "state": "closed" });
@@ -1469,10 +1576,10 @@ mod tests {
             );
 
         let pem = test_rsa_key();
-        let creds = GitHubAppCredentials {
+        let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
-        };
+        });
         let result =
             branch_exists_with_client(&mock, &creds, "owner", "repo", "my-branch", "").await;
         assert!(result.unwrap());
@@ -1501,10 +1608,10 @@ mod tests {
             );
 
         let pem = test_rsa_key();
-        let creds = GitHubAppCredentials {
+        let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
-        };
+        });
         let result =
             branch_exists_with_client(&mock, &creds, "owner", "repo", "no-such-branch", "").await;
         assert!(!result.unwrap());
@@ -1533,12 +1640,30 @@ mod tests {
             );
 
         let pem = test_rsa_key();
-        let creds = GitHubAppCredentials {
+        let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
-        };
+        });
         let result = branch_exists_with_client(&mock, &creds, "owner", "repo", "broken", "").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn branch_exists_with_token_uses_direct_bearer_token() {
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/branches/my-branch",
+                200,
+                r#"{"name": "my-branch"}"#,
+            )
+            .with_req_header("Authorization", "Bearer ghu_test");
+
+        let creds = GitHubCredentials::Token("ghu_test".to_string());
+        let result =
+            branch_exists_with_client(&mock, &creds, "owner", "repo", "my-branch", "").await;
+
+        assert!(result.unwrap());
     }
 
     // -----------------------------------------------------------------------
@@ -1701,10 +1826,10 @@ mod tests {
             );
 
         let pem = test_rsa_key();
-        let creds = GitHubAppCredentials {
+        let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
-        };
+        });
         let detail = get_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "")
             .await
             .unwrap();
@@ -1738,15 +1863,51 @@ mod tests {
             .on(HttpMethod::Get, "/repos/owner/repo/pulls/999", 404, "");
 
         let pem = test_rsa_key();
-        let creds = GitHubAppCredentials {
+        let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
-        };
+        });
         let err = get_pull_request_with_client(&mock, &creds, "owner", "repo", 999, "")
             .await
             .unwrap_err();
         assert!(err.contains("not found"), "got: {err}");
         assert!(err.contains("#999"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn get_pr_with_token_uses_direct_bearer_token() {
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/pulls/42",
+                200,
+                mock_pr_json(),
+            )
+            .with_req_header("Authorization", "Bearer ghu_test");
+
+        let creds = GitHubCredentials::Token("ghu_test".to_string());
+        let detail = get_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "")
+            .await
+            .unwrap();
+
+        assert_eq!(detail.number, 42);
+    }
+
+    #[tokio::test]
+    async fn resolve_clone_credentials_returns_token_for_token_credentials() {
+        let creds = GitHubCredentials::Token("ghu_test".to_string());
+
+        let credentials = resolve_clone_credentials(&creds, "owner", "repo", "")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            credentials,
+            (
+                Some("x-access-token".to_string()),
+                Some("ghu_test".to_string())
+            )
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1776,10 +1937,10 @@ mod tests {
             );
 
         let pem = test_rsa_key();
-        let creds = GitHubAppCredentials {
+        let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
-        };
+        });
         merge_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "squash", "")
             .await
             .unwrap();
@@ -1803,10 +1964,10 @@ mod tests {
             .on(HttpMethod::Put, "/repos/owner/repo/pulls/42/merge", 405, "");
 
         let pem = test_rsa_key();
-        let creds = GitHubAppCredentials {
+        let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
-        };
+        });
         let err = merge_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "squash", "")
             .await
             .unwrap_err();
@@ -1831,10 +1992,10 @@ mod tests {
             .on(HttpMethod::Put, "/repos/owner/repo/pulls/42/merge", 409, "");
 
         let pem = test_rsa_key();
-        let creds = GitHubAppCredentials {
+        let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
-        };
+        });
         let err = merge_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "squash", "")
             .await
             .unwrap_err();
@@ -1868,10 +2029,10 @@ mod tests {
             );
 
         let pem = test_rsa_key();
-        let creds = GitHubAppCredentials {
+        let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
-        };
+        });
         close_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "")
             .await
             .unwrap();
@@ -1895,10 +2056,10 @@ mod tests {
             .on(HttpMethod::Patch, "/repos/owner/repo/pulls/999", 404, "");
 
         let pem = test_rsa_key();
-        let creds = GitHubAppCredentials {
+        let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
-        };
+        });
         let err = close_pull_request_with_client(&mock, &creds, "owner", "repo", 999, "")
             .await
             .unwrap_err();

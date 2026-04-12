@@ -202,13 +202,20 @@ async fn resolve_worktree_plan(options: &mut InitOptions) -> Result<Option<Workt
 }
 
 async fn mint_github_token(
-    creds: &fabro_github::GitHubAppCredentials,
+    creds: &fabro_github::GitHubCredentials,
     origin_url: &str,
     permissions: &HashMap<String, String>,
 ) -> Result<String, Error> {
+    if let fabro_github::GitHubCredentials::Token(token) = creds {
+        return Ok(token.clone());
+    }
+
     let https_url = fabro_github::ssh_url_to_https(origin_url);
     let (owner, repo) =
         fabro_github::parse_github_owner_repo(&https_url).map_err(|e| Error::engine(e.clone()))?;
+    let fabro_github::GitHubCredentials::App(creds) = creds else {
+        unreachable!("token credentials return early");
+    };
     let jwt = fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem)
         .map_err(|e| Error::engine(e.clone()))?;
     let client = reqwest::Client::new();
@@ -227,7 +234,7 @@ async fn mint_github_token(
 
 async fn build_sandbox_env(
     spec: &SandboxEnvSpec,
-    github_app: Option<&fabro_github::GitHubAppCredentials>,
+    github_app: Option<&fabro_github::GitHubCredentials>,
     emitter: &Emitter,
 ) -> Result<HashMap<String, String>, Error> {
     let mut env = spec.devcontainer_env.clone();

@@ -8,6 +8,7 @@ use fabro_config::user::{active_settings_path, load_settings_config};
 use fabro_config::{Storage, resolve_server_from_file};
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
+use fabro_types::settings::server::GithubIntegrationStrategy;
 use fabro_types::settings::{
     InterpString, ObjectStoreSettings, ServerListenSettings,
     ServerSettings as ResolvedServerSettings, SettingsLayer,
@@ -148,6 +149,11 @@ fn apply_runtime_settings(
         .get_or_insert_with(ServerStorageLayer::default);
     storage.root = Some(InterpString::parse(&data_dir.to_string_lossy()));
     settings
+}
+
+fn router_web_enabled(settings: &ResolvedServerSettings) -> bool {
+    settings.web.enabled
+        && settings.integrations.github.strategy != GithubIntegrationStrategy::GhCli
 }
 
 fn use_in_memory_store() -> bool {
@@ -315,7 +321,7 @@ where
             .unwrap_or(resolved_server_settings.scheduler.max_concurrent_runs);
         (auth_mode, client_auth, max_concurrent_runs)
     };
-    let web_enabled = resolved_server_settings.web.enabled;
+    let web_enabled = router_web_enabled(&resolved_server_settings);
 
     let store_path = storage.store_dir();
     let object_store = build_object_store(&store_path)?;
@@ -357,52 +363,59 @@ where
     };
 
     // Optionally start webhook listener
-    let webhook_app_id = resolved_server_settings
-        .integrations
-        .github
-        .webhooks
-        .as_ref()
-        .and(resolved_server_settings.integrations.github.app_id.as_ref())
-        .map(resolve_interp)
-        .transpose()?;
-    let webhook_manager = match webhook_app_id {
-        Some(app_id) => {
-            let secret = secret_snapshot
-                .get("GITHUB_APP_WEBHOOK_SECRET")
-                .cloned()
-                .or_else(|| std::env::var("GITHUB_APP_WEBHOOK_SECRET").ok());
-            let github_app = state
-                .github_app_credentials(Some(&app_id))
-                .await
-                .unwrap_or_else(|err| {
-                    warn!(
-                        error = %err,
-                        "Webhook config present but GITHUB_APP_PRIVATE_KEY is invalid; skipping webhook listener"
-                    );
-                    None
-                });
-            if let (Some(secret), Some(github_app)) = (secret, github_app) {
-                match WebhookManager::start(
-                    secret.into_bytes(),
-                    &github_app.app_id,
-                    &github_app.private_key_pem,
-                )
-                .await
-                {
-                    Ok(manager) => Some(manager),
-                    Err(err) => {
-                        error!(error = %err, "Failed to start webhook listener");
+    let webhook_manager = match resolved_server_settings.integrations.github.strategy {
+        GithubIntegrationStrategy::GhCli => None,
+        GithubIntegrationStrategy::App => {
+            let webhook_app_id = resolved_server_settings
+                .integrations
+                .github
+                .webhooks
+                .as_ref()
+                .and(resolved_server_settings.integrations.github.app_id.as_ref())
+                .map(resolve_interp)
+                .transpose()?;
+            match webhook_app_id {
+                Some(app_id) => {
+                    let secret = secret_snapshot
+                        .get("GITHUB_APP_WEBHOOK_SECRET")
+                        .cloned()
+                        .or_else(|| std::env::var("GITHUB_APP_WEBHOOK_SECRET").ok());
+                    let github_app = state
+                        .github_credentials(&resolved_server_settings.integrations.github)
+                        .await
+                        .unwrap_or_else(|err| {
+                            warn!(
+                                error = %err,
+                                "Webhook config present but GitHub credentials are invalid; skipping webhook listener"
+                            );
+                            None
+                        });
+                    if let (Some(secret), Some(fabro_github::GitHubCredentials::App(github_app))) =
+                        (secret, github_app)
+                    {
+                        match WebhookManager::start(
+                            secret.into_bytes(),
+                            &app_id,
+                            &github_app.private_key_pem,
+                        )
+                        .await
+                        {
+                            Ok(manager) => Some(manager),
+                            Err(err) => {
+                                error!(error = %err, "Failed to start webhook listener");
+                                None
+                            }
+                        }
+                    } else {
+                        warn!(
+                            "Webhook config present but GITHUB_APP_WEBHOOK_SECRET or GITHUB_APP_PRIVATE_KEY not set; skipping webhook listener"
+                        );
                         None
                     }
                 }
-            } else {
-                warn!(
-                    "Webhook config present but GITHUB_APP_WEBHOOK_SECRET or GITHUB_APP_PRIVATE_KEY not set; skipping webhook listener"
-                );
-                None
+                None => None,
             }
         }
-        None => None,
     };
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -695,7 +708,8 @@ mod tests {
 
     use super::{
         ServeArgs, ServerTitlePhase, apply_runtime_settings, bind_tcp_host_with_fallback,
-        build_object_store_with_preference, server_bind_title, server_title,
+        build_object_store_with_preference, resolve_server_settings, router_web_enabled,
+        server_bind_title, server_title,
     };
     use crate::bind::Bind;
 
@@ -789,6 +803,25 @@ enabled = false
                 .and_then(|web| web.enabled),
             Some(false)
         );
+    }
+
+    #[test]
+    fn gh_cli_strategy_forces_web_disabled_in_router_options() {
+        let base = parse_settings(
+            r#"
+_version = 1
+
+[server.web]
+enabled = true
+
+[server.integrations.github]
+strategy = "gh_cli"
+"#,
+        );
+
+        let resolved = resolve_server_settings(&base).expect("settings should resolve");
+
+        assert!(!router_web_enabled(&resolved));
     }
 
     #[test]

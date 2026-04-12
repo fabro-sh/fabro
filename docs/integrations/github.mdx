@@ -3,9 +3,27 @@ title: "GitHub"
 description: "Integrate Fabro with GitHub for repository access and OAuth login"
 ---
 
-Fabro uses a [GitHub App](https://docs.github.com/en/apps/overview) to authenticate users in the web UI and to clone private repositories into remote sandboxes. The GitHub App is created automatically through a guided setup flow — no manual app configuration required.
+Fabro supports two GitHub integration strategies:
 
-## What the GitHub App enables
+- `gh_cli` — the default for local and individual use. Fabro captures `gh auth token` during `fabro install`, stores it as `GITHUB_CLI_TOKEN`, and uses that token directly for repo access, pull requests, and sandbox `GITHUB_TOKEN` injection.
+- `app` — the team-oriented option. Fabro registers a [GitHub App](https://docs.github.com/en/apps/overview), uses installation tokens for repo access, and enables browser OAuth and webhooks.
+
+`gh_cli` changes GitHub integration auth only. It does not provide browser sign-in, so the embedded web UI is disabled when `strategy = "gh_cli"`.
+
+## Strategy matrix
+
+| Capability | `gh_cli` | `app` |
+|---|---|---|
+| CLI pull requests | Yes | Yes |
+| Private repo cloning | Yes | Yes |
+| Sandbox `GITHUB_TOKEN` | Direct CLI token | Scoped installation token |
+| Browser sign-in | No | Yes |
+| Web UI routes | Disabled | Enabled |
+| Webhooks | No | Yes |
+
+## GitHub App mode
+
+The rest of this page describes the `app` strategy, which is required for browser auth and webhooks.
 
 | Feature | How it's used |
 |---|---|
@@ -97,6 +115,16 @@ Fabro stores the GitHub App secrets in the server secret store under these keys:
 - `GITHUB_APP_PRIVATE_KEY`
 
 The private key is stored as base64-encoded PEM. Fabro also accepts raw PEM format (starting with `-----BEGIN`).
+
+## `gh_cli` mode
+
+Choose **GitHub CLI** in `fabro install` to use the default local-user flow. The installer:
+
+1. Runs `gh auth token`
+2. Stores the token as `GITHUB_CLI_TOKEN`
+3. Writes `strategy = "gh_cli"` under `[server.integrations.github]`
+
+In this mode, Fabro disables the embedded web UI and browser auth routes. Machine API routes and `/health` continue to work.
 
 ## How it works
 

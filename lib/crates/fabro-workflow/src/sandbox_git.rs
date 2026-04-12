@@ -129,12 +129,12 @@ pub async fn git_checkpoint(
 
 /// Push a refspec from the host repo to origin (best-effort).
 ///
-/// Authenticates via a GitHub App installation token so we don't depend
-/// on the host's ambient git credentials.
+/// Authenticates via resolved GitHub credentials so we don't depend on the
+/// host's ambient git credentials.
 pub async fn git_push_host(
     repo_path: &Path,
     refspec: &str,
-    github_app: &Option<fabro_github::GitHubAppCredentials>,
+    github_app: &Option<fabro_github::GitHubCredentials>,
     label: &str,
 ) -> bool {
     let (origin_url, _) = match detect_repo_info(repo_path) {
@@ -161,7 +161,7 @@ pub async fn git_push_host(
             }
         }
     } else {
-        tracing::warn!(label, "No GitHub App credentials for push");
+        tracing::warn!(label, "No GitHub credentials for push");
         return false;
     };
 

@@ -47,8 +47,8 @@ fn repo_init_creates_project_toml_and_hello_workflow() {
 
       fabro run hello
 
-      ! No git remote found — skipping GitHub App check
-      Run `git remote add origin <url>` then `fabro install` to set up the GitHub App
+      ! No git remote found — skipping GitHub check
+      Run `git remote add origin <url>`, then `gh auth login` or `fabro install` to configure GitHub access
     ");
 
     assert_snapshot!(

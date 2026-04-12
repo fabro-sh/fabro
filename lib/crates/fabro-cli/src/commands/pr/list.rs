@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use fabro_util::printer::Printer;
 use futures::future::join_all;
 use serde::Serialize;
@@ -20,13 +20,9 @@ struct PrRow {
 
 pub(super) async fn list_command(
     args: PrListArgs,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
     printer: Printer,
 ) -> Result<()> {
-    let creds = github_app.context(
-        "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
-    )?;
     let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
 
@@ -47,6 +43,8 @@ pub(super) async fn list_command(
         fabro_util::printout!(printer, "No pull requests found.");
         return Ok(());
     }
+
+    let creds = super::load_github_credentials_required(printer)?;
 
     let futures: Vec<_> = entries
         .iter()
