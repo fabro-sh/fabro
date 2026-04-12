@@ -12,16 +12,16 @@ pub struct HttpApi {
     pub(crate) api_key:             String,
     pub(crate) base_url:            String,
     pub(crate) default_headers:     HashMap<String, String>,
-    pub(crate) client:              reqwest::Client,
+    pub(crate) client:              fabro_http::HttpClient,
     pub(crate) request_timeout:     Option<Duration>,
     pub(crate) stream_read_timeout: Option<Duration>,
 }
 
 impl HttpApi {
-    fn build_client(timeout: AdapterTimeout) -> reqwest::Client {
+    fn build_client(timeout: AdapterTimeout) -> fabro_http::HttpClient {
         #[cfg(test)]
         {
-            reqwest::Client::builder()
+            fabro_http::HttpClientBuilder::new()
                 .connect_timeout(Duration::from_secs_f64(timeout.connect))
                 .no_proxy()
                 .build()
@@ -29,7 +29,7 @@ impl HttpApi {
         }
         #[cfg(not(test))]
         {
-            reqwest::Client::builder()
+            fabro_http::HttpClientBuilder::new()
                 .connect_timeout(Duration::from_secs_f64(timeout.connect))
                 .build()
                 .unwrap_or_default()

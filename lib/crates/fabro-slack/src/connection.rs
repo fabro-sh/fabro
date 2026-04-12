@@ -57,7 +57,7 @@ pub fn process_message(
 
 /// Fetch a WebSocket URL from Slack's `apps.connections.open` endpoint.
 pub async fn open_socket_url(
-    http: &reqwest::Client,
+    http: &fabro_http::HttpClient,
     app_token: &str,
 ) -> Result<String, ConnectionError> {
     let resp = http

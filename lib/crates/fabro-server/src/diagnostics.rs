@@ -321,7 +321,18 @@ async fn check_github_app(state: &AppState) -> CheckResult {
             }
         };
 
-        let http = reqwest::Client::new();
+        let http = match fabro_http::http_client() {
+            Ok(http) => http,
+            Err(err) => {
+                return CheckResult {
+                    name:        "GitHub CLI".to_string(),
+                    status:      CheckStatus::Error,
+                    summary:     "client error".to_string(),
+                    details:     vec![CheckDetail::new(err.to_string())],
+                    remediation: Some(err.to_string()),
+                };
+            }
+        };
         let probe = timeout(
             Duration::from_secs(15),
             http.get(format!("{}/user", fabro_github::github_api_base_url()))
@@ -340,7 +351,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
                 details:     Vec::new(),
                 remediation: None,
             },
-            Ok(Ok(response)) if response.status() == reqwest::StatusCode::UNAUTHORIZED => {
+            Ok(Ok(response)) if response.status() == fabro_http::StatusCode::UNAUTHORIZED => {
                 CheckResult {
                     name:        "GitHub CLI".to_string(),
                     status:      CheckStatus::Error,
@@ -461,7 +472,18 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         }
     };
 
-    let http = reqwest::Client::new();
+    let http = match fabro_http::http_client() {
+        Ok(http) => http,
+        Err(err) => {
+            return CheckResult {
+                name:        "GitHub App".to_string(),
+                status:      CheckStatus::Error,
+                summary:     "client error".to_string(),
+                details:     vec![CheckDetail::new(err.to_string())],
+                remediation: Some(err.to_string()),
+            };
+        }
+    };
     let auth_result = timeout(
         Duration::from_secs(15),
         fabro_github::get_authenticated_app(&http, &jwt, &fabro_github::github_api_base_url()),
@@ -523,9 +545,21 @@ async fn check_brave_search(state: &AppState) -> CheckResult {
         };
     };
 
-    let probe = timeout(Duration::from_secs(15), async {
-        reqwest::Client::new()
-            .get("https://api.search.brave.com/res/v1/web/search?q=test&count=1")
+    let http = match fabro_http::http_client() {
+        Ok(http) => http,
+        Err(err) => {
+            return CheckResult {
+                name:        "Brave Search".to_string(),
+                status:      CheckStatus::Warning,
+                summary:     "client error".to_string(),
+                details:     vec![CheckDetail::new(err.to_string())],
+                remediation: Some(err.to_string()),
+            };
+        }
+    };
+
+    let probe = timeout(Duration::from_secs(15), async move {
+        http.get("https://api.search.brave.com/res/v1/web/search?q=test&count=1")
             .header("X-Subscription-Token", api_key)
             .send()
             .await

@@ -14,11 +14,11 @@ use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, u
 
 const SHARED_DAEMON_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn server_endpoint(storage_dir: &Path) -> (reqwest::Client, String) {
+fn server_endpoint(storage_dir: &Path) -> (fabro_http::HttpClient, String) {
     let target = server_target(storage_dir);
     if target.starts_with('/') {
         (
-            reqwest::ClientBuilder::new()
+            fabro_http::HttpClientBuilder::new()
                 .unix_socket(target)
                 .no_proxy()
                 .build()
@@ -27,7 +27,7 @@ fn server_endpoint(storage_dir: &Path) -> (reqwest::Client, String) {
         )
     } else {
         (
-            reqwest::ClientBuilder::new()
+            fabro_http::HttpClientBuilder::new()
                 .no_proxy()
                 .build()
                 .expect("test TCP HTTP client should build"),
@@ -36,7 +36,11 @@ fn server_endpoint(storage_dir: &Path) -> (reqwest::Client, String) {
     }
 }
 
-async fn wait_for_server_question(client: &reqwest::Client, base_url: &str, run_id: &str) -> Value {
+async fn wait_for_server_question(
+    client: &fabro_http::HttpClient,
+    base_url: &str,
+    run_id: &str,
+) -> Value {
     let deadline = std::time::Instant::now() + SHARED_DAEMON_TIMEOUT;
     loop {
         let response = client
@@ -216,7 +220,9 @@ fn attach_before_completion_streams_to_finished_state() {
     attach_cmd.current_dir(&context.temp_dir);
     attach_cmd.env("NO_COLOR", "1");
     attach_cmd.env("HOME", &context.home_dir);
-    attach_cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    attach_cmd
+        .env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
     attach_cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
     attach_cmd.env("FABRO_TEST_IN_MEMORY_STORE", "1");
     attach_cmd.args(["attach", &run_id]);
@@ -818,7 +824,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
                 .send()
                 .await
                 .expect("answer submission should succeed");
-            assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+            assert_eq!(response.status(), fabro_http::StatusCode::NO_CONTENT);
         });
     wait_for_status(&run.run_dir, &["succeeded"]);
 }

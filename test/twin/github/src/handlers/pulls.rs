@@ -306,7 +306,7 @@ mod tests {
     use crate::test_support::{sign_test_jwt, test_http_client, test_rsa_private_key};
 
     async fn get_installation_token(
-        client: &reqwest::Client,
+        client: &fabro_http::HttpClient,
         jwt: &str,
         owner: &str,
         repo: &str,
@@ -342,7 +342,7 @@ mod tests {
     async fn setup_and_get_token(
         state: &mut AppState,
         pem: &str,
-    ) -> (TestServer, reqwest::Client, String) {
+    ) -> (TestServer, fabro_http::HttpClient, String) {
         state.register_app(AppOptions {
             app_id:          "100".to_string(),
             slug:            "test-app".to_string(),

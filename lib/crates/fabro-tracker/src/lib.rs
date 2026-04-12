@@ -12,7 +12,7 @@ pub use linear::{LINEAR_API_ENDPOINT, LinearOptions, LinearTracker};
 /// as the `Authorization` value, and returns the parsed JSON response.
 /// Provider-specific error messages use `provider` as a label.
 pub(crate) async fn execute_graphql_request(
-    client: &reqwest::Client,
+    client: &fabro_http::HttpClient,
     endpoint: &str,
     auth_header: &str,
     provider: &str,

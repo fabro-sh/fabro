@@ -108,7 +108,8 @@ fn exec_uses_user_config_defaults() {
     cmd.env_clear();
     cmd.env("HOME", &context.home_dir);
     cmd.env("FABRO_STORAGE_DIR", &context.storage_dir);
-    cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
 
     fabro_snapshot!(context.filters(), cmd, @"
     success: false
@@ -133,7 +134,8 @@ fn exec_server_target_uses_remote_transport_instead_of_local_api_key_resolution(
     let mut cmd = context.exec_cmd();
     cmd.env_clear();
     cmd.env("HOME", &context.home_dir);
-    cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
     cmd.args([
         "--server",
         &format!("{}/api/v1", server.base_url()),
@@ -175,7 +177,8 @@ fn exec_configured_server_target_alone_does_not_reroute_exec() {
     let mut cmd = context.exec_cmd();
     cmd.env_clear();
     cmd.env("HOME", &context.home_dir);
-    cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
     cmd.args([
         "--provider",
         "openai",
@@ -222,7 +225,8 @@ fn exec_cli_server_target_overrides_configured_server_target() {
     let mut cmd = context.exec_cmd();
     cmd.env_clear();
     cmd.env("HOME", &context.home_dir);
-    cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
     cmd.args([
         "--server",
         &format!("{}/api/v1", cli_server.base_url()),

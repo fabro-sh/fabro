@@ -424,8 +424,8 @@ mod tests {
 
     use super::*;
 
-    fn test_http_client() -> reqwest::Client {
-        reqwest::Client::builder().no_proxy().build().unwrap()
+    fn test_http_client() -> fabro_http::HttpClient {
+        fabro_http::test_http_client().unwrap()
     }
 
     fn test_api_client(api_url: &str) -> fabro_api::Client {

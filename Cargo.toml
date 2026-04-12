@@ -74,6 +74,7 @@ object_store = { version = "0.12.5", features = ["aws"] }
 rust-embed = "8"
 percent-encoding = "2"
 minijinja = "2"
+fabro-http = { path = "lib/crates/fabro-http" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -99,6 +100,7 @@ print_stderr = "warn"
 dbg_macro = "warn"
 empty_drop = "warn"
 empty_structs_with_brackets = "warn"
+disallowed_methods = "deny"
 exit = "warn"
 get_unwrap = "warn"
 rc_buffer = "warn"

@@ -32,6 +32,7 @@ fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 fabro-api = { path = "../fabro-api" }
 fabro-store = { path = "../fabro-store" }
+fabro-http.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
 axum.workspace = true
@@ -65,7 +66,6 @@ uuid.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 hex.workspace = true
-reqwest.workspace = true
 rand.workspace = true
 bytes = "1"
 tempfile = "3"

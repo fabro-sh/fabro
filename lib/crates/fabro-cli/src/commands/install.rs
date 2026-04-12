@@ -596,7 +596,7 @@ async fn setup_github_app(
         "  {}",
         s.dim.apply_to("Exchanging code with GitHub...")
     );
-    let client = reqwest::Client::new();
+    let client = fabro_http::http_client()?;
     let resp = client
         .post(format!(
             "https://api.github.com/app-manifests/{code}/conversions"

@@ -270,7 +270,7 @@ async fn probe_surface_availability(
 ) -> Result<SurfaceAvailability> {
     let response = client.post_json_recorded(path, body).await;
 
-    if response.status == reqwest::StatusCode::OK {
+    if response.status == fabro_http::StatusCode::OK {
         return Ok(SurfaceAvailability::Available);
     }
 
@@ -1312,7 +1312,7 @@ async fn enqueue_responses_continuation_scenarios(server: &common::TestServer, m
 async fn post_json_ok(client: &common::ApiClient, path: &str, body: &Value) -> Result<Value> {
     let response = client.post_json_recorded(path, body).await;
     ensure!(
-        response.status == reqwest::StatusCode::OK,
+        response.status == fabro_http::StatusCode::OK,
         "{} returned {}: {}",
         path,
         response.status,
@@ -1328,7 +1328,7 @@ async fn post_sse_ok(
 ) -> Result<common::ParsedSseTranscript> {
     let response = client.post_json_recorded(path, body).await;
     ensure!(
-        response.status == reqwest::StatusCode::OK,
+        response.status == fabro_http::StatusCode::OK,
         "{} returned {}: {}",
         path,
         response.status,
@@ -1362,14 +1362,14 @@ fn classify_live_access_blocker(response: &common::RecordedResponse) -> Option<S
     let message = error.get("message").and_then(Value::as_str).unwrap_or("");
 
     match response.status {
-        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+        fabro_http::StatusCode::UNAUTHORIZED | fabro_http::StatusCode::FORBIDDEN
             if message.contains("Missing scopes:")
                 || message.contains("insufficient permissions")
                 || message.contains("correct role in your organization") =>
         {
             Some("missing required OpenAI API scope or role".to_owned())
         }
-        reqwest::StatusCode::TOO_MANY_REQUESTS if error_type == Some("insufficient_quota") => {
+        fabro_http::StatusCode::TOO_MANY_REQUESTS if error_type == Some("insufficient_quota") => {
             Some("account has insufficient quota for live API calls".to_owned())
         }
         _ => None,
@@ -1391,7 +1391,7 @@ fn ensure_matching_status(
         summarize_recorded_body(live)
     );
     ensure!(
-        local.status == reqwest::StatusCode::OK,
+        local.status == fabro_http::StatusCode::OK,
         "{} returned non-OK responses: local={} body={} live={} body={}",
         label,
         local.status,

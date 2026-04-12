@@ -2,7 +2,7 @@ mod common;
 
 use std::time::Duration;
 
-use reqwest::header::AUTHORIZATION;
+use fabro_http::header::AUTHORIZATION;
 use serde_json::json;
 
 #[tokio::test]
@@ -106,7 +106,7 @@ async fn scripted_hang_times_out_client_side() {
         }))
         .await;
 
-    let client = reqwest::Client::builder()
+    let client = fabro_http::HttpClientBuilder::new()
         .no_proxy()
         .timeout(Duration::from_millis(150))
         .default_headers(

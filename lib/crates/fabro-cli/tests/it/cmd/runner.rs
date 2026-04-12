@@ -46,7 +46,8 @@ fn spawn_worker_process(
     cmd.current_dir(&context.temp_dir);
     cmd.env("NO_COLOR", "1");
     cmd.env("HOME", &context.home_dir);
-    cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
     cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
     cmd.env("FABRO_TEST_IN_MEMORY_STORE", "1");
     cmd.args([
@@ -98,11 +99,11 @@ fn child_output(mut child: Child, status: ExitStatus) -> Output {
     }
 }
 
-fn server_endpoint(storage_dir: &std::path::Path) -> (reqwest::Client, String) {
+fn server_endpoint(storage_dir: &std::path::Path) -> (fabro_http::HttpClient, String) {
     let target = server_target(storage_dir);
     if target.starts_with('/') {
         (
-            reqwest::ClientBuilder::new()
+            fabro_http::HttpClientBuilder::new()
                 .unix_socket(target)
                 .no_proxy()
                 .build()
@@ -111,7 +112,7 @@ fn server_endpoint(storage_dir: &std::path::Path) -> (reqwest::Client, String) {
         )
     } else {
         (
-            reqwest::ClientBuilder::new()
+            fabro_http::HttpClientBuilder::new()
                 .no_proxy()
                 .build()
                 .expect("test TCP HTTP client should build"),
@@ -121,7 +122,7 @@ fn server_endpoint(storage_dir: &std::path::Path) -> (reqwest::Client, String) {
 }
 
 async fn wait_for_server_question(
-    client: &reqwest::Client,
+    client: &fabro_http::HttpClient,
     base_url: &str,
     run_id: &str,
 ) -> serde_json::Value {
@@ -608,7 +609,7 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
             .send()
             .await
             .expect("answer submission should succeed");
-        assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+        assert_eq!(response.status(), fabro_http::StatusCode::NO_CONTENT);
 
         question_id
     });

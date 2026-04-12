@@ -987,7 +987,7 @@ struct SseReaderState {
 
 impl SseReaderState {
     fn new(
-        http_resp: reqwest::Response,
+        http_resp: fabro_http::Response,
         rate_limit: Option<RateLimitInfo>,
         json_schema_mode: bool,
         stream_read_timeout: Option<std::time::Duration>,
@@ -1078,7 +1078,7 @@ fn build_api_request(
     adapter: &Adapter,
     request: &Request,
     stream: bool,
-) -> (ApiRequest, reqwest::RequestBuilder) {
+) -> (ApiRequest, fabro_http::RequestBuilder) {
     let (system, other_messages) = extract_system_prompt(&request.messages);
     let mut api_messages = translate_messages(&other_messages);
 

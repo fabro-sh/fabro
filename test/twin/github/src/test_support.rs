@@ -1,6 +1,6 @@
 #[cfg(test)]
-pub fn test_http_client() -> reqwest::Client {
-    reqwest::Client::builder().no_proxy().build().unwrap()
+pub fn test_http_client() -> fabro_http::HttpClient {
+    fabro_http::test_http_client().unwrap()
 }
 
 #[cfg(test)]

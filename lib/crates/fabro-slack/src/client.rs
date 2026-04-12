@@ -1,4 +1,3 @@
-use reqwest::Client;
 use serde_json::{Value, json};
 use tracing::debug;
 
@@ -14,7 +13,7 @@ pub struct PostedMessage {
 pub struct SlackClient {
     bot_token: String,
     api_base:  String,
-    http:      Client,
+    http:      fabro_http::HttpClient,
 }
 
 impl SlackClient {
@@ -24,11 +23,11 @@ impl SlackClient {
         Self {
             bot_token,
             api_base,
-            http: Client::new(),
+            http: fabro_http::http_client().expect("Slack HTTP client should build"),
         }
     }
 
-    pub fn http(&self) -> &Client {
+    pub fn http(&self) -> &fabro_http::HttpClient {
         &self.http
     }
 

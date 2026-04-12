@@ -1708,7 +1708,7 @@ async fn get_github_repo(
     let settings = state.server_settings();
     let github_settings = &settings.integrations.github;
     let base_url = fabro_github::github_api_base_url();
-    let mut client = None;
+    let mut client: Option<fabro_http::HttpClient> = None;
     let token = match github_settings.strategy {
         GithubIntegrationStrategy::App => {
             let Some(app_id) = github_settings.app_id.as_ref() else {
@@ -1754,9 +1754,18 @@ async fn get_github_repo(
                 None => format!("https://github.com/organizations/{owner}/settings/installations"),
             };
 
-            let client_ref = client.get_or_insert_with(reqwest::Client::new);
+            if client.is_none() {
+                client = Some(match fabro_http::http_client() {
+                    Ok(http) => http,
+                    Err(err) => {
+                        return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
+                            .into_response();
+                    }
+                });
+            }
+            let client_ref = client.as_ref().expect("client initialized above");
             let installed = match fabro_github::check_app_installed(
-                &*client_ref,
+                client_ref,
                 &jwt,
                 &owner,
                 &name,
@@ -1787,7 +1796,7 @@ async fn get_github_repo(
             }
 
             match fabro_github::create_installation_access_token_with_permissions(
-                &*client_ref,
+                client_ref,
                 &jwt,
                 &owner,
                 &name,
@@ -1816,7 +1825,16 @@ async fn get_github_repo(
         },
     };
 
-    let client = client.unwrap_or_else(reqwest::Client::new);
+    let client = match client {
+        Some(client) => client,
+        None => match fabro_http::http_client() {
+            Ok(http) => http,
+            Err(err) => {
+                return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
+                    .into_response();
+            }
+        },
+    };
     let repo_response = match client
         .get(format!("{base_url}/repos/{owner}/{name}"))
         .header("Authorization", format!("Bearer {token}"))
@@ -1830,7 +1848,7 @@ async fn get_github_repo(
             if github_settings.strategy == GithubIntegrationStrategy::GhCli
                 && matches!(
                     response.status(),
-                    reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND
+                    fabro_http::StatusCode::FORBIDDEN | fabro_http::StatusCode::NOT_FOUND
                 ) =>
         {
             return (
@@ -1849,7 +1867,7 @@ async fn get_github_repo(
         }
         Ok(response)
             if github_settings.strategy == GithubIntegrationStrategy::GhCli
-                && response.status() == reqwest::StatusCode::UNAUTHORIZED =>
+                && response.status() == fabro_http::StatusCode::UNAUTHORIZED =>
         {
             return ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,

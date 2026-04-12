@@ -14,13 +14,13 @@ workspace = true
 
 [dependencies]
 fabro-util = { path = "../fabro-util" }
+fabro-http.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = "0.9"
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
-reqwest = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
