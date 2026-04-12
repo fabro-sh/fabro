@@ -371,7 +371,9 @@ async function refresh() {
   } catch(e) { /* silent -- next interval will retry */ }
 }
 
-setInterval(refresh, 2000);
+if (new URLSearchParams(window.location.search).get('refresh') !== '0') {
+  setInterval(refresh, 2000);
+}
 
 function renderState(data) {
   if (data.namespaces.length === 0) {

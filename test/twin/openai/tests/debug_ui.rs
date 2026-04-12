@@ -313,7 +313,10 @@ async fn debug_page_renders_in_headless_chrome() {
         command.arg("--no-sandbox");
     }
     let output = command
-        .arg(format!("{}/__debug", server.base_url))
+        // Static mode keeps the page visually identical for the screenshot
+        // while avoiding a live refresh loop that can stall headless Chrome
+        // on Linux CI.
+        .arg(format!("{}/__debug?refresh=0", server.base_url))
         .output()
         .expect("Chrome should run");
 
