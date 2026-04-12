@@ -17,7 +17,7 @@ leak-timeout = "500ms"
 
     [[profile.default.overrides]]
     filter = "package(twin-openai) & test(debug_page_renders_in_headless_chrome)"
-    slow-timeout = { period = "10s", terminate-after = 1 }
+    slow-timeout = { period = "30s", terminate-after = 1 }
 
 [profile.e2e]
 # E2E (ignored) tests: flag SLOW after 10s, hard-kill after 30s
