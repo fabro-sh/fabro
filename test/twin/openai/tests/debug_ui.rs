@@ -5,8 +5,12 @@
 
 mod common;
 
+use std::process::Stdio;
+
 use serde_json::json;
 use tokio::net::TcpListener;
+use tokio::process::Command as TokioCommand;
+use tokio::time::{Duration, sleep};
 use twin_openai::config::Config;
 
 #[tokio::test]
@@ -300,7 +304,7 @@ async fn debug_page_renders_in_headless_chrome() {
         "/tmp/twin-openai-debug-screenshot-{}.png",
         std::process::id()
     );
-    let mut command = std::process::Command::new(chrome_binary);
+    let mut command = TokioCommand::new(chrome_binary);
     command.args([
         "--headless",
         "--disable-gpu",
@@ -312,21 +316,44 @@ async fn debug_page_renders_in_headless_chrome() {
         // is launched with a compatible user namespace or disabled explicitly.
         command.arg("--no-sandbox");
     }
-    let output = command
+    let mut child = command
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         // Static mode keeps the page visually identical for the screenshot
         // while avoiding a live refresh loop that can stall headless Chrome
         // on Linux CI.
         .arg(format!("{}/__debug?refresh=0", server.base_url))
-        .output()
-        .expect("Chrome should run");
+        .spawn()
+        .expect("Chrome should start");
+    let mut screenshot_data = None;
+    for _ in 0..200 {
+        if let Ok(data) = std::fs::read(&screenshot_path) {
+            if data.len() >= 10_000 {
+                screenshot_data = Some(data);
+                break;
+            }
+        }
 
-    assert!(
-        output.status.success(),
-        "Chrome should exit with code 0, stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+        if let Some(status) = child
+            .try_wait()
+            .expect("Chrome status check should succeed")
+        {
+            panic!("Chrome exited before writing screenshot, status: {status}");
+        }
 
-    let screenshot_data = std::fs::read(&screenshot_path).expect("screenshot file should exist");
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    let screenshot_data = screenshot_data.expect("Chrome should write a screenshot within 20s");
+    if child
+        .try_wait()
+        .expect("Chrome status check should succeed")
+        .is_none()
+    {
+        child.start_kill().expect("Chrome should be killable");
+        let _ = child.wait().await;
+    }
+
     assert!(
         screenshot_data.len() >= 10_000,
         "screenshot should be at least 10KB, got {} bytes",
