@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use fabro_http::{HttpClient as Client, HttpClientBuilder};
 use fabro_http::header::AUTHORIZATION;
+use fabro_http::{HttpClient as Client, HttpClientBuilder};
 use futures_util::StreamExt;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

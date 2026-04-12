@@ -424,12 +424,8 @@ mod tests {
 
     use super::*;
 
-    fn test_http_client() -> fabro_http::HttpClient {
-        fabro_http::test_http_client().unwrap()
-    }
-
     fn test_api_client(api_url: &str) -> fabro_api::Client {
-        fabro_api::Client::new_with_client(api_url, test_http_client())
+        fabro_api::Client::new_with_client(api_url, fabro_test::test_http_client())
     }
 
     fn test_model_json(id: &str, provider: Provider) -> serde_json::Value {

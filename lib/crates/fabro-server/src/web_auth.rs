@@ -15,6 +15,16 @@ use tracing::{debug, error, info, warn};
 
 use crate::server::AppState;
 
+fn github_http_client(context: &str) -> Result<fabro_http::HttpClient, Response> {
+    fabro_http::http_client().map_err(|err| {
+        error!(error = %err, "{context}: could not build GitHub HTTP client");
+        json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error": format!("Failed to build GitHub HTTP client: {err}")}),
+        )
+    })
+}
+
 pub const SESSION_COOKIE_NAME: &str = "__fabro_session";
 const OAUTH_STATE_COOKIE_NAME: &str = "fabro_oauth_state";
 
@@ -286,15 +296,9 @@ async fn callback_github(
         }
     };
 
-    let http = match fabro_http::http_client() {
+    let http = match github_http_client("OAuth callback failed") {
         Ok(http) => http,
-        Err(err) => {
-            error!(error = %err, "OAuth callback failed: could not build GitHub HTTP client");
-            return json_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                json!({"error": format!("Failed to build GitHub HTTP client: {err}")}),
-            );
-        }
+        Err(response) => return response,
     };
     let token = match http
         .post("https://github.com/login/oauth/access_token")
@@ -534,15 +538,9 @@ async fn setup_register(
         .and_then(|s| fabro_http::Url::parse(s).ok())
         .map(|url| format!("{}://{}", url.scheme(), url.authority()));
 
-    let http = match fabro_http::http_client() {
+    let http = match github_http_client("Setup register failed") {
         Ok(http) => http,
-        Err(err) => {
-            error!(error = %err, "Setup register failed: could not build GitHub HTTP client");
-            return json_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                json!({"error": format!("Failed to build GitHub HTTP client: {err}")}),
-            );
-        }
+        Err(response) => return response,
     };
     let response = match http
         .post(format!(

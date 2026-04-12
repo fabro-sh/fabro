@@ -228,10 +228,6 @@ mod tests {
     use crate::error::ProviderErrorKind;
     use crate::types::Message;
 
-    fn test_http_client() -> fabro_http::HttpClient {
-        fabro_http::test_http_client().unwrap()
-    }
-
     fn make_request() -> Request {
         Request {
             model:            "test-model".to_string(),
@@ -273,7 +269,11 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
                 .body(sse_body);
         });
 
-        let adapter = Adapter::new(test_http_client(), server.base_url(), "test-provider");
+        let adapter = Adapter::new(
+            fabro_test::test_http_client(),
+            server.base_url(),
+            "test-provider",
+        );
 
         let mut stream = adapter.stream(&make_request()).await.unwrap();
 
@@ -326,7 +326,11 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
                 .json_body(response_json);
         });
 
-        let adapter = Adapter::new(test_http_client(), server.base_url(), "test-provider");
+        let adapter = Adapter::new(
+            fabro_test::test_http_client(),
+            server.base_url(),
+            "test-provider",
+        );
 
         let response = adapter.complete(&make_request()).await.unwrap();
 
@@ -349,7 +353,11 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
             then.status(502).body("Bad Gateway");
         });
 
-        let adapter = Adapter::new(test_http_client(), server.base_url(), "test-provider");
+        let adapter = Adapter::new(
+            fabro_test::test_http_client(),
+            server.base_url(),
+            "test-provider",
+        );
 
         let err = adapter.complete(&make_request()).await.unwrap_err();
         match &err {
@@ -370,7 +378,11 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
             then.status(502).body("Bad Gateway");
         });
 
-        let adapter = Adapter::new(test_http_client(), server.base_url(), "test-provider");
+        let adapter = Adapter::new(
+            fabro_test::test_http_client(),
+            server.base_url(),
+            "test-provider",
+        );
 
         let result = adapter.stream(&make_request()).await;
         let Err(err) = result else {
@@ -404,7 +416,11 @@ data: {\"type\":\"stream_start\"}\n\
                 .body(sse_body);
         });
 
-        let adapter = Adapter::new(test_http_client(), server.base_url(), "test-provider");
+        let adapter = Adapter::new(
+            fabro_test::test_http_client(),
+            server.base_url(),
+            "test-provider",
+        );
 
         let mut stream = adapter.stream(&make_request()).await.unwrap();
 
@@ -450,7 +466,11 @@ data: {\"type\":\"stream_start\"}\n\
 
     #[test]
     fn adapter_name() {
-        let adapter = Adapter::new(test_http_client(), "http://localhost", "anthropic");
+        let adapter = Adapter::new(
+            fabro_test::test_http_client(),
+            "http://localhost",
+            "anthropic",
+        );
         assert_eq!(adapter.name(), "anthropic");
     }
 }

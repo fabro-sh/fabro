@@ -60,112 +60,134 @@ pub enum HttpClientBuildError {
     Reqwest(#[from] reqwest::Error),
 }
 
-#[derive(Default)]
-pub struct HttpClientBuilder {
-    inner:        reqwest::ClientBuilder,
-    proxy_policy: Option<ProxyPolicy>,
+/// Generates a proxy-policy-aware builder that wraps a reqwest client builder.
+macro_rules! define_builder {
+    ($builder_name:ident, $inner_builder:ty, $inner_new:expr, $client_type:ty) => {
+        #[derive(Default)]
+        pub struct $builder_name {
+            inner:        $inner_builder,
+            proxy_policy: Option<ProxyPolicy>,
+        }
+
+        impl $builder_name {
+            #[must_use]
+            pub fn new() -> Self {
+                Self {
+                    inner:        $inner_new,
+                    proxy_policy: None,
+                }
+            }
+
+            #[must_use]
+            pub fn proxy_policy(mut self, proxy_policy: ProxyPolicy) -> Self {
+                self.proxy_policy = Some(proxy_policy);
+                self
+            }
+
+            #[must_use]
+            pub fn no_proxy(mut self) -> Self {
+                self.inner = self.inner.no_proxy();
+                self
+            }
+
+            #[must_use]
+            pub fn proxy(mut self, proxy: Proxy) -> Self {
+                self.inner = self.inner.proxy(proxy);
+                self
+            }
+
+            #[must_use]
+            pub fn user_agent(mut self, value: impl Into<String>) -> Self {
+                self.inner = self.inner.user_agent(value.into());
+                self
+            }
+
+            #[must_use]
+            pub fn default_headers(mut self, headers: HeaderMap) -> Self {
+                self.inner = self.inner.default_headers(headers);
+                self
+            }
+
+            #[must_use]
+            pub fn connect_timeout(mut self, timeout: Duration) -> Self {
+                self.inner = self.inner.connect_timeout(timeout);
+                self
+            }
+
+            #[must_use]
+            pub fn timeout(mut self, timeout: Duration) -> Self {
+                self.inner = self.inner.timeout(timeout);
+                self
+            }
+
+            #[must_use]
+            pub fn use_rustls_tls(mut self) -> Self {
+                self.inner = self.inner.use_rustls_tls();
+                self
+            }
+
+            #[must_use]
+            pub fn danger_accept_invalid_certs(mut self, accept_invalid_certs: bool) -> Self {
+                self.inner = self.inner.danger_accept_invalid_certs(accept_invalid_certs);
+                self
+            }
+
+            #[must_use]
+            pub fn add_root_certificate(mut self, cert: Certificate) -> Self {
+                self.inner = self.inner.add_root_certificate(cert);
+                self
+            }
+
+            #[must_use]
+            pub fn identity(mut self, identity: Identity) -> Self {
+                self.inner = self.inner.identity(identity);
+                self
+            }
+
+            #[cfg(unix)]
+            #[must_use]
+            pub fn unix_socket<P>(mut self, path: P) -> Self
+            where
+                P: AsRef<Path>,
+            {
+                self.inner = self.inner.unix_socket(path.as_ref());
+                self
+            }
+
+            pub fn build(self) -> Result<$client_type, HttpClientBuildError> {
+                let proxy_policy = ProxyPolicy::resolve(self.proxy_policy)?;
+                let inner = match proxy_policy {
+                    ProxyPolicy::System => self.inner,
+                    ProxyPolicy::Disabled => self.inner.no_proxy(),
+                };
+                inner.build().map_err(Into::into)
+            }
+        }
+    };
 }
 
+define_builder!(
+    HttpClientBuilder,
+    reqwest::ClientBuilder,
+    reqwest::Client::builder(),
+    HttpClient
+);
+
+// `read_timeout` is only available on the async builder.
 impl HttpClientBuilder {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            inner:        reqwest::Client::builder(),
-            proxy_policy: None,
-        }
-    }
-
-    #[must_use]
-    pub fn proxy_policy(mut self, proxy_policy: ProxyPolicy) -> Self {
-        self.proxy_policy = Some(proxy_policy);
-        self
-    }
-
-    #[must_use]
-    pub fn no_proxy(mut self) -> Self {
-        self.inner = self.inner.no_proxy();
-        self
-    }
-
-    #[must_use]
-    pub fn proxy(mut self, proxy: Proxy) -> Self {
-        self.inner = self.inner.proxy(proxy);
-        self
-    }
-
-    #[must_use]
-    pub fn user_agent(mut self, value: impl Into<String>) -> Self {
-        self.inner = self.inner.user_agent(value.into());
-        self
-    }
-
-    #[must_use]
-    pub fn default_headers(mut self, headers: HeaderMap) -> Self {
-        self.inner = self.inner.default_headers(headers);
-        self
-    }
-
-    #[must_use]
-    pub fn connect_timeout(mut self, timeout: Duration) -> Self {
-        self.inner = self.inner.connect_timeout(timeout);
-        self
-    }
-
-    #[must_use]
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.inner = self.inner.timeout(timeout);
-        self
-    }
-
     #[must_use]
     pub fn read_timeout(mut self, timeout: Duration) -> Self {
         self.inner = self.inner.read_timeout(timeout);
         self
     }
-
-    #[must_use]
-    pub fn use_rustls_tls(mut self) -> Self {
-        self.inner = self.inner.use_rustls_tls();
-        self
-    }
-
-    #[must_use]
-    pub fn danger_accept_invalid_certs(mut self, accept_invalid_certs: bool) -> Self {
-        self.inner = self.inner.danger_accept_invalid_certs(accept_invalid_certs);
-        self
-    }
-
-    #[must_use]
-    pub fn add_root_certificate(mut self, cert: Certificate) -> Self {
-        self.inner = self.inner.add_root_certificate(cert);
-        self
-    }
-
-    #[must_use]
-    pub fn identity(mut self, identity: Identity) -> Self {
-        self.inner = self.inner.identity(identity);
-        self
-    }
-
-    #[cfg(unix)]
-    #[must_use]
-    pub fn unix_socket<P>(mut self, path: P) -> Self
-    where
-        P: AsRef<Path>,
-    {
-        self.inner = self.inner.unix_socket(path.as_ref());
-        self
-    }
-
-    pub fn build(self) -> Result<HttpClient, HttpClientBuildError> {
-        let proxy_policy = ProxyPolicy::resolve(self.proxy_policy)?;
-        let inner = match proxy_policy {
-            ProxyPolicy::System => self.inner,
-            ProxyPolicy::Disabled => self.inner.no_proxy(),
-        };
-        inner.build().map_err(Into::into)
-    }
 }
+
+define_builder!(
+    BlockingHttpClientBuilder,
+    reqwest::blocking::ClientBuilder,
+    reqwest::blocking::Client::builder(),
+    BlockingHttpClient
+);
 
 pub fn http_client() -> Result<HttpClient, HttpClientBuildError> {
     HttpClientBuilder::new().build()
@@ -175,107 +197,6 @@ pub fn test_http_client() -> Result<HttpClient, HttpClientBuildError> {
     HttpClientBuilder::new()
         .proxy_policy(ProxyPolicy::Disabled)
         .build()
-}
-
-#[derive(Default)]
-pub struct BlockingHttpClientBuilder {
-    inner:        reqwest::blocking::ClientBuilder,
-    proxy_policy: Option<ProxyPolicy>,
-}
-
-impl BlockingHttpClientBuilder {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            inner:        reqwest::blocking::Client::builder(),
-            proxy_policy: None,
-        }
-    }
-
-    #[must_use]
-    pub fn proxy_policy(mut self, proxy_policy: ProxyPolicy) -> Self {
-        self.proxy_policy = Some(proxy_policy);
-        self
-    }
-
-    #[must_use]
-    pub fn no_proxy(mut self) -> Self {
-        self.inner = self.inner.no_proxy();
-        self
-    }
-
-    #[must_use]
-    pub fn proxy(mut self, proxy: Proxy) -> Self {
-        self.inner = self.inner.proxy(proxy);
-        self
-    }
-
-    #[must_use]
-    pub fn user_agent(mut self, value: impl Into<String>) -> Self {
-        self.inner = self.inner.user_agent(value.into());
-        self
-    }
-
-    #[must_use]
-    pub fn default_headers(mut self, headers: HeaderMap) -> Self {
-        self.inner = self.inner.default_headers(headers);
-        self
-    }
-
-    #[must_use]
-    pub fn connect_timeout(mut self, timeout: Duration) -> Self {
-        self.inner = self.inner.connect_timeout(timeout);
-        self
-    }
-
-    #[must_use]
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.inner = self.inner.timeout(timeout);
-        self
-    }
-
-    #[must_use]
-    pub fn use_rustls_tls(mut self) -> Self {
-        self.inner = self.inner.use_rustls_tls();
-        self
-    }
-
-    #[must_use]
-    pub fn danger_accept_invalid_certs(mut self, accept_invalid_certs: bool) -> Self {
-        self.inner = self.inner.danger_accept_invalid_certs(accept_invalid_certs);
-        self
-    }
-
-    #[must_use]
-    pub fn add_root_certificate(mut self, cert: Certificate) -> Self {
-        self.inner = self.inner.add_root_certificate(cert);
-        self
-    }
-
-    #[must_use]
-    pub fn identity(mut self, identity: Identity) -> Self {
-        self.inner = self.inner.identity(identity);
-        self
-    }
-
-    #[cfg(unix)]
-    #[must_use]
-    pub fn unix_socket<P>(mut self, path: P) -> Self
-    where
-        P: AsRef<Path>,
-    {
-        self.inner = self.inner.unix_socket(path.as_ref());
-        self
-    }
-
-    pub fn build(self) -> Result<BlockingHttpClient, HttpClientBuildError> {
-        let proxy_policy = ProxyPolicy::resolve(self.proxy_policy)?;
-        let inner = match proxy_policy {
-            ProxyPolicy::System => self.inner,
-            ProxyPolicy::Disabled => self.inner.no_proxy(),
-        };
-        inner.build().map_err(Into::into)
-    }
 }
 
 pub fn blocking_http_client() -> Result<BlockingHttpClient, HttpClientBuildError> {

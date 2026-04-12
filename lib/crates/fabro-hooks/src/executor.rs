@@ -437,7 +437,7 @@ impl HookExecutorImpl {
         .await
     }
 
-    /// Build a reqwest client for the given TLS mode.
+    /// Build an HTTP client for the given TLS mode.
     fn build_http_client(tls: TlsMode) -> fabro_http::HttpClient {
         let accept_invalid = matches!(tls, TlsMode::NoVerify | TlsMode::Off);
         #[cfg(test)]
@@ -446,14 +446,14 @@ impl HookExecutorImpl {
                 .danger_accept_invalid_certs(accept_invalid)
                 .no_proxy()
                 .build()
-                .unwrap_or_default()
+                .expect("hook HTTP client should build")
         }
         #[cfg(not(test))]
         {
             fabro_http::HttpClientBuilder::new()
                 .danger_accept_invalid_certs(accept_invalid)
                 .build()
-                .unwrap_or_default()
+                .expect("hook HTTP client should build")
         }
     }
 

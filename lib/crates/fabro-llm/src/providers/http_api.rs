@@ -25,14 +25,14 @@ impl HttpApi {
                 .connect_timeout(Duration::from_secs_f64(timeout.connect))
                 .no_proxy()
                 .build()
-                .unwrap_or_default()
+                .expect("LLM HTTP client should build")
         }
         #[cfg(not(test))]
         {
             fabro_http::HttpClientBuilder::new()
                 .connect_timeout(Duration::from_secs_f64(timeout.connect))
                 .build()
-                .unwrap_or_default()
+                .expect("LLM HTTP client should build")
         }
     }
 

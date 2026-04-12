@@ -1786,9 +1786,9 @@ version = "0.176.2"
 dependencies = [
  "anyhow",
  "fabro-config",
+ "fabro-http",
  "fabro-types",
  "futures",
- "reqwest 0.13.2",
  "rmcp",
  "serde",
  "serde_json",

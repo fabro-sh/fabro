@@ -1764,20 +1764,15 @@ async fn get_github_repo(
                 });
             }
             let client_ref = client.as_ref().expect("client initialized above");
-            let installed = match fabro_github::check_app_installed(
-                client_ref,
-                &jwt,
-                &owner,
-                &name,
-                &base_url,
-            )
-            .await
-            {
-                Ok(installed) => installed,
-                Err(err) => {
-                    return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response();
-                }
-            };
+            let installed =
+                match fabro_github::check_app_installed(client_ref, &jwt, &owner, &name, &base_url)
+                    .await
+                {
+                    Ok(installed) => installed,
+                    Err(err) => {
+                        return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response();
+                    }
+                };
 
             if !installed {
                 return (

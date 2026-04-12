@@ -19,6 +19,19 @@ use tokio::time::timeout;
 
 use crate::server::AppState;
 
+fn http_client_or_check(
+    name: &str,
+    status: CheckStatus,
+) -> Result<fabro_http::HttpClient, CheckResult> {
+    fabro_http::http_client().map_err(|err| CheckResult {
+        name: name.to_string(),
+        status,
+        summary: "client error".to_string(),
+        details: vec![CheckDetail::new(err.to_string())],
+        remediation: Some(err.to_string()),
+    })
+}
+
 #[derive(Debug, Serialize)]
 pub struct DiagnosticsReport {
     pub version:  String,
@@ -321,17 +334,9 @@ async fn check_github_app(state: &AppState) -> CheckResult {
             }
         };
 
-        let http = match fabro_http::http_client() {
+        let http = match http_client_or_check("GitHub CLI", CheckStatus::Error) {
             Ok(http) => http,
-            Err(err) => {
-                return CheckResult {
-                    name:        "GitHub CLI".to_string(),
-                    status:      CheckStatus::Error,
-                    summary:     "client error".to_string(),
-                    details:     vec![CheckDetail::new(err.to_string())],
-                    remediation: Some(err.to_string()),
-                };
-            }
+            Err(result) => return result,
         };
         let probe = timeout(
             Duration::from_secs(15),
@@ -472,17 +477,9 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         }
     };
 
-    let http = match fabro_http::http_client() {
+    let http = match http_client_or_check("GitHub App", CheckStatus::Error) {
         Ok(http) => http,
-        Err(err) => {
-            return CheckResult {
-                name:        "GitHub App".to_string(),
-                status:      CheckStatus::Error,
-                summary:     "client error".to_string(),
-                details:     vec![CheckDetail::new(err.to_string())],
-                remediation: Some(err.to_string()),
-            };
-        }
+        Err(result) => return result,
     };
     let auth_result = timeout(
         Duration::from_secs(15),
@@ -545,17 +542,9 @@ async fn check_brave_search(state: &AppState) -> CheckResult {
         };
     };
 
-    let http = match fabro_http::http_client() {
+    let http = match http_client_or_check("Brave Search", CheckStatus::Warning) {
         Ok(http) => http,
-        Err(err) => {
-            return CheckResult {
-                name:        "Brave Search".to_string(),
-                status:      CheckStatus::Warning,
-                summary:     "client error".to_string(),
-                details:     vec![CheckDetail::new(err.to_string())],
-                remediation: Some(err.to_string()),
-            };
-        }
+        Err(result) => return result,
     };
 
     let probe = timeout(Duration::from_secs(15), async move {
