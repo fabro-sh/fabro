@@ -85,6 +85,11 @@ impl ServerState {
     pub fn log_path(&self) -> PathBuf {
         self.root.join("logs").join("server.log")
     }
+
+    #[must_use]
+    pub fn env_path(&self) -> PathBuf {
+        self.root.join("server.env")
+    }
 }
 
 impl RunScratch {
@@ -169,6 +174,10 @@ mod tests {
         assert_eq!(
             storage.server_state().log_path(),
             std::path::Path::new("/tmp/fabro-data/logs/server.log")
+        );
+        assert_eq!(
+            storage.server_state().env_path(),
+            std::path::Path::new("/tmp/fabro-data/server.env")
         );
     }
 

@@ -15,9 +15,10 @@ use fabro_api::types::{CreateSecretRequest, SecretType as ApiSecretType};
 use fabro_config::user::SETTINGS_CONFIG_FILENAME;
 use fabro_config::{Storage, legacy_env};
 use fabro_model::Provider;
-use fabro_server::secret_store::{SecretStore, SecretType};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
+// Bootstrap-only direct vault writes for `fabro install` when no local server is running.
+use fabro_vault::{SecretType, Vault};
 use rand::Rng;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
@@ -690,7 +691,7 @@ async fn setup_github_app(
     Ok(env_pairs)
 }
 
-async fn persist_install_secrets(
+async fn persist_vault_secrets(
     storage_dir: &Path,
     secrets: &[(String, String)],
     server_was_running: bool,
@@ -716,11 +717,33 @@ async fn persist_install_secrets(
         return Ok(());
     }
 
-    let mut store = SecretStore::load(Storage::new(storage_dir).secrets_path())?;
+    let mut store = Vault::load(Storage::new(storage_dir).secrets_path())?;
     for (name, value) in secrets {
         store.set(name, value, SecretType::Environment, None)?;
     }
     Ok(())
+}
+
+fn persist_server_env_secrets(storage_dir: &Path, secrets: &[(String, String)]) -> Result<()> {
+    if secrets.is_empty() {
+        return Ok(());
+    }
+
+    fabro_config::envfile::merge_env_file(
+        &Storage::new(storage_dir).server_state().env_path(),
+        secrets.iter().cloned(),
+    )?;
+    Ok(())
+}
+
+async fn persist_install_outputs(
+    storage_dir: &Path,
+    server_env_secrets: &[(String, String)],
+    vault_secrets: &[(String, String)],
+    server_was_running: bool,
+) -> Result<()> {
+    persist_server_env_secrets(storage_dir, server_env_secrets)?;
+    persist_vault_secrets(storage_dir, vault_secrets, server_was_running).await
 }
 
 pub(crate) async fn run_install(
@@ -760,7 +783,7 @@ pub(crate) async fn run_install(
         if env_path.exists() {
             fabro_util::printerr!(
                 printer,
-                "  Warning: {} is no longer read by fabro server. This install will persist credentials in the server secret store instead.",
+                "  Warning: {} is no longer read by fabro server. This install will persist runtime secrets in server.env and workflow-visible credentials in the vault instead.",
                 env_path.display()
             );
             fabro_util::printerr!(printer, "");
@@ -818,7 +841,8 @@ pub(crate) async fn run_install(
     fabro_util::printerr!(printer, "  {}", s.dim.apply_to("──────────────────────"));
     fabro_util::printerr!(printer, "");
 
-    let mut secret_pairs: Vec<(String, String)> = Vec::new();
+    let mut vault_pairs: Vec<(String, String)> = Vec::new();
+    let mut server_env_pairs: Vec<(String, String)> = Vec::new();
     let mut configured_providers: Vec<Provider> = Vec::new();
 
     let codex_detected = detect_binary_on_path("codex").await;
@@ -836,7 +860,7 @@ pub(crate) async fn run_install(
 
         if use_oauth {
             let pairs = run_openai_oauth_or_api_key(&s, printer).await?;
-            secret_pairs.extend(pairs);
+            vault_pairs.extend(pairs);
             configured_providers.push(Provider::OpenAi);
             openai_via_oauth = true;
         }
@@ -859,7 +883,7 @@ pub(crate) async fn run_install(
         let first_provider = primary_providers[primary_idx];
         {
             let (env_var, key) = prompt_and_validate_key(first_provider, &s, printer).await?;
-            secret_pairs.push((env_var, key));
+            vault_pairs.push((env_var, key));
             configured_providers.push(first_provider);
         }
     }
@@ -893,7 +917,7 @@ pub(crate) async fn run_install(
         for idx in selected_indices {
             let provider = remaining_providers[idx];
             let (env_var, key) = prompt_and_validate_key(provider, &s, printer).await?;
-            secret_pairs.push((env_var, key));
+            vault_pairs.push((env_var, key));
         }
     }
     fabro_util::printerr!(printer, "");
@@ -929,7 +953,7 @@ pub(crate) async fn run_install(
                 write_github_cli_settings(&mut doc)?;
                 std::fs::write(&user_toml_path, toml::to_string_pretty(&doc)?)?;
                 fabro_util::printerr!(printer, "  {} GitHub CLI configured", s.green.apply_to("✔"));
-                secret_pairs.push(("GITHUB_CLI_TOKEN".to_string(), token));
+                vault_pairs.push(("GITHUB_CLI_TOKEN".to_string(), token));
             }
             1 => {
                 let (owner, username) = prompt_github_app_owner(&s).await?;
@@ -961,7 +985,7 @@ pub(crate) async fn run_install(
                     s.green.apply_to("✔"),
                     slug
                 );
-                secret_pairs.extend(github_env_pairs);
+                server_env_pairs.extend(github_env_pairs);
             }
             _ => unreachable!("prompt_select returned an out-of-range index"),
         }
@@ -1044,12 +1068,12 @@ pub(crate) async fn run_install(
         let jwt_private_b64 = BASE64_STANDARD.encode(jwt_private_pem.as_bytes());
         let jwt_public_b64 = BASE64_STANDARD.encode(jwt_public_pem.as_bytes());
 
-        let server_env_pairs = vec![
+        let generated_server_env_pairs = vec![
             ("FABRO_JWT_PRIVATE_KEY".to_string(), jwt_private_b64),
             ("FABRO_JWT_PUBLIC_KEY".to_string(), jwt_public_b64),
             ("SESSION_SECRET".to_string(), session_secret),
         ];
-        secret_pairs.extend(server_env_pairs);
+        server_env_pairs.extend(generated_server_env_pairs);
         fabro_util::printerr!(printer, "");
 
         fabro_util::printerr!(printer, "  To start Fabro, run these commands:");
@@ -1058,18 +1082,34 @@ pub(crate) async fn run_install(
         fabro_util::printerr!(printer, "");
     }
 
-    persist_install_secrets(&storage_dir, &secret_pairs, server_was_running).await?;
+    persist_install_outputs(
+        &storage_dir,
+        &server_env_pairs,
+        &vault_pairs,
+        server_was_running,
+    )
+    .await?;
     fabro_util::printerr!(
         printer,
-        "  {} Saved {} secrets to {}",
+        "  {} Saved {} runtime secrets to {}",
         s.green.apply_to("✔"),
-        secret_pairs.len(),
+        server_env_pairs.len(),
+        Storage::new(&storage_dir)
+            .server_state()
+            .env_path()
+            .display()
+    );
+    fabro_util::printerr!(
+        printer,
+        "  {} Saved {} workflow-visible secrets to {}",
+        s.green.apply_to("✔"),
+        vault_pairs.len(),
         Storage::new(&storage_dir).secrets_path().display()
     );
     if server_was_running {
         fabro_util::printerr!(
             printer,
-            "  Warning: the local fabro server was already running. Restart it to pick up startup-time features that only initialize at boot."
+            "  Warning: the local fabro server was already running. Restart it to pick up the new server.env values."
         );
     }
     fabro_util::printerr!(printer, "");
@@ -1481,5 +1521,28 @@ client_id = "client-id"
             manifest["setup_url"],
             serde_json::json!("https://app.example.com/setup/callback"),
         );
+    }
+
+    #[tokio::test]
+    async fn persist_install_outputs_offline_splits_server_env_and_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let server_env_pairs = vec![
+            ("SESSION_SECRET".to_string(), "session".to_string()),
+            ("FABRO_JWT_PUBLIC_KEY".to_string(), "public-key".to_string()),
+        ];
+        let vault_pairs = vec![("OPENAI_API_KEY".to_string(), "openai-key".to_string())];
+
+        persist_install_outputs(dir.path(), &server_env_pairs, &vault_pairs, false)
+            .await
+            .unwrap();
+
+        let server_env =
+            std::fs::read_to_string(Storage::new(dir.path()).server_state().env_path()).unwrap();
+        assert!(server_env.contains("SESSION_SECRET=session"));
+        assert!(server_env.contains("FABRO_JWT_PUBLIC_KEY=public-key"));
+
+        let vault = Vault::load(Storage::new(dir.path()).secrets_path()).unwrap();
+        assert_eq!(vault.get("OPENAI_API_KEY"), Some("openai-key"));
+        assert_eq!(vault.get("SESSION_SECRET"), None);
     }
 }

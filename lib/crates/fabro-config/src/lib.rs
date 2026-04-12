@@ -1,6 +1,7 @@
 extern crate self as fabro_config;
 
 pub mod effective_settings;
+pub mod envfile;
 pub mod error;
 pub mod home;
 pub mod legacy_env;

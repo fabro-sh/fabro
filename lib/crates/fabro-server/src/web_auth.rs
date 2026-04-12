@@ -6,15 +6,18 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use cookie::time::Duration;
 use cookie::{Cookie, CookieJar, Expiration, Key, SameSite};
+use fabro_config::Storage;
 use fabro_types::settings::{InterpString, SettingsLayer};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
-use crate::secret_store::SecretType;
 use crate::server::AppState;
+use crate::server_secrets::ServerSecrets;
 
 pub const SESSION_COOKIE_NAME: &str = "__fabro_session";
 const OAUTH_STATE_COOKIE_NAME: &str = "fabro_oauth_state";
@@ -269,7 +272,7 @@ async fn callback_github(
             );
         }
     };
-    let Some(client_secret) = state.secret_or_env("GITHUB_APP_CLIENT_SECRET") else {
+    let Some(client_secret) = state.server_secret("GITHUB_APP_CLIENT_SECRET") else {
         error!("OAuth callback failed: GITHUB_APP_CLIENT_SECRET not configured");
         return json_response(
             StatusCode::CONFLICT,
@@ -643,32 +646,41 @@ async fn setup_register(
         );
     }
 
-    let session_secret = hex::encode(rand::random::<[u8; 32]>());
     let mut secret_updates = vec![
-        ("SESSION_SECRET", session_secret),
         ("GITHUB_APP_CLIENT_SECRET", data.client_secret.clone()),
-        ("GITHUB_APP_PRIVATE_KEY", data.pem.clone()),
+        (
+            "GITHUB_APP_PRIVATE_KEY",
+            BASE64_STANDARD.encode(data.pem.as_bytes()),
+        ),
     ];
     if let Some(ref webhook_secret) = data.webhook_secret {
         secret_updates.push(("GITHUB_APP_WEBHOOK_SECRET", webhook_secret.clone()));
     }
 
-    {
-        let mut store = state.secret_store.write().await;
-        for (name, value) in secret_updates {
-            if let Err(err) = store.set(name, &value, SecretType::Environment, None) {
-                error!(error = %err, secret = name, "Setup register failed: could not save secret");
-                return json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({"error": format!("Failed to save secret {name}: {err}")}),
-                );
-            }
+    let server_env_path = Storage::new(state.server_storage_dir())
+        .server_state()
+        .env_path();
+    let mut server_secrets = match ServerSecrets::load(server_env_path.clone()) {
+        Ok(server_secrets) => server_secrets,
+        Err(err) => {
+            error!(error = %err, path = %server_env_path.display(), "Setup register failed: could not load server env");
+            return json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": format!("Failed to load server env: {err}")}),
+            );
         }
+    };
+    if let Err(err) = server_secrets.persist_updates(secret_updates) {
+        error!(error = %err, path = %server_env_path.display(), "Setup register failed: could not write server env");
+        return json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({"error": format!("Failed to write server env: {err}")}),
+        );
     }
 
     // Re-parse the freshly-written settings file and swap it into the
-    // in-memory state so subsequent OAuth requests see the new GitHub
-    // App credentials without a server restart.
+    // in-memory state so the non-secret GitHub App config becomes visible
+    // immediately. Secret material remains restart-bound through server.env.
     match state.reload_settings_from_disk() {
         Ok(()) => {}
         Err(err) => {
@@ -681,7 +693,7 @@ async fn setup_register(
     }
 
     info!(slug = %data.slug, app_id = %data.id, "GitHub App registered successfully");
-    Json(json!({"ok": true})).into_response()
+    Json(json!({"ok": true, "restart_required": true})).into_response()
 }
 
 /// Walk dotted `path` into `doc`, creating missing intermediate tables,

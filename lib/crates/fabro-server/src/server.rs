@@ -73,6 +73,7 @@ use fabro_types::{
 };
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::version::FABRO_VERSION;
+use fabro_vault::{Error as VaultError, SecretType, Vault};
 use fabro_workflow::Error as WorkflowError;
 use fabro_workflow::artifact_upload::ArtifactSink;
 use fabro_workflow::event::{self as workflow_event, Emitter};
@@ -112,7 +113,7 @@ use crate::error::ApiError;
 use crate::jwt_auth::{
     AuthMode, AuthenticatedService, AuthenticatedSubject, authenticate_service_parts,
 };
-use crate::secret_store::{SecretStore, SecretStoreError, SecretType as StoreSecretType};
+use crate::server_secrets::{ProviderCredentials, ServerSecrets};
 use crate::{demo, diagnostics, run_manifest, settings_view, static_files, web_auth};
 
 pub fn default_page_limit() -> u32 {
@@ -516,15 +517,17 @@ pub struct AppState {
     scheduler_notify:       Notify,
     global_event_tx:        broadcast::Sender<EventEnvelope>,
 
-    pub(crate) secret_store:      AsyncRwLock<SecretStore>,
-    pub(crate) settings:          Arc<RwLock<SettingsLayer>>,
-    pub(crate) server_settings:   RwLock<Arc<ResolvedServerSettings>>,
-    pub(crate) config_path:       PathBuf,
-    pub(crate) local_daemon_mode: bool,
-    shutting_down:                AtomicBool,
-    registry_factory_override:    Option<Box<RegistryFactoryOverride>>,
-    slack_service:                Option<Arc<SlackService>>,
-    slack_started:                AtomicBool,
+    pub(crate) vault:                Arc<AsyncRwLock<Vault>>,
+    pub(crate) server_secrets:       ServerSecrets,
+    pub(crate) provider_credentials: ProviderCredentials,
+    pub(crate) settings:             Arc<RwLock<SettingsLayer>>,
+    pub(crate) server_settings:      RwLock<Arc<ResolvedServerSettings>>,
+    pub(crate) config_path:          PathBuf,
+    pub(crate) local_daemon_mode:    bool,
+    shutting_down:                   AtomicBool,
+    registry_factory_override:       Option<Box<RegistryFactoryOverride>>,
+    slack_service:                   Option<Arc<SlackService>>,
+    slack_started:                   AtomicBool,
 }
 
 fn nonzero_i64(value: i64) -> Option<i64> {
@@ -594,34 +597,24 @@ impl AppState {
     }
 
     pub(crate) async fn build_llm_client(&self) -> Result<LlmClient, String> {
-        let snapshot = self.secret_store.read().await.snapshot();
-        LlmClient::from_lookup(|name| {
-            snapshot
-                .get(name)
-                .cloned()
-                .or_else(|| std::env::var(name).ok())
-        })
-        .await
-        .map_err(|err| err.to_string())
+        self.provider_credentials.build_llm_client().await
     }
 
-    pub(crate) fn secret_or_env(&self, name: &str) -> Option<String> {
-        self.secret_store
-            .try_read()
-            .ok()
-            .and_then(|store| store.get(name).map(str::to_string))
-            .or_else(|| std::env::var(name).ok())
+    pub(crate) fn vault_or_env(&self, name: &str) -> Option<String> {
+        std::env::var(name).ok().or_else(|| {
+            self.vault
+                .try_read()
+                .ok()
+                .and_then(|vault| vault.get(name).map(str::to_string))
+        })
+    }
+
+    pub(crate) fn server_secret(&self, name: &str) -> Option<String> {
+        self.server_secrets.get(name)
     }
 
     pub(crate) async fn session_key(&self) -> Option<Key> {
-        let secret = self
-            .secret_store
-            .read()
-            .await
-            .get("SESSION_SECRET")
-            .map(str::to_string);
-        secret
-            .or_else(|| std::env::var("SESSION_SECRET").ok())
+        self.server_secret("SESSION_SECRET")
             .map(|value| Key::derive_from(value.as_bytes()))
     }
 
@@ -634,13 +627,7 @@ impl AppState {
                 let Some(app_id) = settings.app_id.as_ref().map(InterpString::as_source) else {
                     return Ok(None);
                 };
-                let raw = self
-                    .secret_store
-                    .read()
-                    .await
-                    .get("GITHUB_APP_PRIVATE_KEY")
-                    .map(str::to_string)
-                    .or_else(|| std::env::var("GITHUB_APP_PRIVATE_KEY").ok());
+                let raw = self.server_secret("GITHUB_APP_PRIVATE_KEY");
                 let Some(raw) = raw else {
                     return Ok(None);
                 };
@@ -654,10 +641,8 @@ impl AppState {
             }
             GithubIntegrationStrategy::GhCli => {
                 let token = self
-                    .secret_store
-                    .read()
-                    .await
-                    .get("GITHUB_CLI_TOKEN")
+                    .vault_or_env("GITHUB_CLI_TOKEN")
+                    .as_deref()
                     .map(str::trim)
                     .filter(|token| !token.is_empty())
                     .map(str::to_string);
@@ -1622,14 +1607,14 @@ where
 }
 
 async fn list_secrets(_auth: AuthenticatedService, State(state): State<Arc<AppState>>) -> Response {
-    let data = state.secret_store.read().await.list();
+    let data = state.vault.read().await.list();
     (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response()
 }
 
-fn secret_type_from_api(secret_type: ApiSecretType) -> StoreSecretType {
+fn secret_type_from_api(secret_type: ApiSecretType) -> SecretType {
     match secret_type {
-        ApiSecretType::Environment => StoreSecretType::Environment,
-        ApiSecretType::File => StoreSecretType::File,
+        ApiSecretType::Environment => SecretType::Environment,
+        ApiSecretType::File => SecretType::File,
     }
 }
 
@@ -1644,23 +1629,23 @@ async fn create_secret(
     let description = body.description;
     let state_for_write = Arc::clone(&state);
     let result = spawn_blocking(move || {
-        let mut store = state_for_write.secret_store.blocking_write();
-        store.set(&name, &value, secret_type, description.as_deref())
+        let mut vault = state_for_write.vault.blocking_write();
+        vault.set(&name, &value, secret_type, description.as_deref())
     })
     .await;
 
     match result {
         Ok(Ok(meta)) => (StatusCode::OK, Json(meta)).into_response(),
-        Ok(Err(SecretStoreError::InvalidName(_))) => {
+        Ok(Err(VaultError::InvalidName(_))) => {
             ApiError::bad_request("invalid secret name").into_response()
         }
-        Ok(Err(SecretStoreError::Io(err))) => {
+        Ok(Err(VaultError::Io(err))) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
-        Ok(Err(SecretStoreError::Serde(err))) => {
+        Ok(Err(VaultError::Serde(err))) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
-        Ok(Err(SecretStoreError::NotFound(_))) => ApiError::new(
+        Ok(Err(VaultError::NotFound(_))) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "secret unexpectedly missing",
         )
@@ -1681,24 +1666,24 @@ async fn delete_secret_by_name(
     let name = body.name;
     let state_for_write = Arc::clone(&state);
     let result = spawn_blocking(move || {
-        let mut store = state_for_write.secret_store.blocking_write();
-        store.remove(&name)
+        let mut vault = state_for_write.vault.blocking_write();
+        vault.remove(&name)
     })
     .await;
 
     match result {
         Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
-        Ok(Err(SecretStoreError::InvalidName(_))) => {
+        Ok(Err(VaultError::InvalidName(_))) => {
             ApiError::bad_request("invalid secret name").into_response()
         }
-        Ok(Err(SecretStoreError::NotFound(name))) => {
+        Ok(Err(VaultError::NotFound(name))) => {
             ApiError::new(StatusCode::NOT_FOUND, format!("secret not found: {name}"))
                 .into_response()
         }
-        Ok(Err(SecretStoreError::Io(err))) => {
+        Ok(Err(VaultError::Io(err))) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
-        Ok(Err(SecretStoreError::Serde(err))) => {
+        Ok(Err(VaultError::Serde(err))) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
         Err(err) => ApiError::new(
@@ -2199,11 +2184,17 @@ pub(crate) fn build_app_state_with_path(
     max_concurrent_runs: usize,
     store: Arc<Database>,
     artifact_store: ArtifactStore,
-    secret_store_path: PathBuf,
+    vault_path: PathBuf,
     config_path: PathBuf,
     local_daemon_mode: bool,
 ) -> anyhow::Result<Arc<AppState>> {
-    let secret_store = SecretStore::load(secret_store_path)?;
+    let vault = Arc::new(AsyncRwLock::new(Vault::load(vault_path.clone())?));
+    let server_env_path = vault_path.parent().map_or_else(
+        || PathBuf::from("server.env"),
+        |parent| parent.join("server.env"),
+    );
+    let server_secrets = ServerSecrets::load(server_env_path)?;
+    let provider_credentials = ProviderCredentials::new(Arc::clone(&vault));
     let (global_event_tx, _) = broadcast::channel(4096);
     let resolved_server_settings = {
         let settings = settings.read().expect("settings lock poisoned");
@@ -2251,7 +2242,9 @@ pub(crate) fn build_app_state_with_path(
         max_concurrent_runs,
         scheduler_notify: Notify::new(),
         global_event_tx,
-        secret_store: AsyncRwLock::new(secret_store),
+        vault,
+        server_secrets,
+        provider_credentials,
         settings,
         server_settings: RwLock::new(resolved_server_settings),
         config_path,
@@ -6243,9 +6236,9 @@ mod tests {
         assert_eq!(body["type"], "file");
         assert_eq!(body["description"], "Test certificate");
 
-        let store = state.secret_store.read().await;
-        assert!(!store.snapshot().contains_key("/tmp/test.pem"));
-        assert_eq!(store.file_secrets(), vec![(
+        let vault = state.vault.read().await;
+        assert!(!vault.snapshot().contains_key("/tmp/test.pem"));
+        assert_eq!(vault.file_secrets(), vec![(
             "/tmp/test.pem".to_string(),
             "pem-data".to_string()
         )]);
@@ -6286,7 +6279,51 @@ mod tests {
 
         let delete_response = app.oneshot(delete_req).await.unwrap();
         assert_eq!(delete_response.status(), StatusCode::NO_CONTENT);
-        assert!(state.secret_store.read().await.list().is_empty());
+        assert!(state.vault.read().await.list().is_empty());
+    }
+
+    #[test]
+    fn server_secrets_resolve_process_env_before_server_env() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("server.env"),
+            "SESSION_SECRET=file-value\nGITHUB_APP_CLIENT_SECRET=file-client\n",
+        )
+        .unwrap();
+
+        let secrets =
+            ServerSecrets::with_env_lookup(dir.path().join("server.env"), |name| match name {
+                "SESSION_SECRET" => Some("env-value".to_string()),
+                _ => None,
+            })
+            .unwrap();
+
+        assert_eq!(secrets.get("SESSION_SECRET").as_deref(), Some("env-value"));
+        assert_eq!(
+            secrets.get("GITHUB_APP_CLIENT_SECRET").as_deref(),
+            Some("file-client")
+        );
+    }
+
+    #[test]
+    fn provider_credentials_resolve_process_env_before_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        vault
+            .set("OPENAI_API_KEY", "vault-key", SecretType::Environment, None)
+            .unwrap();
+
+        let provider_credentials =
+            ProviderCredentials::with_env_lookup(Arc::new(AsyncRwLock::new(vault)), |name| {
+                match name {
+                    "OPENAI_API_KEY" => Some("env-key".to_string()),
+                    _ => None,
+                }
+            });
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let resolved = runtime.block_on(provider_credentials.get("OPENAI_API_KEY"));
+        assert_eq!(resolved.as_deref(), Some("env-key"));
     }
 
     #[tokio::test]

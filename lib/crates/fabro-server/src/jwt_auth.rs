@@ -166,7 +166,7 @@ where
             anyhow!(
                 "Fabro server refuses to start: [server.auth.api.jwt] is enabled but \
                  FABRO_JWT_PUBLIC_KEY is not set. Provide an Ed25519 public key in PEM format \
-                 (or base64-encoded PEM) for JWT authentication."
+                 (or base64-encoded PEM) via process env or server.env for JWT authentication."
             )
         })?;
         let pem = decode_pem_env("FABRO_JWT_PUBLIC_KEY", &raw)?;
@@ -198,9 +198,9 @@ where
             "Fabro server refuses to start: no authentication strategies are configured.\n\
              \n\
              Configure at least one of the following in `[server.auth]`:\n\
-               - `[server.auth.api.jwt]` (requires `FABRO_JWT_PUBLIC_KEY` env)\n\
+               - `[server.auth.api.jwt]` (requires `FABRO_JWT_PUBLIC_KEY` in process env or server.env)\n\
                - `[server.auth.api.mtls]` (requires `[server.listen.tls]` cert/key/ca)\n\
-               - `SESSION_SECRET` env (enables cookie-based web auth)\n\
+               - `SESSION_SECRET` in process env or server.env (enables cookie-based web auth)\n\
              \n\
              Or set `{FABRO_LOCAL_NO_AUTH_ENV}=1` to explicitly opt in to \
              unauthenticated local daemon access."

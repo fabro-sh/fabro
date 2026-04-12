@@ -196,16 +196,16 @@ pub async fn run_all(state: &AppState) -> DiagnosticsReport {
 }
 
 async fn check_llm_providers(state: &AppState) -> CheckResult {
-    let configured: Vec<Provider> = Provider::ALL
-        .iter()
-        .copied()
-        .filter(|provider| {
-            provider
-                .api_key_env_vars()
-                .iter()
-                .any(|name| state.secret_or_env(name).is_some())
-        })
-        .collect();
+    let mut configured = Vec::new();
+    for provider in Provider::ALL {
+        if state
+            .provider_credentials
+            .has_any(provider.api_key_env_vars())
+            .await
+        {
+            configured.push(*provider);
+        }
+    }
 
     if configured.is_empty() {
         return CheckResult {
@@ -411,10 +411,10 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         .slug
         .as_ref()
         .map(InterpString::as_source);
-    let private_key_raw = state.secret_or_env("GITHUB_APP_PRIVATE_KEY");
+    let private_key_raw = state.server_secret("GITHUB_APP_PRIVATE_KEY");
     let client_id = settings.integrations.github.client_id.is_some();
-    let client_secret = state.secret_or_env("GITHUB_APP_CLIENT_SECRET").is_some();
-    let webhook_secret = state.secret_or_env("GITHUB_APP_WEBHOOK_SECRET").is_some();
+    let client_secret = state.server_secret("GITHUB_APP_CLIENT_SECRET").is_some();
+    let webhook_secret = state.server_secret("GITHUB_APP_WEBHOOK_SECRET").is_some();
 
     if app_id.is_none()
         && private_key_raw.is_none()
@@ -513,7 +513,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
 }
 
 fn check_sandbox(state: &AppState) -> CheckResult {
-    if state.secret_or_env("DAYTONA_API_KEY").is_some() {
+    if state.vault_or_env("DAYTONA_API_KEY").is_some() {
         CheckResult {
             name:        "Sandbox".to_string(),
             status:      CheckStatus::Pass,
@@ -533,7 +533,7 @@ fn check_sandbox(state: &AppState) -> CheckResult {
 }
 
 async fn check_brave_search(state: &AppState) -> CheckResult {
-    let Some(api_key) = state.secret_or_env("BRAVE_SEARCH_API_KEY") else {
+    let Some(api_key) = state.vault_or_env("BRAVE_SEARCH_API_KEY") else {
         return CheckResult {
             name:        "Brave Search".to_string(),
             status:      CheckStatus::Warning,
@@ -671,7 +671,7 @@ fn check_crypto(state: &AppState) -> CheckResult {
     }
 
     if has_jwt {
-        match state.secret_or_env("FABRO_JWT_PUBLIC_KEY") {
+        match state.server_secret("FABRO_JWT_PUBLIC_KEY") {
             Some(raw) => {
                 if let Err(err) = decode_pem_value("FABRO_JWT_PUBLIC_KEY", &raw).and_then(|pem| {
                     jsonwebtoken::DecodingKey::from_ed_pem(pem.as_bytes())
@@ -685,7 +685,7 @@ fn check_crypto(state: &AppState) -> CheckResult {
         }
     }
 
-    if let Some(raw) = state.secret_or_env("FABRO_JWT_PRIVATE_KEY") {
+    if let Some(raw) = state.server_secret("FABRO_JWT_PRIVATE_KEY") {
         if let Err(err) = decode_pem_value("FABRO_JWT_PRIVATE_KEY", &raw).and_then(|pem| {
             jsonwebtoken::EncodingKey::from_ed_pem(pem.as_bytes())
                 .map(|_| ())
@@ -695,7 +695,7 @@ fn check_crypto(state: &AppState) -> CheckResult {
         }
     }
 
-    if let Some(secret) = state.secret_or_env("SESSION_SECRET") {
+    if let Some(secret) = state.server_secret("SESSION_SECRET") {
         if let Err(err) = validate_session_secret(&secret) {
             errors.push(err);
         }

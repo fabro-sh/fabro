@@ -61,9 +61,8 @@ The rest of this page describes the `app` strategy, which is required for browse
 4. GitHub redirects back to Fabro, which automatically:
    - Exchanges the temporary code for permanent app credentials
    - Writes `app_id`, `client_id`, and `slug` to `~/.fabro/settings.toml`
-   - Stores `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` in the server secret store
-   - Generates a `SESSION_SECRET` for web app sessions
-   - Redirects you to the login page
+   - Stores `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` in `<data_dir>/server.env`
+   - Marks the change as restart-bound so the server must be restarted before login
 
 5. **Install the app** on your GitHub account or organization. Go to `https://github.com/settings/apps/<your-app-slug>/installations` and install it on the repositories Fabro should access.
 
@@ -81,9 +80,9 @@ The GitHub App check verifies five fields:
 |---|---|
 | `server.integrations.github.app_id` | `~/.fabro/settings.toml` |
 | `server.integrations.github.client_id` | `~/.fabro/settings.toml` |
-| `GITHUB_APP_CLIENT_SECRET` | Server secret store |
-| `GITHUB_APP_WEBHOOK_SECRET` | Server secret store |
-| `GITHUB_APP_PRIVATE_KEY` | Server secret store |
+| `GITHUB_APP_CLIENT_SECRET` | `<data_dir>/server.env` |
+| `GITHUB_APP_WEBHOOK_SECRET` | `<data_dir>/server.env` |
+| `GITHUB_APP_PRIVATE_KEY` | `<data_dir>/server.env` |
 
 If all five are set, the check passes. If none are set, it warns (GitHub integration is optional). If some are set but others are missing, it errors with the specific missing fields.
 
@@ -106,9 +105,9 @@ slug = "fabro-a3f2"
 | `client_id` | OAuth Client ID for the app |
 | `slug` | App slug, used for linking to the GitHub App settings page |
 
-### Server secret store
+### `server.env`
 
-Fabro stores the GitHub App secrets in the server secret store under these keys:
+Fabro stores the GitHub App secrets in `<data_dir>/server.env` under these keys:
 
 - `GITHUB_APP_CLIENT_SECRET`
 - `GITHUB_APP_WEBHOOK_SECRET`

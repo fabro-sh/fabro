@@ -29,6 +29,7 @@ strsim = "0.11"
 toml.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+ulid.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

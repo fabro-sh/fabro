@@ -14,6 +14,7 @@ use fabro_types::settings::{
     ServerSettings as ResolvedServerSettings, SettingsLayer,
 };
 use fabro_util::terminal::Styles;
+use fabro_vault::Vault;
 use object_store::ObjectStore;
 use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
@@ -26,11 +27,11 @@ use tracing::{error, info, warn};
 use crate::bind::{self, Bind, BindRequest};
 use crate::github_webhooks::WebhookManager;
 use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode_with_lookup};
-use crate::secret_store::SecretStore;
 use crate::server::{
     RouterOptions, build_app_state_with_path, build_router_with_options,
     reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
 };
+use crate::server_secrets::ServerSecrets;
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls_with_shutdown};
 
 const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
@@ -265,19 +266,19 @@ where
         None => resolve_interp_path(&disk_server_settings.storage.root)?,
     };
     let storage = Storage::new(&data_dir);
-    let secret_store_path = storage.secrets_path();
-    let secret_store = SecretStore::load(secret_store_path.clone())?;
-    let secret_snapshot = secret_store.snapshot();
+    let vault_path = storage.secrets_path();
+    let vault = Vault::load(vault_path.clone())?;
+    let vault_snapshot = vault.snapshot();
+    let server_secrets = ServerSecrets::load(storage.server_state().env_path())?;
 
     // Resolve dry-run mode (same pattern as run.rs)
     let dry_run_mode = if args.dry_run {
         true
     } else {
         match LlmClient::from_lookup(|name| {
-            secret_snapshot
-                .get(name)
-                .cloned()
-                .or_else(|| std::env::var(name).ok())
+            std::env::var(name)
+                .ok()
+                .or_else(|| vault_snapshot.get(name).cloned())
         })
         .await
         {
@@ -306,10 +307,7 @@ where
     std::fs::create_dir_all(&data_dir)?;
     let (auth_mode, client_auth, max_concurrent_runs) = {
         let auth_mode = resolve_auth_mode_with_lookup(&resolved_server_settings, |name| {
-            secret_snapshot
-                .get(name)
-                .cloned()
-                .or_else(|| std::env::var(name).ok())
+            server_secrets.get(name)
         })?;
         let tls_present = matches!(
             resolved_server_settings.listen,
@@ -339,7 +337,7 @@ where
         max_concurrent_runs,
         store,
         artifact_store,
-        secret_store_path,
+        vault_path,
         active_config_path,
         matches!(&auth_mode, AuthMode::Disabled),
     )?;
@@ -376,10 +374,7 @@ where
                 .transpose()?;
             match webhook_app_id {
                 Some(app_id) => {
-                    let secret = secret_snapshot
-                        .get("GITHUB_APP_WEBHOOK_SECRET")
-                        .cloned()
-                        .or_else(|| std::env::var("GITHUB_APP_WEBHOOK_SECRET").ok());
+                    let secret = server_secrets.get("GITHUB_APP_WEBHOOK_SECRET");
                     let github_app = state
                         .github_credentials(&resolved_server_settings.integrations.github)
                         .await

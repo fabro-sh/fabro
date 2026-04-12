@@ -1318,8 +1318,8 @@ paths:
     get:
       operationId: listSecrets
       tags: [Secrets]
-      summary: List stored secrets
-      description: Returns stored secret names and timestamps. Secret values are never exposed.
+      summary: List vault secrets
+      description: Returns workflow-visible vault secret names and timestamps. Secret values are never exposed.
       responses:
         "200":
           description: Secret metadata list
@@ -1330,7 +1330,8 @@ paths:
     post:
       operationId: createSecret
       tags: [Secrets]
-      summary: Store or update a secret
+      summary: Store or update a vault secret
+      description: Stores a secret in the workflow-visible vault. Anything stored here may be used by workflows.
       requestBody:
         required: true
         content:
@@ -1353,7 +1354,7 @@ paths:
     delete:
       operationId: deleteSecretByName
       tags: [Secrets]
-      summary: Delete a stored secret
+      summary: Delete a vault secret
       requestBody:
         required: true
         content:

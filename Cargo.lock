@@ -1584,6 +1584,7 @@ dependencies = [
  "fabro-types",
  "fabro-util",
  "fabro-validate",
+ "fabro-vault",
  "fabro-workflow",
  "futures",
  "git2",
@@ -1636,6 +1637,7 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
  "tracing",
+ "ulid",
 ]
 
 [[package]]
@@ -1913,6 +1915,7 @@ dependencies = [
  "fabro-types",
  "fabro-util",
  "fabro-validate",
+ "fabro-vault",
  "fabro-workflow",
  "futures-util",
  "hex",
@@ -2119,6 +2122,17 @@ dependencies = [
  "fabro-model",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "fabro-vault"
+version = "0.176.2"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ulid",
 ]
 
 [[package]]

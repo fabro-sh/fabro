@@ -162,7 +162,7 @@ Customize the git author identity used for checkpoint commits. When not set, def
 
 ### `[server.integrations.github]` section
 
-Configure GitHub integration auth. `strategy = "gh_cli"` is the default and uses a stored `GITHUB_CLI_TOKEN` from the server secret store. `strategy = "app"` enables the GitHub App flow, browser OAuth, and webhooks.
+Configure GitHub integration auth. `strategy = "gh_cli"` is the default and uses a stored `GITHUB_CLI_TOKEN` from the vault. `strategy = "app"` enables the GitHub App flow, browser OAuth, and webhooks.
 
 ```toml title="settings.toml"
 [server.integrations.github]
@@ -206,9 +206,16 @@ The same `[features]` section can be set in `.fabro/project.toml` (project-level
 
 ## Secrets and environment variables
 
-Fabro stores server-managed credentials in `<data_dir>/secrets.json` and also honors relevant environment variables from the server process environment as a fallback. Fabro no longer auto-loads `.env` files. Provider API keys are required for the models you want to use; everything else is optional.
+Fabro splits secrets into two scopes:
+
+- Server runtime secrets live in `<data_dir>/server.env` and resolve with precedence `process env -> server.env`.
+- Workflow-visible secrets live in `<data_dir>/secrets.json` (the vault). Anything stored in the vault may be used by workflows.
+
+Fabro no longer auto-loads `.env` files. Provider API keys are required for the models you want to use; everything else is optional.
 
 ### LLM provider keys
+
+Fabro's built-in provider access resolves these from `process env -> vault`.
 
 | Variable | Provider |
 |---|---|
@@ -229,6 +236,8 @@ Fabro stores server-managed credentials in `<data_dir>/secrets.json` and also ho
 
 ### Server authentication
 
+Fabro resolves these from `process env -> server.env`.
+
 | Variable | Description |
 |---|---|
 | `FABRO_JWT_PRIVATE_KEY` | Ed25519 private key (base64-encoded PEM) for JWT signing |
@@ -242,6 +251,8 @@ Fabro stores server-managed credentials in `<data_dir>/secrets.json` and also ho
 | `GITHUB_CLI_TOKEN` | Token captured from `gh auth token` and stored by `fabro install` when `strategy = "gh_cli"` |
 
 ### GitHub App extras (optional)
+
+Fabro resolves these from `process env -> server.env`.
 
 | Variable | Description |
 |---|---|

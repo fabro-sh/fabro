@@ -1,9 +1,8 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use fabro_vault::Error as VaultError;
 use serde::Serialize;
-
-use crate::secret_store::SecretStoreError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -23,7 +22,7 @@ pub enum Error {
     Config(#[from] fabro_config::Error),
 
     #[error(transparent)]
-    SecretStore(#[from] SecretStoreError),
+    Vault(#[from] VaultError),
 
     #[error("bad request: {0}")]
     BadRequest(String),
@@ -113,9 +112,7 @@ impl From<Error> for ApiError {
             Error::Llm(err) => Self::new(StatusCode::BAD_GATEWAY, err.to_string()),
             Error::Store(err) => Self::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
             Error::Config(err) => Self::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
-            Error::SecretStore(err) => {
-                Self::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-            }
+            Error::Vault(err) => Self::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
             Error::Internal(msg) => Self::new(StatusCode::INTERNAL_SERVER_ERROR, msg),
         }
     }

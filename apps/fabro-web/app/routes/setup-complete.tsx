@@ -7,6 +7,7 @@ export default function SetupComplete() {
   const code = useMemo(() => new URLSearchParams(window.location.search).get("code"), []);
   const [state, setState] = useState<SetupState>(code ? "registering" : "done");
   const [error, setError] = useState<string | null>(null);
+  const [restartRequired, setRestartRequired] = useState(false);
   const registeredRef = useRef(false);
 
   useEffect(() => {
@@ -33,6 +34,8 @@ export default function SetupComplete() {
         return;
       }
 
+      const payload = await response.json().catch(() => ({}));
+      setRestartRequired(payload.restart_required === true);
       setState("done");
       window.history.replaceState({}, "", "/setup/complete");
     }
@@ -59,14 +62,25 @@ export default function SetupComplete() {
             Setup complete
           </h1>
           <p className="mt-2 text-center text-sm text-fg-3">
-            Your GitHub App has been registered and configured.
+            {restartRequired
+              ? "Your GitHub App is configured. Restart the Fabro server before attempting login."
+              : "Your GitHub App has been registered and configured."}
           </p>
-          <a
-            href="/login"
-            className="mt-6 flex w-full items-center justify-center rounded-lg bg-teal-500 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-300"
-          >
-            Continue to sign in
-          </a>
+          {restartRequired ? (
+            <a
+              href="/setup"
+              className="mt-6 flex w-full items-center justify-center rounded-lg border border-line-strong px-4 py-2.5 text-sm font-medium text-fg-2 transition-colors hover:bg-overlay-strong"
+            >
+              Back to setup
+            </a>
+          ) : (
+            <a
+              href="/login"
+              className="mt-6 flex w-full items-center justify-center rounded-lg bg-teal-500 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-300"
+            >
+              Continue to sign in
+            </a>
+          )}
         </>
       )}
 

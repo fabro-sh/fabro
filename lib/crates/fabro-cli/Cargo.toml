@@ -39,6 +39,7 @@ fabro-server = { path = "../fabro-server" }
 fabro-api = { path = "../fabro-api" }
 fabro-telemetry = { path = "../fabro-telemetry" }
 fabro-store = { path = "../fabro-store" }
+fabro-vault = { path = "../fabro-vault" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 fabro-http.workspace = true
