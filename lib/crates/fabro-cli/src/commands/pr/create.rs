@@ -71,7 +71,7 @@ pub(super) async fn create_command(
     let (owner, repo) = fabro_github::parse_github_owner_repo(&https_url)
         .map_err(|err| anyhow::anyhow!("{err}"))?;
 
-    let creds = super::load_github_credentials_required(printer)?;
+    let creds = super::load_github_credentials_required(printer).await?;
 
     let branch_found = fabro_github::branch_exists(
         &creds,

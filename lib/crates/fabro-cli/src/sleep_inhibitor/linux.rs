@@ -26,6 +26,10 @@ impl LinuxSleepInhibitor {
         cmd.spawn()
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Sleep inhibitor ownership is tied to a std::process::Child dropped synchronously with pre-exec hooks."
+    )]
     fn try_systemd_inhibit() -> Option<Self> {
         let mut cmd = Command::new("systemd-inhibit");
         cmd.args([
@@ -52,6 +56,10 @@ impl LinuxSleepInhibitor {
         }
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Sleep inhibitor ownership is tied to a std::process::Child dropped synchronously with pre-exec hooks."
+    )]
     fn try_gnome_inhibit() -> Option<Self> {
         let mut cmd = Command::new("gnome-session-inhibit");
         cmd.args([

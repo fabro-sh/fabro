@@ -1,6 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde::{Deserialize, Serialize};
+use tokio::process::Command;
 
 pub const GITHUB_API_BASE_URL: &str = "https://api.github.com";
 
@@ -120,10 +121,11 @@ impl GitHubCredentials {
     }
 }
 
-pub fn gh_auth_token() -> Result<String, String> {
-    let output = std::process::Command::new("gh")
+pub async fn gh_auth_token() -> Result<String, String> {
+    let output = Command::new("gh")
         .args(["auth", "token"])
         .output()
+        .await
         .map_err(|err| format!("Failed to run `gh auth token`: {err}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();

@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::LazyLock;
 
 use anyhow::Result;
@@ -17,6 +16,7 @@ use fabro_util::terminal::Styles;
 use fabro_util::version::FABRO_VERSION;
 use regex::Regex;
 use semver::Version;
+use tokio::process::Command as TokioCommand;
 
 use crate::args::{DoctorArgs, GlobalArgs};
 use crate::command_context::CommandContext;
@@ -68,28 +68,29 @@ fn parse_version(re: &Regex, output: &str) -> Option<Version> {
     ))
 }
 
-pub(crate) fn probe_system_deps() -> Vec<ProbeOutcome> {
-    DEP_SPECS
-        .iter()
-        .map(|spec| {
-            let result = Command::new(spec.command[0])
-                .args(&spec.command[1..])
-                .output()
-                .ok();
+pub(crate) async fn probe_system_deps() -> Vec<ProbeOutcome> {
+    let mut outcomes = Vec::with_capacity(DEP_SPECS.len());
+    for spec in DEP_SPECS {
+        let result = TokioCommand::new(spec.command[0])
+            .args(&spec.command[1..])
+            .output()
+            .await
+            .ok();
 
-            match result {
-                None => ProbeOutcome::NotFound,
-                Some(output) if !output.status.success() => ProbeOutcome::Failed,
-                Some(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    let version = parse_version(spec.pattern, &stdout)
-                        .or_else(|| parse_version(spec.pattern, &stderr));
-                    ProbeOutcome::Ok { version }
-                }
+        let outcome = match result {
+            None => ProbeOutcome::NotFound,
+            Some(output) if !output.status.success() => ProbeOutcome::Failed,
+            Some(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let version = parse_version(spec.pattern, &stdout)
+                    .or_else(|| parse_version(spec.pattern, &stderr));
+                ProbeOutcome::Ok { version }
             }
-        })
-        .collect()
+        };
+        outcomes.push(outcome);
+    }
+    outcomes
 }
 
 fn dep_issue(name: &str, issue: &str, required: bool) -> (CheckStatus, String) {

@@ -75,7 +75,7 @@ pub(crate) async fn execute(
     spawn_worker_control_stream(Arc::clone(&interviewer), Arc::clone(&cancel_token))?;
     let run_control = RunControlState::new();
     install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
-    let github_app = maybe_build_github_credentials(&run_record.settings)?;
+    let github_app = maybe_build_github_credentials(&run_record.settings).await?;
     let services = StartServices {
         run_id,
         cancel_token: Some(Arc::clone(&cancel_token)),
@@ -470,7 +470,7 @@ fn update_worker_title_from_event(event: &RunEvent) {
     }
 }
 
-fn maybe_build_github_credentials(
+async fn maybe_build_github_credentials(
     settings: &SettingsLayer,
 ) -> Result<Option<fabro_github::GitHubCredentials>> {
     let resolved_run = fabro_config::resolve_run_from_file(settings).ok();
@@ -493,11 +493,12 @@ fn maybe_build_github_credentials(
         .map(InterpString::as_source);
 
     if required_github_credentials {
-        return build_github_credentials(strategy, app_id.as_deref());
+        return build_github_credentials(strategy, app_id.as_deref()).await;
     }
 
     if pull_request_enabled {
         return Ok(build_github_credentials(strategy, app_id.as_deref())
+            .await
             .ok()
             .flatten());
     }

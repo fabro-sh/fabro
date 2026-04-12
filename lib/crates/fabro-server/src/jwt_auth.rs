@@ -447,6 +447,11 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::disallowed_methods,
+        reason = "These unit tests use the host openssl CLI to generate certificate fixtures for auth validation."
+    )]
+
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use axum::response::IntoResponse;

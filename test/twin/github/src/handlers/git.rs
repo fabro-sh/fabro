@@ -12,6 +12,10 @@ use crate::server::SharedState;
 use crate::state::{PermissionLevel, TokenPermission};
 
 /// Find the git-http-backend binary by querying `git --exec-path`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This synchronous test harness helper resolves the git-http-backend path before launching the CGI subprocess."
+)]
 fn find_git_http_backend() -> Result<PathBuf, String> {
     let output = std::process::Command::new("git")
         .arg("--exec-path")

@@ -52,7 +52,11 @@ pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs, printer: Printe
     }
 
     if args.open && !globals.json {
-        std::process::Command::new("open")
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "Preview URL opening is a fire-and-forget OS integration, not a Tokio-managed child process."
+        )]
+        let _browser = std::process::Command::new("open")
             .arg(&response.url)
             .spawn()
             .context("Failed to open browser")?;

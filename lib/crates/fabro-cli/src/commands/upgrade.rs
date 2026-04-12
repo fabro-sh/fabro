@@ -322,7 +322,7 @@ pub(crate) async fn run_upgrade(
     debug!("SHA256 checksum verified");
 
     // Extract tarball
-    let status = std::process::Command::new("tar")
+    let status = TokioCommand::new("tar")
         .args([
             "xzf",
             &tarball_path.to_string_lossy(),
@@ -330,6 +330,7 @@ pub(crate) async fn run_upgrade(
             &tmp_dir.path().to_string_lossy(),
         ])
         .status()
+        .await
         .context("failed to run tar")?;
     if !status.success() {
         bail!("tar extraction failed");

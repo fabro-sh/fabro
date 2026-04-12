@@ -165,12 +165,12 @@ strategy = "app"
 #[test]
 fn defaults_github_integration_strategy_to_gh_cli() {
     let file = parse(
-        r#"
+        r"
 _version = 1
 
 [server.integrations.github]
 enabled = true
-"#,
+",
     );
 
     let settings =

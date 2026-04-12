@@ -72,6 +72,43 @@ impl LocalSandbox {
             self.working_directory.join(p)
         }
     }
+
+    fn binary_on_path(binary: &str) -> bool {
+        let Some(paths) = std::env::var_os("PATH") else {
+            return false;
+        };
+
+        #[cfg(windows)]
+        let extensions: Vec<String> = std::env::var_os("PATHEXT")
+            .map(|value| {
+                value
+                    .to_string_lossy()
+                    .split(';')
+                    .map(|ext| ext.to_ascii_lowercase())
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![".exe".to_string(), ".cmd".to_string(), ".bat".to_string()]);
+
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join(binary);
+            if candidate.is_file() {
+                return true;
+            }
+
+            #[cfg(windows)]
+            {
+                if candidate.extension().is_none() {
+                    for ext in &extensions {
+                        if dir.join(format!("{binary}{ext}")).is_file() {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
 }
 
 #[async_trait]
@@ -267,15 +304,7 @@ impl Sandbox for LocalSandbox {
         let full_path = self.resolve_path(path);
 
         // Try rg (ripgrep) first, fall back to grep
-        let use_rg = *self.rg_available.get_or_init(|| {
-            std::process::Command::new("rg")
-                .arg("--version")
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-        });
+        let use_rg = *self.rg_available.get_or_init(|| Self::binary_on_path("rg"));
 
         let output = if use_rg {
             let mut args = vec!["-n".to_string()];
@@ -293,9 +322,10 @@ impl Sandbox for LocalSandbox {
             args.push(pattern.into());
             args.push(full_path.to_string_lossy().into_owned());
 
-            std::process::Command::new("rg")
+            Command::new("rg")
                 .args(&args)
                 .output()
+                .await
                 .map_err(|e| format!("Failed to run rg: {e}"))?
         } else {
             let mut args = vec!["-rn".to_string()];
@@ -313,9 +343,10 @@ impl Sandbox for LocalSandbox {
             args.push(pattern.into());
             args.push(full_path.to_string_lossy().into_owned());
 
-            std::process::Command::new("grep")
+            Command::new("grep")
                 .args(&args)
                 .output()
+                .await
                 .map_err(|e| format!("Failed to run grep: {e}"))?
         };
 
@@ -454,6 +485,10 @@ impl Sandbox for LocalSandbox {
         }
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This synchronous host metadata probe only runs uname once while building the sandbox platform string."
+    )]
     fn os_version(&self) -> String {
         #[cfg(unix)]
         {

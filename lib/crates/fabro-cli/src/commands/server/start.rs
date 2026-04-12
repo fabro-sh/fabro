@@ -11,6 +11,7 @@ use fabro_server::serve;
 use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
+use tokio::process::Command as TokioCommand;
 use tokio::time;
 
 use super::record;
@@ -205,7 +206,7 @@ async fn execute_daemon(
     let stdout_log = log_file.try_clone()?;
     let exe = std::env::current_exe()?;
 
-    let mut cmd = std::process::Command::new(&exe);
+    let mut cmd = TokioCommand::new(&exe);
     cmd.args(["server", "__serve"])
         .arg("--record-path")
         .arg(&record_path)
@@ -248,7 +249,7 @@ async fn execute_daemon(
         .stdin(std::process::Stdio::null());
 
     #[cfg(unix)]
-    fabro_proc::pre_exec_setsid(&mut cmd);
+    fabro_proc::pre_exec_setsid(cmd.as_std_mut());
 
     let mut child = cmd.spawn()?;
 
@@ -269,11 +270,12 @@ async fn execute_daemon(
         if let Some(record) = record::read_server_record(&record_path) {
             if try_connect(&record.bind) {
                 if announce {
+                    let pid = child.id().unwrap_or_default();
                     maybe_warn_host_port_fallback(bind, &record.bind, printer);
                     fabro_util::printerr!(
                         printer,
                         "Server started (pid {}) on {}",
-                        child.id(),
+                        pid,
                         record.bind
                     );
                 }
@@ -295,8 +297,8 @@ async fn execute_daemon(
     }
 
     record::remove_server_record(&record_path);
-    let _ = child.kill();
-    let _ = child.wait();
+    let _ = child.kill().await;
+    let _ = child.wait().await;
     let tail = read_log_tail(&log_path, 20);
     if !tail.is_empty() {
         fabro_util::printerr!(printer, "{tail}");

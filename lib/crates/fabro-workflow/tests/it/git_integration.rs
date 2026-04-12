@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "These git integration tests intentionally exercise the real git CLI to validate repository helper behavior."
+)]
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -18,7 +23,7 @@ use fabro_workflow::handler::start::StartHandler;
 use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflow::test_support::run_graph;
 
-fn assert_success(output: Output, context: &str) {
+fn assert_success(output: &Output, context: &str) {
     assert!(
         output.status.success(),
         "{context} failed: {}",
@@ -28,86 +33,74 @@ fn assert_success(output: Output, context: &str) {
 
 fn init_repo(dir: &Path) {
     std::fs::create_dir_all(dir).unwrap();
-    assert_success(
-        Command::new("git")
-            .args(["init"])
-            .current_dir(dir)
-            .output()
-            .unwrap(),
-        "git init",
-    );
-    assert_success(
-        Command::new("git")
-            .args([
-                "-c",
-                "user.name=test",
-                "-c",
-                "user.email=test@test",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "init",
-            ])
-            .current_dir(dir)
-            .output()
-            .unwrap(),
-        "git commit --allow-empty",
-    );
+    let init = Command::new("git")
+        .args(["init"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert_success(&init, "git init");
+    let commit = Command::new("git")
+        .args([
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert_success(&commit, "git commit --allow-empty");
 }
 
 fn init_bare_remote(dir: &Path) {
     std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
-    assert_success(
-        Command::new("git")
-            .args(["init", "--bare"])
-            .arg(dir)
-            .output()
-            .unwrap(),
-        "git init --bare",
-    );
+    let init = Command::new("git")
+        .args(["init", "--bare"])
+        .arg(dir)
+        .output()
+        .unwrap();
+    assert_success(&init, "git init --bare");
 }
 
 fn add_origin(repo_dir: &Path, remote_dir: &Path) {
-    assert_success(
-        Command::new("git")
-            .args(["remote", "add", "origin"])
-            .arg(remote_dir)
-            .current_dir(repo_dir)
-            .output()
-            .unwrap(),
-        "git remote add origin",
-    );
+    let output = Command::new("git")
+        .args(["remote", "add", "origin"])
+        .arg(remote_dir)
+        .current_dir(repo_dir)
+        .output()
+        .unwrap();
+    assert_success(&output, "git remote add origin");
 }
 
 fn rename_branch(repo_dir: &Path, branch: &str) {
-    assert_success(
-        Command::new("git")
-            .args(["branch", "-M", branch])
-            .current_dir(repo_dir)
-            .output()
-            .unwrap(),
-        "git branch -M",
-    );
+    let output = Command::new("git")
+        .args(["branch", "-M", branch])
+        .current_dir(repo_dir)
+        .output()
+        .unwrap();
+    assert_success(&output, "git branch -M");
 }
 
 fn empty_commit(repo_dir: &Path, message: &str) {
-    assert_success(
-        Command::new("git")
-            .args([
-                "-c",
-                "user.name=test",
-                "-c",
-                "user.email=test@test",
-                "commit",
-                "--allow-empty",
-                "-m",
-                message,
-            ])
-            .current_dir(repo_dir)
-            .output()
-            .unwrap(),
-        "git commit --allow-empty",
-    );
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            message,
+        ])
+        .current_dir(repo_dir)
+        .output()
+        .unwrap();
+    assert_success(&output, "git commit --allow-empty");
 }
 
 fn list_branch(repo_dir: &Path, branch: &str) -> String {
@@ -116,7 +109,7 @@ fn list_branch(repo_dir: &Path, branch: &str) -> String {
         .current_dir(repo_dir)
         .output()
         .unwrap();
-    assert_success(output.clone(), "git branch --list");
+    assert_success(&output, "git branch --list");
     String::from_utf8(output.stdout).unwrap()
 }
 
@@ -293,13 +286,13 @@ async fn git_checkpoint_skips_start_node() {
     });
     run_options.host_repo_path = Some(PathBuf::from(repo));
 
-    run_graph(
+    Box::pin(run_graph(
         make_registry(),
         Arc::new(emitter),
         local_env(repo),
         &g,
         &run_options,
-    )
+    ))
     .await
     .unwrap();
 

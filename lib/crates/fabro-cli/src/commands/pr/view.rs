@@ -12,7 +12,7 @@ pub(super) async fn view_command(
 ) -> Result<()> {
     let (record, _run_id) = super::load_pr_record(&args.server, &args.run_id, printer).await?;
 
-    let creds = super::load_github_credentials_required(printer)?;
+    let creds = super::load_github_credentials_required(printer).await?;
 
     let detail = fabro_github::get_pull_request(
         &creds,

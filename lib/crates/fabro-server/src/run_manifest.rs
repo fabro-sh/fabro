@@ -1061,12 +1061,12 @@ app_id = "snapshotted-app-id"
         manifest.configs.push(types::ManifestConfig {
             path:   Some("/tmp/project/.fabro/project.toml".to_string()),
             source: Some(
-                r#"
+                r"
 _version = 1
 
 [run.pull_request]
 enabled = true
-"#
+"
                 .to_string(),
             ),
             type_:  types::ManifestConfigType::Project,

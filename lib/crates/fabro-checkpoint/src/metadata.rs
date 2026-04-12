@@ -179,6 +179,11 @@ impl MetadataStore {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::disallowed_methods,
+        reason = "These unit tests use the real git CLI to validate metadata branch behavior."
+    )]
+
     use std::collections::HashMap;
 
     use chrono::{TimeZone, Utc};

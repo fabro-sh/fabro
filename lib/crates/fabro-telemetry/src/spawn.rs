@@ -78,6 +78,10 @@ fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)], env_remove: &[&str])
 }
 
 #[cfg(windows)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Detached Windows subprocess creation requires std::process::Command creation_flags support."
+)]
 fn spawn_detached_windows(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) {
     use std::os::windows::process::CommandExt;
     const DETACHED_PROCESS: u32 = 0x00000008;

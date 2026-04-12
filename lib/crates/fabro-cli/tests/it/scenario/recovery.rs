@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "This recovery scenario test uses the real git CLI to set up repository history for end-to-end assertions."
+)]
+
 use std::collections::BTreeSet;
 use std::path::Path;
 

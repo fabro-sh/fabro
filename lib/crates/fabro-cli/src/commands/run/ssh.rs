@@ -44,6 +44,10 @@ fn format_output(ssh_command: &str) -> String {
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This path replaces the current process via CommandExt::exec; Tokio child APIs are not a substitute."
+)]
 fn exec_ssh(ssh_cmd: &str) -> Result<()> {
     use std::os::unix::process::CommandExt;
 

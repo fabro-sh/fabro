@@ -10,6 +10,10 @@
     clippy::unnecessary_literal_bound,
     clippy::unreadable_literal
 )]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "These end-to-end workflow integration tests use the real git CLI to verify checkpoint and branch behavior."
+)]
 
 use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;

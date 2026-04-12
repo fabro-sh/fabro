@@ -150,6 +150,10 @@ fn session_refs() -> &'static Mutex<HashMap<PathBuf, usize>> {
     SESSION_REFS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This synchronous test-support helper uses uuidgen when available to create stable unique case IDs."
+)]
 fn test_case_id() -> String {
     let ulid = std::process::Command::new("uuidgen")
         .arg("-r")
@@ -598,6 +602,10 @@ fn wait_for_server_running(server: &ServerPaths) {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This synchronous test-support helper launches the real fabro CLI server before reqwest clients connect to it."
+)]
 fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &Path) {
     if server_running(server) {
         return;
@@ -1093,6 +1101,10 @@ impl TestContext {
     }
 
     /// Initialize a git repository in `temp_dir`.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This synchronous test-support helper initializes fixture repositories with the real git CLI."
+    )]
     pub fn git_init(&self) -> &Self {
         std::process::Command::new("git")
             .args(["init"])

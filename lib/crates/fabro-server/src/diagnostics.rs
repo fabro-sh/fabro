@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -15,6 +14,7 @@ use fabro_util::version::FABRO_VERSION;
 use regex::Regex;
 use semver::Version;
 use serde::Serialize;
+use tokio::process::Command;
 use tokio::time::timeout;
 
 use crate::server::AppState;
@@ -44,8 +44,8 @@ fn parse_version(re: &Regex, output: &str) -> Option<Version> {
     ))
 }
 
-fn probe_dot() -> ProbeOutcome {
-    let result = Command::new("dot").arg("-V").output().ok();
+async fn probe_dot() -> ProbeOutcome {
+    let result = Command::new("dot").arg("-V").output().await.ok();
     match result {
         None => ProbeOutcome::NotFound,
         Some(output) if !output.status.success() => ProbeOutcome::Failed,
@@ -59,8 +59,8 @@ fn probe_dot() -> ProbeOutcome {
     }
 }
 
-fn check_dot() -> CheckResult {
-    let outcome = probe_dot();
+async fn check_dot() -> CheckResult {
+    let outcome = probe_dot().await;
     let (status, summary, remediation) = match &outcome {
         ProbeOutcome::NotFound => (
             CheckStatus::Warning,
@@ -154,10 +154,11 @@ fn validate_session_secret(value: &str) -> Result<(), String> {
 }
 
 pub async fn run_all(state: &AppState) -> DiagnosticsReport {
-    let (llm, github, brave) = tokio::join!(
+    let (llm, github, brave, dot) = tokio::join!(
         check_llm_providers(state),
         check_github_app(state),
         check_brave_search(state),
+        check_dot(),
     );
     let sandbox = check_sandbox(state);
     let crypto = check_crypto(state);
@@ -171,7 +172,7 @@ pub async fn run_all(state: &AppState) -> DiagnosticsReport {
             },
             CheckSection {
                 title:  "System".to_string(),
-                checks: vec![check_dot()],
+                checks: vec![dot],
             },
             CheckSection {
                 title:  "Configuration".to_string(),

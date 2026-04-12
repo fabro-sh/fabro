@@ -44,7 +44,7 @@ pub(super) async fn list_command(
         return Ok(());
     }
 
-    let creds = super::load_github_credentials_required(printer)?;
+    let creds = super::load_github_credentials_required(printer).await?;
 
     let futures: Vec<_> = entries
         .iter()

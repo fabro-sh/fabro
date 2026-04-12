@@ -258,6 +258,10 @@ pub fn derive_public_key_pem(private_key_pem: &str) -> String {
         return TEST_RSA_PUBLIC_PEM.to_string();
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This synchronous test harness helper derives an RSA public key with the host openssl CLI."
+    )]
     let mut child = Command::new("openssl")
         .args(["rsa", "-pubout"])
         .stdin(Stdio::piped())
@@ -391,6 +395,10 @@ pub fn init_bare_repo(
     }
     std::fs::create_dir_all(&repo_dir)
         .map_err(|e| format!("failed to create git dir {}: {e}", repo_dir.display()))?;
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This synchronous test harness helper initializes fixture git repositories with the real git CLI."
+    )]
     let output = std::process::Command::new("git")
         .args(["init", "--bare"])
         .arg(&repo_dir)
@@ -404,6 +412,10 @@ pub fn init_bare_repo(
     }
 
     // Enable http.receivepack so push works via git-http-backend
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This synchronous test harness helper configures fixture git repositories with the real git CLI."
+    )]
     let output = std::process::Command::new("git")
         .args(["config", "http.receivepack", "true"])
         .current_dir(&repo_dir)

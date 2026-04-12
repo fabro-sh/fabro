@@ -238,6 +238,11 @@ pub async fn git_replace_worktree(sandbox: &dyn Sandbox, path: &str, branch: &st
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::disallowed_methods,
+        reason = "These unit tests use the real git CLI to construct sandbox-git fixture repositories."
+    )]
+
     use super::*;
 
     #[tokio::test]

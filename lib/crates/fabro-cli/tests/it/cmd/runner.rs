@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "These CLI integration tests spawn real fabro worker subprocesses and observe their lifecycle."
+)]
+
 use std::io::Read;
 use std::process::{Child, ExitStatus, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -640,11 +645,11 @@ fn worker_exits_with_retro_enabled_even_when_stdin_stays_open() {
 
     context.write_temp(
         ".fabro/project.toml",
-        r#"_version = 1
+        r"_version = 1
 
 [run.execution]
 retros = true
-"#,
+",
     );
     context.write_temp(
         "retro-success.fabro",

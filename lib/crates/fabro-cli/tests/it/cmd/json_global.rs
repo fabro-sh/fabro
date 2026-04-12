@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "These CLI integration tests synchronously probe for dot before exercising JSON output paths."
+)]
+
 use std::process::Command;
 
 use fabro_test::test_context;

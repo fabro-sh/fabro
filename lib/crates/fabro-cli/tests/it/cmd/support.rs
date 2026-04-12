@@ -3,6 +3,10 @@
     clippy::manual_assert,
     clippy::redundant_closure_for_method_calls
 )]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "These CLI integration test helpers shell out to real git and fabro binaries while constructing fixtures."
+)]
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};

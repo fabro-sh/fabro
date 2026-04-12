@@ -31,7 +31,7 @@ pub(crate) async fn dispatch(
     }
 }
 
-fn load_github_credentials_required(printer: Printer) -> Result<GitHubCredentials> {
+async fn load_github_credentials_required(printer: Printer) -> Result<GitHubCredentials> {
     let ctx = CommandContext::base(printer)?;
     let server_settings =
         fabro_config::resolve_server_from_file(ctx.machine_settings()).map_err(|errors| {
@@ -54,6 +54,7 @@ fn load_github_credentials_required(printer: Printer) -> Result<GitHubCredential
             .map(InterpString::as_source)
             .as_deref(),
     )
+    .await
     .map_err(|_| anyhow!(GITHUB_CREDENTIALS_REQUIRED))?;
     creds.context(GITHUB_CREDENTIALS_REQUIRED)
 }

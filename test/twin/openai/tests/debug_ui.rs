@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "These browser-debug integration tests synchronously probe for Chrome binaries before launching external tooling."
+)]
+
 mod common;
 
 use serde_json::json;

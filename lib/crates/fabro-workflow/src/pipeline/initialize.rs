@@ -85,11 +85,15 @@ async fn resolve_worktree_plan(options: &mut InitOptions) -> Result<Option<Workt
         .host_repo_path
         .clone()
         .or_else(|| options.sandbox.host_repo_path());
-    let git_status = host_repo_path
-        .as_ref()
-        .map_or(GitSyncStatus::Dirty, |path| {
-            git::sync_status(path, "origin", options.run_options.base_branch.as_deref())
-        });
+    let git_status = if let Some(path) = host_repo_path.as_ref() {
+        let path = path.clone();
+        let base_branch = options.run_options.base_branch.clone();
+        spawn_blocking(move || git::sync_status(&path, "origin", base_branch.as_deref()))
+            .await
+            .unwrap_or(GitSyncStatus::Dirty)
+    } else {
+        GitSyncStatus::Dirty
+    };
     let strategy = options.sandbox.workdir_strategy(
         worktree_mode,
         git_status.is_clean(),
@@ -166,7 +170,10 @@ async fn resolve_worktree_plan(options: &mut InitOptions) -> Result<Option<Workt
                 options.run_options.display_base_sha = None;
                 return Ok(None);
             };
-            match git::head_sha(&repo_path) {
+            match spawn_blocking(move || git::head_sha(&repo_path))
+                .await
+                .unwrap_or_else(|_| Err(Error::engine("git head_sha task panicked")))
+            {
                 Ok(base_sha) => {
                     options.run_options.display_base_sha = Some(base_sha.clone());
                     Ok(Some(WorktreePlan {
@@ -189,9 +196,15 @@ async fn resolve_worktree_plan(options: &mut InitOptions) -> Result<Option<Workt
             }
         }
         WorkdirStrategy::Cloud => {
-            options.run_options.display_base_sha = host_repo_path
-                .as_ref()
-                .and_then(|path| git::head_sha(path).ok());
+            options.run_options.display_base_sha = if let Some(path) = host_repo_path.as_ref() {
+                let path = path.clone();
+                spawn_blocking(move || git::head_sha(&path))
+                    .await
+                    .ok()
+                    .and_then(std::result::Result::ok)
+            } else {
+                None
+            };
             Ok(None)
         }
         WorkdirStrategy::LocalDirectory => {

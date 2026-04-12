@@ -146,6 +146,7 @@ mod tests {
     use std::collections::HashMap;
 
     use fabro_util::env::TestEnv;
+    use toml::map::Map;
 
     use super::*;
 
@@ -178,7 +179,7 @@ mod tests {
     fn renders_nested_input_variable() {
         let ctx = TemplateContext::new().with_inputs(HashMap::from([(
             "repo".to_string(),
-            toml::Value::Table(toml::map::Map::from_iter([(
+            toml::Value::Table(Map::from_iter([(
                 "name".to_string(),
                 toml::Value::String("fabro".to_string()),
             )])),

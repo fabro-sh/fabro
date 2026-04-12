@@ -10,6 +10,10 @@
     clippy::items_after_statements,
     clippy::print_stderr
 )]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "These Daytona integration tests use the real git CLI to prepare remote-repo fixtures for workflow runs."
+)]
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;

@@ -27,6 +27,10 @@ fn git_error(msg: impl Into<String>) -> Error {
 }
 
 /// Return a pre-configured `git` command with auto-maintenance disabled.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This shared synchronous git helper layer is used by sync code; async callers must wrap it in spawn_blocking."
+)]
 fn git_cmd(dir: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.args(["-c", "maintenance.auto=0", "-c", "gc.auto=0"])
@@ -323,6 +327,10 @@ mod tests {
     use crate::run_dump::RunDump;
 
     /// Create a temporary git repo with an initial commit.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This synchronous test helper shells out to git while constructing fixture repositories."
+    )]
     fn init_repo(dir: &Path) {
         Command::new("git")
             .args(["init"])
@@ -386,6 +394,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This synchronous test verifies git branch listing against the real git CLI."
+    )]
     fn create_branch_and_list() {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());

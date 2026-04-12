@@ -2,11 +2,16 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use fabro_util::printer::Printer;
+use tokio::process::Command as TokioCommand;
 use tokio::task::spawn_blocking;
 
 use crate::args::{GlobalArgs, RepoInitArgs, ServerTargetArgs};
 use crate::command_context::CommandContext;
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This is a shared synchronous git helper used by repo deinit; async callers should use spawn_blocking."
+)]
 pub(super) fn git_repo_root() -> Result<PathBuf> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -27,7 +32,9 @@ pub(crate) async fn run_init(
     globals: &GlobalArgs,
     printer: Printer,
 ) -> Result<Vec<String>> {
-    let repo_root = git_repo_root()?;
+    let repo_root = spawn_blocking(git_repo_root)
+        .await
+        .context("git repo root task panicked")??;
     let mut created = Vec::new();
 
     let fabro_dir = repo_root.join(".fabro");
@@ -144,9 +151,10 @@ draft = true
 
 async fn check_github_app_installation(target: &ServerTargetArgs, printer: Printer) {
     // Get the git remote origin URL
-    let output = match std::process::Command::new("git")
+    let output = match TokioCommand::new("git")
         .args(["remote", "get-url", "origin"])
         .output()
+        .await
     {
         Ok(o) if o.status.success() => o,
         _ => {

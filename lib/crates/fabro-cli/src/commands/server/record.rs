@@ -79,6 +79,10 @@ pub(crate) fn active_server_record(storage_dir: &Path) -> Option<ServerRecord> {
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This synchronous process identity probe is shared by async server start and sync server status flows."
+)]
 fn server_process_matches(record: &ServerRecord) -> bool {
     let output = match std::process::Command::new("ps")
         .args(["-ww", "-o", "command=", "-p", &record.pid.to_string()])

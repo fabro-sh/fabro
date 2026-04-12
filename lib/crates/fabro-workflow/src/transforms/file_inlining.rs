@@ -68,6 +68,11 @@ impl Transform for FileInliningTransform {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::disallowed_methods,
+        reason = "These unit tests use the real git CLI to build repositories for file-inlining transform coverage."
+    )]
+
     use std::sync::Arc;
 
     use fabro_graphviz::graph::{AttrValue, Graph, Node};

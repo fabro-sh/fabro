@@ -1,7 +1,6 @@
-use std::io::Write as _;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use anyhow::{Context, Result, anyhow, bail};
 use axum::extract::Query;
@@ -20,7 +19,9 @@ use fabro_server::secret_store::SecretStore;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use rand::Rng;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tokio::process::Command as TokioCommand;
 use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
 
@@ -38,10 +39,11 @@ use crate::{server_client, user_config};
 // ---------------------------------------------------------------------------
 
 /// Run an openssl subcommand and return stdout on success.
-fn run_openssl(args: &[&str], description: &str) -> Result<Vec<u8>> {
-    let output = Command::new("openssl")
+async fn run_openssl(args: &[&str], description: &str) -> Result<Vec<u8>> {
+    let output = TokioCommand::new("openssl")
         .args(args)
         .output()
+        .await
         .with_context(|| format!("failed to run openssl for: {description}"))?;
     if !output.status.success() {
         bail!(
@@ -53,22 +55,30 @@ fn run_openssl(args: &[&str], description: &str) -> Result<Vec<u8>> {
 }
 
 /// Run an openssl subcommand that reads key material from stdin.
-fn run_openssl_with_stdin(args: &[&str], stdin_data: &[u8], description: &str) -> Result<Vec<u8>> {
-    let mut child = Command::new("openssl")
+async fn run_openssl_with_stdin(
+    args: &[&str],
+    stdin_data: &[u8],
+    description: &str,
+) -> Result<Vec<u8>> {
+    let mut child = TokioCommand::new("openssl")
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("failed to spawn openssl for: {description}"))?;
-    child
+    let mut stdin = child
         .stdin
         .take()
-        .context("openssl process missing stdin")?
+        .context("openssl process missing stdin")?;
+    stdin
         .write_all(stdin_data)
+        .await
         .with_context(|| format!("failed to write to openssl stdin for: {description}"))?;
+    drop(stdin);
     let output = child
         .wait_with_output()
+        .await
         .with_context(|| format!("failed to read openssl output for: {description}"))?;
     if !output.status.success() {
         bail!(
@@ -93,10 +103,11 @@ fn generate_session_secret() -> String {
 // JWT keypair generation
 // ---------------------------------------------------------------------------
 
-fn generate_jwt_keypair() -> Result<(String, String)> {
-    let private_pem = run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate keypair")?;
+async fn generate_jwt_keypair() -> Result<(String, String)> {
+    let private_pem =
+        run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate keypair").await?;
     let public_pem =
-        run_openssl_with_stdin(&["pkey", "-pubout"], &private_pem, "extract public key")?;
+        run_openssl_with_stdin(&["pkey", "-pubout"], &private_pem, "extract public key").await?;
 
     let private_str = String::from_utf8(private_pem).context("private key is not valid UTF-8")?;
     let public_str = String::from_utf8(public_pem).context("public key is not valid UTF-8")?;
@@ -107,11 +118,11 @@ fn generate_jwt_keypair() -> Result<(String, String)> {
 // mTLS certificate generation
 // ---------------------------------------------------------------------------
 
-fn generate_mtls_certs(dir: &Path) -> Result<()> {
+async fn generate_mtls_certs(dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir).context("failed to create certs directory")?;
 
     // 1. CA key + self-signed cert
-    let ca_key = run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate CA key")?;
+    let ca_key = run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate CA key").await?;
     let ca_key_path = dir.join("ca.key");
     std::fs::write(&ca_key_path, &ca_key)?;
 
@@ -130,12 +141,14 @@ fn generate_mtls_certs(dir: &Path) -> Result<()> {
             "/CN=Fabro CA",
         ],
         "generate CA cert",
-    )?;
+    )
+    .await?;
     let ca_cert_path = dir.join("ca.crt");
     std::fs::write(&ca_cert_path, &ca_cert)?;
 
     // 2. Server key + CSR signed by CA
-    let server_key = run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate server key")?;
+    let server_key =
+        run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate server key").await?;
     let server_key_path = dir.join("server.key");
     std::fs::write(&server_key_path, &server_key)?;
 
@@ -151,7 +164,8 @@ fn generate_mtls_certs(dir: &Path) -> Result<()> {
             "/CN=localhost",
         ],
         "generate server CSR",
-    )?;
+    )
+    .await?;
 
     let csr_path = dir.join("server.csr");
     std::fs::write(&csr_path, &csr)?;
@@ -175,7 +189,8 @@ fn generate_mtls_certs(dir: &Path) -> Result<()> {
             "3650",
         ],
         "sign server cert",
-    )?;
+    )
+    .await?;
     std::fs::write(dir.join("server.crt"), &server_cert)?;
 
     // Clean up temporary files
@@ -316,12 +331,13 @@ fn format_config_toml(username: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// Check if a binary exists on PATH using the doctor.rs pattern.
-fn detect_binary_on_path(binary: &str) -> bool {
-    Command::new(binary)
+async fn detect_binary_on_path(binary: &str) -> bool {
+    TokioCommand::new(binary)
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
+        .await
         .map(|s| s.success())
         .unwrap_or(false)
 }
@@ -756,7 +772,7 @@ pub(crate) async fn run_install(
             "  {}",
             s.dim.apply_to("[Pre-flight] System dependency checks")
         );
-        let dep_outcomes = doctor::probe_system_deps();
+        let dep_outcomes = doctor::probe_system_deps().await;
         let dep_check = doctor::check_system_deps(doctor::DEP_SPECS, &dep_outcomes);
 
         if dep_check.status == doctor::CheckStatus::Error {
@@ -777,9 +793,10 @@ pub(crate) async fn run_install(
                 .await??;
 
                 if install {
-                    let status = Command::new("brew")
+                    let status = TokioCommand::new("brew")
                         .args(["install", "graphviz"])
                         .status()
+                        .await
                         .context("failed to run brew install graphviz")?;
                     if !status.success() {
                         fabro_util::printerr!(printer, "  Warning: brew install graphviz failed");
@@ -802,7 +819,7 @@ pub(crate) async fn run_install(
     let mut secret_pairs: Vec<(String, String)> = Vec::new();
     let mut configured_providers: Vec<Provider> = Vec::new();
 
-    let codex_detected = detect_binary_on_path("codex");
+    let codex_detected = detect_binary_on_path("codex").await;
     let mut openai_via_oauth = false;
 
     if codex_detected {
@@ -897,7 +914,7 @@ pub(crate) async fn run_install(
 
         match strategy {
             0 => {
-                let token = fabro_github::gh_auth_token().map_err(|err| {
+                let token = fabro_github::gh_auth_token().await.map_err(|err| {
                     anyhow!("{err}. Run `gh auth login` and rerun `fabro install`.")
                 })?;
                 let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
@@ -1007,7 +1024,7 @@ pub(crate) async fn run_install(
             s.green.apply_to("✔")
         );
 
-        let (jwt_private_pem, jwt_public_pem) = generate_jwt_keypair()?;
+        let (jwt_private_pem, jwt_public_pem) = generate_jwt_keypair().await?;
         fabro_util::printerr!(
             printer,
             "  {} Ed25519 JWT keypair generated",
@@ -1015,7 +1032,7 @@ pub(crate) async fn run_install(
         );
 
         let certs_dir = fabro_dir.join("certs");
-        generate_mtls_certs(&certs_dir)?;
+        generate_mtls_certs(&certs_dir).await?;
         fabro_util::printerr!(
             printer,
             "  {} mTLS CA + server certificates generated",
@@ -1105,14 +1122,14 @@ mod tests {
 
     // -- Binary detection --
 
-    #[test]
-    fn detect_binary_finds_existing_command() {
-        assert!(detect_binary_on_path("git"));
+    #[tokio::test]
+    async fn detect_binary_finds_existing_command() {
+        assert!(detect_binary_on_path("git").await);
     }
 
-    #[test]
-    fn detect_binary_returns_false_for_nonexistent() {
-        assert!(!detect_binary_on_path("arc_nonexistent_xyz"));
+    #[tokio::test]
+    async fn detect_binary_returns_false_for_nonexistent() {
+        assert!(!detect_binary_on_path("arc_nonexistent_xyz").await);
     }
 
     // -- Session secret --
@@ -1137,37 +1154,37 @@ mod tests {
 
     // -- JWT keypair --
 
-    #[test]
-    fn jwt_keypair_private_pem_header() {
-        let (private, _) = generate_jwt_keypair().unwrap();
+    #[tokio::test]
+    async fn jwt_keypair_private_pem_header() {
+        let (private, _) = generate_jwt_keypair().await.unwrap();
         assert!(
             private.starts_with("-----BEGIN PRIVATE KEY-----"),
             "private PEM: {private}"
         );
     }
 
-    #[test]
-    fn jwt_keypair_public_pem_header() {
-        let (_, public) = generate_jwt_keypair().unwrap();
+    #[tokio::test]
+    async fn jwt_keypair_public_pem_header() {
+        let (_, public) = generate_jwt_keypair().await.unwrap();
         assert!(
             public.starts_with("-----BEGIN PUBLIC KEY-----"),
             "public PEM: {public}"
         );
     }
 
-    #[test]
-    fn jwt_keypair_public_parses() {
-        let (_, public) = generate_jwt_keypair().unwrap();
+    #[tokio::test]
+    async fn jwt_keypair_public_parses() {
+        let (_, public) = generate_jwt_keypair().await.unwrap();
         jsonwebtoken::DecodingKey::from_ed_pem(public.as_bytes()).expect("public key should parse");
     }
 
     // -- mTLS cert generation --
 
-    #[test]
-    fn mtls_certs_creates_files() {
+    #[tokio::test]
+    async fn mtls_certs_creates_files() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
-        generate_mtls_certs(&certs_dir).unwrap();
+        generate_mtls_certs(&certs_dir).await.unwrap();
 
         assert!(certs_dir.join("ca.key").exists());
         assert!(certs_dir.join("ca.crt").exists());
@@ -1175,11 +1192,11 @@ mod tests {
         assert!(certs_dir.join("server.crt").exists());
     }
 
-    #[test]
-    fn mtls_ca_cert_is_pem() {
+    #[tokio::test]
+    async fn mtls_ca_cert_is_pem() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
-        generate_mtls_certs(&certs_dir).unwrap();
+        generate_mtls_certs(&certs_dir).await.unwrap();
 
         let ca_crt = std::fs::read_to_string(certs_dir.join("ca.crt")).unwrap();
         assert!(
@@ -1188,11 +1205,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mtls_server_cert_is_pem() {
+    #[tokio::test]
+    async fn mtls_server_cert_is_pem() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
-        generate_mtls_certs(&certs_dir).unwrap();
+        generate_mtls_certs(&certs_dir).await.unwrap();
 
         let server_crt = std::fs::read_to_string(certs_dir.join("server.crt")).unwrap();
         assert!(
@@ -1201,11 +1218,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mtls_certs_parse_via_rustls() {
+    #[tokio::test]
+    async fn mtls_certs_parse_via_rustls() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
-        generate_mtls_certs(&certs_dir).unwrap();
+        generate_mtls_certs(&certs_dir).await.unwrap();
 
         let ca_pem = std::fs::read(certs_dir.join("ca.crt")).unwrap();
         let mut reader = std::io::Cursor::new(&ca_pem);
