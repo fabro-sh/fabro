@@ -6,7 +6,7 @@ use std::sync::Arc;
 use fabro_server::jwt_auth::{AuthMode, AuthStrategy};
 use fabro_server::server::{build_router, create_app_state};
 use fabro_server::tls::{ClientAuth, build_rustls_config};
-use fabro_server::tls_config::TlsSettings;
+use fabro_types::settings::{InterpString, TlsConfig};
 use tokio::net::TcpListener;
 
 use crate::helpers::api;
@@ -37,14 +37,14 @@ struct PkiPaths {
 
 /// Start a TLS server on a random port, returning the bound address.
 async fn start_tls_server(
-    tls_settings: &TlsSettings,
+    tls_settings: &TlsConfig,
     client_auth: ClientAuth,
     auth_mode: AuthMode,
 ) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let rustls_config = build_rustls_config(tls_settings, client_auth);
+    let rustls_config = build_rustls_config(tls_settings, client_auth).unwrap();
     let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
 
     let state = create_app_state();
@@ -92,10 +92,10 @@ async fn mtls_accepts_valid_client_cert() {
     install_crypto_provider();
     let pki = fixture_pki();
 
-    let tls_settings = TlsSettings {
-        cert: pki.server_cert.clone(),
-        key:  pki.server_key.clone(),
-        ca:   pki.ca_cert.clone(),
+    let tls_settings = TlsConfig {
+        cert: InterpString::parse(&pki.server_cert.to_string_lossy()),
+        key:  InterpString::parse(&pki.server_key.to_string_lossy()),
+        ca:   InterpString::parse(&pki.ca_cert.to_string_lossy()),
     };
 
     let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls]);
@@ -117,10 +117,10 @@ async fn mtls_only_rejects_wrong_ca_client_cert() {
     install_crypto_provider();
     let pki = fixture_pki();
 
-    let tls_settings = TlsSettings {
-        cert: pki.server_cert.clone(),
-        key:  pki.server_key.clone(),
-        ca:   pki.ca_cert.clone(),
+    let tls_settings = TlsConfig {
+        cert: InterpString::parse(&pki.server_cert.to_string_lossy()),
+        key:  InterpString::parse(&pki.server_key.to_string_lossy()),
+        ca:   InterpString::parse(&pki.ca_cert.to_string_lossy()),
     };
 
     let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls]);
@@ -155,10 +155,10 @@ async fn mtls_only_rejects_no_client_cert() {
     install_crypto_provider();
     let pki = fixture_pki();
 
-    let tls_settings = TlsSettings {
-        cert: pki.server_cert.clone(),
-        key:  pki.server_key.clone(),
-        ca:   pki.ca_cert.clone(),
+    let tls_settings = TlsConfig {
+        cert: InterpString::parse(&pki.server_cert.to_string_lossy()),
+        key:  InterpString::parse(&pki.server_key.to_string_lossy()),
+        ca:   InterpString::parse(&pki.ca_cert.to_string_lossy()),
     };
 
     // mTLS is the ONLY strategy -> client cert is required at TLS level
@@ -211,10 +211,10 @@ async fn mtls_and_jwt_accepts_valid_jwt_without_client_cert() {
     install_crypto_provider();
     let pki = fixture_pki();
 
-    let tls_settings = TlsSettings {
-        cert: pki.server_cert.clone(),
-        key:  pki.server_key.clone(),
-        ca:   pki.ca_cert.clone(),
+    let tls_settings = TlsConfig {
+        cert: InterpString::parse(&pki.server_cert.to_string_lossy()),
+        key:  InterpString::parse(&pki.server_key.to_string_lossy()),
+        ca:   InterpString::parse(&pki.ca_cert.to_string_lossy()),
     };
 
     let (encoding_key, decoding_key) = fixture_jwt_keypair();
