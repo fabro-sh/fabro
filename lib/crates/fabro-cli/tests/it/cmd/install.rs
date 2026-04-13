@@ -28,7 +28,7 @@ fn help() {
 }
 
 #[test]
-fn install_rejects_json() {
+fn install_json_requires_non_interactive() {
     let context = test_context!();
     let output = context
         .command()
@@ -38,7 +38,55 @@ fn install_rejects_json() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("--json is not supported for this command"));
+    assert!(stderr.contains("--json is only supported for install with --non-interactive"));
+}
+
+#[test]
+fn install_json_non_interactive_is_not_rejected_as_unsupported() {
+    let context = test_context!();
+    let output = context
+        .command()
+        .args(["--json", "install", "--non-interactive"])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Non-interactive install requires additional flags"));
+    assert!(!stderr.contains("--json is not supported for this command"));
+}
+
+#[test]
+fn install_json_non_interactive_allows_github_app_strategy() {
+    let context = test_context!();
+    let output = context
+        .command()
+        .env_remove("MISSING_ANTHROPIC_API_KEY")
+        .args([
+            "--json",
+            "install",
+            "--non-interactive",
+            "--llm-provider",
+            "anthropic",
+            "--llm-api-key-env",
+            "MISSING_ANTHROPIC_API_KEY",
+            "--github-strategy",
+            "app",
+            "--github-owner",
+            "personal",
+        ])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(!stderr.contains("GitHub App setup is not supported with --non-interactive"));
+    assert!(!stderr.contains("requires --github-username"));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let value: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("install JSON error should parse");
+    assert_eq!(value["event"], "install_error");
+    assert_eq!(value["status"], "error");
 }
 
 #[test]

@@ -1298,6 +1298,9 @@ pub(crate) struct InstallNonInteractiveArgs {
     pub(crate) github_strategy: Option<InstallGitHubStrategyArg>,
 
     #[arg(long, hide = true)]
+    pub(crate) github_owner: Option<String>,
+
+    #[arg(long, hide = true)]
     pub(crate) github_username: Option<String>,
 
     #[arg(long, hide = true)]

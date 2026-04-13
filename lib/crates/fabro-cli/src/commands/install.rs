@@ -267,6 +267,7 @@ impl InstallNonInteractiveArgs {
             || self.llm_api_key_stdin
             || self.llm_api_key_env.is_some()
             || self.github_strategy.is_some()
+            || self.github_owner.is_some()
             || self.github_username.is_some()
             || self.overwrite_settings
             || self.keep_existing_settings
@@ -282,6 +283,8 @@ impl InstallNonInteractiveArgs {
             Some("--llm-api-key-env")
         } else if self.github_strategy.is_some() {
             Some("--github-strategy")
+        } else if self.github_owner.is_some() {
+            Some("--github-owner")
         } else if self.github_username.is_some() {
             Some("--github-username")
         } else if self.overwrite_settings {
@@ -312,11 +315,18 @@ Non-interactive usage:
     --github-strategy gh_cli \
     --github-username brynary
 
+  fabro install --non-interactive \
+    --llm-provider anthropic \
+    --llm-api-key-env ANTHROPIC_API_KEY \
+    --github-strategy app \
+    --github-owner personal
+
 Hidden non-interactive flags:
   --llm-provider <PROVIDER>
   --llm-api-key-stdin
   --llm-api-key-env <ENV_VAR>
   --github-strategy <gh_cli|app>
+  --github-owner <personal|org:SLUG>
   --github-username <USERNAME>
   --overwrite-settings
   --keep-existing-settings
@@ -324,7 +334,7 @@ Hidden non-interactive flags:
 
 Notes:
   - Only one API-key-based LLM provider is supported in non-interactive mode.
-  - GitHub CLI is supported in non-interactive mode; GitHub App setup is not."#
+  - GitHub App setup prints a local handoff URL and waits for the browser callback."#
 }
 
 #[derive(Debug, Clone)]
@@ -350,6 +360,48 @@ enum GitHubInstallSelection {
 enum ServerConfigSelection {
     KeepExisting,
     Write,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GitHubAppHandoffMode {
+    Interactive,
+    Manual,
+}
+
+fn install_json_event_line(value: &serde_json::Value) -> Result<String> {
+    serde_json::to_string(&value).context("failed to serialize install JSON event")
+}
+
+fn emit_install_json_event(value: &serde_json::Value) -> Result<()> {
+    let line = install_json_event_line(value)?;
+    #[allow(clippy::print_stdout)]
+    {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+fn install_complete_event() -> serde_json::Value {
+    serde_json::json!({
+        "event": "install_complete",
+        "status": "success",
+    })
+}
+
+fn install_error_event(message: &str) -> serde_json::Value {
+    serde_json::json!({
+        "event": "install_error",
+        "status": "error",
+        "message": message,
+    })
+}
+
+fn install_github_app_handoff_event(url: &str, owner: &GitHubAppOwner) -> serde_json::Value {
+    serde_json::json!({
+        "event": "github_app_handoff",
+        "url": url,
+        "owner": owner.scripted_value(),
+    })
 }
 
 #[async_trait]
@@ -557,9 +609,21 @@ impl NonInteractiveInstallInputSource {
         );
 
         match self.args.github_strategy {
-            Some(InstallGitHubStrategyArg::GhCli) => {}
+            Some(InstallGitHubStrategyArg::GhCli) => {
+                anyhow::ensure!(
+                    self.args.github_owner.is_none(),
+                    "--github-owner is only supported with --github-strategy app"
+                );
+            }
             Some(InstallGitHubStrategyArg::App) => {
-                bail!("GitHub App setup is not supported with --non-interactive")
+                let owner = self.args.github_owner.as_deref().context(
+                    "non-interactive install requires --github-owner for --github-strategy app",
+                )?;
+                GitHubAppOwner::parse_scripted(owner)?;
+                anyhow::ensure!(
+                    self.args.github_username.is_none(),
+                    "--github-username is only supported with --github-strategy gh_cli"
+                );
             }
             None => bail!("non-interactive install requires --github-strategy"),
         }
@@ -575,10 +639,15 @@ impl NonInteractiveInstallInputSource {
             }
         }
 
-        anyhow::ensure!(
-            self.args.github_username.is_some(),
-            "non-interactive install requires --github-username"
-        );
+        if matches!(
+            self.args.github_strategy,
+            Some(InstallGitHubStrategyArg::GhCli)
+        ) {
+            anyhow::ensure!(
+                self.args.github_username.is_some(),
+                "non-interactive install requires --github-username for --github-strategy gh_cli"
+            );
+        }
 
         Ok(())
     }
@@ -627,9 +696,14 @@ impl InstallInputSource for NonInteractiveInstallInputSource {
     ) -> Result<GitHubInstallSelection> {
         match self.args.github_strategy {
             Some(InstallGitHubStrategyArg::GhCli) => Ok(GitHubInstallSelection::GhCli),
-            Some(InstallGitHubStrategyArg::App) => {
-                bail!("GitHub App setup is not supported with --non-interactive")
-            }
+            Some(InstallGitHubStrategyArg::App) => Ok(GitHubInstallSelection::App {
+                owner:    GitHubAppOwner::parse_scripted(
+                    self.args.github_owner.as_deref().context(
+                        "non-interactive install requires --github-owner for --github-strategy app",
+                    )?,
+                )?,
+                username: best_effort_github_username().await,
+            }),
             None => bail!("non-interactive install requires --github-strategy"),
         }
     }
@@ -657,19 +731,41 @@ impl InstallInputSource for NonInteractiveInstallInputSource {
 // GitHub App owner selection
 // ---------------------------------------------------------------------------
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum GitHubAppOwner {
     Personal,
     Organization(String),
 }
 
 impl GitHubAppOwner {
+    fn parse_scripted(value: &str) -> Result<Self> {
+        if value == "personal" {
+            return Ok(Self::Personal);
+        }
+
+        let Some(org) = value.strip_prefix("org:") else {
+            bail!("--github-owner must be 'personal' or 'org:<slug>'");
+        };
+        anyhow::ensure!(
+            !org.trim().is_empty(),
+            "--github-owner organization slug cannot be empty"
+        );
+        Ok(Self::Organization(org.to_string()))
+    }
+
     fn manifest_form_action(&self) -> String {
         match self {
             Self::Personal => "https://github.com/settings/apps/new".to_string(),
             Self::Organization(org) => {
                 format!("https://github.com/organizations/{org}/settings/apps/new")
             }
+        }
+    }
+
+    fn scripted_value(&self) -> String {
+        match self {
+            Self::Personal => "personal".to_string(),
+            Self::Organization(org) => format!("org:{org}"),
         }
     }
 
@@ -691,6 +787,11 @@ impl GitHubAppOwner {
             }
         }
     }
+}
+
+async fn best_effort_github_username() -> Option<String> {
+    let gh = GhCli::detect().await?;
+    gh.authenticated_user().await
 }
 
 /// Ask the user where to create the GitHub App.
@@ -785,6 +886,8 @@ async fn setup_github_app(
     web_url: &str,
     owner: &GitHubAppOwner,
     username: Option<&str>,
+    handoff_mode: GitHubAppHandoffMode,
+    json_output: bool,
     printer: Printer,
 ) -> Result<Vec<(String, String)>> {
     let app_name = owner.app_name(username);
@@ -875,19 +978,34 @@ async fn setup_github_app(
             .ok();
     });
 
-    // Open browser
     let url = format!("http://127.0.0.1:{port}/");
-    fabro_util::printerr!(printer, "  {}", s.dim.apply_to("Opening browser..."));
-    if let Err(e) = open::that(&url) {
-        fabro_util::printerr!(printer, "  Could not open browser automatically: {e}");
-        fabro_util::printerr!(printer, "  Please open this URL manually: {url}");
+    if json_output {
+        emit_install_json_event(&install_github_app_handoff_event(&url, owner))?;
     }
 
-    fabro_util::printerr!(
-        printer,
-        "  {}",
-        s.dim.apply_to("Waiting for GitHub... (Ctrl+C to cancel)")
-    );
+    match handoff_mode {
+        GitHubAppHandoffMode::Interactive => {
+            fabro_util::printerr!(printer, "  {}", s.dim.apply_to("Opening browser..."));
+            if let Err(e) = open::that(&url) {
+                fabro_util::printerr!(printer, "  Could not open browser automatically: {e}");
+                fabro_util::printerr!(printer, "  Please open this URL manually: {url}");
+            }
+        }
+        GitHubAppHandoffMode::Manual => {
+            if !json_output {
+                fabro_util::printerr!(printer, "  Open this URL manually to continue setup:");
+                fabro_util::printerr!(printer, "  {url}");
+            }
+        }
+    }
+
+    if !json_output {
+        fabro_util::printerr!(
+            printer,
+            "  {}",
+            s.dim.apply_to("Waiting for GitHub... (Ctrl+C to cancel)")
+        );
+    }
 
     // Wait for the code
     let code = code_rx
@@ -1076,7 +1194,29 @@ pub(crate) async fn run_install(
     globals: &GlobalArgs,
     printer: Printer,
 ) -> Result<()> {
-    globals.require_no_json()?;
+    if globals.json && !args.non_interactive {
+        bail!("--json is only supported for install with --non-interactive");
+    }
+
+    let result = Box::pin(run_install_inner(args, globals, printer)).await;
+    if globals.json {
+        let emit_result = match &result {
+            Ok(()) => emit_install_json_event(&install_complete_event()),
+            Err(err) => emit_install_json_event(&install_error_event(&err.to_string())),
+        };
+        if result.is_ok() {
+            emit_result?;
+        }
+    }
+
+    result
+}
+
+async fn run_install_inner(
+    args: &InstallArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let web_url = &args.web_url;
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
@@ -1218,6 +1358,12 @@ pub(crate) async fn run_install(
                 web_url,
                 &owner,
                 username.as_deref(),
+                if args.non_interactive {
+                    GitHubAppHandoffMode::Manual
+                } else {
+                    GitHubAppHandoffMode::Interactive
+                },
+                globals.json,
                 printer,
             )
             .await?;
@@ -1654,6 +1800,31 @@ client_id = "client-id"
     }
 
     #[test]
+    fn github_app_owner_parses_personal_scripted_value() {
+        assert_eq!(
+            GitHubAppOwner::parse_scripted("personal").unwrap(),
+            GitHubAppOwner::Personal
+        );
+    }
+
+    #[test]
+    fn github_app_owner_parses_org_scripted_value() {
+        assert_eq!(
+            GitHubAppOwner::parse_scripted("org:acme").unwrap(),
+            GitHubAppOwner::Organization("acme".to_string())
+        );
+    }
+
+    #[test]
+    fn github_app_owner_rejects_invalid_scripted_value() {
+        let err = GitHubAppOwner::parse_scripted("acme").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--github-owner must be 'personal' or 'org:<slug>'")
+        );
+    }
+
+    #[test]
     fn github_app_owner_app_name_with_org() {
         let owner = GitHubAppOwner::Organization("acme-corp".to_string());
         assert_eq!(owner.app_name(Some("alice")), "acme-corp-fabro");
@@ -1671,6 +1842,25 @@ client_id = "client-id"
         let name = owner.app_name(None);
         assert!(name.starts_with("Fabro-"), "expected Fabro- prefix: {name}");
         assert_eq!(name.len(), 12); // "Fabro-" (6) + 6 hex chars
+    }
+
+    #[test]
+    fn install_json_event_line_serializes_handoff_event() {
+        let event =
+            install_github_app_handoff_event("http://127.0.0.1:1234/", &GitHubAppOwner::Personal);
+        let line = install_json_event_line(&event).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["event"], "github_app_handoff");
+        assert_eq!(value["url"], "http://127.0.0.1:1234/");
+        assert_eq!(value["owner"], "personal");
+    }
+
+    #[test]
+    fn install_error_event_contains_message() {
+        let value = install_error_event("boom");
+        assert_eq!(value["event"], "install_error");
+        assert_eq!(value["status"], "error");
+        assert_eq!(value["message"], "boom");
     }
 
     // -- GitHub App manifest --
@@ -1852,10 +2042,9 @@ client_id = "client-id"
         };
 
         let err = source.validate(false).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("non-interactive install requires --github-username")
-        );
+        assert!(err.to_string().contains(
+            "non-interactive install requires --github-username for --github-strategy gh_cli"
+        ));
     }
 
     #[test]
@@ -1873,13 +2062,33 @@ client_id = "client-id"
         source.validate(true).unwrap();
     }
 
-    #[tokio::test]
-    async fn non_interactive_source_rejects_github_app_setup() {
+    #[test]
+    fn non_interactive_source_rejects_missing_github_owner_for_app() {
         let source = NonInteractiveInstallInputSource {
             args: InstallNonInteractiveArgs {
                 llm_provider: Some(Provider::Anthropic),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
                 github_strategy: Some(InstallGitHubStrategyArg::App),
+                ..InstallNonInteractiveArgs::default()
+            },
+        };
+
+        let err = source.validate(false).unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "non-interactive install requires --github-owner for --github-strategy app"
+            )
+        );
+    }
+
+    #[test]
+    fn non_interactive_source_rejects_github_owner_for_gh_cli() {
+        let source = NonInteractiveInstallInputSource {
+            args: InstallNonInteractiveArgs {
+                llm_provider: Some(Provider::Anthropic),
+                llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+                github_strategy: Some(InstallGitHubStrategyArg::GhCli),
+                github_owner: Some("personal".to_string()),
                 github_username: Some("brynary".to_string()),
                 ..InstallNonInteractiveArgs::default()
             },
@@ -1888,8 +2097,43 @@ client_id = "client-id"
         let err = source.validate(false).unwrap_err();
         assert!(
             err.to_string()
-                .contains("GitHub App setup is not supported with --non-interactive")
+                .contains("--github-owner is only supported with --github-strategy app")
         );
+    }
+
+    #[test]
+    fn non_interactive_source_rejects_github_username_for_app() {
+        let source = NonInteractiveInstallInputSource {
+            args: InstallNonInteractiveArgs {
+                llm_provider: Some(Provider::Anthropic),
+                llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+                github_strategy: Some(InstallGitHubStrategyArg::App),
+                github_owner: Some("personal".to_string()),
+                github_username: Some("brynary".to_string()),
+                ..InstallNonInteractiveArgs::default()
+            },
+        };
+
+        let err = source.validate(false).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--github-username is only supported with --github-strategy gh_cli")
+        );
+    }
+
+    #[test]
+    fn non_interactive_source_allows_github_app_setup() {
+        let source = NonInteractiveInstallInputSource {
+            args: InstallNonInteractiveArgs {
+                llm_provider: Some(Provider::Anthropic),
+                llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+                github_strategy: Some(InstallGitHubStrategyArg::App),
+                github_owner: Some("personal".to_string()),
+                ..InstallNonInteractiveArgs::default()
+            },
+        };
+
+        source.validate(false).unwrap();
     }
 
     #[tokio::test]
