@@ -760,10 +760,10 @@ struct CallbackParams {
 fn build_github_app_manifest(app_name: &str, port: u16, web_url: &str) -> serde_json::Value {
     serde_json::json!({
         "name": app_name,
-        "url": "https://github.com/apps/arc",
+        "url": "https://fabro.sh",
         "redirect_url": format!("http://127.0.0.1:{port}/callback"),
-        "callback_urls": [format!("{web_url}/auth/callback")],
-        "setup_url": format!("{web_url}/setup/callback"),
+        "callback_urls": [format!("{web_url}/auth/callback/github")],
+        "setup_url": format!("{web_url}/setup"),
         "public": false,
         "default_permissions": {
             "contents": "write",
@@ -1680,13 +1680,14 @@ client_id = "client-id"
         let web_url = "https://app.example.com";
         let manifest = build_github_app_manifest("Fabro-test", 12345, web_url);
 
+        assert_eq!(manifest["url"], serde_json::json!("https://fabro.sh"),);
         assert_eq!(
             manifest["callback_urls"],
-            serde_json::json!(["https://app.example.com/auth/callback"]),
+            serde_json::json!(["https://app.example.com/auth/callback/github"]),
         );
         assert_eq!(
             manifest["setup_url"],
-            serde_json::json!("https://app.example.com/setup/callback"),
+            serde_json::json!("https://app.example.com/setup"),
         );
     }
 

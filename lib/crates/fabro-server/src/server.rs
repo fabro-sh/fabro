@@ -524,7 +524,6 @@ pub struct AppState {
     pub(crate) provider_credentials: ProviderCredentials,
     pub(crate) settings:             Arc<RwLock<SettingsLayer>>,
     pub(crate) server_settings:      RwLock<Arc<ResolvedServerSettings>>,
-    pub(crate) config_path:          PathBuf,
     pub(crate) local_daemon_mode:    bool,
     shutting_down:                   AtomicBool,
     registry_factory_override:       Option<Box<RegistryFactoryOverride>>,
@@ -712,11 +711,6 @@ impl AppState {
             .expect("server settings lock poisoned") = resolved;
         Ok(())
     }
-
-    pub(crate) fn reload_settings_from_disk(&self) -> anyhow::Result<()> {
-        let reloaded = fabro_config::load_settings_path(&self.config_path)?;
-        self.replace_settings(reloaded)
-    }
 }
 
 fn artifact_upload_token_keys() -> ArtifactUploadTokenKeys {
@@ -858,6 +852,10 @@ impl Default for RouterOptions {
     }
 }
 
+fn removed_web_route(path: &str) -> bool {
+    matches!(path, "/setup/complete")
+}
+
 /// Build the axum Router with configurable web surface routing.
 pub fn build_router_with_options(
     state: Arc<AppState>,
@@ -931,6 +929,8 @@ pub fn build_router_with_options(
                     || (options.web_enabled && path.starts_with("/auth/"));
                 if dispatch_path {
                     dispatch.oneshot(req).await
+                } else if options.web_enabled && removed_web_route(&path) {
+                    Ok::<_, std::convert::Infallible>(StatusCode::NOT_FOUND.into_response())
                 } else if options.web_enabled
                     && matches!(req.method(), &Method::GET | &Method::HEAD)
                 {
@@ -2155,7 +2155,6 @@ pub fn create_app_state_with_settings_and_registry_factory(
         store,
         artifact_store,
         &test_secret_store_path(),
-        test_config_path(),
         false,
     )
     .expect("test app state should build")
@@ -2201,7 +2200,6 @@ pub(crate) fn create_test_app_state_with_session_key(
         store,
         artifact_store,
         &secrets_path,
-        test_config_path(),
         local_daemon_mode,
     )
     .expect("test app state should build")
@@ -2231,7 +2229,6 @@ pub fn create_app_state_with_store(
         store,
         artifact_store,
         &test_secret_store_path(),
-        test_config_path(),
         false,
     )
     .expect("test app state should build")
@@ -2244,7 +2241,6 @@ pub(crate) fn build_app_state_with_path(
     store: Arc<Database>,
     artifact_store: ArtifactStore,
     vault_path: &std::path::Path,
-    config_path: PathBuf,
     local_daemon_mode: bool,
 ) -> anyhow::Result<Arc<AppState>> {
     let vault = Arc::new(AsyncRwLock::new(Vault::load(vault_path.to_path_buf())?));
@@ -2306,7 +2302,6 @@ pub(crate) fn build_app_state_with_path(
         provider_credentials,
         settings,
         server_settings: RwLock::new(resolved_server_settings),
-        config_path,
         local_daemon_mode,
         shutting_down: AtomicBool::new(false),
         registry_factory_override,
@@ -2317,10 +2312,6 @@ pub(crate) fn build_app_state_with_path(
 
 fn test_secret_store_path() -> PathBuf {
     std::env::temp_dir().join(format!("fabro-test-secrets-{}.json", Ulid::new()))
-}
-
-fn test_config_path() -> PathBuf {
-    std::env::temp_dir().join(format!("fabro-test-settings-{}.toml", Ulid::new()))
 }
 
 fn board_column(status: RunStatus) -> Option<&'static str> {

@@ -39,15 +39,18 @@ The rest of this page describes the `app` strategy, which is required for browse
 ### Prerequisites
 
 - A GitHub account (personal or organization)
-- The Fabro web app running (`cd apps/fabro-web && bun run dev`)
+- Shell access to the host that runs the Fabro server
+- The Fabro web app running (`cd apps/fabro-web && bun run dev`) if you want browser sign-in after setup
 
-### Register the GitHub App
+### Register the GitHub App with `fabro install`
 
-1. Navigate to the web app (default `http://localhost:3000`). If no GitHub App is configured, you'll be redirected to the setup page automatically.
+Run the installer on the same machine that will run the Fabro server:
 
-2. Choose where to register the app. If you have the `gh` CLI installed, Fabro detects your GitHub username and any organizations you administer and lets you pick. For organization-owned apps, the app is registered under that org's settings. If `gh` is not available, the app is registered under your personal account.
+```bash
+fabro install
+```
 
-3. Click **Register GitHub App**. This takes you to GitHub with a pre-filled [App Manifest](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) containing:
+When you choose the GitHub App strategy, the CLI opens GitHub with a pre-filled [App Manifest](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) containing:
 
    | Permission | Level | Purpose |
    |---|---|---|
@@ -58,15 +61,20 @@ The rest of this page describes the `app` strategy, which is required for browse
    | Issues | Write | Create issues from workflows |
    | Emails | Read | Read verified email for OAuth login |
 
-4. Review the permissions on GitHub and click **Create GitHub App**.
+The installer:
 
-5. GitHub redirects back to Fabro, which automatically:
-   - Exchanges the temporary code for permanent app credentials
-   - Writes `app_id`, `client_id`, and `slug` to `~/.fabro/settings.toml`
-   - Stores `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` in `<data_dir>/server.env`
-   - Marks the change as restart-bound so the server must be restarted before login
+1. Lets you choose where to register the app. If you have the `gh` CLI installed, Fabro detects your GitHub username and any organizations you administer and lets you pick. If `gh` is not available, the app is registered under your personal account.
+2. Opens GitHub in your browser so you can review the manifest and click **Create GitHub App**.
+3. Receives GitHub's temporary callback on localhost, exchanges it for permanent app credentials, and writes:
+   - `app_id`, `client_id`, and `slug` to `~/.fabro/settings.toml`
+   - `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` to `<data_dir>/server.env`
+4. Prints the resulting app slug so you can install the app on the repositories Fabro should access.
 
-6. **Install the app** on your GitHub account or organization. Go to `https://github.com/settings/apps/<your-app-slug>/installations` and install it on the repositories Fabro should access.
+After setup completes, restart the Fabro server before attempting browser login.
+
+### Install the app on GitHub
+
+Go to `https://github.com/settings/apps/<your-app-slug>/installations` and install it on the repositories Fabro should access.
 
 ### Verify the configuration
 
@@ -143,8 +151,7 @@ The web app uses the GitHub App's OAuth credentials to authenticate users:
 Configure allowed users in `settings.toml`:
 
 ```toml title="settings.toml"
-[web.auth]
-provider = "github"
+[server.auth.github]
 allowed_usernames = ["alice", "bob"]
 ```
 
@@ -218,8 +225,8 @@ The app is installed but doesn't have access to this specific repository. Update
 
 ### "GitHub App authentication failed"
 
-The `app_id` in `settings.toml` or the `GITHUB_APP_PRIVATE_KEY` environment variable is incorrect. Re-run the setup flow or verify the values match your GitHub App.
+The `app_id` in `settings.toml` or the `GITHUB_APP_PRIVATE_KEY` environment variable is incorrect. Re-run `fabro install` on the server host or verify the values match your GitHub App.
 
 ### Clone fails for private repositories
 
-If you see `Git clone failed ... If this is a private repository, configure a GitHub App`, the GitHub App credentials are not configured. Run the setup flow through the web UI or verify with `fabro doctor`.
+If you see `Git clone failed ... If this is a private repository, configure a GitHub App`, the GitHub App credentials are not configured. Run `fabro install` on the server host or verify with `fabro doctor`.

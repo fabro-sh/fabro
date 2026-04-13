@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::Args;
-use fabro_config::user::{active_settings_path, load_settings_config};
+use fabro_config::user::load_settings_config;
 use fabro_config::{Storage, resolve_server_from_file};
 use fabro_sandbox::SandboxProvider;
 use fabro_types::settings::server::GithubIntegrationStrategy;
@@ -86,10 +86,6 @@ pub struct ServeArgs {
 
 fn load_settings(path: Option<&Path>) -> anyhow::Result<SettingsLayer> {
     Ok(load_settings_config(path)?)
-}
-
-fn resolved_config_path(path: Option<&Path>) -> PathBuf {
-    active_settings_path(path)
 }
 
 fn apply_serve_overrides(
@@ -258,7 +254,6 @@ where
     let config_path = args.config.clone();
     let disk_settings = load_settings(config_path.as_deref())?;
     let disk_server_settings = resolve_server_settings(&disk_settings)?;
-    let active_config_path = resolved_config_path(config_path.as_deref());
     let data_dir = match storage_dir_override {
         Some(path) => path,
         None => resolve_interp_path(&disk_server_settings.storage.root)?,
@@ -329,7 +324,6 @@ where
         store,
         artifact_store,
         &vault_path,
-        active_config_path,
         true,
     )?;
     let reconciled = reconcile_incomplete_runs_on_startup(&state).await?;

@@ -1,16 +1,12 @@
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use cookie::time::Duration;
 use cookie::{Cookie, CookieJar, Key, SameSite};
-use fabro_config::Storage;
 use fabro_types::RunAuthMethod;
 use fabro_types::settings::{InterpString, ServerAuthMethod, SettingsLayer};
 use fabro_util::dev_token::validate_dev_token_format;
@@ -18,10 +14,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
-use crate::error::ApiError;
-use crate::jwt_auth::{AuthMode, AuthenticatedSubject, auth_method_name, dev_token_matches};
+use crate::jwt_auth::{AuthMode, auth_method_name, dev_token_matches};
 use crate::server::AppState;
-use crate::server_secrets::ServerSecrets;
 
 pub const SESSION_COOKIE_NAME: &str = "__fabro_session";
 const OAUTH_STATE_COOKIE_NAME: &str = "fabro_oauth_state";
@@ -52,18 +46,8 @@ struct DevTokenLoginRequest {
 }
 
 #[derive(Deserialize)]
-struct SetupRegisterRequest {
-    code: String,
-}
-
-#[derive(Deserialize)]
 struct DemoToggleRequest {
     enabled: bool,
-}
-
-#[derive(Serialize)]
-struct SetupStatusResponse {
-    configured: bool,
 }
 
 #[derive(Serialize)]
@@ -111,16 +95,6 @@ struct GitHubEmail {
     verified: bool,
 }
 
-#[derive(Deserialize)]
-struct GitHubManifestConversion {
-    id:             i64,
-    slug:           String,
-    client_id:      String,
-    client_secret:  String,
-    webhook_secret: Option<String>,
-    pem:            String,
-}
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/login/dev-token", post(login_dev_token))
@@ -133,8 +107,6 @@ pub fn api_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/auth/config", get(auth_config))
         .route("/auth/me", get(auth_me))
-        .route("/setup/register", post(setup_register))
-        .route("/setup/status", get(setup_status))
         .route("/demo/toggle", post(toggle_demo))
 }
 
@@ -669,20 +641,6 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
     .into_response()
 }
 
-async fn setup_status(
-    State(state): State<Arc<AppState>>,
-    Extension(auth_mode): Extension<AuthMode>,
-) -> Response {
-    let configured = state
-        .server_settings()
-        .integrations
-        .github
-        .client_id
-        .is_some()
-        || auth_method_enabled(&auth_mode, ServerAuthMethod::DevToken);
-    Json(SetupStatusResponse { configured }).into_response()
-}
-
 async fn toggle_demo(Json(payload): Json<DemoToggleRequest>) -> Response {
     let mut jar = CookieJar::new();
     jar.add(
@@ -695,277 +653,6 @@ async fn toggle_demo(Json(payload): Json<DemoToggleRequest>) -> Response {
     let mut response = Json(json!({ "enabled": payload.enabled })).into_response();
     append_jar_delta(response.headers_mut(), &jar);
     response
-}
-
-async fn setup_register(
-    subject: AuthenticatedSubject,
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Json(payload): Json<SetupRegisterRequest>,
-) -> Response {
-    if subject.auth_method != RunAuthMethod::DevToken {
-        return ApiError::forbidden().into_response();
-    }
-
-    let origin = headers
-        .get(header::ORIGIN)
-        .or_else(|| headers.get(header::REFERER))
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| fabro_http::Url::parse(s).ok())
-        .map(|url| format!("{}://{}", url.scheme(), url.authority()));
-
-    let http = match fabro_http::http_client() {
-        Ok(http) => http,
-        Err(err) => {
-            error!(error = %err, "Setup register failed: could not build GitHub HTTP client");
-            return json_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                json!({"error": format!("Failed to build GitHub HTTP client: {err}")}),
-            );
-        }
-    };
-    let response = match http
-        .post(format!(
-            "https://api.github.com/app-manifests/{}/conversions",
-            payload.code
-        ))
-        .header(header::ACCEPT, "application/vnd.github+json")
-        .header(header::USER_AGENT, "fabro-server")
-        .send()
-        .await
-    {
-        Ok(response) => response,
-        Err(err) => {
-            error!(error = %err, "Setup register failed: GitHub manifest conversion request failed");
-            return json_response(
-                StatusCode::BAD_GATEWAY,
-                json!({"error": format!("GitHub manifest conversion failed: {err}")}),
-            );
-        }
-    };
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        error!(status = %status, body = %body, "Setup register failed: GitHub manifest conversion returned error");
-        return json_response(
-            StatusCode::BAD_GATEWAY,
-            json!({"error": format!("GitHub manifest conversion failed: {status}")}),
-        );
-    }
-
-    let body = match response.text().await {
-        Ok(body) => body,
-        Err(err) => {
-            error!(error = %err, "Setup register failed: could not read conversion response body");
-            return json_response(
-                StatusCode::BAD_GATEWAY,
-                json!({"error": "Failed to read GitHub manifest conversion response"}),
-            );
-        }
-    };
-    let data = match serde_json::from_str::<GitHubManifestConversion>(&body) {
-        Ok(data) => data,
-        Err(err) => {
-            error!(error = %err, body = %body, "Setup register failed: could not parse conversion response");
-            return json_response(
-                StatusCode::BAD_GATEWAY,
-                json!({"error": format!("Failed to parse GitHub manifest conversion response: {err}")}),
-            );
-        }
-    };
-
-    let settings_path = state.config_path.clone();
-
-    // Edit the settings file in place via `toml_edit::DocumentMut`, which
-    // preserves existing comments, whitespace, and key ordering. The value-
-    // tree parser (`toml::Value`) would strip all of that on round-trip.
-    if let Some(parent) = settings_path.parent() {
-        if let Err(err) = std::fs::create_dir_all(parent) {
-            error!(error = %err, path = %parent.display(), "Setup register failed: could not create settings parent directory");
-            return json_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                json!({"error": format!("Failed to create settings directory: {err}")}),
-            );
-        }
-    }
-    let existing = std::fs::read_to_string(&settings_path).unwrap_or_default();
-    let mut doc: toml_edit::DocumentMut = if existing.is_empty() {
-        toml_edit::DocumentMut::new()
-    } else {
-        match existing
-            .parse::<toml_edit::DocumentMut>()
-            .context("failed to parse existing settings config")
-        {
-            Ok(doc) => doc,
-            Err(err) => {
-                error!(error = %err, path = %settings_path.display(), "Setup register failed: could not parse settings config");
-                return json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({"error": format!("Failed to parse settings config: {err}")}),
-                );
-            }
-        }
-    };
-    if let Err(err) = merge_settings_keys(&mut doc, &data, origin.as_deref()) {
-        error!(error = %err, "Setup register failed: could not merge settings");
-        return json_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"error": format!("Failed to update settings config: {err}")}),
-        );
-    }
-    if let Err(err) = std::fs::write(&settings_path, doc.to_string()) {
-        error!(error = %err, path = %settings_path.display(), "Setup register failed: could not write settings config");
-        return json_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"error": format!("Failed to write settings config: {err}")}),
-        );
-    }
-
-    let mut secret_updates = vec![
-        ("GITHUB_APP_CLIENT_SECRET", data.client_secret.clone()),
-        (
-            "GITHUB_APP_PRIVATE_KEY",
-            BASE64_STANDARD.encode(data.pem.as_bytes()),
-        ),
-    ];
-    if let Some(ref webhook_secret) = data.webhook_secret {
-        secret_updates.push(("GITHUB_APP_WEBHOOK_SECRET", webhook_secret.clone()));
-    }
-
-    let server_env_path = Storage::new(state.server_storage_dir())
-        .server_state()
-        .env_path();
-    let mut server_secrets = match ServerSecrets::load(server_env_path.clone()) {
-        Ok(server_secrets) => server_secrets,
-        Err(err) => {
-            error!(error = %err, path = %server_env_path.display(), "Setup register failed: could not load server env");
-            return json_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                json!({"error": format!("Failed to load server env: {err}")}),
-            );
-        }
-    };
-    if let Err(err) = server_secrets.persist_updates(secret_updates) {
-        error!(error = %err, path = %server_env_path.display(), "Setup register failed: could not write server env");
-        return json_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"error": format!("Failed to write server env: {err}")}),
-        );
-    }
-
-    // Re-parse the freshly-written settings file and swap it into the
-    // in-memory state so the non-secret GitHub App config becomes visible
-    // immediately. Secret material remains restart-bound through server.env.
-    match state.reload_settings_from_disk() {
-        Ok(()) => {}
-        Err(err) => {
-            error!(error = %err, path = %settings_path.display(), "Setup register failed: could not reload written settings config");
-            return json_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                json!({"error": format!("Failed to reload settings config after write: {err}")}),
-            );
-        }
-    }
-
-    info!(slug = %data.slug, app_id = %data.id, "GitHub App registered successfully");
-    Json(json!({"ok": true, "restart_required": true})).into_response()
-}
-
-/// Walk dotted `path` into `doc`, creating missing intermediate tables,
-/// and return a mutable reference to the terminal table.
-///
-/// Uses `toml_edit`'s [`toml_edit::Entry::or_insert`] so existing tables
-/// keep their comments, ordering, and any sibling keys untouched.
-fn ensure_nested_table<'a>(
-    doc: &'a mut toml_edit::DocumentMut,
-    path: &[&str],
-) -> anyhow::Result<&'a mut toml_edit::Table> {
-    let mut current: &mut toml_edit::Table = doc.as_table_mut();
-    for segment in path {
-        let next = current
-            .entry(segment)
-            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
-        current = next
-            .as_table_mut()
-            .ok_or_else(|| anyhow!("settings config [{segment}] is not a table"))?;
-    }
-    Ok(current)
-}
-
-/// Set a scalar value on `table[key]`, preserving any key-level decor
-/// (leading comments, blank lines) that was attached to the existing entry.
-///
-/// `toml_edit`'s default `Table::insert` replaces the entry wholesale and
-/// drops its prefix decoration, which would strip a top-of-file comment
-/// attached to a key we're updating. Copying the decor forward keeps the
-/// user's formatting intact.
-fn set_preserving_decor(table: &mut toml_edit::Table, key: &str, value: toml_edit::Item) {
-    let preserved_decor = table.key(key).map(|existing| existing.leaf_decor().clone());
-    table.insert(key, value);
-    if let (Some(decor), Some(mut updated)) = (preserved_decor, table.key_mut(key)) {
-        *updated.leaf_decor_mut() = decor;
-    }
-}
-
-fn merge_settings_keys(
-    doc: &mut toml_edit::DocumentMut,
-    data: &GitHubManifestConversion,
-    origin: Option<&str>,
-) -> anyhow::Result<()> {
-    let web_url = origin.map_or_else(|| "http://localhost:3000".to_string(), str::to_string);
-
-    // Make sure the freshly-written file is a valid v2 file. `_version` is
-    // always `1` at the moment, so skip the write entirely if it's already
-    // there -- otherwise we'd trample any top-of-file comment attached to
-    // the key.
-    let root = doc.as_table_mut();
-    if !root.contains_key("_version") {
-        root.insert("_version", toml_edit::value(1_i64));
-    }
-
-    let web = ensure_nested_table(doc, &["server", "web"])?;
-    set_preserving_decor(web, "enabled", toml_edit::value(true));
-    set_preserving_decor(web, "url", toml_edit::value(web_url));
-
-    let auth = ensure_nested_table(doc, &["server", "auth"])?;
-    let mut methods = auth
-        .get("methods")
-        .and_then(|item| item.as_array())
-        .map(|array| {
-            array
-                .iter()
-                .filter_map(|value| value.as_str().map(str::to_string))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    if !methods.iter().any(|method| method == "github") {
-        methods.push("github".to_string());
-    }
-    if methods.is_empty() {
-        methods.push("github".to_string());
-    }
-    set_preserving_decor(
-        auth,
-        "methods",
-        toml_edit::value(
-            methods
-                .into_iter()
-                .map(toml_edit::Value::from)
-                .collect::<toml_edit::Array>(),
-        ),
-    );
-
-    let github = ensure_nested_table(doc, &["server", "integrations", "github"])?;
-    set_preserving_decor(github, "app_id", toml_edit::value(data.id.to_string()));
-    set_preserving_decor(
-        github,
-        "client_id",
-        toml_edit::value(data.client_id.clone()),
-    );
-    set_preserving_decor(github, "slug", toml_edit::value(data.slug.clone()));
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -986,10 +673,7 @@ mod tests {
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
-    use super::{
-        GitHubManifestConversion, SessionCookie, api_routes, merge_settings_keys,
-        read_private_session, routes,
-    };
+    use super::{SessionCookie, api_routes, read_private_session, routes};
     use crate::jwt_auth::{AuthMode, ConfiguredAuth};
     use crate::server;
 
@@ -1036,19 +720,6 @@ mod tests {
         }
     }
 
-    fn encode_session_cookie(key: &Key, session: &SessionCookie) -> String {
-        let mut jar = cookie::CookieJar::new();
-        jar.private_mut(key).add(cookie::Cookie::new(
-            super::SESSION_COOKIE_NAME,
-            serde_json::to_string(session).unwrap(),
-        ));
-        jar.delta()
-            .next()
-            .expect("private cookie should exist")
-            .encoded()
-            .to_string()
-    }
-
     fn test_auth_router_with_settings(
         settings: SettingsLayer,
         auth_mode: AuthMode,
@@ -1085,143 +756,6 @@ mod tests {
 
     async fn response_json(response: axum::response::Response) -> Value {
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
-    }
-
-    fn sample_conversion() -> GitHubManifestConversion {
-        GitHubManifestConversion {
-            id:             123,
-            slug:           "fabro".to_string(),
-            client_id:      "abc".to_string(),
-            client_secret:  "shh".to_string(),
-            pem:            String::new(),
-            webhook_secret: None,
-        }
-    }
-
-    fn parse_doc(source: &str) -> toml_edit::DocumentMut {
-        source
-            .parse::<toml_edit::DocumentMut>()
-            .expect("fixture should parse as TOML")
-    }
-
-    #[test]
-    fn merge_settings_keys_writes_v2_server_integrations_github() {
-        let mut doc = parse_doc("_version = 1\n");
-        merge_settings_keys(&mut doc, &sample_conversion(), Some("https://example.test")).unwrap();
-
-        let methods = doc["server"]["auth"]["methods"]
-            .as_array()
-            .expect("server.auth.methods should exist");
-        assert_eq!(
-            methods.iter().next().and_then(|value| value.as_str()),
-            Some("github")
-        );
-
-        let github = doc["server"]["integrations"]["github"]
-            .as_table()
-            .expect("server.integrations.github should exist");
-        assert_eq!(github["app_id"].as_str(), Some("123"));
-        assert_eq!(github["slug"].as_str(), Some("fabro"));
-        assert_eq!(github["client_id"].as_str(), Some("abc"));
-
-        let web = doc["server"]["web"]
-            .as_table()
-            .expect("server.web should exist");
-        assert_eq!(web["url"].as_str(), Some("https://example.test"));
-        assert_eq!(web["enabled"].as_bool(), Some(true));
-
-        // Re-parse the emitted document to prove it round-trips into a
-        // valid v2 `SettingsLayer`.
-        let emitted = doc.to_string();
-        let file = fabro_config::parse_settings_layer(&emitted)
-            .expect("merged output should parse as a v2 SettingsLayer");
-        let server = file.server.as_ref().expect("[server] should be present");
-        let integrations = server
-            .integrations
-            .as_ref()
-            .expect("[server.integrations] should be present");
-        let github = integrations
-            .github
-            .as_ref()
-            .expect("[server.integrations.github] should be present");
-        assert_eq!(
-            github
-                .app_id
-                .as_ref()
-                .map(fabro_types::settings::InterpString::as_source),
-            Some("123".to_string())
-        );
-    }
-
-    #[test]
-    fn merge_settings_keys_preserves_comments_and_unrelated_keys() {
-        let existing = r##"# Top-of-file comment explaining the settings layout.
-_version = 1
-
-# Storage root comment — should survive the edit.
-[server.storage]
-root = "/srv/fabro-data"
-
-# A pre-existing integration that is NOT github.
-[server.integrations.slack]
-default_channel = "#ops"
-
-[run.model]
-provider = "anthropic"
-name = "claude-sonnet"
-"##;
-        let mut doc = parse_doc(existing);
-        merge_settings_keys(
-            &mut doc,
-            &sample_conversion(),
-            Some("https://fabro.example"),
-        )
-        .unwrap();
-
-        let emitted = doc.to_string();
-
-        // Comments must survive the round-trip.
-        assert!(
-            emitted.contains("# Top-of-file comment explaining the settings layout."),
-            "top-of-file comment was stripped:\n{emitted}"
-        );
-        assert!(
-            emitted.contains("# Storage root comment — should survive the edit."),
-            "inline table comment was stripped:\n{emitted}"
-        );
-        assert!(
-            emitted.contains("# A pre-existing integration that is NOT github."),
-            "sibling-table comment was stripped:\n{emitted}"
-        );
-
-        // Unrelated keys must still be intact.
-        assert!(
-            emitted.contains(r#"root = "/srv/fabro-data""#),
-            "server.storage.root was lost:\n{emitted}"
-        );
-        assert!(
-            emitted.contains(r##"default_channel = "#ops""##),
-            "server.integrations.slack.default_channel was lost:\n{emitted}"
-        );
-        assert!(
-            emitted.contains(r#"provider = "anthropic""#),
-            "run.model.provider was lost:\n{emitted}"
-        );
-
-        // And the new keys must be present.
-        assert!(
-            emitted.contains(r#"app_id = "123""#),
-            "server.integrations.github.app_id missing:\n{emitted}"
-        );
-        assert!(
-            emitted.contains(r#"url = "https://fabro.example""#),
-            "server.web.url missing:\n{emitted}"
-        );
-
-        // Finally, the whole thing must still parse as a valid v2
-        // SettingsLayer.
-        fabro_config::parse_settings_layer(&emitted)
-            .expect("merged output should still parse as v2 after the edit");
     }
 
     #[tokio::test]
@@ -1315,61 +849,6 @@ name = "claude-sonnet"
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
         assert_eq!(body, json!({ "methods": ["dev-token"] }));
-    }
-
-    #[tokio::test]
-    async fn setup_register_requires_authentication() {
-        let app = test_auth_router_with_settings(SettingsLayer::default(), dev_token_auth_mode());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/setup/register")
-                    .body(Body::from("not json"))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn setup_register_forbids_github_sessions() {
-        let key = Key::derive_from(b"web-auth-test-key-material-0123456789");
-        let app = test_auth_router_with_settings(
-            github_settings("https://fabro.example"),
-            github_auth_mode(),
-        );
-        let now = chrono::Utc::now().timestamp();
-        let session_cookie = encode_session_cookie(&key, &SessionCookie {
-            v:           1,
-            login:       "octocat".to_string(),
-            auth_method: RunAuthMethod::Github,
-            provider_id: Some(1),
-            name:        "Octocat".to_string(),
-            email:       "octocat@example.com".to_string(),
-            avatar_url:  "https://avatars.example/octocat".to_string(),
-            user_url:    "https://github.com/octocat".to_string(),
-            iat:         now,
-            exp:         now + 60,
-        });
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/setup/register")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::COOKIE, session_cookie)
-                    .body(Body::from(json!({ "code": "fake-code" }).to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

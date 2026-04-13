@@ -25,4 +25,11 @@ describe("browser router", () => {
     expect(paths).toContain("/login");
     expect(paths).not.toContain("/auth/login");
   });
+
+  test("exposes /setup but not the removed /setup/complete route", () => {
+    const paths = collectPaths(routes);
+
+    expect(paths).toContain("/setup");
+    expect(paths).not.toContain("/setup/complete");
+  });
 });

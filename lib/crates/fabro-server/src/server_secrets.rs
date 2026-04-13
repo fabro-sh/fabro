@@ -42,16 +42,6 @@ impl ServerSecrets {
     pub(crate) fn get(&self, name: &str) -> Option<String> {
         (self.env_lookup)(name).or_else(|| self.file_entries.get(name).cloned())
     }
-
-    pub(crate) fn persist_updates<I, K, V>(&mut self, updates: I) -> Result<(), Error>
-    where
-        I: IntoIterator<Item = (K, V)>,
-        K: Into<String>,
-        V: Into<String>,
-    {
-        self.file_entries = envfile::merge_env_file(&self.path, updates)?;
-        Ok(())
-    }
 }
 
 impl std::fmt::Debug for ServerSecrets {

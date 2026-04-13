@@ -1,12 +1,7 @@
 import { redirect } from "react-router";
-import { getAuthMe, getSetupStatus } from "../api";
+import { getAuthMe } from "../api";
 
 export async function loader() {
-  const setup = await getSetupStatus();
-  if (!setup.configured) {
-    return redirect("/setup");
-  }
-
   try {
     await getAuthMe();
   } catch (error) {

@@ -97,13 +97,29 @@ async fn web_enabled_serves_web_only_routes() {
     let auth_me_response = app.clone().oneshot(auth_me_request).await.unwrap();
     assert_eq!(auth_me_response.status(), StatusCode::UNAUTHORIZED);
 
+    let setup_request = Request::builder()
+        .method("GET")
+        .uri("/setup")
+        .body(Body::empty())
+        .unwrap();
+    let setup_response = app.clone().oneshot(setup_request).await.unwrap();
+    assert_eq!(setup_response.status(), StatusCode::OK);
+
     let setup_status_request = Request::builder()
         .method("GET")
         .uri("/api/v1/setup/status")
         .body(Body::empty())
         .unwrap();
     let setup_status_response = app.clone().oneshot(setup_status_request).await.unwrap();
-    assert_eq!(setup_status_response.status(), StatusCode::OK);
+    assert_eq!(setup_status_response.status(), StatusCode::NOT_FOUND);
+
+    let setup_complete_request = Request::builder()
+        .method("GET")
+        .uri("/setup/complete")
+        .body(Body::empty())
+        .unwrap();
+    let setup_complete_response = app.clone().oneshot(setup_complete_request).await.unwrap();
+    assert_eq!(setup_complete_response.status(), StatusCode::NOT_FOUND);
 
     let demo_toggle_request = Request::builder()
         .method("POST")
@@ -138,6 +154,7 @@ enabled = false
 
     for (method, path, body) in [
         ("GET", "/", Body::empty()),
+        ("GET", "/setup", Body::empty()),
         ("GET", "/runs/abc", Body::empty()),
         ("GET", "/auth/login/github", Body::empty()),
         ("GET", "/api/v1/auth/me", Body::empty()),

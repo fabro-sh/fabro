@@ -48,14 +48,6 @@ export async function apiJsonOrNull<T>(
   return response.json() as Promise<T>;
 }
 
-export async function getSetupStatus(): Promise<{ configured: boolean }> {
-  const response = await fetch("/api/v1/setup/status", { credentials: "include" });
-  if (!response.ok) {
-    throw new Response(null, { status: response.status, statusText: response.statusText });
-  }
-  return response.json();
-}
-
 export async function getAuthConfig(): Promise<{ methods: string[] }> {
   const response = await fetch("/api/v1/auth/config", { credentials: "include" });
   if (!response.ok) {

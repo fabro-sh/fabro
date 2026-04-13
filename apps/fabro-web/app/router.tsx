@@ -9,7 +9,6 @@ import {
 import Root, { ErrorBoundary as RootErrorBoundary } from "./root";
 import * as RedirectHome from "./routes/redirect-home";
 import * as Setup from "./routes/setup";
-import * as SetupComplete from "./routes/setup-complete";
 import * as AuthLogin from "./routes/auth-login";
 import * as Start from "./routes/start";
 import * as Workflows from "./routes/workflows";
@@ -81,7 +80,6 @@ export const routes: RouteObject[] = [
     children: [
       indexRoute(RedirectHome),
       route("setup", Setup),
-      route("setup/complete", SetupComplete),
       route("login", AuthLogin),
       {
         loader: appShellLoader,
