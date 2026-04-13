@@ -323,7 +323,8 @@ async fn main_inner() -> (String, Result<()>) {
 #[cfg(test)]
 mod tests {
     use args::{
-        Commands, ModelsCommand, ProviderCommand, ProviderNamespace, StoreCommand, StoreNamespace,
+        Commands, InstallGitHubStrategyArg, ModelsCommand, ProviderCommand, ProviderNamespace,
+        StoreCommand, StoreNamespace,
     };
 
     use super::*;
@@ -373,6 +374,34 @@ mod tests {
             }) => {
                 assert_eq!(args.provider, fabro_model::Provider::Anthropic);
                 assert!(args.api_key_stdin);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_install_non_interactive_accepts_gh_cli_strategy() {
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "install",
+            "--non-interactive",
+            "--llm-provider",
+            "anthropic",
+            "--llm-api-key-env",
+            "ANTHROPIC_API_KEY",
+            "--github-strategy",
+            "gh_cli",
+            "--github-username",
+            "brynary",
+        ])
+        .expect("should parse");
+        match *cli.command {
+            Commands::Install(args) => {
+                assert!(args.non_interactive);
+                assert_eq!(
+                    args.scripted.github_strategy,
+                    Some(InstallGitHubStrategyArg::GhCli)
+                );
             }
             _ => panic!("unexpected command variant"),
         }

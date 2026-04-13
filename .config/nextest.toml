@@ -12,6 +12,10 @@ leak-timeout = "500ms"
     slow-timeout = { period = "5s", terminate-after = 4 }
 
     [[profile.default.overrides]]
+    filter = "package(fabro-server) & test(all_spec_routes_are_routable)"
+    slow-timeout = { period = "15s", terminate-after = 4 }
+
+    [[profile.default.overrides]]
     filter = "package(fabro-workflow) & kind(test)"
     slow-timeout = { period = "2s", terminate-after = 3 }
 

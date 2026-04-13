@@ -3139,6 +3139,8 @@ fn worker_command(
     cmd.arg("__run-worker")
         .arg("--server")
         .arg(server_target)
+        .arg("--storage-dir")
+        .arg(&storage_dir)
         .arg("--artifact-upload-token")
         .arg(artifact_upload_token)
         .arg("--run-dir")
@@ -6354,8 +6356,51 @@ type = "http"
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        assert!(state.vault.read().await.list().is_empty());
+        let listed = state.vault.read().await.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "openai_codex");
+        assert_eq!(listed[0].secret_type, SecretType::Credential);
         assert!(state.vault.read().await.get("openai_codex").is_some());
+    }
+
+    #[tokio::test]
+    async fn list_secrets_includes_credential_metadata() {
+        let state = create_app_state();
+        {
+            let mut vault = state.vault.write().await;
+            vault
+                .set(
+                    "anthropic",
+                    "{\"provider\":\"anthropic\"}",
+                    SecretType::Credential,
+                    Some("saved auth"),
+                )
+                .unwrap();
+        }
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api("/secrets"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        let data = body["data"].as_array().expect("data should be an array");
+        let entry = data
+            .iter()
+            .find(|entry| entry["name"] == "anthropic")
+            .expect("credential metadata should be listed");
+        assert_eq!(entry["type"], "credential");
+        assert_eq!(entry["description"], "saved auth");
+        assert!(entry.get("updated_at").is_some());
+        assert!(entry.get("value").is_none());
     }
 
     #[tokio::test]

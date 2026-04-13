@@ -135,7 +135,6 @@ impl Vault {
         let mut data = self
             .entries
             .iter()
-            .filter(|(_, entry)| entry.secret_type != SecretType::Credential)
             .map(|(name, entry)| SecretMetadata {
                 name:        name.clone(),
                 secret_type: entry.secret_type,
@@ -351,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn list_hides_credential_entries_loaded_from_disk() {
+    fn list_includes_credential_entries_loaded_from_disk() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("secrets.json");
         std::fs::write(
@@ -376,8 +375,10 @@ mod tests {
 
         let store = Vault::load(path).unwrap();
 
-        assert_eq!(store.list().len(), 1);
+        assert_eq!(store.list().len(), 2);
         assert_eq!(store.list()[0].name, "OPENAI_API_KEY");
+        assert_eq!(store.list()[1].name, "openai_codex");
+        assert_eq!(store.list()[1].secret_type, SecretType::Credential);
         assert_eq!(store.get("openai_codex"), Some("{\"provider\":\"openai\"}"));
     }
 

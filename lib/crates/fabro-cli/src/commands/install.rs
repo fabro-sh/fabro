@@ -238,6 +238,10 @@ fn merge_server_settings(doc: &mut toml::Value, username: &str) -> Result<()> {
 
     let listen = ensure_table(server, "listen")?;
     listen.insert("type".to_string(), toml::Value::String("tcp".to_string()));
+    listen.insert(
+        "address".to_string(),
+        toml::Value::String("127.0.0.1:3000".to_string()),
+    );
     let listen_tls = ensure_table(listen, "tls")?;
     let certs_dir = fabro_util::Home::from_env().certs_dir();
     listen_tls.insert(
@@ -1204,10 +1208,11 @@ pub(crate) async fn run_install(
     let server_was_running = record::active_server_record(&storage_dir).is_some();
     let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
     let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
+    let config_existed_before_install = config_path.exists();
     let input_source: Box<dyn InstallInputSource + Send + Sync> =
         match NonInteractiveInstallInputSource::new(args)? {
             Some(source) => {
-                source.validate(config_path.exists())?;
+                source.validate(config_existed_before_install)?;
                 Box::new(source)
             }
             None => Box::new(InteractiveInstallInputSource),
@@ -1370,7 +1375,7 @@ pub(crate) async fn run_install(
         fabro_util::printerr!(printer, "");
 
         match input_source
-            .choose_server_config(config_path.exists())
+            .choose_server_config(config_existed_before_install)
             .await?
         {
             ServerConfigSelection::KeepExisting => {
@@ -1714,7 +1719,15 @@ mod tests {
             .and_then(|s| s.listen.as_ref())
             .expect("server.listen should be set");
         let tls = match listen {
-            ServerListenLayer::Tcp { tls, .. } => tls.as_ref().expect("server.listen.tls"),
+            ServerListenLayer::Tcp { address, tls } => {
+                assert_eq!(
+                    address
+                        .as_ref()
+                        .map(fabro_types::settings::InterpString::as_source),
+                    Some("127.0.0.1:3000".to_string())
+                );
+                tls.as_ref().expect("server.listen.tls")
+            }
             ServerListenLayer::Unix { .. } => panic!("expected tcp listen"),
         };
         let certs_dir = fabro_util::Home::from_env().certs_dir();

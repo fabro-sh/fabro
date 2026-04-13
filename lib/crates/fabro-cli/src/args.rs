@@ -751,6 +751,10 @@ pub(crate) struct RunWorkerArgs {
     #[arg(long)]
     pub(crate) server: String,
 
+    /// Fabro storage directory for loading worker-visible secrets
+    #[arg(long, hide = true)]
+    pub(crate) storage_dir: Option<PathBuf>,
+
     /// Short-lived bearer token for artifact uploads
     #[arg(long, hide = true)]
     pub(crate) artifact_upload_token: Option<String>,
@@ -1272,8 +1276,9 @@ pub(crate) struct DoctorArgs {
     pub(crate) verbose: bool,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum InstallGitHubStrategyArg {
+    #[value(name = "gh_cli", alias = "gh-cli")]
     GhCli,
     App,
 }

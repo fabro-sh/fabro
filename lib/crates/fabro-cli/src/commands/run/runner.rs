@@ -6,11 +6,13 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
+use fabro_config::Storage;
 use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage};
 use fabro_store::{EventEnvelope, EventPayload, RunProjection};
 use fabro_types::settings::run::RunMode;
 use fabro_types::settings::{InterpString, SettingsLayer};
 use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, StatusReason};
+use fabro_vault::Vault;
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use fabro_workflow::artifact_upload::{ArtifactSink, StageArtifactUploader};
 use fabro_workflow::event::{Emitter, RunEventSink};
@@ -19,7 +21,7 @@ use fabro_workflow::run_control::RunControlState;
 use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, RwLock as AsyncRwLock, mpsc};
 use tokio::time::sleep;
 
 use crate::args::RunWorkerMode;
@@ -48,6 +50,7 @@ enum WorkerTitlePhase {
 pub(crate) async fn execute(
     run_id: RunId,
     server: String,
+    storage_dir: Option<PathBuf>,
     artifact_upload_token: Option<String>,
     run_dir: PathBuf,
     mode: RunWorkerMode,
@@ -76,6 +79,7 @@ pub(crate) async fn execute(
     let run_control = RunControlState::new();
     install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
     let github_app = maybe_build_github_credentials(&run_record.settings).await?;
+    let vault = load_worker_vault(storage_dir.as_deref())?;
     let services = StartServices {
         run_id,
         cancel_token: Some(Arc::clone(&cancel_token)),
@@ -92,7 +96,7 @@ pub(crate) async fn execute(
         artifact_sink,
         run_control: Some(run_control),
         github_app,
-        vault: None,
+        vault,
         on_node: None,
         registry_override: None,
     };
@@ -107,6 +111,21 @@ pub(crate) async fn execute(
     }
 
     Ok(())
+}
+
+fn load_worker_vault(storage_dir: Option<&Path>) -> Result<Option<Arc<AsyncRwLock<Vault>>>> {
+    let Some(storage_dir) = storage_dir else {
+        return Ok(None);
+    };
+
+    let storage = Storage::new(storage_dir);
+    let vault = Vault::load(storage.secrets_path()).with_context(|| {
+        format!(
+            "failed to load worker vault from {}",
+            storage.root().display()
+        )
+    })?;
+    Ok(Some(Arc::new(AsyncRwLock::new(vault))))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -553,18 +572,23 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    use fabro_auth::{AuthCredential, AuthDetails};
+    use fabro_config::Storage;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
+    use fabro_model::Provider;
     use fabro_types::run_event::{
         InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
         RunFailedProps, RunStatusTransitionProps,
     };
     use fabro_types::{EventBody, StatusReason, fixtures};
+    use fabro_vault::{SecretType, Vault};
     use fabro_workflow::artifact_upload::StageArtifactUploader;
 
     use super::{
         MissingArtifactUploadTokenUploader, WorkerControlStreamEvent, WorkerTitlePhase,
         apply_worker_control_line, handle_worker_control_stream_events, initial_worker_title_phase,
-        read_worker_control_stream_blocking, worker_title, worker_title_phase_for_event,
+        load_worker_vault, read_worker_control_stream_blocking, worker_title,
+        worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
 
@@ -773,5 +797,32 @@ mod tests {
         let answer: fabro_interview::Answer = answer_task.await.unwrap();
         assert_eq!(answer.value, AnswerValue::Interrupted);
         assert!(!cancel_token.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn load_worker_vault_reads_credentials_from_storage_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = Storage::new(temp.path());
+        let mut vault = Vault::load(storage.secrets_path()).unwrap();
+        vault
+            .set(
+                "anthropic",
+                &serde_json::to_string(&AuthCredential {
+                    provider: Provider::Anthropic,
+                    details:  AuthDetails::ApiKey {
+                        key: "vault-key".to_string(),
+                    },
+                })
+                .unwrap(),
+                SecretType::Credential,
+                None,
+            )
+            .unwrap();
+
+        let loaded = load_worker_vault(Some(temp.path())).unwrap().unwrap();
+        let guard = loaded.read().await;
+        let credential = guard.get("anthropic").unwrap();
+
+        assert!(credential.contains("vault-key"));
     }
 }

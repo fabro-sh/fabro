@@ -1,4 +1,8 @@
+use fabro_auth::{AuthCredential, AuthDetails};
+use fabro_config::Storage;
+use fabro_model::Provider;
 use fabro_test::{fabro_snapshot, test_context};
+use fabro_vault::{SecretType, Vault};
 use httpmock::MockServer;
 use serde_json::Value;
 
@@ -84,6 +88,32 @@ fn run_completed_event(run_id: &str) -> serde_json::Value {
             "status": "success"
         }
     })
+}
+
+fn seed_anthropic_vault(storage_dir: &std::path::Path, base_url: &str) {
+    let mut vault = Vault::load(Storage::new(storage_dir).secrets_path()).unwrap();
+    vault
+        .set(
+            "anthropic",
+            &serde_json::to_string(&AuthCredential {
+                provider: Provider::Anthropic,
+                details:  AuthDetails::ApiKey {
+                    key: "vault-anthropic-key".to_string(),
+                },
+            })
+            .unwrap(),
+            SecretType::Credential,
+            None,
+        )
+        .unwrap();
+    vault
+        .set(
+            "ANTHROPIC_BASE_URL",
+            base_url,
+            SecretType::Environment,
+            None,
+        )
+        .unwrap();
 }
 
 fn run_running_event(run_id: &str, seq: u32) -> serde_json::Value {
@@ -232,6 +262,96 @@ fn detach_uses_configured_server_target_without_server_flag() {
         String::from_utf8_lossy(&output.stdout).trim(),
         run_id.as_str()
     );
+}
+
+#[test]
+fn run_uses_vault_credentials_for_worker_execution() {
+    let context = test_context!();
+    let run_id = unique_run_id();
+    let llm_server = MockServer::start();
+    seed_anthropic_vault(
+        &context.storage_dir,
+        &format!("{}/v1", llm_server.base_url()),
+    );
+
+    let llm_mock = llm_server.mock(|when, then| {
+        when.method("POST")
+            .path("/v1/messages")
+            .header("x-api-key", "vault-anthropic-key");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "id": "msg_test_123",
+                    "model": "claude-haiku-4-5",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Hello from vault"
+                        }
+                    ],
+                    "stop_reason": "end_turn",
+                    "usage": {
+                        "input_tokens": 12,
+                        "output_tokens": 4
+                    }
+                })
+                .to_string(),
+            );
+    });
+
+    context.write_temp(
+        "vault_worker_llm.fabro",
+        "\
+digraph VaultWorkerLlm {
+  graph [goal=\"Use a vault-backed Anthropic credential\"]
+  rankdir=LR
+
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare, label=\"Exit\"]
+  draft [shape=tab, label=\"Draft\", prompt=\"Write a short greeting.\"]
+
+  start -> draft -> exit
+}
+",
+    );
+
+    let output = context
+        .run_cmd()
+        .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("ANTHROPIC_BASE_URL")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_BASE_URL")
+        .env_remove("GEMINI_API_KEY")
+        .args([
+            "--run-id",
+            run_id.as_str(),
+            "--auto-approve",
+            "--no-retro",
+            "--sandbox",
+            "local",
+            "--provider",
+            "anthropic",
+            "--model",
+            "claude-haiku-4-5",
+            context
+                .temp_dir
+                .join("vault_worker_llm.fabro")
+                .to_str()
+                .unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    llm_mock.assert();
+    wait_for_event_names(&context.find_run_dir(&run_id), &["run.completed"]);
 }
 
 #[test]
