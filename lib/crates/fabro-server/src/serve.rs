@@ -26,7 +26,7 @@ use tracing::{error, info, warn};
 
 use crate::bind::{self, Bind, BindRequest};
 use crate::github_webhooks::WebhookManager;
-use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode_with_lookup};
+use crate::jwt_auth::{AuthMode, AuthStrategy, ResolvedAuth, resolve_auth_mode_with_lookup};
 use crate::server::{
     RouterOptions, build_app_state_with_path, build_router_with_options,
     reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
@@ -305,20 +305,24 @@ where
     let resolved_server_settings = resolve_server_settings(&effective_settings)?;
     let shared_settings = Arc::new(RwLock::new(effective_settings));
     std::fs::create_dir_all(&data_dir)?;
-    let (auth_mode, client_auth, max_concurrent_runs) = {
-        let auth_mode = resolve_auth_mode_with_lookup(&resolved_server_settings, |name| {
+    let (resolved_auth, client_auth, max_concurrent_runs) = {
+        let resolved_auth = resolve_auth_mode_with_lookup(&resolved_server_settings, |name| {
             server_secrets.get(name)
         })?;
         let tls_present = matches!(
             resolved_server_settings.listen,
             ServerListenSettings::Tcp { ref tls, .. } if tls.is_some()
         );
-        let client_auth = tls_present.then(|| client_auth_from_mode(&auth_mode));
+        let client_auth = tls_present.then(|| client_auth_from_mode(&resolved_auth.mode));
         let max_concurrent_runs = args
             .max_concurrent_runs
             .unwrap_or(resolved_server_settings.scheduler.max_concurrent_runs);
-        (auth_mode, client_auth, max_concurrent_runs)
+        (resolved_auth, client_auth, max_concurrent_runs)
     };
+    let ResolvedAuth {
+        mode: auth_mode,
+        session_key_override,
+    } = resolved_auth;
     let web_enabled = router_web_enabled(&resolved_server_settings);
 
     let store_path = storage.store_dir();
@@ -339,7 +343,8 @@ where
         artifact_store,
         &vault_path,
         active_config_path,
-        matches!(&auth_mode, AuthMode::Disabled),
+        session_key_override,
+        true,
     )?;
     let reconciled = reconcile_incomplete_runs_on_startup(&state).await?;
     if reconciled > 0 {

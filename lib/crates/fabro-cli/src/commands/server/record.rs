@@ -12,6 +12,8 @@ pub(crate) struct ServerRecord {
     pub pid:        u32,
     pub bind:       Bind,
     pub log_path:   PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dev_token_path: Option<PathBuf>,
     pub started_at: DateTime<Utc>,
 }
 
@@ -109,6 +111,7 @@ mod tests {
             pid: std::process::id(),
             bind,
             log_path: PathBuf::from("/tmp/server.log"),
+            dev_token_path: None,
             started_at: Utc::now(),
         }
     }

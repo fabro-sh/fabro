@@ -13,6 +13,7 @@ use crate::settings::SettingsLayer;
 pub enum RunAuthMethod {
     Disabled,
     Cookie,
+    DevToken,
     Jwt,
     Mtls,
 }

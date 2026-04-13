@@ -17,6 +17,10 @@ impl Home {
             return Self::new(root);
         }
 
+        if let Some(home) = std::env::var_os("HOME") {
+            return Self::new(PathBuf::from(home).join(".fabro"));
+        }
+
         let root =
             dirs::home_dir().map_or_else(|| PathBuf::from(".fabro"), |home| home.join(".fabro"));
         Self::new(root)
@@ -58,6 +62,11 @@ impl Home {
     }
 
     #[must_use]
+    pub fn dev_token_path(&self) -> PathBuf {
+        self.root.join("dev-token")
+    }
+
+    #[must_use]
     pub fn workflows_dir(&self) -> PathBuf {
         self.root.join("workflows")
     }
@@ -76,6 +85,9 @@ impl Home {
 #[cfg(test)]
 mod tests {
     use super::Home;
+    use std::sync::{LazyLock, Mutex};
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn accessors_are_relative_to_root() {
@@ -107,6 +119,10 @@ mod tests {
             std::path::Path::new("/tmp/fabro-home/fabro.sock")
         );
         assert_eq!(
+            home.dev_token_path(),
+            std::path::Path::new("/tmp/fabro-home/dev-token")
+        );
+        assert_eq!(
             home.workflows_dir(),
             std::path::Path::new("/tmp/fabro-home/workflows")
         );
@@ -115,5 +131,18 @@ mod tests {
             std::path::Path::new("/tmp/fabro-home/logs")
         );
         assert_eq!(home.tmp_dir(), std::path::Path::new("/tmp/fabro-home/tmp"));
+    }
+
+    #[test]
+    fn from_env_prefers_home_env_when_fabro_home_is_absent() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("FABRO_HOME");
+        std::env::set_var("HOME", "/tmp/fabro-home-env");
+
+        let home = Home::from_env();
+
+        std::env::remove_var("HOME");
+
+        assert_eq!(home.root(), std::path::Path::new("/tmp/fabro-home-env/.fabro"));
     }
 }

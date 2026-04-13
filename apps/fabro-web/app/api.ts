@@ -56,6 +56,27 @@ export async function getSetupStatus(): Promise<{ configured: boolean }> {
   return response.json();
 }
 
+export async function getAuthConfig(): Promise<{ methods: string[] }> {
+  const response = await fetch("/api/v1/auth/config", { credentials: "include" });
+  if (!response.ok) {
+    throw new Response(null, { status: response.status, statusText: response.statusText });
+  }
+  return response.json();
+}
+
+export async function loginDevToken(token: string): Promise<{ ok: boolean }> {
+  const response = await fetch("/auth/login/dev-token", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) {
+    throw new Response(null, { status: response.status, statusText: response.statusText });
+  }
+  return response.json();
+}
+
 export async function getAuthMe(): Promise<{
   user: {
     login: string;

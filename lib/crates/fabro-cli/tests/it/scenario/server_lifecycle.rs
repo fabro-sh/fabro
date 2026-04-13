@@ -18,6 +18,10 @@ fn start_status_stop_lifecycle() {
         r"started \d+[hms] (?:\d+[hms] )*ago".to_string(),
         "started [UPTIME] ago".to_string(),
     ));
+    filters.push((
+        r"fabro_dev_[0-9a-f]{64}".to_string(),
+        "fabro_dev_[DEV_TOKEN]".to_string(),
+    ));
 
     let mut cmd = context.command();
     cmd.env("FABRO_STORAGE_DIR", &storage_dir);
@@ -28,6 +32,8 @@ fn start_status_stop_lifecycle() {
     ----- stdout -----
     ----- stderr -----
     Server started (pid [PID]) on [SOCKET_PATH]
+    Dev token: fabro_dev_[DEV_TOKEN]
+    Token file: [HOME_DIR]/.fabro/dev-token
     ");
 
     let mut cmd = context.command();

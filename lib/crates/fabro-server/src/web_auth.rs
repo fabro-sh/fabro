@@ -5,7 +5,7 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use cookie::time::Duration;
@@ -16,8 +16,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
+use crate::jwt_auth::{AuthMode, AuthStrategy, dev_token_matches};
 use crate::server::AppState;
 use crate::server_secrets::ServerSecrets;
+use fabro_util::dev_token::validate_dev_token_format;
 
 pub const SESSION_COOKIE_NAME: &str = "__fabro_session";
 const OAUTH_STATE_COOKIE_NAME: &str = "fabro_oauth_state";
@@ -25,11 +27,12 @@ const OAUTH_STATE_COOKIE_NAME: &str = "fabro_oauth_state";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionCookie {
     pub login:      String,
+    pub provider:   String,
     pub name:       String,
     pub email:      String,
     pub avatar_url: String,
     pub user_url:   String,
-    pub github_id:  i64,
+    pub provider_id: Option<i64>,
     pub exp:        i64,
 }
 
@@ -37,6 +40,11 @@ pub struct SessionCookie {
 struct OAuthCallbackParams {
     code:  String,
     state: String,
+}
+
+#[derive(Deserialize)]
+struct DevTokenLoginRequest {
+    token: String,
 }
 
 #[derive(Deserialize)]
@@ -55,9 +63,14 @@ struct SetupStatusResponse {
 }
 
 #[derive(Serialize)]
+struct AuthConfigResponse {
+    methods: Vec<String>,
+}
+
+#[derive(Serialize)]
 struct AuthMeResponse {
     user:      SessionUser,
-    provider:  &'static str,
+    provider:  String,
     #[serde(rename = "demoMode")]
     demo_mode: bool,
     features:  serde_json::Value,
@@ -106,6 +119,7 @@ struct GitHubManifestConversion {
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/login/dev-token", post(login_dev_token))
         .route("/login/github", get(login_github))
         .route("/callback/github", get(callback_github))
         .route("/logout", post(logout))
@@ -113,6 +127,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 
 pub fn api_routes() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/auth/config", get(auth_config))
         .route("/auth/me", get(auth_me))
         .route("/setup/register", post(setup_register))
         .route("/setup/status", get(setup_status))
@@ -170,6 +185,93 @@ fn resolve_interp(value: &InterpString) -> anyhow::Result<String> {
         .resolve(|name| std::env::var(name).ok())
         .map(|resolved| resolved.value)
         .map_err(anyhow::Error::from)
+}
+
+fn auth_methods_from_mode(auth_mode: &AuthMode) -> Vec<String> {
+    match auth_mode {
+        AuthMode::Strategies(strategies) => {
+            if strategies
+                .iter()
+                .any(|strategy| matches!(strategy, AuthStrategy::DevToken { .. }))
+            {
+                vec!["dev-token".to_string()]
+            } else if strategies
+                .iter()
+                .any(|strategy| matches!(strategy, AuthStrategy::Cookie))
+            {
+                vec!["github".to_string()]
+            } else {
+                Vec::new()
+            }
+        }
+        AuthMode::Disabled => Vec::new(),
+    }
+}
+
+async fn login_dev_token(
+    State(state): State<Arc<AppState>>,
+    Extension(auth_mode): Extension<AuthMode>,
+    Json(payload): Json<DevTokenLoginRequest>,
+) -> Response {
+    let expected = match auth_mode {
+        AuthMode::Strategies(strategies) => strategies.iter().find_map(|strategy| match strategy {
+            AuthStrategy::DevToken { token } => Some(token.clone()),
+            _ => None,
+        }),
+        AuthMode::Disabled => None,
+    };
+    let Some(expected) = expected else {
+        return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
+    };
+
+    if !validate_dev_token_format(&payload.token) || !dev_token_matches(&payload.token, &expected)
+    {
+        return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
+    }
+
+    let Some(session_key) = state.session_key() else {
+        return json_response(
+            StatusCode::CONFLICT,
+            json!({"error": "SESSION_SECRET is not configured"}),
+        );
+    };
+
+    let now = chrono::Utc::now();
+    let session = SessionCookie {
+        login:       "dev".to_string(),
+        provider:    "dev-token".to_string(),
+        name:        "Development User".to_string(),
+        email:       "dev@localhost".to_string(),
+        avatar_url:  "/logo.svg".to_string(),
+        user_url:    String::new(),
+        provider_id: None,
+        exp:         (now + chrono::Duration::days(30)).timestamp(),
+    };
+
+    let mut jar = CookieJar::new();
+    jar.private_mut(&session_key).add(
+        Cookie::build((
+            SESSION_COOKIE_NAME,
+            serde_json::to_string(&session).unwrap_or_default(),
+        ))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .secure(false)
+        .max_age(Duration::days(30))
+        .build(),
+    );
+
+    let mut response = Json(json!({ "ok": true })).into_response();
+    append_jar_delta(response.headers_mut(), &jar);
+    response
+}
+
+async fn auth_config(Extension(auth_mode): Extension<AuthMode>) -> Response {
+    Json(AuthConfigResponse {
+        methods: auth_methods_from_mode(&auth_mode),
+    })
+    .into_response()
 }
 
 async fn login_github(State(state): State<Arc<AppState>>) -> Response {
@@ -409,13 +511,14 @@ async fn callback_github(
         .unwrap_or_default();
     let now = chrono::Utc::now();
     let session = SessionCookie {
-        login:      profile.login.clone(),
-        name:       profile.name.unwrap_or_else(|| profile.login.clone()),
-        email:      primary_email,
-        avatar_url: profile.avatar_url,
-        user_url:   format!("https://github.com/{}", profile.login),
-        github_id:  profile.id,
-        exp:        (now + chrono::Duration::days(30)).timestamp(),
+        login:       profile.login.clone(),
+        provider:    "github".to_string(),
+        name:        profile.name.unwrap_or_else(|| profile.login.clone()),
+        email:       primary_email,
+        avatar_url:  profile.avatar_url,
+        user_url:    format!("https://github.com/{}", profile.login),
+        provider_id: Some(profile.id),
+        exp:         (now + chrono::Duration::days(30)).timestamp(),
     };
 
     info!(login = %session.login, "OAuth login succeeded");
@@ -495,20 +598,26 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
             avatar_url: session.avatar_url,
             user_url:   session.user_url,
         },
-        provider: "github",
+        provider: session.provider,
         demo_mode,
         features: features_json(&settings),
     })
     .into_response()
 }
 
-async fn setup_status(State(state): State<Arc<AppState>>) -> Response {
+async fn setup_status(
+    State(state): State<Arc<AppState>>,
+    Extension(auth_mode): Extension<AuthMode>,
+) -> Response {
     let configured = state
         .server_settings()
         .integrations
         .github
         .client_id
-        .is_some();
+        .is_some()
+        || auth_methods_from_mode(&auth_mode)
+            .iter()
+            .any(|method| method == "dev-token");
     Json(SetupStatusResponse { configured }).into_response()
 }
 
@@ -772,7 +881,45 @@ fn merge_settings_keys(
 
 #[cfg(test)]
 mod tests {
-    use super::{GitHubManifestConversion, merge_settings_keys};
+    use axum::Extension;
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode, header};
+    use axum_extra::extract::cookie::Key;
+    use fabro_types::settings::SettingsLayer;
+    use serde_json::{Value, json};
+    use tower::ServiceExt;
+
+    use super::{GitHubManifestConversion, api_routes, merge_settings_keys, read_private_session, routes};
+    use crate::jwt_auth::{AuthMode, AuthStrategy};
+    use crate::server;
+
+    const DEV_TOKEN: &str =
+        "fabro_dev_abababababababababababababababababababababababababababababababab";
+
+    fn dev_token_auth_mode() -> AuthMode {
+        AuthMode::Strategies(vec![
+            AuthStrategy::DevToken {
+                token: DEV_TOKEN.to_string(),
+            },
+            AuthStrategy::Cookie,
+        ])
+    }
+
+    fn test_auth_router(key: &Key, auth_mode: AuthMode) -> axum::Router {
+        axum::Router::new()
+            .nest("/auth", routes())
+            .nest("/api/v1", api_routes())
+            .layer(Extension(auth_mode))
+            .with_state(server::create_test_app_state_with_session_key(
+                SettingsLayer::default(),
+                Some(key.clone()),
+                false,
+            ))
+    }
+
+    async fn response_json(response: axum::response::Response) -> Value {
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+    }
 
     fn sample_conversion() -> GitHubManifestConversion {
         GitHubManifestConversion {
@@ -901,5 +1048,97 @@ name = "claude-sonnet"
         // SettingsLayer.
         fabro_config::parse_settings_layer(&emitted)
             .expect("merged output should still parse as v2 after the edit");
+    }
+
+    #[tokio::test]
+    async fn login_dev_token_mints_session_with_dev_token_provider() {
+        let key = Key::derive_from(b"web-auth-test-key-material-0123456789");
+        let app = test_auth_router(&key, dev_token_auth_mode());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login/dev-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(json!({ "token": DEV_TOKEN }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let session_cookie = response
+            .headers()
+            .get(header::SET_COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .expect("session cookie should be set")
+            .to_string();
+
+        let mut cookie_headers = axum::http::HeaderMap::new();
+        cookie_headers.insert(
+            header::COOKIE,
+            axum::http::HeaderValue::from_str(&session_cookie).unwrap(),
+        );
+        let session = read_private_session(&cookie_headers, &key).expect("session should decode");
+        assert_eq!(session.provider, "dev-token");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/auth/me")
+                    .header(header::COOKIE, &session_cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["provider"], "dev-token");
+        assert_eq!(body["user"]["login"], "dev");
+    }
+
+    #[tokio::test]
+    async fn login_dev_token_rejects_invalid_token() {
+        let key = Key::derive_from(b"web-auth-test-key-material-0123456789");
+        let app = test_auth_router(&key, dev_token_auth_mode());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login/dev-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "token": "fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd" })
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn auth_config_returns_dev_token_method() {
+        let key = Key::derive_from(b"web-auth-test-key-material-0123456789");
+        let app = test_auth_router(&key, dev_token_auth_mode());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/auth/config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body, json!({ "methods": ["dev-token"] }));
     }
 }

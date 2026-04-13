@@ -1,0 +1,106 @@
+use std::fs;
+use std::io::Write as _;
+use std::path::Path;
+
+use anyhow::{Result, anyhow};
+use rand::RngCore;
+use rand::rngs::OsRng;
+
+pub const DEV_TOKEN_PREFIX: &str = "fabro_dev_";
+const DEV_TOKEN_RANDOM_BYTES: usize = 32;
+const DEV_TOKEN_HEX_LEN: usize = DEV_TOKEN_RANDOM_BYTES * 2;
+const DEV_TOKEN_LEN: usize = DEV_TOKEN_PREFIX.len() + DEV_TOKEN_HEX_LEN;
+
+pub fn generate_dev_token() -> String {
+    let mut bytes = [0_u8; DEV_TOKEN_RANDOM_BYTES];
+    OsRng.fill_bytes(&mut bytes);
+
+    let mut token = String::with_capacity(DEV_TOKEN_LEN);
+    token.push_str(DEV_TOKEN_PREFIX);
+    for byte in bytes {
+        use std::fmt::Write as _;
+
+        let _ = write!(&mut token, "{byte:02x}");
+    }
+    token
+}
+
+pub fn validate_dev_token_format(token: &str) -> bool {
+    let Some(hex) = token.strip_prefix(DEV_TOKEN_PREFIX) else {
+        return false;
+    };
+
+    token.len() == DEV_TOKEN_LEN
+        && hex.len() == DEV_TOKEN_HEX_LEN
+        && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+pub fn load_or_create_dev_token(path: &Path) -> Result<String> {
+    match fs::read_to_string(path) {
+        Ok(contents) => {
+            let token = contents.trim().to_string();
+            if validate_dev_token_format(&token) {
+                return Ok(token);
+            }
+            return Err(anyhow!("invalid dev token format in {}", path.display()));
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err.into()),
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let token = generate_dev_token();
+    let temp_path = path.with_file_name(format!(
+        ".{}.tmp-{:x}",
+        path.file_name().and_then(|name| name.to_str()).unwrap_or("dev-token"),
+        rand::random::<u64>()
+    ));
+    write_private_token_file(&temp_path, &token)?;
+    fs::rename(&temp_path, path)?;
+
+    Ok(token)
+}
+
+pub fn write_dev_token(path: &Path, token: &str) -> Result<()> {
+    if !validate_dev_token_format(token) {
+        return Err(anyhow!("invalid dev token format for {}", path.display()));
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let temp_path = path.with_file_name(format!(
+        ".{}.tmp-{:x}",
+        path.file_name().and_then(|name| name.to_str()).unwrap_or("dev-token"),
+        rand::random::<u64>()
+    ));
+    write_private_token_file(&temp_path, token)?;
+    fs::rename(&temp_path, path)?;
+    Ok(())
+}
+
+fn write_private_token_file(path: &Path, contents: &str) -> Result<()> {
+    #[cfg(unix)]
+    let mut file = {
+        use std::fs::OpenOptions;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?
+    };
+
+    #[cfg(not(unix))]
+    let mut file = std::fs::File::create(path)?;
+
+    file.write_all(contents.as_bytes())?;
+    file.sync_all()?;
+    Ok(())
+}

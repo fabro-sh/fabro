@@ -44,6 +44,7 @@ pub(crate) async fn execute(
         },
         |dir| Storage::new(dir).server_state().log_path(),
     );
+    let dev_token_path = std::env::var_os("FABRO_DEV_TOKEN_PATH").map(PathBuf::from);
     let pid = std::process::id();
 
     Box::pin(serve::serve_command(
@@ -55,6 +56,7 @@ pub(crate) async fn execute(
                 pid,
                 bind: resolved_bind.clone(),
                 log_path: log_path.clone(),
+                dev_token_path: dev_token_path.clone(),
                 started_at: Utc::now(),
             })
         },

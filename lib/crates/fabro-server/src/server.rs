@@ -523,6 +523,7 @@ pub struct AppState {
     pub(crate) settings:             Arc<RwLock<SettingsLayer>>,
     pub(crate) server_settings:      RwLock<Arc<ResolvedServerSettings>>,
     pub(crate) config_path:          PathBuf,
+    session_key_override:            Option<Key>,
     pub(crate) local_daemon_mode:    bool,
     shutting_down:                   AtomicBool,
     registry_factory_override:       Option<Box<RegistryFactoryOverride>>,
@@ -614,8 +615,10 @@ impl AppState {
     }
 
     pub(crate) fn session_key(&self) -> Option<Key> {
-        self.server_secret("SESSION_SECRET")
+        self.session_key_override.clone().or_else(|| {
+            self.server_secret("SESSION_SECRET")
             .map(|value| Key::derive_from(value.as_bytes()))
+        })
     }
 
     pub(crate) fn github_credentials(
@@ -2147,6 +2150,7 @@ pub fn create_app_state_with_settings_and_registry_factory(
         artifact_store,
         &test_secret_store_path(),
         test_config_path(),
+        None,
         false,
     )
     .expect("test app state should build")
@@ -2164,6 +2168,27 @@ pub fn create_app_state_with_options(
         store,
         artifact_store,
     )
+}
+
+#[cfg(test)]
+pub(crate) fn create_test_app_state_with_session_key(
+    settings: SettingsLayer,
+    session_key_override: Option<Key>,
+    local_daemon_mode: bool,
+) -> Arc<AppState> {
+    let (store, artifact_store) = test_store_bundle();
+    build_app_state_with_path(
+        Arc::new(RwLock::new(settings)),
+        None,
+        5,
+        store,
+        artifact_store,
+        &test_secret_store_path(),
+        test_config_path(),
+        session_key_override,
+        local_daemon_mode,
+    )
+    .expect("test app state should build")
 }
 
 fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
@@ -2191,6 +2216,7 @@ pub fn create_app_state_with_store(
         artifact_store,
         &test_secret_store_path(),
         test_config_path(),
+        None,
         false,
     )
     .expect("test app state should build")
@@ -2204,6 +2230,7 @@ pub(crate) fn build_app_state_with_path(
     artifact_store: ArtifactStore,
     vault_path: &std::path::Path,
     config_path: PathBuf,
+    session_key_override: Option<Key>,
     local_daemon_mode: bool,
 ) -> anyhow::Result<Arc<AppState>> {
     let vault = Arc::new(AsyncRwLock::new(Vault::load(vault_path.to_path_buf())?));
@@ -2266,6 +2293,7 @@ pub(crate) fn build_app_state_with_path(
         settings,
         server_settings: RwLock::new(resolved_server_settings),
         config_path,
+        session_key_override,
         local_daemon_mode,
         shutting_down: AtomicBool::new(false),
         registry_factory_override,

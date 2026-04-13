@@ -4,24 +4,21 @@ use anyhow::{Result, anyhow};
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use cookie::Key;
 use fabro_types::RunAuthMethod;
 use fabro_types::settings::{ServerListenSettings, ServerSettings as ResolvedServerSettings};
+use hmac::{Hmac, Mac};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rustls_pki_types::CertificateDer;
 use serde::Deserialize;
-use tracing::warn;
+use sha2::Sha256;
 
 use crate::error::ApiError;
 use crate::web_auth::SessionCookie;
+use fabro_util::dev_token::validate_dev_token_format;
 
-/// Env var that explicitly opts the server into unauthenticated startup.
-///
-/// When set to `"1"`, [`resolve_auth_mode_with_lookup`] returns
-/// [`AuthMode::Disabled`] regardless of what `server.auth` says. This is the
-/// only escape hatch for running the server without configured
-/// authentication; it is off by default, so accidental misconfigurations
-/// fail closed.
-pub const FABRO_LOCAL_NO_AUTH_ENV: &str = "FABRO_LOCAL_NO_AUTH";
+type HmacSha256 = Hmac<Sha256>;
+const DEV_TOKEN_COMPARE_KEY: &[u8] = b"fabro-dev-token-compare-key";
 
 /// JWT claims for service-to-service authentication.
 #[derive(Debug, Deserialize)]
@@ -38,6 +35,9 @@ struct Claims {
 /// A single authentication strategy resolved at startup.
 #[derive(Clone, Debug)]
 pub enum AuthStrategy {
+    DevToken {
+        token: String,
+    },
     Jwt {
         key:               Arc<DecodingKey>,
         validation:        Arc<Validation>,
@@ -64,6 +64,12 @@ pub enum AuthMode {
     Disabled,
 }
 
+#[derive(Clone, Debug)]
+pub struct ResolvedAuth {
+    pub mode:                 AuthMode,
+    pub session_key_override: Option<Key>,
+}
+
 /// Peer certificates extracted from the TLS connection, inserted as a request
 /// extension.
 #[derive(Clone)]
@@ -81,10 +87,7 @@ pub fn decode_pem_env(name: &str, value: &str) -> Result<String> {
 
 /// Resolve the authentication mode from resolved server settings.
 ///
-/// Call this once at startup before serving requests. Returns
-/// [`AuthMode::Disabled`] when [`FABRO_LOCAL_NO_AUTH_ENV`] is set to `"1"`
-/// (explicit insecure-startup opt-in). Returns `AuthMode::Strategies(...)`
-/// when `server.auth` resolves to at least one enabled strategy.
+/// Call this once at startup before serving requests.
 ///
 /// Fails closed when `server.auth` is absent or resolves to zero enabled
 /// strategies, or when a configured strategy is missing its required
@@ -93,7 +96,7 @@ pub fn decode_pem_env(name: &str, value: &str) -> Result<String> {
 ///
 /// Walks the v2 `server.auth.api.{jwt,mtls}` subtree and
 /// `server.auth.web.allowed_usernames`.
-pub fn resolve_auth_mode(settings: &ResolvedServerSettings) -> Result<AuthMode> {
+pub fn resolve_auth_mode(settings: &ResolvedServerSettings) -> Result<ResolvedAuth> {
     resolve_auth_mode_with_lookup(settings, |name| std::env::var(name).ok())
 }
 
@@ -137,18 +140,10 @@ fn resolve_auth_strategies(settings: &ResolvedServerSettings) -> ResolvedAuthStr
 pub fn resolve_auth_mode_with_lookup<F>(
     settings: &ResolvedServerSettings,
     lookup: F,
-) -> Result<AuthMode>
+) -> Result<ResolvedAuth>
 where
     F: Fn(&str) -> Option<String>,
 {
-    if lookup(FABRO_LOCAL_NO_AUTH_ENV).as_deref() == Some("1") {
-        warn!(
-            "{FABRO_LOCAL_NO_AUTH_ENV}=1 set; allowing unauthenticated local daemon access. \
-             Do not use this flag outside local development or demo environments."
-        );
-        return Ok(AuthMode::Disabled);
-    }
-
     let ResolvedAuthStrategies {
         jwt_enabled,
         mtls_enabled,
@@ -193,21 +188,36 @@ where
         strategies.push(AuthStrategy::Mtls);
     }
 
+    let mut session_key_override = None;
     if strategies.is_empty() {
-        return Err(anyhow!(
-            "Fabro server refuses to start: no authentication strategies are configured.\n\
-             \n\
-             Configure at least one of the following in `[server.auth]`:\n\
-               - `[server.auth.api.jwt]` (requires `FABRO_JWT_PUBLIC_KEY` in process env or server.env)\n\
-               - `[server.auth.api.mtls]` (requires `[server.listen.tls]` cert/key/ca)\n\
-               - `SESSION_SECRET` in process env or server.env (enables cookie-based web auth)\n\
-             \n\
-             Or set `{FABRO_LOCAL_NO_AUTH_ENV}=1` to explicitly opt in to \
-             unauthenticated local daemon access."
-        ));
+        let Some(token) = lookup("FABRO_DEV_TOKEN") else {
+            return Err(anyhow!(
+                "Fabro server refuses to start: no authentication strategies are configured.\n\
+                 \n\
+                 Configure at least one of the following in `[server.auth]`:\n\
+                   - `[server.auth.api.jwt]` (requires `FABRO_JWT_PUBLIC_KEY` in process env or server.env)\n\
+                   - `[server.auth.api.mtls]` (requires `[server.listen.tls]` cert/key/ca)\n\
+                   - `SESSION_SECRET` in process env or server.env (enables cookie-based web auth)\n\
+                 \n\
+                 For CLI-managed local starts, set `FABRO_DEV_TOKEN` to enable dev-token authentication."
+            ));
+        };
+
+        if !validate_dev_token_format(&token) {
+            return Err(anyhow!(
+                "Fabro server refuses to start: FABRO_DEV_TOKEN has invalid format."
+            ));
+        }
+
+        session_key_override = Some(Key::derive_from(token.as_bytes()));
+        strategies.push(AuthStrategy::DevToken { token });
+        strategies.push(AuthStrategy::Cookie);
     }
 
-    Ok(AuthMode::Strategies(strategies))
+    Ok(ResolvedAuth {
+        mode: AuthMode::Strategies(strategies),
+        session_key_override,
+    })
 }
 
 /// Extract the login from JWT claims.
@@ -283,6 +293,42 @@ fn try_jwt(
     Ok(())
 }
 
+pub(crate) fn dev_token_matches(provided: &str, expected: &str) -> bool {
+    let Ok(mut provided_mac) = HmacSha256::new_from_slice(DEV_TOKEN_COMPARE_KEY) else {
+        return false;
+    };
+    provided_mac.update(provided.as_bytes());
+    let provided_mac = provided_mac.finalize().into_bytes();
+
+    let Ok(mut expected_mac) = HmacSha256::new_from_slice(DEV_TOKEN_COMPARE_KEY) else {
+        return false;
+    };
+    expected_mac.update(expected.as_bytes());
+    expected_mac.verify_slice(&provided_mac).is_ok()
+}
+
+fn try_dev_token(parts: &Parts, expected: &str) -> Result<(), ApiError> {
+    let header = parts
+        .headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(ApiError::unauthorized)?;
+
+    let token = header
+        .strip_prefix("Bearer ")
+        .ok_or_else(ApiError::unauthorized)?;
+
+    if !validate_dev_token_format(token) || !validate_dev_token_format(expected) {
+        return Err(ApiError::unauthorized());
+    }
+
+    if dev_token_matches(token, expected) {
+        Ok(())
+    } else {
+        Err(ApiError::unauthorized())
+    }
+}
+
 /// Try to authenticate via mTLS peer certificates.
 fn try_mtls(parts: &Parts) -> Result<(), ApiError> {
     let peer_certs = parts
@@ -346,6 +392,7 @@ pub fn authenticate_service_parts(parts: &Parts) -> Result<(), ApiError> {
         let result = match strategy {
             AuthStrategy::Mtls => try_mtls(parts),
             AuthStrategy::Cookie => try_cookie(parts),
+            AuthStrategy::DevToken { token } => try_dev_token(parts, token),
             AuthStrategy::Jwt {
                 key,
                 validation,
@@ -403,11 +450,24 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
 
         for strategy in strategies {
             match strategy {
+                AuthStrategy::DevToken { token } => {
+                    if try_dev_token(parts, token).is_ok() {
+                        return Ok(Self {
+                            login:       Some("dev".to_string()),
+                            auth_method: RunAuthMethod::DevToken,
+                        });
+                    }
+                    last_err = ApiError::unauthorized();
+                }
                 AuthStrategy::Cookie => {
                     if let Some(session) = parts.extensions.get::<SessionCookie>() {
                         return Ok(Self {
                             login:       Some(session.login.clone()),
-                            auth_method: RunAuthMethod::Cookie,
+                            auth_method: if session.provider == "dev-token" {
+                                RunAuthMethod::DevToken
+                            } else {
+                                RunAuthMethod::Cookie
+                            },
                         });
                     }
                     last_err = ApiError::unauthorized();
@@ -481,7 +541,7 @@ mod tests {
         let err =
             resolve_auth_mode_with_lookup(&file, empty_lookup).expect_err("should refuse startup");
         assert!(err.to_string().contains("refuses to start"));
-        assert!(err.to_string().contains("FABRO_LOCAL_NO_AUTH"));
+        assert!(err.to_string().contains("FABRO_DEV_TOKEN"));
     }
 
     #[test]
@@ -503,33 +563,42 @@ enabled = false
     }
 
     #[test]
-    fn opt_in_insecure_startup_via_env() {
+    fn dev_token_fallback_activates_when_env_set() {
         let file = settings("_version = 1\n");
-        let mode = resolve_auth_mode_with_lookup(&file, |name| {
-            (name == FABRO_LOCAL_NO_AUTH_ENV).then(|| "1".to_string())
+        let resolved = resolve_auth_mode_with_lookup(&file, |name| {
+            (name == "FABRO_DEV_TOKEN").then(|| {
+                "fabro_dev_abababababababababababababababababababababababababababababababab"
+                    .to_string()
+            })
         })
-        .expect("FABRO_LOCAL_NO_AUTH=1 should allow startup");
-        assert!(matches!(mode, AuthMode::Disabled));
+        .expect("valid FABRO_DEV_TOKEN should allow startup");
+        let AuthMode::Strategies(strategies) = resolved.mode else {
+            panic!("expected Strategies");
+        };
+        assert_eq!(strategies.len(), 2);
+        assert!(matches!(strategies[0], AuthStrategy::DevToken { .. }));
+        assert!(matches!(strategies[1], AuthStrategy::Cookie));
+        assert!(resolved.session_key_override.is_some());
     }
 
     #[test]
-    fn insecure_startup_flag_any_other_value_still_fails_closed() {
+    fn dev_token_fallback_rejects_invalid_format() {
         let file = settings("_version = 1\n");
         let err = resolve_auth_mode_with_lookup(&file, |name| {
-            (name == FABRO_LOCAL_NO_AUTH_ENV).then(|| "true".to_string())
+            (name == "FABRO_DEV_TOKEN").then(|| "fabro_dev_not_hex".to_string())
         })
-        .expect_err("only the literal string \"1\" opts in");
-        assert!(err.to_string().contains("refuses to start"));
+        .expect_err("invalid dev token format should refuse startup");
+        assert!(err.to_string().contains("invalid"));
     }
 
     #[test]
     fn cookie_strategy_alone_unlocks_startup() {
         let file = settings("_version = 1\n");
-        let mode = resolve_auth_mode_with_lookup(&file, |name| {
+        let resolved = resolve_auth_mode_with_lookup(&file, |name| {
             (name == "SESSION_SECRET").then(|| "deadbeef".to_string())
         })
         .expect("SESSION_SECRET alone should unlock startup");
-        let AuthMode::Strategies(strategies) = mode else {
+        let AuthMode::Strategies(strategies) = resolved.mode else {
             panic!("expected Strategies, got Disabled");
         };
         assert_eq!(strategies.len(), 1);
@@ -555,9 +624,9 @@ key = "/etc/fabro/tls/key.pem"
 ca = "/etc/fabro/tls/ca.pem"
 "#,
         );
-        let mode =
+        let resolved =
             resolve_auth_mode_with_lookup(&file, empty_lookup).expect("mTLS config should resolve");
-        let AuthMode::Strategies(strategies) = mode else {
+        let AuthMode::Strategies(strategies) = resolved.mode else {
             panic!("expected Strategies, got Disabled");
         };
         assert!(strategies.iter().any(|s| matches!(s, AuthStrategy::Mtls)));
@@ -1009,11 +1078,12 @@ enabled = true
             .unwrap();
         req.extensions_mut().insert(SessionCookie {
             login:      "brynary".to_string(),
+            provider:   "github".to_string(),
             name:       "Brynary".to_string(),
             email:      "b@example.com".to_string(),
             avatar_url: "https://example.com/avatar.png".to_string(),
             user_url:   "https://github.com/brynary".to_string(),
-            github_id:  1,
+            provider_id: Some(1),
             exp:        9_999_999_999,
         });
 
@@ -1022,6 +1092,69 @@ enabled = true
         let body = response_json(response).await;
         assert_eq!(body["login"], "brynary");
         assert_eq!(body["auth_method"], "cookie");
+    }
+
+    #[tokio::test]
+    async fn dev_token_strategy_accepts_valid_bearer() {
+        let app = test_router(AuthMode::Strategies(vec![AuthStrategy::DevToken {
+            token: "fabro_dev_abababababababababababababababababababababababababababababababab"
+                .to_string(),
+        }]));
+
+        let req = Request::builder()
+            .uri("/test")
+            .header(
+                "authorization",
+                "Bearer fabro_dev_abababababababababababababababababababababababababababababababab",
+            )
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn dev_token_strategy_rejects_wrong_bearer() {
+        let app = test_router(AuthMode::Strategies(vec![AuthStrategy::DevToken {
+            token: "fabro_dev_abababababababababababababababababababababababababababababababab"
+                .to_string(),
+        }]));
+
+        let req = Request::builder()
+            .uri("/test")
+            .header(
+                "authorization",
+                "Bearer fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+            )
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn dev_token_subject_extracts_dev_login() {
+        let app = subject_router(AuthMode::Strategies(vec![AuthStrategy::DevToken {
+            token: "fabro_dev_abababababababababababababababababababababababababababababababab"
+                .to_string(),
+        }]));
+
+        let req = Request::builder()
+            .uri("/subject")
+            .header(
+                "authorization",
+                "Bearer fabro_dev_abababababababababababababababababababababababababababababababab",
+            )
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["login"], "dev");
+        assert_eq!(body["auth_method"], "dev_token");
     }
 
     #[tokio::test]

@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::fs;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -6,6 +7,7 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, anyhow, bail};
 use bytes::Bytes;
 use fabro_api::types;
+use fabro_config::Storage;
 use fabro_http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use fabro_http::multipart::{Form, Part};
 use fabro_server::bind::Bind;
@@ -22,8 +24,11 @@ use tokio_util::io::ReaderStream;
 
 use crate::args::ServerTargetArgs;
 use crate::commands::server::start;
+use crate::commands::server::record;
 use crate::user_config::cli_http_client_builder;
 use crate::{sse, user_config};
+use fabro_util::Home;
+use fabro_util::dev_token::validate_dev_token_format;
 
 #[derive(Clone)]
 pub(crate) struct ServerStoreClient {
@@ -93,7 +98,7 @@ pub(crate) async fn connect_server_target_direct(target: &str) -> Result<ServerS
         if !path.is_absolute() {
             bail!("server target must be an http(s) URL or absolute Unix socket path");
         }
-        connect_unix_socket_api_client_bundle(path).await
+        connect_unix_socket_api_client_bundle(path, None).await
     }
 }
 
@@ -116,10 +121,19 @@ async fn connect_api_client_bundle(storage_dir: &Path) -> Result<ServerStoreClie
         .await
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
     match bind {
-        Bind::Unix(path) => connect_unix_socket_api_client_bundle(&path).await,
-        Bind::Tcp(addr) => Err(anyhow!(
-            "Unsupported server bind for store client auto-connect: {addr}"
-        )),
+        Bind::Unix(path) => connect_unix_socket_api_client_bundle(&path, Some(storage_dir)).await,
+        Bind::Tcp(addr) => {
+            let token = wait_for_local_dev_token(storage_dir)?;
+            let builder = cli_http_client_builder().no_proxy();
+            let http_client = apply_bearer_token_auth(builder, &token)?.build()?;
+            let base_url = format!("http://{addr}");
+            let client = fabro_api::Client::new_with_client(&base_url, http_client.clone());
+            Ok(ServerStoreClient {
+                client,
+                http_client,
+                base_url,
+            })
+        }
     }
 }
 
@@ -138,7 +152,9 @@ async fn connect_target_api_client_bundle(
             connect_remote_api_client_bundle(api_url, tls.as_ref())
         }
         user_config::ServerTarget::UnixSocket(path) => {
-            if let Ok(client) = try_connect_unix_socket_api_client_bundle(path).await {
+            if let Ok(client) =
+                try_connect_unix_socket_api_client_bundle(path, Some(&runtime.storage_dir)).await
+            {
                 Ok(client)
             } else {
                 start::ensure_server_running_on_socket(
@@ -148,7 +164,7 @@ async fn connect_target_api_client_bundle(
                 )
                 .await
                 .with_context(|| format!("Failed to start fabro server for {}", path.display()))?;
-                connect_unix_socket_api_client_bundle(path).await
+                connect_unix_socket_api_client_bundle(path, Some(&runtime.storage_dir)).await
             }
         }
     }
@@ -176,12 +192,77 @@ fn normalize_remote_server_target(api_url: &str) -> String {
         .to_string()
 }
 
-fn build_unix_socket_http_client(path: &Path) -> Result<fabro_http::HttpClient> {
-    cli_http_client_builder()
-        .unix_socket(path)
-        .no_proxy()
-        .build()
-        .context("Failed to build Unix-socket HTTP client for fabro server")
+fn read_dev_token_file(path: &Path) -> Option<String> {
+    fs::read_to_string(path)
+        .ok()
+        .map(|token| token.trim().to_string())
+        .filter(|token| validate_dev_token_format(token))
+}
+
+fn load_dev_token_if_available(storage_dir: Option<&Path>) -> Option<String> {
+    if let Some(token) = std::env::var("FABRO_DEV_TOKEN")
+        .ok()
+        .filter(|token| validate_dev_token_format(token))
+    {
+        return Some(token);
+    }
+
+    if let Some(storage_dir) = storage_dir {
+        let storage_token_path = Storage::new(storage_dir).server_state().dev_token_path();
+        if let Some(token) = read_dev_token_file(&storage_token_path) {
+            return Some(token);
+        }
+
+        let record_path = Storage::new(storage_dir).server_state().record_path();
+        if let Some(token) = record::read_server_record(&record_path)
+            .and_then(|server| server.dev_token_path)
+            .as_deref()
+            .and_then(read_dev_token_file)
+        {
+            return Some(token);
+        }
+    }
+
+    read_dev_token_file(&Home::from_env().dev_token_path())
+}
+
+fn wait_for_local_dev_token(storage_dir: &Path) -> Result<String> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+
+    while std::time::Instant::now() < deadline {
+        if let Some(token) = load_dev_token_if_available(Some(storage_dir)) {
+            return Ok(token);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    bail!(
+        "local server dev token did not become available for {}",
+        storage_dir.display()
+    );
+}
+
+fn apply_bearer_token_auth(
+    builder: fabro_http::HttpClientBuilder,
+    token: &str,
+) -> Result<fabro_http::HttpClientBuilder> {
+    let mut headers = fabro_http::HeaderMap::new();
+    headers.insert(
+        fabro_http::header::AUTHORIZATION,
+        fabro_http::HeaderValue::from_str(&format!("Bearer {token}"))
+            .context("invalid dev token header value")?,
+    );
+    Ok(builder.default_headers(headers))
+}
+
+fn apply_dev_token_auth(
+    builder: fabro_http::HttpClientBuilder,
+    storage_dir: Option<&Path>,
+) -> Result<fabro_http::HttpClientBuilder> {
+    let Some(token) = load_dev_token_if_available(storage_dir) else {
+        return Ok(builder);
+    };
+    apply_bearer_token_auth(builder, &token)
 }
 
 fn unix_socket_api_client_bundle(http_client: fabro_http::HttpClient) -> ServerStoreClient {
@@ -194,15 +275,51 @@ fn unix_socket_api_client_bundle(http_client: fabro_http::HttpClient) -> ServerS
     }
 }
 
-async fn try_connect_unix_socket_api_client_bundle(path: &Path) -> Result<ServerStoreClient> {
-    let http_client = build_unix_socket_http_client(path)?;
-    check_server_ready(&http_client).await?;
+async fn try_connect_unix_socket_api_client_bundle(
+    path: &Path,
+    storage_dir: Option<&Path>,
+) -> Result<ServerStoreClient> {
+    let probe_client = cli_http_client_builder()
+        .unix_socket(path)
+        .no_proxy()
+        .build()
+        .context("Failed to build Unix-socket HTTP client for fabro server")?;
+    check_server_ready(&probe_client).await?;
+
+    let http_client = if let Some(storage_dir) = storage_dir {
+        let token = wait_for_local_dev_token(storage_dir)?;
+        apply_bearer_token_auth(cli_http_client_builder().unix_socket(path).no_proxy(), &token)?
+            .build()
+            .context("Failed to build Unix-socket HTTP client for fabro server")?
+    } else {
+        apply_dev_token_auth(cli_http_client_builder().unix_socket(path).no_proxy(), None)?
+            .build()
+            .context("Failed to build Unix-socket HTTP client for fabro server")?
+    };
     Ok(unix_socket_api_client_bundle(http_client))
 }
 
-async fn connect_unix_socket_api_client_bundle(path: &Path) -> Result<ServerStoreClient> {
-    let http_client = build_unix_socket_http_client(path)?;
-    wait_for_server_ready(&http_client).await?;
+async fn connect_unix_socket_api_client_bundle(
+    path: &Path,
+    storage_dir: Option<&Path>,
+) -> Result<ServerStoreClient> {
+    let probe_client = cli_http_client_builder()
+        .unix_socket(path)
+        .no_proxy()
+        .build()
+        .context("Failed to build Unix-socket HTTP client for fabro server")?;
+    wait_for_server_ready(&probe_client).await?;
+
+    let http_client = if let Some(storage_dir) = storage_dir {
+        let token = wait_for_local_dev_token(storage_dir)?;
+        apply_bearer_token_auth(cli_http_client_builder().unix_socket(path).no_proxy(), &token)?
+            .build()
+            .context("Failed to build Unix-socket HTTP client for fabro server")?
+    } else {
+        apply_dev_token_auth(cli_http_client_builder().unix_socket(path).no_proxy(), None)?
+            .build()
+            .context("Failed to build Unix-socket HTTP client for fabro server")?
+    };
     Ok(unix_socket_api_client_bundle(http_client))
 }
 
@@ -872,6 +989,94 @@ async fn ensure_raw_response_success(response: fabro_http::Response) -> Result<(
     }
 
     bail!("request failed with status {status}: {body}");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{LazyLock, Mutex};
+
+    use super::*;
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    #[test]
+    fn load_dev_token_if_available_prefers_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp_home = tempfile::tempdir().unwrap();
+        let token_path = temp_home.path().join("dev-token");
+        std::fs::write(
+            &token_path,
+            "fabro_dev_abababababababababababababababababababababababababababababababab",
+        )
+        .unwrap();
+
+        std::env::set_var("FABRO_HOME", temp_home.path());
+        std::env::set_var(
+            "FABRO_DEV_TOKEN",
+            "fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        );
+
+        let token = load_dev_token_if_available(None);
+
+        std::env::remove_var("FABRO_DEV_TOKEN");
+        std::env::remove_var("FABRO_HOME");
+
+        assert_eq!(
+            token.as_deref(),
+            Some(
+                "fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+            )
+        );
+    }
+
+    #[test]
+    fn load_dev_token_if_available_reads_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp_home = tempfile::tempdir().unwrap();
+        let token = "fabro_dev_abababababababababababababababababababababababababababababababab";
+        std::fs::write(temp_home.path().join("dev-token"), token).unwrap();
+
+        std::env::remove_var("FABRO_DEV_TOKEN");
+        std::env::set_var("FABRO_HOME", temp_home.path());
+
+        let loaded = load_dev_token_if_available(None);
+
+        std::env::remove_var("FABRO_HOME");
+
+        assert_eq!(loaded.as_deref(), Some(token));
+    }
+
+    #[test]
+    fn load_dev_token_if_available_reads_path_from_active_server_record() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp_home = tempfile::tempdir().unwrap();
+        let storage = tempfile::tempdir().unwrap();
+        let token_dir = tempfile::tempdir().unwrap();
+        let token = "fabro_dev_abababababababababababababababababababababababababababababababab";
+        let token_path = token_dir.path().join("dev-token");
+        std::fs::write(&token_path, token).unwrap();
+
+        let record_path = fabro_config::Storage::new(storage.path())
+            .server_state()
+            .record_path();
+        record::write_server_record(&record_path, &record::ServerRecord {
+            pid: std::process::id(),
+            bind: fabro_server::bind::Bind::Unix(temp_home.path().join("fabro.sock")),
+            log_path: storage.path().join("server.log"),
+            dev_token_path: Some(token_path),
+            started_at: chrono::Utc::now(),
+        })
+        .unwrap();
+
+        std::env::remove_var("FABRO_DEV_TOKEN");
+        std::env::set_var("FABRO_HOME", temp_home.path());
+
+        let loaded = load_dev_token_if_available(Some(storage.path()));
+
+        std::env::remove_var("FABRO_HOME");
+
+        assert_eq!(loaded.as_deref(), Some(token));
+    }
 }
 
 fn is_not_found_error<E>(err: &progenitor_client::Error<E>) -> bool

@@ -90,6 +90,11 @@ impl ServerState {
     pub fn env_path(&self) -> PathBuf {
         self.root.join("server.env")
     }
+
+    #[must_use]
+    pub fn dev_token_path(&self) -> PathBuf {
+        self.root.join("server.dev-token")
+    }
 }
 
 impl RunScratch {

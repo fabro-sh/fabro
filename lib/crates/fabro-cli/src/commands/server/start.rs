@@ -6,9 +6,10 @@ use chrono::Utc;
 use fabro_config::Storage;
 use fabro_config::user::default_socket_path;
 use fabro_server::bind::{Bind, BindRequest};
-use fabro_server::jwt_auth::FABRO_LOCAL_NO_AUTH_ENV;
 use fabro_server::serve;
 use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs};
+use fabro_util::Home;
+use fabro_util::dev_token;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use tokio::process::Command as TokioCommand;
@@ -27,7 +28,15 @@ pub(crate) async fn execute(
     serve_args.bind = Some(bind.to_string());
 
     if foreground {
-        Box::pin(execute_foreground(bind, serve_args, storage_dir, styles)).await
+        Box::pin(execute_foreground(
+            bind,
+            serve_args,
+            storage_dir,
+            styles,
+            true,
+            printer,
+        ))
+        .await
     } else {
         execute_daemon(&bind, &serve_args, &storage_dir, true, printer).await
     }
@@ -124,7 +133,22 @@ async fn execute_foreground(
     serve_args: ServeArgs,
     storage_dir: PathBuf,
     styles: &'static Styles,
+    announce: bool,
+    printer: Printer,
 ) -> Result<()> {
+    let home = Home::from_env();
+    let token = dev_token::load_or_create_dev_token(&home.dev_token_path())?;
+    dev_token::write_dev_token(
+        &Storage::new(&storage_dir).server_state().dev_token_path(),
+        &token,
+    )?;
+    let prior_token = std::env::var_os("FABRO_DEV_TOKEN");
+    std::env::set_var("FABRO_DEV_TOKEN", &token);
+    let _env_guard = scopeguard::guard(prior_token, |prior_token| match prior_token {
+        Some(value) => std::env::set_var("FABRO_DEV_TOKEN", value),
+        None => std::env::remove_var("FABRO_DEV_TOKEN"),
+    });
+
     let lock_file = acquire_lock(&storage_dir).await?;
     let _lock_file = lock_file; // keep alive for the duration
 
@@ -159,10 +183,14 @@ async fn execute_foreground(
         styles,
         Some(storage_dir),
         move |resolved_bind| {
+            if announce {
+                print_dev_token(printer, &home, &token);
+            }
             record::write_server_record(&record_path, &record::ServerRecord {
                 pid,
                 bind: resolved_bind.clone(),
                 log_path: log_path.clone(),
+                dev_token_path: Some(home.dev_token_path()),
                 started_at: Utc::now(),
             })
         },
@@ -238,10 +266,12 @@ async fn execute_daemon(
         cmd.arg("--config").arg(config);
     }
 
+    let home = Home::from_env();
+    let token = dev_token::load_or_create_dev_token(&home.dev_token_path())?;
+    dev_token::write_dev_token(&server_state.dev_token_path(), &token)?;
     cmd.arg("--storage-dir").arg(storage_dir);
-    if matches!(bind, BindRequest::Unix(_)) {
-        cmd.env(FABRO_LOCAL_NO_AUTH_ENV, "1");
-    }
+    cmd.env("FABRO_DEV_TOKEN", &token);
+    cmd.env("FABRO_DEV_TOKEN_PATH", home.dev_token_path());
 
     cmd.env_remove("FABRO_JSON");
     cmd.stdout(stdout_log)
@@ -278,6 +308,7 @@ async fn execute_daemon(
                         pid,
                         record.bind
                     );
+                    print_dev_token(printer, &home, &token);
                 }
                 return Ok(());
             }
@@ -304,6 +335,11 @@ async fn execute_daemon(
         fabro_util::printerr!(printer, "{tail}");
     }
     bail!("Server did not become ready within {timeout:?}");
+}
+
+fn print_dev_token(printer: Printer, home: &Home, token: &str) {
+    fabro_util::printerr!(printer, "Dev token: {token}");
+    fabro_util::printerr!(printer, "Token file: {}", home.dev_token_path().display());
 }
 
 // ---------------------------------------------------------------------------
