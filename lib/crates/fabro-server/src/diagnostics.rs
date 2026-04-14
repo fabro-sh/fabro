@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::sync::LazyLock;
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -13,10 +12,7 @@ use fabro_util::check_report::{CheckDetail, CheckResult, CheckSection, CheckStat
 use fabro_util::dev_token::validate_dev_token_format;
 use fabro_util::session_secret;
 use fabro_util::version::FABRO_VERSION;
-use regex::Regex;
-use semver::Version;
 use serde::Serialize;
-use tokio::process::Command;
 use tokio::time::timeout;
 
 use crate::server::AppState;
@@ -39,69 +35,6 @@ fn http_client_or_check(
 pub struct DiagnosticsReport {
     pub version:  String,
     pub sections: Vec<CheckSection>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum ProbeOutcome {
-    NotFound,
-    Failed,
-    Ok { version: Option<Version> },
-}
-
-static DOT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"graphviz version (\d+)\.(\d+)\.(\d+)").unwrap());
-
-fn parse_version(re: &Regex, output: &str) -> Option<Version> {
-    let caps = re.captures(output)?;
-    Some(Version::new(
-        caps[1].parse().ok()?,
-        caps[2].parse().ok()?,
-        caps[3].parse().ok()?,
-    ))
-}
-
-async fn probe_dot() -> ProbeOutcome {
-    let result = Command::new("dot").arg("-V").output().await.ok();
-    match result {
-        None => ProbeOutcome::NotFound,
-        Some(output) if !output.status.success() => ProbeOutcome::Failed,
-        Some(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let version =
-                parse_version(&DOT_RE, &stdout).or_else(|| parse_version(&DOT_RE, &stderr));
-            ProbeOutcome::Ok { version }
-        }
-    }
-}
-
-async fn check_dot() -> CheckResult {
-    let outcome = probe_dot().await;
-    let (status, summary, remediation) = match &outcome {
-        ProbeOutcome::NotFound => (
-            CheckStatus::Warning,
-            "not installed".to_string(),
-            Some("Install Graphviz to enable workflow graph rendering".to_string()),
-        ),
-        ProbeOutcome::Failed => (
-            CheckStatus::Warning,
-            "command failed".to_string(),
-            Some("Check that `dot -V` succeeds on the server host".to_string()),
-        ),
-        ProbeOutcome::Ok {
-            version: Some(version),
-        } => (CheckStatus::Pass, format!("dot {version}"), None),
-        ProbeOutcome::Ok { version: None } => {
-            (CheckStatus::Pass, "dot available".to_string(), None)
-        }
-    };
-    CheckResult {
-        name: "dot".to_string(),
-        status,
-        summary,
-        details: Vec::new(),
-        remediation,
-    }
 }
 
 fn decode_pem_value(name: &str, value: &str) -> Result<String, String> {
@@ -150,11 +83,10 @@ fn validate_session_secret(value: &str) -> Result<(), String> {
 }
 
 pub async fn run_all(state: &AppState) -> DiagnosticsReport {
-    let (llm, github, brave, dot) = tokio::join!(
+    let (llm, github, brave) = tokio::join!(
         check_llm_providers(state),
         check_github_app(state),
         check_brave_search(state),
-        check_dot(),
     );
     let sandbox = check_sandbox(state);
     let crypto = check_crypto(state);
@@ -165,10 +97,6 @@ pub async fn run_all(state: &AppState) -> DiagnosticsReport {
             CheckSection {
                 title:  "Credentials".to_string(),
                 checks: vec![llm, github, sandbox, brave],
-            },
-            CheckSection {
-                title:  "System".to_string(),
-                checks: vec![dot],
             },
             CheckSection {
                 title:  "Configuration".to_string(),

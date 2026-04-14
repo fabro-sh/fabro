@@ -304,7 +304,7 @@ pub(crate) async fn get_run_graph(
     // Use graphviz to render the demo DOT source
     let dot_source = "digraph demo {\n  graph [goal=\"Demo\"]\n  rankdir=LR\n  start [shape=Mdiamond, label=\"Start\"]\n  detect [label=\"Detect\\nDrift\"]\n  exit [shape=Msquare, label=\"Exit\"]\n  propose [label=\"Propose\\nChanges\"]\n  review [label=\"Review\\nChanges\"]\n  apply [label=\"Apply\\nChanges\"]\n  start -> detect\n  detect -> exit [label=\"No drift\"]\n  detect -> propose [label=\"Drift found\"]\n  propose -> review\n  review -> propose [label=\"Revise\"]\n  review -> apply [label=\"Accept\"]\n  apply -> exit\n}";
 
-    crate::server::render_graph_bytes(dot_source, fabro_graphviz::render::GraphFormat::Svg).await
+    crate::server::render_graph_bytes(dot_source).await
 }
 
 pub(crate) async fn list_secrets(
@@ -394,12 +394,6 @@ pub(crate) async fn run_diagnostics(
                         { "name": "GitHub App", "status": "pass", "summary": "demo configured", "details": [], "remediation": null },
                         { "name": "Sandbox", "status": "warning", "summary": "not configured", "details": [], "remediation": "Set DAYTONA_API_KEY to enable cloud sandbox execution" },
                         { "name": "Brave Search", "status": "warning", "summary": "not configured", "details": [], "remediation": "Set BRAVE_SEARCH_API_KEY to enable web search" }
-                    ]
-                },
-                {
-                    "title": "System",
-                    "checks": [
-                        { "name": "dot", "status": "pass", "summary": "dot available", "details": [], "remediation": null }
                     ]
                 },
                 {

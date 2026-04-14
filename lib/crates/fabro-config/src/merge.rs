@@ -494,6 +494,7 @@ fn combine_server_integrations(
 #[cfg(test)]
 mod tests {
     use fabro_types::settings::InterpString;
+    use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
 
     use super::*;
     use crate::parse::parse_settings_layer;
@@ -714,23 +715,17 @@ verbosity = "verbose"
 
         let merged = combine_files(lower, higher);
         let output = merged.cli.unwrap().output.unwrap();
-        assert_eq!(
-            output.format,
-            Some(fabro_types::settings::cli::OutputFormat::Text)
-        );
-        assert_eq!(
-            output.verbosity,
-            Some(fabro_types::settings::cli::OutputVerbosity::Verbose)
-        );
+        assert_eq!(output.format, Some(OutputFormat::Text));
+        assert_eq!(output.verbosity, Some(OutputVerbosity::Verbose));
     }
 
     #[test]
     fn cli_updates_merges_by_field() {
         let lower = parse(
-            r#"
+            r"
 [cli.updates]
 check = true
-"#,
+",
         );
         let higher = parse(
             r#"

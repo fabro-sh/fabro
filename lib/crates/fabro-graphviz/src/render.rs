@@ -1,28 +1,4 @@
-use std::fmt;
-use std::io::Write;
-use std::process::Command;
 use std::sync::LazyLock;
-
-use anyhow::bail;
-
-/// Output format for graph rendering.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum GraphFormat {
-    /// Scalable Vector Graphics
-    #[default]
-    Svg,
-    /// Portable Network Graphics
-    Png,
-}
-
-impl fmt::Display for GraphFormat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Svg => write!(f, "svg"),
-            Self::Png => write!(f, "png"),
-        }
-    }
-}
 
 /// Dark mode CSS injected into SVG output (leading newline included for
 /// insertion).
@@ -88,60 +64,12 @@ pub fn postprocess_svg(raw: Vec<u8>) -> Vec<u8> {
     svg.into_bytes()
 }
 
-/// Render styled DOT source into the given format via the `dot` command.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "This synchronous rendering helper is intentionally called behind spawn_blocking from async server code."
-)]
-pub fn render_dot(source: &str, format: GraphFormat) -> anyhow::Result<Vec<u8>> {
+/// Render styled DOT source into SVG via the vendored Graphviz library.
+pub fn render_dot(source: &str) -> anyhow::Result<Vec<u8>> {
     let styled_source = inject_dot_style_defaults(source);
-    let mut child = match Command::new("dot")
-        .arg(format!("-T{format}"))
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            bail!("Graphviz is not installed. Install it with: brew install graphviz");
-        }
-        Err(err) => {
-            bail!("Failed to run dot: {err}");
-        }
-    };
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(styled_source.as_bytes())?;
-    }
-
-    let output = child.wait_with_output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("dot failed: {stderr}");
-    }
-
-    let raw = output.stdout;
-    if matches!(format, GraphFormat::Svg) {
-        Ok(postprocess_svg(raw))
-    } else {
-        Ok(raw)
-    }
-}
-
-#[cfg(test)]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "This synchronous test probe checks whether dot is installed before running render assertions."
-)]
-fn dot_is_available() -> bool {
-    Command::new("dot")
-        .arg("-V")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok()
+    let raw = fabro_graphviz_sys::render_dot_to_svg(&styled_source)
+        .map_err(|e| anyhow::anyhow!("Graphviz rendering failed: {e}"))?;
+    Ok(postprocess_svg(raw))
 }
 
 #[cfg(test)]
@@ -173,14 +101,39 @@ mod tests {
     }
 
     #[test]
-    fn render_dot_svg_or_png_if_graphviz_is_available() {
-        if !dot_is_available() {
-            return;
-        }
-        let svg = render_dot("digraph { a -> b }", GraphFormat::Svg).unwrap();
+    fn render_dot_produces_svg() {
+        let svg = render_dot("digraph { a -> b }").unwrap();
         assert!(String::from_utf8(svg).unwrap().contains("<svg"));
+    }
 
-        let png = render_dot("digraph { a -> b }", GraphFormat::Png).unwrap();
-        assert!(!png.is_empty());
+    #[test]
+    fn render_dot_complex_graph() {
+        let source = r#"digraph {
+            subgraph cluster_0 {
+                label = "process #1";
+                a0 -> a1 -> a2 -> a3;
+            }
+            subgraph cluster_1 {
+                label = "process #2";
+                b0 -> b1 -> b2 -> b3;
+            }
+            start -> a0;
+            start -> b0;
+            a1 -> b3;
+            b2 -> a3;
+            a3 -> end;
+            b3 -> end;
+        }"#;
+        let svg = render_dot(source).unwrap();
+        let svg_str = String::from_utf8(svg).unwrap();
+        assert!(svg_str.contains("<svg"));
+        assert!(svg_str.contains("process #1"));
+        assert!(svg_str.contains("process #2"));
+    }
+
+    #[test]
+    fn render_dot_invalid_source_returns_error() {
+        let result = render_dot("not valid dot {{{");
+        assert!(result.is_err());
     }
 }

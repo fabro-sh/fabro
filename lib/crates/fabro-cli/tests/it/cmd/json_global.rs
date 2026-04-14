@@ -1,23 +1,7 @@
-#![expect(
-    clippy::disallowed_methods,
-    reason = "These CLI integration tests synchronously probe for dot before exercising JSON output paths."
-)]
-
-use std::process::Command;
-
 use fabro_test::test_context;
 use serde_json::Value;
 
 use super::support::{fixture, output_stderr, output_stdout, setup_completed_fast_dry_run};
-
-fn dot_is_available() -> bool {
-    Command::new("dot")
-        .arg("-V")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok()
-}
 
 #[test]
 fn completion_rejects_json() {
@@ -143,10 +127,6 @@ fn graph_json_without_output_is_rejected() {
 
 #[test]
 fn graph_json_with_output_reports_file() {
-    if !dot_is_available() {
-        return;
-    }
-
     let context = test_context!();
     let output_path = context.temp_dir.join("graph.svg");
     let workflow = fixture("simple.fabro");

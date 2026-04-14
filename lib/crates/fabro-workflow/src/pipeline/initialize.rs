@@ -810,13 +810,13 @@ mod tests {
     }
 
     fn llm_graph() -> (Graph, String) {
-        let source = r#"digraph test {
+        let source = r"digraph test {
   start [shape=Mdiamond];
   writer [shape=box];
   exit [shape=Msquare];
   start -> writer;
   writer -> exit;
-}"#
+}"
         .to_string();
         let mut graph = Graph::new("test");
         let mut start = Node::new("start");

@@ -56,8 +56,7 @@ export const SystemApiAxiosParamCreator = function (configuration?: Configuratio
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            // authentication mTLS required
-            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+            // authentication SessionCookie required
 
             // authentication BearerAuth required
             // http bearer authentication required
@@ -98,8 +97,7 @@ export const SystemApiAxiosParamCreator = function (configuration?: Configuratio
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            // authentication mTLS required
-            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+            // authentication SessionCookie required
 
             // authentication BearerAuth required
             // http bearer authentication required
@@ -139,8 +137,7 @@ export const SystemApiAxiosParamCreator = function (configuration?: Configuratio
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            // authentication mTLS required
-            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+            // authentication SessionCookie required
 
             // authentication BearerAuth required
             // http bearer authentication required
@@ -179,8 +176,7 @@ export const SystemApiAxiosParamCreator = function (configuration?: Configuratio
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            // authentication mTLS required
-            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+            // authentication SessionCookie required
 
             // authentication BearerAuth required
             // http bearer authentication required

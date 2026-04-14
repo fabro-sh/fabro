@@ -30,8 +30,8 @@ pub use fabro_api::types::{
     DiskUsageSummaryRow, EventEnvelope as ApiEventEnvelope, ModelReference, PaginatedEventList,
     PaginatedRunList, PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse,
     PruneRunEntry, PruneRunsRequest, PruneRunsResponse, QuestionType as ApiQuestionType,
-    RenderWorkflowGraphDirection, RenderWorkflowGraphFormat, RenderWorkflowGraphRequest,
-    RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
+    RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RunArtifactEntry,
+    RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
     RunControlAction as ApiRunControlAction, RunError, RunManifest, RunStatus, RunStatusResponse,
     SandboxFileEntry, SandboxFileListResponse, SecretType as ApiSecretType, ServerSettings,
     SshAccessRequest, SshAccessResponse, StartRunRequest, StatusReason as ApiStatusReason,
@@ -39,7 +39,6 @@ pub use fabro_api::types::{
 };
 use fabro_auth::parse_credential_secret;
 use fabro_config::{Storage, resolve_server_from_file};
-use fabro_graphviz::render::GraphFormat;
 use fabro_interview::{
     Answer, ControlInterviewer, Interviewer, Question, QuestionType, WorkerControlEnvelope,
 };
@@ -3590,16 +3589,12 @@ async fn render_graph_from_manifest(
         return ApiError::bad_request("Validation failed").into_response();
     }
 
-    let format = match req.format.unwrap_or(RenderWorkflowGraphFormat::Svg) {
-        RenderWorkflowGraphFormat::Svg => GraphFormat::Svg,
-        RenderWorkflowGraphFormat::Png => GraphFormat::Png,
-    };
     let direction = req.direction.as_ref().map(|direction| match direction {
         RenderWorkflowGraphDirection::Lr => "LR",
         RenderWorkflowGraphDirection::Tb => "TB",
     });
     let dot_source = run_manifest::graph_source(&prepared, direction);
-    render_graph_bytes(&dot_source, format).await
+    render_graph_bytes(&dot_source).await
 }
 
 async fn start_run(
@@ -6178,18 +6173,17 @@ async fn create_completion(
     }
 }
 
-/// Render DOT source to a styled image via `render_dot` on a blocking thread.
-pub(crate) async fn render_graph_bytes(dot_source: &str, format: GraphFormat) -> Response {
+/// Render DOT source to a styled SVG image via `render_dot` on a blocking
+/// thread.
+pub(crate) async fn render_graph_bytes(dot_source: &str) -> Response {
     use fabro_graphviz::render::render_dot;
 
-    let content_type = match format {
-        GraphFormat::Svg => "image/svg+xml",
-        GraphFormat::Png => "image/png",
-    };
     let source = dot_source.to_owned();
-    match spawn_blocking(move || render_dot(&source, format)).await {
-        Ok(Ok(bytes)) => (StatusCode::OK, [("content-type", content_type)], bytes).into_response(),
-        Ok(Err(e)) => ApiError::new(StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+    match spawn_blocking(move || render_dot(&source)).await {
+        Ok(Ok(bytes)) => {
+            (StatusCode::OK, [("content-type", "image/svg+xml")], bytes).into_response()
+        }
+        Ok(Err(e)) => ApiError::new(StatusCode::BAD_REQUEST, e.to_string()).into_response(),
         Err(e) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -6211,13 +6205,13 @@ async fn get_graph(
         }
     };
     if !live_dot_source.is_empty() {
-        return render_graph_bytes(&live_dot_source, GraphFormat::Svg).await;
+        return render_graph_bytes(&live_dot_source).await;
     }
 
     match state.store.open_run_reader(&id).await {
         Ok(run_store) => match run_store.state().await {
             Ok(run_state) => match run_state.graph_source {
-                Some(dot_source) => render_graph_bytes(&dot_source, GraphFormat::Svg).await,
+                Some(dot_source) => render_graph_bytes(&dot_source).await,
                 None => ApiError::new(StatusCode::NOT_FOUND, "Graph not found.").into_response(),
             },
             Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
@@ -7830,11 +7824,6 @@ slug = "fabro"
 
         let response = app.oneshot(req).await.unwrap();
 
-        // If graphviz is not installed, we get 502 — skip assertion
-        if response.status() == StatusCode::BAD_GATEWAY {
-            return;
-        }
-
         assert_eq!(response.status(), StatusCode::OK);
 
         let content_type = response
@@ -7885,10 +7874,6 @@ slug = "fabro"
             .unwrap();
 
         let response = app.oneshot(req).await.unwrap();
-
-        if response.status() == StatusCode::BAD_GATEWAY {
-            return;
-        }
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(

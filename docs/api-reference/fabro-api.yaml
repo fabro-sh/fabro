@@ -189,7 +189,7 @@ paths:
       operationId: renderWorkflowGraph
       tags: [Runs]
       summary: Render Workflow Graph
-      description: Validates and renders a workflow manifest as SVG or PNG without creating a run.
+      description: Validates and renders a workflow manifest as SVG without creating a run.
       requestBody:
         required: true
         content:
@@ -204,18 +204,8 @@ paths:
               schema:
                 type: string
                 format: binary
-            image/png:
-              schema:
-                type: string
-                format: binary
         "400":
           description: Invalid manifest or workflow
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "502":
-          description: Graphviz rendering failed
           content:
             application/json:
               schema:
@@ -394,12 +384,6 @@ paths:
                 type: string
         "404":
           description: Run not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "502":
-          description: Graphviz not available
           content:
             application/json:
               schema:
@@ -2337,7 +2321,6 @@ components:
       type: string
       enum:
         - svg
-        - png
 
     RenderWorkflowGraphDirection:
       type: string

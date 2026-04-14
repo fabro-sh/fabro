@@ -9,7 +9,7 @@ use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use tracing::debug;
 
-use crate::args::{GlobalArgs, GraphArgs, GraphDirection, GraphOutputFormat};
+use crate::args::{GlobalArgs, GraphArgs, GraphDirection};
 use crate::command_context::CommandContext;
 use crate::commands::run::output::api_diagnostics_to_local;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest};
@@ -50,10 +50,7 @@ pub(crate) async fn run(
     let rendered = client
         .render_workflow_graph(types::RenderWorkflowGraphRequest {
             manifest:  built.manifest,
-            format:    Some(match args.format {
-                GraphOutputFormat::Svg => types::RenderWorkflowGraphFormat::Svg,
-                GraphOutputFormat::Png => types::RenderWorkflowGraphFormat::Png,
-            }),
+            format:    Some(types::RenderWorkflowGraphFormat::Svg),
             direction: args.direction.map(|direction| match direction {
                 GraphDirection::Lr => types::RenderWorkflowGraphDirection::Lr,
                 GraphDirection::Tb => types::RenderWorkflowGraphDirection::Tb,

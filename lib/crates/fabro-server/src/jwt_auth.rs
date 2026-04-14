@@ -315,12 +315,12 @@ mod tests {
     #[test]
     fn fails_when_auth_methods_empty() {
         let file = parse_settings_layer(
-            r#"
+            r"
 _version = 1
 
 [server.auth]
 methods = []
-"#,
+",
         )
         .expect("fixture should parse");
         let errors = resolve_server_from_file(&file).expect_err("empty auth methods should fail");

@@ -16,8 +16,7 @@
 
 
 export const RenderWorkflowGraphFormat = {
-    SVG: 'svg',
-    PNG: 'png'
+    SVG: 'svg'
 } as const;
 
 export type RenderWorkflowGraphFormat = typeof RenderWorkflowGraphFormat[keyof typeof RenderWorkflowGraphFormat];

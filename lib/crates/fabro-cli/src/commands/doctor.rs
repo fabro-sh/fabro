@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
 
 use anyhow::Result;
 use fabro_api::types as api_types;
@@ -14,133 +13,11 @@ pub(crate) use fabro_util::check_report::{
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::version::FABRO_VERSION;
-use regex::Regex;
-use semver::Version;
-use tokio::process::Command as TokioCommand;
 
 use crate::args::{DoctorArgs, GlobalArgs};
 use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 use crate::user_config;
-
-pub(crate) struct DepSpec {
-    pub name:        &'static str,
-    command:         &'static [&'static str],
-    pub required:    bool,
-    pub min_version: Version,
-    pattern:         &'static LazyLock<Regex>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ProbeOutcome {
-    NotFound,
-    Failed,
-    Ok { version: Option<Version> },
-}
-
-static DOT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"graphviz version (\d+)\.(\d+)\.(\d+)").unwrap());
-
-pub(crate) const DEP_SPECS: &[DepSpec] = &[DepSpec {
-    name:        "dot",
-    command:     &["dot", "-V"],
-    required:    false,
-    min_version: Version::new(2, 0, 0),
-    pattern:     &DOT_RE,
-}];
-
-fn parse_version(re: &Regex, output: &str) -> Option<Version> {
-    let caps = re.captures(output)?;
-    Some(Version::new(
-        caps[1].parse().ok()?,
-        caps[2].parse().ok()?,
-        caps[3].parse().ok()?,
-    ))
-}
-
-pub(crate) async fn probe_system_deps() -> Vec<ProbeOutcome> {
-    let mut outcomes = Vec::with_capacity(DEP_SPECS.len());
-    for spec in DEP_SPECS {
-        let result = TokioCommand::new(spec.command[0])
-            .args(&spec.command[1..])
-            .output()
-            .await
-            .ok();
-
-        let outcome = match result {
-            None => ProbeOutcome::NotFound,
-            Some(output) if !output.status.success() => ProbeOutcome::Failed,
-            Some(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let version = parse_version(spec.pattern, &stdout)
-                    .or_else(|| parse_version(spec.pattern, &stderr));
-                ProbeOutcome::Ok { version }
-            }
-        };
-        outcomes.push(outcome);
-    }
-    outcomes
-}
-
-fn dep_issue(name: &str, issue: &str, required: bool) -> (CheckStatus, String) {
-    let severity = if required { "required" } else { "optional" };
-    let status = if required {
-        CheckStatus::Error
-    } else {
-        CheckStatus::Warning
-    };
-    (status, format!("{name}: {issue} ({severity})"))
-}
-
-pub(crate) fn check_system_deps(specs: &[DepSpec], outcomes: &[ProbeOutcome]) -> CheckResult {
-    let mut details = Vec::new();
-    let mut worst_status = CheckStatus::Pass;
-
-    for (spec, outcome) in specs.iter().zip(outcomes) {
-        let (status, text) = match outcome {
-            ProbeOutcome::NotFound => dep_issue(spec.name, "not found", spec.required),
-            ProbeOutcome::Failed => dep_issue(spec.name, "command failed", spec.required),
-            ProbeOutcome::Ok { version: None } => {
-                (CheckStatus::Pass, format!("{}: version unknown", spec.name))
-            }
-            ProbeOutcome::Ok {
-                version: Some(version),
-            } => {
-                if version < &spec.min_version {
-                    (
-                        CheckStatus::Warning,
-                        format!("{}: {version} (minimum {})", spec.name, spec.min_version),
-                    )
-                } else {
-                    (CheckStatus::Pass, format!("{}: {version}", spec.name))
-                }
-            }
-        };
-
-        worst_status = worst_status.max(status);
-        details.push(CheckDetail::new(text));
-    }
-
-    let summary = match worst_status {
-        CheckStatus::Pass => "all found".to_string(),
-        CheckStatus::Warning => "some issues".to_string(),
-        CheckStatus::Error => "missing required tools".to_string(),
-    };
-
-    let remediation = match worst_status {
-        CheckStatus::Pass => None,
-        _ => Some("Install missing system dependencies".to_string()),
-    };
-
-    CheckResult {
-        name: "System dependencies".to_string(),
-        status: worst_status,
-        summary,
-        details,
-        remediation,
-    }
-}
 
 pub(crate) fn check_config(
     settings_path: Option<PathBuf>,
@@ -662,19 +539,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_version_dot() {
-        assert_eq!(
-            parse_version(&DOT_RE, "dot - graphviz version 12.2.1 (20241206.2024)"),
-            Some(Version::new(12, 2, 1))
-        );
-    }
-
-    #[test]
-    fn parse_version_garbage_returns_none() {
-        assert_eq!(parse_version(&DOT_RE, "no version here"), None);
-    }
-
-    #[test]
     fn render_report_text_without_color_has_no_ansi() {
         let report = CheckReport {
             title:    "Fabro Doctor".to_string(),
@@ -699,88 +563,5 @@ mod tests {
         );
         assert!(rendered.contains("Fabro Doctor"));
         assert!(rendered.contains("[✓] Configuration (loaded)"));
-    }
-
-    fn spec(name: &'static str, required: bool, min_version: Version) -> DepSpec {
-        DepSpec {
-            name,
-            command: &["echo", "unused"],
-            required,
-            min_version,
-            pattern: &DOT_RE,
-        }
-    }
-
-    #[test]
-    fn check_system_deps_all_present() {
-        let specs = [spec("dot", false, Version::new(2, 0, 0))];
-        let outcomes = [ProbeOutcome::Ok {
-            version: Some(Version::new(12, 2, 1)),
-        }];
-        let result = check_system_deps(&specs, &outcomes);
-        assert_eq!(result.status, CheckStatus::Pass);
-        assert_eq!(result.summary, "all found");
-    }
-
-    #[test]
-    fn check_system_deps_required_missing_is_error() {
-        let specs = [spec("required-tool", true, Version::new(3, 0, 0))];
-        let outcomes = [ProbeOutcome::NotFound];
-        let result = check_system_deps(&specs, &outcomes);
-        assert_eq!(result.status, CheckStatus::Error);
-    }
-
-    #[test]
-    fn check_system_deps_optional_missing_is_warning() {
-        let specs = [spec("dot", false, Version::new(2, 0, 0))];
-        let outcomes = [ProbeOutcome::NotFound];
-        let result = check_system_deps(&specs, &outcomes);
-        assert_eq!(result.status, CheckStatus::Warning);
-    }
-
-    #[test]
-    fn check_system_deps_outdated_is_warning() {
-        let specs = [spec("required-tool", true, Version::new(3, 0, 0))];
-        let outcomes = [ProbeOutcome::Ok {
-            version: Some(Version::new(1, 1, 1)),
-        }];
-        let result = check_system_deps(&specs, &outcomes);
-        assert_eq!(result.status, CheckStatus::Warning);
-    }
-
-    #[test]
-    fn check_system_deps_unparseable_success_is_pass() {
-        let specs = [spec("required-tool", true, Version::new(3, 0, 0))];
-        let outcomes = [ProbeOutcome::Ok { version: None }];
-        let result = check_system_deps(&specs, &outcomes);
-        assert_eq!(result.status, CheckStatus::Pass);
-        assert!(result.details[0].text.contains("version unknown"));
-    }
-
-    #[test]
-    fn check_system_deps_required_command_failed_is_error() {
-        let specs = [spec("required-tool", true, Version::new(3, 0, 0))];
-        let outcomes = [ProbeOutcome::Failed];
-        let result = check_system_deps(&specs, &outcomes);
-        assert_eq!(result.status, CheckStatus::Error);
-    }
-
-    #[test]
-    fn check_system_deps_optional_command_failed_is_warning() {
-        let specs = [spec("dot", false, Version::new(2, 0, 0))];
-        let outcomes = [ProbeOutcome::Failed];
-        let result = check_system_deps(&specs, &outcomes);
-        assert_eq!(result.status, CheckStatus::Warning);
-    }
-
-    #[test]
-    fn check_system_deps_error_beats_warning() {
-        let specs = [
-            spec("required-tool", true, Version::new(3, 0, 0)),
-            spec("dot", false, Version::new(2, 0, 0)),
-        ];
-        let outcomes = [ProbeOutcome::NotFound, ProbeOutcome::NotFound];
-        let result = check_system_deps(&specs, &outcomes);
-        assert_eq!(result.status, CheckStatus::Error);
     }
 }

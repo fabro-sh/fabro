@@ -1715,11 +1715,19 @@ name = "fabro-graphviz"
 version = "0.176.2"
 dependencies = [
  "anyhow",
+ "fabro-graphviz-sys",
  "fabro-types",
  "nom",
  "regex",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "fabro-graphviz-sys"
+version = "0.176.2"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

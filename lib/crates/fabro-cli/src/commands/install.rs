@@ -415,8 +415,6 @@ fn install_github_app_handoff_event(url: &str, owner: &GitHubAppOwner) -> serde_
 
 #[async_trait]
 trait InstallInputSource {
-    async fn choose_graphviz_install(&self, dot_missing: bool) -> Result<bool>;
-
     async fn collect_llm_selection(
         &self,
         facts: &InstallFacts,
@@ -439,15 +437,6 @@ struct InteractiveInstallInputSource;
 
 #[async_trait]
 impl InstallInputSource for InteractiveInstallInputSource {
-    async fn choose_graphviz_install(&self, dot_missing: bool) -> Result<bool> {
-        if !dot_missing {
-            return Ok(false);
-        }
-
-        spawn_blocking(|| prompt_confirm("Graphviz (dot) not found. Install via Homebrew?", true))
-            .await?
-    }
-
     async fn collect_llm_selection(
         &self,
         facts: &InstallFacts,
@@ -676,10 +665,6 @@ impl NonInteractiveInstallInputSource {
 
 #[async_trait]
 impl InstallInputSource for NonInteractiveInstallInputSource {
-    async fn choose_graphviz_install(&self, _dot_missing: bool) -> Result<bool> {
-        Ok(false)
-    }
-
     async fn collect_llm_selection(
         &self,
         _facts: &InstallFacts,
@@ -1319,48 +1304,8 @@ async fn run_install_inner(
         }
     }
 
-    // Pre-flight checks
-    let facts = {
-        let dep_outcomes = doctor::probe_system_deps().await;
-        let dep_check = doctor::check_system_deps(doctor::DEP_SPECS, &dep_outcomes);
-        let dot_missing = doctor::DEP_SPECS
-            .iter()
-            .position(|spec| spec.name == "dot")
-            .is_some_and(|idx| matches!(dep_outcomes[idx], doctor::ProbeOutcome::NotFound));
-
-        fabro_util::printerr!(
-            printer,
-            "  {}",
-            s.dim.apply_to("[Pre-flight] System dependency checks")
-        );
-
-        if dep_check.status == doctor::CheckStatus::Error {
-            fabro_util::printerr!(printer, "  Missing required system dependencies:");
-            for detail in &dep_check.details {
-                fabro_util::printerr!(printer, "    {}", detail.text);
-            }
-            bail!("Install missing required tools before running setup");
-        }
-
-        if input_source.choose_graphviz_install(dot_missing).await? {
-            let status = TokioCommand::new("brew")
-                .args(["install", "graphviz"])
-                .status()
-                .await
-                .context("failed to run brew install graphviz")?;
-            if !status.success() {
-                fabro_util::printerr!(printer, "  Warning: brew install graphviz failed");
-            }
-        }
-
-        for detail in &dep_check.details {
-            fabro_util::printerr!(printer, "  {}", detail.text);
-        }
-        fabro_util::printerr!(printer, "");
-
-        InstallFacts {
-            codex_detected: detect_binary_on_path("codex").await,
-        }
+    let facts = InstallFacts {
+        codex_detected: detect_binary_on_path("codex").await,
     };
 
     // Step 1: LLM Providers
@@ -2060,7 +2005,10 @@ client_id = "client-id"
             &vault_secrets,
             false,
             |_| {
-                let client = fabro_api::Client::new(&server.base_url());
+                let client = fabro_api::Client::new_with_client(
+                    &server.base_url(),
+                    fabro_test::test_http_client(),
+                );
                 Box::pin(async move { Ok(client) })
             },
             {

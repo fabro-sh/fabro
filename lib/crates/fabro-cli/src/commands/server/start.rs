@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use chrono::Utc;
-use fabro_config::user::default_socket_path;
+use fabro_config::user::load_settings_config;
 use fabro_config::{Storage, envfile};
 use fabro_server::bind::{Bind, BindRequest};
 use fabro_server::serve;
@@ -44,12 +44,7 @@ pub(crate) async fn ensure_server_running_for_storage(
     storage_dir: &Path,
     config_path: &Path,
 ) -> Result<Bind> {
-    if let Some(existing) = record::active_server_record(storage_dir) {
-        return Ok(existing.bind);
-    }
-
-    let bind = Bind::Unix(default_socket_path());
-    ensure_server_running_with_bind(bind, config_path, storage_dir).await
+    ensure_server_running_with_bind(None, config_path, storage_dir).await
 }
 
 pub(crate) async fn ensure_server_running_on_socket(
@@ -57,18 +52,25 @@ pub(crate) async fn ensure_server_running_on_socket(
     config_path: &Path,
     storage_dir: &Path,
 ) -> Result<()> {
-    let bind = Bind::Unix(socket_path.to_path_buf());
-    let _ = ensure_server_running_with_bind(bind, config_path, storage_dir).await?;
+    let _ = ensure_server_running_with_bind(
+        Some(BindRequest::Unix(socket_path.to_path_buf())),
+        config_path,
+        storage_dir,
+    )
+    .await?;
     Ok(())
 }
 
 async fn ensure_server_running_with_bind(
-    bind: Bind,
+    bind_request: Option<BindRequest>,
     config_path: &Path,
     storage_dir: &Path,
 ) -> Result<Bind> {
     if let Some(existing) = record::active_server_record(storage_dir) {
-        if existing.bind == bind {
+        if bind_request
+            .as_ref()
+            .is_none_or(|requested| bind_matches_request(&existing.bind, requested))
+        {
             return Ok(existing.bind);
         }
         bail!(
@@ -79,7 +81,7 @@ async fn ensure_server_running_with_bind(
     }
 
     let serve_args = ServeArgs {
-        bind:                None,
+        bind:                bind_request.as_ref().map(ToString::to_string),
         web:                 false,
         no_web:              false,
         model:               None,
@@ -90,9 +92,11 @@ async fn ensure_server_running_with_bind(
         config:              Some(config_path.to_path_buf()),
     };
 
-    let bind_request = match &bind {
-        Bind::Unix(path) => BindRequest::Unix(path.clone()),
-        Bind::Tcp(addr) => BindRequest::Tcp(*addr),
+    let bind_request = if let Some(bind_request) = bind_request {
+        bind_request
+    } else {
+        let settings = load_settings_config(Some(config_path))?;
+        serve::resolve_bind_request_from_settings(&settings, None)?
     };
 
     match execute_daemon(
@@ -104,7 +108,14 @@ async fn ensure_server_running_with_bind(
     )
     .await
     {
-        Ok(()) => Ok(bind),
+        Ok(()) => record::active_server_record(storage_dir)
+            .map(|server| server.bind)
+            .ok_or_else(|| {
+                anyhow!(
+                    "Server started but no active record was found for {}",
+                    storage_dir.display()
+                )
+            }),
         Err(err) => {
             if let Some(existing) = record::active_server_record(storage_dir) {
                 Ok(existing.bind)
@@ -112,6 +123,21 @@ async fn ensure_server_running_with_bind(
                 Err(err)
             }
         }
+    }
+}
+
+fn bind_matches_request(existing: &Bind, requested: &BindRequest) -> bool {
+    match (existing, requested) {
+        (Bind::Unix(existing_path), BindRequest::Unix(requested_path)) => {
+            existing_path == requested_path
+        }
+        (Bind::Tcp(existing_addr), BindRequest::Tcp(requested_addr)) => {
+            existing_addr == requested_addr
+        }
+        (Bind::Tcp(existing_addr), BindRequest::TcpHost(requested_host)) => {
+            existing_addr.ip() == *requested_host
+        }
+        _ => false,
     }
 }
 

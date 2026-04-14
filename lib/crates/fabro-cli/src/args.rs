@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand, ValueEnum};
 use fabro_agent::cli::AgentArgs;
-use fabro_graphviz::render::GraphFormat;
 
 pub(crate) const LONG_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -306,23 +305,12 @@ impl fmt::Display for GraphDirection {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub(crate) enum GraphOutputFormat {
     Svg,
-    Png,
-}
-
-impl From<GraphOutputFormat> for GraphFormat {
-    fn from(value: GraphOutputFormat) -> Self {
-        match value {
-            GraphOutputFormat::Svg => Self::Svg,
-            GraphOutputFormat::Png => Self::Png,
-        }
-    }
 }
 
 impl fmt::Display for GraphOutputFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Svg => write!(f, "svg"),
-            Self::Png => write!(f, "png"),
         }
     }
 }
@@ -935,7 +923,7 @@ pub(crate) enum Commands {
     Preflight(PreflightArgs),
     /// Validate a workflow
     Validate(ValidateArgs),
-    /// Render a workflow graph as SVG or PNG
+    /// Render a workflow graph as SVG
     Graph(GraphArgs),
     /// Parse a DOT file and print its AST
     #[command(hide = true)]

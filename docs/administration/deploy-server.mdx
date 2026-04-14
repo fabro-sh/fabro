@@ -30,7 +30,7 @@ Both interfaces use the same workflow engine, the same Graphviz files, and the s
 fabro server start
 ```
 
-This starts the API on `127.0.0.1:3000` by default. To also run the web UI:
+This starts the server on a Unix socket at `~/.fabro/fabro.sock` by default. Use `--bind 127.0.0.1` for TCP. To also run the web UI:
 
 ```bash
 fabro server start                 # API on port 3000
@@ -41,8 +41,7 @@ Common flags:
 
 | Flag | Default | Description |
 |---|---|---|
-| `--port` | `3000` | Port to listen on |
-| `--host` | `127.0.0.1` | Host address to bind to |
+| `--bind` | `~/.fabro/fabro.sock` | Address to bind: `IP` or `IP:port` for TCP, or a path for Unix socket |
 | `--model` | — | Override default LLM model |
 | `--sandbox` | — | Override default sandbox provider |
 | `--max-concurrent-runs` | `5` | Maximum concurrent run executions |

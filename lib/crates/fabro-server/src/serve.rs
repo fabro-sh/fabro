@@ -4,10 +4,11 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::Args;
+use fabro_config::merge::combine_files;
 use fabro_config::user::load_settings_config;
 use fabro_config::{Storage, resolve_server_from_file};
 use fabro_sandbox::SandboxProvider;
-use fabro_types::settings::server::GithubIntegrationStrategy;
+use fabro_types::settings::server::{GithubIntegrationStrategy, ServerLayer, ServerListenLayer};
 use fabro_types::settings::{
     InterpString, ObjectStoreSettings, ServerListenSettings,
     ServerSettings as ResolvedServerSettings, SettingsLayer,
@@ -187,6 +188,51 @@ fn resolve_server_settings(file: &SettingsLayer) -> anyhow::Result<ResolvedServe
     })
 }
 
+pub fn resolve_bind_request_from_settings(
+    settings: &SettingsLayer,
+    explicit_bind: Option<&str>,
+) -> anyhow::Result<BindRequest> {
+    let effective_settings = match explicit_bind.map(bind::parse_bind).transpose()? {
+        Some(BindRequest::TcpHost(host)) => return Ok(BindRequest::TcpHost(host)),
+        Some(bind) => combine_files(settings.clone(), bind_override_layer(bind)),
+        None => settings.clone(),
+    };
+    let resolved = resolve_server_settings(&effective_settings)?;
+    resolved_bind_request(&resolved)
+}
+
+fn bind_override_layer(bind: BindRequest) -> SettingsLayer {
+    let listen = match bind {
+        BindRequest::Unix(path) => ServerListenLayer::Unix {
+            path: Some(InterpString::parse(&path.display().to_string())),
+        },
+        BindRequest::Tcp(address) => ServerListenLayer::Tcp {
+            address: Some(InterpString::parse(&address.to_string())),
+            tls:     None,
+        },
+        BindRequest::TcpHost(_) => {
+            unreachable!("host-only bind requests are handled before building a settings override")
+        }
+    };
+
+    SettingsLayer {
+        server: Some(ServerLayer {
+            listen: Some(listen),
+            ..ServerLayer::default()
+        }),
+        ..SettingsLayer::default()
+    }
+}
+
+fn resolved_bind_request(
+    resolved_server_settings: &ResolvedServerSettings,
+) -> anyhow::Result<BindRequest> {
+    match &resolved_server_settings.listen {
+        ServerListenSettings::Unix { path } => Ok(BindRequest::Unix(resolve_interp_path(path)?)),
+        ServerListenSettings::Tcp { address, .. } => Ok(BindRequest::Tcp(*address)),
+    }
+}
+
 fn resolve_interp(value: &InterpString) -> anyhow::Result<String> {
     value
         .resolve(|name| std::env::var(name).ok())
@@ -294,6 +340,8 @@ where
     // Shared config for live reloading
     let effective_settings = apply_runtime_settings(&disk_settings, &args, dry_run_mode, &data_dir);
     let resolved_server_settings = resolve_server_settings(&effective_settings)?;
+    let bind_request =
+        resolve_bind_request_from_settings(&effective_settings, args.bind.as_deref())?;
     let shared_settings = Arc::new(RwLock::new(effective_settings));
     std::fs::create_dir_all(&data_dir)?;
     let (auth_mode, max_concurrent_runs) = {
@@ -336,14 +384,6 @@ where
     spawn_scheduler(Arc::clone(&state));
     let router =
         build_router_with_options(Arc::clone(&state), auth_mode, RouterOptions { web_enabled });
-
-    let bind_request = match args.bind {
-        Some(ref s) => bind::parse_bind(s)?,
-        None => match &resolved_server_settings.listen {
-            ServerListenSettings::Unix { path } => BindRequest::Unix(resolve_interp_path(path)?),
-            ServerListenSettings::Tcp { address, .. } => BindRequest::Tcp(*address),
-        },
-    };
 
     // Optionally start webhook listener
     let webhook_manager = match resolved_server_settings.integrations.github.strategy {
@@ -663,13 +703,14 @@ mod tests {
 
     use fabro_config::parse_settings_layer;
     use fabro_types::settings::SettingsLayer;
+    use fabro_util::Home;
 
     use super::{
         ServeArgs, ServerTitlePhase, apply_runtime_settings, bind_tcp_host_with_fallback,
-        build_object_store_with_preference, resolve_server_settings, router_web_enabled,
-        server_bind_title, server_title,
+        build_object_store_with_preference, resolve_bind_request_from_settings,
+        resolve_server_settings, router_web_enabled, server_bind_title, server_title,
     };
-    use crate::bind::Bind;
+    use crate::bind::{Bind, BindRequest};
 
     fn parse_settings(source: &str) -> SettingsLayer {
         parse_settings_layer(source).expect("v2 fixture should parse")
@@ -761,6 +802,58 @@ enabled = false
                 .and_then(|web| web.enabled),
             Some(false)
         );
+    }
+
+    #[test]
+    fn resolve_bind_request_from_settings_defaults_to_socket_when_listen_is_absent() {
+        let bind =
+            resolve_bind_request_from_settings(&SettingsLayer::default(), None).expect("bind");
+
+        assert_eq!(bind, BindRequest::Unix(Home::from_env().socket_path()));
+    }
+
+    #[test]
+    fn resolve_bind_request_from_settings_uses_configured_tcp_when_no_explicit_bind_is_given() {
+        let settings = parse_settings(
+            r#"
+_version = 1
+
+[server.listen]
+type = "tcp"
+address = "127.0.0.1:0"
+"#,
+        );
+
+        let bind = resolve_bind_request_from_settings(&settings, None).expect("bind");
+
+        assert_eq!(bind, BindRequest::Tcp("127.0.0.1:0".parse().unwrap()));
+    }
+
+    #[test]
+    fn resolve_bind_request_from_settings_prefers_explicit_bind_over_config() {
+        let settings = parse_settings(
+            r#"
+_version = 1
+
+[server.listen]
+type = "tcp"
+address = "127.0.0.1:32276"
+"#,
+        );
+
+        let bind =
+            resolve_bind_request_from_settings(&settings, Some("/tmp/fabro.sock")).expect("bind");
+
+        assert_eq!(bind, BindRequest::Unix(PathBuf::from("/tmp/fabro.sock")));
+    }
+
+    #[test]
+    fn resolve_bind_request_from_settings_preserves_host_only_cli_bind() {
+        let settings = SettingsLayer::default();
+
+        let bind = resolve_bind_request_from_settings(&settings, Some("127.0.0.1")).expect("bind");
+
+        assert_eq!(bind, BindRequest::TcpHost("127.0.0.1".parse().unwrap()));
     }
 
     #[test]

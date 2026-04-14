@@ -11,7 +11,7 @@ fn help() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Render a workflow graph as SVG or PNG
+    Render a workflow graph as SVG
 
     Usage: fabro graph [OPTIONS] <WORKFLOW>
 
@@ -39,7 +39,7 @@ fn help() {
               Output format
               
               [default: svg]
-              [possible values: svg, png]
+              [possible values: svg]
 
           --no-upgrade-check
               Disable automatic upgrade check

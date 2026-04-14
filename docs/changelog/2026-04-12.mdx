@@ -1,15 +1,23 @@
 ---
-title: "Typed secrets and fabro pr create --force"
+title: "Provider credential auth and resolved settings"
 date: "2026-04-12"
 ---
 
-## Typed secrets
+## Provider credential auth
 
-Secrets now carry metadata describing their type and purpose. The new secrets API lets you inspect which secrets are configured, what they're used for, and whether they're present — without exposing the values themselves. This makes it easier to diagnose missing credentials and understand what a workflow needs before running it.
+Managing LLM provider credentials used to mean setting environment variables or manually configuring API keys for each session. Now, `fabro provider login` walks you through a typed authentication flow — OAuth device auth for OpenAI Codex, API key entry for other providers — and stores credentials securely in the vault. Workflows automatically pick up stored credentials at runtime, so you configure once and forget.
+
+## Resolved settings view
+
+`fabro settings` now renders a compact, fully-resolved view by default, showing the effective value for every setting after all layers (builtins, project, CLI overrides) are merged. Previously you had to mentally merge multiple config sources to understand what value was active. Builtin defaults are now materialized as a base layer, so `fabro settings` always shows a complete picture even when you haven't configured anything explicitly.
 
 ## More
 
 <Accordion title="CLI">
 - Added `--force` option to `fabro pr create` to skip confirmation prompts
 - `fabro doctor` now checks that the storage directory exists and is writable
+</Accordion>
+
+<Accordion title="API">
+- Settings API endpoint now returns a `resolved` view alongside the raw settings
 </Accordion>

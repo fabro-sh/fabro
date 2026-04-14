@@ -139,6 +139,71 @@ fn start_without_bind_uses_home_socket_instead_of_storage_socket() {
 }
 
 #[test]
+fn start_without_bind_uses_configured_tcp_listen_address() {
+    let context = test_context!();
+    let storage_root = isolated_storage_dir();
+    let storage_dir = storage_root.path().join("storage");
+    let config_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let config_path = config_dir.path().join("settings.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+_version = 1
+
+[server.listen]
+type = "tcp"
+address = "127.0.0.1:0"
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = context.command();
+    cmd.env("FABRO_STORAGE_DIR", &storage_dir);
+    cmd.args([
+        "server",
+        "start",
+        "--dry-run",
+        "--config",
+        config_path.to_str().unwrap(),
+    ]);
+    let output = cmd.output().expect("server start command should run");
+    assert!(
+        output.status.success(),
+        "server start should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let bind_regex = regex::Regex::new(r"127\.0\.0\.1:\d+").unwrap();
+    assert!(
+        bind_regex.is_match(&stderr),
+        "expected configured tcp bind in stderr, got {stderr}"
+    );
+
+    let output = context
+        .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
+        .args(["server", "status", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let bind = json["bind"].as_str().expect("bind should be a string");
+    assert!(
+        bind.starts_with("127.0.0.1:"),
+        "expected configured tcp bind, got {bind}"
+    );
+
+    context
+        .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
+        .args(["server", "stop"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn start_with_tcp_host_only_bind_resolves_to_host_and_port() {
     let context = test_context!();
     let storage_root = isolated_storage_dir();
@@ -220,7 +285,7 @@ fn start_with_tcp_host_only_bind_warns_and_falls_back_when_default_port_is_unava
     Warning: TCP port 32276 is unavailable on 127.0.0.1; falling back to a random port.
     Server started (pid [PID]) on [TCP_BIND]
     Dev token: fabro_dev_[DEV_TOKEN]
-    Token file: [HOME]/.fabro/dev-token
+    Token file: [HOME_DIR]/.fabro/dev-token
     ");
 
     let output = context

@@ -102,7 +102,7 @@ Several `settings.toml` settings can be overridden via `fabro server start` flag
 
 | Flag | Default | Description |
 |---|---|---|
-| `--bind` | `~/.fabro/fabro.sock` | Address to bind: `IP` or `IP:port` for TCP, or a path for Unix socket |
+| `--bind` | Resolved `[server.listen]`, falling back to `~/.fabro/fabro.sock` when `[server.listen]` is absent | Address to bind: `IP` or `IP:port` for TCP, or a path for Unix socket |
 | `--web` | enabled | Enable the embedded web UI, browser auth routes, and web-only helper endpoints |
 | `--no-web` | disabled | Disable the embedded web UI, browser auth routes, and web-only helper endpoints |
 | `--foreground` | — | Run in the foreground instead of daemonizing |
@@ -226,7 +226,7 @@ The same `[features]` section can be set in `.fabro/project.toml` (project-level
 Fabro splits secrets into two scopes:
 
 - Server runtime secrets live in `<data_dir>/server.env` and resolve with precedence `process env -> server.env`.
-- Workflow-visible secrets live in `<data_dir>/secrets.json` (the vault). Anything stored in the vault may be used by workflows.
+- Workflow-visible secrets live in `<data_dir>/vaults/default/secrets.json` (the vault). Anything stored in the vault may be used by workflows.
 
 For the auth model above, the main server runtime secrets are:
 

@@ -115,7 +115,7 @@ pub(crate) fn default_interp(path: impl AsRef<std::path::Path>) -> InterpString 
 mod tests {
     use std::collections::HashMap;
 
-    use fabro_types::settings::run::{HookType, McpTransport};
+    use fabro_types::settings::run::{HookType, McpTransport, TlsMode};
 
     use super::resolve;
     use crate::parse_settings_layer;
@@ -209,7 +209,7 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
                     "Bearer {{ env.HOOK_TOKEN }}".to_string(),
                 )])),
                 allowed_env_vars: Vec::new(),
-                tls:              fabro_types::settings::run::TlsMode::Verify,
+                tls:              TlsMode::Verify,
             })
         );
     }

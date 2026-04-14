@@ -135,34 +135,36 @@ mod tests {
             })
         );
 
-        let mut settings = Settings::default();
-        settings.server = ServerSettings {
-            slatedb: ServerSlateDbSettings {
-                prefix:         InterpString::parse("slatedb/"),
-                store:          ObjectStoreSettings::Local {
-                    root: InterpString::parse("/srv/slatedb"),
-                },
-                flush_interval: StdDuration::from_secs(30),
-            },
-            ..ServerSettings::default()
-        };
-        settings.run = RunSettings {
-            agent: RunAgentSettings {
-                mcps: HashMap::from([("sandboxed".to_string(), McpServerSettings {
-                    name:                 "sandboxed".to_string(),
-                    transport:            McpTransport::Http {
-                        url:     "https://mcp.example.com".to_string(),
-                        headers: HashMap::from([(
-                            "Authorization".to_string(),
-                            "Bearer {{ env.MCP_TOKEN }}".to_string(),
-                        )]),
+        let settings = Settings {
+            server: ServerSettings {
+                slatedb: ServerSlateDbSettings {
+                    prefix:         InterpString::parse("slatedb/"),
+                    store:          ObjectStoreSettings::Local {
+                        root: InterpString::parse("/srv/slatedb"),
                     },
-                    startup_timeout_secs: 15,
-                    tool_timeout_secs:    90,
-                })]),
-                ..RunAgentSettings::default()
+                    flush_interval: StdDuration::from_secs(30),
+                },
+                ..ServerSettings::default()
             },
-            ..RunSettings::default()
+            run: RunSettings {
+                agent: RunAgentSettings {
+                    mcps: HashMap::from([("sandboxed".to_string(), McpServerSettings {
+                        name:                 "sandboxed".to_string(),
+                        transport:            McpTransport::Http {
+                            url:     "https://mcp.example.com".to_string(),
+                            headers: HashMap::from([(
+                                "Authorization".to_string(),
+                                "Bearer {{ env.MCP_TOKEN }}".to_string(),
+                            )]),
+                        },
+                        startup_timeout_secs: 15,
+                        tool_timeout_secs:    90,
+                    })]),
+                    ..RunAgentSettings::default()
+                },
+                ..RunSettings::default()
+            },
+            ..Settings::default()
         };
 
         let value = serde_json::to_value(settings).unwrap();

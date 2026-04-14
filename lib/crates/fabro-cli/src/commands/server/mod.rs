@@ -7,9 +7,7 @@ pub(crate) mod stop;
 use std::time::Duration;
 
 use anyhow::Result;
-use fabro_server::bind;
-use fabro_server::bind::BindRequest;
-use fabro_server::serve::ServeArgs;
+use fabro_server::serve::{self, ServeArgs};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
@@ -34,10 +32,8 @@ pub(crate) async fn dispatch(
                 storage_dir.as_deref(),
             )?;
             let storage_dir = user_config::storage_dir(&settings)?;
-            let bind_addr = match serve_args.bind.as_deref() {
-                Some(s) => bind::parse_bind(s)?,
-                None => BindRequest::Unix(user_config::default_socket_path()),
-            };
+            let bind_addr =
+                serve::resolve_bind_request_from_settings(&settings, serve_args.bind.as_deref())?;
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             Box::pin(start::execute(
                 bind_addr,
@@ -68,19 +64,18 @@ pub(crate) async fn dispatch(
             record_path,
             serve_args,
         }) => {
+            let settings = user_config::load_settings_with_config_and_storage_dir(
+                serve_args.config.as_deref(),
+                storage_dir.as_deref(),
+            )?;
             let active_config_path = Some(
                 serve_args
                     .config
                     .clone()
                     .unwrap_or_else(|| user_config::active_settings_path(None)),
             );
-            let bind_addr = if let Some(s) = serve_args.bind.as_deref() {
-                bind::parse_bind(s)?
-            } else {
-                // __serve should always receive an explicit --bind from the parent,
-                // but fall back to the storage dir default if missing.
-                BindRequest::Unix(user_config::default_socket_path())
-            };
+            let bind_addr =
+                serve::resolve_bind_request_from_settings(&settings, serve_args.bind.as_deref())?;
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             Box::pin(foreground::execute(
                 record_path,

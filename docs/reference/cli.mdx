@@ -329,10 +329,10 @@ fabro model test -m claude-sonnet-4-5
 
 ## `fabro server start`
 
-Start the Fabro server daemon. By default, the server launches as a background process listening on a Unix socket. Use `--foreground` for the previous blocking behavior.
+Start the Fabro server daemon. By default, the server launches as a background process using the resolved `[server.listen]` setting, and falls back to a Unix socket when `[server.listen]` is absent. Use `--foreground` for the previous blocking behavior.
 
 ```bash
-fabro server start                                # background daemon on Unix socket
+fabro server start                                # background daemon using server.listen or the default Unix socket
 fabro server start --bind 127.0.0.1              # TCP on 32276, or random port if 32276 is busy
 fabro server start --bind 127.0.0.1:8080          # TCP on a specific port
 fabro server start --no-web                       # API and /health only
@@ -342,7 +342,7 @@ fabro server start --sandbox daytona --max-concurrent-runs 4
 
 | Flag | Description | Default |
 |---|---|---|
-| `--bind <ADDR>` | Address to bind: `IP` or `IP:port` for TCP, or a path for Unix socket | `~/.fabro/fabro.sock` |
+| `--bind <ADDR>` | Address to bind: `IP` or `IP:port` for TCP, or a path for Unix socket | Resolved `[server.listen]`, falling back to `~/.fabro/fabro.sock` when `[server.listen]` is absent |
 | `--web` | Enable the embedded web UI, browser auth routes, and web-only helper endpoints | Enabled |
 | `--no-web` | Disable the embedded web UI, browser auth routes, and web-only helper endpoints | Disabled |
 | `--foreground` | Run in the foreground instead of daemonizing | — |
@@ -493,18 +493,18 @@ fabro system df -v
 
 ## `fabro graph`
 
-Render a workflow graph as SVG or PNG. Requires [Graphviz](https://graphviz.org) (`dot`) to be installed. SVG output includes styled defaults (teal node strokes, clean typography, transparent background) and automatic dark mode support via `prefers-color-scheme` media queries.
+Render a workflow graph as SVG. SVG output includes styled defaults (teal node strokes, clean typography, transparent background) and automatic dark mode support via `prefers-color-scheme` media queries.
 
 ```bash
 fabro graph workflow.fabro
-fabro graph workflow.fabro --format png -o diagram.png
-fabro graph run.toml --format svg
+fabro graph workflow.fabro -o diagram.svg
+fabro graph run.toml
 ```
 
 | Argument / Flag | Description |
 |---|---|
 | `<WORKFLOW>` | Path to a `.fabro` workflow file or `.toml` run config (required) |
-| `--format <FORMAT>` | Output format: `svg` (default) or `png` |
+| `--format <FORMAT>` | Output format: `svg` (default) |
 | `-o, --output <FILE>` | Output file path. Defaults to stdout. |
 | `-d, --direction <DIR>` | Graph direction: `lr` or `tb`. If omitted, uses the Graphviz file's own `rankdir`. |
 
@@ -810,7 +810,7 @@ fabro provider login --provider anthropic
 |---|---|
 | `--provider <PROVIDER>` | LLM provider to authenticate with (required) |
 
-For OpenAI, this launches a browser-based OAuth PKCE flow with an automatic fallback to manual API key entry. All other providers prompt for an API key with validation. Credentials are saved to the connected Fabro server's secret store.
+For OpenAI, this offers a device code flow — you open a URL in your browser, enter a one-time code, and Fabro completes the auth handshake automatically. If you decline, it falls back to manual API key entry. All other providers prompt for an API key with validation. Credentials are saved to the connected Fabro server's vault as typed credentials.
 
 ## `fabro install`
 
@@ -819,13 +819,15 @@ Interactive setup wizard that walks you through configuring API keys and validat
 ```bash
 fabro install
 fabro install --web-url https://fabro.example.com
+fabro install --non-interactive --llm-provider anthropic --llm-api-key-env ANTHROPIC_API_KEY --github-strategy token
 ```
 
 | Flag | Description | Default |
 |---|---|---|
 | `--web-url <URL>` | Web UI base URL for OAuth callback endpoints | `http://localhost:3000` |
+| `--non-interactive` | Run without prompts; supply inputs via scripted flags | — |
 
-When configuring a GitHub App, the wizard detects your GitHub organizations (via the `gh` CLI) and lets you choose whether to register the app under your personal account or an organization.
+When configuring a GitHub App, the wizard detects your GitHub organizations (via the `gh` CLI) and lets you choose whether to register the app under your personal account or an organization. Use `--non-interactive` for headless or CI environments where no TTY is available.
 
 ## `fabro uninstall`
 

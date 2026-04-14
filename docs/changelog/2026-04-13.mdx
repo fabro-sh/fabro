@@ -1,0 +1,30 @@
+---
+title: "Scripted install and local server auth"
+date: "2026-04-13"
+---
+
+## Scripted non-interactive install
+
+`fabro install` now supports fully non-interactive setup, including GitHub App creation. You can pass all required values as flags — app ID, private key, webhook secret — without any browser interaction. The installer generates Ed25519 keys natively in Rust instead of shelling out to OpenSSL, and the browser-based GitHub App bootstrap flow has been removed in favor of the CLI-only path. This makes it possible to script Fabro deployments in CI or headless environments.
+
+```bash
+fabro install --github-app-id 12345 --github-private-key-file key.pem --github-webhook-secret s3cret
+```
+
+## Dev-token local server auth
+
+Local CLI-managed servers previously started with no authentication. Now, `fabro server start` provisions a dev token and passes it to both the CLI and web clients automatically. This means local servers are authenticated by default — the web UI redirects through a token-based login flow, and CLI commands authenticate transparently. The dev token is scoped to the local session and stored alongside other server state.
+
+<Warning>
+**`GITHUB_CLI_TOKEN` renamed to `GITHUB_TOKEN`.** The environment variable and vault secret for GitHub token auth have been renamed. The `gh_cli` strategy is now called `token`, reflecting that at runtime it's just a stored token — not tied to the `gh` CLI.
+
+To migrate: replace `GITHUB_CLI_TOKEN` with `GITHUB_TOKEN` in your environment or vault configuration. `GH_TOKEN` is also accepted as a fallback.
+</Warning>
+
+## More
+
+<Accordion title="Fixes">
+- Fixed OpenAI Codex OAuth device auth to align with current endpoint response shape
+- Fixed setup registration and OAuth state validation to prevent half-written configurations
+- Fixed vault-backed credentials not loading during server-spawned workflow execution
+</Accordion>
