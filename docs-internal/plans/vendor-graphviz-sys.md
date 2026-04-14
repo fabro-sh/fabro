@@ -333,6 +333,14 @@ pub enum GraphFormat {
 
 - Remove PNG branch from the `match args.format` expression
 - Remove `GraphOutputFormat` to `RenderWorkflowGraphFormat` PNG mapping
+- After removing `RenderWorkflowGraphFormat::Png` from the OpenAPI spec, the generated Rust types will no longer have a `Png` variant, so this match arm would fail to compile anyway -- just remove it
+
+### `fabro-cli/tests/it/cmd/json_global.rs`
+
+- Remove the `dot_is_available()` helper function (lines 13-20)
+- Remove the `if !dot_is_available() { return; }` guard from `graph_json_with_output_reports_file` (line 146)
+- Remove the module-level `#[expect(clippy::disallowed_methods)]` attribute (lines 1-4) -- it was only needed because `Command::new("dot")` is called in `dot_is_available()`
+- Remove `use std::process::Command;` import (line 6) if no longer used after removing `dot_is_available()`
 
 ### `fabro-server/Cargo.toml`
 
@@ -369,21 +377,24 @@ After editing the spec:
 
 ### `fabro-server/src/diagnostics.rs`
 
-- Remove `check_dot()` function and all related code (`probe_dot()`, `ProbeOutcome`, `DOT_RE`)
-- Remove `dot` from the `tokio::join!` in `run_all()`
-- Remove the "System" check section (or repurpose for other checks)
+- Remove `check_dot()` function and all related code (`probe_dot()`, `ProbeOutcome`, `DOT_RE`, `parse_version`)
+- Remove `dot` from the `tokio::join!` in `run_all()` (line 153)
+- Remove the `CheckSection { title: "System", checks: vec![dot] }` block from the `DiagnosticsReport` sections (line 170-172) -- `dot` is the only check in the "System" section, so remove the entire section
+- Remove `use std::sync::LazyLock;`, `use regex::Regex;`, `use semver::Version;` imports if no longer used after removing `DOT_RE` and `parse_version`
 
 ### `fabro-cli/src/commands/doctor.rs`
 
-- Remove `dot` from `DEP_SPECS` array -- make it an empty slice or remove the array entirely
-- Keep the `check_system_deps` function (it works on any list of deps, currently just `dot`)
-- Update tests that reference `dot` in `DEP_SPECS`
+- Make `DEP_SPECS` an empty slice: `pub(crate) const DEP_SPECS: &[DepSpec] = &[];`
+- Remove `DOT_RE` static (line 41-42) and the `DepSpec` fields that reference it
+- Keep `DepSpec`, `ProbeOutcome`, `probe_system_deps`, `check_system_deps` functions -- they are generic and still called from `install.rs` pre-flight checks; with an empty slice they become no-ops
+- Remove the `parse_version_dot` test (line 665-669) since there is no `DOT_RE` to test
+- Update `check_system_deps_all_present` and other system-deps tests that construct a `DepSpec` referencing `DOT_RE` -- these use a local `spec()` helper that references `&DOT_RE`, so replace with an inline `LazyLock<Regex>` or remove the DOT-specific tests and keep only generic tests with a dummy regex
 
 ### `fabro-cli/src/commands/install.rs`
 
-- Remove `choose_graphviz_install()` from `InstallInputSource` trait and both impls
-- Remove the `brew install graphviz` block (~lines 1345-1354)
-- Remove the `dot_missing` variable and related logic
+- Remove `choose_graphviz_install()` from `InstallInputSource` trait (line 418) and both impls: `InteractiveInstallInputSource` (line 442-448) and `NonInteractiveInstallInputSource` (line 679-681)
+- Remove the `dot_missing` variable (line 1326-1329) and the `if input_source.choose_graphviz_install(dot_missing).await?` block (lines 1345-1354)
+- The `dep_outcomes`/`dep_check` pre-flight section (lines 1324-1325) becomes a no-op with empty `DEP_SPECS`, but keep it so the infrastructure is in place if future system deps are added
 
 ## Step 7: Update workspace Cargo.toml
 
@@ -482,8 +493,9 @@ fn render_dot_invalid_source_returns_error() {
 ```
 
 ### Test 7: Diagnostics/doctor updated
-- Update doctor tests to reflect empty `DEP_SPECS`
+- Update doctor tests to reflect empty `DEP_SPECS` (the `spec()` helper in tests uses `&DOT_RE` -- replace with a test-local regex)
 - Verify diagnostics report no longer includes "dot" check
+- Verify `graph_json_with_output_reports_file` in `fabro-cli/tests/it/cmd/json_global.rs` no longer skips (the `dot_is_available()` guard is removed)
 
 ### Test 8: OpenAPI spec consistency
 - `cargo nextest run -p fabro-server` -- conformance test catches spec/router drift
@@ -525,7 +537,7 @@ If `dot` is installed on the machine:
 6. Verify: `cargo build -p fabro-graphviz-sys` and `cargo nextest run -p fabro-graphviz-sys`
 7. Wire into `fabro-graphviz` -- update render.rs, remove PNG
 8. Update `fabro-server` -- simplify render_graph_bytes, remove guards
-9. Update `fabro-cli` -- simplify args, remove PNG
+9. Update `fabro-cli` -- simplify args, remove PNG, update `json_global.rs` integration test
 10. Update OpenAPI spec + regenerate clients
 11. Update diagnostics/doctor/install -- remove dot checks
 12. Full workspace build + test + clippy + fmt
