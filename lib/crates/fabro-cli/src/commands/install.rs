@@ -1469,12 +1469,6 @@ async fn run_install_inner(
 
     // Secrets and auth material
     {
-        fabro_util::printerr!(
-            printer,
-            "  {}",
-            s.dim.apply_to("Generating secrets and auth material...")
-        );
-
         let session_secret = session_secret::generate_session_secret();
         fabro_util::printerr!(
             printer,
