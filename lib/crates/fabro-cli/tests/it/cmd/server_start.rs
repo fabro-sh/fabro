@@ -220,7 +220,7 @@ fn start_with_tcp_host_only_bind_warns_and_falls_back_when_default_port_is_unava
     Warning: TCP port 32276 is unavailable on 127.0.0.1; falling back to a random port.
     Server started (pid [PID]) on [TCP_BIND]
     Dev token: fabro_dev_[DEV_TOKEN]
-    Token file: [HOME]/.fabro/dev-token
+    Token file: [HOME_DIR]/.fabro/dev-token
     ");
 
     let output = context
