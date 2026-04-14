@@ -1581,9 +1581,9 @@ async fn run_install_inner(
         fabro_util::printerr!(printer, "");
         let doctor_args = DoctorArgs {
             target:  ServerTargetArgs::default(),
-            verbose: true,
+            verbose: false,
         };
-        let _ = doctor::run_doctor(&doctor_args, true, cli, cli_layer, printer).await?;
+        let _ = doctor::run_doctor(&doctor_args, false, cli, cli_layer, printer).await?;
     }
 
     fabro_util::printerr!(printer, "");
