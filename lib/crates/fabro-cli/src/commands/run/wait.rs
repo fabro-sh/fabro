@@ -2,6 +2,8 @@ use std::io::Write;
 
 use anyhow::{Result, bail};
 use fabro_types::RunId;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_workflow::records::Conclusion;
@@ -9,7 +11,7 @@ use fabro_workflow::run_status::RunStatus;
 use tokio::time;
 use tracing::info;
 
-use crate::args::{GlobalArgs, WaitArgs};
+use crate::args::WaitArgs;
 use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::{format_duration_ms, format_usd_micros};
@@ -22,10 +24,11 @@ const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(3
 pub(crate) async fn run(
     args: &WaitArgs,
     styles: &Styles,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run_info = lookup.resolve(&args.run)?;
     let client = lookup.client();
@@ -74,7 +77,7 @@ pub(crate) async fn run(
 
     let conclusion = client.get_run_state(&run_id).await?.conclusion;
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         let json_value = build_json_output(final_status, &run_id, conclusion.as_ref());
         let mut out = std::io::stdout().lock();
         serde_json::to_writer_pretty(&mut out, &json_value)?;

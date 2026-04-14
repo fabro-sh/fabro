@@ -5,17 +5,19 @@ use fabro_config::project::{
     WorkflowInfo, WorkflowSource, discover_project_config, list_workflows_detailed,
     resolve_fabro_root,
 };
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
-use crate::args::{GlobalArgs, WorkflowListArgs};
+use crate::args::WorkflowListArgs;
 use crate::shared::{color_if, print_json_pretty, relative_path};
 
 const GOAL_MAX_LEN: usize = 60;
 
 pub(super) fn list_command(
     _args: &WorkflowListArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
     printer: Printer,
 ) -> Result<()> {
     let styles = Styles::detect_stderr();
@@ -34,7 +36,7 @@ pub(super) fn list_command(
 
     let workflows = list_workflows_detailed(Some(&project_wf_dir), user_wf_dir.as_deref());
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         print_json_pretty(&workflows)?;
         return Ok(());
     }

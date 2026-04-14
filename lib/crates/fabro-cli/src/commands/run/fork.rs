@@ -1,11 +1,13 @@
 use anyhow::{Context, Result};
 use fabro_checkpoint::git::Store;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_workflow::operations::{ForkRunInput, RewindTarget, build_timeline_or_rebuild, fork};
 use git2::Repository;
 
-use crate::args::{ForkArgs, GlobalArgs};
+use crate::args::ForkArgs;
 use crate::command_context::CommandContext;
 use crate::commands::store::rebuild::rebuild_run_store;
 use crate::server_runs::ServerSummaryLookup;
@@ -15,11 +17,12 @@ use crate::shared::repo::ensure_matching_repo_origin;
 pub(crate) async fn run(
     args: &ForkArgs,
     styles: &Styles,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
@@ -33,7 +36,7 @@ pub(crate) async fn run(
     let timeline = build_timeline_or_rebuild(&store, Some(&run_store), &run_id).await?;
 
     if args.list {
-        if globals.json {
+        if cli.output.format == OutputFormat::Json {
             print_json_pretty(&super::rewind::timeline_entries_json(&timeline))?;
             return Ok(());
         }
@@ -55,7 +58,7 @@ pub(crate) async fn run(
     let run_id_string = run_id.to_string();
     let new_run_id_string = new_run_id.to_string();
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         let target = args.target.clone().unwrap_or_else(|| "latest".to_string());
         print_json_pretty(&serde_json::json!({
             "source_run_id": run_id_string,

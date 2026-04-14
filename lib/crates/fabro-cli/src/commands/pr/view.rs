@@ -1,18 +1,22 @@
 use anyhow::Result;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use tracing::info;
 
-use crate::args::{GlobalArgs, PrViewArgs};
+use crate::args::PrViewArgs;
 use crate::shared::print_json_pretty;
 
 pub(super) async fn view_command(
     args: PrViewArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
-    let (record, _run_id) = super::load_pr_record(&args.server, &args.run_id, printer).await?;
+    let (record, _run_id) =
+        super::load_pr_record(&args.server, &args.run_id, cli, cli_layer, printer).await?;
 
-    let creds = super::load_github_credentials_required(printer)?;
+    let creds = super::load_github_credentials_required(cli, cli_layer, printer)?;
 
     let detail = fabro_github::get_pull_request(
         &creds,
@@ -26,7 +30,7 @@ pub(super) async fn view_command(
 
     info!(number = detail.number, owner = %record.owner, repo = %record.repo, "Viewing pull request");
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         print_json_pretty(&detail)?;
         return Ok(());
     }

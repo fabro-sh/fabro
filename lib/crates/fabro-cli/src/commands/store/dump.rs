@@ -6,6 +6,8 @@ use bytes::Bytes;
 #[cfg(test)]
 use fabro_store::{ArtifactStore, RunDatabase};
 use fabro_store::{EventEnvelope, RunProjection, StageId};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_types::{RunBlobId, RunId};
 use fabro_util::printer::Printer;
 use fabro_workflow::run_dump::RunDump;
@@ -13,7 +15,7 @@ use futures::future::BoxFuture;
 #[cfg(test)]
 use serde::de::DeserializeOwned;
 
-use crate::args::{GlobalArgs, StoreDumpArgs};
+use crate::args::StoreDumpArgs;
 use crate::server_client::ServerStoreClient;
 use crate::server_runs::ServerRunLookup;
 use crate::shared::{absolute_or_current, print_json_pretty};
@@ -21,7 +23,7 @@ use crate::user_config::{load_settings_with_storage_dir, storage_dir};
 
 pub(crate) async fn dump_command(
     args: &StoreDumpArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
     printer: Printer,
 ) -> Result<()> {
     let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
@@ -31,7 +33,7 @@ pub(crate) async fn dump_command(
     let state = lookup.client().get_run_state(&run_id).await?;
     let source = ServerDumpSource::new(lookup.client(), &run_id);
     let file_count = export_run_from_source(&source, &state, &args.output).await?;
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         print_json_pretty(&serde_json::json!({
             "run_id": run_id,
             "output_dir": absolute_or_current(&args.output),

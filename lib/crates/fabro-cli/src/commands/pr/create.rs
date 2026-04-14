@@ -1,12 +1,14 @@
 use anyhow::{Context, Result, bail};
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::pull_request::maybe_open_pull_request;
 use tracing::info;
 
-use crate::args::{GlobalArgs, PrCreateArgs};
+use crate::args::PrCreateArgs;
 use crate::command_context::CommandContext;
 use crate::commands::store::rebuild::rebuild_run_store;
 use crate::server_runs::ServerSummaryLookup;
@@ -15,10 +17,11 @@ use crate::shared::repo::ensure_matching_repo_origin;
 
 pub(super) async fn create_command(
     args: PrCreateArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
@@ -74,7 +77,7 @@ pub(super) async fn create_command(
     let (owner, repo) = fabro_github::parse_github_owner_repo(&https_url)
         .map_err(|err| anyhow::anyhow!("{err}"))?;
 
-    let creds = super::load_github_credentials_required(printer)?;
+    let creds = super::load_github_credentials_required(cli, cli_layer, printer)?;
 
     let branch_found = fabro_github::branch_exists(
         &creds,
@@ -116,14 +119,14 @@ pub(super) async fn create_command(
     match record {
         Some(record) => {
             info!(pr_url = %record.html_url, "Pull request created");
-            if globals.json {
+            if cli.output.format == OutputFormat::Json {
                 print_json_pretty(&record)?;
             } else {
                 fabro_util::printout!(printer, "{}", record.html_url);
             }
         }
         None => {
-            if globals.json {
+            if cli.output.format == OutputFormat::Json {
                 print_json_pretty(&serde_json::Value::Null)?;
             } else {
                 fabro_util::printout!(printer, "No pull request created (empty diff).");

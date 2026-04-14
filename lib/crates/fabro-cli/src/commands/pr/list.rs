@@ -1,13 +1,15 @@
 use anyhow::Result;
 use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use futures::future::join_all;
 use serde::Serialize;
 use tracing::info;
 
-use crate::args::{GlobalArgs, PrListArgs};
+use crate::args::PrListArgs;
 use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::{color_if, print_json_pretty};
@@ -23,10 +25,11 @@ struct PrRow {
 
 pub(super) async fn list_command(
     args: PrListArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
 
     let mut entries = Vec::new();
@@ -39,7 +42,7 @@ pub(super) async fn list_command(
     }
 
     if entries.is_empty() {
-        if globals.json {
+        if cli.output.format == OutputFormat::Json {
             print_json_pretty(&Vec::<PrRow>::new())?;
             return Ok(());
         }
@@ -47,7 +50,7 @@ pub(super) async fn list_command(
         return Ok(());
     }
 
-    let creds = super::load_github_credentials_required(printer)?;
+    let creds = super::load_github_credentials_required(cli, cli_layer, printer)?;
 
     let futures: Vec<_> = entries
         .iter()
@@ -101,7 +104,7 @@ pub(super) async fn list_command(
             .collect()
     };
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         print_json_pretty(&rows)?;
         return Ok(());
     }

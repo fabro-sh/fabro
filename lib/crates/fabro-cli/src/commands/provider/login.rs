@@ -2,21 +2,25 @@ use anyhow::Result;
 use fabro_api::types;
 use fabro_auth::credential_id_for;
 use fabro_config::legacy_env;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::CliLayer;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
-use crate::args::{GlobalArgs, ProviderLoginArgs};
+use crate::args::{ProviderLoginArgs, require_no_json_override};
 use crate::command_context::CommandContext;
 use crate::shared::provider_auth;
 
 pub(super) async fn login_command(
     args: ProviderLoginArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
+    process_local_json: bool,
     printer: Printer,
 ) -> Result<()> {
-    globals.require_no_json()?;
+    require_no_json_override(process_local_json)?;
     let s = Styles::detect_stderr();
-    let ctx = CommandContext::for_target(&args.target, printer)?;
+    let ctx = CommandContext::for_target(&args.target, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
     let credential = if args.api_key_stdin {
         provider_auth::authenticate_provider_with_api_key_source(

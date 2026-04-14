@@ -4,12 +4,14 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::Home;
 use fabro_util::printer::Printer;
 use serde::Serialize;
 use tracing::warn;
 
-use crate::args::{GlobalArgs, UninstallArgs};
+use crate::args::UninstallArgs;
 use crate::commands::server;
 use crate::shared::{format_size, print_json_pretty, tilde_path};
 use crate::user_config;
@@ -29,14 +31,15 @@ struct Inventory {
 #[allow(clippy::unused_async)] // call site requires async
 pub(crate) async fn run_uninstall(
     args: &UninstallArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
     printer: Printer,
 ) -> Result<()> {
+    let json = cli.output.format == OutputFormat::Json;
     let home = Home::from_env();
     let home_root = home.root().to_path_buf();
 
     if !looks_like_fabro_home(&home_root) {
-        if globals.json {
+        if json {
             print_json_pretty(&serde_json::json!({ "status": "not_installed" }))?;
         } else {
             fabro_util::printerr!(printer, "Fabro is not installed.");
@@ -52,7 +55,7 @@ pub(crate) async fn run_uninstall(
     let inventory = build_inventory(&home_root, &storage_dir);
 
     if !args.yes {
-        if globals.json {
+        if json {
             print_json_pretty(&inventory)?;
         } else {
             print_preview(&inventory, printer);
@@ -60,7 +63,7 @@ pub(crate) async fn run_uninstall(
         return Ok(());
     }
 
-    execute_uninstall(&inventory, globals.json, printer).await
+    execute_uninstall(&inventory, json, printer).await
 }
 
 fn build_inventory(home_root: &Path, storage_dir: &Path) -> Inventory {

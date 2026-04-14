@@ -1,18 +1,26 @@
 use anyhow::{Result, bail};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use tracing::info;
 
-use crate::args::{GlobalArgs, SshArgs};
+use crate::args::{SshArgs, require_no_json_override};
 use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
-pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs, printer: Printer) -> Result<()> {
-    if globals.json && !args.print {
-        globals.require_no_json()?;
+pub(crate) async fn run(
+    args: SshArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
+    process_local_json: bool,
+    printer: Printer,
+) -> Result<()> {
+    if process_local_json && !args.print {
+        require_no_json_override(process_local_json)?;
     }
 
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
@@ -24,7 +32,7 @@ pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs, printer: Printer) -
     info!(run_id = %args.run, ttl_minutes = args.ttl, "Creating SSH access");
 
     if args.print {
-        if globals.json {
+        if cli.output.format == OutputFormat::Json {
             print_json_pretty(&serde_json::json!({ "command": ssh.command }))?;
         } else {
             {

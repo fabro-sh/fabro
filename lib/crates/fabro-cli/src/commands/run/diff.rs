@@ -1,18 +1,25 @@
 use std::io::{self, IsTerminal, Write};
 
 use anyhow::{Context, Result, bail};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use tracing::{debug, info};
 
-use crate::args::{DiffArgs, GlobalArgs};
+use crate::args::DiffArgs;
 use crate::command_context::CommandContext;
 use crate::server_client::RunProjection;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
-pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs, printer: Printer) -> Result<()> {
+pub(crate) async fn run(
+    args: DiffArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
+    printer: Printer,
+) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
@@ -20,7 +27,7 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs, printer: Printer) 
 
     let patch = resolve_diff(&state, &args)?;
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         let value = serde_json::json!({
             "run_id": run_id,
             "node": args.node,

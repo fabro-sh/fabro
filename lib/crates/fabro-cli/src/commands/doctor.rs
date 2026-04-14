@@ -7,6 +7,8 @@ use fabro_config::user::{
     active_settings_path, legacy_old_user_config_path, legacy_server_config_path,
     legacy_user_config_path,
 };
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 pub(crate) use fabro_util::check_report::{
     CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
 };
@@ -14,7 +16,7 @@ use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::version::FABRO_VERSION;
 
-use crate::args::{DoctorArgs, GlobalArgs};
+use crate::args::DoctorArgs;
 use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 use crate::user_config;
@@ -240,11 +242,13 @@ fn render_report(report: &CheckReport, styles: &Styles, verbose: bool, printer: 
 pub(crate) async fn run_doctor(
     args: &DoctorArgs,
     verbose: bool,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<i32, anyhow::Error> {
     let styles = Styles::detect_stdout();
-    let spinner = if globals.json {
+    let json = cli.output.format == OutputFormat::Json;
+    let spinner = if json {
         None
     } else {
         let spinner = indicatif::ProgressBar::new_spinner();
@@ -295,7 +299,7 @@ pub(crate) async fn run_doctor(
         }],
     };
 
-    let ctx = match CommandContext::for_target(&args.target, printer) {
+    let ctx = match CommandContext::for_target(&args.target, printer, cli.clone(), cli_layer) {
         Ok(ctx) => ctx,
         Err(err) => {
             report.sections.push(CheckSection {
@@ -316,7 +320,7 @@ pub(crate) async fn run_doctor(
                 spinner.finish_and_clear();
             }
 
-            if globals.json {
+            if json {
                 print_json_pretty(&report)?;
             } else {
                 render_report(&report, &styles, verbose, printer);
@@ -346,7 +350,7 @@ pub(crate) async fn run_doctor(
                 spinner.finish_and_clear();
             }
 
-            if globals.json {
+            if json {
                 print_json_pretty(&report)?;
             } else {
                 render_report(&report, &styles, verbose, printer);
@@ -375,7 +379,7 @@ pub(crate) async fn run_doctor(
                 spinner.finish_and_clear();
             }
 
-            if globals.json {
+            if json {
                 print_json_pretty(&report)?;
             } else {
                 render_report(&report, &styles, verbose, printer);
@@ -416,7 +420,7 @@ pub(crate) async fn run_doctor(
         spinner.finish_and_clear();
     }
 
-    if globals.json {
+    if json {
         print_json_pretty(&report)?;
     } else {
         render_report(&report, &styles, verbose, printer);

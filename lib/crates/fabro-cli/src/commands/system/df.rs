@@ -3,19 +3,22 @@ use chrono::{DateTime, Utc};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_api::types;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 
-use crate::args::{DfArgs, GlobalArgs};
+use crate::args::DfArgs;
 use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::shared::{format_size, print_json_pretty};
 
 pub(super) async fn df_command(
     args: &DfArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
-    let ctx = CommandContext::for_connection(&args.connection, printer)?;
+    let ctx = CommandContext::for_connection(&args.connection, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
     let output = server
         .api()
@@ -26,7 +29,8 @@ pub(super) async fn df_command(
         .map_err(server_client::map_api_error)?
         .into_inner();
 
-    let storage_dir = if globals.json {
+    let json = cli.output.format == OutputFormat::Json;
+    let storage_dir = if json {
         None
     } else {
         server
@@ -39,14 +43,14 @@ pub(super) async fn df_command(
             .storage_dir
     };
 
-    df_from(&output, storage_dir.as_deref(), globals)
+    df_from(&output, storage_dir.as_deref(), json)
 }
 
 #[allow(clippy::print_stdout)]
 fn df_from(
     output: &types::DiskUsageResponse,
     storage_dir: Option<&str>,
-    globals: &GlobalArgs,
+    json_output: bool,
 ) -> Result<()> {
     let runs_summary = output
         .summary
@@ -82,7 +86,7 @@ fn df_from(
     };
     let log_reclaim_pct = if total_log_size > 0 { 100 } else { 0 };
 
-    if globals.json {
+    if json_output {
         print_json_pretty(output)?;
         return Ok(());
     }

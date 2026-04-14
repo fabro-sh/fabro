@@ -3,6 +3,8 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 use semver::Version;
 use sha2::{Digest, Sha256};
@@ -10,7 +12,7 @@ use tokio::process::Command as TokioCommand;
 use tokio::task::JoinHandle;
 use tracing::debug;
 
-use crate::args::{GlobalArgs, UpgradeArgs};
+use crate::args::UpgradeArgs;
 use crate::shared::print_json_pretty;
 
 // ── Download backend abstraction ───────────────────────────────────────────
@@ -226,7 +228,7 @@ impl UpgradeCheckState {
 
 pub(crate) async fn run_upgrade(
     args: UpgradeArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
     printer: Printer,
 ) -> Result<()> {
     let backend = select_backend().await;
@@ -268,7 +270,7 @@ pub(crate) async fn run_upgrade(
             }
         }
         std::cmp::Ordering::Equal if !args.force => {
-            if globals.json {
+            if cli.output.format == OutputFormat::Json {
                 print_json_pretty(&serde_json::json!({
                     "previous_version": current.to_string(),
                     "installed_version": current.to_string(),
@@ -282,7 +284,7 @@ pub(crate) async fn run_upgrade(
     }
 
     if args.dry_run {
-        if globals.json {
+        if cli.output.format == OutputFormat::Json {
             print_json_pretty(&serde_json::json!({
                 "previous_version": current.to_string(),
                 "installed_version": target.to_string(),
@@ -358,7 +360,7 @@ pub(crate) async fn run_upgrade(
         let _ = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755));
     }
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         print_json_pretty(&serde_json::json!({
             "previous_version": current.to_string(),
             "installed_version": target.to_string(),
@@ -374,12 +376,8 @@ pub(crate) async fn run_upgrade(
 /// Spawn a background task that checks for a newer version and prints a notice
 /// to stderr after the main command completes. Returns a handle that should be
 /// awaited at the end of `main_inner`.
-pub(crate) fn spawn_upgrade_check(
-    no_upgrade_check: bool,
-    upgrade_check_enabled: bool,
-    printer: Printer,
-) -> Option<JoinHandle<()>> {
-    if no_upgrade_check || !upgrade_check_enabled {
+pub(crate) fn spawn_upgrade_check(check: bool, printer: Printer) -> Option<JoinHandle<()>> {
+    if !check {
         return None;
     }
     Some(tokio::spawn(async move {

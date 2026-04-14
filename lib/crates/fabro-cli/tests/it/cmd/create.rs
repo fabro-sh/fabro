@@ -409,7 +409,7 @@ fn create_persists_requested_overrides_into_store() {
 }
 
 #[test]
-fn create_json_implies_auto_approve() {
+fn create_json_does_not_imply_auto_approve() {
     let context = test_context!();
     let workflow = fixture("simple.fabro");
     let output = context
@@ -442,7 +442,7 @@ fn create_json_implies_auto_approve() {
         )
         .execution
         .approval
-            == fabro_types::settings::run::ApprovalMode::Auto
+            != fabro_types::settings::run::ApprovalMode::Auto
     );
 }
 

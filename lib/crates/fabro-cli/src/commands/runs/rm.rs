@@ -1,8 +1,10 @@
 use anyhow::{Context, Result, bail};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 
 use super::short_run_id;
-use crate::args::{GlobalArgs, RunsRemoveArgs};
+use crate::args::RunsRemoveArgs;
 use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::server_runs::{
@@ -12,21 +14,23 @@ use crate::shared::print_json_pretty;
 
 pub(crate) async fn remove_command(
     args: &RunsRemoveArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-    remove_from(args, lookup.client(), lookup.runs(), globals, printer).await
+    remove_from(args, lookup.client(), lookup.runs(), cli, printer).await
 }
 
 async fn remove_from(
     args: &RunsRemoveArgs,
     client: &server_client::ServerStoreClient,
     runs: &[ServerRunSummaryInfo],
-    globals: &GlobalArgs,
+    cli: &CliSettings,
     printer: Printer,
 ) -> Result<()> {
+    let json = cli.output.format == OutputFormat::Json;
     let mut had_errors = false;
     let mut removed = Vec::new();
     let mut errors = Vec::new();
@@ -35,7 +39,7 @@ async fn remove_from(
         let run = match resolve_server_run_from_summaries(runs, identifier) {
             Ok(run) => run,
             Err(err) => {
-                if !globals.json {
+                if !json {
                     fabro_util::printerr!(printer, "error: {identifier}: {err}");
                 }
                 errors.push(serde_json::json!({
@@ -54,7 +58,7 @@ async fn remove_from(
                 short_run_id(&run_id),
                 run.status()
             );
-            if !globals.json {
+            if !json {
                 fabro_util::printerr!(printer, "{error}");
             }
             errors.push(serde_json::json!({
@@ -67,7 +71,7 @@ async fn remove_from(
 
         let run_id = run.run_id().to_string();
         if let Err(err) = delete_server_run(client, &run).await {
-            if !globals.json {
+            if !json {
                 fabro_util::printerr!(printer, "error: {identifier}: {err}");
             }
             errors.push(serde_json::json!({
@@ -78,12 +82,12 @@ async fn remove_from(
             continue;
         }
         removed.push(run_id.clone());
-        if !globals.json {
+        if !json {
             fabro_util::printerr!(printer, "{}", short_run_id(&run_id));
         }
     }
 
-    if globals.json {
+    if json {
         print_json_pretty(&serde_json::json!({
             "removed": removed,
             "errors": errors,

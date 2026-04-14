@@ -3,10 +3,12 @@ use chrono::{DateTime, Utc};
 use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_api::Client;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
-use crate::args::{GlobalArgs, SecretListArgs};
+use crate::args::SecretListArgs;
 use crate::server_client;
 use crate::shared::print_json_pretty;
 
@@ -24,7 +26,7 @@ fn format_age(dt: DateTime<Utc>, now: DateTime<Utc>) -> String {
 pub(super) async fn list_command(
     client: &Client,
     _args: &SecretListArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
     printer: Printer,
 ) -> Result<()> {
     let response = client
@@ -33,7 +35,7 @@ pub(super) async fn list_command(
         .await
         .map_err(server_client::map_api_error)?;
     let secrets = response.into_inner().data;
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         print_json_pretty(&secrets)?;
         return Ok(());
     }

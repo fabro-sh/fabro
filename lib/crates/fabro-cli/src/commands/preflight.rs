@@ -1,11 +1,12 @@
 use anyhow::bail;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
-use fabro_types::settings::cli::OutputVerbosity;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat, OutputVerbosity};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
-use crate::args::{GlobalArgs, PreflightArgs};
+use crate::args::PreflightArgs;
 use crate::command_context::CommandContext;
 use crate::commands::run::output::{
     api_check_report_to_local, api_diagnostics_to_local, print_preflight_workflow_summary,
@@ -16,12 +17,13 @@ use crate::shared::print_json_pretty;
 
 pub(crate) async fn execute(
     mut args: PreflightArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let ctx = CommandContext::for_target(&args.target, printer)?;
-    args.verbose = args.verbose || ctx.cli_settings().output.verbosity == OutputVerbosity::Verbose;
+    let ctx = CommandContext::for_target(&args.target, printer, cli.clone(), cli_layer)?;
+    args.verbose = args.verbose || cli.output.verbosity == OutputVerbosity::Verbose;
 
     let manifest = build_run_manifest(ManifestBuildInput {
         workflow:           args.workflow.clone(),
@@ -36,7 +38,7 @@ pub(crate) async fn execute(
     let response = client.run_preflight(manifest.manifest).await?;
     let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         print_json_pretty(&response)?;
     } else {
         print_preflight_workflow_summary(

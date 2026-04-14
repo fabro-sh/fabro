@@ -1,8 +1,10 @@
 use anyhow::Result;
 use fabro_api::{Client, types};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 
-use crate::args::{GlobalArgs, SecretSetArgs, SecretTypeArg};
+use crate::args::{SecretSetArgs, SecretTypeArg};
 use crate::server_client;
 use crate::shared::print_json_pretty;
 
@@ -16,7 +18,7 @@ fn api_secret_type(secret_type: SecretTypeArg) -> types::SecretType {
 pub(super) async fn set_command(
     client: &Client,
     args: &SecretSetArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
     printer: Printer,
 ) -> Result<()> {
     let meta = client
@@ -31,7 +33,7 @@ pub(super) async fn set_command(
         .await
         .map_err(server_client::map_api_error)?
         .into_inner();
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         print_json_pretty(&meta)?;
     } else {
         fabro_util::printerr!(printer, "Set {}", meta.name);

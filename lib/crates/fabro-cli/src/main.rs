@@ -18,10 +18,15 @@ mod user_config;
 use std::ffi::OsString;
 
 use anyhow::Result;
-use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands, ServerCommand, ServerNamespace};
+use args::{
+    Commands, GlobalArgs, LONG_VERSION, RunCommands, ServerCommand, ServerNamespace,
+    global_args_cli_layer, printer_from_verbosity, require_no_json_override,
+};
 use clap::{CommandFactory, Parser};
+use fabro_config::merge::combine_files;
 use fabro_config::user::load_settings_config;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
+use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -120,43 +125,45 @@ async fn main_inner() -> (String, Result<()>) {
     let cli = Cli::parse();
 
     let Cli { globals, command } = cli;
-    let printer = Printer::from_flags(globals.quiet, globals.verbose);
+    let bootstrap_printer = Printer::from_flags(globals.quiet, globals.verbose);
+    let cli_layer = global_args_cli_layer(&globals);
+    let process_local_json = globals.json;
     let command_name = command.name().to_string();
 
-    let (config_log_level, upgrade_check_enabled) = {
-        if let Commands::Server(ServerNamespace {
-            command:
-                ServerCommand::Start(args::ServerStartArgs {
-                    serve_args: args, ..
-                })
-                | ServerCommand::Serve(args::ServerServeArgs {
-                    serve_args: args, ..
-                }),
-        }) = command.as_ref()
-        {
-            match load_settings_config(args.config.as_deref()) {
-                Ok(layer) => {
-                    let server_settings = layer;
-                    (
-                        server_settings
-                            .server
-                            .as_ref()
-                            .and_then(|server| server.logging.as_ref())
-                            .and_then(|logging| logging.level.clone()),
-                        false,
-                    )
-                }
-                Err(err) => return (command_name, Err(err.into())),
-            }
-        } else {
-            match user_config::load_settings() {
-                Ok(cli_settings) => match user_config::resolve_cli_settings(&cli_settings) {
-                    Ok(resolved_cli) => (resolved_cli.logging.level, resolved_cli.updates.check),
-                    Err(err) => return (command_name, Err(err)),
-                },
-                Err(err) => return (command_name, Err(err)),
-            }
+    let user_settings = match user_config::load_settings() {
+        Ok(settings) => settings,
+        Err(err) => return (command_name, Err(err)),
+    };
+    let combined_settings = combine_files(user_settings, SettingsLayer {
+        cli: Some(cli_layer.clone()),
+        ..SettingsLayer::default()
+    });
+    let cli_settings = match user_config::resolve_cli_settings(&combined_settings) {
+        Ok(cli_settings) => cli_settings,
+        Err(err) => return (command_name, Err(err)),
+    };
+    let printer = printer_from_verbosity(cli_settings.output.verbosity);
+
+    let config_log_level = if let Commands::Server(ServerNamespace {
+        command:
+            ServerCommand::Start(args::ServerStartArgs {
+                serve_args: args, ..
+            })
+            | ServerCommand::Serve(args::ServerServeArgs {
+                serve_args: args, ..
+            }),
+    }) = command.as_ref()
+    {
+        match load_settings_config(args.config.as_deref()) {
+            Ok(layer) => layer
+                .server
+                .as_ref()
+                .and_then(|server| server.logging.as_ref())
+                .and_then(|logging| logging.level.clone()),
+            Err(err) => return (command_name, Err(err.into())),
         }
+    } else {
+        cli_settings.logging.level.clone()
     };
 
     let log_prefix = if command_name == "server start" || command_name == "server __serve" {
@@ -166,7 +173,10 @@ async fn main_inner() -> (String, Result<()>) {
     };
     if let Err(err) = logging::init_tracing(globals.debug, config_log_level.as_deref(), log_prefix)
     {
-        fabro_util::printerr!(printer, "Warning: failed to initialize logging: {err:#}");
+        fabro_util::printerr!(
+            bootstrap_printer,
+            "Warning: failed to initialize logging: {err:#}"
+        );
     }
 
     debug!(command = %command_name, "CLI command started");
@@ -178,59 +188,74 @@ async fn main_inner() -> (String, Result<()>) {
             | Commands::Repo(_)
             | Commands::Install(_)
     ) {
-        commands::upgrade::spawn_upgrade_check(
-            globals.no_upgrade_check,
-            upgrade_check_enabled,
-            printer,
-        )
+        commands::upgrade::spawn_upgrade_check(cli_settings.updates.check, printer)
     } else {
         None
     };
 
     let result = Box::pin(async move {
         match *command {
-            Commands::Exec(args) => commands::exec::execute(args, &globals, printer).await?,
+            Commands::Exec(args) => commands::exec::execute(args, &cli_settings, printer).await?,
             Commands::RunCmd(cmd) => {
-                Box::pin(commands::run::dispatch(cmd, &globals, printer)).await?;
+                Box::pin(commands::run::dispatch(
+                    cmd,
+                    &cli_settings,
+                    &cli_layer,
+                    process_local_json,
+                    printer,
+                ))
+                .await?;
             }
             Commands::Preflight(args) => {
-                commands::preflight::execute(args, &globals, printer).await?;
+                commands::preflight::execute(args, &cli_settings, &cli_layer, printer).await?;
             }
             Commands::Validate(args) => {
                 let styles = Styles::detect_stderr();
-                commands::validate::run(&args, &styles, &globals, printer).await?;
+                commands::validate::run(&args, &styles, &cli_settings, &cli_layer, printer).await?;
             }
             Commands::Graph(args) => {
                 let styles = Styles::detect_stderr();
-                commands::graph::run(&args, &styles, &globals, printer).await?;
+                commands::graph::run(
+                    &args,
+                    &styles,
+                    &cli_settings,
+                    &cli_layer,
+                    process_local_json,
+                    printer,
+                )
+                .await?;
             }
             Commands::Parse(args) => {
-                commands::parse::run(&args, &globals, printer)?;
+                commands::parse::run(&args, &cli_settings, printer)?;
             }
-            Commands::Artifact(ns) => commands::artifact::dispatch(ns, &globals, printer).await?,
-            Commands::Store(ns) => commands::store::dispatch(ns, &globals, printer).await?,
-            Commands::RunsCmd(cmd) => commands::runs::dispatch(cmd, &globals, printer).await?,
+            Commands::Artifact(ns) => {
+                commands::artifact::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
+            }
+            Commands::Store(ns) => commands::store::dispatch(ns, &cli_settings, printer).await?,
+            Commands::RunsCmd(cmd) => {
+                commands::runs::dispatch(cmd, &cli_settings, &cli_layer, printer).await?;
+            }
             Commands::Model { command } => {
-                commands::model::execute(command, &globals, printer).await?;
+                commands::model::execute(command, &cli_settings, &cli_layer, printer).await?;
             }
             Commands::Server(ns) => {
                 Box::pin(commands::server::dispatch(ns.command, &globals, printer)).await?;
             }
             Commands::Doctor(args) => {
-                let cli_settings = user_config::load_settings()?;
-                let verbose = args.verbose
-                    || user_config::resolve_cli_settings(&cli_settings)?
-                        .output
-                        .verbosity
-                        == OutputVerbosity::Verbose;
+                let verbose =
+                    args.verbose || cli_settings.output.verbosity == OutputVerbosity::Verbose;
                 let exit_code = Box::pin(commands::doctor::run_doctor(
-                    &args, verbose, &globals, printer,
+                    &args,
+                    verbose,
+                    &cli_settings,
+                    &cli_layer,
+                    printer,
                 ))
                 .await?;
                 std::process::exit(exit_code);
             }
             Commands::Discord => {
-                if globals.json {
+                if process_local_json {
                     shared::print_json_pretty(&serde_json::json!({
                         "url": "https://fabro.sh/discord",
                     }))?;
@@ -239,7 +264,7 @@ async fn main_inner() -> (String, Result<()>) {
                 }
             }
             Commands::Docs => {
-                if globals.json {
+                if process_local_json {
                     shared::print_json_pretty(&serde_json::json!({
                         "url": "https://docs.fabro.sh/",
                     }))?;
@@ -247,29 +272,72 @@ async fn main_inner() -> (String, Result<()>) {
                     open::that("https://docs.fabro.sh/")?;
                 }
             }
-            Commands::Repo(ns) => commands::repo::dispatch(ns, &globals, printer).await?,
+            Commands::Repo(ns) => {
+                commands::repo::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
+            }
             Commands::Install(args) => {
-                Box::pin(commands::install::run_install(&args, &globals, printer)).await?;
+                Box::pin(commands::install::run_install(
+                    &args,
+                    &cli_settings,
+                    &cli_layer,
+                    process_local_json,
+                    printer,
+                ))
+                .await?;
             }
             Commands::Uninstall(args) => {
-                commands::uninstall::run_uninstall(&args, &globals, printer).await?;
+                commands::uninstall::run_uninstall(&args, &cli_settings, printer).await?;
             }
-            Commands::Pr(ns) => Box::pin(commands::pr::dispatch(ns, &globals, printer)).await?,
-            Commands::Secret(ns) => commands::secret::dispatch(ns, &globals, printer).await?,
+            Commands::Pr(ns) => {
+                Box::pin(commands::pr::dispatch(
+                    ns,
+                    &cli_settings,
+                    &cli_layer,
+                    printer,
+                ))
+                .await?;
+            }
+            Commands::Secret(ns) => {
+                commands::secret::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
+            }
             Commands::Settings(args) => {
-                Box::pin(commands::config::execute(&args, &globals, printer)).await?;
+                Box::pin(commands::config::execute(
+                    &args,
+                    &cli_settings,
+                    &cli_layer,
+                    printer,
+                ))
+                .await?;
             }
-            Commands::Workflow(ns) => commands::workflow::dispatch(ns, &globals, printer)?,
+            Commands::Workflow(ns) => commands::workflow::dispatch(ns, &cli_settings, printer)?,
             Commands::Upgrade(args) => {
-                commands::upgrade::run_upgrade(args, &globals, printer).await?;
+                commands::upgrade::run_upgrade(args, &cli_settings, printer).await?;
             }
-            Commands::Provider(ns) => commands::provider::dispatch(ns, &globals, printer).await?,
+            Commands::Provider(ns) => {
+                commands::provider::dispatch(
+                    ns,
+                    &cli_settings,
+                    &cli_layer,
+                    process_local_json,
+                    printer,
+                )
+                .await?;
+            }
             Commands::Sandbox { command } => {
-                commands::sandbox::dispatch(command, &globals, printer).await?;
+                commands::sandbox::dispatch(
+                    command,
+                    &cli_settings,
+                    &cli_layer,
+                    process_local_json,
+                    printer,
+                )
+                .await?;
             }
-            Commands::System(ns) => commands::system::dispatch(ns, &globals, printer).await?,
+            Commands::System(ns) => {
+                commands::system::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
+            }
             Commands::Completion(args) => {
-                globals.require_no_json()?;
+                require_no_json_override(process_local_json)?;
                 let mut cmd = Cli::command();
                 let shell = args.shell;
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

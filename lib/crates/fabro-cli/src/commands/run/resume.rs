@@ -1,7 +1,9 @@
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
-use crate::args::{GlobalArgs, ResumeArgs};
+use crate::args::ResumeArgs;
 use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
@@ -14,18 +16,20 @@ use crate::shared::print_json_pretty;
 pub(crate) async fn resume_command(
     args: ResumeArgs,
     styles: &'static Styles,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> anyhow::Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
 
     super::start::start_run_with_client(lookup.client(), &run_id, true).await?;
 
+    let json = cli.output.format == OutputFormat::Json;
     if args.detach {
-        if globals.json {
+        if json {
             print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
         } else {
             fabro_util::printout!(printer, "{run_id}");
@@ -36,11 +40,11 @@ pub(crate) async fn resume_command(
             &run_id,
             true,
             styles,
-            globals.json,
+            json,
             printer,
         )
         .await?;
-        if !globals.json {
+        if !json {
             super::output::print_run_summary_with_client(
                 lookup.client(),
                 &run_id,

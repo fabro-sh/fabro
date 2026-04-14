@@ -2,20 +2,23 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail};
 use fabro_api::types;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use tracing::{debug, info};
 
-use crate::args::{GlobalArgs, RunsPruneArgs};
+use crate::args::RunsPruneArgs;
 use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::shared::{format_size, print_json_pretty};
 
 pub(super) async fn prune_command(
     args: &RunsPruneArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
-    let ctx = CommandContext::for_connection(&args.connection, printer)?;
+    let ctx = CommandContext::for_connection(&args.connection, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
     let response = server
         .api()
@@ -32,7 +35,7 @@ pub(super) async fn prune_command(
         .await
         .map_err(server_client::map_api_error)?
         .into_inner();
-    prune_from(&response, globals, printer)
+    prune_from(&response, cli.output.format == OutputFormat::Json, printer)
 }
 
 pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
@@ -53,7 +56,7 @@ pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
 
 fn prune_from(
     response: &types::PruneRunsResponse,
-    globals: &GlobalArgs,
+    json_output: bool,
     printer: Printer,
 ) -> Result<()> {
     let total_count = response.total_count.unwrap_or_default();
@@ -66,7 +69,7 @@ fn prune_from(
         "pruning runs"
     );
 
-    if globals.json {
+    if json_output {
         print_json_pretty(response)?;
         return Ok(());
     }

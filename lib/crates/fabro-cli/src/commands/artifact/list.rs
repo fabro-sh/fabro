@@ -1,14 +1,17 @@
 use anyhow::Result;
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
-use crate::args::{ArtifactListArgs, GlobalArgs};
+use crate::args::ArtifactListArgs;
 
 pub(super) async fn list_command(
     args: &ArtifactListArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
     let (_run_id, _client, entries) = super::resolve_artifacts(
@@ -16,11 +19,13 @@ pub(super) async fn list_command(
         &args.run_id,
         args.node.as_deref(),
         args.retry,
+        cli,
+        cli_layer,
         printer,
     )
     .await?;
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         fabro_util::printout!(printer, "{}", serde_json::to_string_pretty(&entries)?);
         return Ok(());
     }

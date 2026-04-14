@@ -2,13 +2,13 @@ use std::io::Write;
 
 use fabro_config::project::resolve_workflow;
 use fabro_graphviz::parser::parse_ast;
+use fabro_types::settings::CliSettings;
 use fabro_util::printer::Printer;
 
-use crate::args::{GlobalArgs, ParseArgs};
+use crate::args::ParseArgs;
 use crate::shared::read_workflow_file;
 
-pub(crate) fn run(args: &ParseArgs, globals: &GlobalArgs, _printer: Printer) -> anyhow::Result<()> {
-    let _ = globals;
+pub(crate) fn run(args: &ParseArgs, _cli: &CliSettings, _printer: Printer) -> anyhow::Result<()> {
     let stdout = std::io::stdout();
     run_to(args, stdout.lock())
 }

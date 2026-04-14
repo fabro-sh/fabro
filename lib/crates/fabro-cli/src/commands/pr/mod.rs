@@ -8,10 +8,11 @@ use anyhow::{Context, Result, anyhow};
 use fabro_config::Storage;
 use fabro_github::GitHubCredentials;
 use fabro_types::PullRequestRecord;
-use fabro_types::settings::InterpString;
+use fabro_types::settings::cli::CliLayer;
+use fabro_types::settings::{CliSettings, InterpString};
 use fabro_util::printer::Printer;
 
-use crate::args::{GlobalArgs, PrCommand, PrNamespace, ServerTargetArgs};
+use crate::args::{PrCommand, PrNamespace, ServerTargetArgs};
 use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::github::build_github_credentials;
@@ -22,20 +23,27 @@ const GITHUB_CREDENTIALS_REQUIRED: &str =
 
 pub(crate) async fn dispatch(
     ns: PrNamespace,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
     match ns.command {
-        PrCommand::Create(args) => Box::pin(create::create_command(args, globals, printer)).await,
-        PrCommand::List(args) => list::list_command(args, globals, printer).await,
-        PrCommand::View(args) => view::view_command(args, globals, printer).await,
-        PrCommand::Merge(args) => merge::merge_command(args, globals, printer).await,
-        PrCommand::Close(args) => close::close_command(args, globals, printer).await,
+        PrCommand::Create(args) => {
+            Box::pin(create::create_command(args, cli, cli_layer, printer)).await
+        }
+        PrCommand::List(args) => list::list_command(args, cli, cli_layer, printer).await,
+        PrCommand::View(args) => view::view_command(args, cli, cli_layer, printer).await,
+        PrCommand::Merge(args) => merge::merge_command(args, cli, cli_layer, printer).await,
+        PrCommand::Close(args) => close::close_command(args, cli, cli_layer, printer).await,
     }
 }
 
-fn load_github_credentials_required(printer: Printer) -> Result<GitHubCredentials> {
-    let ctx = CommandContext::base(printer)?;
+fn load_github_credentials_required(
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
+    printer: Printer,
+) -> Result<GitHubCredentials> {
+    let ctx = CommandContext::base(printer, cli.clone(), cli_layer)?;
     let server_settings =
         fabro_config::resolve_server_from_file(ctx.machine_settings()).map_err(|errors| {
             anyhow!(
@@ -68,9 +76,11 @@ fn load_github_credentials_required(printer: Printer) -> Result<GitHubCredential
 pub(crate) async fn load_pr_record(
     server: &ServerTargetArgs,
     run_id: &str,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<(PullRequestRecord, fabro_types::RunId)> {
-    let ctx = CommandContext::for_target(server, printer)?;
+    let ctx = CommandContext::for_target(server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(run_id)?;
     let run_id = run.run_id();

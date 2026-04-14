@@ -6,12 +6,12 @@ use fabro_agent::cli::{OutputFormat, run_with_args, run_with_args_and_client};
 use fabro_llm::client::Client;
 use fabro_llm::providers::FabroServerAdapter;
 use fabro_mcp::config::{McpServerSettings, McpTransport};
-use fabro_types::settings::InterpString;
 use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
 use fabro_types::settings::run::McpEntryLayer;
+use fabro_types::settings::{CliSettings, InterpString};
 use fabro_util::printer::Printer;
 
-use crate::args::{ExecArgs, GlobalArgs};
+use crate::args::ExecArgs;
 use crate::user_config;
 
 fn runtime_mcp_server(name: &str, entry: &McpEntryLayer) -> McpServerSettings {
@@ -100,34 +100,28 @@ fn runtime_mcp_server(name: &str, entry: &McpEntryLayer) -> McpServerSettings {
 
 pub(crate) async fn execute(
     mut args: ExecArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
     _printer: Printer,
 ) -> Result<()> {
     use fabro_agent::cli::PermissionLevel as AgentPermissionLevel;
     use fabro_types::settings::run::AgentPermissions;
 
-    let cli_settings = user_config::load_settings()?;
-    let resolved_cli = user_config::resolve_cli_settings(&cli_settings)?;
+    let raw_settings = user_config::load_settings()?;
     #[cfg(feature = "sleep_inhibitor")]
-    let _sleep_guard = crate::sleep_inhibitor::guard(resolved_cli.exec.prevent_idle_sleep);
-    let provider_str = resolved_cli
+    let _sleep_guard = crate::sleep_inhibitor::guard(cli.exec.prevent_idle_sleep);
+    let provider_str = cli
         .exec
         .model
         .provider
         .as_ref()
         .map(InterpString::as_source);
-    let model_str = resolved_cli
-        .exec
-        .model
-        .name
-        .as_ref()
-        .map(InterpString::as_source);
-    let permissions = resolved_cli.exec.agent.permissions.map(|p| match p {
+    let model_str = cli.exec.model.name.as_ref().map(InterpString::as_source);
+    let permissions = cli.exec.agent.permissions.map(|p| match p {
         AgentPermissions::ReadOnly => AgentPermissionLevel::ReadOnly,
         AgentPermissions::ReadWrite => AgentPermissionLevel::ReadWrite,
         AgentPermissions::Full => AgentPermissionLevel::Full,
     });
-    let output_format = Some(match resolved_cli.output.format {
+    let output_format = Some(match cli.output.format {
         SettingsOutputFormat::Text => OutputFormat::Text,
         SettingsOutputFormat::Json => OutputFormat::Json,
     });
@@ -137,16 +131,12 @@ pub(crate) async fn execute(
         permissions,
         output_format,
     );
-    if globals.json {
-        args.agent.output_format = Some(OutputFormat::Json);
-    }
-    let server_target = user_config::exec_server_target(&args.server, &cli_settings)?;
+    let server_target = user_config::exec_server_target(&args.server, &raw_settings)?;
     // v2 MCPs live under `cli.exec.agent.mcps` (owner-specific) or
     // `run.agent.mcps`. For `fabro exec` we use the cli.exec path, falling
     // back to run.agent.mcps if unset.
-    let mcp_servers: Vec<McpServerSettings> = if !resolved_cli.exec.agent.mcps.is_empty() {
-        resolved_cli
-            .exec
+    let mcp_servers: Vec<McpServerSettings> = if !cli.exec.agent.mcps.is_empty() {
+        cli.exec
             .agent
             .mcps
             .values()
@@ -157,7 +147,7 @@ pub(crate) async fn execute(
                 tool_timeout_secs:    server.tool_timeout_secs,
             })
             .collect()
-    } else if let Some(mcps) = cli_settings
+    } else if let Some(mcps) = raw_settings
         .cli
         .as_ref()
         .and_then(|cli| cli.exec.as_ref())
@@ -169,7 +159,7 @@ pub(crate) async fn execute(
             .map(|(name, entry)| runtime_mcp_server(name, entry))
             .collect()
     } else {
-        fabro_config::resolve_run_from_file(&cli_settings)
+        fabro_config::resolve_run_from_file(&raw_settings)
             .map(|settings| {
                 settings
                     .agent

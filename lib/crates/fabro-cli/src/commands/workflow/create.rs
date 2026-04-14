@@ -2,14 +2,16 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use fabro_config::project::{discover_project_config, resolve_fabro_root};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 
-use crate::args::{GlobalArgs, WorkflowCreateArgs};
+use crate::args::WorkflowCreateArgs;
 use crate::shared::{print_json_pretty, relative_path};
 
 pub(super) fn create_command(
     args: &WorkflowCreateArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
     printer: Printer,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?;
@@ -24,7 +26,7 @@ pub(super) fn create_command(
     let fabro_root = resolve_fabro_root(&config_path, &config);
     let created = write_workflow_scaffold(args, &fabro_root)?;
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         let created: Vec<_> = created.iter().map(|path| relative_path(path)).collect();
         print_json_pretty(&serde_json::json!({
             "name": args.name,

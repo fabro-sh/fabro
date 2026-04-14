@@ -3,12 +3,14 @@ use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_api::{self, types as api_types};
 use fabro_model::{Catalog, Model, Provider};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::args::{GlobalArgs, ModelListArgs, ModelTestArgs, ModelsCommand};
+use crate::args::{ModelListArgs, ModelTestArgs, ModelsCommand};
 use crate::command_context::CommandContext;
 use crate::server_client;
 
@@ -40,7 +42,8 @@ struct ModelTestOutput {
 
 pub(crate) async fn execute(
     command: Option<ModelsCommand>,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
     let command = command.unwrap_or_default();
@@ -48,10 +51,15 @@ pub(crate) async fn execute(
         ModelsCommand::List(args) => &args.target,
         ModelsCommand::Test(args) => &args.target,
     };
-    let ctx = CommandContext::for_target(target_args, printer)?;
+    let ctx = CommandContext::for_target(target_args, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
 
-    run_models(command, server.api(), globals.json).await
+    run_models(
+        command,
+        server.api(),
+        cli.output.format == OutputFormat::Json,
+    )
+    .await
 }
 
 fn format_context_window(tokens: i64) -> String {

@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
+use fabro_config::merge::combine_files;
+use fabro_types::settings::cli::CliLayer;
 use fabro_types::settings::{CliSettings, SettingsLayer};
 use fabro_util::printer::Printer;
 use tokio::sync::OnceCell;
@@ -34,34 +36,66 @@ pub(crate) struct CommandContext {
 }
 
 impl CommandContext {
-    pub(crate) fn base(printer: Printer) -> Result<Self> {
-        Self::new(printer, ServerMode::None)
+    pub(crate) fn base(
+        printer: Printer,
+        cli_settings: CliSettings,
+        cli_layer: &CliLayer,
+    ) -> Result<Self> {
+        Self::new(printer, ServerMode::None, cli_settings, cli_layer)
     }
 
-    pub(crate) fn for_target(args: &ServerTargetArgs, printer: Printer) -> Result<Self> {
-        Self::new(printer, ServerMode::ByTarget {
-            target_override: args.server.clone(),
-        })
+    pub(crate) fn for_target(
+        args: &ServerTargetArgs,
+        printer: Printer,
+        cli_settings: CliSettings,
+        cli_layer: &CliLayer,
+    ) -> Result<Self> {
+        Self::new(
+            printer,
+            ServerMode::ByTarget {
+                target_override: args.server.clone(),
+            },
+            cli_settings,
+            cli_layer,
+        )
     }
 
-    pub(crate) fn for_connection(args: &ServerConnectionArgs, printer: Printer) -> Result<Self> {
-        Self::new(printer, ServerMode::ByStorageDir {
-            target_override:      args.target.server.clone(),
-            storage_dir_override: args.storage_dir.clone_path(),
-        })
+    pub(crate) fn for_connection(
+        args: &ServerConnectionArgs,
+        printer: Printer,
+        cli_settings: CliSettings,
+        cli_layer: &CliLayer,
+    ) -> Result<Self> {
+        Self::new(
+            printer,
+            ServerMode::ByStorageDir {
+                target_override:      args.target.server.clone(),
+                storage_dir_override: args.storage_dir.clone_path(),
+            },
+            cli_settings,
+            cli_layer,
+        )
     }
 
-    fn new(printer: Printer, server_mode: ServerMode) -> Result<Self> {
+    fn new(
+        printer: Printer,
+        server_mode: ServerMode,
+        cli_settings: CliSettings,
+        cli_layer: &CliLayer,
+    ) -> Result<Self> {
         let cwd = std::env::current_dir().context("Failed to get current directory")?;
         let base_config_path = user_config::active_settings_path(None);
-        let machine_settings = match &server_mode {
+        let disk_settings = match &server_mode {
             ServerMode::None | ServerMode::ByTarget { .. } => user_config::load_settings()?,
             ServerMode::ByStorageDir {
                 storage_dir_override,
                 ..
             } => user_config::load_settings_with_storage_dir(storage_dir_override.as_deref())?,
         };
-        let cli_settings = user_config::resolve_cli_settings(&machine_settings)?;
+        let machine_settings = combine_files(disk_settings, SettingsLayer {
+            cli: Some(cli_layer.clone()),
+            ..SettingsLayer::default()
+        });
 
         Ok(Self {
             printer,

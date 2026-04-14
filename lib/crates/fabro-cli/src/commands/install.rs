@@ -18,6 +18,8 @@ use fabro_auth::{AuthCredential, AuthMethod, codex_oauth_config, credential_id_f
 use fabro_config::user::SETTINGS_CONFIG_FILENAME;
 use fabro_config::{Storage, envfile, legacy_env};
 use fabro_model::Provider;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::{dev_token, session_secret};
@@ -32,8 +34,7 @@ use tokio::task::spawn_blocking;
 
 use super::doctor;
 use crate::args::{
-    DoctorArgs, GlobalArgs, InstallArgs, InstallGitHubStrategyArg, InstallNonInteractiveArgs,
-    ServerTargetArgs,
+    DoctorArgs, InstallArgs, InstallGitHubStrategyArg, InstallNonInteractiveArgs, ServerTargetArgs,
 };
 use crate::commands::server::{record, stop};
 use crate::gh::GhCli;
@@ -1229,15 +1230,18 @@ async fn persist_install_outputs_with_settings(
 
 pub(crate) async fn run_install(
     args: &InstallArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
+    process_local_json: bool,
     printer: Printer,
 ) -> Result<()> {
-    if globals.json && !args.non_interactive {
+    let json = cli.output.format == OutputFormat::Json;
+    if process_local_json && !args.non_interactive {
         bail!("--json is only supported for install with --non-interactive");
     }
 
-    let result = Box::pin(run_install_inner(args, globals, printer)).await;
-    if globals.json {
+    let result = Box::pin(run_install_inner(args, cli, cli_layer, printer)).await;
+    if json {
         let emit_result = match &result {
             Ok(()) => emit_install_json_event(&install_complete_event()),
             Err(err) => emit_install_json_event(&install_error_event(&err.to_string())),
@@ -1252,9 +1256,11 @@ pub(crate) async fn run_install(
 
 async fn run_install_inner(
     args: &InstallArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
+    let json = cli.output.format == OutputFormat::Json;
     let web_url = &args.web_url;
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
@@ -1360,7 +1366,7 @@ async fn run_install_inner(
                 } else {
                     GitHubAppHandoffMode::Interactive
                 },
-                globals.json,
+                json,
                 printer,
             )
             .await?;
@@ -1539,7 +1545,7 @@ async fn run_install_inner(
             target:  ServerTargetArgs::default(),
             verbose: true,
         };
-        let _ = doctor::run_doctor(&doctor_args, true, globals, printer).await?;
+        let _ = doctor::run_doctor(&doctor_args, true, cli, cli_layer, printer).await?;
     }
 
     fabro_util::printerr!(printer, "");

@@ -1,17 +1,20 @@
 use anyhow::Result;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use futures::StreamExt;
 
-use crate::args::{GlobalArgs, SystemEventsArgs};
+use crate::args::SystemEventsArgs;
 use crate::command_context::CommandContext;
 use crate::{server_client, sse};
 
 pub(super) async fn events_command(
     args: &SystemEventsArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
-    let ctx = CommandContext::for_connection(&args.connection, printer)?;
+    let ctx = CommandContext::for_connection(&args.connection, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
 
     let mut request = server.api().attach_events();
@@ -23,16 +26,17 @@ pub(super) async fn events_command(
     let mut stream = response.into_inner();
     let mut pending = Vec::new();
 
+    let json = cli.output.format == OutputFormat::Json;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|err| anyhow::anyhow!("{err}"))?;
         pending.extend_from_slice(&chunk);
         for payload in sse::drain_sse_payloads(&mut pending, false) {
-            render_sse_payload(&payload, globals.json)?;
+            render_sse_payload(&payload, json)?;
         }
     }
 
     for payload in sse::drain_sse_payloads(&mut pending, true) {
-        render_sse_payload(&payload, globals.json)?;
+        render_sse_payload(&payload, json)?;
     }
 
     Ok(())

@@ -1,11 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use tokio::fs;
 use tracing::{debug, info};
 
-use crate::args::{CpArgs, GlobalArgs, ServerTargetArgs};
+use crate::args::{CpArgs, ServerTargetArgs};
 use crate::command_context::CommandContext;
 use crate::server_client::ServerStoreClient;
 use crate::server_runs::ServerSummaryLookup;
@@ -25,7 +27,12 @@ enum CopyDirection {
     },
 }
 
-pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs, printer: Printer) -> Result<()> {
+pub(crate) async fn cp_command(
+    args: CpArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
+    printer: Printer,
+) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
 
     match direction {
@@ -35,7 +42,8 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs, printer: Prin
             local_path,
         } => {
             let (client, run_id) =
-                resolve_client_and_run_id(&args.server, &run_prefix, printer).await?;
+                resolve_client_and_run_id(&args.server, &run_prefix, cli, cli_layer, printer)
+                    .await?;
 
             let file_count = if args.recursive {
                 Some(download_recursive(&client, &run_id, &remote_path, &local_path).await?)
@@ -45,7 +53,7 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs, printer: Prin
                 None
             };
 
-            if globals.json {
+            if cli.output.format == OutputFormat::Json {
                 let mut value = serde_json::json!({
                     "direction": "download",
                     "recursive": args.recursive,
@@ -66,7 +74,8 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs, printer: Prin
             remote_path,
         } => {
             let (client, run_id) =
-                resolve_client_and_run_id(&args.server, &run_prefix, printer).await?;
+                resolve_client_and_run_id(&args.server, &run_prefix, cli, cli_layer, printer)
+                    .await?;
 
             let file_count = if args.recursive {
                 Some(upload_recursive(&client, &run_id, &local_path, &remote_path).await?)
@@ -76,7 +85,7 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs, printer: Prin
                 None
             };
 
-            if globals.json {
+            if cli.output.format == OutputFormat::Json {
                 let mut value = serde_json::json!({
                     "direction": "upload",
                     "recursive": args.recursive,
@@ -120,9 +129,11 @@ fn parse_direction(src: &str, dst: &str) -> Result<CopyDirection> {
 async fn resolve_client_and_run_id(
     server: &ServerTargetArgs,
     run_prefix: &str,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<(ServerStoreClient, fabro_types::RunId)> {
-    let ctx = CommandContext::for_target(server, printer)?;
+    let ctx = CommandContext::for_target(server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(run_prefix)?;
     Ok((lookup.client().clone_for_reuse(), run.run_id()))

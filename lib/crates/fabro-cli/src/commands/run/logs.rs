@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::json::normalize_json_value;
 use fabro_util::printer::Printer;
 use fabro_util::redact::redact_jsonl_line;
@@ -11,7 +13,7 @@ use fabro_util::terminal::Styles;
 use tokio::time;
 use tracing::{debug, info};
 
-use crate::args::{GlobalArgs, LogsArgs};
+use crate::args::LogsArgs;
 use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::server_runs::ServerSummaryLookup;
@@ -22,10 +24,11 @@ const FOLLOW_TERMINAL_GRACE: Duration = Duration::from_millis(500);
 pub(crate) async fn run(
     args: &LogsArgs,
     styles: &Styles,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let client = lookup.client();
@@ -52,7 +55,7 @@ pub(crate) async fn run(
     let stdout = io::stdout();
     let is_tty = stdout.is_terminal();
     let mut out = stdout.lock();
-    let pretty = args.pretty && !globals.json;
+    let pretty = args.pretty && cli.output.format != OutputFormat::Json;
 
     for line in &filtered {
         if pretty {

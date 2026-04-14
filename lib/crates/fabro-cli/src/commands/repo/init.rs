@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use tokio::process::Command as TokioCommand;
 use tokio::task::spawn_blocking;
 
-use crate::args::{GlobalArgs, RepoInitArgs, ServerTargetArgs};
+use crate::args::{RepoInitArgs, ServerTargetArgs};
 use crate::command_context::CommandContext;
 
 #[expect(
@@ -29,7 +31,8 @@ pub(super) fn git_repo_root() -> Result<PathBuf> {
 
 pub(crate) async fn run_init(
     args: &RepoInitArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<Vec<String>> {
     let repo_root = spawn_blocking(git_repo_root)
@@ -71,7 +74,7 @@ draft = true
     let green = console::Style::new().green();
     let bold = console::Style::new().bold();
     let dim = console::Style::new().dim();
-    if !globals.json {
+    if cli.output.format != OutputFormat::Json {
         fabro_util::printerr!(
             printer,
             "  {} {}",
@@ -104,7 +107,7 @@ draft = true
     )
     .with_context(|| format!("failed to write {}", dot_path.display()))?;
     created.push(".fabro/workflows/hello/workflow.fabro".to_string());
-    if !globals.json {
+    if cli.output.format != OutputFormat::Json {
         fabro_util::printerr!(
             printer,
             "  {} {}",
@@ -121,7 +124,7 @@ draft = true
     )
     .with_context(|| format!("failed to write {}", toml_path.display()))?;
     created.push(".fabro/workflows/hello/workflow.toml".to_string());
-    if !globals.json {
+    if cli.output.format != OutputFormat::Json {
         fabro_util::printerr!(
             printer,
             "  {} {}",
@@ -130,7 +133,7 @@ draft = true
         );
     }
 
-    if !globals.json {
+    if cli.output.format != OutputFormat::Json {
         fabro_util::printerr!(
             printer,
             "\n{} Run a workflow with:\n\n  {}",
@@ -142,14 +145,19 @@ draft = true
         );
     }
 
-    if !globals.json {
-        check_github_app_installation(&args.target, printer).await;
+    if cli.output.format != OutputFormat::Json {
+        check_github_app_installation(&args.target, cli, cli_layer, printer).await;
     }
 
     Ok(created)
 }
 
-async fn check_github_app_installation(target: &ServerTargetArgs, printer: Printer) {
+async fn check_github_app_installation(
+    target: &ServerTargetArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
+    printer: Printer,
+) {
     // Get the git remote origin URL
     let output = match TokioCommand::new("git")
         .args(["remote", "get-url", "origin"])
@@ -187,7 +195,7 @@ async fn check_github_app_installation(target: &ServerTargetArgs, printer: Print
         return; // Not a GitHub repo — skip silently
     };
 
-    let ctx = match CommandContext::for_target(target, printer) {
+    let ctx = match CommandContext::for_target(target, printer, cli.clone(), cli_layer) {
         Ok(ctx) => ctx,
         Err(err) => {
             fabro_util::printerr!(

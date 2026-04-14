@@ -33,6 +33,62 @@ fn settings_json_outputs_parseable_json() {
 }
 
 #[test]
+fn settings_uses_json_output_format_from_home_config() {
+    let context = test_context!();
+    context.write_home(
+        ".fabro/settings.toml",
+        "_version = 1\n\n[cli.output]\nformat = \"json\"\n",
+    );
+
+    let output = context.settings().output().expect("command should run");
+
+    assert!(output.status.success());
+    let value: Value =
+        serde_json::from_slice(&output.stdout).expect("settings config JSON should parse");
+    assert!(value.is_object());
+}
+
+#[test]
+fn secret_list_uses_json_output_format_from_home_config() {
+    let context = test_context!();
+    context.write_home(
+        ".fabro/settings.toml",
+        "_version = 1\n\n[cli.output]\nformat = \"json\"\n",
+    );
+
+    let output = context
+        .command()
+        .args(["secret", "list"])
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    let value: Value =
+        serde_json::from_slice(&output.stdout).expect("secret list config JSON should parse");
+    assert_eq!(value, Value::Array(vec![]));
+}
+
+#[test]
+fn completion_succeeds_with_json_output_format_from_home_config() {
+    let context = test_context!();
+    context.write_home(
+        ".fabro/settings.toml",
+        "_version = 1\n\n[cli.output]\nformat = \"json\"\n",
+    );
+
+    let output = context
+        .command()
+        .args(["completion", "zsh"])
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    let stdout = output_stdout(&output);
+    assert!(stdout.contains("#compdef"));
+    assert!(serde_json::from_slice::<Value>(&output.stdout).is_err());
+}
+
+#[test]
 fn ps_supports_global_flag_and_env_var() {
     let context = test_context!();
     setup_completed_fast_dry_run(&context);

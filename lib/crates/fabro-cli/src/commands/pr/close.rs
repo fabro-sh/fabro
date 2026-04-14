@@ -1,18 +1,22 @@
 use anyhow::Result;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use tracing::info;
 
-use crate::args::{GlobalArgs, PrCloseArgs};
+use crate::args::PrCloseArgs;
 use crate::shared::print_json_pretty;
 
 pub(super) async fn close_command(
     args: PrCloseArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
-    let (record, _run_id) = super::load_pr_record(&args.server, &args.run_id, printer).await?;
+    let (record, _run_id) =
+        super::load_pr_record(&args.server, &args.run_id, cli, cli_layer, printer).await?;
 
-    let creds = super::load_github_credentials_required(printer)?;
+    let creds = super::load_github_credentials_required(cli, cli_layer, printer)?;
 
     fabro_github::close_pull_request(
         &creds,
@@ -25,7 +29,7 @@ pub(super) async fn close_command(
     .map_err(|err| anyhow::anyhow!("{err}"))?;
 
     info!(number = record.number, owner = %record.owner, repo = %record.repo, "Closed pull request");
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         print_json_pretty(&serde_json::json!({
             "number": record.number,
             "html_url": record.html_url,

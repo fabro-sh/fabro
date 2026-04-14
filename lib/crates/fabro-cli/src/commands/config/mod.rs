@@ -3,10 +3,11 @@ use std::path::Path;
 
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
 use fabro_config::{load_and_resolve, load_settings_project, project};
-use fabro_types::settings::SettingsLayer;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
+use fabro_types::settings::{CliSettings, SettingsLayer};
 use fabro_util::printer::Printer;
 
-use crate::args::{GlobalArgs, SettingsArgs};
+use crate::args::SettingsArgs;
 use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 use crate::user_config;
@@ -76,9 +77,11 @@ fn strip_nulls(value: &mut serde_json::Value) {
 
 fn local_settings_value(
     args: &SettingsArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> anyhow::Result<serde_json::Value> {
-    let base_ctx = CommandContext::base(printer)?;
+    let base_ctx = CommandContext::base(printer, cli.clone(), cli_layer)?;
     let layers = config_layers(&base_ctx, args.workflow.as_deref())?;
     let mut value = serde_json::to_value(load_and_resolve(
         layers,
@@ -91,15 +94,17 @@ fn local_settings_value(
 
 async fn rendered_config(
     args: &SettingsArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> anyhow::Result<serde_json::Value> {
     if args.local {
-        return local_settings_value(args, printer);
+        return local_settings_value(args, cli, cli_layer, printer);
     }
     if args.workflow.is_some() {
         anyhow::bail!("WORKFLOW requires --local; use `fabro settings --local WORKFLOW`");
     }
-    let ctx = CommandContext::for_target(&args.target, printer)?;
+    let ctx = CommandContext::for_target(&args.target, printer, cli.clone(), cli_layer)?;
     ctx.server()
         .await?
         .retrieve_resolved_server_settings()
@@ -108,11 +113,12 @@ async fn rendered_config(
 
 pub(crate) async fn execute(
     args: &SettingsArgs,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> anyhow::Result<()> {
-    let config = Box::pin(rendered_config(args, printer)).await?;
-    if globals.json {
+    let config = Box::pin(rendered_config(args, cli, cli_layer, printer)).await?;
+    if cli.output.format == OutputFormat::Json {
         print_json_pretty(&config)?;
         return Ok(());
     }

@@ -3,6 +3,8 @@ use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_checkpoint::git::Store;
 use fabro_types::run_event::{CheckpointCompletedProps, RunRewoundProps, RunSubmittedProps};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_types::{EventBody, RunEvent};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -13,7 +15,7 @@ use fabro_workflow::operations::{
 use git2::Repository;
 use serde::Serialize;
 
-use crate::args::{GlobalArgs, RewindArgs};
+use crate::args::RewindArgs;
 use crate::command_context::CommandContext;
 use crate::commands::store::rebuild::rebuild_run_store;
 use crate::server_client::ServerStoreClient;
@@ -32,11 +34,12 @@ pub(crate) struct TimelineEntryJson {
 pub(crate) async fn run(
     args: &RewindArgs,
     styles: &Styles,
-    globals: &GlobalArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
     printer: Printer,
 ) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
@@ -50,7 +53,7 @@ pub(crate) async fn run(
     let timeline = build_timeline_or_rebuild(&store, Some(&run_store), &run_id).await?;
 
     if args.list || args.target.is_none() {
-        if globals.json {
+        if cli.output.format == OutputFormat::Json {
             print_json_pretty(&timeline_entries_json(&timeline))?;
             return Ok(());
         }
@@ -70,7 +73,7 @@ pub(crate) async fn run(
 
     let run_id_string = run_id.to_string();
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         print_json_pretty(&serde_json::json!({
             "run_id": run_id_string,
             "target": args.target.as_deref().unwrap(),

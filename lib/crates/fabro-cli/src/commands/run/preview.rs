@@ -1,14 +1,22 @@
 use anyhow::{Context, Result};
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use tracing::info;
 
-use crate::args::{GlobalArgs, PreviewArgs};
+use crate::args::PreviewArgs;
 use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
-pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs, printer: Printer) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+pub(crate) async fn run(
+    args: PreviewArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
+    process_local_json: bool,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
@@ -26,7 +34,7 @@ pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs, printer: Printe
 
     info!(run_id = %args.run, port = args.port, "Generating preview URL");
 
-    if globals.json {
+    if cli.output.format == OutputFormat::Json {
         match response.token {
             Some(token) => {
                 print_json_pretty(&serde_json::json!({ "url": response.url, "token": token }))?;
@@ -51,7 +59,7 @@ pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs, printer: Printe
         }
     }
 
-    if args.open && !globals.json {
+    if args.open && !process_local_json {
         #[expect(
             clippy::disallowed_methods,
             reason = "Preview URL opening is a fire-and-forget OS integration, not a Tokio-managed child process."

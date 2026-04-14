@@ -3,6 +3,10 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand, ValueEnum};
 use fabro_agent::cli::AgentArgs;
+use fabro_types::settings::cli::{
+    CliLayer, CliLoggingLayer, CliOutputLayer, CliUpdatesLayer, OutputFormat, OutputVerbosity,
+};
+use fabro_util::printer::Printer;
 
 pub(crate) const LONG_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -36,11 +40,44 @@ pub(crate) struct GlobalArgs {
     pub verbose: bool,
 }
 
-impl GlobalArgs {
-    pub(crate) fn require_no_json(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(!self.json, "--json is not supported for this command");
-        Ok(())
+pub(crate) fn global_args_cli_layer(globals: &GlobalArgs) -> CliLayer {
+    let format = globals.json.then_some(OutputFormat::Json);
+    let verbosity = match (globals.quiet, globals.verbose) {
+        (true, _) => Some(OutputVerbosity::Quiet),
+        (_, true) => Some(OutputVerbosity::Verbose),
+        _ => None,
+    };
+    let output =
+        (format.is_some() || verbosity.is_some()).then_some(CliOutputLayer { format, verbosity });
+    let updates = globals
+        .no_upgrade_check
+        .then_some(CliUpdatesLayer { check: Some(false) });
+    let logging = globals.debug.then_some(CliLoggingLayer {
+        level: Some("debug".to_string()),
+    });
+
+    CliLayer {
+        output,
+        updates,
+        logging,
+        ..CliLayer::default()
     }
+}
+
+pub(crate) fn printer_from_verbosity(verbosity: OutputVerbosity) -> Printer {
+    match verbosity {
+        OutputVerbosity::Quiet => Printer::Quiet,
+        OutputVerbosity::Normal => Printer::Default,
+        OutputVerbosity::Verbose => Printer::Verbose,
+    }
+}
+
+pub(crate) fn require_no_json_override(process_local_json: bool) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !process_local_json,
+        "--json is not supported for this command"
+    );
+    Ok(())
 }
 
 #[derive(Args, Debug, Clone, Default)]

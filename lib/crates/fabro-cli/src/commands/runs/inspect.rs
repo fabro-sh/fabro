@@ -1,9 +1,11 @@
 use anyhow::Result;
+use fabro_types::settings::CliSettings;
+use fabro_types::settings::cli::CliLayer;
 use fabro_util::printer::Printer;
 use fabro_workflow::run_status::RunStatus;
 use serde::Serialize;
 
-use crate::args::{GlobalArgs, InspectArgs};
+use crate::args::InspectArgs;
 use crate::command_context::CommandContext;
 use crate::server_client::RunProjection;
 use crate::server_runs::{ServerRunSummaryInfo, ServerSummaryLookup};
@@ -19,8 +21,13 @@ pub(crate) struct InspectOutput {
     pub sandbox:      Option<serde_json::Value>,
 }
 
-pub(crate) async fn run(args: &InspectArgs, _globals: &GlobalArgs, printer: Printer) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer)?;
+pub(crate) async fn run(
+    args: &InspectArgs,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
