@@ -48,7 +48,7 @@ vendor/graphviz-14.1.5/
     pack/         -- packing (all .c/.h)
     pathplan/     -- path planning (all .c/.h)
     xdot/         -- xdot format (all .c/.h)
-    util/         -- utility headers (header-only, no .c needed except arena.c, list.c, xml.c, base64.c, random.c, gv_find_me.c, gv_fopen.c)
+    util/         -- utility headers and source files. The exact set of .c files needed depends on what Graphviz 14.1.5 compiles; include all .c/.h initially, then trim if unused (compiler errors will guide which files are required)
   plugin/
     core/         -- core renderers including SVG (gvrender_core_svg.c, gvplugin_core.c, gvloadimage_core.c)
     dot_layout/   -- dot layout plugin (gvlayout_dot_layout.c, gvplugin_dot_layout.c)
@@ -169,12 +169,11 @@ A minimal `config.h` that Graphviz source expects. All build configuration defin
 
 ### src/lib.rs -- Safe Rust API
 
-The `lib.rs` exposes a single safe function. The crate allows `unsafe_code` via a crate-level lint override since FFI requires it.
+The `lib.rs` exposes a single safe function. The workspace denies `unsafe_code`, so the `fabro-graphviz-sys` Cargo.toml overrides it to `"allow"` (see Step 7). No crate-level `#![allow(unsafe_code)]` attribute is needed in `lib.rs` -- the Cargo.toml override suffices.
 
 ```rust
-#![allow(unsafe_code)]
 
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_uint};
 use std::ptr;
 
@@ -278,7 +277,7 @@ Key changes:
 
 3. **Remove `dot_is_available()`** -- no longer needed.
 
-4. **Remove `GraphFormat` enum** -- or simplify to a constant. Since the OpenAPI spec and CLI still reference it, keep a simpler version:
+4. **Remove `GraphFormat` enum** entirely. The enum, its `Display` impl (lines 18-25), and the `Png` variant are all unnecessary when only SVG is supported. The callers (`fabro-server`, `fabro-cli`) no longer need to pass a format. If keeping a simpler version is preferred for forward compat:
 
 ```rust
 /// Output format for graph rendering (only SVG is supported).
@@ -289,9 +288,11 @@ pub enum GraphFormat {
 }
 ```
 
-5. **Remove `std::process::Command` import** and related code.
+But removing it entirely is simpler since `render_dot` no longer takes a format parameter.
 
-6. **Remove the `#[expect(clippy::disallowed_methods)]` attribute** on `render_dot` -- no longer calling `Command::new`.
+5. **Remove imports** no longer used: `std::process::Command`, `std::io::Write` (was for `stdin.write_all`), and `anyhow::bail` (all three `bail!` calls are inside `render_dot` and will be replaced by `anyhow::anyhow!`). Keep `use anyhow` since `render_dot` still returns `anyhow::Result`.
+
+6. **Remove the `#[expect(clippy::disallowed_methods)]` attribute** on `render_dot` -- `Command::new` is a disallowed method (see `clippy.toml`), and we no longer call it.
 
 ## Step 4: Update callers of `render_dot`
 
@@ -326,8 +327,10 @@ pub enum GraphFormat {
 ### `fabro-cli/src/args.rs`
 
 - Remove `GraphOutputFormat::Png` variant
-- Remove `From<GraphOutputFormat> for GraphFormat` impl (or simplify)
-- Remove import of `GraphFormat` if no longer needed
+- Remove `From<GraphOutputFormat> for GraphFormat` impl (or simplify to identity)
+- Remove `use fabro_graphviz::render::GraphFormat;` import (line 6) if `GraphFormat` is removed entirely
+- Update the doc comment on `Graph(GraphArgs)` (line 938): change `"Render a workflow graph as SVG or PNG"` to `"Render a workflow graph as SVG"`
+- Update the `Display` impl for `GraphOutputFormat` (lines 321-328): remove `Png` arm
 
 ### `fabro-cli/src/commands/graph.rs`
 
@@ -340,7 +343,14 @@ pub enum GraphFormat {
 - Remove the `dot_is_available()` helper function (lines 13-20)
 - Remove the `if !dot_is_available() { return; }` guard from `graph_json_with_output_reports_file` (line 146)
 - Remove the module-level `#[expect(clippy::disallowed_methods)]` attribute (lines 1-4) -- it was only needed because `Command::new("dot")` is called in `dot_is_available()`
-- Remove `use std::process::Command;` import (line 6) if no longer used after removing `dot_is_available()`
+- Remove `use std::process::Command;` import (line 6) -- no longer used after removing `dot_is_available()`
+
+### `fabro-cli/tests/it/cmd/graph.rs`
+
+- Update the inline snapshot in `help()` test (line 10-72):
+  - Line 14: Change `"Render a workflow graph as SVG or PNG"` to `"Render a workflow graph as SVG"`
+  - Line 42: Change `[possible values: svg, png]` to `[possible values: svg]` (or remove `--format` from CLI entirely since SVG is the only option; if kept, clap will still show the possible values)
+- Run `cargo insta accept` after verifying the pending snapshot is correct
 
 ### `fabro-server/Cargo.toml`
 
@@ -387,14 +397,23 @@ After editing the spec:
 - Make `DEP_SPECS` an empty slice: `pub(crate) const DEP_SPECS: &[DepSpec] = &[];`
 - Remove `DOT_RE` static (line 41-42) and the `DepSpec` fields that reference it
 - Keep `DepSpec`, `ProbeOutcome`, `probe_system_deps`, `check_system_deps` functions -- they are generic and still called from `install.rs` pre-flight checks; with an empty slice they become no-ops
-- Remove the `parse_version_dot` test (line 665-669) since there is no `DOT_RE` to test
-- Update `check_system_deps_all_present` and other system-deps tests that construct a `DepSpec` referencing `DOT_RE` -- these use a local `spec()` helper that references `&DOT_RE`, so replace with an inline `LazyLock<Regex>` or remove the DOT-specific tests and keep only generic tests with a dummy regex
+- Remove the `parse_version_dot` test (line 665-669) and `parse_version_garbage_returns_none` test (line 672-674) since there is no `DOT_RE` to test. The `parse_version` function itself can stay (it is generic and used by `probe_system_deps`).
+- The `spec()` helper (line 704-712) references `&DOT_RE` for its `pattern` field. Since `DOT_RE` is removed, add a test-local static: `static TEST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"version (\d+)\.(\d+)\.(\d+)").unwrap());` and update `spec()` to use `&TEST_RE`. The tests `check_system_deps_all_present` (line 715), `check_system_deps_required_missing_is_error` (line 726), `check_system_deps_optional_missing_is_warning` (line 734), and `check_system_deps_outdated_is_warning` (line 742) exercise the generic `check_system_deps` infrastructure and should remain -- only the regex reference changes.
 
 ### `fabro-cli/src/commands/install.rs`
 
 - Remove `choose_graphviz_install()` from `InstallInputSource` trait (line 418) and both impls: `InteractiveInstallInputSource` (line 442-448) and `NonInteractiveInstallInputSource` (line 679-681)
 - Remove the `dot_missing` variable (line 1326-1329) and the `if input_source.choose_graphviz_install(dot_missing).await?` block (lines 1345-1354)
 - The `dep_outcomes`/`dep_check` pre-flight section (lines 1324-1325) becomes a no-op with empty `DEP_SPECS`, but keep it so the infrastructure is in place if future system deps are added
+
+## Step 6b: Update documentation
+
+Several docs reference Graphviz as a system dependency. Update them to reflect that Graphviz is now bundled:
+
+- **`docs/reference/cli.mdx`** (line 496): Remove "Requires Graphviz (`dot`) to be installed" from the `graph` command description. Update "SVG or PNG" to "SVG".
+- **`docs/api-reference/overview.mdx`** (line 117): Remove the row about `502 Bad Gateway` / "Graphviz `dot` not installed" from the status code table.
+- **`docs/changelog/2026-03-11.mdx`** (line 37): Remove "Requires Graphviz `dot` to be installed" and update "SVG or PNG" to "SVG".
+- **`docs/administration/troubleshooting.mdx`** (line 21): Remove "Server-side Graphviz availability" from the doctor checks list.
 
 ## Step 7: Update workspace Cargo.toml
 
@@ -456,10 +475,14 @@ mod tests {
 ```
 
 ### Test 3: `render_dot` produces SVG unconditionally
-Update existing test in `fabro-graphviz/src/render.rs`:
+Update existing test `render_dot_svg_or_png_if_graphviz_is_available` in `fabro-graphviz/src/render.rs`:
+- Rename to `render_dot_produces_svg`
 - Remove `if !dot_is_available() { return; }` guard
+- Remove the `dot_is_available()` function (line 138-145) and its `#[expect(clippy::disallowed_methods)]` attribute (lines 134-137)
+- Remove the PNG assertion (line 183-184) -- PNG is no longer supported
+- Change `render_dot("digraph { a -> b }", GraphFormat::Svg)` to `render_dot("digraph { a -> b }")` (no format param)
 - Test always runs and succeeds
-- Add a complex graph test with multiple nodes, edges, subgraphs
+- Optionally add a complex graph test with multiple nodes, edges, subgraphs
 
 ### Test 4: SVG post-processing preserved
 Existing `postprocess_svg_removes_white_background` test is sufficient.
@@ -537,10 +560,11 @@ If `dot` is installed on the machine:
 6. Verify: `cargo build -p fabro-graphviz-sys` and `cargo nextest run -p fabro-graphviz-sys`
 7. Wire into `fabro-graphviz` -- update render.rs, remove PNG
 8. Update `fabro-server` -- simplify render_graph_bytes, remove guards
-9. Update `fabro-cli` -- simplify args, remove PNG, update `json_global.rs` integration test
+9. Update `fabro-cli` -- simplify args, remove PNG, update `json_global.rs` and `graph.rs` test snapshots
 10. Update OpenAPI spec + regenerate clients
 11. Update diagnostics/doctor/install -- remove dot checks
-12. Full workspace build + test + clippy + fmt
+12. Update documentation (cli.mdx, overview.mdx, troubleshooting.mdx, changelog)
+13. Full workspace build + test + clippy + fmt + `cargo insta accept` for snapshot updates
 
 ## Risk mitigation
 
