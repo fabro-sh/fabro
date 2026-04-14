@@ -70,6 +70,7 @@ base64.workspace = true
 ulid.workspace = true
 scopeguard = "1"
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+ring = "0.17"
 rustls-pemfile = "2"
 x509-parser = "0.16"
 rand.workspace = true

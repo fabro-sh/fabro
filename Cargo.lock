@@ -1621,6 +1621,7 @@ dependencies = [
  "progenitor-client",
  "rand 0.8.5",
  "regex",
+ "ring",
  "rustls",
  "rustls-pemfile",
  "scopeguard",

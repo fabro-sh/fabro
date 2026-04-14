@@ -38,27 +38,16 @@ pub(crate) enum ProbeOutcome {
     Ok { version: Option<Version> },
 }
 
-static OPENSSL_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:OpenSSL|LibreSSL)\s+(\d+)\.(\d+)\.(\d+)").unwrap());
 static DOT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"graphviz version (\d+)\.(\d+)\.(\d+)").unwrap());
 
-pub(crate) const DEP_SPECS: &[DepSpec] = &[
-    DepSpec {
-        name:        "openssl",
-        command:     &["openssl", "version"],
-        required:    true,
-        min_version: Version::new(3, 0, 0),
-        pattern:     &OPENSSL_RE,
-    },
-    DepSpec {
-        name:        "dot",
-        command:     &["dot", "-V"],
-        required:    false,
-        min_version: Version::new(2, 0, 0),
-        pattern:     &DOT_RE,
-    },
-];
+pub(crate) const DEP_SPECS: &[DepSpec] = &[DepSpec {
+    name:        "dot",
+    command:     &["dot", "-V"],
+    required:    false,
+    min_version: Version::new(2, 0, 0),
+    pattern:     &DOT_RE,
+}];
 
 fn parse_version(re: &Regex, output: &str) -> Option<Version> {
     let caps = re.captures(output)?;
@@ -673,14 +662,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_version_openssl() {
-        assert_eq!(
-            parse_version(&OPENSSL_RE, "OpenSSL 3.4.1 11 Feb 2025"),
-            Some(Version::new(3, 4, 1))
-        );
-    }
-
-    #[test]
     fn parse_version_dot() {
         assert_eq!(
             parse_version(&DOT_RE, "dot - graphviz version 12.2.1 (20241206.2024)"),
@@ -690,7 +671,6 @@ mod tests {
 
     #[test]
     fn parse_version_garbage_returns_none() {
-        assert_eq!(parse_version(&OPENSSL_RE, "not a version"), None);
         assert_eq!(parse_version(&DOT_RE, "no version here"), None);
     }
 
@@ -733,18 +713,10 @@ mod tests {
 
     #[test]
     fn check_system_deps_all_present() {
-        let specs = [
-            spec("openssl", true, Version::new(3, 0, 0)),
-            spec("dot", false, Version::new(2, 0, 0)),
-        ];
-        let outcomes = [
-            ProbeOutcome::Ok {
-                version: Some(Version::new(3, 4, 1)),
-            },
-            ProbeOutcome::Ok {
-                version: Some(Version::new(12, 2, 1)),
-            },
-        ];
+        let specs = [spec("dot", false, Version::new(2, 0, 0))];
+        let outcomes = [ProbeOutcome::Ok {
+            version: Some(Version::new(12, 2, 1)),
+        }];
         let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Pass);
         assert_eq!(result.summary, "all found");
@@ -752,7 +724,7 @@ mod tests {
 
     #[test]
     fn check_system_deps_required_missing_is_error() {
-        let specs = [spec("openssl", true, Version::new(3, 0, 0))];
+        let specs = [spec("required-tool", true, Version::new(3, 0, 0))];
         let outcomes = [ProbeOutcome::NotFound];
         let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Error);
@@ -768,7 +740,7 @@ mod tests {
 
     #[test]
     fn check_system_deps_outdated_is_warning() {
-        let specs = [spec("openssl", true, Version::new(3, 0, 0))];
+        let specs = [spec("required-tool", true, Version::new(3, 0, 0))];
         let outcomes = [ProbeOutcome::Ok {
             version: Some(Version::new(1, 1, 1)),
         }];
@@ -778,7 +750,7 @@ mod tests {
 
     #[test]
     fn check_system_deps_unparseable_success_is_pass() {
-        let specs = [spec("openssl", true, Version::new(3, 0, 0))];
+        let specs = [spec("required-tool", true, Version::new(3, 0, 0))];
         let outcomes = [ProbeOutcome::Ok { version: None }];
         let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Pass);
@@ -787,7 +759,7 @@ mod tests {
 
     #[test]
     fn check_system_deps_required_command_failed_is_error() {
-        let specs = [spec("openssl", true, Version::new(3, 0, 0))];
+        let specs = [spec("required-tool", true, Version::new(3, 0, 0))];
         let outcomes = [ProbeOutcome::Failed];
         let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Error);
@@ -804,7 +776,7 @@ mod tests {
     #[test]
     fn check_system_deps_error_beats_warning() {
         let specs = [
-            spec("openssl", true, Version::new(3, 0, 0)),
+            spec("required-tool", true, Version::new(3, 0, 0)),
             spec("dot", false, Version::new(2, 0, 0)),
         ];
         let outcomes = [ProbeOutcome::NotFound, ProbeOutcome::NotFound];
