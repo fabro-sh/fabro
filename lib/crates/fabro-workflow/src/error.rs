@@ -1700,11 +1700,12 @@ mod tests {
         // 3. Outcome → StageFailed event
         let failure = outcome.failure.clone().unwrap();
         let event = Event::StageFailed {
-            node_id:    "code".into(),
-            name:       "code".into(),
-            index:      0,
-            failure:    failure.clone(),
-            will_retry: false,
+            node_id:     "code".into(),
+            name:        "code".into(),
+            index:       0,
+            failure:     failure.clone(),
+            will_retry:  false,
+            duration_ms: 0,
         };
 
         // 4. Verify classification survived all the way through

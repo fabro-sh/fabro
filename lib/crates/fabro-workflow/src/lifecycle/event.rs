@@ -209,15 +209,17 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             let stage_index = state.stage_index;
             let scope = stage_scope_for(state, &gv.id);
 
+            let duration_ms = u64::try_from(ctx.result.duration.as_millis()).unwrap();
             self.emitter.emit_scoped(
                 &Event::StageFailed {
-                    node_id:    gv.id.clone(),
-                    name:       gv.label().to_string(),
-                    index:      stage_index,
-                    failure:    outcome.failure.clone().unwrap_or_else(|| {
+                    node_id: gv.id.clone(),
+                    name: gv.label().to_string(),
+                    index: stage_index,
+                    failure: outcome.failure.clone().unwrap_or_else(|| {
                         FailureDetail::new("handler failed", FailureCategory::TransientInfra)
                     }),
                     will_retry: true,
+                    duration_ms,
                 },
                 &scope,
             );
@@ -260,13 +262,14 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         if outcome.status == StageStatus::Fail {
             self.emitter.emit_scoped(
                 &Event::StageFailed {
-                    node_id:    gv.id.clone(),
-                    name:       gv.label().to_string(),
-                    index:      stage_index,
-                    failure:    outcome.failure.clone().unwrap_or_else(|| {
+                    node_id: gv.id.clone(),
+                    name: gv.label().to_string(),
+                    index: stage_index,
+                    failure: outcome.failure.clone().unwrap_or_else(|| {
                         FailureDetail::new("handler failed", FailureCategory::Deterministic)
                     }),
                     will_retry: false,
+                    duration_ms,
                 },
                 &scope,
             );

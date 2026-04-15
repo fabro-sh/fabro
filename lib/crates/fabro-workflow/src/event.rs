@@ -181,11 +181,12 @@ pub enum Event {
         max_attempts: usize,
     },
     StageFailed {
-        node_id:    String,
-        name:       String,
-        index:      usize,
-        failure:    FailureDetail,
-        will_retry: bool,
+        node_id:     String,
+        name:        String,
+        index:       usize,
+        failure:     FailureDetail,
+        will_retry:  bool,
+        duration_ms: u64,
     },
     StageRetrying {
         node_id:      String,
@@ -1652,11 +1653,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
             index,
             failure,
             will_retry,
+            duration_ms,
             ..
         } => EventBody::StageFailed(fabro_types::StageFailedProps {
-            index:      *index,
-            failure:    Some(failure.clone()),
-            will_retry: *will_retry,
+            index:       *index,
+            failure:     Some(failure.clone()),
+            will_retry:  *will_retry,
+            duration_ms: *duration_ms,
         }),
         Event::StageRetrying {
             index,
@@ -2994,14 +2997,15 @@ mod tests {
     #[test]
     fn run_event_stage_failure_keeps_failure_detail() {
         let stored = to_run_event(&fixtures::RUN_3, &Event::StageFailed {
-            node_id:    "code".to_string(),
-            name:       "Code".to_string(),
-            index:      1,
-            failure:    FailureDetail::new(
+            node_id:     "code".to_string(),
+            name:        "Code".to_string(),
+            index:       1,
+            failure:     FailureDetail::new(
                 "lint failed",
                 crate::outcome::FailureCategory::Deterministic,
             ),
-            will_retry: true,
+            will_retry:  true,
+            duration_ms: 5000,
         });
 
         assert_eq!(stored.event_name(), "stage.failed");

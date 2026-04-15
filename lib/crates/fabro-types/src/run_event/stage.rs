@@ -50,10 +50,12 @@ pub struct StageCompletedProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StageFailedProps {
-    pub index:      usize,
+    pub index:       usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure:    Option<FailureDetail>,
-    pub will_retry: bool,
+    pub failure:     Option<FailureDetail>,
+    pub will_retry:  bool,
+    #[serde(default)]
+    pub duration_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
