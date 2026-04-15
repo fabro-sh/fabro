@@ -192,7 +192,7 @@ async fn main_inner() -> (String, Result<()>) {
         Commands::RunCmd(RunCommands::Run(_) | RunCommands::Create(_))
             | Commands::Exec(_)
             | Commands::Repo(_)
-            | Commands::Install(_)
+            | Commands::Install { .. }
     ) {
         commands::upgrade::spawn_upgrade_check(cli_settings.updates.check, printer)
     } else {
@@ -285,9 +285,10 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Repo(ns) => {
                 commands::repo::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
             }
-            Commands::Install(args) => {
-                Box::pin(commands::install::run_install(
+            Commands::Install { args, command } => {
+                Box::pin(commands::install::execute(
                     &args,
+                    command,
                     &cli_settings,
                     &cli_layer,
                     process_local_json,
@@ -475,12 +476,39 @@ mod tests {
         ])
         .expect("should parse");
         match *cli.command {
-            Commands::Install(args) => {
+            Commands::Install {
+                args,
+                command: None,
+            } => {
                 assert!(args.non_interactive);
                 assert_eq!(
                     args.scripted.github_strategy,
                     Some(InstallGitHubStrategyArg::Token)
                 );
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_install_github_non_interactive_accepts_token_strategy() {
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "install",
+            "github",
+            "--non-interactive",
+            "--strategy",
+            "token",
+        ])
+        .expect("should parse");
+        match *cli.command {
+            Commands::Install {
+                args,
+                command: Some(args::InstallCommand::Github(github_args)),
+            } => {
+                assert!(args.non_interactive);
+                assert_eq!(github_args.strategy, Some(InstallGitHubStrategyArg::Token));
+                assert_eq!(github_args.owner, None);
             }
             _ => panic!("unexpected command variant"),
         }

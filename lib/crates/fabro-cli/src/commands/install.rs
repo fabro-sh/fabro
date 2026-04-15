@@ -16,7 +16,7 @@ use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::{CreateSecretRequest, SecretType as ApiSecretType};
 use fabro_auth::{AuthCredential, AuthMethod, codex_oauth_config, credential_id_for};
-use fabro_config::user::SETTINGS_CONFIG_FILENAME;
+use fabro_config::user::{SETTINGS_CONFIG_FILENAME, legacy_default_storage_root};
 use fabro_config::{ResolveError, Storage, envfile, legacy_env};
 use fabro_model::Provider;
 use fabro_server::bind::Bind;
@@ -28,6 +28,7 @@ use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::version::FABRO_VERSION;
 use fabro_util::{dev_token, path, session_secret};
+use fabro_vault::{SecretType as VaultSecretType, Vault};
 use futures::future::BoxFuture;
 use rand::Rng;
 use ring::rand::SystemRandom;
@@ -39,7 +40,8 @@ use tokio::task::spawn_blocking;
 
 use super::doctor;
 use crate::args::{
-    DoctorArgs, InstallArgs, InstallGitHubStrategyArg, InstallNonInteractiveArgs, ServerTargetArgs,
+    DoctorArgs, InstallArgs, InstallCommand, InstallGitHubStrategyArg, InstallGithubArgs,
+    InstallNonInteractiveArgs, ServerTargetArgs,
 };
 use crate::commands::server::{record, start, stop};
 use crate::gh::GhCli;
@@ -57,6 +59,10 @@ const ED25519_SPKI_PREFIX: [u8; 12] = [
     0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x03, 0x21, 0x00,
 ];
 const ED25519_PUBLIC_KEY_LEN: usize = 32;
+const GITHUB_TOKEN_SECRET_KEY: &str = "GITHUB_TOKEN";
+const GITHUB_APP_PRIVATE_KEY_KEY: &str = "GITHUB_APP_PRIVATE_KEY";
+const GITHUB_APP_CLIENT_SECRET_KEY: &str = "GITHUB_APP_CLIENT_SECRET";
+const GITHUB_APP_WEBHOOK_SECRET_KEY: &str = "GITHUB_APP_WEBHOOK_SECRET";
 
 fn pem_encode(label: &str, bytes: &[u8]) -> String {
     let body = BASE64_STANDARD.encode(bytes);
@@ -183,6 +189,18 @@ fn github_integration_table(doc: &mut toml::Value) -> Result<&mut toml::Table> {
 }
 
 fn write_token_settings(doc: &mut toml::Value) -> Result<()> {
+    if let Some(server) = doc.get_mut("server").and_then(toml::Value::as_table_mut) {
+        if let Some(auth) = server.get_mut("auth").and_then(toml::Value::as_table_mut) {
+            if let Some(methods) = auth.get_mut("methods").and_then(toml::Value::as_array_mut) {
+                methods.retain(|value| value.as_str() != Some("github"));
+                if methods.is_empty() {
+                    methods.push(toml::Value::String("dev-token".to_string()));
+                }
+            }
+            auth.remove("github");
+        }
+    }
+
     let github = github_integration_table(doc)?;
     github.insert("strategy".into(), toml::Value::String("token".to_string()));
     github.remove("app_id");
@@ -759,6 +777,70 @@ impl InstallInputSource for NonInteractiveInstallInputSource {
     }
 }
 
+fn validate_install_github_non_interactive(
+    github_args: &InstallGithubArgs,
+    non_interactive: bool,
+) -> Result<()> {
+    if !non_interactive {
+        if github_args.strategy.is_some() {
+            bail!("--strategy requires --non-interactive");
+        }
+        if github_args.owner.is_some() {
+            bail!("--owner requires --non-interactive");
+        }
+        return Ok(());
+    }
+
+    match github_args.strategy {
+        Some(InstallGitHubStrategyArg::Token) => {
+            anyhow::ensure!(
+                github_args.owner.is_none(),
+                "--owner is only supported with --strategy app"
+            );
+        }
+        Some(InstallGitHubStrategyArg::App) => {
+            let owner = github_args
+                .owner
+                .as_deref()
+                .context("install github --non-interactive requires --owner for --strategy app")?;
+            GitHubAppOwner::parse_scripted(owner)?;
+        }
+        None => bail!("install github --non-interactive requires --strategy"),
+    }
+
+    Ok(())
+}
+
+async fn choose_install_github_selection(
+    install_args: &InstallArgs,
+    github_args: &InstallGithubArgs,
+    s: &Styles,
+    printer: Printer,
+) -> Result<GitHubInstallSelection> {
+    validate_install_github_non_interactive(github_args, install_args.non_interactive)?;
+
+    if !install_args.non_interactive {
+        let input = InteractiveInstallInputSource;
+        return input.choose_github_install(s, printer).await;
+    }
+
+    match github_args.strategy {
+        Some(InstallGitHubStrategyArg::Token) => {
+            let token = fabro_github::gh_auth_token().await.map_err(|err| {
+                anyhow!("{err}. Run `gh auth login` and rerun `fabro install github`.")
+            })?;
+            Ok(GitHubInstallSelection::Token { token })
+        }
+        Some(InstallGitHubStrategyArg::App) => Ok(GitHubInstallSelection::App {
+            owner:    GitHubAppOwner::parse_scripted(github_args.owner.as_deref().context(
+                "install github --non-interactive requires --owner for --strategy app",
+            )?)?,
+            username: best_effort_github_username().await,
+        }),
+        None => bail!("install github --non-interactive requires --strategy"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GitHub App owner selection
 // ---------------------------------------------------------------------------
@@ -1227,6 +1309,86 @@ async fn persist_install_outputs(
     .await
 }
 
+struct PendingGitHubInstallWrite<'a> {
+    settings_write:    PendingSettingsWrite<'a>,
+    server_env_set:    Vec<(String, String)>,
+    server_env_remove: Vec<&'static str>,
+    vault_set:         Vec<(String, String)>,
+    vault_remove:      Vec<&'static str>,
+}
+
+fn restore_optional_file(path: &Path, previous_contents: Option<&str>) -> Result<()> {
+    match previous_contents {
+        Some(contents) => {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(path, contents)?;
+        }
+        None => match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        },
+    }
+
+    Ok(())
+}
+
+fn persist_github_install_changes(
+    storage_dir: &Path,
+    writes: &PendingGitHubInstallWrite<'_>,
+) -> Result<()> {
+    let storage = Storage::new(storage_dir);
+    let server_env_path = storage.server_state().env_path();
+    let vault_path = storage.secrets_path();
+    let previous_server_env = std::fs::read_to_string(&server_env_path).ok();
+    let previous_vault = std::fs::read_to_string(&vault_path).ok();
+
+    let result = (|| -> Result<()> {
+        let mut server_env = envfile::read_env_file(&server_env_path)?;
+        for key in &writes.server_env_remove {
+            server_env.remove(*key);
+        }
+        for (key, value) in &writes.server_env_set {
+            server_env.insert(key.clone(), value.clone());
+        }
+        if server_env.is_empty() {
+            restore_optional_file(&server_env_path, None)?;
+        } else {
+            envfile::write_env_file(&server_env_path, &server_env)?;
+        }
+
+        let mut vault = Vault::load(vault_path.clone()).map_err(anyhow::Error::from)?;
+        for key in &writes.vault_remove {
+            match vault.remove(key) {
+                Ok(()) | Err(fabro_vault::Error::NotFound(_)) => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+        for (key, value) in &writes.vault_set {
+            vault
+                .set(key, value, VaultSecretType::Environment, None)
+                .map_err(anyhow::Error::from)?;
+        }
+
+        std::fs::write(writes.settings_write.path, writes.settings_write.contents)?;
+        Ok(())
+    })();
+
+    if let Err(err) = result {
+        restore_optional_file(
+            writes.settings_write.path,
+            writes.settings_write.previous_contents,
+        )?;
+        restore_optional_file(&server_env_path, previous_server_env.as_deref())?;
+        restore_optional_file(&vault_path, previous_vault.as_deref())?;
+        return Err(err);
+    }
+
+    Ok(())
+}
+
 fn render_server_resolve_errors(errors: Vec<ResolveError>) -> anyhow::Error {
     anyhow::anyhow!(
         "failed to resolve server settings:\n{}",
@@ -1326,6 +1488,18 @@ async fn restart_server_after_install(
     .await
 }
 
+async fn maybe_restart_server_after_github_install(
+    storage_dir: &Path,
+    config_path: &Path,
+    server_was_running: bool,
+) -> Option<InstallServerRestartOutcome> {
+    if !server_was_running {
+        return None;
+    }
+
+    Some(restart_server_after_install(storage_dir, config_path).await)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InstallDoctorOutcome {
     SkippedServerRestartFailure,
@@ -1359,6 +1533,167 @@ where
 
     let _ = run_doctor().await?;
     Ok(InstallDoctorOutcome::Ran)
+}
+
+pub(crate) async fn execute(
+    args: &InstallArgs,
+    command: Option<InstallCommand>,
+    cli: &CliSettings,
+    cli_layer: &CliLayer,
+    process_local_json: bool,
+    printer: Printer,
+) -> Result<()> {
+    match command {
+        None => run_install(args, cli, cli_layer, process_local_json, printer).await,
+        Some(InstallCommand::Github(github_args)) => {
+            run_install_github_command(args, &github_args, cli, process_local_json, printer).await
+        }
+    }
+}
+
+async fn run_install_github_command(
+    args: &InstallArgs,
+    github_args: &InstallGithubArgs,
+    cli: &CliSettings,
+    process_local_json: bool,
+    printer: Printer,
+) -> Result<()> {
+    let json = cli.output.format == OutputFormat::Json;
+    if process_local_json && !args.non_interactive {
+        bail!("--json is only supported for install with --non-interactive");
+    }
+
+    let result = Box::pin(run_install_github_inner(args, github_args, json, printer)).await;
+    if json {
+        let emit_result = match &result {
+            Ok(()) => emit_install_json_event(&install_complete_event()),
+            Err(err) => emit_install_json_event(&install_error_event(&err.to_string())),
+        };
+        if result.is_ok() {
+            emit_result?;
+        }
+    }
+
+    result
+}
+
+async fn run_install_github_inner(
+    args: &InstallArgs,
+    github_args: &InstallGithubArgs,
+    json_output: bool,
+    printer: Printer,
+) -> Result<()> {
+    let s = Styles::detect_stderr();
+    let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
+    let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
+    if !config_path.exists() {
+        bail!("No settings.toml found. Run `fabro install` first.");
+    }
+
+    let existing_config_contents =
+        std::fs::read_to_string(&config_path).context("failed to read existing settings.toml")?;
+    let parsed_settings = user_config::apply_storage_dir_override(
+        fabro_config::parse_settings_layer(&existing_config_contents)
+            .context("failed to parse existing settings.toml")?,
+        args.storage_dir.as_deref(),
+    );
+    let storage_dir = user_config::storage_dir(&parsed_settings).unwrap_or_else(|_| {
+        args.storage_dir
+            .clone_path()
+            .unwrap_or_else(|| legacy_default_storage_root().join("storage"))
+    });
+    let server_was_running = record::active_server_record(&storage_dir).is_some();
+    let mut doc: toml::Value = toml::from_str(&existing_config_contents)
+        .context("failed to parse existing settings.toml")?;
+
+    let selection = choose_install_github_selection(args, github_args, &s, printer).await?;
+    let mut server_env_set = Vec::new();
+    let mut server_env_remove = Vec::new();
+    let mut vault_set = Vec::new();
+    let mut vault_remove = Vec::new();
+
+    match selection {
+        GitHubInstallSelection::Token { token } => {
+            write_token_settings(&mut doc)?;
+            vault_set.push((GITHUB_TOKEN_SECRET_KEY.to_string(), token));
+            server_env_remove.extend([
+                GITHUB_APP_PRIVATE_KEY_KEY,
+                GITHUB_APP_CLIENT_SECRET_KEY,
+                GITHUB_APP_WEBHOOK_SECRET_KEY,
+            ]);
+        }
+        GitHubInstallSelection::App { owner, username } => {
+            let allowed_username = username.clone().context(
+                "GitHub App install requires an authenticated GitHub username; run `gh auth login` and rerun `fabro install github`",
+            )?;
+            server_env_remove.extend([
+                GITHUB_APP_PRIVATE_KEY_KEY,
+                GITHUB_APP_CLIENT_SECRET_KEY,
+                GITHUB_APP_WEBHOOK_SECRET_KEY,
+            ]);
+            let registration = setup_github_app(
+                &s,
+                &args.web_url,
+                &owner,
+                username.as_deref(),
+                if args.non_interactive {
+                    GitHubAppHandoffMode::Manual
+                } else {
+                    GitHubAppHandoffMode::Interactive
+                },
+                json_output,
+                printer,
+            )
+            .await?;
+            server_env_set.extend(registration.env_pairs);
+            vault_remove.push(GITHUB_TOKEN_SECRET_KEY);
+            write_github_app_settings(
+                &mut doc,
+                &registration.app_id,
+                &registration.slug,
+                &registration.client_id,
+                &[allowed_username],
+            )?;
+        }
+    }
+
+    let settings_toml = toml::to_string_pretty(&doc)?;
+    persist_github_install_changes(&storage_dir, &PendingGitHubInstallWrite {
+        settings_write: PendingSettingsWrite {
+            path:              &config_path,
+            contents:          settings_toml.as_str(),
+            previous_contents: Some(existing_config_contents.as_str()),
+        },
+        server_env_set,
+        server_env_remove,
+        vault_set,
+        vault_remove,
+    })?;
+
+    if let Some(restart_outcome) =
+        maybe_restart_server_after_github_install(&storage_dir, &config_path, server_was_running)
+            .await
+    {
+        match restart_outcome {
+            InstallServerRestartOutcome::Started(bind) => {
+                fabro_util::printerr!(
+                    printer,
+                    "  {} Server running at {}",
+                    s.green.apply_to("✔"),
+                    bind
+                );
+            }
+            InstallServerRestartOutcome::Failed(err) => {
+                fabro_util::printerr!(
+                    printer,
+                    "  {} Failed to restart server: {err}",
+                    s.yellow.apply_to("Warning:")
+                );
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub(crate) async fn run_install(
@@ -1930,6 +2265,12 @@ name = "custom"
             r#"
 _version = 1
 
+[server.auth]
+methods = ["dev-token", "github"]
+
+[server.auth.github]
+allowed_usernames = ["alice"]
+
 [server.integrations.github]
 strategy = "app"
 app_id = "123"
@@ -1957,6 +2298,55 @@ client_id = "client-id"
         assert!(!github.contains_key("app_id"));
         assert!(!github.contains_key("slug"));
         assert!(!github.contains_key("client_id"));
+    }
+
+    #[test]
+    fn write_token_settings_removes_github_auth_state() {
+        let mut doc: toml::Value = toml::from_str(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token", "github"]
+
+[server.auth.github]
+allowed_usernames = ["alice"]
+
+[server.integrations.github]
+strategy = "app"
+app_id = "123"
+slug = "fabro-app"
+client_id = "client-id"
+"#,
+        )
+        .unwrap();
+
+        write_token_settings(&mut doc).unwrap();
+
+        let methods = doc
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .and_then(|server| server.get("auth"))
+            .and_then(toml::Value::as_table)
+            .and_then(|auth| auth.get("methods"))
+            .and_then(toml::Value::as_array)
+            .expect("server.auth.methods should exist");
+        assert_eq!(
+            methods
+                .iter()
+                .map(|value| value.as_str().expect("auth method should be a string"))
+                .collect::<Vec<_>>(),
+            vec!["dev-token"]
+        );
+        assert!(
+            doc.get("server")
+                .and_then(toml::Value::as_table)
+                .and_then(|server| server.get("auth"))
+                .and_then(toml::Value::as_table)
+                .and_then(|auth| auth.get("github"))
+                .is_none(),
+            "server.auth.github should be removed"
+        );
     }
 
     #[test]
@@ -2512,6 +2902,139 @@ client_id = "client-id"
         );
     }
 
+    #[test]
+    fn persist_github_install_changes_replaces_app_env_keys_with_token_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        let server_env_path = storage.server_state().env_path();
+        envfile::write_env_file(
+            &server_env_path,
+            &std::collections::HashMap::from([
+                (
+                    GITHUB_APP_PRIVATE_KEY_KEY.to_string(),
+                    "private".to_string(),
+                ),
+                (
+                    GITHUB_APP_CLIENT_SECRET_KEY.to_string(),
+                    "client".to_string(),
+                ),
+                (
+                    GITHUB_APP_WEBHOOK_SECRET_KEY.to_string(),
+                    "webhook".to_string(),
+                ),
+                ("KEEP_ME".to_string(), "1".to_string()),
+            ]),
+        )
+        .unwrap();
+
+        let settings_path = dir.path().join(SETTINGS_CONFIG_FILENAME);
+        std::fs::write(&settings_path, "before").unwrap();
+
+        persist_github_install_changes(dir.path(), &PendingGitHubInstallWrite {
+            settings_write:    PendingSettingsWrite {
+                path:              &settings_path,
+                contents:          "after",
+                previous_contents: Some("before"),
+            },
+            server_env_set:    Vec::new(),
+            server_env_remove: vec![
+                GITHUB_APP_PRIVATE_KEY_KEY,
+                GITHUB_APP_CLIENT_SECRET_KEY,
+                GITHUB_APP_WEBHOOK_SECRET_KEY,
+            ],
+            vault_set:         vec![(GITHUB_TOKEN_SECRET_KEY.to_string(), "token".to_string())],
+            vault_remove:      Vec::new(),
+        })
+        .unwrap();
+
+        let server_env = envfile::read_env_file(&server_env_path).unwrap();
+        assert_eq!(server_env.get("KEEP_ME").map(String::as_str), Some("1"));
+        assert!(!server_env.contains_key(GITHUB_APP_PRIVATE_KEY_KEY));
+        assert!(!server_env.contains_key(GITHUB_APP_CLIENT_SECRET_KEY));
+        assert!(!server_env.contains_key(GITHUB_APP_WEBHOOK_SECRET_KEY));
+
+        let vault = Vault::load(storage.secrets_path()).unwrap();
+        assert_eq!(vault.get(GITHUB_TOKEN_SECRET_KEY), Some("token"));
+        assert_eq!(
+            vault
+                .get_entry(GITHUB_TOKEN_SECRET_KEY)
+                .map(|entry| entry.secret_type),
+            Some(VaultSecretType::Environment)
+        );
+        assert_eq!(std::fs::read_to_string(&settings_path).unwrap(), "after");
+    }
+
+    #[test]
+    fn persist_github_install_changes_replaces_token_secret_with_app_env_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        let server_env_path = storage.server_state().env_path();
+        envfile::write_env_file(
+            &server_env_path,
+            &std::collections::HashMap::from([("KEEP_ME".to_string(), "1".to_string())]),
+        )
+        .unwrap();
+
+        let mut vault = Vault::load(storage.secrets_path()).unwrap();
+        vault
+            .set(
+                GITHUB_TOKEN_SECRET_KEY,
+                "token",
+                VaultSecretType::Environment,
+                None,
+            )
+            .unwrap();
+
+        let settings_path = dir.path().join(SETTINGS_CONFIG_FILENAME);
+        std::fs::write(&settings_path, "before").unwrap();
+
+        persist_github_install_changes(dir.path(), &PendingGitHubInstallWrite {
+            settings_write:    PendingSettingsWrite {
+                path:              &settings_path,
+                contents:          "after",
+                previous_contents: Some("before"),
+            },
+            server_env_set:    vec![
+                (
+                    GITHUB_APP_PRIVATE_KEY_KEY.to_string(),
+                    "private".to_string(),
+                ),
+                (
+                    GITHUB_APP_CLIENT_SECRET_KEY.to_string(),
+                    "client".to_string(),
+                ),
+            ],
+            server_env_remove: vec![
+                GITHUB_APP_PRIVATE_KEY_KEY,
+                GITHUB_APP_CLIENT_SECRET_KEY,
+                GITHUB_APP_WEBHOOK_SECRET_KEY,
+            ],
+            vault_set:         Vec::new(),
+            vault_remove:      vec![GITHUB_TOKEN_SECRET_KEY],
+        })
+        .unwrap();
+
+        let server_env = envfile::read_env_file(&server_env_path).unwrap();
+        assert_eq!(server_env.get("KEEP_ME").map(String::as_str), Some("1"));
+        assert_eq!(
+            server_env
+                .get(GITHUB_APP_PRIVATE_KEY_KEY)
+                .map(String::as_str),
+            Some("private")
+        );
+        assert_eq!(
+            server_env
+                .get(GITHUB_APP_CLIENT_SECRET_KEY)
+                .map(String::as_str),
+            Some("client")
+        );
+        assert!(!server_env.contains_key(GITHUB_APP_WEBHOOK_SECRET_KEY));
+
+        let vault = Vault::load(storage.secrets_path()).unwrap();
+        assert_eq!(vault.get(GITHUB_TOKEN_SECRET_KEY), None);
+        assert_eq!(std::fs::read_to_string(&settings_path).unwrap(), "after");
+    }
+
     #[tokio::test]
     async fn write_artifact_store_metadata_creates_marker_in_resolved_store() {
         let dir = tempfile::tempdir().unwrap();
@@ -2742,5 +3265,39 @@ root = "{}"
         assert!(err.to_string().contains(
             "settings.toml already exists; pass --overwrite-settings or --keep-existing-settings"
         ));
+    }
+
+    #[test]
+    fn validate_install_github_non_interactive_rejects_owner_for_token() {
+        let err = validate_install_github_non_interactive(
+            &InstallGithubArgs {
+                strategy: Some(InstallGitHubStrategyArg::Token),
+                owner:    Some("personal".to_string()),
+            },
+            true,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--owner is only supported with --strategy app")
+        );
+    }
+
+    #[test]
+    fn validate_install_github_non_interactive_requires_owner_for_app() {
+        let err = validate_install_github_non_interactive(
+            &InstallGithubArgs {
+                strategy: Some(InstallGitHubStrategyArg::App),
+                owner:    None,
+            },
+            true,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("install github --non-interactive requires --owner for --strategy app")
+        );
     }
 }

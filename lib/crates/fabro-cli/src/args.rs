@@ -989,7 +989,12 @@ pub(crate) enum Commands {
     /// Show client and server version information
     Version(VersionArgs),
     /// Set up the Fabro environment (LLMs, certs, GitHub)
-    Install(InstallArgs),
+    Install {
+        #[command(flatten)]
+        args:    InstallArgs,
+        #[command(subcommand)]
+        command: Option<InstallCommand>,
+    },
     /// Uninstall Fabro from this machine
     Uninstall(UninstallArgs),
     /// Pull request operations
@@ -1077,7 +1082,10 @@ impl Commands {
                 RepoCommand::Init(_) => "repo init",
                 RepoCommand::Deinit => "repo deinit",
             },
-            Self::Install(_) => "install",
+            Self::Install { command, .. } => match command {
+                None => "install",
+                Some(InstallCommand::Github(_)) => "install github",
+            },
             Self::Uninstall(_) => "uninstall",
             Self::Pr(ns) => match &ns.command {
                 PrCommand::Create(_) => "pr create",
@@ -1324,6 +1332,24 @@ pub(crate) enum InstallGitHubStrategyArg {
     App,
 }
 
+#[derive(Subcommand, Debug, Clone)]
+pub(crate) enum InstallCommand {
+    /// Configure GitHub integration (token or GitHub App)
+    Github(InstallGithubArgs),
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct InstallGithubArgs {
+    /// GitHub authentication strategy (requires --non-interactive)
+    #[arg(long)]
+    pub(crate) strategy: Option<InstallGitHubStrategyArg>,
+
+    /// GitHub App owner: 'personal' or 'org:<slug>' (app only, requires
+    /// --non-interactive)
+    #[arg(long)]
+    pub(crate) owner: Option<String>,
+}
+
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct InstallNonInteractiveArgs {
     #[arg(long, hide = true)]
@@ -1364,7 +1390,7 @@ pub(crate) struct InstallArgs {
     pub(crate) web_url: String,
 
     /// Run install without prompts; use hidden scripted flags for inputs
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub(crate) non_interactive: bool,
 
     #[command(flatten)]
