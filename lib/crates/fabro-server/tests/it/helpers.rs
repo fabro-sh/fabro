@@ -34,9 +34,7 @@ pub(crate) fn test_app_state_with_options(
     create_app_state_with_options_and_registry_factory(
         settings,
         max_concurrent_runs,
-        |interviewer| {
-        fabro_workflow::handler::default_registry(interviewer, || None)
-    },
+        |interviewer| fabro_workflow::handler::default_registry(interviewer, || None),
     )
 }
 
