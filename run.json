@@ -1,0 +1,178 @@
+{
+  "run_id": "01KP8PGWZK4T11SJBA3A49SN6Z",
+  "settings": {
+    "_version": 1,
+    "project": {
+      "directory": "."
+    },
+    "workflow": {
+      "graph": "workflow.fabro"
+    },
+    "run": {
+      "goal": "Say hello and demonstrate a basic Fabro workflow",
+      "model": {
+        "provider": "openai",
+        "name": "gpt-5.4-mini"
+      },
+      "prepare": {
+        "timeout": "5m"
+      },
+      "execution": {
+        "mode": "normal",
+        "approval": "prompt",
+        "retros": true
+      },
+      "sandbox": {
+        "provider": "daytona",
+        "preserve": false,
+        "devcontainer": false,
+        "local": {
+          "worktree_mode": "clean"
+        }
+      },
+      "pull_request": {
+        "enabled": true,
+        "draft": true
+      }
+    },
+    "cli": {
+      "target": {
+        "type": "http",
+        "url": "http://127.0.0.1:32276",
+        "tls": null
+      },
+      "exec": {
+        "prevent_idle_sleep": false
+      },
+      "output": {
+        "format": "text",
+        "verbosity": "normal"
+      },
+      "updates": {
+        "check": true
+      }
+    },
+    "server": {
+      "listen": {
+        "type": "tcp",
+        "address": "127.0.0.1:32276",
+        "tls": null
+      },
+      "api": {
+        "url": "http://127.0.0.1:32276/api/v1"
+      },
+      "web": {
+        "enabled": true,
+        "url": "http://127.0.0.1:32276"
+      },
+      "auth": {
+        "methods": [
+          "dev-token"
+        ]
+      },
+      "storage": {
+        "root": "/Users/bhelmkamp/.fabro/storage"
+      },
+      "artifacts": {
+        "provider": "local",
+        "prefix": ""
+      },
+      "slatedb": {
+        "provider": "local",
+        "prefix": "",
+        "flush_interval": "1ms",
+        "disk_cache": false
+      },
+      "scheduler": {
+        "max_concurrent_runs": 5
+      },
+      "integrations": {
+        "github": {
+          "strategy": "token"
+        }
+      }
+    },
+    "features": {
+      "session_sandboxes": false
+    }
+  },
+  "graph": {
+    "name": "Hello",
+    "nodes": {
+      "exit": {
+        "id": "exit",
+        "attrs": {
+          "shape": {
+            "String": "Msquare"
+          },
+          "label": {
+            "String": "Exit"
+          }
+        }
+      },
+      "greet": {
+        "id": "greet",
+        "attrs": {
+          "prompt": {
+            "String": "Print a listing of the top-level files and directories in this repo."
+          },
+          "label": {
+            "String": "Greet"
+          }
+        }
+      },
+      "start": {
+        "id": "start",
+        "attrs": {
+          "label": {
+            "String": "Start"
+          },
+          "shape": {
+            "String": "Mdiamond"
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "start",
+        "to": "greet",
+        "attrs": {}
+      },
+      {
+        "from": "greet",
+        "to": "exit",
+        "attrs": {}
+      }
+    ],
+    "attrs": {
+      "goal": {
+        "String": "Say hello and demonstrate a basic Fabro workflow"
+      },
+      "rankdir": {
+        "String": "LR"
+      }
+    }
+  },
+  "workflow_slug": "hello",
+  "working_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro",
+  "repo_origin_url": "https://github.com/fabro-sh/fabro",
+  "base_branch": "main",
+  "provenance": {
+    "server": {
+      "version": "0.176.2"
+    },
+    "client": {
+      "user_agent": "fabro-cli/0.176.2",
+      "name": "fabro-cli",
+      "version": "0.176.2"
+    },
+    "subject": {
+      "login": "dev",
+      "auth_method": "dev_token"
+    }
+  },
+  "manifest_blob": "24cd155752e4a2c7a8b363a7d79ab8945a12f3b5591c4eda6e0bad47c87c8a85",
+  "definition_blob": "8e4620be8ef1236135d34ea602e73fd9ec5f0db88681ea784df87105d9f0481a"
+}
