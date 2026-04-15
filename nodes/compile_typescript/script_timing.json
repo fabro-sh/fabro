@@ -1,0 +1,7 @@
+{
+  "stdout": "bun install v1.3.10 (30e609e0)\n\n+ @tailwindcss/cli@4.2.2\n+ @types/node@22.19.13\n+ @types/react@19.2.14\n+ @types/react-dom@19.2.3\n+ tailwindcss@4.2.1\n+ typescript@5.9.3\n+ @dnd-kit/core@6.3.1\n+ @dnd-kit/sortable@10.0.0\n+ @dnd-kit/utilities@3.2.2\n+ @headlessui/react@2.2.9\n+ @heroicons/react@2.2.0\n+ @pierre/diffs@1.0.11\n+ @viz-js/viz@3.25.0\n+ react@19.2.4\n+ react-dom@19.2.4\n+ react-router@7.12.0\n\n1154 packages installed [3.71s]\n$ tsc\n",
+  "stderr": "",
+  "exit_code": 0,
+  "duration_ms": 7027,
+  "timed_out": false
+}
