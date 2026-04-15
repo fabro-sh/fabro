@@ -1,0 +1,5 @@
+{
+  "mode": "agent",
+  "provider": "openai",
+  "model": "gpt-5.4"
+}
