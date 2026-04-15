@@ -1,0 +1,320 @@
+{
+  "run_id": "01KP8W5AM70ZNGCF1BBGJYBWGR",
+  "settings": {
+    "_version": 1,
+    "project": {
+      "directory": "."
+    },
+    "workflow": {
+      "graph": "workflow.fabro"
+    },
+    "run": {
+      "goal": "Verify the sandbox can lint and test the project",
+      "model": {
+        "provider": "anthropic",
+        "name": "claude-sonnet-4-6"
+      },
+      "prepare": {
+        "timeout": "5m"
+      },
+      "execution": {
+        "mode": "normal",
+        "approval": "prompt",
+        "retros": true
+      },
+      "sandbox": {
+        "provider": "daytona",
+        "preserve": true,
+        "devcontainer": false,
+        "local": {
+          "worktree_mode": "clean"
+        },
+        "daytona": {
+          "auto_stop_interval": 30,
+          "labels": {
+            "repo": "fabro-sh/fabro"
+          },
+          "snapshot": {
+            "name": "fabro-v6",
+            "cpu": 4,
+            "memory": "8GB",
+            "disk": "20GB",
+            "dockerfile": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+          }
+        }
+      },
+      "hooks": [
+        {
+          "id": "cargo-fmt",
+          "name": "cargo-fmt",
+          "event": "post_tool_use",
+          "matcher": "write_file|edit_file|apply_patch",
+          "blocking": true,
+          "script": "cargo fmt"
+        }
+      ],
+      "pull_request": {
+        "enabled": true,
+        "draft": false
+      }
+    },
+    "cli": {
+      "target": {
+        "type": "http",
+        "url": "http://127.0.0.1:32276",
+        "tls": null
+      },
+      "exec": {
+        "prevent_idle_sleep": false
+      },
+      "output": {
+        "format": "text",
+        "verbosity": "normal"
+      },
+      "updates": {
+        "check": true
+      }
+    },
+    "server": {
+      "listen": {
+        "type": "tcp",
+        "address": "127.0.0.1:32276",
+        "tls": null
+      },
+      "api": {
+        "url": "http://127.0.0.1:32276/api/v1"
+      },
+      "web": {
+        "enabled": true,
+        "url": "http://127.0.0.1:32276"
+      },
+      "auth": {
+        "methods": [
+          "dev-token"
+        ]
+      },
+      "storage": {
+        "root": "/Users/bhelmkamp/.fabro/storage"
+      },
+      "artifacts": {
+        "provider": "local",
+        "prefix": ""
+      },
+      "slatedb": {
+        "provider": "local",
+        "prefix": "",
+        "flush_interval": "1ms",
+        "disk_cache": false
+      },
+      "scheduler": {
+        "max_concurrent_runs": 5
+      },
+      "integrations": {
+        "github": {
+          "strategy": "token"
+        }
+      }
+    },
+    "features": {
+      "session_sandboxes": false
+    }
+  },
+  "graph": {
+    "name": "Smoke",
+    "nodes": {
+      "toolchain": {
+        "id": "toolchain",
+        "attrs": {
+          "goal_gate": {
+            "Boolean": true
+          },
+          "label": {
+            "String": "Toolchain"
+          },
+          "shape": {
+            "String": "parallelogram"
+          },
+          "script": {
+            "String": "rustc --version && cargo --version && bun --version 2>&1"
+          }
+        }
+      },
+      "test_typescript": {
+        "id": "test_typescript",
+        "attrs": {
+          "label": {
+            "String": "Test TypeScript"
+          },
+          "shape": {
+            "String": "parallelogram"
+          },
+          "goal_gate": {
+            "Boolean": true
+          },
+          "script": {
+            "String": "cd apps/fabro-web && bun test 2>&1"
+          }
+        }
+      },
+      "compile_typescript": {
+        "id": "compile_typescript",
+        "attrs": {
+          "script": {
+            "String": "cd apps/fabro-web && bun install && bun run typecheck 2>&1"
+          },
+          "goal_gate": {
+            "Boolean": true
+          },
+          "shape": {
+            "String": "parallelogram"
+          },
+          "label": {
+            "String": "Compile TypeScript"
+          }
+        }
+      },
+      "start": {
+        "id": "start",
+        "attrs": {
+          "shape": {
+            "String": "Mdiamond"
+          },
+          "label": {
+            "String": "Start"
+          }
+        }
+      },
+      "exit": {
+        "id": "exit",
+        "attrs": {
+          "label": {
+            "String": "Exit"
+          },
+          "shape": {
+            "String": "Msquare"
+          }
+        }
+      },
+      "test_rust": {
+        "id": "test_rust",
+        "attrs": {
+          "script": {
+            "String": "ulimit -n 4096 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1"
+          },
+          "label": {
+            "String": "Test Rust"
+          },
+          "shape": {
+            "String": "parallelogram"
+          },
+          "goal_gate": {
+            "Boolean": true
+          }
+        }
+      },
+      "compile_rust": {
+        "id": "compile_rust",
+        "attrs": {
+          "label": {
+            "String": "Compile Rust"
+          },
+          "goal_gate": {
+            "Boolean": true
+          },
+          "script": {
+            "String": "cargo check -q --workspace 2>&1"
+          },
+          "shape": {
+            "String": "parallelogram"
+          }
+        }
+      },
+      "lint_rust": {
+        "id": "lint_rust",
+        "attrs": {
+          "label": {
+            "String": "Lint Rust"
+          },
+          "shape": {
+            "String": "parallelogram"
+          },
+          "script": {
+            "String": "cargo +nightly fmt --check --all 2>&1 && cargo clippy -q --workspace -- -D warnings 2>&1"
+          },
+          "goal_gate": {
+            "Boolean": true
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "start",
+        "to": "toolchain",
+        "attrs": {}
+      },
+      {
+        "from": "toolchain",
+        "to": "compile_rust",
+        "attrs": {}
+      },
+      {
+        "from": "compile_rust",
+        "to": "compile_typescript",
+        "attrs": {}
+      },
+      {
+        "from": "compile_typescript",
+        "to": "lint_rust",
+        "attrs": {}
+      },
+      {
+        "from": "lint_rust",
+        "to": "test_rust",
+        "attrs": {}
+      },
+      {
+        "from": "test_rust",
+        "to": "test_typescript",
+        "attrs": {}
+      },
+      {
+        "from": "test_typescript",
+        "to": "exit",
+        "attrs": {}
+      }
+    ],
+    "attrs": {
+      "retry_target": {
+        "String": "exit"
+      },
+      "rankdir": {
+        "String": "LR"
+      },
+      "goal": {
+        "String": "Verify the sandbox can lint and test the project"
+      }
+    }
+  },
+  "workflow_slug": "smoke",
+  "working_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro",
+  "repo_origin_url": "https://github.com/fabro-sh/fabro",
+  "base_branch": "main",
+  "provenance": {
+    "server": {
+      "version": "0.176.2"
+    },
+    "client": {
+      "user_agent": "fabro-cli/0.176.2",
+      "name": "fabro-cli",
+      "version": "0.176.2"
+    },
+    "subject": {
+      "login": "dev",
+      "auth_method": "dev_token"
+    }
+  },
+  "manifest_blob": "a6dd218d59c12d6b2cb00e44bfbf7c2f129c26eb7243de095ab80d285ec0a7ea",
+  "definition_blob": "694e657f282969186c899bb8985b761e1a9b6524c2d2b02bc9dc11187013ce81"
+}
