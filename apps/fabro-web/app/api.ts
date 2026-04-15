@@ -27,8 +27,8 @@ export async function apiJson<T>(path: string, options?: ApiOptions): Promise<T>
   return response.json() as Promise<T>;
 }
 
-export function isNotImplemented(status: number): boolean {
-  return status === 501;
+export function isNotAvailable(status: number): boolean {
+  return status === 404 || status === 501;
 }
 
 export async function apiJsonOrNull<T>(
@@ -36,7 +36,7 @@ export async function apiJsonOrNull<T>(
   options?: ApiOptions,
 ): Promise<T | null> {
   const response = await apiFetch(path, options);
-  if (isNotImplemented(response.status)) {
+  if (isNotAvailable(response.status)) {
     return null;
   }
   if (!response.ok) {

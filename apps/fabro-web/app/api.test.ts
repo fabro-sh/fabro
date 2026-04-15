@@ -1,21 +1,21 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { getAuthConfig, isNotImplemented, loginDevToken } from "./api";
+import { getAuthConfig, isNotAvailable, loginDevToken } from "./api";
 
 afterEach(() => {
   mock.restore();
 });
 
-describe("isNotImplemented", () => {
+describe("isNotAvailable", () => {
   test("returns true for 501 status", () => {
-    expect(isNotImplemented(501)).toBe(true);
+    expect(isNotAvailable(501)).toBe(true);
+  });
+
+  test("returns true for 404 status", () => {
+    expect(isNotAvailable(404)).toBe(true);
   });
 
   test("returns false for 200 status", () => {
-    expect(isNotImplemented(200)).toBe(false);
-  });
-
-  test("returns false for 404 status", () => {
-    expect(isNotImplemented(404)).toBe(false);
+    expect(isNotAvailable(200)).toBe(false);
   });
 });
 

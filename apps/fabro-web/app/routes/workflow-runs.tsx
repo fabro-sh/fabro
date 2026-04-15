@@ -3,11 +3,12 @@ import { ChevronDownIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outlin
 import { Link, useParams } from "react-router";
 import { ciConfig, columnNames, deriveCiStatus, mapRunListItem, statusColors } from "../data/runs";
 import type { ColumnStatus, RunWithStatus } from "../data/runs";
-import { apiJson } from "../api";
+import { apiJsonOrNull } from "../api";
 import type { PaginatedRunList } from "@qltysh/fabro-api-client";
 
 export async function loader({ request, params }: any) {
-  const { data: apiRuns } = await apiJson<PaginatedRunList>(`/workflows/${params.name}/runs`, { request });
+  const result = await apiJsonOrNull<PaginatedRunList>(`/workflows/${params.name}/runs`, { request });
+  const apiRuns = result?.data ?? [];
   const runs: RunWithStatus[] = apiRuns.map((r) => ({
     ...mapRunListItem(r),
     status: r.status as ColumnStatus,
