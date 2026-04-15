@@ -1,0 +1,71 @@
+diff --git a/lib/crates/fabro-server/src/server.rs b/lib/crates/fabro-server/src/server.rs
+index 469681e1..282ed6ee 100644
+--- a/lib/crates/fabro-server/src/server.rs
++++ b/lib/crates/fabro-server/src/server.rs
+@@ -1215,6 +1215,7 @@ async fn get_system_info(
+                     RunStatus::Queued
+                         | RunStatus::Starting
+                         | RunStatus::Running
++                        | RunStatus::Blocked
+                         | RunStatus::Paused
+                 )
+             })
+@@ -2667,6 +2668,7 @@ async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Res
+                 | RunStatus::Queued
+                 | RunStatus::Starting
+                 | RunStatus::Running
++                | RunStatus::Blocked
+                 | RunStatus::Paused
+         ) {
+             WORKER_CANCEL_GRACE
+@@ -3859,7 +3861,7 @@ async fn start_run(
+         if let Some(managed_run) = runs.get(&id) {
+             if matches!(
+                 managed_run.status,
+-                RunStatus::Queued | RunStatus::Starting | RunStatus::Running
++                RunStatus::Queued | RunStatus::Starting | RunStatus::Running | RunStatus::Blocked
+             ) {
+                 return ApiError::new(
+                     StatusCode::CONFLICT,
+@@ -5798,6 +5800,7 @@ async fn cancel_run(
+                 | RunStatus::Queued
+                 | RunStatus::Starting
+                 | RunStatus::Running
++                | RunStatus::Blocked
+                 | RunStatus::Paused => {
+                     let use_cancel_signal = !matches!(
+                         managed_run.answer_transport,
+diff --git a/lib/crates/fabro-server/tests/it/scenario/lifecycle.rs b/lib/crates/fabro-server/tests/it/scenario/lifecycle.rs
+index 8a3da09a..0450d640 100644
+--- a/lib/crates/fabro-server/tests/it/scenario/lifecycle.rs
++++ b/lib/crates/fabro-server/tests/it/scenario/lifecycle.rs
+@@ -211,11 +211,15 @@ async fn full_http_lifecycle_cancel() {
+     let response = app.clone().oneshot(req).await.unwrap();
+     assert_eq!(response.status(), StatusCode::OK);
+     let body = body_json(response.into_body()).await;
+-    assert_eq!(body["status"], "running");
++    let status = body["status"].as_str().unwrap();
++    assert!(
++        status == "running" || status == "blocked",
++        "expected running or blocked, got {status}"
++    );
+     assert_eq!(body["pending_control"], "cancel");
+ 
+-    // Verify the durable store view converges to cancelled failure.
+-    let body = wait_for_run_state(&app, &run_id, "failed", "cancelled").await;
++    // Verify the durable store view converges to canonical cancelled.
++    let body = wait_for_run_state(&app, &run_id, "cancelled", "cancelled").await;
+     assert_eq!(body["status_reason"], "cancelled");
+ }
+ 
+@@ -254,8 +258,8 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
+     let response = app.clone().oneshot(req).await.unwrap();
+     assert_eq!(response.status(), StatusCode::OK);
+ 
+-    let status = wait_for_run_status(&app, &run_id, &["failed"]).await;
+-    assert_eq!(status, "failed");
++    let status = wait_for_run_status(&app, &run_id, &["cancelled"]).await;
++    assert_eq!(status, "cancelled");
+ 
+     let req = Request::builder()
+         .method("GET")
