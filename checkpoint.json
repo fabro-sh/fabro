@@ -1,10 +1,11 @@
 {
-  "timestamp": "2026-04-15T14:20:06.781355Z",
-  "current_node": "compile_rust",
+  "timestamp": "2026-04-15T14:20:20.388493Z",
+  "current_node": "compile_typescript",
   "completed_nodes": [
     "start",
     "toolchain",
-    "compile_rust"
+    "compile_rust",
+    "compile_typescript"
   ],
   "node_retries": {},
   "context_values": {
@@ -15,16 +16,18 @@
     "thread.start.current_node": "toolchain",
     "command.stderr": "",
     "thread.toolchain.current_node": "compile_rust",
+    "internal.retry_count.compile_typescript": 0,
     "internal.retry_count.toolchain": 0,
     "graph.retry_target": "exit",
-    "internal.thread_id": "toolchain",
+    "internal.thread_id": "compile_rust",
     "internal.run_id": "01KP8R1FGHYXRYNNM1MSY9QRXQ",
+    "thread.compile_rust.current_node": "compile_typescript",
     "internal.node_visit_count": 1,
-    "command.output": "",
+    "command.output": "bun install v1.3.10 (30e609e0)\n\n+ @tailwindcss/cli@4.2.2\n+ @types/node@22.19.13\n+ @types/react@19.2.14\n+ @types/react-dom@19.2.3\n+ tailwindcss@4.2.1\n+ typescript@5.9.3\n+ @dnd-kit/core@6.3.1\n+ @dnd-kit/sortable@10.0.0\n+ @dnd-kit/utilities@3.2.2\n+ @headlessui/react@2.2.9\n+ @heroicons/react@2.2.0\n+ @pierre/diffs@1.0.11\n+ @viz-js/viz@3.25.0\n+ react@19.2.4\n+ react-dom@19.2.4\n+ react-router@7.12.0\n\n1154 packages installed [5.03s]\n$ tsc\n",
     "failure_signature": "",
     "graph.goal": "Verify the sandbox can lint and test the project",
     "outcome": "success",
-    "current_node": "compile_rust",
+    "current_node": "compile_typescript",
     "graph.rankdir": "LR"
   },
   "node_outcomes": {
@@ -49,12 +52,22 @@
       },
       "notes": "Script completed: cargo check -q --workspace 2>&1",
       "usage": null
+    },
+    "compile_typescript": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "bun install v1.3.10 (30e609e0)\n\n+ @tailwindcss/cli@4.2.2\n+ @types/node@22.19.13\n+ @types/react@19.2.14\n+ @types/react-dom@19.2.3\n+ tailwindcss@4.2.1\n+ typescript@5.9.3\n+ @dnd-kit/core@6.3.1\n+ @dnd-kit/sortable@10.0.0\n+ @dnd-kit/utilities@3.2.2\n+ @headlessui/react@2.2.9\n+ @heroicons/react@2.2.0\n+ @pierre/diffs@1.0.11\n+ @viz-js/viz@3.25.0\n+ react@19.2.4\n+ react-dom@19.2.4\n+ react-router@7.12.0\n\n1154 packages installed [5.03s]\n$ tsc\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: cd apps/fabro-web && bun install && bun run typecheck 2>&1",
+      "usage": null
     }
   },
-  "next_node_id": "compile_typescript",
+  "next_node_id": "lint_rust",
   "node_visits": {
     "toolchain": 1,
     "compile_rust": 1,
+    "compile_typescript": 1,
     "start": 1
   }
 }
