@@ -1,34 +1,33 @@
 {
-  "timestamp": "2026-04-15T15:29:19.027995Z",
-  "current_node": "toolchain",
+  "timestamp": "2026-04-15T15:32:04.676386Z",
+  "current_node": "compile_rust",
   "completed_nodes": [
     "start",
-    "toolchain"
+    "toolchain",
+    "compile_rust"
   ],
   "node_retries": {},
   "context_values": {
     "internal.node_visit_count": 1,
+    "thread.toolchain.current_node": "compile_rust",
     "graph.rankdir": "LR",
     "internal.retry_count.toolchain": 0,
     "outcome": "success",
+    "internal.retry_count.compile_rust": 0,
     "internal.retry_count.start": 0,
     "failure_signature": "",
-    "internal.thread_id": "start",
+    "internal.thread_id": "toolchain",
     "failure_class": "",
-    "current_node": "toolchain",
+    "current_node": "compile_rust",
     "thread.start.current_node": "toolchain",
     "graph.retry_target": "exit",
-    "command.output": "rustc 1.94.0 (4a4ef493e 2026-03-02)\ncargo 1.94.0 (85eff7c80 2026-01-15)\n1.3.10\n",
+    "command.output": "",
     "internal.fidelity": "compact",
     "internal.run_id": "01KP8W5AM70ZNGCF1BBGJYBWGR",
     "command.stderr": "",
     "graph.goal": "Verify the sandbox can lint and test the project"
   },
   "node_outcomes": {
-    "start": {
-      "status": "success",
-      "usage": null
-    },
     "toolchain": {
       "status": "success",
       "context_updates": {
@@ -37,11 +36,25 @@
       },
       "notes": "Script completed: rustc --version && cargo --version && bun --version 2>&1",
       "usage": null
+    },
+    "compile_rust": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": ""
+      },
+      "notes": "Script completed: cargo check -q --workspace 2>&1",
+      "usage": null
+    },
+    "start": {
+      "status": "success",
+      "usage": null
     }
   },
-  "next_node_id": "compile_rust",
+  "next_node_id": "compile_typescript",
   "node_visits": {
     "start": 1,
-    "toolchain": 1
+    "toolchain": 1,
+    "compile_rust": 1
   }
 }

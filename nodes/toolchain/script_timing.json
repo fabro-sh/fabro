@@ -1,0 +1,7 @@
+{
+  "stdout": "rustc 1.94.0 (4a4ef493e 2026-03-02)\ncargo 1.94.0 (85eff7c80 2026-01-15)\n1.3.10\n",
+  "stderr": "",
+  "exit_code": 0,
+  "duration_ms": 195,
+  "timed_out": false
+}
