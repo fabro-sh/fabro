@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { BlockedReason } from './blocked-reason';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { InternalRunStatus } from './internal-run-status';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -26,8 +29,8 @@ import type { StatusReason } from './status-reason';
 export interface RunStatusRecord {
     'status': InternalRunStatus;
     'reason'?: StatusReason | null;
+    'blocked_reason'?: BlockedReason | null;
     'updated_at': string;
 }
-
 
 

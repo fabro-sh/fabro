@@ -97,7 +97,7 @@ fn seed_anthropic_vault(storage_dir: &std::path::Path, base_url: &str) {
             "anthropic",
             &serde_json::to_string(&AuthCredential {
                 provider: Provider::Anthropic,
-                details:  AuthDetails::ApiKey {
+                details: AuthDetails::ApiKey {
                     key: "vault-anthropic-key".to_string(),
                 },
             })

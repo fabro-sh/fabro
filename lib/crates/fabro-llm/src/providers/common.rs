@@ -213,8 +213,8 @@ pub async fn send_and_read_response(
 /// configurable delimiter (e.g. `"\n"` for Gemini/OpenAI-compatible, `"\n\n"`
 /// for Anthropic/OpenAI SSE event blocks).
 pub struct LineReader {
-    response:            fabro_http::Response,
-    buffer:              String,
+    response: fabro_http::Response,
+    buffer: String,
     stream_read_timeout: Option<std::time::Duration>,
 }
 
@@ -267,7 +267,7 @@ impl LineReader {
                     warn!("Stream read timed out waiting for next event");
                     return Err(Error::Stream {
                         message: "stream read timed out waiting for next event".to_string(),
-                        source:  None,
+                        source: None,
                     });
                 }
             }
@@ -467,9 +467,9 @@ mod tests {
     #[test]
     fn extract_system_prompt_developer_role() {
         let dev = Message {
-            role:         Role::Developer,
-            content:      vec![ContentPart::text("dev instructions")],
-            name:         None,
+            role: Role::Developer,
+            content: vec![ContentPart::text("dev instructions")],
+            name: None,
             tool_call_id: None,
         };
         let msgs = vec![dev, Message::user("hi")];
@@ -481,9 +481,9 @@ mod tests {
     #[test]
     fn extract_system_prompt_ignores_whitespace_system_and_developer() {
         let dev = Message {
-            role:         Role::Developer,
-            content:      vec![ContentPart::text(" \n\t ")],
-            name:         None,
+            role: Role::Developer,
+            content: vec![ContentPart::text(" \n\t ")],
+            name: None,
             tool_call_id: None,
         };
         let msgs = vec![Message::system("   "), dev, Message::user("hi")];

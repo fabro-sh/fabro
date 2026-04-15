@@ -23,37 +23,37 @@ use crate::{
 /// Configuration for a Docker-based sandbox.
 pub struct DockerSandboxOptions {
     /// Docker image to use. Default: `"fabro-agent:latest"`.
-    pub image:                  String,
+    pub image: String,
     /// Host directory to bind-mount into the container.
     pub host_working_directory: String,
     /// Mount point inside the container. Default: `"/workspace"`.
-    pub container_mount_point:  String,
+    pub container_mount_point: String,
     /// Docker network mode. Default: `Some("bridge")`.
-    pub network_mode:           Option<String>,
+    pub network_mode: Option<String>,
     /// Additional `"host_path:container_path"` bind mounts.
-    pub extra_mounts:           Vec<String>,
+    pub extra_mounts: Vec<String>,
     /// Memory limit in bytes. `None` = unlimited.
-    pub memory_limit:           Option<i64>,
+    pub memory_limit: Option<i64>,
     /// CPU quota (microseconds per 100ms period). `None` = unlimited.
-    pub cpu_quota:              Option<i64>,
+    pub cpu_quota: Option<i64>,
     /// Whether to pull the image if not found locally. Default: `true`.
-    pub auto_pull:              bool,
+    pub auto_pull: bool,
     /// Additional `KEY=VALUE` environment variables for the container.
-    pub env_vars:               Vec<String>,
+    pub env_vars: Vec<String>,
 }
 
 impl Default for DockerSandboxOptions {
     fn default() -> Self {
         Self {
-            image:                  "fabro-agent:latest".to_string(),
+            image: "fabro-agent:latest".to_string(),
             host_working_directory: String::new(),
-            container_mount_point:  "/workspace".to_string(),
-            network_mode:           Some("bridge".to_string()),
-            extra_mounts:           Vec::new(),
-            memory_limit:           None,
-            cpu_quota:              None,
-            auto_pull:              true,
-            env_vars:               Vec::new(),
+            container_mount_point: "/workspace".to_string(),
+            network_mode: Some("bridge".to_string()),
+            extra_mounts: Vec::new(),
+            memory_limit: None,
+            cpu_quota: None,
+            auto_pull: true,
+            env_vars: Vec::new(),
         }
     }
 }
@@ -64,13 +64,13 @@ impl Default for DockerSandboxOptions {
 /// file operations, commands, grep, and glob execute inside the container via
 /// `docker exec`.
 pub struct DockerSandbox {
-    docker:            Docker,
-    config:            DockerSandboxOptions,
-    container_id:      OnceCell<String>,
-    cached_platform:   std::sync::OnceLock<String>,
+    docker: Docker,
+    config: DockerSandboxOptions,
+    container_id: OnceCell<String>,
+    cached_platform: std::sync::OnceLock<String>,
     cached_os_version: std::sync::OnceLock<String>,
-    rg_available:      OnceCell<bool>,
-    event_callback:    Option<SandboxEventCallback>,
+    rg_available: OnceCell<bool>,
+    event_callback: Option<SandboxEventCallback>,
 }
 
 impl DockerSandbox {
@@ -361,7 +361,7 @@ impl Sandbox for DockerSandbox {
         }
         let pull_duration = u64::try_from(pull_start.elapsed().as_millis()).unwrap_or(u64::MAX);
         self.emit(SandboxEvent::SnapshotPulled {
-            name:        self.config.image.clone(),
+            name: self.config.image.clone(),
             duration_ms: pull_duration,
         });
 
@@ -432,12 +432,12 @@ impl Sandbox for DockerSandbox {
 
         let init_duration = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
         self.emit(SandboxEvent::Ready {
-            provider:    "docker".into(),
+            provider: "docker".into(),
             duration_ms: init_duration,
-            name:        None,
-            cpu:         None,
-            memory:      None,
-            url:         None,
+            name: None,
+            cpu: None,
+            memory: None,
+            url: None,
         });
 
         Ok(())

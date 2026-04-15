@@ -12,8 +12,8 @@ const GIT: &str = "git -c maintenance.auto=0 -c gc.auto=0";
 
 /// Information returned when a sandbox sets up git for a workflow run.
 pub struct GitRunInfo {
-    pub base_sha:    String,
-    pub run_branch:  String,
+    pub base_sha: String,
+    pub run_branch: String,
     pub base_branch: Option<String>,
 }
 
@@ -188,28 +188,28 @@ pub enum SandboxEvent {
         provider: String,
     },
     Ready {
-        provider:    String,
+        provider: String,
         duration_ms: u64,
-        name:        Option<String>,
-        cpu:         Option<f64>,
-        memory:      Option<f64>,
-        url:         Option<String>,
+        name: Option<String>,
+        cpu: Option<f64>,
+        memory: Option<f64>,
+        url: Option<String>,
     },
     InitializeFailed {
-        provider:    String,
-        error:       String,
+        provider: String,
+        error: String,
         duration_ms: u64,
     },
     CleanupStarted {
         provider: String,
     },
     CleanupCompleted {
-        provider:    String,
+        provider: String,
         duration_ms: u64,
     },
     CleanupFailed {
         provider: String,
-        error:    String,
+        error: String,
     },
 
     // -- Docker --
@@ -217,7 +217,7 @@ pub enum SandboxEvent {
         name: String,
     },
     SnapshotPulled {
-        name:        String,
+        name: String,
         duration_ms: u64,
     },
 
@@ -229,25 +229,25 @@ pub enum SandboxEvent {
         name: String,
     },
     SnapshotReady {
-        name:        String,
+        name: String,
         duration_ms: u64,
     },
     SnapshotFailed {
-        name:  String,
+        name: String,
         error: String,
     },
 
     // -- Daytona git --
     GitCloneStarted {
-        url:    String,
+        url: String,
         branch: Option<String>,
     },
     GitCloneCompleted {
-        url:         String,
+        url: String,
         duration_ms: u64,
     },
     GitCloneFailed {
-        url:   String,
+        url: String,
         error: String,
     },
 }
@@ -344,25 +344,25 @@ pub fn format_lines_numbered(content: &str, offset: Option<usize>, limit: Option
 
 #[derive(Debug, Clone)]
 pub struct ExecResult {
-    pub stdout:      String,
-    pub stderr:      String,
-    pub exit_code:   i32,
-    pub timed_out:   bool,
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+    pub timed_out: bool,
     pub duration_ms: u64,
 }
 
 #[derive(Debug, Clone)]
 pub struct DirEntry {
-    pub name:   String,
+    pub name: String,
     pub is_dir: bool,
-    pub size:   Option<u64>,
+    pub size: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct GrepOptions {
-    pub glob_filter:      Option<String>,
+    pub glob_filter: Option<String>,
     pub case_insensitive: bool,
-    pub max_results:      Option<usize>,
+    pub max_results: Option<usize>,
 }
 
 #[async_trait]
@@ -612,10 +612,10 @@ mod tests {
     #[test]
     fn exec_result_fields() {
         let result = ExecResult {
-            stdout:      "out".into(),
-            stderr:      "err".into(),
-            exit_code:   1,
-            timed_out:   true,
+            stdout: "out".into(),
+            stderr: "err".into(),
+            exit_code: 1,
+            timed_out: true,
             duration_ms: 5000,
         };
         assert_eq!(result.exit_code, 1);
@@ -626,9 +626,9 @@ mod tests {
     #[test]
     fn dir_entry_fields() {
         let entry = DirEntry {
-            name:   "src".into(),
+            name: "src".into(),
             is_dir: true,
-            size:   None,
+            size: None,
         };
         assert_eq!(entry.name, "src");
         assert!(entry.is_dir);
@@ -650,34 +650,34 @@ mod tests {
                 provider: "local".into(),
             },
             SandboxEvent::Ready {
-                provider:    "local".into(),
+                provider: "local".into(),
                 duration_ms: 50,
-                name:        None,
-                cpu:         None,
-                memory:      None,
-                url:         None,
+                name: None,
+                cpu: None,
+                memory: None,
+                url: None,
             },
             SandboxEvent::InitializeFailed {
-                provider:    "docker".into(),
-                error:       "no daemon".into(),
+                provider: "docker".into(),
+                error: "no daemon".into(),
                 duration_ms: 100,
             },
             SandboxEvent::CleanupStarted {
                 provider: "daytona".into(),
             },
             SandboxEvent::CleanupCompleted {
-                provider:    "daytona".into(),
+                provider: "daytona".into(),
                 duration_ms: 200,
             },
             SandboxEvent::CleanupFailed {
                 provider: "docker".into(),
-                error:    "container gone".into(),
+                error: "container gone".into(),
             },
             SandboxEvent::SnapshotPulling {
                 name: "ubuntu:22.04".into(),
             },
             SandboxEvent::SnapshotPulled {
-                name:        "ubuntu:22.04".into(),
+                name: "ubuntu:22.04".into(),
                 duration_ms: 5000,
             },
             SandboxEvent::SnapshotEnsuring {
@@ -687,23 +687,23 @@ mod tests {
                 name: "my-snap".into(),
             },
             SandboxEvent::SnapshotReady {
-                name:        "my-snap".into(),
+                name: "my-snap".into(),
                 duration_ms: 30000,
             },
             SandboxEvent::SnapshotFailed {
-                name:  "my-snap".into(),
+                name: "my-snap".into(),
                 error: "build failed".into(),
             },
             SandboxEvent::GitCloneStarted {
-                url:    "https://github.com/org/repo.git".into(),
+                url: "https://github.com/org/repo.git".into(),
                 branch: Some("main".into()),
             },
             SandboxEvent::GitCloneCompleted {
-                url:         "https://github.com/org/repo.git".into(),
+                url: "https://github.com/org/repo.git".into(),
                 duration_ms: 8000,
             },
             SandboxEvent::GitCloneFailed {
-                url:   "https://github.com/org/repo.git".into(),
+                url: "https://github.com/org/repo.git".into(),
                 error: "auth failed".into(),
             },
         ];

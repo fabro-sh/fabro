@@ -15,28 +15,28 @@ use crate::retry::RetryPolicy;
 
 #[derive(Debug, Clone)]
 pub struct TestNode {
-    pub id:         String,
-    pub terminal:   bool,
+    pub id: String,
+    pub terminal: bool,
     pub max_visits: Option<usize>,
-    pub goal_gate:  Option<(String, StageStatus)>,
+    pub goal_gate: Option<(String, StageStatus)>,
 }
 
 impl TestNode {
     pub fn new(id: &str) -> Self {
         Self {
-            id:         id.to_string(),
-            terminal:   false,
+            id: id.to_string(),
+            terminal: false,
             max_visits: None,
-            goal_gate:  None,
+            goal_gate: None,
         }
     }
 
     pub fn terminal(id: &str) -> Self {
         Self {
-            id:         id.to_string(),
-            terminal:   true,
+            id: id.to_string(),
+            terminal: true,
             max_visits: None,
-            goal_gate:  None,
+            goal_gate: None,
         }
     }
 
@@ -71,18 +71,18 @@ impl NodeSpec for TestNode {
 
 #[derive(Debug, Clone)]
 pub struct TestEdge {
-    pub from:         String,
-    pub to:           String,
-    pub label:        Option<String>,
+    pub from: String,
+    pub to: String,
+    pub label: Option<String>,
     pub loop_restart: bool,
 }
 
 impl TestEdge {
     pub fn new(from: &str, to: &str) -> Self {
         Self {
-            from:         from.to_string(),
-            to:           to.to_string(),
-            label:        None,
+            from: from.to_string(),
+            to: to.to_string(),
+            label: None,
             loop_restart: false,
         }
     }
@@ -118,8 +118,8 @@ impl EdgeSpec for TestEdge {
 
 #[derive(Debug, Clone)]
 pub struct TestGraph {
-    pub nodes:         Vec<TestNode>,
-    pub edges:         Vec<TestEdge>,
+    pub nodes: Vec<TestNode>,
+    pub edges: Vec<TestEdge>,
     pub start_node_id: String,
     pub retry_targets: HashMap<String, String>,
 }
@@ -180,7 +180,7 @@ impl Graph for TestGraph {
                 .find(|e| e.label.as_deref() == Some(label.as_str()))
             {
                 return Some(EdgeSelection {
-                    edge:   e.clone(),
+                    edge: e.clone(),
                     reason: "preferred_label",
                 });
             }
@@ -193,7 +193,7 @@ impl Graph for TestGraph {
             .find(|e| e.label.as_deref() == Some(status_label.as_str()))
         {
             return Some(EdgeSelection {
-                edge:   e.clone(),
+                edge: e.clone(),
                 reason: "condition",
             });
         }
@@ -202,7 +202,7 @@ impl Graph for TestGraph {
         for suggested in &outcome.suggested_next_ids {
             if let Some(e) = edges.iter().find(|e| e.to == *suggested) {
                 return Some(EdgeSelection {
-                    edge:   e.clone(),
+                    edge: e.clone(),
                     reason: "suggested_next",
                 });
             }
@@ -211,7 +211,7 @@ impl Graph for TestGraph {
         // Fourth: unconditional (no label)
         if let Some(e) = edges.iter().find(|e| e.label.is_none()) {
             return Some(EdgeSelection {
-                edge:   e.clone(),
+                edge: e.clone(),
                 reason: "unconditional",
             });
         }
@@ -286,16 +286,16 @@ impl NodeHandler<TestGraph> for AlwaysFailHandler {
 }
 
 pub struct CountingHandler {
-    pub call_count:   AtomicU32,
-    pub outcomes:     std::sync::Mutex<Vec<std::result::Result<Outcome, Error>>>,
+    pub call_count: AtomicU32,
+    pub outcomes: std::sync::Mutex<Vec<std::result::Result<Outcome, Error>>>,
     pub retry_policy: RetryPolicy,
 }
 
 impl CountingHandler {
     pub fn new(outcomes: Vec<std::result::Result<Outcome, Error>>) -> Self {
         Self {
-            call_count:   AtomicU32::new(0),
-            outcomes:     std::sync::Mutex::new(outcomes),
+            call_count: AtomicU32::new(0),
+            outcomes: std::sync::Mutex::new(outcomes),
             retry_policy: RetryPolicy::none(),
         }
     }
@@ -336,7 +336,7 @@ impl NodeHandler<TestGraph> for CountingHandler {
 /// A handler that dispatches based on node ID.
 pub struct DispatchHandler {
     handlers: HashMap<String, Arc<dyn NodeHandler<TestGraph>>>,
-    default:  Arc<dyn NodeHandler<TestGraph>>,
+    default: Arc<dyn NodeHandler<TestGraph>>,
 }
 
 impl DispatchHandler {
@@ -380,17 +380,17 @@ impl NodeHandler<TestGraph> for DispatchHandler {
 /// A handler that returns Err(Error::Handler) with configurable
 /// retryability.
 pub struct ErrorHandler {
-    pub detail:       HandlerErrorDetail,
+    pub detail: HandlerErrorDetail,
     pub retry_policy: RetryPolicy,
 }
 
 impl ErrorHandler {
     pub fn retryable(message: &str, policy: RetryPolicy) -> Self {
         Self {
-            detail:       HandlerErrorDetail {
-                message:   message.to_string(),
+            detail: HandlerErrorDetail {
+                message: message.to_string(),
                 retryable: true,
-                category:  None,
+                category: None,
                 signature: None,
             },
             retry_policy: policy,
@@ -399,10 +399,10 @@ impl ErrorHandler {
 
     pub fn non_retryable(message: &str) -> Self {
         Self {
-            detail:       HandlerErrorDetail {
-                message:   message.to_string(),
+            detail: HandlerErrorDetail {
+                message: message.to_string(),
                 retryable: false,
-                category:  None,
+                category: None,
                 signature: None,
             },
             retry_policy: RetryPolicy::none(),

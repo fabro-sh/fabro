@@ -36,13 +36,9 @@ interface ColumnStyle {
 
 const columnStyles: Record<string, ColumnStyle> = {
   working:   { accent: "bg-teal-500", iconColor: "text-teal-500", iconType: "branch", actions: ["Watch", "Steer"] },
-  initializing: { accent: "bg-amber", iconColor: "text-amber", iconType: "branch", actions: [] },
+  blocked:   { accent: "bg-amber",    iconColor: "text-amber",    iconType: "branch", actions: ["Answer Question"] },
   review:    { accent: "bg-mint",     iconColor: "text-mint",     iconType: "pr",     actions: [] },
   merge:     { accent: "bg-teal-300", iconColor: "text-teal-300", iconType: "pr",     actions: ["Merge"] },
-  running:   { accent: "bg-teal-500", iconColor: "text-teal-500", iconType: "branch", actions: ["Watch", "Steer"] },
-  waiting:   { accent: "bg-amber",    iconColor: "text-amber",    iconType: "branch", actions: ["Answer Question"] },
-  succeeded: { accent: "bg-teal-300", iconColor: "text-teal-300", iconType: "pr",     actions: [] },
-  failed:    { accent: "bg-coral",    iconColor: "text-coral",    iconType: "branch", actions: [] },
 };
 
 const defaultColumnStyle: ColumnStyle = { accent: "bg-fg-muted", iconColor: "text-fg-muted", iconType: "branch", actions: [] };
@@ -528,6 +524,8 @@ export default function Runs({ loaderData }: any) {
   const STATUS_EVENTS = new Set([
     "run.submitted", "run.starting", "run.running",
     "run.paused", "run.completed", "run.failed",
+    "interview.started", "interview.completed",
+    "interview.timeout", "interview.interrupted",
   ]);
 
   useEffect(() => {

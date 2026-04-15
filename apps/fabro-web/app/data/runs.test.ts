@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mapRunSummaryToRunItem } from "./runs";
+import { mapRunSummaryToRunItem, isRunStatus } from "./runs";
 
 describe("mapRunSummaryToRunItem", () => {
   test("maps store run summary to RunItem", () => {
@@ -15,6 +15,7 @@ describe("mapRunSummaryToRunItem", () => {
       labels: {},
       start_time: "2026-04-08T12:00:00Z",
       status_reason: null,
+      blocked_reason: null,
       pending_control: null,
     };
     const item = mapRunSummaryToRunItem(summary);
@@ -38,6 +39,7 @@ describe("mapRunSummaryToRunItem", () => {
       labels: {},
       start_time: null,
       status_reason: null,
+      blocked_reason: null,
       pending_control: null,
     };
     const item = mapRunSummaryToRunItem(summary);
@@ -45,5 +47,19 @@ describe("mapRunSummaryToRunItem", () => {
     expect(item.title).toBe("Untitled run");
     expect(item.workflow).toBe("unknown");
     expect(item.repo).toBe("unknown");
+  });
+
+  test("summary mapping accepts blocked, paused, completed, and cancelled statuses", () => {
+    for (const status of ["blocked", "paused", "completed", "cancelled"]) {
+      expect(isRunStatus(status)).toBe(true);
+    }
+  });
+
+  test("no UI code depends on waiting status", () => {
+    expect(isRunStatus("waiting")).toBe(false);
+  });
+
+  test("no UI code depends on dead status", () => {
+    expect(isRunStatus("dead")).toBe(false);
   });
 });

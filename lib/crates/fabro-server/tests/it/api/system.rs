@@ -157,8 +157,8 @@ async fn get_system_disk_usage_returns_summary_and_verbose_rows() {
 
     let run_id = create_run(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT)).await;
     start_run(&app, &run_id).await;
-    let status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
-    assert_eq!(status, "succeeded");
+    let status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
+    assert_eq!(status, "completed");
 
     let logs_dir = storage_dir.join("logs");
     std::fs::create_dir_all(&logs_dir).unwrap();
@@ -189,8 +189,8 @@ async fn prune_runs_supports_dry_run_and_deletion() {
 
     let run_id = create_run(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT)).await;
     start_run(&app, &run_id).await;
-    let status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
-    assert_eq!(status, "succeeded");
+    let status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
+    assert_eq!(status, "completed");
 
     let run_id_parsed: RunId = run_id.parse().unwrap();
     let run_dir = Storage::new(&storage_dir)

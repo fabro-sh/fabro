@@ -2,21 +2,21 @@ use serde_json::{Value, json};
 
 #[derive(Clone, Debug)]
 pub struct ResponsePlan {
-    pub id:                String,
-    pub created:           u64,
-    pub model:             String,
-    pub response_text:     String,
+    pub id: String,
+    pub created: u64,
+    pub model: String,
+    pub response_text: String,
     pub structured_output: Option<Value>,
-    pub reasoning:         Vec<String>,
-    pub tool_calls:        Vec<ToolCallPlan>,
-    pub input_tokens:      u64,
-    pub output_tokens:     u64,
+    pub reasoning: Vec<String>,
+    pub tool_calls: Vec<ToolCallPlan>,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
 }
 
 #[derive(Clone, Debug)]
 pub struct ToolCallPlan {
-    pub id:        String,
-    pub name:      String,
+    pub id: String,
+    pub name: String,
     pub arguments: Value,
 }
 

@@ -49,11 +49,14 @@ pub(crate) async fn run(
         .as_deref()
         .map(str::parse::<RewindTarget>)
         .transpose()?;
-    let new_run_id = fork(&store, &ForkRunInput {
-        source_run_id: run_id,
-        target,
-        push: !args.no_push,
-    })?;
+    let new_run_id = fork(
+        &store,
+        &ForkRunInput {
+            source_run_id: run_id,
+            target,
+            push: !args.no_push,
+        },
+    )?;
 
     let run_id_string = run_id.to_string();
     let new_run_id_string = new_run_id.to_string();

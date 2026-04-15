@@ -12,10 +12,10 @@ pub type SharedState = Arc<RwLock<AppState>>;
 
 /// A running test server instance.
 pub struct TestServer {
-    url:         String,
+    url: String,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
-    handle:      Option<tokio::task::JoinHandle<()>>,
-    _git_root:   TempDir, // Kept alive for the server's lifetime; cleaned up on drop
+    handle: Option<tokio::task::JoinHandle<()>>,
+    _git_root: TempDir, // Kept alive for the server's lifetime; cleaned up on drop
 }
 
 impl TestServer {

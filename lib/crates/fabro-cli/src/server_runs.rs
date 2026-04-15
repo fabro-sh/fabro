@@ -11,9 +11,9 @@ use fabro_workflow::run_lookup::{RunInfo, resolve_run_from_summaries, scratch_ba
 use crate::server_client::{self, ServerStoreClient};
 
 pub(crate) struct ServerRunLookup {
-    client:       ServerStoreClient,
+    client: ServerStoreClient,
     scratch_base: PathBuf,
-    summaries:    Vec<RunSummary>,
+    summaries: Vec<RunSummary>,
 }
 
 impl ServerRunLookup {
@@ -63,7 +63,7 @@ impl ServerRunSummaryInfo {
     }
 
     pub(crate) fn status(&self) -> RunStatus {
-        self.summary.status.unwrap_or(RunStatus::Dead)
+        self.summary.status.unwrap_or(RunStatus::Failed)
     }
 
     pub(crate) fn status_reason(&self) -> Option<StatusReason> {
@@ -105,7 +105,7 @@ impl ServerRunSummaryInfo {
 
 pub(crate) struct ServerSummaryLookup {
     client: Arc<ServerStoreClient>,
-    runs:   Vec<ServerRunSummaryInfo>,
+    runs: Vec<ServerRunSummaryInfo>,
 }
 
 impl ServerSummaryLookup {

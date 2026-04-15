@@ -81,14 +81,14 @@ async fn ensure_server_running_with_bind(
     }
 
     let serve_args = ServeArgs {
-        bind:                bind_request.as_ref().map(ToString::to_string),
-        web:                 false,
-        no_web:              false,
-        model:               None,
-        provider:            None,
-        sandbox:             None,
+        bind: bind_request.as_ref().map(ToString::to_string),
+        web: false,
+        no_web: false,
+        model: None,
+        provider: None,
+        sandbox: None,
         max_concurrent_runs: server_max_concurrent_runs_override(),
-        config:              Some(config_path.to_path_buf()),
+        config: Some(config_path.to_path_buf()),
     };
 
     let bind_request = if let Some(bind_request) = bind_request {
@@ -266,13 +266,16 @@ async fn execute_foreground(
         Some(storage_dir),
         move |resolved_bind| {
             print_dev_token(printer, &home, &token);
-            record::write_server_record(&record_path, &record::ServerRecord {
-                pid,
-                bind: resolved_bind.clone(),
-                log_path: log_path.clone(),
-                dev_token_path: Some(home.dev_token_path()),
-                started_at: Utc::now(),
-            })
+            record::write_server_record(
+                &record_path,
+                &record::ServerRecord {
+                    pid,
+                    bind: resolved_bind.clone(),
+                    log_path: log_path.clone(),
+                    dev_token_path: Some(home.dev_token_path()),
+                    started_at: Utc::now(),
+                },
+            )
         },
     ))
     .await

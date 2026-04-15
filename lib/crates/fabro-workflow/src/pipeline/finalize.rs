@@ -37,10 +37,10 @@ pub fn classify_engine_result(
             let failure_reason = outcome.failure_reason().map(String::from);
             let (run_status, status_reason) = match status {
                 StageStatus::Success | StageStatus::Skipped => {
-                    (RunStatus::Succeeded, Some(StatusReason::Completed))
+                    (RunStatus::Completed, Some(StatusReason::Completed))
                 }
                 StageStatus::PartialSuccess => {
-                    (RunStatus::Succeeded, Some(StatusReason::PartialSuccess))
+                    (RunStatus::Completed, Some(StatusReason::PartialSuccess))
                 }
                 StageStatus::Fail | StageStatus::Retry => {
                     (RunStatus::Failed, Some(StatusReason::WorkflowError))
@@ -319,17 +319,17 @@ mod tests {
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings:         SettingsLayer::default(),
-            run_dir:          run_dir.to_path_buf(),
-            cancel_token:     None,
-            run_id:           test_run_id(),
-            labels:           HashMap::new(),
-            workflow_slug:    None,
-            github_app:       None,
-            host_repo_path:   None,
-            base_branch:      None,
+            settings: SettingsLayer::default(),
+            run_dir: run_dir.to_path_buf(),
+            cancel_token: None,
+            run_id: test_run_id(),
+            labels: HashMap::new(),
+            workflow_slug: None,
+            github_app: None,
+            host_repo_path: None,
+            base_branch: None,
             display_base_sha: None,
-            git:              None,
+            git: None,
         }
     }
 
@@ -366,15 +366,18 @@ mod tests {
             retro: None,
         };
 
-        let concluded = finalize(retroed, &FinalizeOptions {
-            run_dir:          run_dir.clone(),
-            run_id:           test_run_id(),
-            run_store:        run_store.clone().into(),
-            workflow_name:    "test".to_string(),
-            hook_runner:      None,
-            preserve_sandbox: true,
-            last_git_sha:     None,
-        })
+        let concluded = finalize(
+            retroed,
+            &FinalizeOptions {
+                run_dir: run_dir.clone(),
+                run_id: test_run_id(),
+                run_store: run_store.clone().into(),
+                workflow_name: "test".to_string(),
+                hook_runner: None,
+                preserve_sandbox: true,
+                last_git_sha: None,
+            },
+        )
         .await
         .unwrap();
         store_logger.flush().await;

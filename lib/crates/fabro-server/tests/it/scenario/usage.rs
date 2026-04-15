@@ -19,8 +19,8 @@ async fn aggregate_billing_increments_after_run_completes() {
             .await;
 
     // Poll until run completes
-    let status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
-    assert_eq!(status, "succeeded");
+    let status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
+    assert_eq!(status, "completed");
 
     let mut total_runs = 0;
     for _ in 0..POLL_ATTEMPTS {

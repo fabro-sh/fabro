@@ -77,7 +77,7 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
     [
       {
         "run_id": "[ULID]",
-        "status": "succeeded",
+        "status": "completed",
         "run_record": {
           "goal": "Run tests and report results",
           "workflow_name": "Simple",
@@ -143,7 +143,7 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
     [
       {
         "run_id": "[ULID]",
-        "status": "succeeded",
+        "status": "completed",
         "run_record": {
           "goal": "Run tests and report results",
           "workflow_name": "Simple",
@@ -194,7 +194,7 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
     [
       {
         "run_id": "[ULID]",
-        "status": "succeeded",
+        "status": "completed",
         "run_record": {
           "goal": "Edit a tracked file",
           "workflow_name": "Flow",

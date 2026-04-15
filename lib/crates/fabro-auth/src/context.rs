@@ -3,13 +3,13 @@ use fabro_model::Provider;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthContextRequest {
     ApiKey {
-        provider:      Provider,
+        provider: Provider,
         env_var_names: Vec<String>,
     },
     DeviceCode {
-        user_code:        String,
+        user_code: String,
         verification_uri: String,
-        expires_in:       u64,
+        expires_in: u64,
     },
 }
 

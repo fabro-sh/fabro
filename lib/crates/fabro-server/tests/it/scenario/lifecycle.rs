@@ -155,8 +155,8 @@ async fn full_http_lifecycle_approve_and_complete() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
     // 4. Poll until the run reaches a terminal success or failure state.
-    let final_status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
-    assert_eq!(final_status, "succeeded");
+    let final_status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
+    assert_eq!(final_status, "completed");
 
     // 5. Verify no pending questions
     let req = Request::builder()
@@ -214,8 +214,8 @@ async fn full_http_lifecycle_cancel() {
     assert_eq!(body["status"], "running");
     assert_eq!(body["pending_control"], "cancel");
 
-    // Verify the durable store view converges to cancelled failure.
-    let body = wait_for_run_state(&app, &run_id, "failed", "cancelled").await;
+    // Verify the durable store view converges to cancelled status.
+    let body = wait_for_run_state(&app, &run_id, "cancelled", "cancelled").await;
     assert_eq!(body["status_reason"], "cancelled");
 }
 
@@ -254,8 +254,8 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
     let response = app.clone().oneshot(req).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let status = wait_for_run_status(&app, &run_id, &["failed"]).await;
-    assert_eq!(status, "failed");
+    let status = wait_for_run_status(&app, &run_id, &["cancelled", "failed"]).await;
+    assert_eq!(status, "cancelled");
 
     let req = Request::builder()
         .method("GET")
@@ -280,8 +280,11 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(failed_reasons, vec![(
-        Some("cancelled".to_string()),
-        Some("Pipeline cancelled".to_string())
-    )]);
+    assert_eq!(
+        failed_reasons,
+        vec![(
+            Some("cancelled".to_string()),
+            Some("Pipeline cancelled".to_string())
+        )]
+    );
 }

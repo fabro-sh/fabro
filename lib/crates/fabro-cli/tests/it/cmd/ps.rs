@@ -136,7 +136,7 @@ fn ps_all_json_lists_created_and_completed_runs() {
         "ps should include the created run: {runs:#?}"
     );
     assert!(
-        runs.iter().any(|run| run["status"] == "succeeded"),
+        runs.iter().any(|run| run["status"] == "completed"),
         "ps should include the completed run: {runs:#?}"
     );
 }
@@ -247,7 +247,7 @@ fn ps_filters_by_workflow_and_label() {
     );
     let run = &runs[0];
     assert_eq!(run["workflow_name"], "Simple");
-    assert_eq!(run["status"], "succeeded");
+    assert_eq!(run["status"], "completed");
     assert_eq!(run["labels"]["suite"], "alpha");
     assert_eq!(run["labels"]["fabro_test_case"], context.test_case_id());
     assert_eq!(run["labels"]["fabro_test_run"], context.test_run_id());
@@ -274,7 +274,7 @@ fn ps_uses_configured_server_target_without_server_flag() {
                         },
                         "host_repo_path": "/srv/repo",
                         "start_time": "2026-04-05T12:00:00Z",
-                        "status": "succeeded",
+                        "status": "completed",
                         "status_reason": null,
                         "duration_ms": 123,
                         "total_usd_micros": null

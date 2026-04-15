@@ -20,12 +20,11 @@
 
 export const BoardColumn = {
     WORKING: 'working',
-    INITIALIZING: 'initializing',
+    BLOCKED: 'blocked',
     REVIEW: 'review',
     MERGE: 'merge'
 } as const;
 
 export type BoardColumn = typeof BoardColumn[keyof typeof BoardColumn];
-
 
 

@@ -141,9 +141,9 @@ impl Handler for FanInHandler {
 }
 
 struct Candidate {
-    id:     String,
+    id: String,
     status: String,
-    score:  f64,
+    score: f64,
 }
 
 fn status_rank(status: &str) -> u32 {
@@ -161,16 +161,16 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
     let arr = results.as_array().unwrap_or(&empty_vec);
     if arr.is_empty() {
         return Candidate {
-            id:     "unknown".to_string(),
+            id: "unknown".to_string(),
             status: "fail".to_string(),
-            score:  0.0,
+            score: 0.0,
         };
     }
 
     let mut candidates: Vec<Candidate> = arr
         .iter()
         .map(|v| Candidate {
-            id:     v
+            id: v
                 .get("id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
@@ -180,7 +180,7 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
                 .and_then(|v| v.as_str())
                 .unwrap_or("fail")
                 .to_string(),
-            score:  v
+            score: v
                 .get("score")
                 .and_then(serde_json::Value::as_f64)
                 .unwrap_or(0.0),
@@ -204,9 +204,9 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
     });
 
     candidates.into_iter().next().unwrap_or_else(|| Candidate {
-        id:     "unknown".to_string(),
+        id: "unknown".to_string(),
         status: "fail".to_string(),
-        score:  0.0,
+        score: 0.0,
     })
 }
 
@@ -234,12 +234,12 @@ async fn llm_evaluate(
 
     emitter.emit_scoped(
         &Event::Prompt {
-            stage:    node_id.to_string(),
-            visit:    stage_scope.visit,
-            text:     full_prompt.clone(),
-            mode:     Some("fan_in".to_string()),
+            stage: node_id.to_string(),
+            visit: stage_scope.visit,
+            text: full_prompt.clone(),
+            mode: Some("fan_in".to_string()),
             provider: None,
-            model:    None,
+            model: None,
         },
         &stage_scope,
     );
@@ -273,28 +273,28 @@ async fn llm_evaluate(
                 serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
             emitter.emit_scoped(
                 &Event::PromptCompleted {
-                    node_id:  node_id.to_string(),
+                    node_id: node_id.to_string(),
                     response: response_text.clone(),
-                    model:    String::new(),
+                    model: String::new(),
                     provider: String::new(),
-                    billing:  None,
+                    billing: None,
                 },
                 &stage_scope,
             );
             Ok(Candidate {
-                id:     best_id,
+                id: best_id,
                 status: outcome.status.to_string(),
-                score:  0.0,
+                score: 0.0,
             })
         }
         Ok(CodergenResult::Text { text, .. }) => {
             emitter.emit_scoped(
                 &Event::PromptCompleted {
-                    node_id:  node_id.to_string(),
+                    node_id: node_id.to_string(),
                     response: text.clone(),
-                    model:    String::new(),
+                    model: String::new(),
                     provider: String::new(),
-                    billing:  None,
+                    billing: None,
                 },
                 &stage_scope,
             );
@@ -473,9 +473,9 @@ mod tests {
             ) -> Result<CodergenResult, Error> {
                 // Return text that contains the ID "branch_b"
                 Ok(CodergenResult::Text {
-                    text:              "The best candidate is branch_b".to_string(),
-                    usage:             None,
-                    files_touched:     Vec::new(),
+                    text: "The best candidate is branch_b".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
                     last_file_touched: None,
                 })
             }

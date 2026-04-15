@@ -137,10 +137,13 @@ mod tests {
         let path = dir.path().join("server.env");
         std::fs::write(&path, "EXISTING=value\n").unwrap();
 
-        let entries = merge_env_file(&path, [
-            ("SESSION_SECRET", "secret"),
-            ("FABRO_JWT_PUBLIC_KEY", "jwt"),
-        ])
+        let entries = merge_env_file(
+            &path,
+            [
+                ("SESSION_SECRET", "secret"),
+                ("FABRO_JWT_PUBLIC_KEY", "jwt"),
+            ],
+        )
         .unwrap();
 
         assert_eq!(entries.get("EXISTING").map(String::as_str), Some("value"));

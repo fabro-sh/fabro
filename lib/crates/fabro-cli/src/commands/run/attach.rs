@@ -119,10 +119,10 @@ pub(crate) async fn attach_run_with_client(
 }
 
 struct AttachOptions {
-    auto_approve:   bool,
-    verbose:        bool,
+    auto_approve: bool,
+    verbose: bool,
     kill_on_detach: bool,
-    json_output:    bool,
+    json_output: bool,
 }
 
 fn replay_run_with_client(
@@ -295,7 +295,7 @@ fn api_question_to_question(question: &types::ApiQuestion) -> Question {
         .options
         .iter()
         .map(|option| QuestionOption {
-            key:   option.key.clone(),
+            key: option.key.clone(),
             label: option.label.clone(),
         })
         .collect();
@@ -448,7 +448,7 @@ fn state_exit_code(state: &server_client::RunProjection) -> Option<ExitCode> {
     }
 
     match state.status.as_ref() {
-        Some(record) if record.status == RunStatus::Succeeded => Some(ExitCode::from(0)),
+        Some(record) if record.status == RunStatus::Completed => Some(ExitCode::from(0)),
         Some(record) if record.status.is_terminal() => Some(ExitCode::from(1)),
         Some(_) | None => None,
     }
@@ -571,14 +571,14 @@ mod tests {
     #[test]
     fn answer_requires_reattach_for_interrupted_and_skipped_answers() {
         let interrupted = Answer {
-            value:           AnswerValue::Interrupted,
+            value: AnswerValue::Interrupted,
             selected_option: None,
-            text:            None,
+            text: None,
         };
         let skipped = Answer {
-            value:           AnswerValue::Skipped,
+            value: AnswerValue::Skipped,
             selected_option: None,
-            text:            None,
+            text: None,
         };
         let answered = Answer::yes();
 

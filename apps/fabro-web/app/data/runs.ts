@@ -29,17 +29,13 @@ export interface RunItem {
   sandboxId?: string;
 }
 
-export type ColumnStatus = "working" | "initializing" | "review" | "merge" | "running" | "waiting" | "succeeded" | "failed";
+export type ColumnStatus = "working" | "blocked" | "review" | "merge";
 
 export const columnNames: Record<ColumnStatus, string> = {
   working: "Working",
-  initializing: "Initializing",
+  blocked: "Blocked",
   review: "Verify",
   merge: "Merge",
-  running: "Running",
-  waiting: "Waiting",
-  succeeded: "Succeeded",
-  failed: "Failed",
 };
 
 export interface RunWithStatus extends RunItem {
@@ -83,6 +79,7 @@ export interface RunSummaryResponse {
   host_repo_path: string | null;
   status: string | null;
   status_reason: string | null;
+  blocked_reason: string | null;
   pending_control: string | null;
   duration_ms: number | null;
   total_usd_micros: number | null;
@@ -113,34 +110,34 @@ export function deriveCiStatus(checks: CheckRun[]): CiStatus {
 
 export const statusColors: Record<ColumnStatus, { dot: string; text: string }> = {
   working: { dot: "bg-teal-500", text: "text-teal-500" },
-  initializing: { dot: "bg-amber", text: "text-amber" },
+  blocked: { dot: "bg-amber", text: "text-amber" },
   review: { dot: "bg-mint", text: "text-mint" },
   merge: { dot: "bg-teal-300", text: "text-teal-300" },
-  running: { dot: "bg-teal-500", text: "text-teal-500" },
-  waiting: { dot: "bg-amber", text: "text-amber" },
-  succeeded: { dot: "bg-teal-300", text: "text-teal-300" },
-  failed: { dot: "bg-coral", text: "text-coral" },
 };
 
 export type RunStatus =
   | "submitted"
+  | "queued"
   | "starting"
   | "running"
+  | "blocked"
   | "paused"
   | "removing"
-  | "succeeded"
+  | "completed"
   | "failed"
-  | "dead";
+  | "cancelled";
 
 export const runStatusDisplay: Record<RunStatus, { label: string; dot: string; text: string }> = {
   submitted: { label: "Submitted", dot: "bg-fg-muted", text: "text-fg-muted" },
+  queued: { label: "Queued", dot: "bg-fg-muted", text: "text-fg-muted" },
   starting: { label: "Starting", dot: "bg-amber", text: "text-amber" },
   running: { label: "Running", dot: "bg-teal-500", text: "text-teal-500" },
+  blocked: { label: "Blocked", dot: "bg-amber", text: "text-amber" },
   paused: { label: "Paused", dot: "bg-amber", text: "text-amber" },
   removing: { label: "Removing", dot: "bg-fg-muted", text: "text-fg-muted" },
-  succeeded: { label: "Succeeded", dot: "bg-mint", text: "text-mint" },
+  completed: { label: "Completed", dot: "bg-mint", text: "text-mint" },
   failed: { label: "Failed", dot: "bg-coral", text: "text-coral" },
-  dead: { label: "Dead", dot: "bg-coral", text: "text-coral" },
+  cancelled: { label: "Cancelled", dot: "bg-coral", text: "text-coral" },
 };
 
 const knownRunStatuses = new Set<string>(Object.keys(runStatusDisplay));

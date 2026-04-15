@@ -144,7 +144,7 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
         }),
         @r#"
         {
-          "status": "succeeded",
+          "status": "completed",
           "has_conclusion": true
         }
         "#

@@ -2,7 +2,7 @@ use std::sync::{Mutex, OnceLock};
 
 struct Buffer {
     start: *mut u8,
-    len:   usize,
+    len: usize,
 }
 
 // Safety: after init() we treat the captured argv region as exclusively

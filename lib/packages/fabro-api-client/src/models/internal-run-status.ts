@@ -20,16 +20,17 @@
 
 export const InternalRunStatus = {
     SUBMITTED: 'submitted',
+    QUEUED: 'queued',
     STARTING: 'starting',
     RUNNING: 'running',
+    BLOCKED: 'blocked',
     PAUSED: 'paused',
     REMOVING: 'removing',
-    SUCCEEDED: 'succeeded',
+    COMPLETED: 'completed',
     FAILED: 'failed',
-    DEAD: 'dead'
+    CANCELLED: 'cancelled'
 } as const;
 
 export type InternalRunStatus = typeof InternalRunStatus[keyof typeof InternalRunStatus];
-
 
 

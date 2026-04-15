@@ -17,15 +17,15 @@ use super::interp::InterpString;
 /// A structurally resolved `[server]` view for consumers.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ServerSettings {
-    pub listen:       ServerListenSettings,
-    pub api:          ServerApiSettings,
-    pub web:          ServerWebSettings,
-    pub auth:         ServerAuthSettings,
-    pub storage:      ServerStorageSettings,
-    pub artifacts:    ServerArtifactsSettings,
-    pub slatedb:      ServerSlateDbSettings,
-    pub scheduler:    ServerSchedulerSettings,
-    pub logging:      ServerLoggingSettings,
+    pub listen: ServerListenSettings,
+    pub api: ServerApiSettings,
+    pub web: ServerWebSettings,
+    pub auth: ServerAuthSettings,
+    pub storage: ServerStorageSettings,
+    pub artifacts: ServerArtifactsSettings,
+    pub slatedb: ServerSlateDbSettings,
+    pub scheduler: ServerSchedulerSettings,
+    pub logging: ServerLoggingSettings,
     pub integrations: ServerIntegrationsSettings,
 }
 
@@ -35,7 +35,7 @@ pub enum ServerListenSettings {
     Tcp {
         #[serde(serialize_with = "serialize_socket_addr")]
         address: SocketAddr,
-        tls:     Option<TlsConfig>,
+        tls: Option<TlsConfig>,
     },
     Unix {
         path: InterpString,
@@ -53,14 +53,14 @@ impl Default for ServerListenSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TlsConfig {
     pub cert: InterpString,
-    pub key:  InterpString,
+    pub key: InterpString,
 }
 
 impl Default for TlsConfig {
     fn default() -> Self {
         Self {
             cert: InterpString::parse(""),
-            key:  InterpString::parse(""),
+            key: InterpString::parse(""),
         }
     }
 }
@@ -73,14 +73,14 @@ pub struct ServerApiSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ServerWebSettings {
     pub enabled: bool,
-    pub url:     InterpString,
+    pub url: InterpString,
 }
 
 impl Default for ServerWebSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            url:     InterpString::parse(""),
+            url: InterpString::parse(""),
         }
     }
 }
@@ -88,14 +88,14 @@ impl Default for ServerWebSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ServerAuthSettings {
     pub methods: Vec<ServerAuthMethod>,
-    pub github:  ServerAuthGithubSettings,
+    pub github: ServerAuthGithubSettings,
 }
 
 impl Default for ServerAuthSettings {
     fn default() -> Self {
         Self {
             methods: vec![ServerAuthMethod::DevToken],
-            github:  ServerAuthGithubSettings::default(),
+            github: ServerAuthGithubSettings::default(),
         }
     }
 }
@@ -128,34 +128,34 @@ impl Default for ServerStorageSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ServerArtifactsSettings {
     pub prefix: InterpString,
-    pub store:  ObjectStoreSettings,
+    pub store: ObjectStoreSettings,
 }
 
 impl Default for ServerArtifactsSettings {
     fn default() -> Self {
         Self {
             prefix: InterpString::parse(""),
-            store:  ObjectStoreSettings::default(),
+            store: ObjectStoreSettings::default(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ServerSlateDbSettings {
-    pub prefix:         InterpString,
-    pub store:          ObjectStoreSettings,
+    pub prefix: InterpString,
+    pub store: ObjectStoreSettings,
     #[serde(serialize_with = "serialize_std_duration")]
     pub flush_interval: StdDuration,
-    pub disk_cache:     bool,
+    pub disk_cache: bool,
 }
 
 impl Default for ServerSlateDbSettings {
     fn default() -> Self {
         Self {
-            prefix:         InterpString::parse(""),
-            store:          ObjectStoreSettings::default(),
+            prefix: InterpString::parse(""),
+            store: ObjectStoreSettings::default(),
             flush_interval: StdDuration::ZERO,
-            disk_cache:     false,
+            disk_cache: false,
         }
     }
 }
@@ -167,9 +167,9 @@ pub enum ObjectStoreSettings {
         root: InterpString,
     },
     S3 {
-        bucket:     InterpString,
-        region:     InterpString,
-        endpoint:   Option<InterpString>,
+        bucket: InterpString,
+        region: InterpString,
+        endpoint: Option<InterpString>,
         path_style: bool,
     },
 }
@@ -194,26 +194,26 @@ pub struct ServerLoggingSettings {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ServerIntegrationsSettings {
-    pub github:  GithubIntegrationSettings,
-    pub slack:   SlackIntegrationSettings,
+    pub github: GithubIntegrationSettings,
+    pub slack: SlackIntegrationSettings,
     pub discord: DiscordIntegrationSettings,
-    pub teams:   TeamsIntegrationSettings,
+    pub teams: TeamsIntegrationSettings,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct GithubIntegrationSettings {
-    pub enabled:     bool,
-    pub strategy:    GithubIntegrationStrategy,
-    pub app_id:      Option<InterpString>,
-    pub client_id:   Option<InterpString>,
-    pub slug:        Option<InterpString>,
+    pub enabled: bool,
+    pub strategy: GithubIntegrationStrategy,
+    pub app_id: Option<InterpString>,
+    pub client_id: Option<InterpString>,
+    pub slug: Option<InterpString>,
     pub permissions: HashMap<String, InterpString>,
-    pub webhooks:    Option<IntegrationWebhooksSettings>,
+    pub webhooks: Option<IntegrationWebhooksSettings>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SlackIntegrationSettings {
-    pub enabled:         bool,
+    pub enabled: bool,
     pub default_channel: Option<InterpString>,
 }
 
@@ -251,23 +251,23 @@ where
 #[serde(deny_unknown_fields)]
 pub struct ServerLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub listen:       Option<ServerListenLayer>,
+    pub listen: Option<ServerListenLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api:          Option<ServerApiLayer>,
+    pub api: Option<ServerApiLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web:          Option<ServerWebLayer>,
+    pub web: Option<ServerWebLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth:         Option<ServerAuthLayer>,
+    pub auth: Option<ServerAuthLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub storage:      Option<ServerStorageLayer>,
+    pub storage: Option<ServerStorageLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifacts:    Option<ServerArtifactsLayer>,
+    pub artifacts: Option<ServerArtifactsLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slatedb:      Option<ServerSlateDbLayer>,
+    pub slatedb: Option<ServerSlateDbLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scheduler:    Option<ServerSchedulerLayer>,
+    pub scheduler: Option<ServerSchedulerLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub logging:      Option<ServerLoggingLayer>,
+    pub logging: Option<ServerLoggingLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integrations: Option<ServerIntegrationsLayer>,
 }
@@ -281,7 +281,7 @@ pub enum ServerListenLayer {
         #[serde(default)]
         address: Option<InterpString>,
         #[serde(default)]
-        tls:     Option<ServerListenTlsLayer>,
+        tls: Option<ServerListenTlsLayer>,
     },
     Unix {
         #[serde(default)]
@@ -295,7 +295,7 @@ pub struct ServerListenTlsLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cert: Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key:  Option<InterpString>,
+    pub key: Option<InterpString>,
 }
 
 /// `[server.api]` — API surface settings.
@@ -315,7 +315,7 @@ pub struct ServerWebLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url:     Option<InterpString>,
+    pub url: Option<InterpString>,
 }
 
 /// `[server.auth]` — cohesive server auth surface.
@@ -329,7 +329,7 @@ pub struct ServerAuthLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub methods: Option<Vec<ServerAuthMethod>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github:  Option<ServerAuthGithubLayer>,
+    pub github: Option<ServerAuthGithubLayer>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -354,11 +354,11 @@ pub struct ServerArtifactsLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<ObjectStoreProvider>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefix:   Option<InterpString>,
+    pub prefix: Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub local:    Option<ObjectStoreLocalLayer>,
+    pub local: Option<ObjectStoreLocalLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub s3:       Option<ObjectStoreS3Layer>,
+    pub s3: Option<ObjectStoreS3Layer>,
 }
 
 /// `[server.slatedb]` — SlateDB bottomless storage plus tunables.
@@ -366,17 +366,17 @@ pub struct ServerArtifactsLayer {
 #[serde(deny_unknown_fields)]
 pub struct ServerSlateDbLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider:       Option<ObjectStoreProvider>,
+    pub provider: Option<ObjectStoreProvider>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefix:         Option<InterpString>,
+    pub prefix: Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flush_interval: Option<DurationLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub local:          Option<ObjectStoreLocalLayer>,
+    pub local: Option<ObjectStoreLocalLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub s3:             Option<ObjectStoreS3Layer>,
+    pub s3: Option<ObjectStoreS3Layer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disk_cache:     Option<bool>,
+    pub disk_cache: Option<bool>,
 }
 
 /// Closed enum of object-store providers. Unknown providers hard-fail
@@ -401,11 +401,11 @@ pub struct ObjectStoreLocalLayer {
 #[serde(deny_unknown_fields)]
 pub struct ObjectStoreS3Layer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bucket:     Option<InterpString>,
+    pub bucket: Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub region:     Option<InterpString>,
+    pub region: Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub endpoint:   Option<InterpString>,
+    pub endpoint: Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path_style: Option<bool>,
 }
@@ -434,13 +434,13 @@ pub struct ServerLoggingLayer {
 #[serde(deny_unknown_fields)]
 pub struct ServerIntegrationsLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github:  Option<GithubIntegrationLayer>,
+    pub github: Option<GithubIntegrationLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slack:   Option<SlackIntegrationLayer>,
+    pub slack: Option<SlackIntegrationLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discord: Option<DiscordIntegrationLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub teams:   Option<TeamsIntegrationLayer>,
+    pub teams: Option<TeamsIntegrationLayer>,
 }
 
 /// `[server.integrations.github]` — GitHub App, credentials, and inbound
@@ -449,19 +449,19 @@ pub struct ServerIntegrationsLayer {
 #[serde(deny_unknown_fields)]
 pub struct GithubIntegrationLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled:     Option<bool>,
+    pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub strategy:    Option<GithubIntegrationStrategy>,
+    pub strategy: Option<GithubIntegrationStrategy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub app_id:      Option<InterpString>,
+    pub app_id: Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_id:   Option<InterpString>,
+    pub client_id: Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slug:        Option<InterpString>,
+    pub slug: Option<InterpString>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub permissions: HashMap<String, InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub webhooks:    Option<IntegrationWebhooksLayer>,
+    pub webhooks: Option<IntegrationWebhooksLayer>,
 }
 
 /// `[server.integrations.slack]` — Slack workspace credentials and defaults.
@@ -469,7 +469,7 @@ pub struct GithubIntegrationLayer {
 #[serde(deny_unknown_fields)]
 pub struct SlackIntegrationLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled:         Option<bool>,
+    pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_channel: Option<InterpString>,
 }

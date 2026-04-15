@@ -84,7 +84,7 @@ fn system_df_verbose_lists_runs_with_reclaimable_marker() {
         "verbose system df should include the workflow name: {stdout}"
     );
     assert!(
-        stdout.contains("succeeded"),
+        stdout.contains("completed"),
         "verbose system df should include the run status: {stdout}"
     );
     assert!(

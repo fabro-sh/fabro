@@ -33,48 +33,48 @@ use crate::runtime_store::RunStoreHandle;
 #[allow(clippy::large_enum_variant)]
 pub enum Event {
     RunCreated {
-        run_id:            RunId,
-        settings:          serde_json::Value,
-        graph:             serde_json::Value,
+        run_id: RunId,
+        settings: serde_json::Value,
+        graph: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        workflow_source:   Option<String>,
+        workflow_source: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        workflow_config:   Option<String>,
-        labels:            BTreeMap<String, String>,
-        run_dir:           String,
+        workflow_config: Option<String>,
+        labels: BTreeMap<String, String>,
+        run_dir: String,
         working_directory: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        host_repo_path:    Option<String>,
+        host_repo_path: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        repo_origin_url:   Option<String>,
+        repo_origin_url: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        base_branch:       Option<String>,
+        base_branch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        workflow_slug:     Option<String>,
+        workflow_slug: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        db_prefix:         Option<String>,
+        db_prefix: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        provenance:        Option<RunProvenance>,
+        provenance: Option<RunProvenance>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        manifest_blob:     Option<RunBlobId>,
+        manifest_blob: Option<RunBlobId>,
     },
     WorkflowRunStarted {
-        name:         String,
-        run_id:       RunId,
+        name: String,
+        run_id: RunId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        base_branch:  Option<String>,
+        base_branch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        base_sha:     Option<String>,
+        base_sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        run_branch:   Option<String>,
+        run_branch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         worktree_dir: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        goal:         Option<String>,
+        goal: Option<String>,
     },
     RunSubmitted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason:          Option<StatusReason>,
+        reason: Option<StatusReason>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         definition_blob: Option<RunBlobId>,
     },
@@ -106,48 +106,48 @@ pub enum Event {
     RunUnpaused,
     RunRewound {
         target_checkpoint_ordinal: usize,
-        target_node_id:            String,
-        target_visit:              usize,
+        target_node_id: String,
+        target_visit: usize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        previous_status:           Option<String>,
+        previous_status: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        run_commit_sha:            Option<String>,
+        run_commit_sha: Option<String>,
     },
     WorkflowRunCompleted {
-        duration_ms:          u64,
-        artifact_count:       usize,
+        duration_ms: u64,
+        artifact_count: usize,
         #[serde(default)]
-        status:               String,
+        status: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason:               Option<StatusReason>,
+        reason: Option<StatusReason>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        total_usd_micros:     Option<i64>,
+        total_usd_micros: Option<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_git_commit_sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        final_patch:          Option<String>,
+        final_patch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        billing:              Option<BilledTokenCounts>,
+        billing: Option<BilledTokenCounts>,
     },
     WorkflowRunFailed {
-        error:          Error,
-        duration_ms:    u64,
+        error: Error,
+        duration_ms: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason:         Option<StatusReason>,
+        reason: Option<StatusReason>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         git_commit_sha: Option<String>,
     },
     RunNotice {
-        level:   RunNoticeLevel,
-        code:    String,
+        level: RunNoticeLevel,
+        code: String,
         message: String,
     },
     StageStarted {
-        node_id:      String,
-        name:         String,
-        index:        usize,
+        node_id: String,
+        name: String,
+        index: usize,
         handler_type: String,
-        attempt:      usize,
+        attempt: usize,
         max_attempts: usize,
     },
     StageCompleted {
@@ -181,61 +181,61 @@ pub enum Event {
         max_attempts: usize,
     },
     StageFailed {
-        node_id:     String,
-        name:        String,
-        index:       usize,
-        failure:     FailureDetail,
-        will_retry:  bool,
+        node_id: String,
+        name: String,
+        index: usize,
+        failure: FailureDetail,
+        will_retry: bool,
         duration_ms: u64,
     },
     StageRetrying {
-        node_id:      String,
-        name:         String,
-        index:        usize,
-        attempt:      usize,
+        node_id: String,
+        name: String,
+        index: usize,
+        attempt: usize,
         max_attempts: usize,
-        delay_ms:     u64,
+        delay_ms: u64,
     },
     ParallelStarted {
-        node_id:      String,
-        visit:        u32,
+        node_id: String,
+        visit: u32,
         branch_count: usize,
-        join_policy:  String,
+        join_policy: String,
     },
     ParallelBranchStarted {
-        parallel_group_id:  StageId,
+        parallel_group_id: StageId,
         parallel_branch_id: ParallelBranchId,
-        branch:             String,
-        index:              usize,
+        branch: String,
+        index: usize,
     },
     ParallelBranchCompleted {
-        parallel_group_id:  StageId,
+        parallel_group_id: StageId,
         parallel_branch_id: ParallelBranchId,
-        branch:             String,
-        index:              usize,
-        duration_ms:        u64,
-        status:             String,
+        branch: String,
+        index: usize,
+        duration_ms: u64,
+        status: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        head_sha:           Option<String>,
+        head_sha: Option<String>,
     },
     ParallelCompleted {
-        node_id:       String,
-        visit:         u32,
-        duration_ms:   u64,
+        node_id: String,
+        visit: u32,
+        duration_ms: u64,
         success_count: usize,
         failure_count: usize,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        results:       Vec<serde_json::Value>,
+        results: Vec<serde_json::Value>,
     },
     InterviewStarted {
-        question_id:     String,
-        question:        String,
-        stage:           String,
-        question_type:   String,
+        question_id: String,
+        question: String,
+        stage: String,
+        question_type: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        options:         Vec<fabro_types::InterviewOption>,
+        options: Vec<fabro_types::InterviewOption>,
         #[serde(default)]
-        allow_freeform:  bool,
+        allow_freeform: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_seconds: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -243,21 +243,21 @@ pub enum Event {
     },
     InterviewCompleted {
         question_id: String,
-        question:    String,
-        answer:      String,
+        question: String,
+        answer: String,
         duration_ms: u64,
     },
     InterviewTimeout {
         question_id: String,
-        question:    String,
-        stage:       String,
+        question: String,
+        stage: String,
         duration_ms: u64,
     },
     InterviewInterrupted {
         question_id: String,
-        question:    String,
-        stage:       String,
-        reason:      String,
+        question: String,
+        stage: String,
+        reason: String,
         duration_ms: u64,
     },
     CheckpointCompleted {
@@ -287,96 +287,96 @@ pub enum Event {
     },
     CheckpointFailed {
         node_id: String,
-        error:   String,
+        error: String,
     },
     GitCommit {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node_id: Option<String>,
-        sha:     String,
+        sha: String,
     },
     GitPush {
-        branch:  String,
+        branch: String,
         success: bool,
     },
     GitBranch {
         branch: String,
-        sha:    String,
+        sha: String,
     },
     GitWorktreeAdd {
-        path:   String,
+        path: String,
         branch: String,
     },
     GitWorktreeRemove {
         path: String,
     },
     GitFetch {
-        branch:  String,
+        branch: String,
         success: bool,
     },
     GitReset {
         sha: String,
     },
     EdgeSelected {
-        from_node:          String,
-        to_node:            String,
-        label:              Option<String>,
-        condition:          Option<String>,
+        from_node: String,
+        to_node: String,
+        label: Option<String>,
+        condition: Option<String>,
         /// Which selection step chose this edge (e.g. "condition",
         /// "preferred_label", "jump").
-        reason:             String,
+        reason: String,
         /// The stage's preferred label hint, if any.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        preferred_label:    Option<String>,
+        preferred_label: Option<String>,
         /// The stage's suggested next node IDs, if any.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         suggested_next_ids: Vec<String>,
         /// The stage outcome status that influenced routing.
-        stage_status:       String,
+        stage_status: String,
         /// Whether this was a direct jump (bypassing normal edge selection).
-        is_jump:            bool,
+        is_jump: bool,
     },
     LoopRestart {
         from_node: String,
-        to_node:   String,
+        to_node: String,
     },
     Prompt {
-        stage:    String,
-        visit:    u32,
-        text:     String,
+        stage: String,
+        visit: u32,
+        text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        mode:     Option<String>,
+        mode: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        model:    Option<String>,
+        model: Option<String>,
     },
     PromptCompleted {
-        node_id:  String,
+        node_id: String,
         response: String,
-        model:    String,
+        model: String,
         provider: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        billing:  Option<BilledModelUsage>,
+        billing: Option<BilledModelUsage>,
     },
     /// Forwarded from an agent session, tagged with the workflow stage.
     Agent {
-        stage:             String,
-        visit:             u32,
-        event:             AgentEvent,
+        stage: String,
+        visit: u32,
+        event: AgentEvent,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        session_id:        Option<String>,
+        session_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
     },
     SubgraphStarted {
-        node_id:    String,
+        node_id: String,
         start_node: String,
     },
     SubgraphCompleted {
-        node_id:        String,
+        node_id: String,
         steps_executed: usize,
-        status:         String,
-        duration_ms:    u64,
+        status: String,
+        duration_ms: u64,
     },
     /// Forwarded from a sandbox lifecycle operation.
     Sandbox {
@@ -384,174 +384,174 @@ pub enum Event {
     },
     /// Emitted after the sandbox has been initialized (by engine lifecycle).
     SandboxInitialized {
-        working_directory:      String,
-        provider:               String,
+        working_directory: String,
+        provider: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        identifier:             Option<String>,
+        identifier: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         host_working_directory: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        container_mount_point:  Option<String>,
+        container_mount_point: Option<String>,
     },
     SetupStarted {
         command_count: usize,
     },
     SetupCommandStarted {
         command: String,
-        index:   usize,
+        index: usize,
     },
     SetupCommandCompleted {
-        command:     String,
-        index:       usize,
-        exit_code:   i32,
+        command: String,
+        index: usize,
+        exit_code: i32,
         duration_ms: u64,
     },
     SetupCompleted {
         duration_ms: u64,
     },
     SetupFailed {
-        command:   String,
-        index:     usize,
+        command: String,
+        index: usize,
         exit_code: i32,
-        stderr:    String,
+        stderr: String,
     },
     StallWatchdogTimeout {
-        node:         String,
+        node: String,
         idle_seconds: u64,
     },
     ArtifactCaptured {
-        node_id:        String,
-        attempt:        u32,
-        node_slug:      String,
-        path:           String,
-        mime:           String,
-        content_md5:    String,
+        node_id: String,
+        attempt: u32,
+        node_slug: String,
+        path: String,
+        mime: String,
+        content_md5: String,
         content_sha256: String,
-        bytes:          u64,
+        bytes: u64,
     },
     SshAccessReady {
         ssh_command: String,
     },
     Failover {
-        stage:         String,
+        stage: String,
         from_provider: String,
-        from_model:    String,
-        to_provider:   String,
-        to_model:      String,
-        error:         String,
+        from_model: String,
+        to_provider: String,
+        to_model: String,
+        error: String,
     },
     CliEnsureStarted {
         cli_name: String,
         provider: String,
     },
     CliEnsureCompleted {
-        cli_name:          String,
-        provider:          String,
+        cli_name: String,
+        provider: String,
         already_installed: bool,
-        node_installed:    bool,
-        duration_ms:       u64,
+        node_installed: bool,
+        duration_ms: u64,
     },
     CliEnsureFailed {
-        cli_name:    String,
-        provider:    String,
-        error:       String,
+        cli_name: String,
+        provider: String,
+        error: String,
         duration_ms: u64,
     },
     CommandStarted {
-        node_id:    String,
-        script:     String,
-        command:    String,
-        language:   String,
+        node_id: String,
+        script: String,
+        command: String,
+        language: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u64>,
     },
     CommandCompleted {
-        node_id:     String,
-        stdout:      String,
-        stderr:      String,
+        node_id: String,
+        stdout: String,
+        stderr: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        exit_code:   Option<i32>,
+        exit_code: Option<i32>,
         duration_ms: u64,
-        timed_out:   bool,
+        timed_out: bool,
     },
     AgentCliStarted {
-        node_id:  String,
-        visit:    u32,
-        mode:     String,
+        node_id: String,
+        visit: u32,
+        mode: String,
         provider: String,
-        model:    String,
-        command:  String,
+        model: String,
+        command: String,
     },
     AgentCliCompleted {
-        node_id:     String,
-        stdout:      String,
-        stderr:      String,
-        exit_code:   i32,
+        node_id: String,
+        stdout: String,
+        stderr: String,
+        exit_code: i32,
         duration_ms: u64,
     },
     PullRequestCreated {
-        pr_url:      String,
-        pr_number:   u64,
-        owner:       String,
-        repo:        String,
+        pr_url: String,
+        pr_number: u64,
+        owner: String,
+        repo: String,
         base_branch: String,
         head_branch: String,
-        title:       String,
-        draft:       bool,
+        title: String,
+        draft: bool,
     },
     PullRequestFailed {
         error: String,
     },
     DevcontainerResolved {
-        dockerfile_lines:        usize,
-        environment_count:       usize,
+        dockerfile_lines: usize,
+        environment_count: usize,
         lifecycle_command_count: usize,
-        workspace_folder:        String,
+        workspace_folder: String,
     },
     DevcontainerLifecycleStarted {
-        phase:         String,
+        phase: String,
         command_count: usize,
     },
     DevcontainerLifecycleCommandStarted {
-        phase:   String,
+        phase: String,
         command: String,
-        index:   usize,
+        index: usize,
     },
     DevcontainerLifecycleCommandCompleted {
-        phase:       String,
-        command:     String,
-        index:       usize,
-        exit_code:   i32,
+        phase: String,
+        command: String,
+        index: usize,
+        exit_code: i32,
         duration_ms: u64,
     },
     DevcontainerLifecycleCompleted {
-        phase:       String,
+        phase: String,
         duration_ms: u64,
     },
     DevcontainerLifecycleFailed {
-        phase:     String,
-        command:   String,
-        index:     usize,
+        phase: String,
+        command: String,
+        index: usize,
         exit_code: i32,
-        stderr:    String,
+        stderr: String,
     },
     RetroStarted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        prompt:   Option<String>,
+        prompt: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        model:    Option<String>,
+        model: Option<String>,
     },
     RetroCompleted {
         duration_ms: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        response:    Option<String>,
+        response: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        retro:       Option<serde_json::Value>,
+        retro: Option<serde_json::Value>,
     },
     RetroFailed {
-        error:       String,
+        error: String,
         duration_ms: u64,
     },
 }
@@ -1268,15 +1268,15 @@ pub fn event_name(event: &Event) -> &'static str {
 
 #[derive(Debug, Default)]
 struct StoredEventFields {
-    session_id:         Option<String>,
-    parent_session_id:  Option<String>,
-    node_id:            Option<String>,
-    node_label:         Option<String>,
-    stage_id:           Option<StageId>,
-    parallel_group_id:  Option<StageId>,
+    session_id: Option<String>,
+    parent_session_id: Option<String>,
+    node_id: Option<String>,
+    node_label: Option<String>,
+    stage_id: Option<StageId>,
+    parallel_group_id: Option<StageId>,
     parallel_branch_id: Option<ParallelBranchId>,
-    tool_call_id:       Option<String>,
-    actor:              Option<ActorRef>,
+    tool_call_id: Option<String>,
+    actor: Option<ActorRef>,
 }
 
 fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> Option<String> {
@@ -1294,13 +1294,13 @@ fn node_stored_fields(node_id: Option<String>) -> StoredEventFields {
 
 fn billed_token_counts_from_llm(usage: &LlmTokenCounts) -> BilledTokenCounts {
     BilledTokenCounts {
-        input_tokens:       usage.input_tokens,
-        output_tokens:      usage.output_tokens,
-        total_tokens:       usage.total_tokens(),
-        reasoning_tokens:   usage.reasoning_tokens,
-        cache_read_tokens:  usage.cache_read_tokens,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        total_tokens: usage.total_tokens(),
+        reasoning_tokens: usage.reasoning_tokens,
+        cache_read_tokens: usage.cache_read_tokens,
         cache_write_tokens: usage.cache_write_tokens,
-        total_usd_micros:   None,
+        total_usd_micros: None,
     }
 }
 
@@ -1480,21 +1480,20 @@ fn event_body_from_event(event: &Event) -> EventBody {
             manifest_blob,
             ..
         } => EventBody::RunCreated(fabro_types::RunCreatedProps {
-            settings:          serde_json::from_value(settings.clone())
-                .expect("run.created settings"),
-            graph:             serde_json::from_value(graph.clone()).expect("run.created graph"),
-            workflow_source:   workflow_source.clone(),
-            workflow_config:   workflow_config.clone(),
-            labels:            labels.clone(),
-            run_dir:           run_dir.clone(),
+            settings: serde_json::from_value(settings.clone()).expect("run.created settings"),
+            graph: serde_json::from_value(graph.clone()).expect("run.created graph"),
+            workflow_source: workflow_source.clone(),
+            workflow_config: workflow_config.clone(),
+            labels: labels.clone(),
+            run_dir: run_dir.clone(),
             working_directory: working_directory.clone(),
-            host_repo_path:    host_repo_path.clone(),
-            repo_origin_url:   repo_origin_url.clone(),
-            base_branch:       base_branch.clone(),
-            workflow_slug:     workflow_slug.clone(),
-            db_prefix:         db_prefix.clone(),
-            provenance:        provenance.clone(),
-            manifest_blob:     *manifest_blob,
+            host_repo_path: host_repo_path.clone(),
+            repo_origin_url: repo_origin_url.clone(),
+            base_branch: base_branch.clone(),
+            workflow_slug: workflow_slug.clone(),
+            db_prefix: db_prefix.clone(),
+            provenance: provenance.clone(),
+            manifest_blob: *manifest_blob,
         }),
         Event::WorkflowRunStarted {
             name,
@@ -1505,18 +1504,18 @@ fn event_body_from_event(event: &Event) -> EventBody {
             goal,
             ..
         } => EventBody::RunStarted(fabro_types::RunStartedProps {
-            name:         name.clone(),
-            base_branch:  base_branch.clone(),
-            base_sha:     base_sha.clone(),
-            run_branch:   run_branch.clone(),
+            name: name.clone(),
+            base_branch: base_branch.clone(),
+            base_sha: base_sha.clone(),
+            run_branch: run_branch.clone(),
             worktree_dir: worktree_dir.clone(),
-            goal:         goal.clone(),
+            goal: goal.clone(),
         }),
         Event::RunSubmitted {
             reason,
             definition_blob,
         } => EventBody::RunSubmitted(fabro_types::RunSubmittedProps {
-            reason:          *reason,
+            reason: *reason,
             definition_blob: *definition_blob,
         }),
         Event::RunStarting { reason } => {
@@ -1553,10 +1552,10 @@ fn event_body_from_event(event: &Event) -> EventBody {
             run_commit_sha,
         } => EventBody::RunRewound(fabro_types::RunRewoundProps {
             target_checkpoint_ordinal: *target_checkpoint_ordinal,
-            target_node_id:            target_node_id.clone(),
-            target_visit:              *target_visit,
-            previous_status:           previous_status.clone(),
-            run_commit_sha:            run_commit_sha.clone(),
+            target_node_id: target_node_id.clone(),
+            target_visit: *target_visit,
+            previous_status: previous_status.clone(),
+            run_commit_sha: run_commit_sha.clone(),
         }),
         Event::WorkflowRunCompleted {
             duration_ms,
@@ -1568,14 +1567,14 @@ fn event_body_from_event(event: &Event) -> EventBody {
             final_patch,
             billing,
         } => EventBody::RunCompleted(fabro_types::RunCompletedProps {
-            duration_ms:          *duration_ms,
-            artifact_count:       *artifact_count,
-            status:               status.clone(),
-            reason:               *reason,
-            total_usd_micros:     *total_usd_micros,
+            duration_ms: *duration_ms,
+            artifact_count: *artifact_count,
+            status: status.clone(),
+            reason: *reason,
+            total_usd_micros: *total_usd_micros,
             final_git_commit_sha: final_git_commit_sha.clone(),
-            final_patch:          final_patch.clone(),
-            billing:              billing.clone(),
+            final_patch: final_patch.clone(),
+            billing: billing.clone(),
         }),
         Event::WorkflowRunFailed {
             error,
@@ -1583,9 +1582,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             reason,
             git_commit_sha,
         } => EventBody::RunFailed(fabro_types::RunFailedProps {
-            error:          error.to_string(),
-            duration_ms:    *duration_ms,
-            reason:         *reason,
+            error: error.to_string(),
+            duration_ms: *duration_ms,
+            reason: *reason,
             git_commit_sha: git_commit_sha.clone(),
         }),
         Event::RunNotice {
@@ -1593,8 +1592,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
             code,
             message,
         } => EventBody::RunNotice(fabro_types::RunNoticeProps {
-            level:   *level,
-            code:    code.clone(),
+            level: *level,
+            code: code.clone(),
             message: message.clone(),
         }),
         Event::StageStarted {
@@ -1604,9 +1603,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             max_attempts,
             ..
         } => EventBody::StageStarted(fabro_types::StageStartedProps {
-            index:        *index,
+            index: *index,
             handler_type: handler_type.clone(),
-            attempt:      *attempt,
+            attempt: *attempt,
             max_attempts: *max_attempts,
         }),
         Event::StageCompleted {
@@ -1656,9 +1655,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             duration_ms,
             ..
         } => EventBody::StageFailed(fabro_types::StageFailedProps {
-            index:       *index,
-            failure:     Some(failure.clone()),
-            will_retry:  *will_retry,
+            index: *index,
+            failure: Some(failure.clone()),
+            will_retry: *will_retry,
             duration_ms: *duration_ms,
         }),
         Event::StageRetrying {
@@ -1668,10 +1667,10 @@ fn event_body_from_event(event: &Event) -> EventBody {
             delay_ms,
             ..
         } => EventBody::StageRetrying(fabro_types::StageRetryingProps {
-            index:        *index,
-            attempt:      *attempt,
+            index: *index,
+            attempt: *attempt,
             max_attempts: *max_attempts,
-            delay_ms:     *delay_ms,
+            delay_ms: *delay_ms,
         }),
         Event::ParallelStarted {
             visit,
@@ -1679,9 +1678,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             join_policy,
             ..
         } => EventBody::ParallelStarted(fabro_types::ParallelStartedProps {
-            visit:        *visit,
+            visit: *visit,
             branch_count: *branch_count,
-            join_policy:  join_policy.clone(),
+            join_policy: join_policy.clone(),
         }),
         Event::ParallelBranchStarted { index, .. } => {
             EventBody::ParallelBranchStarted(fabro_types::ParallelBranchStartedProps {
@@ -1695,10 +1694,10 @@ fn event_body_from_event(event: &Event) -> EventBody {
             head_sha,
             ..
         } => EventBody::ParallelBranchCompleted(fabro_types::ParallelBranchCompletedProps {
-            index:       *index,
+            index: *index,
             duration_ms: *duration_ms,
-            status:      status.clone(),
-            head_sha:    head_sha.clone(),
+            status: status.clone(),
+            head_sha: head_sha.clone(),
         }),
         Event::ParallelCompleted {
             visit,
@@ -1708,11 +1707,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             results,
             ..
         } => EventBody::ParallelCompleted(fabro_types::ParallelCompletedProps {
-            visit:         *visit,
-            duration_ms:   *duration_ms,
+            visit: *visit,
+            duration_ms: *duration_ms,
             success_count: *success_count,
             failure_count: *failure_count,
-            results:       results.clone(),
+            results: results.clone(),
         }),
         Event::InterviewStarted {
             question_id,
@@ -1724,12 +1723,12 @@ fn event_body_from_event(event: &Event) -> EventBody {
             timeout_seconds,
             context_display,
         } => EventBody::InterviewStarted(fabro_types::InterviewStartedProps {
-            question_id:     question_id.clone(),
-            question:        question.clone(),
-            stage:           stage.clone(),
-            question_type:   question_type.clone(),
-            options:         options.clone(),
-            allow_freeform:  *allow_freeform,
+            question_id: question_id.clone(),
+            question: question.clone(),
+            stage: stage.clone(),
+            question_type: question_type.clone(),
+            options: options.clone(),
+            allow_freeform: *allow_freeform,
             timeout_seconds: *timeout_seconds,
             context_display: context_display.clone(),
         }),
@@ -1740,8 +1739,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
             duration_ms,
         } => EventBody::InterviewCompleted(fabro_types::InterviewCompletedProps {
             question_id: question_id.clone(),
-            question:    question.clone(),
-            answer:      answer.clone(),
+            question: question.clone(),
+            answer: answer.clone(),
             duration_ms: *duration_ms,
         }),
         Event::InterviewTimeout {
@@ -1751,8 +1750,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
             duration_ms,
         } => EventBody::InterviewTimeout(fabro_types::InterviewTimeoutProps {
             question_id: question_id.clone(),
-            question:    question.clone(),
-            stage:       stage.clone(),
+            question: question.clone(),
+            stage: stage.clone(),
             duration_ms: *duration_ms,
         }),
         Event::InterviewInterrupted {
@@ -1763,9 +1762,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             duration_ms,
         } => EventBody::InterviewInterrupted(fabro_types::InterviewInterruptedProps {
             question_id: question_id.clone(),
-            question:    question.clone(),
-            stage:       stage.clone(),
-            reason:      reason.clone(),
+            question: question.clone(),
+            stage: stage.clone(),
+            reason: reason.clone(),
             duration_ms: *duration_ms,
         }),
         Event::CheckpointCompleted {
@@ -1805,16 +1804,16 @@ fn event_body_from_event(event: &Event) -> EventBody {
             EventBody::GitCommit(fabro_types::GitCommitProps { sha: sha.clone() })
         }
         Event::GitPush { branch, success } => EventBody::GitPush(fabro_types::GitPushProps {
-            branch:  branch.clone(),
+            branch: branch.clone(),
             success: *success,
         }),
         Event::GitBranch { branch, sha } => EventBody::GitBranch(fabro_types::GitBranchProps {
             branch: branch.clone(),
-            sha:    sha.clone(),
+            sha: sha.clone(),
         }),
         Event::GitWorktreeAdd { path, branch } => {
             EventBody::GitWorktreeAdd(fabro_types::GitWorktreeAddProps {
-                path:   path.clone(),
+                path: path.clone(),
                 branch: branch.clone(),
             })
         }
@@ -1822,7 +1821,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             EventBody::GitWorktreeRemove(fabro_types::GitWorktreeRemoveProps { path: path.clone() })
         }
         Event::GitFetch { branch, success } => EventBody::GitFetch(fabro_types::GitFetchProps {
-            branch:  branch.clone(),
+            branch: branch.clone(),
             success: *success,
         }),
         Event::GitReset { sha } => {
@@ -1839,20 +1838,20 @@ fn event_body_from_event(event: &Event) -> EventBody {
             stage_status,
             is_jump,
         } => EventBody::EdgeSelected(fabro_types::EdgeSelectedProps {
-            from_node:          from_node.clone(),
-            to_node:            to_node.clone(),
-            label:              label.clone(),
-            condition:          condition.clone(),
-            reason:             reason.clone(),
-            preferred_label:    preferred_label.clone(),
+            from_node: from_node.clone(),
+            to_node: to_node.clone(),
+            label: label.clone(),
+            condition: condition.clone(),
+            reason: reason.clone(),
+            preferred_label: preferred_label.clone(),
             suggested_next_ids: suggested_next_ids.clone(),
-            stage_status:       stage_status.clone(),
-            is_jump:            *is_jump,
+            stage_status: stage_status.clone(),
+            is_jump: *is_jump,
         }),
         Event::LoopRestart { from_node, to_node } => {
             EventBody::LoopRestart(fabro_types::LoopRestartProps {
                 from_node: from_node.clone(),
-                to_node:   to_node.clone(),
+                to_node: to_node.clone(),
             })
         }
         Event::Prompt {
@@ -1863,11 +1862,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             model,
             ..
         } => EventBody::StagePrompt(fabro_types::StagePromptProps {
-            visit:    *visit,
-            text:     text.clone(),
-            mode:     mode.clone(),
+            visit: *visit,
+            text: text.clone(),
+            mode: mode.clone(),
             provider: provider.clone(),
-            model:    model.clone(),
+            model: model.clone(),
         }),
         Event::PromptCompleted {
             response,
@@ -1877,16 +1876,16 @@ fn event_body_from_event(event: &Event) -> EventBody {
             ..
         } => EventBody::PromptCompleted(fabro_types::PromptCompletedProps {
             response: response.clone(),
-            model:    model.clone(),
+            model: model.clone(),
             provider: provider.clone(),
-            billing:  billing.clone(),
+            billing: billing.clone(),
         }),
         Event::Agent { visit, event, .. } => match event {
             AgentEvent::SessionStarted { provider, model } => {
                 EventBody::AgentSessionStarted(fabro_types::AgentSessionStartedProps {
                     provider: provider.clone(),
-                    model:    model.clone(),
-                    visit:    *visit,
+                    model: model.clone(),
+                    visit: *visit,
                 })
             }
             AgentEvent::SessionEnded => {
@@ -1898,7 +1897,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 })
             }
             AgentEvent::UserInput { text } => EventBody::AgentInput(fabro_types::AgentInputProps {
-                text:  text.clone(),
+                text: text.clone(),
                 visit: *visit,
             }),
             AgentEvent::AssistantMessage {
@@ -1907,21 +1906,21 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 usage,
                 tool_call_count,
             } => EventBody::AgentMessage(fabro_types::AgentMessageProps {
-                text:            text.clone(),
-                model:           model.clone(),
-                billing:         billed_token_counts_from_llm(usage),
+                text: text.clone(),
+                model: model.clone(),
+                billing: billed_token_counts_from_llm(usage),
                 tool_call_count: *tool_call_count,
-                visit:           *visit,
+                visit: *visit,
             }),
             AgentEvent::ToolCallStarted {
                 tool_name,
                 tool_call_id,
                 arguments,
             } => EventBody::AgentToolStarted(fabro_types::AgentToolStartedProps {
-                tool_name:    tool_name.clone(),
+                tool_name: tool_name.clone(),
                 tool_call_id: tool_call_id.clone(),
-                arguments:    arguments.clone(),
-                visit:        *visit,
+                arguments: arguments.clone(),
+                visit: *visit,
             }),
             AgentEvent::ToolCallCompleted {
                 tool_name,
@@ -1929,11 +1928,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 output,
                 is_error,
             } => EventBody::AgentToolCompleted(fabro_types::AgentToolCompletedProps {
-                tool_name:    tool_name.clone(),
+                tool_name: tool_name.clone(),
                 tool_call_id: tool_call_id.clone(),
-                output:       output.clone(),
-                is_error:     *is_error,
-                visit:        *visit,
+                output: output.clone(),
+                is_error: *is_error,
+                visit: *visit,
             }),
             AgentEvent::Error { error } => EventBody::AgentError(fabro_types::AgentErrorProps {
                 error: serde_json::to_value(error).expect("serializable agent error"),
@@ -1944,10 +1943,10 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 message,
                 details,
             } => EventBody::AgentWarning(fabro_types::AgentWarningProps {
-                kind:    kind.clone(),
+                kind: kind.clone(),
                 message: message.clone(),
                 details: details.clone(),
-                visit:   *visit,
+                visit: *visit,
             }),
             AgentEvent::LoopDetected => {
                 EventBody::AgentLoopDetected(fabro_types::AgentLoopDetectedProps { visit: *visit })
@@ -1955,12 +1954,12 @@ fn event_body_from_event(event: &Event) -> EventBody {
             AgentEvent::TurnLimitReached { max_turns } => {
                 EventBody::AgentTurnLimitReached(fabro_types::AgentTurnLimitReachedProps {
                     max_turns: *max_turns,
-                    visit:     *visit,
+                    visit: *visit,
                 })
             }
             AgentEvent::SteeringInjected { text } => {
                 EventBody::AgentSteeringInjected(fabro_types::AgentSteeringInjectedProps {
-                    text:  text.clone(),
+                    text: text.clone(),
                     visit: *visit,
                 })
             }
@@ -1968,9 +1967,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 estimated_tokens,
                 context_window_size,
             } => EventBody::AgentCompactionStarted(fabro_types::AgentCompactionStartedProps {
-                estimated_tokens:    *estimated_tokens,
+                estimated_tokens: *estimated_tokens,
                 context_window_size: *context_window_size,
-                visit:               *visit,
+                visit: *visit,
             }),
             AgentEvent::CompactionCompleted {
                 original_turn_count,
@@ -1978,11 +1977,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 summary_token_estimate,
                 tracked_file_count,
             } => EventBody::AgentCompactionCompleted(fabro_types::AgentCompactionCompletedProps {
-                original_turn_count:    *original_turn_count,
-                preserved_turn_count:   *preserved_turn_count,
+                original_turn_count: *original_turn_count,
+                preserved_turn_count: *preserved_turn_count,
                 summary_token_estimate: *summary_token_estimate,
-                tracked_file_count:     *tracked_file_count,
-                visit:                  *visit,
+                tracked_file_count: *tracked_file_count,
+                visit: *visit,
             }),
             AgentEvent::LlmRetry {
                 provider,
@@ -1991,12 +1990,12 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 delay_secs,
                 error,
             } => EventBody::AgentLlmRetry(fabro_types::AgentLlmRetryProps {
-                provider:   provider.clone(),
-                model:      model.clone(),
-                attempt:    *attempt,
+                provider: provider.clone(),
+                model: model.clone(),
+                attempt: *attempt,
                 delay_secs: *delay_secs,
-                error:      serde_json::to_value(error).expect("serializable sdk error"),
-                visit:      *visit,
+                error: serde_json::to_value(error).expect("serializable sdk error"),
+                visit: *visit,
             }),
             AgentEvent::SubAgentSpawned {
                 agent_id,
@@ -2004,9 +2003,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 task,
             } => EventBody::AgentSubSpawned(fabro_types::AgentSubSpawnedProps {
                 agent_id: agent_id.clone(),
-                depth:    *depth,
-                task:     task.clone(),
-                visit:    *visit,
+                depth: *depth,
+                task: task.clone(),
+                visit: *visit,
             }),
             AgentEvent::SubAgentCompleted {
                 agent_id,
@@ -2014,11 +2013,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 success,
                 turns_used,
             } => EventBody::AgentSubCompleted(fabro_types::AgentSubCompletedProps {
-                agent_id:   agent_id.clone(),
-                depth:      *depth,
-                success:    *success,
+                agent_id: agent_id.clone(),
+                depth: *depth,
+                success: *success,
                 turns_used: *turns_used,
-                visit:      *visit,
+                visit: *visit,
             }),
             AgentEvent::SubAgentFailed {
                 agent_id,
@@ -2026,15 +2025,15 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 error,
             } => EventBody::AgentSubFailed(fabro_types::AgentSubFailedProps {
                 agent_id: agent_id.clone(),
-                depth:    *depth,
-                error:    serde_json::to_value(error).expect("serializable agent error"),
-                visit:    *visit,
+                depth: *depth,
+                error: serde_json::to_value(error).expect("serializable agent error"),
+                visit: *visit,
             }),
             AgentEvent::SubAgentClosed { agent_id, depth } => {
                 EventBody::AgentSubClosed(fabro_types::AgentSubClosedProps {
                     agent_id: agent_id.clone(),
-                    depth:    *depth,
-                    visit:    *visit,
+                    depth: *depth,
+                    visit: *visit,
                 })
             }
             AgentEvent::McpServerReady {
@@ -2042,14 +2041,14 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 tool_count,
             } => EventBody::AgentMcpReady(fabro_types::AgentMcpReadyProps {
                 server_name: server_name.clone(),
-                tool_count:  *tool_count,
-                visit:       *visit,
+                tool_count: *tool_count,
+                visit: *visit,
             }),
             AgentEvent::McpServerFailed { server_name, error } => {
                 EventBody::AgentMcpFailed(fabro_types::AgentMcpFailedProps {
                     server_name: server_name.clone(),
-                    error:       error.clone(),
-                    visit:       *visit,
+                    error: error.clone(),
+                    visit: *visit,
                 })
             }
             AgentEvent::AssistantTextStart
@@ -2073,8 +2072,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
             ..
         } => EventBody::SubgraphCompleted(fabro_types::SubgraphCompletedProps {
             steps_executed: *steps_executed,
-            status:         status.clone(),
-            duration_ms:    *duration_ms,
+            status: status.clone(),
+            duration_ms: *duration_ms,
         }),
         Event::Sandbox { event } => match event {
             SandboxEvent::Initializing { provider } => {
@@ -2090,20 +2089,20 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 memory,
                 url,
             } => EventBody::SandboxReady(fabro_types::SandboxReadyProps {
-                provider:    provider.clone(),
+                provider: provider.clone(),
                 duration_ms: *duration_ms,
-                name:        name.clone(),
-                cpu:         *cpu,
-                memory:      *memory,
-                url:         url.clone(),
+                name: name.clone(),
+                cpu: *cpu,
+                memory: *memory,
+                url: url.clone(),
             }),
             SandboxEvent::InitializeFailed {
                 provider,
                 error,
                 duration_ms,
             } => EventBody::SandboxFailed(fabro_types::SandboxFailedProps {
-                provider:    provider.clone(),
-                error:       error.clone(),
+                provider: provider.clone(),
+                error: error.clone(),
                 duration_ms: *duration_ms,
             }),
             SandboxEvent::CleanupStarted { provider } => {
@@ -2115,13 +2114,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 provider,
                 duration_ms,
             } => EventBody::SandboxCleanupCompleted(fabro_types::SandboxCleanupCompletedProps {
-                provider:    provider.clone(),
+                provider: provider.clone(),
                 duration_ms: *duration_ms,
             }),
             SandboxEvent::CleanupFailed { provider, error } => {
                 EventBody::SandboxCleanupFailed(fabro_types::SandboxCleanupFailedProps {
                     provider: provider.clone(),
-                    error:    error.clone(),
+                    error: error.clone(),
                 })
             }
             SandboxEvent::SnapshotPulling { name } => {
@@ -2129,7 +2128,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             }
             SandboxEvent::SnapshotPulled { name, duration_ms } => {
                 EventBody::SnapshotPulled(fabro_types::SnapshotCompletedProps {
-                    name:        name.clone(),
+                    name: name.clone(),
                     duration_ms: *duration_ms,
                 })
             }
@@ -2141,31 +2140,31 @@ fn event_body_from_event(event: &Event) -> EventBody {
             }
             SandboxEvent::SnapshotReady { name, duration_ms } => {
                 EventBody::SnapshotReady(fabro_types::SnapshotCompletedProps {
-                    name:        name.clone(),
+                    name: name.clone(),
                     duration_ms: *duration_ms,
                 })
             }
             SandboxEvent::SnapshotFailed { name, error } => {
                 EventBody::SnapshotFailed(fabro_types::SnapshotFailedProps {
-                    name:  name.clone(),
+                    name: name.clone(),
                     error: error.clone(),
                 })
             }
             SandboxEvent::GitCloneStarted { url, branch } => {
                 EventBody::GitCloneStarted(fabro_types::GitCloneStartedProps {
-                    url:    url.clone(),
+                    url: url.clone(),
                     branch: branch.clone(),
                 })
             }
             SandboxEvent::GitCloneCompleted { url, duration_ms } => {
                 EventBody::GitCloneCompleted(fabro_types::GitCloneCompletedProps {
-                    url:         url.clone(),
+                    url: url.clone(),
                     duration_ms: *duration_ms,
                 })
             }
             SandboxEvent::GitCloneFailed { url, error } => {
                 EventBody::GitCloneFailed(fabro_types::GitCloneFailedProps {
-                    url:   url.clone(),
+                    url: url.clone(),
                     error: error.clone(),
                 })
             }
@@ -2177,11 +2176,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             host_working_directory,
             container_mount_point,
         } => EventBody::SandboxInitialized(fabro_types::SandboxInitializedProps {
-            working_directory:      working_directory.clone(),
-            provider:               provider.clone(),
-            identifier:             identifier.clone(),
+            working_directory: working_directory.clone(),
+            provider: provider.clone(),
+            identifier: identifier.clone(),
             host_working_directory: host_working_directory.clone(),
-            container_mount_point:  container_mount_point.clone(),
+            container_mount_point: container_mount_point.clone(),
         }),
         Event::SetupStarted { command_count } => {
             EventBody::SetupStarted(fabro_types::SetupStartedProps {
@@ -2191,7 +2190,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::SetupCommandStarted { command, index } => {
             EventBody::SetupCommandStarted(fabro_types::SetupCommandStartedProps {
                 command: command.clone(),
-                index:   *index,
+                index: *index,
             })
         }
         Event::SetupCommandCompleted {
@@ -2200,9 +2199,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             exit_code,
             duration_ms,
         } => EventBody::SetupCommandCompleted(fabro_types::SetupCommandCompletedProps {
-            command:     command.clone(),
-            index:       *index,
-            exit_code:   *exit_code,
+            command: command.clone(),
+            index: *index,
+            exit_code: *exit_code,
             duration_ms: *duration_ms,
         }),
         Event::SetupCompleted { duration_ms } => {
@@ -2216,10 +2215,10 @@ fn event_body_from_event(event: &Event) -> EventBody {
             exit_code,
             stderr,
         } => EventBody::SetupFailed(fabro_types::SetupFailedProps {
-            command:   command.clone(),
-            index:     *index,
+            command: command.clone(),
+            index: *index,
             exit_code: *exit_code,
-            stderr:    stderr.clone(),
+            stderr: stderr.clone(),
         }),
         Event::StallWatchdogTimeout { idle_seconds, .. } => {
             EventBody::StallWatchdogTimeout(fabro_types::StallWatchdogTimeoutProps {
@@ -2236,13 +2235,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
             bytes,
             ..
         } => EventBody::ArtifactCaptured(fabro_types::ArtifactCapturedProps {
-            attempt:        *attempt,
-            node_slug:      node_slug.clone(),
-            path:           path.clone(),
-            mime:           mime.clone(),
-            content_md5:    content_md5.clone(),
+            attempt: *attempt,
+            node_slug: node_slug.clone(),
+            path: path.clone(),
+            mime: mime.clone(),
+            content_md5: content_md5.clone(),
             content_sha256: content_sha256.clone(),
-            bytes:          *bytes,
+            bytes: *bytes,
         }),
         Event::SshAccessReady { ssh_command } => {
             EventBody::SshAccessReady(fabro_types::SshAccessReadyProps {
@@ -2258,10 +2257,10 @@ fn event_body_from_event(event: &Event) -> EventBody {
             ..
         } => EventBody::Failover(fabro_types::FailoverProps {
             from_provider: from_provider.clone(),
-            from_model:    from_model.clone(),
-            to_provider:   to_provider.clone(),
-            to_model:      to_model.clone(),
-            error:         error.clone(),
+            from_model: from_model.clone(),
+            to_provider: to_provider.clone(),
+            to_model: to_model.clone(),
+            error: error.clone(),
         }),
         Event::CliEnsureStarted { cli_name, provider } => {
             EventBody::CliEnsureStarted(fabro_types::CliEnsureStartedProps {
@@ -2276,11 +2275,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             node_installed,
             duration_ms,
         } => EventBody::CliEnsureCompleted(fabro_types::CliEnsureCompletedProps {
-            cli_name:          cli_name.clone(),
-            provider:          provider.clone(),
+            cli_name: cli_name.clone(),
+            provider: provider.clone(),
             already_installed: *already_installed,
-            node_installed:    *node_installed,
-            duration_ms:       *duration_ms,
+            node_installed: *node_installed,
+            duration_ms: *duration_ms,
         }),
         Event::CliEnsureFailed {
             cli_name,
@@ -2288,9 +2287,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             error,
             duration_ms,
         } => EventBody::CliEnsureFailed(fabro_types::CliEnsureFailedProps {
-            cli_name:    cli_name.clone(),
-            provider:    provider.clone(),
-            error:       error.clone(),
+            cli_name: cli_name.clone(),
+            provider: provider.clone(),
+            error: error.clone(),
             duration_ms: *duration_ms,
         }),
         Event::CommandStarted {
@@ -2300,9 +2299,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             timeout_ms,
             ..
         } => EventBody::CommandStarted(fabro_types::CommandStartedProps {
-            script:     script.clone(),
-            command:    command.clone(),
-            language:   language.clone(),
+            script: script.clone(),
+            command: command.clone(),
+            language: language.clone(),
             timeout_ms: *timeout_ms,
         }),
         Event::CommandCompleted {
@@ -2313,11 +2312,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             timed_out,
             ..
         } => EventBody::CommandCompleted(fabro_types::CommandCompletedProps {
-            stdout:      stdout.clone(),
-            stderr:      stderr.clone(),
-            exit_code:   *exit_code,
+            stdout: stdout.clone(),
+            stderr: stderr.clone(),
+            exit_code: *exit_code,
             duration_ms: *duration_ms,
-            timed_out:   *timed_out,
+            timed_out: *timed_out,
         }),
         Event::AgentCliStarted {
             visit,
@@ -2327,11 +2326,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             command,
             ..
         } => EventBody::AgentCliStarted(fabro_types::AgentCliStartedProps {
-            visit:    *visit,
-            mode:     mode.clone(),
+            visit: *visit,
+            mode: mode.clone(),
             provider: provider.clone(),
-            model:    model.clone(),
-            command:  command.clone(),
+            model: model.clone(),
+            command: command.clone(),
         }),
         Event::AgentCliCompleted {
             stdout,
@@ -2340,9 +2339,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             duration_ms,
             ..
         } => EventBody::AgentCliCompleted(fabro_types::AgentCliCompletedProps {
-            stdout:      stdout.clone(),
-            stderr:      stderr.clone(),
-            exit_code:   *exit_code,
+            stdout: stdout.clone(),
+            stderr: stderr.clone(),
+            exit_code: *exit_code,
             duration_ms: *duration_ms,
         }),
         Event::PullRequestCreated {
@@ -2355,14 +2354,14 @@ fn event_body_from_event(event: &Event) -> EventBody {
             title,
             draft,
         } => EventBody::PullRequestCreated(fabro_types::PullRequestCreatedProps {
-            pr_url:      pr_url.clone(),
-            pr_number:   *pr_number,
-            owner:       owner.clone(),
-            repo:        repo.clone(),
+            pr_url: pr_url.clone(),
+            pr_number: *pr_number,
+            owner: owner.clone(),
+            repo: repo.clone(),
             base_branch: base_branch.clone(),
             head_branch: head_branch.clone(),
-            title:       title.clone(),
-            draft:       *draft,
+            title: title.clone(),
+            draft: *draft,
         }),
         Event::PullRequestFailed { error } => {
             EventBody::PullRequestFailed(fabro_types::PullRequestFailedProps {
@@ -2375,17 +2374,17 @@ fn event_body_from_event(event: &Event) -> EventBody {
             lifecycle_command_count,
             workspace_folder,
         } => EventBody::DevcontainerResolved(fabro_types::DevcontainerResolvedProps {
-            dockerfile_lines:        *dockerfile_lines,
-            environment_count:       *environment_count,
+            dockerfile_lines: *dockerfile_lines,
+            environment_count: *environment_count,
             lifecycle_command_count: *lifecycle_command_count,
-            workspace_folder:        workspace_folder.clone(),
+            workspace_folder: workspace_folder.clone(),
         }),
         Event::DevcontainerLifecycleStarted {
             phase,
             command_count,
         } => EventBody::DevcontainerLifecycleStarted(
             fabro_types::DevcontainerLifecycleStartedProps {
-                phase:         phase.clone(),
+                phase: phase.clone(),
                 command_count: *command_count,
             },
         ),
@@ -2395,9 +2394,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             index,
         } => EventBody::DevcontainerLifecycleCommandStarted(
             fabro_types::DevcontainerLifecycleCommandStartedProps {
-                phase:   phase.clone(),
+                phase: phase.clone(),
                 command: command.clone(),
-                index:   *index,
+                index: *index,
             },
         ),
         Event::DevcontainerLifecycleCommandCompleted {
@@ -2408,17 +2407,17 @@ fn event_body_from_event(event: &Event) -> EventBody {
             duration_ms,
         } => EventBody::DevcontainerLifecycleCommandCompleted(
             fabro_types::DevcontainerLifecycleCommandCompletedProps {
-                phase:       phase.clone(),
-                command:     command.clone(),
-                index:       *index,
-                exit_code:   *exit_code,
+                phase: phase.clone(),
+                command: command.clone(),
+                index: *index,
+                exit_code: *exit_code,
                 duration_ms: *duration_ms,
             },
         ),
         Event::DevcontainerLifecycleCompleted { phase, duration_ms } => {
             EventBody::DevcontainerLifecycleCompleted(
                 fabro_types::DevcontainerLifecycleCompletedProps {
-                    phase:       phase.clone(),
+                    phase: phase.clone(),
                     duration_ms: *duration_ms,
                 },
             )
@@ -2431,11 +2430,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             stderr,
         } => {
             EventBody::DevcontainerLifecycleFailed(fabro_types::DevcontainerLifecycleFailedProps {
-                phase:     phase.clone(),
-                command:   command.clone(),
-                index:     *index,
+                phase: phase.clone(),
+                command: command.clone(),
+                index: *index,
                 exit_code: *exit_code,
-                stderr:    stderr.clone(),
+                stderr: stderr.clone(),
             })
         }
         Event::RetroStarted {
@@ -2443,9 +2442,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             provider,
             model,
         } => EventBody::RetroStarted(fabro_types::RetroStartedProps {
-            prompt:   prompt.clone(),
+            prompt: prompt.clone(),
             provider: provider.clone(),
-            model:    model.clone(),
+            model: model.clone(),
         }),
         Event::RetroCompleted {
             duration_ms,
@@ -2453,12 +2452,12 @@ fn event_body_from_event(event: &Event) -> EventBody {
             retro,
         } => EventBody::RetroCompleted(fabro_types::RetroCompletedProps {
             duration_ms: *duration_ms,
-            response:    response.clone(),
-            retro:       retro.clone(),
+            response: response.clone(),
+            retro: retro.clone(),
         }),
         Event::RetroFailed { error, duration_ms } => {
             EventBody::RetroFailed(fabro_types::RetroFailedProps {
-                error:       error.clone(),
+                error: error.clone(),
                 duration_ms: *duration_ms,
             })
         }
@@ -2470,9 +2469,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
 /// that happen inside a concrete stage execution.
 #[derive(Clone, Debug)]
 pub struct StageScope {
-    pub node_id:            String,
-    pub visit:              u32,
-    pub parallel_group_id:  Option<StageId>,
+    pub node_id: String,
+    pub visit: u32,
+    pub parallel_group_id: Option<StageId>,
     pub parallel_branch_id: Option<ParallelBranchId>,
 }
 
@@ -2481,9 +2480,9 @@ impl StageScope {
     /// ids from the current context.
     pub fn from_context(context: &WfContext, node_id: impl Into<String>) -> Self {
         Self {
-            node_id:            node_id.into(),
-            visit:              u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
-            parallel_group_id:  context.parallel_group_id(),
+            node_id: node_id.into(),
+            visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
+            parallel_group_id: context.parallel_group_id(),
             parallel_branch_id: context.parallel_branch_id(),
         }
     }
@@ -2515,9 +2514,9 @@ impl StageScope {
         parallel_branch_id: ParallelBranchId,
     ) -> Self {
         Self {
-            node_id:            target_node_id.into(),
-            visit:              target_visit,
-            parallel_group_id:  Some(parallel_group_id),
+            node_id: target_node_id.into(),
+            visit: target_visit,
+            parallel_group_id: Some(parallel_group_id),
             parallel_branch_id: Some(parallel_branch_id),
         }
     }
@@ -2762,8 +2761,8 @@ type EventListener = Arc<dyn Fn(&RunEvent) + Send + Sync>;
 
 /// Callback-based event emitter for workflow run events.
 pub struct Emitter {
-    run_id:        RunId,
-    listeners:     std::sync::Mutex<Vec<EventListener>>,
+    run_id: RunId,
+    listeners: std::sync::Mutex<Vec<EventListener>>,
     /// Epoch milliseconds of the last `emit()` or `touch()` call. 0 until first
     /// event.
     last_event_at: AtomicI64,
@@ -2896,13 +2895,13 @@ mod tests {
             received_clone.lock().unwrap().push(event.clone());
         });
         emitter.emit(&Event::WorkflowRunStarted {
-            name:         "test".to_string(),
-            run_id:       fixtures::RUN_1,
-            base_branch:  None,
-            base_sha:     None,
-            run_branch:   None,
+            name: "test".to_string(),
+            run_id: fixtures::RUN_1,
+            base_branch: None,
+            base_sha: None,
+            run_branch: None,
             worktree_dir: None,
-            goal:         None,
+            goal: None,
         });
         let events = received.lock().unwrap();
         assert_eq!(events.len(), 1);
@@ -2945,9 +2944,9 @@ mod tests {
             },
             Utc::now(),
             Some(&StageScope {
-                node_id:            "plan".to_string(),
-                visit:              1,
-                parallel_group_id:  None,
+                node_id: "plan".to_string(),
+                visit: 1,
+                parallel_group_id: None,
                 parallel_branch_id: None,
             }),
         );
@@ -2965,28 +2964,31 @@ mod tests {
 
     #[test]
     fn run_event_stage_completed_keeps_response_and_signature_snapshots() {
-        let stored = to_run_event(&fixtures::RUN_2, &Event::StageCompleted {
-            node_id: "plan".to_string(),
-            name: "Plan".to_string(),
-            index: 0,
-            duration_ms: 5000,
-            status: "success".to_string(),
-            preferred_label: None,
-            suggested_next_ids: Vec::new(),
-            billing: None,
-            failure: None,
-            notes: None,
-            files_touched: Vec::new(),
-            context_updates: None,
-            jump_to_node: None,
-            context_values: None,
-            node_visits: None,
-            loop_failure_signatures: Some(BTreeMap::from([("sig-a".to_string(), 2usize)])),
-            restart_failure_signatures: Some(BTreeMap::from([("sig-b".to_string(), 1usize)])),
-            response: Some("done".to_string()),
-            attempt: 1,
-            max_attempts: 1,
-        });
+        let stored = to_run_event(
+            &fixtures::RUN_2,
+            &Event::StageCompleted {
+                node_id: "plan".to_string(),
+                name: "Plan".to_string(),
+                index: 0,
+                duration_ms: 5000,
+                status: "success".to_string(),
+                preferred_label: None,
+                suggested_next_ids: Vec::new(),
+                billing: None,
+                failure: None,
+                notes: None,
+                files_touched: Vec::new(),
+                context_updates: None,
+                jump_to_node: None,
+                context_values: None,
+                node_visits: None,
+                loop_failure_signatures: Some(BTreeMap::from([("sig-a".to_string(), 2usize)])),
+                restart_failure_signatures: Some(BTreeMap::from([("sig-b".to_string(), 1usize)])),
+                response: Some("done".to_string()),
+                attempt: 1,
+                max_attempts: 1,
+            },
+        );
 
         let properties = stored.properties().unwrap();
         assert_eq!(properties["response"], "done");
@@ -2996,17 +2998,20 @@ mod tests {
 
     #[test]
     fn run_event_stage_failure_keeps_failure_detail() {
-        let stored = to_run_event(&fixtures::RUN_3, &Event::StageFailed {
-            node_id:     "code".to_string(),
-            name:        "Code".to_string(),
-            index:       1,
-            failure:     FailureDetail::new(
-                "lint failed",
-                crate::outcome::FailureCategory::Deterministic,
-            ),
-            will_retry:  true,
-            duration_ms: 5000,
-        });
+        let stored = to_run_event(
+            &fixtures::RUN_3,
+            &Event::StageFailed {
+                node_id: "code".to_string(),
+                name: "Code".to_string(),
+                index: 1,
+                failure: FailureDetail::new(
+                    "lint failed",
+                    crate::outcome::FailureCategory::Deterministic,
+                ),
+                will_retry: true,
+                duration_ms: 5000,
+            },
+        );
 
         assert_eq!(stored.event_name(), "stage.failed");
         let properties = stored.properties().unwrap();
@@ -3017,17 +3022,20 @@ mod tests {
 
     #[test]
     fn run_event_agent_tool_started_moves_session_metadata_to_header() {
-        let stored = to_run_event(&fixtures::RUN_4, &Event::Agent {
-            stage:             "code".to_string(),
-            visit:             2,
-            event:             AgentEvent::ToolCallStarted {
-                tool_name:    "read_file".to_string(),
-                tool_call_id: "call_1".to_string(),
-                arguments:    serde_json::json!({"path": "src/main.rs"}),
+        let stored = to_run_event(
+            &fixtures::RUN_4,
+            &Event::Agent {
+                stage: "code".to_string(),
+                visit: 2,
+                event: AgentEvent::ToolCallStarted {
+                    tool_name: "read_file".to_string(),
+                    tool_call_id: "call_1".to_string(),
+                    arguments: serde_json::json!({"path": "src/main.rs"}),
+                },
+                session_id: Some("ses_child".to_string()),
+                parent_session_id: Some("ses_parent".to_string()),
             },
-            session_id:        Some("ses_child".to_string()),
-            parent_session_id: Some("ses_parent".to_string()),
-        });
+        );
 
         assert_eq!(stored.event_name(), "agent.tool.started");
         assert_eq!(stored.node_id.as_deref(), Some("code"));
@@ -3042,16 +3050,19 @@ mod tests {
 
     #[test]
     fn run_event_sandbox_event_keeps_properties_nested() {
-        let stored = to_run_event(&fixtures::RUN_5, &Event::Sandbox {
-            event: SandboxEvent::Ready {
-                provider:    "daytona".to_string(),
-                duration_ms: 2500,
-                name:        Some("sandbox-1".to_string()),
-                cpu:         Some(4.0),
-                memory:      Some(8.0),
-                url:         Some("https://example.test".to_string()),
+        let stored = to_run_event(
+            &fixtures::RUN_5,
+            &Event::Sandbox {
+                event: SandboxEvent::Ready {
+                    provider: "daytona".to_string(),
+                    duration_ms: 2500,
+                    name: Some("sandbox-1".to_string()),
+                    cpu: Some(4.0),
+                    memory: Some(8.0),
+                    url: Some("https://example.test".to_string()),
+                },
             },
-        });
+        );
 
         assert_eq!(stored.event_name(), "sandbox.ready");
         assert!(stored.node_id.is_none());
@@ -3062,12 +3073,15 @@ mod tests {
 
     #[test]
     fn run_event_workflow_failure_uses_display_error() {
-        let stored = to_run_event(&fixtures::RUN_6, &Event::WorkflowRunFailed {
-            error:          Error::handler("boom"),
-            duration_ms:    900,
-            reason:         Some(StatusReason::WorkflowError),
-            git_commit_sha: Some("abc123".to_string()),
-        });
+        let stored = to_run_event(
+            &fixtures::RUN_6,
+            &Event::WorkflowRunFailed {
+                error: Error::handler("boom"),
+                duration_ms: 900,
+                reason: Some(StatusReason::WorkflowError),
+                git_commit_sha: Some("abc123".to_string()),
+            },
+        );
 
         assert_eq!(stored.event_name(), "run.failed");
         let properties = stored.properties().unwrap();
@@ -3084,11 +3098,14 @@ mod tests {
             None,
         );
         let run_store = store.create_run(&fixtures::RUN_7).await.unwrap();
-        let stored = to_run_event(&fixtures::RUN_7, &Event::RunNotice {
-            level:   RunNoticeLevel::Warn,
-            code:    "example".to_string(),
-            message: "notice".to_string(),
-        });
+        let stored = to_run_event(
+            &fixtures::RUN_7,
+            &Event::RunNotice {
+                level: RunNoticeLevel::Warn,
+                code: "example".to_string(),
+                message: "notice".to_string(),
+            },
+        );
         let payload = build_redacted_event_payload(&stored, &fixtures::RUN_7).unwrap();
         run_store.append_event(&payload).await.unwrap();
 
@@ -3145,11 +3162,14 @@ mod tests {
 
     #[test]
     fn build_redacted_event_payload_requires_id() {
-        let stored = to_run_event(&fixtures::RUN_8, &Event::RetroStarted {
-            prompt:   Some("Analyze the run".to_string()),
-            provider: None,
-            model:    None,
-        });
+        let stored = to_run_event(
+            &fixtures::RUN_8,
+            &Event::RetroStarted {
+                prompt: Some("Analyze the run".to_string()),
+                provider: None,
+                model: None,
+            },
+        );
         let payload = build_redacted_event_payload(&stored, &fixtures::RUN_8).unwrap();
         assert_eq!(payload.as_value()["id"], stored.id);
         assert_eq!(payload.as_value()["event"], "retro.started");
@@ -3163,31 +3183,31 @@ mod tests {
     fn event_name_matches_new_dot_notation() {
         assert_eq!(
             event_name(&Event::RetroStarted {
-                prompt:   None,
+                prompt: None,
                 provider: None,
-                model:    None,
+                model: None,
             }),
             "retro.started"
         );
         assert_eq!(
             event_name(&Event::ParallelBranchStarted {
-                parallel_group_id:  StageId::new("plan", 1),
+                parallel_group_id: StageId::new("plan", 1),
                 parallel_branch_id: ParallelBranchId::new(StageId::new("plan", 1), 0),
-                branch:             "fork".to_string(),
-                index:              0,
+                branch: "fork".to_string(),
+                index: 0,
             }),
             "parallel.branch.started"
         );
         assert_eq!(
             event_name(&Event::Agent {
-                stage:             "code".to_string(),
-                visit:             1,
-                event:             AgentEvent::SubAgentSpawned {
+                stage: "code".to_string(),
+                visit: 1,
+                event: AgentEvent::SubAgentSpawned {
                     agent_id: "a1".to_string(),
-                    depth:    1,
-                    task:     "do it".to_string(),
+                    depth: 1,
+                    task: "do it".to_string(),
                 },
-                session_id:        None,
+                session_id: None,
                 parent_session_id: None,
             }),
             "agent.sub.spawned"
@@ -3199,18 +3219,18 @@ mod tests {
         let stored = to_run_event_at(
             &fixtures::RUN_1,
             &Event::StageStarted {
-                node_id:      "review".to_string(),
-                name:         "review".to_string(),
-                index:        1,
+                node_id: "review".to_string(),
+                name: "review".to_string(),
+                index: 1,
                 handler_type: "agent".to_string(),
-                attempt:      1,
+                attempt: 1,
                 max_attempts: 1,
             },
             Utc::now(),
             Some(&StageScope {
-                node_id:            "review".to_string(),
-                visit:              1,
-                parallel_group_id:  Some(StageId::new("fanout", 2)),
+                node_id: "review".to_string(),
+                visit: 1,
+                parallel_group_id: Some(StageId::new("fanout", 2)),
                 parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 2), 1)),
             }),
         );
@@ -3223,24 +3243,30 @@ mod tests {
 
     #[test]
     fn parallel_started_populates_parallel_group_id() {
-        let stored = to_run_event(&fixtures::RUN_1, &Event::ParallelStarted {
-            node_id:      "fanout".to_string(),
-            visit:        2,
-            branch_count: 3,
-            join_policy:  "wait_all".to_string(),
-        });
+        let stored = to_run_event(
+            &fixtures::RUN_1,
+            &Event::ParallelStarted {
+                node_id: "fanout".to_string(),
+                visit: 2,
+                branch_count: 3,
+                join_policy: "wait_all".to_string(),
+            },
+        );
         assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
         assert!(stored.parallel_branch_id.is_none());
     }
 
     #[test]
     fn parallel_branch_started_populates_group_and_branch_ids() {
-        let stored = to_run_event(&fixtures::RUN_1, &Event::ParallelBranchStarted {
-            parallel_group_id:  StageId::new("fanout", 2),
-            parallel_branch_id: ParallelBranchId::new(StageId::new("fanout", 2), 1),
-            branch:             "review".to_string(),
-            index:              1,
-        });
+        let stored = to_run_event(
+            &fixtures::RUN_1,
+            &Event::ParallelBranchStarted {
+                parallel_group_id: StageId::new("fanout", 2),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fanout", 2), 1),
+                branch: "review".to_string(),
+                index: 1,
+            },
+        );
         assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
         assert_eq!(
             stored.parallel_branch_id,
@@ -3253,21 +3279,21 @@ mod tests {
         let stored = to_run_event_at(
             &fixtures::RUN_1,
             &Event::Agent {
-                stage:             "code".to_string(),
-                visit:             3,
-                event:             AgentEvent::ToolCallStarted {
-                    tool_name:    "read_file".to_string(),
+                stage: "code".to_string(),
+                visit: 3,
+                event: AgentEvent::ToolCallStarted {
+                    tool_name: "read_file".to_string(),
                     tool_call_id: "call_abc".to_string(),
-                    arguments:    serde_json::json!({"path": "src/main.rs"}),
+                    arguments: serde_json::json!({"path": "src/main.rs"}),
                 },
-                session_id:        Some("ses_1".to_string()),
+                session_id: Some("ses_1".to_string()),
                 parent_session_id: None,
             },
             Utc::now(),
             Some(&StageScope {
-                node_id:            "code".to_string(),
-                visit:              3,
-                parallel_group_id:  Some(StageId::new("fanout", 2)),
+                node_id: "code".to_string(),
+                visit: 3,
+                parallel_group_id: Some(StageId::new("fanout", 2)),
                 parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 2), 0)),
             }),
         );
@@ -3287,19 +3313,19 @@ mod tests {
         // Prompt, InterviewStarted, Failover, GitCommit) should pick up stage_id
         // / parallel_group_id / parallel_branch_id from the scope argument.
         let scope = StageScope {
-            node_id:            "build".to_string(),
-            visit:              2,
-            parallel_group_id:  Some(StageId::new("fanout", 1)),
+            node_id: "build".to_string(),
+            visit: 2,
+            parallel_group_id: Some(StageId::new("fanout", 1)),
             parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 1), 0)),
         };
 
         let command_started = to_run_event_at(
             &fixtures::RUN_1,
             &Event::CommandStarted {
-                node_id:    "build".to_string(),
-                script:     "echo".to_string(),
-                command:    "echo".to_string(),
-                language:   "shell".to_string(),
+                node_id: "build".to_string(),
+                script: "echo".to_string(),
+                command: "echo".to_string(),
+                language: "shell".to_string(),
                 timeout_ms: None,
             },
             Utc::now(),
@@ -3312,12 +3338,12 @@ mod tests {
         let prompt = to_run_event_at(
             &fixtures::RUN_1,
             &Event::Prompt {
-                stage:    "build".to_string(),
-                visit:    2,
-                text:     "do it".to_string(),
-                mode:     None,
+                stage: "build".to_string(),
+                visit: 2,
+                text: "do it".to_string(),
+                mode: None,
                 provider: None,
-                model:    None,
+                model: None,
             },
             Utc::now(),
             Some(&scope),
@@ -3328,7 +3354,7 @@ mod tests {
             &fixtures::RUN_1,
             &Event::GitCommit {
                 node_id: Some("build".to_string()),
-                sha:     "deadbeef".to_string(),
+                sha: "deadbeef".to_string(),
             },
             Utc::now(),
             Some(&scope),
@@ -3347,42 +3373,52 @@ mod tests {
     #[test]
     fn control_action_events_carry_actor_in_envelope() {
         let actor = ActorRef {
-            kind:    ActorKind::User,
-            id:      Some("alice".to_string()),
+            kind: ActorKind::User,
+            id: Some("alice".to_string()),
             display: Some("alice".to_string()),
         };
 
-        let cancel = to_run_event(&fixtures::RUN_1, &Event::RunCancelRequested {
-            actor: Some(actor.clone()),
-        });
+        let cancel = to_run_event(
+            &fixtures::RUN_1,
+            &Event::RunCancelRequested {
+                actor: Some(actor.clone()),
+            },
+        );
         assert_eq!(cancel.event_name(), "run.cancel.requested");
         assert_eq!(cancel.actor.as_ref().expect("actor set"), &actor);
 
-        let pause = to_run_event(&fixtures::RUN_1, &Event::RunPauseRequested {
-            actor: Some(actor.clone()),
-        });
+        let pause = to_run_event(
+            &fixtures::RUN_1,
+            &Event::RunPauseRequested {
+                actor: Some(actor.clone()),
+            },
+        );
         assert_eq!(pause.actor.as_ref().expect("actor set"), &actor);
 
-        let unpause = to_run_event(&fixtures::RUN_1, &Event::RunUnpauseRequested {
-            actor: None,
-        });
+        let unpause = to_run_event(
+            &fixtures::RUN_1,
+            &Event::RunUnpauseRequested { actor: None },
+        );
         assert!(unpause.actor.is_none());
     }
 
     #[test]
     fn agent_assistant_message_populates_agent_actor() {
-        let stored = to_run_event(&fixtures::RUN_1, &Event::Agent {
-            stage:             "code".to_string(),
-            visit:             1,
-            event:             AgentEvent::AssistantMessage {
-                text:            "ok".to_string(),
-                model:           "claude-sonnet".to_string(),
-                usage:           LlmTokenCounts::default(),
-                tool_call_count: 0,
+        let stored = to_run_event(
+            &fixtures::RUN_1,
+            &Event::Agent {
+                stage: "code".to_string(),
+                visit: 1,
+                event: AgentEvent::AssistantMessage {
+                    text: "ok".to_string(),
+                    model: "claude-sonnet".to_string(),
+                    usage: LlmTokenCounts::default(),
+                    tool_call_count: 0,
+                },
+                session_id: Some("ses_agent".to_string()),
+                parent_session_id: None,
             },
-            session_id:        Some("ses_agent".to_string()),
-            parent_session_id: None,
-        });
+        );
         let actor = stored.actor.as_ref().expect("actor set");
         assert_eq!(actor.kind, ActorKind::Agent);
         assert_eq!(actor.id.as_deref(), Some("ses_agent"));
@@ -3395,31 +3431,34 @@ mod tests {
         use ::fabro_types::{Graph, RunAuthMethod, RunSubjectProvenance, fixtures};
 
         let provenance = RunProvenance {
-            server:  None,
-            client:  None,
+            server: None,
+            client: None,
             subject: Some(RunSubjectProvenance {
-                login:       Some("alice".to_string()),
+                login: Some("alice".to_string()),
                 auth_method: RunAuthMethod::Github,
             }),
         };
 
-        let stored = to_run_event(&fixtures::RUN_1, &Event::RunCreated {
-            run_id:            fixtures::RUN_1,
-            settings:          serde_json::to_value(SettingsLayer::default()).unwrap(),
-            graph:             serde_json::to_value(Graph::new("test")).unwrap(),
-            workflow_source:   None,
-            workflow_config:   None,
-            labels:            BTreeMap::default(),
-            run_dir:           "/tmp/run".to_string(),
-            working_directory: "/tmp/run".to_string(),
-            host_repo_path:    None,
-            repo_origin_url:   None,
-            base_branch:       None,
-            workflow_slug:     None,
-            db_prefix:         None,
-            provenance:        Some(provenance),
-            manifest_blob:     None,
-        });
+        let stored = to_run_event(
+            &fixtures::RUN_1,
+            &Event::RunCreated {
+                run_id: fixtures::RUN_1,
+                settings: serde_json::to_value(SettingsLayer::default()).unwrap(),
+                graph: serde_json::to_value(Graph::new("test")).unwrap(),
+                workflow_source: None,
+                workflow_config: None,
+                labels: BTreeMap::default(),
+                run_dir: "/tmp/run".to_string(),
+                working_directory: "/tmp/run".to_string(),
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                workflow_slug: None,
+                db_prefix: None,
+                provenance: Some(provenance),
+                manifest_blob: None,
+            },
+        );
         let actor = stored.actor.as_ref().expect("actor set");
         assert_eq!(actor.kind, ActorKind::User);
         assert_eq!(actor.id.as_deref(), Some("alice"));

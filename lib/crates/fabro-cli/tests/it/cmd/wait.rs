@@ -49,7 +49,7 @@ fn wait_completed_run_prints_success_summary() {
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    Succeeded [ULID]  [DURATION]
+    Completed [ULID]  [DURATION]
     ");
 }
 
@@ -70,7 +70,7 @@ fn wait_completed_run_reads_store_without_status_or_conclusion_files() {
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    Succeeded [ULID]  [DURATION]
+    Completed [ULID]  [DURATION]
     ");
 }
 
@@ -92,7 +92,7 @@ fn wait_completed_run_json_outputs_status_and_duration() {
     ----- stdout -----
     {
       "run_id": "[ULID]",
-      "status": "succeeded",
+      "status": "completed",
       "duration_ms": [DURATION_MS]
     }
     ----- stderr -----

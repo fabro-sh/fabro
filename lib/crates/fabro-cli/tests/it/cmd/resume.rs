@@ -69,10 +69,10 @@ fn resume_rewound_run_succeeds() {
         String::from_utf8_lossy(&rewind.stdout),
         output_stderr(&rewind)
     );
-    let rewound_head = git_stdout(&setup.repo_dir, &[
-        "rev-parse",
-        &format!("fabro/run/{}", setup.run.run_id),
-    ]);
+    let rewound_head = git_stdout(
+        &setup.repo_dir,
+        &["rev-parse", &format!("fabro/run/{}", setup.run.run_id)],
+    );
 
     let mut resume_cmd = context.command();
     resume_cmd.current_dir(&setup.repo_dir);
@@ -98,7 +98,7 @@ fn resume_rewound_run_succeeds() {
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    Succeeded [ULID]  [DURATION]
+    Completed [ULID]  [DURATION]
     ");
 
     assert_eq!(
@@ -109,10 +109,10 @@ fn resume_rewound_run_succeeds() {
         std::fs::read_to_string(setup.repo_dir.join("story.txt")).unwrap(),
         "line 1\n"
     );
-    let resumed_head = git_stdout(&setup.repo_dir, &[
-        "rev-parse",
-        &format!("fabro/run/{}", setup.run.run_id),
-    ]);
+    let resumed_head = git_stdout(
+        &setup.repo_dir,
+        &["rev-parse", &format!("fabro/run/{}", setup.run.run_id)],
+    );
     assert_ne!(resumed_head.trim(), rewound_head.trim());
 }
 

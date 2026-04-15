@@ -99,10 +99,10 @@ fn rewind_target_updates_metadata_and_resume_hint() {
     ");
     assert!(output.status.success(), "rewind should succeed");
 
-    let run_head = git_stdout(&setup.repo_dir, &[
-        "rev-parse",
-        &format!("fabro/run/{}", setup.run.run_id),
-    ]);
+    let run_head = git_stdout(
+        &setup.repo_dir,
+        &["rev-parse", &format!("fabro/run/{}", setup.run.run_id)],
+    );
     assert_eq!(run_head.trim(), expected_run_head);
 
     let mut list_cmd = context.command();

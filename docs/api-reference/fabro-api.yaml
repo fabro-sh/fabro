@@ -2089,10 +2089,11 @@ components:
         - queued
         - starting
         - running
+        - blocked
+        - paused
         - completed
         - failed
         - cancelled
-        - paused
 
     RunManifest:
       description: Self-contained workflow run manifest.
@@ -2480,6 +2481,10 @@ components:
         status_reason:
           allOf:
             - $ref: "#/components/schemas/StatusReason"
+          nullable: true
+        blocked_reason:
+          allOf:
+            - $ref: "#/components/schemas/BlockedReason"
           nullable: true
         pending_control:
           allOf:
@@ -2876,13 +2881,21 @@ components:
       type: string
       enum:
         - submitted
+        - queued
         - starting
         - running
+        - blocked
         - paused
         - removing
-        - succeeded
+        - completed
         - failed
-        - dead
+        - cancelled
+
+    BlockedReason:
+      description: Reason why a run is blocked.
+      type: string
+      enum:
+        - human_input_required
 
     StatusReason:
       description: Optional reason attached to a run status transition.
@@ -2920,6 +2933,10 @@ components:
         reason:
           oneOf:
             - $ref: "#/components/schemas/StatusReason"
+            - type: "null"
+        blocked_reason:
+          oneOf:
+            - $ref: "#/components/schemas/BlockedReason"
             - type: "null"
         updated_at:
           type: string
@@ -3088,6 +3105,9 @@ components:
         status_reason:
           type: string
           nullable: true
+        blocked_reason:
+          type: string
+          nullable: true
         pending_control:
           allOf:
             - $ref: "#/components/schemas/RunControlAction"
@@ -3109,7 +3129,7 @@ components:
       type: string
       enum:
         - working
-        - initializing
+        - blocked
         - review
         - merge
 

@@ -78,7 +78,7 @@ fn start_by_run_id_starts_created_run() {
         }),
         @r#"
         {
-          "status": "succeeded"
+          "status": "completed"
         }
         "#
     );
@@ -123,7 +123,7 @@ fn start_by_run_id_starts_created_run_without_run_json_or_status_json() {
         }),
         @r#"
         {
-          "status": "succeeded"
+          "status": "completed"
         }
         "#
     );
@@ -173,7 +173,7 @@ fn start_rejects_already_active_or_completed_run() {
     ");
 
     gate.release();
-    wait_for_status(&run.run_dir, &["succeeded"]);
+    wait_for_status(&run.run_dir, &["completed"]);
 
     let mut completed_cmd = context.command();
     completed_cmd.args(["start", &run_id]);
@@ -182,7 +182,7 @@ fn start_rejects_already_active_or_completed_run() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: cannot start run: status is Succeeded, expected submitted
+    error: cannot start run: status is Completed, expected submitted
     ");
 }
 
@@ -237,5 +237,5 @@ fn start_runs_under_server_ownership_without_launcher_record() {
     );
 
     gate.release();
-    wait_for_status(&run.run_dir, &["succeeded"]);
+    wait_for_status(&run.run_dir, &["completed"]);
 }

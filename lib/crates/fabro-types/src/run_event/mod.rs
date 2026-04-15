@@ -36,9 +36,9 @@ pub enum ActorKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActorRef {
-    pub kind:    ActorKind,
+    pub kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id:      Option<String>,
+    pub id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
 }
@@ -47,8 +47,8 @@ impl ActorRef {
     #[must_use]
     pub fn user(login: String) -> Self {
         Self {
-            kind:    ActorKind::User,
-            id:      Some(login.clone()),
+            kind: ActorKind::User,
+            id: Some(login.clone()),
             display: Some(login),
         }
     }
@@ -65,19 +65,19 @@ impl ActorRef {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEvent {
-    pub id:                 String,
-    pub ts:                 DateTime<Utc>,
-    pub run_id:             RunId,
-    pub node_id:            Option<String>,
-    pub node_label:         Option<String>,
-    pub stage_id:           Option<StageId>,
-    pub parallel_group_id:  Option<StageId>,
+    pub id: String,
+    pub ts: DateTime<Utc>,
+    pub run_id: RunId,
+    pub node_id: Option<String>,
+    pub node_label: Option<String>,
+    pub stage_id: Option<StageId>,
+    pub parallel_group_id: Option<StageId>,
     pub parallel_branch_id: Option<ParallelBranchId>,
-    pub session_id:         Option<String>,
-    pub parent_session_id:  Option<String>,
-    pub tool_call_id:       Option<String>,
-    pub actor:              Option<ActorRef>,
-    pub body:               EventBody,
+    pub session_id: Option<String>,
+    pub parent_session_id: Option<String>,
+    pub tool_call_id: Option<String>,
+    pub actor: Option<ActorRef>,
+    pub body: EventBody,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -297,37 +297,37 @@ pub enum EventBody {
     #[serde(rename = "retro.failed")]
     RetroFailed(RetroFailedProps),
     Unknown {
-        name:       String,
+        name: String,
         properties: Value,
     },
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct RunEventRaw {
-    id:                 String,
-    ts:                 DateTime<Utc>,
-    run_id:             RunId,
+    id: String,
+    ts: DateTime<Utc>,
+    run_id: RunId,
     #[serde(default)]
-    node_id:            Option<String>,
+    node_id: Option<String>,
     #[serde(default)]
-    node_label:         Option<String>,
+    node_label: Option<String>,
     #[serde(default)]
-    stage_id:           Option<StageId>,
+    stage_id: Option<StageId>,
     #[serde(default)]
-    parallel_group_id:  Option<StageId>,
+    parallel_group_id: Option<StageId>,
     #[serde(default)]
     parallel_branch_id: Option<ParallelBranchId>,
     #[serde(default)]
-    session_id:         Option<String>,
+    session_id: Option<String>,
     #[serde(default)]
-    parent_session_id:  Option<String>,
+    parent_session_id: Option<String>,
     #[serde(default)]
-    tool_call_id:       Option<String>,
+    tool_call_id: Option<String>,
     #[serde(default)]
-    actor:              Option<ActorRef>,
-    event:              String,
+    actor: Option<ActorRef>,
+    event: String,
     #[serde(default = "default_properties")]
-    properties:         Value,
+    properties: Value,
 }
 
 fn default_properties() -> Value {
@@ -335,20 +335,20 @@ fn default_properties() -> Value {
 }
 
 struct RunEventParts<'a> {
-    id:                 String,
-    ts:                 DateTime<Utc>,
-    run_id:             RunId,
-    node_id:            Option<String>,
-    node_label:         Option<String>,
-    stage_id:           Option<StageId>,
-    parallel_group_id:  Option<StageId>,
+    id: String,
+    ts: DateTime<Utc>,
+    run_id: RunId,
+    node_id: Option<String>,
+    node_label: Option<String>,
+    stage_id: Option<StageId>,
+    parallel_group_id: Option<StageId>,
     parallel_branch_id: Option<ParallelBranchId>,
-    session_id:         Option<String>,
-    parent_session_id:  Option<String>,
-    tool_call_id:       Option<String>,
-    actor:              Option<ActorRef>,
-    event:              &'a str,
-    properties:         &'a Value,
+    session_id: Option<String>,
+    parent_session_id: Option<String>,
+    tool_call_id: Option<String>,
+    actor: Option<ActorRef>,
+    event: &'a str,
+    properties: &'a Value,
 }
 
 impl EventBody {
@@ -593,20 +593,20 @@ impl RunEvent {
     pub fn from_value(value: Value) -> serde_json::Result<Self> {
         let raw: RunEventRaw = serde_json::from_value(value)?;
         Self::from_parts(RunEventParts {
-            id:                 raw.id,
-            ts:                 raw.ts,
-            run_id:             raw.run_id,
-            node_id:            raw.node_id,
-            node_label:         raw.node_label,
-            stage_id:           raw.stage_id,
-            parallel_group_id:  raw.parallel_group_id,
+            id: raw.id,
+            ts: raw.ts,
+            run_id: raw.run_id,
+            node_id: raw.node_id,
+            node_label: raw.node_label,
+            stage_id: raw.stage_id,
+            parallel_group_id: raw.parallel_group_id,
             parallel_branch_id: raw.parallel_branch_id,
-            session_id:         raw.session_id,
-            parent_session_id:  raw.parent_session_id,
-            tool_call_id:       raw.tool_call_id,
-            actor:              raw.actor,
-            event:              &raw.event,
-            properties:         &raw.properties,
+            session_id: raw.session_id,
+            parent_session_id: raw.parent_session_id,
+            tool_call_id: raw.tool_call_id,
+            actor: raw.actor,
+            event: &raw.event,
+            properties: &raw.properties,
         })
     }
 
@@ -670,7 +670,7 @@ impl RunEvent {
             Ok(body) => body,
             Err(err) if is_known_event_name(parts.event) => return Err(err),
             Err(_) => EventBody::Unknown {
-                name:       parts.event.to_string(),
+                name: parts.event.to_string(),
                 properties: parts.properties.clone(),
             },
         };
@@ -783,21 +783,21 @@ mod tests {
     #[test]
     fn run_event_round_trips_json() {
         let event = RunEvent {
-            id:                 "evt_1".to_string(),
-            ts:                 DateTime::parse_from_rfc3339("2026-04-04T12:00:00.000Z")
+            id: "evt_1".to_string(),
+            ts: DateTime::parse_from_rfc3339("2026-04-04T12:00:00.000Z")
                 .unwrap()
                 .with_timezone(&Utc),
-            run_id:             fixtures::RUN_1,
-            node_id:            Some("build".to_string()),
-            node_label:         Some("Build".to_string()),
-            stage_id:           None,
-            parallel_group_id:  None,
+            run_id: fixtures::RUN_1,
+            node_id: Some("build".to_string()),
+            node_label: Some("Build".to_string()),
+            stage_id: None,
+            parallel_group_id: None,
             parallel_branch_id: None,
-            session_id:         None,
-            parent_session_id:  None,
-            tool_call_id:       None,
-            actor:              None,
-            body:               EventBody::StageCompleted(StageCompletedProps {
+            session_id: None,
+            parent_session_id: None,
+            tool_call_id: None,
+            actor: None,
+            body: EventBody::StageCompleted(StageCompletedProps {
                 index: 1,
                 duration_ms: 1234,
                 status: crate::StageStatus::Success,
@@ -829,15 +829,18 @@ mod tests {
     fn run_event_deserializes_adjacent_layout() {
         let settings = SettingsLayer::default();
         let graph = Graph {
-            name:  "test".to_string(),
-            nodes: HashMap::from([("start".to_string(), Node {
-                id:      "start".to_string(),
-                attrs:   HashMap::new(),
-                classes: Vec::new(),
-            })]),
+            name: "test".to_string(),
+            nodes: HashMap::from([(
+                "start".to_string(),
+                Node {
+                    id: "start".to_string(),
+                    attrs: HashMap::new(),
+                    classes: Vec::new(),
+                },
+            )]),
             edges: vec![Edge {
-                from:  "start".to_string(),
-                to:    "done".to_string(),
+                from: "start".to_string(),
+                to: "done".to_string(),
                 attrs: HashMap::new(),
             }],
             attrs: HashMap::new(),
@@ -891,9 +894,9 @@ mod tests {
     fn interview_interrupted_kind_matches_event_name() {
         let body = EventBody::InterviewInterrupted(InterviewInterruptedProps {
             question_id: "q-1".to_string(),
-            question:    "approve?".to_string(),
-            stage:       "gate".to_string(),
-            reason:      "interrupted".to_string(),
+            question: "approve?".to_string(),
+            stage: "gate".to_string(),
+            reason: "interrupted".to_string(),
             duration_ms: 12,
         });
 
@@ -1025,27 +1028,27 @@ mod tests {
     #[test]
     fn run_event_omits_absent_envelope_fields() {
         let event = RunEvent {
-            id:                 "evt_bare".to_string(),
-            ts:                 DateTime::parse_from_rfc3339("2026-04-04T12:00:00.000Z")
+            id: "evt_bare".to_string(),
+            ts: DateTime::parse_from_rfc3339("2026-04-04T12:00:00.000Z")
                 .unwrap()
                 .with_timezone(&Utc),
-            run_id:             fixtures::RUN_1,
-            node_id:            None,
-            node_label:         None,
-            stage_id:           None,
-            parallel_group_id:  None,
+            run_id: fixtures::RUN_1,
+            node_id: None,
+            node_label: None,
+            stage_id: None,
+            parallel_group_id: None,
             parallel_branch_id: None,
-            session_id:         None,
-            parent_session_id:  None,
-            tool_call_id:       None,
-            actor:              None,
-            body:               EventBody::RunStarted(RunStartedProps {
-                name:         "demo".to_string(),
-                base_branch:  None,
-                base_sha:     None,
-                run_branch:   None,
+            session_id: None,
+            parent_session_id: None,
+            tool_call_id: None,
+            actor: None,
+            body: EventBody::RunStarted(RunStartedProps {
+                name: "demo".to_string(),
+                base_branch: None,
+                base_sha: None,
+                run_branch: None,
                 worktree_dir: None,
-                goal:         None,
+                goal: None,
             }),
         };
 

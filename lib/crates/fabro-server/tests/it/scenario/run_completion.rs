@@ -17,8 +17,8 @@ async fn run_completes_and_status_is_completed() {
         create_and_start_run_from_manifest(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT))
             .await;
 
-    let status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
-    assert_eq!(status, "succeeded");
+    let status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
+    assert_eq!(status, "completed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -61,8 +61,8 @@ async fn attach_run_events_replays_terminal_event_after_completion() {
     let run_id =
         create_and_start_run_from_manifest(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT))
             .await;
-    let status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
-    assert_eq!(status, "succeeded");
+    let status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
+    assert_eq!(status, "completed");
 
     let req = Request::builder()
         .method("GET")

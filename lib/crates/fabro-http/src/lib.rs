@@ -65,7 +65,7 @@ macro_rules! define_builder {
     ($builder_name:ident, $inner_builder:ty, $inner_new:expr, $client_type:ty) => {
         #[derive(Default)]
         pub struct $builder_name {
-            inner:        $inner_builder,
+            inner: $inner_builder,
             proxy_policy: Option<ProxyPolicy>,
         }
 
@@ -73,7 +73,7 @@ macro_rules! define_builder {
             #[must_use]
             pub fn new() -> Self {
                 Self {
-                    inner:        $inner_new,
+                    inner: $inner_new,
                     proxy_policy: None,
                 }
             }
@@ -214,7 +214,7 @@ mod tests {
     use super::*;
 
     struct EnvGuard {
-        key:      &'static str,
+        key: &'static str,
         original: Option<std::ffi::OsString>,
     }
 

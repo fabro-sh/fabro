@@ -21,10 +21,10 @@ const CONFIG_FILENAME: &str = ".fabro/project.toml";
 #[derive(Clone, Debug)]
 pub struct WorkflowPathResolution {
     pub resolved_workflow_path: PathBuf,
-    pub dot_path:               PathBuf,
-    pub workflow_config:        Option<SettingsLayer>,
-    pub workflow_toml_path:     Option<PathBuf>,
-    pub workflow_slug:          Option<String>,
+    pub dot_path: PathBuf,
+    pub workflow_config: Option<SettingsLayer>,
+    pub workflow_toml_path: Option<PathBuf>,
+    pub workflow_slug: Option<String>,
 }
 
 /// Parse a project config from a TOML string.
@@ -222,8 +222,8 @@ fn user_workflows_dir() -> PathBuf {
 /// Metadata about a discovered workflow.
 #[derive(Clone, Debug, Serialize)]
 pub struct WorkflowInfo {
-    pub name:   String,
-    pub goal:   Option<String>,
+    pub name: String,
+    pub goal: Option<String>,
     pub source: WorkflowSource,
 }
 

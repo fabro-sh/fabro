@@ -15,7 +15,7 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
         .map_err(|err| Error::engine(err.to_string()))?;
 
     if let Some(record) = state.status {
-        if record.status == RunStatus::Succeeded {
+        if record.status == RunStatus::Completed {
             return Err(Error::Precondition(
                 "run already finished successfully — nothing to resume".to_string(),
             ));

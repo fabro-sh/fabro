@@ -17,12 +17,12 @@ use crate::{Error, ListRunsQuery, Result, RunSummary, keys};
 
 #[derive(Clone)]
 pub struct Database {
-    object_store:   Arc<dyn ObjectStore>,
-    base_prefix:    String,
+    object_store: Arc<dyn ObjectStore>,
+    base_prefix: String,
     flush_interval: Duration,
-    cache_path:     Option<PathBuf>,
-    db:             Arc<OnceCell<slatedb::Db>>,
-    active_runs:    Arc<Mutex<HashMap<RunId, Arc<RunDatabaseInner>>>>,
+    cache_path: Option<PathBuf>,
+    db: Arc<OnceCell<slatedb::Db>>,
+    active_runs: Arc<Mutex<HashMap<RunId, Arc<RunDatabaseInner>>>>,
 }
 
 impl std::fmt::Debug for Database {
@@ -402,7 +402,7 @@ mod tests {
         assert_eq!(summary[1].run_id, test_run_id("run-1"));
         assert_eq!(summary[1].workflow_name, Some("night-sky".to_string()));
         assert_eq!(summary[1].goal, Some("map the constellations".to_string()));
-        assert_eq!(summary[1].status, Some(RunStatus::Succeeded));
+        assert_eq!(summary[1].status, Some(RunStatus::Completed));
         assert_eq!(summary[1].status_reason, Some(StatusReason::Completed));
 
         let reopened = store.open_run(&test_run_id("run-1")).await.unwrap();
@@ -536,7 +536,7 @@ mod tests {
 
         let summary = store.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(summary.len(), 1);
-        assert_eq!(summary[0].status, Some(RunStatus::Failed));
+        assert_eq!(summary[0].status, Some(RunStatus::Cancelled));
         assert_eq!(summary[0].status_reason, Some(StatusReason::Cancelled));
         assert_eq!(summary[0].pending_control, None);
     }
@@ -581,6 +581,6 @@ mod tests {
         let summary = reopened.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(summary.len(), 1);
         assert_eq!(summary[0].run_id, test_run_id("run-1"));
-        assert_eq!(summary[0].status, Some(RunStatus::Succeeded));
+        assert_eq!(summary[0].status, Some(RunStatus::Completed));
     }
 }

@@ -279,7 +279,7 @@ fn rm_uses_configured_server_target_without_local_run_dir() {
                         "labels": {},
                         "host_repo_path": null,
                         "start_time": "2026-04-05T12:00:00Z",
-                        "status": "succeeded",
+                        "status": "completed",
                         "status_reason": null,
                         "duration_ms": 123,
                         "total_usd_micros": null

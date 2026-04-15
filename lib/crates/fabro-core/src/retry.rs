@@ -3,14 +3,14 @@ pub use fabro_util::backoff::BackoffPolicy;
 #[derive(Debug, Clone)]
 pub struct RetryPolicy {
     pub max_attempts: u32,
-    pub backoff:      BackoffPolicy,
+    pub backoff: BackoffPolicy,
 }
 
 impl RetryPolicy {
     pub fn none() -> Self {
         Self {
             max_attempts: 1,
-            backoff:      BackoffPolicy::default(),
+            backoff: BackoffPolicy::default(),
         }
     }
 

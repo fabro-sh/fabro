@@ -374,19 +374,19 @@ impl HookExecutorImpl {
 
             for _ in 0..rounds {
                 let request = Request {
-                    model:            resolved_model.clone(),
-                    messages:         messages.clone(),
-                    provider:         None,
-                    tools:            Some(tool_defs.clone()),
-                    tool_choice:      None,
-                    response_format:  None,
-                    temperature:      None,
-                    top_p:            None,
-                    max_tokens:       None,
-                    stop_sequences:   None,
+                    model: resolved_model.clone(),
+                    messages: messages.clone(),
+                    provider: None,
+                    tools: Some(tool_defs.clone()),
+                    tool_choice: None,
+                    response_format: None,
+                    temperature: None,
+                    top_p: None,
+                    max_tokens: None,
+                    stop_sequences: None,
                     reasoning_effort: None,
-                    speed:            None,
-                    metadata:         None,
+                    speed: None,
+                    metadata: None,
                     provider_options: None,
                 };
 
@@ -408,8 +408,8 @@ impl HookExecutorImpl {
                 for tc in &tool_calls {
                     let tool = registry.get(&tc.name).cloned();
                     let ctx = ToolContext {
-                        env:      sandbox.clone(),
-                        cancel:   cancel.child_token(),
+                        env: sandbox.clone(),
+                        cancel: cancel.child_token(),
                         tool_env: None,
                     };
                     let result = match tool {
@@ -560,17 +560,17 @@ impl HookExecutorImpl {
 
 /// Cached HTTP clients keyed by TLS mode.
 struct HttpClientCache {
-    verify:    fabro_http::HttpClient,
+    verify: fabro_http::HttpClient,
     no_verify: fabro_http::HttpClient,
-    off:       fabro_http::HttpClient,
+    off: fabro_http::HttpClient,
 }
 
 impl HttpClientCache {
     fn new() -> Self {
         Self {
-            verify:    HookExecutorImpl::build_http_client(TlsMode::Verify),
+            verify: HookExecutorImpl::build_http_client(TlsMode::Verify),
             no_verify: HookExecutorImpl::build_http_client(TlsMode::NoVerify),
-            off:       HookExecutorImpl::build_http_client(TlsMode::Off),
+            off: HookExecutorImpl::build_http_client(TlsMode::Off),
         }
     }
 
@@ -710,14 +710,14 @@ mod tests {
 
     fn make_definition(command: &str) -> HookDefinition {
         HookDefinition {
-            name:       Some("test-hook".into()),
-            event:      HookEvent::StageStart,
-            command:    Some(command.into()),
-            hook_type:  None,
-            matcher:    None,
-            blocking:   None,
+            name: Some("test-hook".into()),
+            event: HookEvent::StageStart,
+            command: Some(command.into()),
+            hook_type: None,
+            matcher: None,
+            blocking: None,
             timeout_ms: Some(5000),
-            sandbox:    Some(false), // host execution for tests
+            sandbox: Some(false), // host execution for tests
         }
     }
 
@@ -816,9 +816,12 @@ mod tests {
         let ctx = make_context();
         let sandbox = make_sandbox();
         let result = executor.execute(&def, &ctx, sandbox, None).await;
-        assert_eq!(result.decision, HookDecision::Skip {
-            reason: Some("test skip".into()),
-        });
+        assert_eq!(
+            result.decision,
+            HookDecision::Skip {
+                reason: Some("test skip".into()),
+            }
+        );
     }
 
     #[tokio::test]
@@ -837,14 +840,14 @@ mod tests {
     async fn no_hook_type_blocks() {
         let executor = HookExecutorImpl;
         let def = HookDefinition {
-            name:       None,
-            event:      HookEvent::StageStart,
-            command:    None,
-            hook_type:  None,
-            matcher:    None,
-            blocking:   None,
+            name: None,
+            event: HookEvent::StageStart,
+            command: None,
+            hook_type: None,
+            matcher: None,
+            blocking: None,
             timeout_ms: None,
-            sandbox:    Some(false),
+            sandbox: Some(false),
         };
         let ctx = make_context();
         let sandbox = make_sandbox();
@@ -1006,9 +1009,12 @@ mod tests {
         .await;
 
         mock.assert_async().await;
-        assert_eq!(decision, HookDecision::Skip {
-            reason: Some("not needed".into()),
-        });
+        assert_eq!(
+            decision,
+            HookDecision::Skip {
+                reason: Some("not needed".into()),
+            }
+        );
     }
 
     #[tokio::test]
@@ -1224,19 +1230,19 @@ mod tests {
 
         let executor = HookExecutorImpl;
         let def = HookDefinition {
-            name:       Some("http-test".into()),
-            event:      HookEvent::StageStart,
-            command:    None,
-            hook_type:  Some(HookType::Http {
-                url:              server.url("/hook"),
-                headers:          None,
+            name: Some("http-test".into()),
+            event: HookEvent::StageStart,
+            command: None,
+            hook_type: Some(HookType::Http {
+                url: server.url("/hook"),
+                headers: None,
                 allowed_env_vars: vec![],
-                tls:              TlsMode::Off,
+                tls: TlsMode::Off,
             }),
-            matcher:    None,
-            blocking:   None,
+            matcher: None,
+            blocking: None,
             timeout_ms: Some(5000),
-            sandbox:    Some(false),
+            sandbox: Some(false),
         };
         let ctx = make_context();
         let sandbox = make_sandbox();

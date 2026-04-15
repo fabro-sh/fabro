@@ -52,7 +52,7 @@ pub(crate) async fn run(
             if started_waiting_at.elapsed() < WAIT_STARTUP_GRACE {
                 RunStatus::Submitted
             } else {
-                RunStatus::Dead
+                RunStatus::Failed
             }
         });
 
@@ -86,7 +86,7 @@ pub(crate) async fn run(
         print_human_output(final_status, &run_id, conclusion.as_ref(), styles, printer);
     }
 
-    if final_status == RunStatus::Succeeded {
+    if final_status == RunStatus::Completed {
         Ok(())
     } else {
         std::process::exit(1);
@@ -123,10 +123,10 @@ fn print_human_output(
     printer: Printer,
 ) {
     let (style, label) = match status {
-        RunStatus::Succeeded => (&styles.bold_green, "Succeeded"),
+        RunStatus::Completed => (&styles.bold_green, "Completed"),
         RunStatus::Failed => (&styles.bold_red, "Failed"),
-        RunStatus::Dead => (&styles.bold_red, "Dead"),
-        // Poll loop only breaks on is_terminal() which is Succeeded | Failed | Dead
+        RunStatus::Cancelled => (&styles.bold_red, "Cancelled"),
+        // Poll loop only breaks on is_terminal() which is Completed | Failed | Cancelled
         _ => unreachable!(),
     };
     let status_display = style.apply_to(label);
@@ -167,29 +167,29 @@ mod tests {
     }
 
     #[test]
-    fn json_output_succeeded_with_conclusion() {
+    fn json_output_completed_with_conclusion() {
         let run_id = fixtures::RUN_1;
         let conclusion = Conclusion {
-            timestamp:            chrono::Utc::now(),
-            status:               StageStatus::Success,
-            duration_ms:          12345,
-            failure_reason:       None,
+            timestamp: chrono::Utc::now(),
+            status: StageStatus::Success,
+            duration_ms: 12345,
+            failure_reason: None,
             final_git_commit_sha: None,
-            stages:               vec![],
-            billing:              Some(BilledTokenCounts {
-                input_tokens:       0,
-                output_tokens:      0,
-                total_tokens:       0,
-                reasoning_tokens:   0,
-                cache_read_tokens:  0,
+            stages: vec![],
+            billing: Some(BilledTokenCounts {
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                reasoning_tokens: 0,
+                cache_read_tokens: 0,
                 cache_write_tokens: 0,
-                total_usd_micros:   Some(420_000),
+                total_usd_micros: Some(420_000),
             }),
-            total_retries:        0,
+            total_retries: 0,
         };
-        let json = build_json_output(RunStatus::Succeeded, &run_id, Some(&conclusion));
+        let json = build_json_output(RunStatus::Completed, &run_id, Some(&conclusion));
         assert_eq!(json["run_id"], run_id.to_string());
-        assert_eq!(json["status"], "succeeded");
+        assert_eq!(json["status"], "completed");
         assert_eq!(json["duration_ms"], 12345);
         assert_eq!(json["total_usd_micros"], 420_000);
     }
@@ -205,23 +205,23 @@ mod tests {
     }
 
     #[test]
-    fn json_output_dead_status() {
-        let json = build_json_output(RunStatus::Dead, &fixtures::RUN_3, None);
-        assert_eq!(json["status"], "dead");
+    fn json_output_cancelled_status() {
+        let json = build_json_output(RunStatus::Cancelled, &fixtures::RUN_3, None);
+        assert_eq!(json["status"], "cancelled");
     }
 
     #[test]
     fn json_output_no_cost_when_none() {
         let run_id = fixtures::RUN_4;
         let conclusion = Conclusion {
-            timestamp:            chrono::Utc::now(),
-            status:               StageStatus::Fail,
-            duration_ms:          500,
-            failure_reason:       Some("error".into()),
+            timestamp: chrono::Utc::now(),
+            status: StageStatus::Fail,
+            duration_ms: 500,
+            failure_reason: Some("error".into()),
             final_git_commit_sha: None,
-            stages:               vec![],
-            billing:              None,
-            total_retries:        0,
+            stages: vec![],
+            billing: None,
+            total_retries: 0,
         };
         let json = build_json_output(RunStatus::Failed, &run_id, Some(&conclusion));
         assert!(json.get("total_usd_micros").is_none());
@@ -229,30 +229,30 @@ mod tests {
     }
 
     #[test]
-    fn human_output_succeeded() {
+    fn human_output_completed() {
         let styles = no_color_styles();
         let run_id = fixtures::RUN_5;
         let conclusion = Conclusion {
-            timestamp:            chrono::Utc::now(),
-            status:               StageStatus::Success,
-            duration_ms:          8000,
-            failure_reason:       None,
+            timestamp: chrono::Utc::now(),
+            status: StageStatus::Success,
+            duration_ms: 8000,
+            failure_reason: None,
             final_git_commit_sha: None,
-            stages:               vec![],
-            billing:              Some(BilledTokenCounts {
-                input_tokens:       0,
-                output_tokens:      0,
-                total_tokens:       0,
-                reasoning_tokens:   0,
-                cache_read_tokens:  0,
+            stages: vec![],
+            billing: Some(BilledTokenCounts {
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                reasoning_tokens: 0,
+                cache_read_tokens: 0,
                 cache_write_tokens: 0,
-                total_usd_micros:   Some(150_000),
+                total_usd_micros: Some(150_000),
             }),
-            total_retries:        0,
+            total_retries: 0,
         };
         // Just verify no panic; actual stderr output is hard to capture
         print_human_output(
-            RunStatus::Succeeded,
+            RunStatus::Completed,
             &run_id,
             Some(&conclusion),
             &styles,
@@ -276,7 +276,7 @@ mod tests {
     fn poll_terminal_immediately() {
         let dir = tempfile::tempdir().unwrap();
         let status_path = dir.path().join("status.json");
-        let record = RunStatusRecord::new(RunStatus::Succeeded, None);
+        let record = RunStatusRecord::new(RunStatus::Completed, None);
         std::fs::write(&status_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
 
         // Simulate what the poll loop does
@@ -286,18 +286,18 @@ mod tests {
         .unwrap()
         .status;
         assert!(status.is_terminal());
-        assert_eq!(status, RunStatus::Succeeded);
+        assert_eq!(status, RunStatus::Completed);
     }
 
     #[test]
-    fn missing_status_treated_as_dead() {
+    fn missing_status_treated_as_failed() {
         let status = match std::fs::read_to_string(std::path::Path::new("/nonexistent/status.json"))
         {
             Ok(data) => serde_json::from_str::<RunStatusRecord>(&data)
                 .map(|record| record.status)
-                .unwrap_or(RunStatus::Dead),
-            Err(_) => RunStatus::Dead,
+                .unwrap_or(RunStatus::Failed),
+            Err(_) => RunStatus::Failed,
         };
-        assert_eq!(status, RunStatus::Dead);
+        assert_eq!(status, RunStatus::Failed);
     }
 }

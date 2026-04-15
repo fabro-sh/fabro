@@ -15,7 +15,7 @@ use crate::helpers::{
 static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 struct ProxyPolicyGuard {
-    _lock:    MutexGuard<'static, ()>,
+    _lock: MutexGuard<'static, ()>,
     previous: Option<OsString>,
 }
 
@@ -80,8 +80,8 @@ async fn dry_run_serve_starts_and_runs_workflow() {
         create_and_start_run_from_manifest(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT))
             .await;
 
-    let status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
-    assert_eq!(status, "succeeded");
+    let status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
+    assert_eq!(status, "completed");
 }
 
 #[tokio::test]

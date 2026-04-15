@@ -433,93 +433,121 @@ mod tests {
 
         let store = test_store();
         let run = store.create_run(&fixtures::RUN_1).await.unwrap();
-        append_event(&run, &fixtures::RUN_1, &Event::Prompt {
-            stage:    "work".into(),
-            visit:    2,
-            text:     "hello".into(),
-            mode:     Some("prompt".into()),
-            provider: Some("openai".into()),
-            model:    Some("gpt-5.4".into()),
-        })
+        append_event(
+            &run,
+            &fixtures::RUN_1,
+            &Event::Prompt {
+                stage: "work".into(),
+                visit: 2,
+                text: "hello".into(),
+                mode: Some("prompt".into()),
+                provider: Some("openai".into()),
+                model: Some("gpt-5.4".into()),
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &fixtures::RUN_1, &Event::PromptCompleted {
-            node_id:  "work".into(),
-            response: "world".into(),
-            model:    "gpt-5.4".into(),
-            provider: "openai".into(),
-            billing:  None,
-        })
+        append_event(
+            &run,
+            &fixtures::RUN_1,
+            &Event::PromptCompleted {
+                node_id: "work".into(),
+                response: "world".into(),
+                model: "gpt-5.4".into(),
+                provider: "openai".into(),
+                billing: None,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &fixtures::RUN_1, &Event::StageCompleted {
-            node_id: "work".into(),
-            name: "Work".into(),
-            index: 2,
-            duration_ms: 100,
-            status: "success".into(),
-            preferred_label: None,
-            suggested_next_ids: Vec::new(),
-            billing: None,
-            failure: None,
-            notes: None,
-            files_touched: Vec::new(),
-            context_updates: None,
-            jump_to_node: None,
-            context_values: None,
-            node_visits: Some(std::collections::BTreeMap::from([("work".into(), 2)])),
-            loop_failure_signatures: None,
-            restart_failure_signatures: None,
-            response: Some("world".into()),
-            attempt: 1,
-            max_attempts: 1,
-        })
+        append_event(
+            &run,
+            &fixtures::RUN_1,
+            &Event::StageCompleted {
+                node_id: "work".into(),
+                name: "Work".into(),
+                index: 2,
+                duration_ms: 100,
+                status: "success".into(),
+                preferred_label: None,
+                suggested_next_ids: Vec::new(),
+                billing: None,
+                failure: None,
+                notes: None,
+                files_touched: Vec::new(),
+                context_updates: None,
+                jump_to_node: None,
+                context_values: None,
+                node_visits: Some(std::collections::BTreeMap::from([("work".into(), 2)])),
+                loop_failure_signatures: None,
+                restart_failure_signatures: None,
+                response: Some("world".into()),
+                attempt: 1,
+                max_attempts: 1,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &fixtures::RUN_1, &Event::CommandStarted {
-            node_id:    "work".into(),
-            script:     "echo hi".into(),
-            command:    "echo hi".into(),
-            language:   "shell".into(),
-            timeout_ms: None,
-        })
+        append_event(
+            &run,
+            &fixtures::RUN_1,
+            &Event::CommandStarted {
+                node_id: "work".into(),
+                script: "echo hi".into(),
+                command: "echo hi".into(),
+                language: "shell".into(),
+                timeout_ms: None,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &fixtures::RUN_1, &Event::CommandCompleted {
-            node_id:     "work".into(),
-            stdout:      "hi\n".into(),
-            stderr:      String::new(),
-            exit_code:   Some(0),
-            duration_ms: 10,
-            timed_out:   false,
-        })
+        append_event(
+            &run,
+            &fixtures::RUN_1,
+            &Event::CommandCompleted {
+                node_id: "work".into(),
+                stdout: "hi\n".into(),
+                stderr: String::new(),
+                exit_code: Some(0),
+                duration_ms: 10,
+                timed_out: false,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &fixtures::RUN_1, &Event::ParallelCompleted {
-            node_id:       "work".into(),
-            visit:         2,
-            duration_ms:   100,
-            success_count: 1,
-            failure_count: 0,
-            results:       vec![serde_json::json!({"id": "a"})],
-        })
+        append_event(
+            &run,
+            &fixtures::RUN_1,
+            &Event::ParallelCompleted {
+                node_id: "work".into(),
+                visit: 2,
+                duration_ms: 100,
+                success_count: 1,
+                failure_count: 0,
+                results: vec![serde_json::json!({"id": "a"})],
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &fixtures::RUN_1, &Event::CheckpointCompleted {
-            node_id: "work".into(),
-            status: "success".into(),
-            current_node: "work".into(),
-            completed_nodes: Vec::new(),
-            node_retries: std::collections::BTreeMap::new(),
-            context_values: std::collections::BTreeMap::new(),
-            node_outcomes: std::collections::BTreeMap::new(),
-            next_node_id: None,
-            git_commit_sha: None,
-            loop_failure_signatures: std::collections::BTreeMap::new(),
-            restart_failure_signatures: std::collections::BTreeMap::new(),
-            node_visits: std::collections::BTreeMap::from([("work".into(), 2)]),
-            diff: Some("diff --git a/story.txt b/story.txt".into()),
-        })
+        append_event(
+            &run,
+            &fixtures::RUN_1,
+            &Event::CheckpointCompleted {
+                node_id: "work".into(),
+                status: "success".into(),
+                current_node: "work".into(),
+                completed_nodes: Vec::new(),
+                node_retries: std::collections::BTreeMap::new(),
+                context_values: std::collections::BTreeMap::new(),
+                node_outcomes: std::collections::BTreeMap::new(),
+                next_node_id: None,
+                git_commit_sha: None,
+                loop_failure_signatures: std::collections::BTreeMap::new(),
+                restart_failure_signatures: std::collections::BTreeMap::new(),
+                node_visits: std::collections::BTreeMap::from([("work".into(), 2)]),
+                diff: Some("diff --git a/story.txt b/story.txt".into()),
+            },
+        )
         .await
         .unwrap();
 

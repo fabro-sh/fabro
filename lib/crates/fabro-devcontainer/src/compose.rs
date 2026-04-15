@@ -4,17 +4,17 @@ use std::path::{Path, PathBuf};
 /// Extracted configuration from a Docker Compose service.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ComposeServiceSpec {
-    pub image:       Option<String>,
-    pub build:       Option<ComposeBuild>,
-    pub ports:       Vec<u16>,
+    pub image: Option<String>,
+    pub build: Option<ComposeBuild>,
+    pub ports: Vec<u16>,
     pub environment: HashMap<String, String>,
-    pub user:        Option<String>,
+    pub user: Option<String>,
 }
 
 /// Build configuration from a Docker Compose service.
 #[derive(Debug, Clone)]
 pub(crate) struct ComposeBuild {
-    pub context:    String,
+    pub context: String,
     pub dockerfile: Option<String>,
 }
 
@@ -62,7 +62,7 @@ fn parse_build(service: &serde_yaml::Value) -> Option<ComposeBuild> {
 
     if let Some(context) = build_val.as_str() {
         return Some(ComposeBuild {
-            context:    context.to_string(),
+            context: context.to_string(),
             dockerfile: None,
         });
     }

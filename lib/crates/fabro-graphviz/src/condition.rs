@@ -28,8 +28,8 @@ pub enum ConditionExpr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Clause {
-    pub key:   String,
-    pub op:    Op,
+    pub key: String,
+    pub op: Op,
     pub value: String,
 }
 
@@ -207,7 +207,7 @@ fn is_word_operator_context(tokens: &[Token]) -> bool {
 
 struct Parser {
     tokens: Vec<Token>,
-    pos:    usize,
+    pos: usize,
 }
 
 impl Parser {
@@ -403,8 +403,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key:   "outcome".to_string(),
-                op:    Op::Eq,
+                key: "outcome".to_string(),
+                op: Op::Eq,
                 value: "success".to_string(),
             })
         );
@@ -417,13 +417,13 @@ mod tests {
             expr,
             ConditionExpr::And(vec![
                 ConditionExpr::Clause(Clause {
-                    key:   "a".to_string(),
-                    op:    Op::Eq,
+                    key: "a".to_string(),
+                    op: Op::Eq,
                     value: "1".to_string(),
                 }),
                 ConditionExpr::Clause(Clause {
-                    key:   "b".to_string(),
-                    op:    Op::Eq,
+                    key: "b".to_string(),
+                    op: Op::Eq,
                     value: "2".to_string(),
                 }),
             ])
@@ -436,8 +436,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key:   "some_flag".to_string(),
-                op:    Op::Truthy,
+                key: "some_flag".to_string(),
+                op: Op::Truthy,
                 value: String::new(),
             })
         );
@@ -449,8 +449,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key:   "outcome".to_string(),
-                op:    Op::NotEq,
+                key: "outcome".to_string(),
+                op: Op::NotEq,
                 value: "fail".to_string(),
             })
         );
@@ -529,8 +529,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key:   "outcome".to_string(),
-                op:    Op::Eq,
+                key: "outcome".to_string(),
+                op: Op::Eq,
                 value: "success".to_string(),
             })
         );
@@ -549,8 +549,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key:   "outcome".to_string(),
-                op:    Op::NotEq,
+                key: "outcome".to_string(),
+                op: Op::NotEq,
                 value: "fail".to_string(),
             })
         );
@@ -562,8 +562,8 @@ mod tests {
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
-                key:   "context.msg".to_string(),
-                op:    Op::Eq,
+                key: "context.msg".to_string(),
+                op: Op::Eq,
                 value: "hello world".to_string(),
             })
         );

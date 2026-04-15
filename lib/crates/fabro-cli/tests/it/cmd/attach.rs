@@ -257,7 +257,7 @@ fn attach_before_completion_streams_to_finished_state() {
         stderr: stderr_reader.join().expect("stderr reader should join"),
     };
     let snapshot = format_output_snapshot(&output, &filters);
-    wait_for_status(&run.run_dir, &["succeeded"]);
+    wait_for_status(&run.run_dir, &["completed"]);
 
     insta::assert_snapshot!(snapshot, @"
     success: true
@@ -848,5 +848,5 @@ fn attach_json_errors_without_prompting_for_human_input() {
                 .expect("answer submission should succeed");
             assert_eq!(response.status(), fabro_http::StatusCode::NO_CONTENT);
         });
-    wait_for_status(&run.run_dir, &["succeeded"]);
+    wait_for_status(&run.run_dir, &["completed"]);
 }

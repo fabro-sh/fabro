@@ -34,36 +34,36 @@ mod system_time_iso8601 {
 #[derive(Debug, Clone)]
 pub enum Turn {
     User {
-        content:   String,
+        content: String,
         timestamp: SystemTime,
     },
     Assistant {
-        content:        String,
-        tool_calls:     Vec<ToolCall>,
+        content: String,
+        tool_calls: Vec<ToolCall>,
         /// Provider-specific content parts (e.g. `OpenAI` reasoning items,
         /// `Anthropic` thinking blocks with signatures) preserved for
         /// round-tripping. Reasoning/thinking text is stored here as
         /// `ContentPart::Thinking`.
         provider_parts: Vec<ContentPart>,
-        usage:          Box<TokenCounts>,
-        response_id:    String,
-        timestamp:      SystemTime,
+        usage: Box<TokenCounts>,
+        response_id: String,
+        timestamp: SystemTime,
     },
     ToolResults {
-        results:   Vec<ToolResult>,
+        results: Vec<ToolResult>,
         timestamp: SystemTime,
     },
     /// Injected content sent as a system-role message to the LLM (maps to
     /// `Role::System`).
     System {
-        content:   String,
+        content: String,
         timestamp: SystemTime,
     },
     /// Injected steering content sent as a user-role message to the LLM (maps
     /// to `Role::User`). Used to guide the assistant's behavior
     /// mid-conversation without appearing as actual user input.
     Steering {
-        content:   String,
+        content: String,
         timestamp: SystemTime,
     },
 }
@@ -101,7 +101,7 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        model:    Option<String>,
+        model: Option<String>,
     },
     SessionEnded,
     ProcessingEnd,
@@ -111,14 +111,14 @@ pub enum AgentEvent {
     AssistantTextStart,
     /// Replaces the current in-progress assistant output buffers.
     AssistantOutputReplace {
-        text:      String,
+        text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reasoning: Option<String>,
     },
     AssistantMessage {
-        text:            String,
-        model:           String,
-        usage:           TokenCounts,
+        text: String,
+        model: String,
+        usage: TokenCounts,
         tool_call_count: usize,
     },
     TextDelta {
@@ -128,24 +128,24 @@ pub enum AgentEvent {
         delta: String,
     },
     ToolCallStarted {
-        tool_name:    String,
+        tool_name: String,
         tool_call_id: String,
-        arguments:    serde_json::Value,
+        arguments: serde_json::Value,
     },
     ToolCallOutputDelta {
         delta: String,
     },
     ToolCallCompleted {
-        tool_name:    String,
+        tool_name: String,
         tool_call_id: String,
-        output:       serde_json::Value,
-        is_error:     bool,
+        output: serde_json::Value,
+        is_error: bool,
     },
     Error {
         error: Error,
     },
     Warning {
-        kind:    String,
+        kind: String,
         message: String,
         details: serde_json::Value,
     },
@@ -160,49 +160,49 @@ pub enum AgentEvent {
         text: String,
     },
     CompactionStarted {
-        estimated_tokens:    usize,
+        estimated_tokens: usize,
         context_window_size: usize,
     },
     CompactionCompleted {
-        original_turn_count:    usize,
-        preserved_turn_count:   usize,
+        original_turn_count: usize,
+        preserved_turn_count: usize,
         summary_token_estimate: usize,
-        tracked_file_count:     usize,
+        tracked_file_count: usize,
     },
     LlmRetry {
-        provider:   String,
-        model:      String,
-        attempt:    usize,
+        provider: String,
+        model: String,
+        attempt: usize,
         delay_secs: f64,
-        error:      LlmError,
+        error: LlmError,
     },
     SubAgentSpawned {
         agent_id: String,
-        depth:    usize,
-        task:     String,
+        depth: usize,
+        task: String,
     },
     SubAgentCompleted {
-        agent_id:   String,
-        depth:      usize,
-        success:    bool,
+        agent_id: String,
+        depth: usize,
+        success: bool,
         turns_used: usize,
     },
     SubAgentFailed {
         agent_id: String,
-        depth:    usize,
-        error:    Error,
+        depth: usize,
+        error: Error,
     },
     SubAgentClosed {
         agent_id: String,
-        depth:    usize,
+        depth: usize,
     },
     McpServerReady {
         server_name: String,
-        tool_count:  usize,
+        tool_count: usize,
     },
     McpServerFailed {
         server_name: String,
-        error:       String,
+        error: String,
     },
 }
 
@@ -412,10 +412,10 @@ impl AgentEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEvent {
-    pub event:             AgentEvent,
+    pub event: AgentEvent,
     #[serde(with = "system_time_iso8601")]
-    pub timestamp:         SystemTime,
-    pub session_id:        String,
+    pub timestamp: SystemTime,
+    pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
 }
@@ -427,18 +427,21 @@ mod tests {
     #[test]
     fn session_event_construction() {
         let event = SessionEvent {
-            event:             AgentEvent::SessionStarted {
+            event: AgentEvent::SessionStarted {
                 provider: Some("anthropic".into()),
-                model:    Some("claude-opus".into()),
+                model: Some("claude-opus".into()),
             },
-            timestamp:         SystemTime::now(),
-            session_id:        "sess_1".into(),
+            timestamp: SystemTime::now(),
+            session_id: "sess_1".into(),
             parent_session_id: None,
         };
-        assert!(matches!(event.event, AgentEvent::SessionStarted {
-            provider: Some(_),
-            model:    Some(_),
-        }));
+        assert!(matches!(
+            event.event,
+            AgentEvent::SessionStarted {
+                provider: Some(_),
+                model: Some(_),
+            }
+        ));
         assert_eq!(event.session_id, "sess_1");
         assert_eq!(event.parent_session_id, None);
     }
@@ -446,24 +449,30 @@ mod tests {
     #[test]
     fn compaction_events_constructible() {
         let started = AgentEvent::CompactionStarted {
-            estimated_tokens:    5000,
+            estimated_tokens: 5000,
             context_window_size: 8000,
         };
-        assert!(matches!(started, AgentEvent::CompactionStarted {
-            estimated_tokens: 5000,
-            ..
-        }));
+        assert!(matches!(
+            started,
+            AgentEvent::CompactionStarted {
+                estimated_tokens: 5000,
+                ..
+            }
+        ));
 
         let completed = AgentEvent::CompactionCompleted {
-            original_turn_count:    20,
-            preserved_turn_count:   6,
-            summary_token_estimate: 500,
-            tracked_file_count:     3,
-        };
-        assert!(matches!(completed, AgentEvent::CompactionCompleted {
             original_turn_count: 20,
-            ..
-        }));
+            preserved_turn_count: 6,
+            summary_token_estimate: 500,
+            tracked_file_count: 3,
+        };
+        assert!(matches!(
+            completed,
+            AgentEvent::CompactionCompleted {
+                original_turn_count: 20,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -480,36 +489,39 @@ mod tests {
     fn subagent_spawned_constructible() {
         let event = AgentEvent::SubAgentSpawned {
             agent_id: "sa-1".into(),
-            depth:    1,
-            task:     "list files".into(),
-        };
-        assert!(matches!(event, AgentEvent::SubAgentSpawned {
             depth: 1,
-            ..
-        }));
+            task: "list files".into(),
+        };
+        assert!(matches!(
+            event,
+            AgentEvent::SubAgentSpawned { depth: 1, .. }
+        ));
     }
 
     #[test]
     fn subagent_completed_constructible() {
         let event = AgentEvent::SubAgentCompleted {
-            agent_id:   "sa-1".into(),
-            depth:      1,
-            success:    true,
-            turns_used: 5,
-        };
-        assert!(matches!(event, AgentEvent::SubAgentCompleted {
+            agent_id: "sa-1".into(),
+            depth: 1,
             success: true,
             turns_used: 5,
-            ..
-        }));
+        };
+        assert!(matches!(
+            event,
+            AgentEvent::SubAgentCompleted {
+                success: true,
+                turns_used: 5,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn subagent_failed_constructible() {
         let event = AgentEvent::SubAgentFailed {
             agent_id: "sa-1".into(),
-            depth:    0,
-            error:    Error::ToolExecution("timeout".into()),
+            depth: 0,
+            error: Error::ToolExecution("timeout".into()),
         };
         assert!(matches!(event, AgentEvent::SubAgentFailed { depth: 0, .. }));
     }
@@ -518,7 +530,7 @@ mod tests {
     fn subagent_closed_constructible() {
         let event = AgentEvent::SubAgentClosed {
             agent_id: "sa-1".into(),
-            depth:    2,
+            depth: 2,
         };
         assert!(matches!(event, AgentEvent::SubAgentClosed { depth: 2, .. }));
     }
@@ -528,23 +540,23 @@ mod tests {
         let events = vec![
             AgentEvent::SubAgentSpawned {
                 agent_id: "sa-1".into(),
-                depth:    0,
-                task:     "test".into(),
+                depth: 0,
+                task: "test".into(),
             },
             AgentEvent::SubAgentCompleted {
-                agent_id:   "sa-1".into(),
-                depth:      0,
-                success:    true,
+                agent_id: "sa-1".into(),
+                depth: 0,
+                success: true,
                 turns_used: 3,
             },
             AgentEvent::SubAgentFailed {
                 agent_id: "sa-1".into(),
-                depth:    0,
-                error:    Error::ToolExecution("oops".into()),
+                depth: 0,
+                error: Error::ToolExecution("oops".into()),
             },
             AgentEvent::SubAgentClosed {
                 agent_id: "sa-1".into(),
-                depth:    0,
+                depth: 0,
             },
         ];
         let json = serde_json::to_string(&events).unwrap();
@@ -555,12 +567,12 @@ mod tests {
     #[test]
     fn session_event_serde_round_trip_without_parent_session_id() {
         let event = SessionEvent {
-            event:             AgentEvent::SessionStarted {
+            event: AgentEvent::SessionStarted {
                 provider: Some("anthropic".into()),
-                model:    Some("claude-opus".into()),
+                model: Some("claude-opus".into()),
             },
-            timestamp:         SystemTime::now(),
-            session_id:        "sess_42".into(),
+            timestamp: SystemTime::now(),
+            session_id: "sess_42".into(),
             parent_session_id: None,
         };
         let json = serde_json::to_string(&event).unwrap();
@@ -573,21 +585,24 @@ mod tests {
         let deserialized: SessionEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.session_id, "sess_42");
         assert_eq!(deserialized.parent_session_id, None);
-        assert!(matches!(deserialized.event, AgentEvent::SessionStarted {
-            provider: Some(_),
-            model:    Some(_),
-        }));
+        assert!(matches!(
+            deserialized.event,
+            AgentEvent::SessionStarted {
+                provider: Some(_),
+                model: Some(_),
+            }
+        ));
     }
 
     #[test]
     fn session_event_serde_round_trip_with_parent_session_id() {
         let event = SessionEvent {
-            event:             AgentEvent::SessionStarted {
+            event: AgentEvent::SessionStarted {
                 provider: Some("openai".into()),
-                model:    Some("gpt-5.4".into()),
+                model: Some("gpt-5.4".into()),
             },
-            timestamp:         SystemTime::now(),
-            session_id:        "sess_child".into(),
+            timestamp: SystemTime::now(),
+            session_id: "sess_child".into(),
             parent_session_id: Some("sess_parent".into()),
         };
         let json = serde_json::to_string(&event).unwrap();
@@ -606,19 +621,19 @@ mod tests {
     fn mcp_server_ready_constructible() {
         let event = AgentEvent::McpServerReady {
             server_name: "filesystem".into(),
-            tool_count:  3,
-        };
-        assert!(matches!(event, AgentEvent::McpServerReady {
             tool_count: 3,
-            ..
-        }));
+        };
+        assert!(matches!(
+            event,
+            AgentEvent::McpServerReady { tool_count: 3, .. }
+        ));
     }
 
     #[test]
     fn mcp_server_failed_constructible() {
         let event = AgentEvent::McpServerFailed {
             server_name: "broken".into(),
-            error:       "connection refused".into(),
+            error: "connection refused".into(),
         };
         assert!(
             matches!(event, AgentEvent::McpServerFailed { server_name, .. } if server_name == "broken")
@@ -630,20 +645,20 @@ mod tests {
         let events = vec![
             AgentEvent::McpServerReady {
                 server_name: "fs".into(),
-                tool_count:  5,
+                tool_count: 5,
             },
             AgentEvent::McpServerFailed {
                 server_name: "bad".into(),
-                error:       "timeout".into(),
+                error: "timeout".into(),
             },
         ];
         let json = serde_json::to_string(&events).unwrap();
         let deserialized: Vec<AgentEvent> = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.len(), 2);
-        assert!(matches!(&deserialized[0], AgentEvent::McpServerReady {
-            tool_count: 5,
-            ..
-        }));
+        assert!(matches!(
+            &deserialized[0],
+            AgentEvent::McpServerReady { tool_count: 5, .. }
+        ));
         assert!(matches!(
             &deserialized[1],
             AgentEvent::McpServerFailed { .. }
@@ -653,16 +668,16 @@ mod tests {
     #[test]
     fn agent_event_assistant_message() {
         let usage = TokenCounts {
-            input_tokens:       100,
-            output_tokens:      50,
-            cache_read_tokens:  80,
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_read_tokens: 80,
             cache_write_tokens: 10,
-            reasoning_tokens:   20,
+            reasoning_tokens: 20,
         };
         let event = AgentEvent::AssistantMessage {
-            text:            "Hello".into(),
-            model:           "test-model".into(),
-            usage:           usage.clone(),
+            text: "Hello".into(),
+            model: "test-model".into(),
+            usage: usage.clone(),
             tool_call_count: 2,
         };
         match &event {
@@ -683,7 +698,7 @@ mod tests {
     #[test]
     fn agent_event_assistant_output_replace_roundtrip() {
         let event = AgentEvent::AssistantOutputReplace {
-            text:      "Hello again".into(),
+            text: "Hello again".into(),
             reasoning: Some("Retrying from scratch".into()),
         };
         let json = serde_json::to_string(&event).unwrap();
@@ -704,7 +719,7 @@ mod tests {
         let event = AgentEvent::Error {
             error: Error::Llm(LlmError::Network {
                 message: "refused".into(),
-                source:  None,
+                source: None,
             }),
         };
         let json = serde_json::to_string(&event).unwrap();
@@ -721,19 +736,19 @@ mod tests {
     fn llm_retry_event_carries_sdk_error() {
         use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};
         let event = AgentEvent::LlmRetry {
-            provider:   "openai".into(),
-            model:      "gpt-4".into(),
-            attempt:    1,
+            provider: "openai".into(),
+            model: "gpt-4".into(),
+            attempt: 1,
             delay_secs: 2.0,
-            error:      LlmError::Provider {
-                kind:   ProviderErrorKind::RateLimit,
+            error: LlmError::Provider {
+                kind: ProviderErrorKind::RateLimit,
                 detail: Box::new(ProviderErrorDetail {
-                    message:     "too fast".into(),
-                    provider:    "openai".into(),
+                    message: "too fast".into(),
+                    provider: "openai".into(),
                     status_code: Some(429),
-                    error_code:  None,
+                    error_code: None,
                     retry_after: Some(2.0),
-                    raw:         None,
+                    raw: None,
                 }),
             },
         };
@@ -752,8 +767,8 @@ mod tests {
     fn subagent_failed_carries_agent_error() {
         let event = AgentEvent::SubAgentFailed {
             agent_id: "sa-1".into(),
-            depth:    0,
-            error:    Error::ToolExecution("cmd failed".into()),
+            depth: 0,
+            error: Error::ToolExecution("cmd failed".into()),
         };
         let json = serde_json::to_string(&event).unwrap();
         let deserialized: AgentEvent = serde_json::from_str(&json).unwrap();
@@ -780,7 +795,7 @@ mod tests {
     fn mcp_server_failed_still_string() {
         let event = AgentEvent::McpServerFailed {
             server_name: "broken".into(),
-            error:       "connection refused".into(),
+            error: "connection refused".into(),
         };
         let json = serde_json::to_string(&event).unwrap();
         let deserialized: AgentEvent = serde_json::from_str(&json).unwrap();

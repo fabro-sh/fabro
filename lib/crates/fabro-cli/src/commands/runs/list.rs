@@ -146,15 +146,16 @@ pub(crate) async fn list_command(
 fn status_cell(status: RunStatus, use_color: bool) -> CellStruct {
     let text = status.to_string();
     let color = match status {
-        RunStatus::Succeeded => Some(Color::Green),
-        RunStatus::Failed => Some(Color::Red),
-        RunStatus::Running | RunStatus::Starting | RunStatus::Submitted => Some(Color::Cyan),
-        RunStatus::Removing => Some(Color::Yellow),
+        RunStatus::Completed => Some(Color::Green),
+        RunStatus::Failed | RunStatus::Cancelled => Some(Color::Red),
+        RunStatus::Running | RunStatus::Starting | RunStatus::Submitted | RunStatus::Queued => {
+            Some(Color::Cyan)
+        }
+        RunStatus::Blocked | RunStatus::Removing => Some(Color::Yellow),
         RunStatus::Paused => Some(Color::Magenta),
-        RunStatus::Dead => Some(Color::Ansi256(8)),
     };
     text.cell()
-        .bold(use_color && color != Some(Color::Ansi256(8)))
+        .bold(use_color)
         .foreground_color(color_if(use_color, color.unwrap_or(Color::Ansi256(8))))
 }
 

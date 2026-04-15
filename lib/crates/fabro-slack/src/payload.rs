@@ -4,13 +4,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlackQuestionRef {
     pub run_id: String,
-    pub qid:    String,
+    pub qid: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct SlackAnswerSubmission {
     pub run_id: String,
-    pub qid:    String,
+    pub qid: String,
     pub answer: Answer,
 }
 
@@ -19,20 +19,20 @@ pub struct SlackAnswerSubmission {
 pub enum SlackActionPayload {
     Yes {
         run_id: String,
-        qid:    String,
+        qid: String,
     },
     No {
         run_id: String,
-        qid:    String,
+        qid: String,
     },
     Selected {
         run_id: String,
-        qid:    String,
-        key:    String,
+        qid: String,
+        key: String,
     },
     SubmitMulti {
         run_id: String,
-        qid:    String,
+        qid: String,
     },
 }
 
@@ -45,7 +45,7 @@ impl SlackActionPayload {
             | Self::Selected { run_id, qid, .. }
             | Self::SubmitMulti { run_id, qid } => SlackQuestionRef {
                 run_id: run_id.clone(),
-                qid:    qid.clone(),
+                qid: qid.clone(),
             },
         }
     }
@@ -64,8 +64,8 @@ mod tests {
     fn action_payload_serializes_run_id_and_qid() {
         let payload = SlackActionPayload::Selected {
             run_id: "run_123".to_string(),
-            qid:    "q_123".to_string(),
-            key:    "approve".to_string(),
+            qid: "q_123".to_string(),
+            key: "approve".to_string(),
         };
         let json = encode_action_value(&payload);
         assert_eq!(

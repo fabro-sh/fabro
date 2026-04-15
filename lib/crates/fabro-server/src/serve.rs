@@ -217,7 +217,7 @@ fn bind_override_layer(bind: BindRequest) -> SettingsLayer {
         },
         BindRequest::Tcp(address) => ServerListenLayer::Tcp {
             address: Some(InterpString::parse(&address.to_string())),
-            tls:     None,
+            tls: None,
         },
         BindRequest::TcpHost(_) => {
             unreachable!("host-only bind requests are handled before building a settings override")
@@ -692,14 +692,14 @@ mod tests {
     fn apply_runtime_settings_preserves_storage_dir() {
         let base = SettingsLayer::default();
         let args = ServeArgs {
-            bind:                None,
-            model:               None,
-            provider:            None,
-            sandbox:             None,
-            web:                 false,
-            no_web:              false,
+            bind: None,
+            model: None,
+            provider: None,
+            sandbox: None,
+            web: false,
+            no_web: false,
             max_concurrent_runs: None,
-            config:              None,
+            config: None,
         };
 
         let resolved = apply_runtime_settings(&base, &args, &PathBuf::from("/srv/fabro-storage"));
@@ -724,14 +724,14 @@ enabled = false
 ",
         );
         let args = ServeArgs {
-            bind:                None,
-            model:               None,
-            provider:            None,
-            sandbox:             None,
-            web:                 true,
-            no_web:              false,
+            bind: None,
+            model: None,
+            provider: None,
+            sandbox: None,
+            web: true,
+            no_web: false,
             max_concurrent_runs: None,
-            config:              None,
+            config: None,
         };
 
         let resolved = apply_runtime_settings(&base, &args, &PathBuf::from("/srv/fabro"));
@@ -750,14 +750,14 @@ enabled = false
     fn apply_runtime_settings_disables_web_from_cli_flag() {
         let base = SettingsLayer::default();
         let args = ServeArgs {
-            bind:                None,
-            model:               None,
-            provider:            None,
-            sandbox:             None,
-            web:                 false,
-            no_web:              true,
+            bind: None,
+            model: None,
+            provider: None,
+            sandbox: None,
+            web: false,
+            no_web: true,
             max_concurrent_runs: None,
-            config:              None,
+            config: None,
         };
 
         let resolved = apply_runtime_settings(&base, &args, &PathBuf::from("/srv/fabro"));

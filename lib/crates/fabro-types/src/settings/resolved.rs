@@ -7,11 +7,11 @@ use super::{
 /// A fully resolved settings view across all namespaces.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Settings {
-    pub project:  ProjectSettings,
+    pub project: ProjectSettings,
     pub workflow: WorkflowSettings,
-    pub run:      RunSettings,
-    pub cli:      CliSettings,
-    pub server:   ServerSettings,
+    pub run: RunSettings,
+    pub cli: CliSettings,
+    pub server: ServerSettings,
     pub features: FeaturesSettings,
 }
 
@@ -44,8 +44,8 @@ mod tests {
                 url: InterpString::parse("https://api.example.com"),
                 tls: Some(CliTargetTlsSettings {
                     cert: InterpString::parse("/tmp/client.crt"),
-                    key:  InterpString::parse("/tmp/client.key"),
-                    ca:   InterpString::parse("/tmp/ca.pem"),
+                    key: InterpString::parse("/tmp/client.key"),
+                    ca: InterpString::parse("/tmp/ca.pem"),
                 }),
             })
             .unwrap(),
@@ -71,8 +71,8 @@ mod tests {
         assert_eq!(
             serde_json::to_value(McpTransport::Sandbox {
                 command: vec!["fabro-mcp".to_string(), "--serve".to_string()],
-                port:    3333,
-                env:     HashMap::from([("TOKEN".to_string(), "{{ env.MCP_TOKEN }}".to_string())]),
+                port: 3333,
+                env: HashMap::from([("TOKEN".to_string(), "{{ env.MCP_TOKEN }}".to_string())]),
             })
             .unwrap(),
             json!({
@@ -98,9 +98,9 @@ mod tests {
 
         assert_eq!(
             serde_json::to_value(ObjectStoreSettings::S3 {
-                bucket:     InterpString::parse("fabro-artifacts"),
-                region:     InterpString::parse("us-east-1"),
-                endpoint:   Some(InterpString::parse("https://s3.example.com")),
+                bucket: InterpString::parse("fabro-artifacts"),
+                region: InterpString::parse("us-east-1"),
+                endpoint: Some(InterpString::parse("https://s3.example.com")),
                 path_style: true,
             })
             .unwrap(),
@@ -119,9 +119,9 @@ mod tests {
         assert_eq!(
             serde_json::to_value(ServerListenSettings::Tcp {
                 address: "127.0.0.1:8080".parse().unwrap(),
-                tls:     Some(TlsConfig {
+                tls: Some(TlsConfig {
                     cert: InterpString::parse("/tmp/server.crt"),
-                    key:  InterpString::parse("/tmp/server.key"),
+                    key: InterpString::parse("/tmp/server.key"),
                 }),
             })
             .unwrap(),
@@ -138,29 +138,32 @@ mod tests {
         let settings = Settings {
             server: ServerSettings {
                 slatedb: ServerSlateDbSettings {
-                    prefix:         InterpString::parse("slatedb/"),
-                    store:          ObjectStoreSettings::Local {
+                    prefix: InterpString::parse("slatedb/"),
+                    store: ObjectStoreSettings::Local {
                         root: InterpString::parse("/srv/slatedb"),
                     },
                     flush_interval: StdDuration::from_secs(30),
-                    disk_cache:     false,
+                    disk_cache: false,
                 },
                 ..ServerSettings::default()
             },
             run: RunSettings {
                 agent: RunAgentSettings {
-                    mcps: HashMap::from([("sandboxed".to_string(), McpServerSettings {
-                        name:                 "sandboxed".to_string(),
-                        transport:            McpTransport::Http {
-                            url:     "https://mcp.example.com".to_string(),
-                            headers: HashMap::from([(
-                                "Authorization".to_string(),
-                                "Bearer {{ env.MCP_TOKEN }}".to_string(),
-                            )]),
+                    mcps: HashMap::from([(
+                        "sandboxed".to_string(),
+                        McpServerSettings {
+                            name: "sandboxed".to_string(),
+                            transport: McpTransport::Http {
+                                url: "https://mcp.example.com".to_string(),
+                                headers: HashMap::from([(
+                                    "Authorization".to_string(),
+                                    "Bearer {{ env.MCP_TOKEN }}".to_string(),
+                                )]),
+                            },
+                            startup_timeout_secs: 15,
+                            tool_timeout_secs: 90,
                         },
-                        startup_timeout_secs: 15,
-                        tool_timeout_secs:    90,
-                    })]),
+                    )]),
                     ..RunAgentSettings::default()
                 },
                 ..RunSettings::default()
