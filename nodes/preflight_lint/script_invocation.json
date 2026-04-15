@@ -1,0 +1,5 @@
+{
+  "script": "cargo clippy -q --workspace -- -D warnings 2>&1",
+  "command": "cargo clippy -q --workspace -- -D warnings 2>&1",
+  "language": "shell"
+}
