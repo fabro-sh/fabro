@@ -47,11 +47,16 @@ export interface RunWithStatus extends RunItem {
   statusLabel: string;
 }
 
+function truncateGoal(goal: string): string {
+  const firstLine = goal.split("\n")[0];
+  return firstLine.length > 100 ? firstLine.slice(0, 100) + "…" : firstLine;
+}
+
 export function mapRunListItem(item: RunListItem): RunItem {
   return {
     id: item.id,
     repo: item.repository.name,
-    title: item.title,
+    title: truncateGoal(item.title),
     workflow: item.workflow.slug,
     number: item.pull_request?.number,
     additions: item.pull_request?.additions,
@@ -91,7 +96,7 @@ export function mapRunSummaryToRunItem(summary: RunSummaryResponse): RunItem {
   return {
     id: summary.run_id,
     repo: repoName,
-    title: summary.goal ?? "Untitled run",
+    title: summary.goal ? truncateGoal(summary.goal) : "Untitled run",
     workflow: summary.workflow_slug ?? "unknown",
     elapsed:
       summary.duration_ms != null
