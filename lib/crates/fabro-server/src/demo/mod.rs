@@ -758,7 +758,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "expand".into(),
                 },
-                status:       BoardColumn::Pending,
+                status:       BoardColumn::Initializing,
                 pull_request: Some(RunPullRequest {
                     number:    0,
                     additions: Some(567),
@@ -788,7 +788,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "implement".into(),
                 },
-                status:       BoardColumn::Pending,
+                status:       BoardColumn::Initializing,
                 pull_request: Some(RunPullRequest {
                     number:    0,
                     additions: Some(145),
