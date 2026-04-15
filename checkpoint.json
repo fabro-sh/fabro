@@ -1,17 +1,18 @@
 {
-  "timestamp": "2026-04-15T15:10:58.375888Z",
-  "current_node": "test_rust",
+  "timestamp": "2026-04-15T15:11:03.365747Z",
+  "current_node": "test_typescript",
   "completed_nodes": [
     "start",
     "toolchain",
     "compile_rust",
     "compile_typescript",
     "lint_rust",
-    "test_rust"
+    "test_rust",
+    "test_typescript"
   ],
   "node_retries": {},
   "context_values": {
-    "current_node": "test_rust",
+    "current_node": "test_typescript",
     "graph.rankdir": "LR",
     "internal.retry_count.start": 0,
     "thread.start.current_node": "toolchain",
@@ -20,36 +21,25 @@
     "internal.retry_count.test_rust": 0,
     "internal.retry_count.compile_rust": 0,
     "internal.retry_count.toolchain": 0,
-    "command.output": "────────────\n Nextest run ID fddcb8a8-3262-4b1c-9cc9-dd13c8a56797 with nextest profile: default\n    Starting 3980 tests across 66 binaries (182 tests skipped)\n        FAIL [   0.102s] ( 551/3980) fabro-cli::it cmd::model_test::bulk_skip_exits_zero_and_prints_summary\n  stdout ───\n\n    running 1 test\n    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Snapshot Summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n    Snapshot: bulk_skip_exits_zero_and_prints_summary\n    Source: lib/crates/fabro-cli/tests/it/cmd/model_test.rs:85\n    ────────────────────────────────────────────────────────────────────────────────\n    Expression: snapshot\n    ────────────────────────────────────────────────────────────────────────────────\n    -old snapshot\n    +new results\n    ────────────┬───────────────────────────────────────────────────────────────────\n        1     1 │ success: true\n        2     2 │ exit_code: 0\n        3     3 │ ----- stdout -----\n        4       │-MODEL              PROVIDER   ALIASES                CONTEXT          COST      SPEED  RESULT \n        5       │- claude-opus-4-6    anthropic  opus, claude-opus           1m  $5.0 / $25.0   25 tok/s  ok     \n        6       │- claude-sonnet-4-5  anthropic                            200k  $3.0 / $15.0   50 tok/s  ok     \n        7       │- claude-sonnet-4-6  anthropic  sonnet, claude-sonnet     200k  $3.0 / $15.0   50 tok/s  ok     \n        8       │- claude-haiku-4-5   anthropic  haiku, claude-haiku       200k   $0.8 / $4.0  100 tok/s  ok\n        9     4 │ ----- stderr -----\n       10     5 │ Testing claude-opus-4-6... done\n       11     6 │ Testing claude-sonnet-4-5... done\n       12     7 │ Testing claude-sonnet-4-6... done\n    ┈┈┈┈┈┈┈┈┈┈┈┈┼┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n       26    21 │ Testing kimi-k2.5... done\n       27    22 │ Testing glm-4.7... done\n       28    23 │ Testing minimax-m2.5... done\n       29    24 │ Testing mercury-2... done\n       30       │-Skipped 16 model(s) (no credentials: OpenAI, Gemini, Kimi, Zai, Minimax, Inception)\n             25 │+Skipped 20 model(s) (no credentials: Anthropic, OpenAI, Gemini, Kimi, Zai, Minimax, Inception)\n    ────────────┴───────────────────────────────────────────────────────────────────\n    To update snapshots run `cargo insta review`\n    Stopped on the first failure. Run `cargo insta test` to run all snapshots.\n    test cmd::model_test::bulk_skip_exits_zero_and_prints_summary ... FAILED\n\n    failures:\n\n    failures:\n        cmd::model_test::bulk_skip_exits_zero_and_prints_summary\n\n    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 346 filtered out; finished in 0.10s\n\n  stderr ───\n    Testing claude-opus-4-6... done\n    Testing claude-sonnet-4-5... done\n    Testing claude-sonnet-4-6... done\n    Testing claude-haiku-4-5... done\n    Testing gpt-5.2... done\n    Testing gpt-5-mini... done\n    Testing gpt-5.2-codex... done\n    Testing gpt-5.3-codex... done\n    Testing gpt-5.3-codex-spark... done\n    Testing gpt-5.4... done\n    Testing gpt-5.4-pro... done\n    Testing gpt-5.4-mini... done\n    Testing gemini-3.1-pro-preview... done\n    Testing gemini-3.1-pro-preview-customtools... done\n    Testing gemini-3-flash-preview... done\n    Testing gemini-3.1-flash-lite-preview... done\n    Testing kimi-k2.5... done\n    Testing glm-4.7... done\n    Testing minimax-m2.5... done\n    Testing mercury-2... done\n    Skipped 20 model(s) (no credentials: Anthropic, OpenAI, Gemini, Kimi, Zai, Minimax, Inception)\n\n    thread 'cmd::model_test::bulk_skip_exits_zero_and_prints_summary' (26131) panicked at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/runtime.rs:719:13:\n    snapshot assertion for 'bulk_skip_exits_zero_and_prints_summary' failed in line 85\n    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n  Cancelling due to test failure: 3 tests still running\n────────────\n     Summary [   5.376s] 554/3980 tests run: 553 passed, 1 failed, 182 skipped\n        FAIL [   0.102s] ( 551/3980) fabro-cli::it cmd::model_test::bulk_skip_exits_zero_and_prints_summary\nwarning: 3426/3980 tests were not run due to test failure (run with --no-fail-fast to run all tests, or run with --max-fail)\nerror: test run failed\n",
+    "command.output": "bun test v1.3.10 (30e609e0)\n\napp/api.test.ts:\n(pass) isNotAvailable > returns true for 501 status [1.00ms]\n(pass) isNotAvailable > returns true for 404 status\n(pass) isNotAvailable > returns false for 200 status\n(pass) auth helpers > getAuthConfig fetches auth methods without triggering auth redirect behavior\n(pass) auth helpers > loginDevToken posts the token payload [1.00ms]\n\napp/router.test.tsx:\n(pass) browser router > uses /login for the sign-in page instead of the backend auth namespace [1.00ms]\n(pass) browser router > exposes /setup but not the removed /setup/complete route\n\nscripts/build.test.ts:\n(pass) watch mode keeps running until interrupted [1055.01ms]\n\napp/data/runs.test.ts:\n(pass) mapRunSummaryToRunItem > maps store run summary to RunItem\n(pass) mapRunSummaryToRunItem > handles missing optional fields\n\napp/layouts/app-shell.test.tsx:\n(pass) getVisibleNavigation > shows all nav items in demo mode [1.00ms]\n(pass) getVisibleNavigation > hides Workflows and Insights in production mode\n\napp/lib/demo-mode.test.tsx:\n(pass) DemoModeProvider > provides demo mode value to children [11.00ms]\n(pass) DemoModeProvider > defaults to false [1.00ms]\n\napp/lib/theme-selection.test.ts:\n(pass) resolveTheme > defaults to dark when no saved theme exists\n(pass) resolveTheme > uses the saved theme when it is valid\n(pass) buildThemeBootScript > defaults the boot script to dark without using system preference\n\n 17 pass\n 0 fail\n 37 expect() calls\nRan 17 tests across 7 files. [1385.00ms]\n",
+    "thread.test_rust.current_node": "test_typescript",
     "thread.compile_rust.current_node": "compile_typescript",
     "thread.lint_rust.current_node": "test_rust",
-    "outcome": "fail",
-    "failure_signature": "test_rust|canceled|script failed with exit code: <n> ## stdout ──────────── nextest run id <hex>-<n>-4b1c-9cc9-<hex> with nextest profile: default starting <n> tests across <n> binaries (<n> tests skipped) fail [ <n>.102s] ( <n>/<n>) f",
+    "outcome": "success",
+    "failure_signature": "",
     "thread.compile_typescript.current_node": "lint_rust",
-    "internal.thread_id": "lint_rust",
+    "internal.thread_id": "test_rust",
     "internal.run_id": "01KP8TQ29CPJVE75N8YBE6WA52",
     "graph.goal": "Verify the sandbox can lint and test the project",
     "internal.fidelity": "compact",
     "graph.retry_target": "exit",
     "internal.node_visit_count": 1,
-    "failure_class": "canceled",
+    "failure_class": "",
     "thread.toolchain.current_node": "compile_rust",
-    "internal.retry_count.lint_rust": 0
+    "internal.retry_count.lint_rust": 0,
+    "internal.retry_count.test_typescript": 0
   },
   "node_outcomes": {
-    "start": {
-      "status": "success",
-      "usage": null
-    },
-    "compile_rust": {
-      "status": "success",
-      "context_updates": {
-        "command.stderr": "",
-        "command.output": ""
-      },
-      "notes": "Script completed: cargo check -q --workspace 2>&1",
-      "usage": null
-    },
     "toolchain": {
       "status": "success",
       "context_updates": {
@@ -57,24 +47,6 @@
         "command.stderr": ""
       },
       "notes": "Script completed: rustc --version && cargo --version && bun --version 2>&1",
-      "usage": null
-    },
-    "compile_typescript": {
-      "status": "success",
-      "context_updates": {
-        "command.output": "bun install v1.3.10 (30e609e0)\n\n+ @tailwindcss/cli@4.2.2\n+ @types/node@22.19.13\n+ @types/react@19.2.14\n+ @types/react-dom@19.2.3\n+ tailwindcss@4.2.1\n+ typescript@5.9.3\n+ @dnd-kit/core@6.3.1\n+ @dnd-kit/sortable@10.0.0\n+ @dnd-kit/utilities@3.2.2\n+ @headlessui/react@2.2.9\n+ @heroicons/react@2.2.0\n+ @pierre/diffs@1.0.11\n+ @viz-js/viz@3.25.0\n+ react@19.2.4\n+ react-dom@19.2.4\n+ react-router@7.12.0\n\n1154 packages installed [3.71s]\n$ tsc\n",
-        "command.stderr": ""
-      },
-      "notes": "Script completed: cd apps/fabro-web && bun install && bun run typecheck 2>&1",
-      "usage": null
-    },
-    "lint_rust": {
-      "status": "success",
-      "context_updates": {
-        "command.stderr": "",
-        "command.output": "info: syncing channel updates for nightly-x86_64-unknown-linux-gnu\ninfo: latest update on 2026-04-15 for version 1.97.0-nightly (a5c825cd8 2026-04-14)\ninfo: downloading 6 components\n"
-      },
-      "notes": "Script completed: cargo +nightly fmt --check --all 2>&1 && cargo clippy -q --workspace -- -D warnings 2>&1",
       "usage": null
     },
     "test_rust": {
@@ -88,14 +60,55 @@
         "failure_class": "canceled"
       },
       "usage": null
+    },
+    "start": {
+      "status": "success",
+      "usage": null
+    },
+    "compile_rust": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": ""
+      },
+      "notes": "Script completed: cargo check -q --workspace 2>&1",
+      "usage": null
+    },
+    "compile_typescript": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "bun install v1.3.10 (30e609e0)\n\n+ @tailwindcss/cli@4.2.2\n+ @types/node@22.19.13\n+ @types/react@19.2.14\n+ @types/react-dom@19.2.3\n+ tailwindcss@4.2.1\n+ typescript@5.9.3\n+ @dnd-kit/core@6.3.1\n+ @dnd-kit/sortable@10.0.0\n+ @dnd-kit/utilities@3.2.2\n+ @headlessui/react@2.2.9\n+ @heroicons/react@2.2.0\n+ @pierre/diffs@1.0.11\n+ @viz-js/viz@3.25.0\n+ react@19.2.4\n+ react-dom@19.2.4\n+ react-router@7.12.0\n\n1154 packages installed [3.71s]\n$ tsc\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: cd apps/fabro-web && bun install && bun run typecheck 2>&1",
+      "usage": null
+    },
+    "test_typescript": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "bun test v1.3.10 (30e609e0)\n\napp/api.test.ts:\n(pass) isNotAvailable > returns true for 501 status [1.00ms]\n(pass) isNotAvailable > returns true for 404 status\n(pass) isNotAvailable > returns false for 200 status\n(pass) auth helpers > getAuthConfig fetches auth methods without triggering auth redirect behavior\n(pass) auth helpers > loginDevToken posts the token payload [1.00ms]\n\napp/router.test.tsx:\n(pass) browser router > uses /login for the sign-in page instead of the backend auth namespace [1.00ms]\n(pass) browser router > exposes /setup but not the removed /setup/complete route\n\nscripts/build.test.ts:\n(pass) watch mode keeps running until interrupted [1055.01ms]\n\napp/data/runs.test.ts:\n(pass) mapRunSummaryToRunItem > maps store run summary to RunItem\n(pass) mapRunSummaryToRunItem > handles missing optional fields\n\napp/layouts/app-shell.test.tsx:\n(pass) getVisibleNavigation > shows all nav items in demo mode [1.00ms]\n(pass) getVisibleNavigation > hides Workflows and Insights in production mode\n\napp/lib/demo-mode.test.tsx:\n(pass) DemoModeProvider > provides demo mode value to children [11.00ms]\n(pass) DemoModeProvider > defaults to false [1.00ms]\n\napp/lib/theme-selection.test.ts:\n(pass) resolveTheme > defaults to dark when no saved theme exists\n(pass) resolveTheme > uses the saved theme when it is valid\n(pass) buildThemeBootScript > defaults the boot script to dark without using system preference\n\n 17 pass\n 0 fail\n 37 expect() calls\nRan 17 tests across 7 files. [1385.00ms]\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: cd apps/fabro-web && bun test 2>&1",
+      "usage": null
+    },
+    "lint_rust": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "info: syncing channel updates for nightly-x86_64-unknown-linux-gnu\ninfo: latest update on 2026-04-15 for version 1.97.0-nightly (a5c825cd8 2026-04-14)\ninfo: downloading 6 components\n"
+      },
+      "notes": "Script completed: cargo +nightly fmt --check --all 2>&1 && cargo clippy -q --workspace -- -D warnings 2>&1",
+      "usage": null
     }
   },
-  "next_node_id": "test_typescript",
+  "next_node_id": "exit",
   "node_visits": {
     "lint_rust": 1,
     "start": 1,
     "toolchain": 1,
     "test_rust": 1,
+    "test_typescript": 1,
     "compile_rust": 1,
     "compile_typescript": 1
   }
