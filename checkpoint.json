@@ -1,0 +1,68 @@
+{
+  "timestamp": "2026-04-15T14:16:09.972607Z",
+  "current_node": "greet",
+  "completed_nodes": [
+    "start",
+    "greet"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+    "current_node": "greet",
+    "internal.run_id": "01KP8QZ17J44G5STS7WWY9ZVRH",
+    "internal.fidelity": "compact",
+    "internal.node_visit_count": 1,
+    "outcome": "success",
+    "failure_class": "",
+    "internal.retry_count.greet": 0,
+    "last_response": "Hello! Here’s a basic Fabro-style first step: inspect the repo before doing anything else.\n\nTop-level files and directories in this repo:\n\n```text\n.ai\n.cargo\n.claude\n.config\n.env.example\n.fabro\n.git",
+    "failure_signature": "",
+    "internal.retry_count.start": 0,
+    "internal.thread_id": "start",
+    "thread.start.current_node": "greet",
+    "response.greet": "Hello! Here’s a basic Fabro-style first step: inspect the repo before doing anything else.\n\nTop-level files and directories in this repo:\n\n```text\n.ai\n.cargo\n.claude\n.config\n.env.example\n.fabro\n.git\n.gitattributes\n.github\n.gitignore\nAGENTS.md\nCLAUDE.md\nCONTRIBUTING.md\nCargo.lock\nCargo.toml\nLICENSE.md\nREADME.md\napps\nbin\nbun.lock\nclippy.toml\ndocker\ndocs\ndocs-internal\nevals\nfiles-internal\ninstall.md\ninstall.sh\ninstaller\nlib\npackage.json\nrustfmt.toml\nscripts\ntest\n```\n\nIf you want, I can next demonstrate a basic Fabro workflow by finding an example workflow in `.fabro/workflows` and explaining how to run it.",
+    "last_stage": "greet",
+    "graph.rankdir": "LR"
+  },
+  "node_outcomes": {
+    "greet": {
+      "status": "success",
+      "context_updates": {
+        "response.greet": "Hello! Here’s a basic Fabro-style first step: inspect the repo before doing anything else.\n\nTop-level files and directories in this repo:\n\n```text\n.ai\n.cargo\n.claude\n.config\n.env.example\n.fabro\n.git\n.gitattributes\n.github\n.gitignore\nAGENTS.md\nCLAUDE.md\nCONTRIBUTING.md\nCargo.lock\nCargo.toml\nLICENSE.md\nREADME.md\napps\nbin\nbun.lock\nclippy.toml\ndocker\ndocs\ndocs-internal\nevals\nfiles-internal\ninstall.md\ninstall.sh\ninstaller\nlib\npackage.json\nrustfmt.toml\nscripts\ntest\n```\n\nIf you want, I can next demonstrate a basic Fabro workflow by finding an example workflow in `.fabro/workflows` and explaining how to run it.",
+        "last_stage": "greet",
+        "last_response": "Hello! Here’s a basic Fabro-style first step: inspect the repo before doing anything else.\n\nTop-level files and directories in this repo:\n\n```text\n.ai\n.cargo\n.claude\n.config\n.env.example\n.fabro\n.git"
+      },
+      "notes": "Stage completed: greet",
+      "usage": {
+        "input": {
+          "usage": {
+            "model": {
+              "provider": "openai",
+              "model_id": "gpt-5.4"
+            },
+            "tokens": {
+              "input_tokens": 16097,
+              "output_tokens": 321,
+              "reasoning_tokens": 180,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            }
+          },
+          "facts": {
+            "provider": "open_ai"
+          }
+        },
+        "total_usd_micros": 47757
+      }
+    },
+    "start": {
+      "status": "success",
+      "usage": null
+    }
+  },
+  "next_node_id": "exit",
+  "node_visits": {
+    "start": 1,
+    "greet": 1
+  }
+}
