@@ -145,16 +145,14 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
         )
         .await;
         match result {
-            Ok(Ok(())) => details.push(CheckDetail::new(format!("{provider} connectivity: OK"))),
+            Ok(Ok(())) => details.push(CheckDetail::new(format!("{provider}: OK"))),
             Ok(Err(err)) => {
                 failed.push(provider.to_string());
-                details.push(CheckDetail::new(format!("{provider} connectivity: {err}")));
+                details.push(CheckDetail::new(format!("{provider}: {err}")));
             }
             Err(_) => {
                 failed.push(provider.to_string());
-                details.push(CheckDetail::new(format!(
-                    "{provider} connectivity: timeout (30s)"
-                )));
+                details.push(CheckDetail::new(format!("{provider}: timeout (30s)")));
             }
         }
     }
@@ -425,7 +423,7 @@ fn check_sandbox(state: &AppState) -> CheckResult {
             summary:     "recommended, not configured".to_string(),
             details:     Vec::new(),
             remediation: Some(
-                "Run `fabro secret set DAYTONA_API_KEY <value>` to enable cloud sandbox execution"
+                "Run `fabro secret set DAYTONA_API_KEY` to enable cloud sandbox execution"
                     .to_string(),
             ),
         }

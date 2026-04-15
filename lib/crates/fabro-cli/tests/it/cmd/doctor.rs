@@ -81,7 +81,7 @@ async fn twin_doctor() {
     let output = run_success_output(cmd).await;
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
-        stdout.to_lowercase().contains("openai connectivity: ok"),
+        stdout.to_lowercase().contains("openai: ok"),
         "expected verbose doctor output to include openai probe success, got: {stdout}"
     );
     assert!(
