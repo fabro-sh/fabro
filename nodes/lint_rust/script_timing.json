@@ -1,0 +1,7 @@
+{
+  "stdout": "info: syncing channel updates for nightly-x86_64-unknown-linux-gnu\ninfo: latest update on 2026-04-15 for version 1.97.0-nightly (a5c825cd8 2026-04-14)\ninfo: downloading 6 components\n",
+  "stderr": "",
+  "exit_code": 0,
+  "duration_ms": 42145,
+  "timed_out": false
+}

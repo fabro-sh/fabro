@@ -1,16 +1,17 @@
 {
-  "timestamp": "2026-04-15T15:44:38.473370Z",
-  "current_node": "lint_rust",
+  "timestamp": "2026-04-15T15:46:38.265934Z",
+  "current_node": "test_rust",
   "completed_nodes": [
     "start",
     "toolchain",
     "compile_rust",
     "compile_typescript",
-    "lint_rust"
+    "lint_rust",
+    "test_rust"
   ],
   "node_retries": {},
   "context_values": {
-    "current_node": "lint_rust",
+    "current_node": "test_rust",
     "outcome": "success",
     "failure_signature": "",
     "internal.retry_count.compile_rust": 0,
@@ -24,13 +25,15 @@
     "command.stderr": "",
     "graph.goal": "Verify the sandbox can lint and test the project",
     "internal.run_id": "01KP8WWSP212ZWTJD4PVCWX00J",
-    "internal.thread_id": "compile_typescript",
-    "command.output": "info: syncing channel updates for nightly-x86_64-unknown-linux-gnu\ninfo: latest update on 2026-04-15 for version 1.97.0-nightly (a5c825cd8 2026-04-14)\ninfo: downloading 6 components\n",
+    "internal.thread_id": "lint_rust",
+    "command.output": "────────────\n Nextest run ID 66cf05b0-54f3-4e3b-ac30-b8244e94afd5 with nextest profile: default\n    Starting 3980 tests across 66 binaries (182 tests skipped)\n[>  6.000s] (─────────) fabro-cli::it cmd::ps::ps_accepts_local_tcp_server_target\n[>  6.000s] (─────────) fabro-cli::it cmd::server_start::start_already_running_exits_with_error\n[>  6.000s] (─────────) fabro-cli::it cmd::server_start::start_with_tcp_host_only_bind_resolves_to_host_and_port\n[>  6.000s] (─────────) fabro-cli::it cmd::server_start::start_without_bind_uses_configured_tcp_listen_address\n[>  6.000s] (─────────) fabro-cli::it cmd::server_start::start_without_bind_uses_home_socket_instead_of_storage_socket\n[>  6.000s] (─────────) fabro-cli::it scenario::server_lifecycle::start_status_stop_lifecycle\n────────────\n     Summary [  19.980s] 3980 tests run: 3980 passed (6 slow), 182 skipped\n",
     "thread.compile_typescript.current_node": "lint_rust",
     "internal.retry_count.toolchain": 0,
     "internal.node_visit_count": 1,
     "failure_class": "",
     "internal.retry_count.lint_rust": 0,
+    "thread.lint_rust.current_node": "test_rust",
+    "internal.retry_count.test_rust": 0,
     "internal.retry_count.start": 0
   },
   "node_outcomes": {
@@ -45,6 +48,15 @@
     },
     "start": {
       "status": "success",
+      "usage": null
+    },
+    "test_rust": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "────────────\n Nextest run ID 66cf05b0-54f3-4e3b-ac30-b8244e94afd5 with nextest profile: default\n    Starting 3980 tests across 66 binaries (182 tests skipped)\n[>  6.000s] (─────────) fabro-cli::it cmd::ps::ps_accepts_local_tcp_server_target\n[>  6.000s] (─────────) fabro-cli::it cmd::server_start::start_already_running_exits_with_error\n[>  6.000s] (─────────) fabro-cli::it cmd::server_start::start_with_tcp_host_only_bind_resolves_to_host_and_port\n[>  6.000s] (─────────) fabro-cli::it cmd::server_start::start_without_bind_uses_configured_tcp_listen_address\n[>  6.000s] (─────────) fabro-cli::it cmd::server_start::start_without_bind_uses_home_socket_instead_of_storage_socket\n[>  6.000s] (─────────) fabro-cli::it scenario::server_lifecycle::start_status_stop_lifecycle\n────────────\n     Summary [  19.980s] 3980 tests run: 3980 passed (6 slow), 182 skipped\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: ulimit -n 4096 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1",
       "usage": null
     },
     "compile_rust": {
@@ -75,10 +87,11 @@
       "usage": null
     }
   },
-  "next_node_id": "test_rust",
+  "next_node_id": "test_typescript",
   "node_visits": {
     "toolchain": 1,
     "compile_rust": 1,
+    "test_rust": 1,
     "start": 1,
     "compile_typescript": 1,
     "lint_rust": 1
