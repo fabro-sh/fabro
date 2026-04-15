@@ -1215,6 +1215,7 @@ async fn get_system_info(
                     RunStatus::Queued
                         | RunStatus::Starting
                         | RunStatus::Running
+                        | RunStatus::Blocked
                         | RunStatus::Paused
                 )
             })
@@ -2667,6 +2668,7 @@ async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Res
                 | RunStatus::Queued
                 | RunStatus::Starting
                 | RunStatus::Running
+                | RunStatus::Blocked
                 | RunStatus::Paused
         ) {
             WORKER_CANCEL_GRACE
@@ -3859,7 +3861,7 @@ async fn start_run(
         if let Some(managed_run) = runs.get(&id) {
             if matches!(
                 managed_run.status,
-                RunStatus::Queued | RunStatus::Starting | RunStatus::Running
+                RunStatus::Queued | RunStatus::Starting | RunStatus::Running | RunStatus::Blocked
             ) {
                 return ApiError::new(
                     StatusCode::CONFLICT,
@@ -5798,6 +5800,7 @@ async fn cancel_run(
                 | RunStatus::Queued
                 | RunStatus::Starting
                 | RunStatus::Running
+                | RunStatus::Blocked
                 | RunStatus::Paused => {
                     let use_cancel_signal = !matches!(
                         managed_run.answer_transport,

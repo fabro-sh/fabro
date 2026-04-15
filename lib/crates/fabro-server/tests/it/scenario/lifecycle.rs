@@ -211,11 +211,15 @@ async fn full_http_lifecycle_cancel() {
     let response = app.clone().oneshot(req).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response.into_body()).await;
-    assert_eq!(body["status"], "running");
+    let status = body["status"].as_str().unwrap();
+    assert!(
+        status == "running" || status == "blocked",
+        "expected running or blocked, got {status}"
+    );
     assert_eq!(body["pending_control"], "cancel");
 
-    // Verify the durable store view converges to cancelled failure.
-    let body = wait_for_run_state(&app, &run_id, "failed", "cancelled").await;
+    // Verify the durable store view converges to canonical cancelled.
+    let body = wait_for_run_state(&app, &run_id, "cancelled", "cancelled").await;
     assert_eq!(body["status_reason"], "cancelled");
 }
 
@@ -254,8 +258,8 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
     let response = app.clone().oneshot(req).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let status = wait_for_run_status(&app, &run_id, &["failed"]).await;
-    assert_eq!(status, "failed");
+    let status = wait_for_run_status(&app, &run_id, &["cancelled"]).await;
+    assert_eq!(status, "cancelled");
 
     let req = Request::builder()
         .method("GET")
