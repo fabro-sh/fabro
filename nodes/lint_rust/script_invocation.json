@@ -1,0 +1,5 @@
+{
+  "script": "cargo +nightly fmt --check --all 2>&1 && cargo clippy -q --workspace -- -D warnings 2>&1",
+  "command": "cargo +nightly fmt --check --all 2>&1 && cargo clippy -q --workspace -- -D warnings 2>&1",
+  "language": "shell"
+}
