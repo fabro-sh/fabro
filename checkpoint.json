@@ -1,17 +1,19 @@
 {
-  "timestamp": "2026-04-15T14:20:20.388493Z",
-  "current_node": "compile_typescript",
+  "timestamp": "2026-04-15T14:20:59.437279Z",
+  "current_node": "lint_rust",
   "completed_nodes": [
     "start",
     "toolchain",
     "compile_rust",
-    "compile_typescript"
+    "compile_typescript",
+    "lint_rust"
   ],
   "node_retries": {},
   "context_values": {
     "internal.retry_count.start": 0,
-    "failure_class": "",
+    "failure_class": "canceled",
     "internal.retry_count.compile_rust": 0,
+    "thread.compile_typescript.current_node": "lint_rust",
     "internal.fidelity": "compact",
     "thread.start.current_node": "toolchain",
     "command.stderr": "",
@@ -19,15 +21,16 @@
     "internal.retry_count.compile_typescript": 0,
     "internal.retry_count.toolchain": 0,
     "graph.retry_target": "exit",
-    "internal.thread_id": "compile_rust",
+    "internal.thread_id": "compile_typescript",
     "internal.run_id": "01KP8R1FGHYXRYNNM1MSY9QRXQ",
     "thread.compile_rust.current_node": "compile_typescript",
     "internal.node_visit_count": 1,
-    "command.output": "bun install v1.3.10 (30e609e0)\n\n+ @tailwindcss/cli@4.2.2\n+ @types/node@22.19.13\n+ @types/react@19.2.14\n+ @types/react-dom@19.2.3\n+ tailwindcss@4.2.1\n+ typescript@5.9.3\n+ @dnd-kit/core@6.3.1\n+ @dnd-kit/sortable@10.0.0\n+ @dnd-kit/utilities@3.2.2\n+ @headlessui/react@2.2.9\n+ @heroicons/react@2.2.0\n+ @pierre/diffs@1.0.11\n+ @viz-js/viz@3.25.0\n+ react@19.2.4\n+ react-dom@19.2.4\n+ react-router@7.12.0\n\n1154 packages installed [5.03s]\n$ tsc\n",
-    "failure_signature": "",
+    "command.output": "info: syncing channel updates for nightly-x86_64-unknown-linux-gnu\ninfo: latest update on 2026-04-15 for version 1.97.0-nightly (a5c825cd8 2026-04-14)\ninfo: downloading 6 components\nerror: this `map_or` can be simplified\n    --> lib/crates/fabro-server/src/server.rs:2096:34\n     |\n2096 |                       let active = run_state\n     |  __________________________________^\n2097 | |                         .status\n2098 | |                         .as_ref()\n2099 | |                         .map_or(false, |s| !s.status.is_terminal());\n     | |___________________________________________________________________^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unnecessary_map_or\n     = note: `-D clippy::unnecessary-map-or` implied by `-D warnings`\n     = help: to override `-D warnings` add `#[allow(clippy::unnecessary_map_or)]`\nhelp: use is_some_and instead\n     |\n2099 -                         .map_or(false, |s| !s.status.is_terminal());\n2099 +                         .is_some_and(|s| !s.status.is_terminal());\n     |\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2130:17\n     |\n2130 |                 fabro_types::outcome::StageStatus::Success\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n     = note: `-D clippy::absolute-paths` implied by `-D warnings`\n     = help: to override `-D warnings` add `#[allow(clippy::absolute_paths)]`\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2131:19\n     |\n2131 |                 | fabro_types::outcome::StageStatus::PartialSuccess => ApiStageStatus::Completed,\n     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2132:17\n     |\n2132 |                 fabro_types::outcome::StageStatus::Fail => ApiStageStatus::Failed,\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2133:17\n     |\n2133 |                 fabro_types::outcome::StageStatus::Skipped => ApiStageStatus::Cancelled,\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2134:17\n     |\n2134 |                 fabro_types::outcome::StageStatus::Retry => ApiStageStatus::Pending,\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: could not compile `fabro-server` (lib) due to 6 previous errors\n",
+    "failure_signature": "lint_rust|canceled|script failed with exit code: <n> ## stdout info: syncing channel updates for nightly-x86_64-unknown-linux-gnu info: latest update on <n>-<n>-<n> for version <n>.<n>.<n>-nightly (<hex> <n>-<n>-<n>) info: downloading <n> components error: th",
     "graph.goal": "Verify the sandbox can lint and test the project",
-    "outcome": "success",
-    "current_node": "compile_typescript",
+    "internal.retry_count.lint_rust": 0,
+    "outcome": "fail",
+    "current_node": "lint_rust",
     "graph.rankdir": "LR"
   },
   "node_outcomes": {
@@ -53,6 +56,18 @@
       "notes": "Script completed: cargo check -q --workspace 2>&1",
       "usage": null
     },
+    "lint_rust": {
+      "status": "fail",
+      "context_updates": {
+        "command.output": "info: syncing channel updates for nightly-x86_64-unknown-linux-gnu\ninfo: latest update on 2026-04-15 for version 1.97.0-nightly (a5c825cd8 2026-04-14)\ninfo: downloading 6 components\nerror: this `map_or` can be simplified\n    --> lib/crates/fabro-server/src/server.rs:2096:34\n     |\n2096 |                       let active = run_state\n     |  __________________________________^\n2097 | |                         .status\n2098 | |                         .as_ref()\n2099 | |                         .map_or(false, |s| !s.status.is_terminal());\n     | |___________________________________________________________________^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unnecessary_map_or\n     = note: `-D clippy::unnecessary-map-or` implied by `-D warnings`\n     = help: to override `-D warnings` add `#[allow(clippy::unnecessary_map_or)]`\nhelp: use is_some_and instead\n     |\n2099 -                         .map_or(false, |s| !s.status.is_terminal());\n2099 +                         .is_some_and(|s| !s.status.is_terminal());\n     |\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2130:17\n     |\n2130 |                 fabro_types::outcome::StageStatus::Success\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n     = note: `-D clippy::absolute-paths` implied by `-D warnings`\n     = help: to override `-D warnings` add `#[allow(clippy::absolute_paths)]`\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2131:19\n     |\n2131 |                 | fabro_types::outcome::StageStatus::PartialSuccess => ApiStageStatus::Completed,\n     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2132:17\n     |\n2132 |                 fabro_types::outcome::StageStatus::Fail => ApiStageStatus::Failed,\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2133:17\n     |\n2133 |                 fabro_types::outcome::StageStatus::Skipped => ApiStageStatus::Cancelled,\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2134:17\n     |\n2134 |                 fabro_types::outcome::StageStatus::Retry => ApiStageStatus::Pending,\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: could not compile `fabro-server` (lib) due to 6 previous errors\n",
+        "command.stderr": ""
+      },
+      "failure": {
+        "message": "Script failed with exit code: 101\n\n## stdout\ninfo: syncing channel updates for nightly-x86_64-unknown-linux-gnu\ninfo: latest update on 2026-04-15 for version 1.97.0-nightly (a5c825cd8 2026-04-14)\ninfo: downloading 6 components\nerror: this `map_or` can be simplified\n    --> lib/crates/fabro-server/src/server.rs:2096:34\n     |\n2096 |                       let active = run_state\n     |  __________________________________^\n2097 | |                         .status\n2098 | |                         .as_ref()\n2099 | |                         .map_or(false, |s| !s.status.is_terminal());\n     | |___________________________________________________________________^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#unnecessary_map_or\n     = note: `-D clippy::unnecessary-map-or` implied by `-D warnings`\n     = help: to override `-D warnings` add `#[allow(clippy::unnecessary_map_or)]`\nhelp: use is_some_and instead\n     |\n2099 -                         .map_or(false, |s| !s.status.is_terminal());\n2099 +                         .is_some_and(|s| !s.status.is_terminal());\n     |\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2130:17\n     |\n2130 |                 fabro_types::outcome::StageStatus::Success\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n     = note: `-D clippy::absolute-paths` implied by `-D warnings`\n     = help: to override `-D warnings` add `#[allow(clippy::absolute_paths)]`\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2131:19\n     |\n2131 |                 | fabro_types::outcome::StageStatus::PartialSuccess => ApiStageStatus::Completed,\n     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2132:17\n     |\n2132 |                 fabro_types::outcome::StageStatus::Fail => ApiStageStatus::Failed,\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2133:17\n     |\n2133 |                 fabro_types::outcome::StageStatus::Skipped => ApiStageStatus::Cancelled,\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: consider bringing this path into scope with the `use` keyword\n    --> lib/crates/fabro-server/src/server.rs:2134:17\n     |\n2134 |                 fabro_types::outcome::StageStatus::Retry => ApiStageStatus::Pending,\n     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#absolute_paths\n\nerror: could not compile `fabro-server` (lib) due to 6 previous errors\n",
+        "failure_class": "canceled"
+      },
+      "usage": null
+    },
     "compile_typescript": {
       "status": "success",
       "context_updates": {
@@ -63,8 +78,9 @@
       "usage": null
     }
   },
-  "next_node_id": "lint_rust",
+  "next_node_id": "test_rust",
   "node_visits": {
+    "lint_rust": 1,
     "toolchain": 1,
     "compile_rust": 1,
     "compile_typescript": 1,
