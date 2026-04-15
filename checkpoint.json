@@ -1,0 +1,68 @@
+{
+  "timestamp": "2026-04-15T13:47:14.027406Z",
+  "current_node": "greet",
+  "completed_nodes": [
+    "start",
+    "greet"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "internal.node_visit_count": 1,
+    "current_node": "greet",
+    "internal.thread_id": "start",
+    "internal.retry_count.start": 0,
+    "last_stage": "greet",
+    "thread.start.current_node": "greet",
+    "internal.retry_count.greet": 0,
+    "internal.fidelity": "compact",
+    "outcome": "success",
+    "graph.rankdir": "LR",
+    "internal.run_id": "01KP8PA9BVTT124QR7A28FD3H6",
+    "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+    "failure_class": "",
+    "failure_signature": "",
+    "last_response": "Hello! I’m OpenAI’s coding assistant.\n\nFrom the repository layout, this looks like **Fabro**: an AI-powered workflow orchestration platform with a Rust backend and a React frontend. This message i",
+    "response.greet": "Hello! I’m OpenAI’s coding assistant.\n\nFrom the repository layout, this looks like **Fabro**: an AI-powered workflow orchestration platform with a Rust backend and a React frontend. This message is a simple test of the **Fabro workflow engine**—a basic hello-world style workflow to confirm everything is wired up and running.\n\nIf you want, I can also help demonstrate a slightly more realistic workflow next."
+  },
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "usage": null
+    },
+    "greet": {
+      "status": "success",
+      "context_updates": {
+        "last_response": "Hello! I’m OpenAI’s coding assistant.\n\nFrom the repository layout, this looks like **Fabro**: an AI-powered workflow orchestration platform with a Rust backend and a React frontend. This message i",
+        "last_stage": "greet",
+        "response.greet": "Hello! I’m OpenAI’s coding assistant.\n\nFrom the repository layout, this looks like **Fabro**: an AI-powered workflow orchestration platform with a Rust backend and a React frontend. This message is a simple test of the **Fabro workflow engine**—a basic hello-world style workflow to confirm everything is wired up and running.\n\nIf you want, I can also help demonstrate a slightly more realistic workflow next."
+      },
+      "notes": "Stage completed: greet",
+      "usage": {
+        "input": {
+          "usage": {
+            "model": {
+              "provider": "openai",
+              "model_id": "gpt-5.4-mini"
+            },
+            "tokens": {
+              "input_tokens": 4338,
+              "output_tokens": 91,
+              "reasoning_tokens": 451,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            }
+          },
+          "facts": {
+            "provider": "open_ai"
+          }
+        },
+        "total_usd_micros": 5692
+      }
+    }
+  },
+  "next_node_id": "exit",
+  "node_visits": {
+    "greet": 1,
+    "start": 1
+  }
+}
