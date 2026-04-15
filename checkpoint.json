@@ -1,0 +1,70 @@
+{
+  "timestamp": "2026-04-15T16:40:44.262918Z",
+  "current_node": "greet",
+  "completed_nodes": [
+    "start",
+    "greet"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "internal.run_id": "01KP907M84W244F13KQ7NCEMP7",
+    "failure_signature": "",
+    "internal.thread_id": "start",
+    "current_node": "greet",
+    "internal.retry_count.start": 0,
+    "outcome": "success",
+    "last_response": "Here's a breakdown of the top-level contents of the Fabro repository:\n\n### Configuration & Metadata\n| Entry | Description |\n|---|---|\n| `.env.example` | Template for environment variables (API keys, c",
+    "graph.rankdir": "LR",
+    "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+    "failure_class": "",
+    "response.greet": "Here's a breakdown of the top-level contents of the Fabro repository:\n\n### Configuration & Metadata\n| Entry | Description |\n|---|---|\n| `.env.example` | Template for environment variables (API keys, credentials) |\n| `.gitattributes` | Git file attribute settings |\n| `.gitignore` | Git ignore rules |\n| `Cargo.lock` | Rust dependency lockfile |\n| `Cargo.toml` | Rust workspace manifest |\n| `bun.lock` | Bun (JS) dependency lockfile |\n| `package.json` | Root JS package config |\n| `clippy.toml` | Rust linter (Clippy) config |\n| `rustfmt.toml` | Rust formatter config |\n\n### Documentation\n| Entry | Description |\n|---|---|\n| `README.md` | Project overview |\n| `AGENTS.md` | Guidance for AI agents working in this repo |\n| `CLAUDE.md` | Symlink → `AGENTS.md` (Claude-specific alias) |\n| `CONTRIBUTING.md` | Contributor guidelines |\n| `LICENSE.md` | License |\n| `docs/` | Public-facing documentation (API reference, guides) |\n| `docs-internal/` | Internal strategy docs (logging, events, testing) |\n| `files-internal/` | Internal reference files |\n\n### Source Code\n| Entry | Description |\n|---|---|\n| `lib/` | Shared Rust crates (`fabro-workflow`, `fabro-llm`, etc.) and TypeScript packages |\n| `apps/` | Frontend apps — `fabro-web` (React UI) and `marketing` (Astro site) |\n| `bin/` | Binary entry points |\n| `installer/` | Installation scripts/tooling |\n| `scripts/` | Dev/ops helper scripts |\n\n### Runtime & Dev Tooling\n| Entry | Description |\n|---|---|\n| `.fabro/` | Fabro project config & workflow definitions for this repo itself |\n| `.ai/` | AI-related config/context |\n| `.cargo/` | Cargo toolchain config |\n| `.claude/` | Claude-specific config |\n| `.config/` | General tool config |\n| `.github/` | GitHub Actions workflows and PR templates |\n| `docker/` | Dockerfiles for containerized execution |\n| `evals/` | Evaluation harnesses |\n| `test/` | Integration / E2E test fixtures |\n\n### Symlinks\n| Entry | Points To |\n|---|---|\n| `install.sh` | `apps/marketing/public/install.sh` |\n| `install.md` | `apps/marketing/public/install.md` |\n\nThis is a **monorepo** combining Rust backend crates, a React frontend, a marketing site, and all the tooling for Fabro — an AI-powered workflow orchestration platform. The core engine lives in `lib/crates/`, with workflows defined as Graphviz graphs.",
+    "thread.start.current_node": "greet",
+    "internal.node_visit_count": 1,
+    "last_stage": "greet",
+    "internal.fidelity": "compact",
+    "internal.retry_count.greet": 0
+  },
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "usage": null
+    },
+    "greet": {
+      "status": "success",
+      "context_updates": {
+        "response.greet": "Here's a breakdown of the top-level contents of the Fabro repository:\n\n### Configuration & Metadata\n| Entry | Description |\n|---|---|\n| `.env.example` | Template for environment variables (API keys, credentials) |\n| `.gitattributes` | Git file attribute settings |\n| `.gitignore` | Git ignore rules |\n| `Cargo.lock` | Rust dependency lockfile |\n| `Cargo.toml` | Rust workspace manifest |\n| `bun.lock` | Bun (JS) dependency lockfile |\n| `package.json` | Root JS package config |\n| `clippy.toml` | Rust linter (Clippy) config |\n| `rustfmt.toml` | Rust formatter config |\n\n### Documentation\n| Entry | Description |\n|---|---|\n| `README.md` | Project overview |\n| `AGENTS.md` | Guidance for AI agents working in this repo |\n| `CLAUDE.md` | Symlink → `AGENTS.md` (Claude-specific alias) |\n| `CONTRIBUTING.md` | Contributor guidelines |\n| `LICENSE.md` | License |\n| `docs/` | Public-facing documentation (API reference, guides) |\n| `docs-internal/` | Internal strategy docs (logging, events, testing) |\n| `files-internal/` | Internal reference files |\n\n### Source Code\n| Entry | Description |\n|---|---|\n| `lib/` | Shared Rust crates (`fabro-workflow`, `fabro-llm`, etc.) and TypeScript packages |\n| `apps/` | Frontend apps — `fabro-web` (React UI) and `marketing` (Astro site) |\n| `bin/` | Binary entry points |\n| `installer/` | Installation scripts/tooling |\n| `scripts/` | Dev/ops helper scripts |\n\n### Runtime & Dev Tooling\n| Entry | Description |\n|---|---|\n| `.fabro/` | Fabro project config & workflow definitions for this repo itself |\n| `.ai/` | AI-related config/context |\n| `.cargo/` | Cargo toolchain config |\n| `.claude/` | Claude-specific config |\n| `.config/` | General tool config |\n| `.github/` | GitHub Actions workflows and PR templates |\n| `docker/` | Dockerfiles for containerized execution |\n| `evals/` | Evaluation harnesses |\n| `test/` | Integration / E2E test fixtures |\n\n### Symlinks\n| Entry | Points To |\n|---|---|\n| `install.sh` | `apps/marketing/public/install.sh` |\n| `install.md` | `apps/marketing/public/install.md` |\n\nThis is a **monorepo** combining Rust backend crates, a React frontend, a marketing site, and all the tooling for Fabro — an AI-powered workflow orchestration platform. The core engine lives in `lib/crates/`, with workflows defined as Graphviz graphs.",
+        "last_stage": "greet",
+        "last_response": "Here's a breakdown of the top-level contents of the Fabro repository:\n\n### Configuration & Metadata\n| Entry | Description |\n|---|---|\n| `.env.example` | Template for environment variables (API keys, c"
+      },
+      "notes": "Stage completed: greet",
+      "usage": {
+        "input": {
+          "usage": {
+            "model": {
+              "provider": "anthropic",
+              "model_id": "claude-sonnet-4-6"
+            },
+            "tokens": {
+              "input_tokens": 1519,
+              "output_tokens": 783,
+              "reasoning_tokens": 0,
+              "cache_read_tokens": 5643,
+              "cache_write_tokens": 5990
+            }
+          },
+          "facts": {
+            "provider": "anthropic",
+            "cache_write_5m_tokens": 5990,
+            "cache_write_1h_tokens": 0
+          }
+        },
+        "total_usd_micros": 40456
+      }
+    }
+  },
+  "next_node_id": "exit",
+  "node_visits": {
+    "start": 1,
+    "greet": 1
+  }
+}
