@@ -1,0 +1,7 @@
+_version = 1
+
+[workflow]
+graph = "workflow.fabro"
+
+[run.sandbox]
+provider = "local"
