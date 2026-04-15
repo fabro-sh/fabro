@@ -17,7 +17,7 @@ import {
   SunIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { Form, Link, Outlet, redirect, useLocation, useMatches, useRevalidator } from "react-router";
+import { Link, Outlet, useLocation, useMatches, useRevalidator } from "react-router";
 import { getAuthMe } from "../api";
 import { DemoModeProvider } from "../lib/demo-mode";
 import { useTheme } from "../lib/theme";
@@ -143,14 +143,14 @@ export default function AppShell({ loaderData }: any) {
                     className="absolute right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
                   >
                     <MenuItem>
-                      <Form method="POST" action="/auth/logout">
+                      <form method="POST" action="/auth/logout">
                         <button
                           type="submit"
                           className="block w-full px-4 py-2 text-left text-sm text-fg-3 data-focus:bg-overlay data-focus:outline-hidden"
                         >
                           Sign out
                         </button>
-                      </Form>
+                      </form>
                     </MenuItem>
                   </MenuItems>
                 </Menu>
@@ -239,7 +239,7 @@ export default function AppShell({ loaderData }: any) {
             </div>
             {provider !== "tailscale" && (
               <div className="mt-3 space-y-1 px-2">
-                <Form method="POST" action="/auth/logout">
+                <form method="POST" action="/auth/logout">
                   <DisclosureButton
                     as="button"
                     type="submit"
@@ -247,7 +247,7 @@ export default function AppShell({ loaderData }: any) {
                   >
                     Sign out
                   </DisclosureButton>
-                </Form>
+                </form>
               </div>
             )}
           </div>
