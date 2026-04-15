@@ -1,0 +1,7 @@
+{
+  "stdout": "error: variables can be used directly in the `format!` string\n  --> lib/crates/fabro-cli/src/commands/run/wait.rs:52:13\n   |\n52 | /             bail!(\n53 | |                 \"Run '{}' has no status record yet. Try again in a moment.\",\n54 | |                 run_id\n55 | |             );\n   | |_____________^\n   |\n   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#uninlined_format_args\n   = note: `-D clippy::uninlined-format-args` implied by `-D warnings`\n   = help: to override `-D warnings` add `#[allow(clippy::uninlined_format_args)]`\n\nerror: could not compile `fabro-cli` (bin \"fabro\") due to 1 previous error\n",
+  "stderr": "",
+  "exit_code": 101,
+  "duration_ms": 25712,
+  "timed_out": false
+}
