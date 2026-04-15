@@ -29,11 +29,11 @@ export interface RunItem {
   sandboxId?: string;
 }
 
-export type ColumnStatus = "working" | "pending" | "review" | "merge" | "running" | "waiting" | "succeeded" | "failed";
+export type ColumnStatus = "working" | "initializing" | "review" | "merge" | "running" | "waiting" | "succeeded" | "failed";
 
 export const columnNames: Record<ColumnStatus, string> = {
   working: "Working",
-  pending: "Pending",
+  initializing: "Initializing",
   review: "Verify",
   merge: "Merge",
   running: "Running",
@@ -108,7 +108,7 @@ export function deriveCiStatus(checks: CheckRun[]): CiStatus {
 
 export const statusColors: Record<ColumnStatus, { dot: string; text: string }> = {
   working: { dot: "bg-teal-500", text: "text-teal-500" },
-  pending: { dot: "bg-amber", text: "text-amber" },
+  initializing: { dot: "bg-amber", text: "text-amber" },
   review: { dot: "bg-mint", text: "text-mint" },
   merge: { dot: "bg-teal-300", text: "text-teal-300" },
   running: { dot: "bg-teal-500", text: "text-teal-500" },
@@ -116,6 +116,33 @@ export const statusColors: Record<ColumnStatus, { dot: string; text: string }> =
   succeeded: { dot: "bg-teal-300", text: "text-teal-300" },
   failed: { dot: "bg-coral", text: "text-coral" },
 };
+
+export type RunStatus =
+  | "submitted"
+  | "starting"
+  | "running"
+  | "paused"
+  | "removing"
+  | "succeeded"
+  | "failed"
+  | "dead";
+
+export const runStatusDisplay: Record<RunStatus, { label: string; dot: string; text: string }> = {
+  submitted: { label: "Submitted", dot: "bg-fg-muted", text: "text-fg-muted" },
+  starting: { label: "Starting", dot: "bg-amber", text: "text-amber" },
+  running: { label: "Running", dot: "bg-teal-500", text: "text-teal-500" },
+  paused: { label: "Paused", dot: "bg-amber", text: "text-amber" },
+  removing: { label: "Removing", dot: "bg-fg-muted", text: "text-fg-muted" },
+  succeeded: { label: "Succeeded", dot: "bg-mint", text: "text-mint" },
+  failed: { label: "Failed", dot: "bg-coral", text: "text-coral" },
+  dead: { label: "Dead", dot: "bg-coral", text: "text-coral" },
+};
+
+const knownRunStatuses = new Set<string>(Object.keys(runStatusDisplay));
+
+export function isRunStatus(s: string): s is RunStatus {
+  return knownRunStatuses.has(s);
+}
 
 export const ciConfig: Record<CiStatus, { label: string; dot: string; text: string }> = {
   passing: { label: "Passing", dot: "bg-mint", text: "text-mint" },

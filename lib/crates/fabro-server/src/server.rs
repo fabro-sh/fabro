@@ -2428,7 +2428,7 @@ fn test_secret_store_path() -> PathBuf {
 
 fn board_column(status: WorkflowRunStatus) -> Option<&'static str> {
     match status {
-        WorkflowRunStatus::Submitted | WorkflowRunStatus::Starting => Some("pending"),
+        WorkflowRunStatus::Submitted | WorkflowRunStatus::Starting => Some("initializing"),
         WorkflowRunStatus::Running => Some("running"),
         WorkflowRunStatus::Paused => Some("waiting"),
         WorkflowRunStatus::Succeeded => Some("succeeded"),
@@ -2439,7 +2439,7 @@ fn board_column(status: WorkflowRunStatus) -> Option<&'static str> {
 
 fn board_columns() -> serde_json::Value {
     serde_json::json!([
-        {"id": "pending", "name": "Pending"},
+        {"id": "initializing", "name": "Initializing"},
         {"id": "running", "name": "Running"},
         {"id": "waiting", "name": "Waiting"},
         {"id": "succeeded", "name": "Succeeded"},
@@ -8520,8 +8520,8 @@ level = "debug"
         let body = body_json(response.into_body()).await;
         assert_eq!(body["pending_control"].as_str(), Some("pause"));
 
-        // Verify the run appears on the board (store has Submitted status → "pending"
-        // column)
+        // Verify the run appears on the board (store has Submitted status →
+        // "initializing" column)
         let req = Request::builder()
             .method("GET")
             .uri(api("/boards/runs"))
@@ -8535,7 +8535,7 @@ level = "debug"
             .iter()
             .find(|item| item["id"].as_str() == Some(run_id_str.as_str()))
             .expect("board item should exist");
-        assert_eq!(item["status"].as_str(), Some("pending"));
+        assert_eq!(item["status"].as_str(), Some("initializing"));
     }
 
     #[tokio::test]
@@ -9005,7 +9005,7 @@ timeout = "30s"
         // Status should be a board column, not a lifecycle status
         let status = item["status"].as_str().unwrap();
         assert!(
-            ["working", "pending", "review", "merge"].contains(&status),
+            ["working", "initializing", "review", "merge"].contains(&status),
             "status should be a board column, got: {status}"
         );
         assert!(item["created_at"].is_string());

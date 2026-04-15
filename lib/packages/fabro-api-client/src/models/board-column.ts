@@ -20,7 +20,7 @@
 
 export const BoardColumn = {
     WORKING: 'working',
-    PENDING: 'pending',
+    INITIALIZING: 'initializing',
     REVIEW: 'review',
     MERGE: 'merge'
 } as const;

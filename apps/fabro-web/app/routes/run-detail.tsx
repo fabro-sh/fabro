@@ -2,8 +2,8 @@ import { useEffect } from "react";
 import { ChevronDownIcon, ChevronRightIcon } from "@heroicons/react/20/solid";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { Link, Outlet, useFetcher, useLocation } from "react-router";
-import { columnNames, mapRunSummaryToRunItem, statusColors } from "../data/runs";
-import type { ColumnStatus, RunSummaryResponse } from "../data/runs";
+import { mapRunSummaryToRunItem, runStatusDisplay, isRunStatus } from "../data/runs";
+import type { RunSummaryResponse } from "../data/runs";
 import { apiJson } from "../api";
 import { useDemoMode } from "../lib/demo-mode";
 import type { PreviewUrlResponse } from "@qltysh/fabro-api-client";
@@ -25,17 +25,16 @@ export async function loader({ request, params }: any) {
   if (!response.ok) return { run: null };
   const summary: RunSummaryResponse = await response.json();
   const item = mapRunSummaryToRunItem(summary);
-  const statusMap: Record<string, ColumnStatus> = {
-    running: "working",
-    paused: "pending",
-    completed: "merge",
-  };
-  const status = statusMap[summary.status ?? ""] ?? "working";
+  const rawStatus = summary.status ?? "submitted";
+  const display = isRunStatus(rawStatus)
+    ? runStatusDisplay[rawStatus]
+    : { label: rawStatus, dot: "bg-fg-muted", text: "text-fg-muted" };
   return {
     run: {
       ...item,
-      status,
-      statusLabel: columnNames[status] ?? summary.status ?? "Unknown",
+      statusLabel: display.label,
+      statusDot: display.dot,
+      statusText: display.text,
     },
   };
 }
@@ -78,8 +77,6 @@ export default function RunDetail({ loaderData, params }: any) {
     return <p className="py-8 text-center text-sm text-fg-muted">Run not found.</p>;
   }
 
-  const colors = statusColors[run.status];
-
   return (
     <div>
       <nav className="mb-4 flex items-center gap-1 text-sm text-fg-muted">
@@ -97,8 +94,8 @@ export default function RunDetail({ loaderData, params }: any) {
           <h2 className="text-xl font-semibold text-fg">{run.title}</h2>
           <div className="mt-2 flex items-center gap-3 text-sm">
             <span className="flex items-center gap-1.5">
-              <span className={`size-2 rounded-full ${colors.dot}`} />
-              <span className={`font-medium ${colors.text}`}>{run.statusLabel}</span>
+              <span className={`size-2 rounded-full ${run.statusDot}`} />
+              <span className={`font-medium ${run.statusText}`}>{run.statusLabel}</span>
             </span>
             <span className="font-mono text-xs text-fg-muted">{run.repo}</span>
             {run.elapsed && (

@@ -3109,7 +3109,7 @@ components:
       type: string
       enum:
         - working
-        - pending
+        - initializing
         - review
         - merge
 

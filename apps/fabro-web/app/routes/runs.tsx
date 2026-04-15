@@ -36,7 +36,7 @@ interface ColumnStyle {
 
 const columnStyles: Record<string, ColumnStyle> = {
   working:   { accent: "bg-teal-500", iconColor: "text-teal-500", iconType: "branch", actions: ["Watch", "Steer"] },
-  pending:   { accent: "bg-amber",    iconColor: "text-amber",    iconType: "branch", actions: [] },
+  initializing: { accent: "bg-amber", iconColor: "text-amber", iconType: "branch", actions: [] },
   review:    { accent: "bg-mint",     iconColor: "text-mint",     iconType: "pr",     actions: [] },
   merge:     { accent: "bg-teal-300", iconColor: "text-teal-300", iconType: "pr",     actions: ["Merge"] },
   running:   { accent: "bg-teal-500", iconColor: "text-teal-500", iconType: "branch", actions: ["Watch", "Steer"] },
