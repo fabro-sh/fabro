@@ -1,0 +1,70 @@
+{
+  "timestamp": "2026-04-16T17:14:26.515826Z",
+  "current_node": "greet",
+  "completed_nodes": [
+    "start",
+    "greet"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "internal.node_visit_count": 1,
+    "graph.rankdir": "LR",
+    "failure_class": "",
+    "last_response": "Hello! 👋 I'm Claude, an AI coding assistant made by Anthropic. I'm here to help you with software engineering tasks — things like debugging, adding features, refactoring code, explaining how thin",
+    "current_node": "greet",
+    "internal.retry_count.start": 0,
+    "internal.fidelity": "compact",
+    "internal.thread_id": "start",
+    "last_stage": "greet",
+    "internal.run_id": "01KPBMJ9Z0NZ14SE6M1P8TVVRE",
+    "outcome": "success",
+    "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+    "failure_signature": "",
+    "response.greet": "Hello! 👋 I'm Claude, an AI coding assistant made by Anthropic. I'm here to help you with software engineering tasks — things like debugging, adding features, refactoring code, explaining how things work, and more.\n\nThis message is a **test of the Fabro workflow engine**! 🚀\n\nHere's what's happening under the hood:\n\n- **Fabro** is an AI-powered workflow orchestration platform\n- Workflows are defined as **Graphviz graphs**, where each node is a *stage* (agent, prompt, command, conditional, human, parallel, etc.)\n- The workflow engine parses those graphs and executes each stage in sequence (or in parallel, depending on the graph structure)\n- This \"say hello\" step is itself a stage in a workflow — a simple demonstration that the engine is running correctly\n\n### What Fabro can do:\n| Feature | Description |\n|---|---|\n| 🤖 AI Agents | Coding agents with tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch |\n| 🔄 Checkpoints | Pause, checkpoint, and resume workflows at any stage |\n| 🌐 Multi-provider LLM | Anthropic, OpenAI, Gemini, and OpenAI-compatible backends |\n| 👤 Human-in-the-loop | Workflows can pause and wait for human input |\n| 🔗 Integrations | GitHub Apps, Slack, MCP (Model Context Protocol) |\n\nIf you'd like to explore the codebase, run a workflow, fix a bug, or add a feature — just ask! I'm ready to dive in. 🛠️",
+    "internal.retry_count.greet": 0,
+    "thread.start.current_node": "greet"
+  },
+  "node_outcomes": {
+    "greet": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "greet",
+        "last_response": "Hello! 👋 I'm Claude, an AI coding assistant made by Anthropic. I'm here to help you with software engineering tasks — things like debugging, adding features, refactoring code, explaining how thin",
+        "response.greet": "Hello! 👋 I'm Claude, an AI coding assistant made by Anthropic. I'm here to help you with software engineering tasks — things like debugging, adding features, refactoring code, explaining how things work, and more.\n\nThis message is a **test of the Fabro workflow engine**! 🚀\n\nHere's what's happening under the hood:\n\n- **Fabro** is an AI-powered workflow orchestration platform\n- Workflows are defined as **Graphviz graphs**, where each node is a *stage* (agent, prompt, command, conditional, human, parallel, etc.)\n- The workflow engine parses those graphs and executes each stage in sequence (or in parallel, depending on the graph structure)\n- This \"say hello\" step is itself a stage in a workflow — a simple demonstration that the engine is running correctly\n\n### What Fabro can do:\n| Feature | Description |\n|---|---|\n| 🤖 AI Agents | Coding agents with tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch |\n| 🔄 Checkpoints | Pause, checkpoint, and resume workflows at any stage |\n| 🌐 Multi-provider LLM | Anthropic, OpenAI, Gemini, and OpenAI-compatible backends |\n| 👤 Human-in-the-loop | Workflows can pause and wait for human input |\n| 🔗 Integrations | GitHub Apps, Slack, MCP (Model Context Protocol) |\n\nIf you'd like to explore the codebase, run a workflow, fix a bug, or add a feature — just ask! I'm ready to dive in. 🛠️"
+      },
+      "notes": "Stage completed: greet",
+      "usage": {
+        "input": {
+          "usage": {
+            "model": {
+              "provider": "anthropic",
+              "model_id": "claude-sonnet-4-6"
+            },
+            "tokens": {
+              "input_tokens": 356,
+              "output_tokens": 390,
+              "reasoning_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 5616
+            }
+          },
+          "facts": {
+            "provider": "anthropic",
+            "cache_write_5m_tokens": 5616,
+            "cache_write_1h_tokens": 0
+          }
+        },
+        "total_usd_micros": 27978
+      }
+    },
+    "start": {
+      "status": "success",
+      "usage": null
+    }
+  },
+  "next_node_id": "exit",
+  "node_visits": {
+    "start": 1,
+    "greet": 1
+  }
+}
