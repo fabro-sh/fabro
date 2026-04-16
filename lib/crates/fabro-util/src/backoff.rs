@@ -15,7 +15,7 @@ impl Default for BackoffPolicy {
         Self {
             initial_delay: Duration::from_secs(1),
             factor:        2.0,
-            max_delay:     Duration::from_secs(60),
+            max_delay:     Duration::from_mins(1),
             jitter:        false,
         }
     }
@@ -110,7 +110,7 @@ mod tests {
         let b = BackoffPolicy {
             initial_delay: Duration::from_millis(500),
             factor:        1.0,
-            max_delay:     Duration::from_secs(60),
+            max_delay:     Duration::from_mins(1),
             jitter:        false,
         };
         assert_eq!(b.delay_for_attempt(1), Duration::from_millis(500));
