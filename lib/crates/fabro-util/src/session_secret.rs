@@ -3,8 +3,8 @@ use rand::Rng;
 const MIN_SESSION_SECRET_LEN: usize = 64;
 
 pub fn generate_session_secret() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 32] = rng.gen();
+    let mut rng = rand::rng();
+    let bytes: [u8; 32] = rng.random();
     let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
         use std::fmt::Write as _;

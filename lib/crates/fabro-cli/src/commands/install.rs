@@ -933,10 +933,10 @@ impl GitHubAppOwner {
                 if let Some(user) = username {
                     format!("{user}-fabro")
                 } else {
-                    let mut rng = rand::thread_rng();
+                    let mut rng = rand::rng();
                     let suffix: String = (0..6).fold(String::with_capacity(6), |mut s, _| {
                         use std::fmt::Write;
-                        let _ = write!(s, "{:x}", rng.gen::<u8>() % 16);
+                        let _ = write!(s, "{:x}", rng.random::<u8>() % 16);
                         s
                     });
                     format!("Fabro-{suffix}")

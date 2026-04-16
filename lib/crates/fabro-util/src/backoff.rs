@@ -34,7 +34,7 @@ impl BackoffPolicy {
         };
         if self.jitter {
             // Apply jitter: random factor in [0.5, 1.5)
-            let jitter_factor = rand::thread_rng().gen_range(0.5..1.5);
+            let jitter_factor = rand::rng().random_range(0.5..1.5);
             capped.mul_f64(jitter_factor)
         } else {
             capped

@@ -186,7 +186,7 @@ impl DaytonaSandbox {
             format!(
                 "fabro-{}-{:04x}",
                 chrono::Utc::now().format("%Y%m%d-%H%M%S"),
-                rand::thread_rng().gen_range(0..0x10000u32),
+                rand::rng().random_range(0..0x10000u32),
             )
         };
         let (network_block_all, network_allow_list) = match &self.config.network {

@@ -197,8 +197,8 @@ fn weighted_random<'a>(edges: &[&'a GvEdge]) -> Option<&'a GvEdge> {
         })
         .collect();
     let total: f64 = weights.iter().sum();
-    let mut rng = rand::thread_rng();
-    let mut roll: f64 = rng.gen_range(0.0..total);
+    let mut rng = rand::rng();
+    let mut roll: f64 = rng.random_range(0.0..total);
     for (i, &w) in weights.iter().enumerate() {
         roll -= w;
         if roll < 0.0 {

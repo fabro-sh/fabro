@@ -20,7 +20,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls", "query", "form", "multipart"] }
 ulid = "1"
 uuid = { version = "1", features = ["v4", "v7", "v8"] }
-rand = "0.8"
+rand = "0.9"
 dotenvy = "0.15"
 futures = "0.3"
 tokio-stream = "0.1"

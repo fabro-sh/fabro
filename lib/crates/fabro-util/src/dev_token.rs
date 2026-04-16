@@ -3,7 +3,7 @@ use std::io::Write as _;
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
-use rand::RngCore;
+use rand::TryRngCore;
 use rand::rngs::OsRng;
 
 pub const DEV_TOKEN_PREFIX: &str = "fabro_dev_";
@@ -13,7 +13,7 @@ const DEV_TOKEN_LEN: usize = DEV_TOKEN_PREFIX.len() + DEV_TOKEN_HEX_LEN;
 
 pub fn generate_dev_token() -> String {
     let mut bytes = [0_u8; DEV_TOKEN_RANDOM_BYTES];
-    OsRng.fill_bytes(&mut bytes);
+    OsRng.try_fill_bytes(&mut bytes).expect("OS RNG");
 
     let mut token = String::with_capacity(DEV_TOKEN_LEN);
     token.push_str(DEV_TOKEN_PREFIX);

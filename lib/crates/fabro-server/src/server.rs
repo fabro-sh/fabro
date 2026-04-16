@@ -89,7 +89,7 @@ use fabro_workflow::run_status::{
 };
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use object_store::memory::InMemory as MemoryObjectStore;
-use rand::RngCore;
+use rand::TryRngCore;
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
@@ -740,7 +740,7 @@ impl AppState {
 
 fn artifact_upload_token_keys() -> ArtifactUploadTokenKeys {
     let mut secret = [0_u8; 32];
-    OsRng.fill_bytes(&mut secret);
+    OsRng.try_fill_bytes(&mut secret).expect("OS RNG");
 
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_required_spec_claims(&["iss", "iat", "exp"]);
