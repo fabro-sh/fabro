@@ -148,8 +148,10 @@ fn status_cell(status: RunStatus, use_color: bool) -> CellStruct {
     let color = match status {
         RunStatus::Succeeded => Some(Color::Green),
         RunStatus::Failed => Some(Color::Red),
-        RunStatus::Running | RunStatus::Starting | RunStatus::Submitted => Some(Color::Cyan),
-        RunStatus::Removing => Some(Color::Yellow),
+        RunStatus::Running | RunStatus::Starting | RunStatus::Submitted | RunStatus::Queued => {
+            Some(Color::Cyan)
+        }
+        RunStatus::Blocked | RunStatus::Removing => Some(Color::Yellow),
         RunStatus::Paused => Some(Color::Magenta),
         RunStatus::Dead => Some(Color::Ansi256(8)),
     };

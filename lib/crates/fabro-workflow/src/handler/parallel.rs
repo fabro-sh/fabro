@@ -294,6 +294,7 @@ impl Handler for ParallelHandler {
             let provider = services.provider;
             let workflow_path = services.workflow_path.clone();
             let workflow_bundle = services.workflow_bundle.clone();
+            let blocked_state_tracker = services.blocked_state_tracker.clone();
             let graph = graph.clone();
             let run_dir = run_dir.to_path_buf();
             let sem = Arc::clone(&semaphore);
@@ -367,6 +368,7 @@ impl Handler for ParallelHandler {
                     provider,
                     workflow_path,
                     workflow_bundle,
+                    blocked_state_tracker,
                 };
                 let handler = registry.resolve(target_node);
                 let outcome = super::dispatch_handler(

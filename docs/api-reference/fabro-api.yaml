@@ -2089,10 +2089,18 @@ components:
         - queued
         - starting
         - running
-        - completed
-        - failed
-        - cancelled
+        - blocked
         - paused
+        - removing
+        - succeeded
+        - failed
+        - dead
+
+    BlockedReason:
+      description: Reason a run is blocked.
+      type: string
+      enum:
+        - human_input_required
 
     RunManifest:
       description: Self-contained workflow run manifest.
@@ -2480,6 +2488,10 @@ components:
         status_reason:
           allOf:
             - $ref: "#/components/schemas/StatusReason"
+          nullable: true
+        blocked_reason:
+          allOf:
+            - $ref: "#/components/schemas/BlockedReason"
           nullable: true
         pending_control:
           allOf:
@@ -2871,19 +2883,6 @@ components:
           items:
             $ref: "#/components/schemas/RunArtifactEntry"
 
-    InternalRunStatus:
-      description: Internal event-sourced run status.
-      type: string
-      enum:
-        - submitted
-        - starting
-        - running
-        - paused
-        - removing
-        - succeeded
-        - failed
-        - dead
-
     StatusReason:
       description: Optional reason attached to a run status transition.
       type: string
@@ -2916,10 +2915,14 @@ components:
         - updated_at
       properties:
         status:
-          $ref: "#/components/schemas/InternalRunStatus"
-        reason:
+          $ref: "#/components/schemas/RunStatus"
+        status_reason:
           oneOf:
             - $ref: "#/components/schemas/StatusReason"
+            - type: "null"
+        blocked_reason:
+          oneOf:
+            - $ref: "#/components/schemas/BlockedReason"
             - type: "null"
         updated_at:
           type: string
@@ -3047,6 +3050,10 @@ components:
           type: object
           additionalProperties: true
           nullable: true
+        pending_interviews:
+          type: object
+          additionalProperties: true
+          description: Map from question ID to pending interview record.
         nodes:
           type: object
           description: Map from StageId (`node_id@visit`) to NodeState.
@@ -3058,6 +3065,7 @@ components:
       type: object
       required:
         - run_id
+        - status
         - labels
       properties:
         run_id:
@@ -3083,10 +3091,14 @@ components:
           format: date-time
           nullable: true
         status:
-          type: string
-          nullable: true
+          $ref: "#/components/schemas/RunStatus"
         status_reason:
-          type: string
+          allOf:
+            - $ref: "#/components/schemas/StatusReason"
+          nullable: true
+        blocked_reason:
+          allOf:
+            - $ref: "#/components/schemas/BlockedReason"
           nullable: true
         pending_control:
           allOf:
@@ -3108,10 +3120,11 @@ components:
       description: Board column status for a run in the list view.
       type: string
       enum:
-        - working
         - initializing
-        - review
-        - merge
+        - running
+        - blocked
+        - succeeded
+        - failed
 
     CheckRunStatus:
       description: Status of a CI check run.

@@ -746,5 +746,5 @@ fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
         .status
         .expect("cancelled run should have a status record");
     assert_eq!(status_record.status.to_string(), "failed");
-    assert_eq!(status_record.reason, Some(StatusReason::Cancelled));
+    assert_eq!(status_record.status_reason, Some(StatusReason::Cancelled));
 }

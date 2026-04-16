@@ -729,6 +729,7 @@ mod tests {
             sandbox: None,
             web: false,
             no_web: false,
+            watch_web: false,
             max_concurrent_runs: None,
             config: None,
         };
@@ -761,6 +762,7 @@ enabled = false
             sandbox: None,
             web: true,
             no_web: false,
+            watch_web: false,
             max_concurrent_runs: None,
             config: None,
         };
@@ -787,6 +789,7 @@ enabled = false
             sandbox: None,
             web: false,
             no_web: true,
+            watch_web: false,
             max_concurrent_runs: None,
             config: None,
         };

@@ -31,6 +31,7 @@ use object_store::memory::InMemory;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
+use crate::blocked_state::BlockedStateTracker;
 use crate::context::Context;
 use crate::error::Error;
 use crate::event::Emitter;
@@ -66,6 +67,8 @@ pub struct EngineServices {
     pub workflow_path: Option<PathBuf>,
     /// Bundled workflows available for child-workflow resolution.
     pub workflow_bundle: Option<Arc<WorkflowBundle>>,
+    /// Run-scoped blocked-state tracker for human interview coordination.
+    pub blocked_state_tracker: Option<Arc<BlockedStateTracker>>,
 }
 
 impl EngineServices {
@@ -139,6 +142,7 @@ impl EngineServices {
             provider: Provider::Anthropic,
             workflow_path: None,
             workflow_bundle: None,
+            blocked_state_tracker: None,
         }
     }
 }

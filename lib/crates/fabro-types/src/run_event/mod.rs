@@ -106,6 +106,12 @@ pub enum EventBody {
     RunPaused(RunControlEffectProps),
     #[serde(rename = "run.unpaused")]
     RunUnpaused(RunControlEffectProps),
+    #[serde(rename = "run.queued")]
+    RunQueued(RunStatusTransitionProps),
+    #[serde(rename = "run.blocked")]
+    RunBlocked(RunBlockedProps),
+    #[serde(rename = "run.unblocked")]
+    RunUnblocked(RunUnblockedProps),
     #[serde(rename = "run.rewound")]
     RunRewound(RunRewoundProps),
     #[serde(rename = "run.completed")]
@@ -365,6 +371,9 @@ impl EventBody {
             Self::RunUnpauseRequested(_) => "run.unpause.requested",
             Self::RunPaused(_) => "run.paused",
             Self::RunUnpaused(_) => "run.unpaused",
+            Self::RunQueued(_) => "run.queued",
+            Self::RunBlocked(_) => "run.blocked",
+            Self::RunUnblocked(_) => "run.unblocked",
             Self::RunRewound(_) => "run.rewound",
             Self::RunCompleted(_) => "run.completed",
             Self::RunFailed(_) => "run.failed",

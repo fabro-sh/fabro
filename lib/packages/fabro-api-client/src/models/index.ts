@@ -13,6 +13,7 @@ export * from './assistant-stage-turn';
 export * from './billed-token-counts';
 export * from './billing-by-model';
 export * from './billing-stage-ref';
+export * from './blocked-reason';
 export * from './board-column';
 export * from './check-run';
 export * from './check-run-status';

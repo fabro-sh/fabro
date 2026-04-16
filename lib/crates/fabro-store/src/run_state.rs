@@ -132,12 +132,35 @@ impl RunProjection {
                 self.pending_control = Some(RunControlAction::Unpause);
             }
             EventBody::RunPaused(_) => {
-                self.status = Some(run_status_record(RunStatus::Paused, None, ts));
+                // Preserve blocked_reason while paused over an unresolved block.
+                let prev_blocked_reason = self.status.as_ref().and_then(|s| s.blocked_reason);
+                let mut record = run_status_record(RunStatus::Paused, None, ts);
+                record.blocked_reason = prev_blocked_reason;
+                self.status = Some(record);
                 self.pending_control = None;
             }
             EventBody::RunUnpaused(_) => {
                 self.status = Some(run_status_record(RunStatus::Running, None, ts));
                 self.pending_control = None;
+            }
+            EventBody::RunQueued(props) => {
+                self.status = Some(run_status_record(RunStatus::Queued, props.reason, ts));
+            }
+            EventBody::RunBlocked(props) => {
+                let mut record = run_status_record(RunStatus::Blocked, None, ts);
+                record.blocked_reason = Some(props.blocked_reason);
+                self.status = Some(record);
+            }
+            EventBody::RunUnblocked(_) => {
+                // Clear blocked_reason. If currently blocked, restore Running.
+                // If currently paused (block resolved while paused), keep Paused.
+                if let Some(ref mut status) = self.status {
+                    status.blocked_reason = None;
+                    if status.status == RunStatus::Blocked {
+                        status.status = RunStatus::Running;
+                        status.updated_at = ts;
+                    }
+                }
             }
             EventBody::RunCompleted(props) => {
                 self.status = Some(run_status_record(RunStatus::Succeeded, props.reason, ts));
@@ -385,8 +408,16 @@ impl RunProjection {
                 .unwrap_or_default(),
             host_repo_path: self.run.as_ref().and_then(|run| run.host_repo_path.clone()),
             start_time: self.start.as_ref().map(|start| start.start_time),
-            status: self.status.as_ref().map(|status| status.status),
-            status_reason: self.status.as_ref().and_then(|status| status.reason),
+            status: Some(
+                self.status
+                    .as_ref()
+                    .map_or(RunStatus::Submitted, |status| status.status),
+            ),
+            status_reason: self.status.as_ref().and_then(|status| status.status_reason),
+            blocked_reason: self
+                .status
+                .as_ref()
+                .and_then(|status| status.blocked_reason),
             pending_control: self.pending_control,
             duration_ms: self
                 .conclusion
@@ -436,7 +467,8 @@ fn run_status_record(
 ) -> RunStatusRecord {
     RunStatusRecord {
         status,
-        reason,
+        status_reason: reason,
+        blocked_reason: None,
         updated_at,
     }
 }
@@ -855,5 +887,144 @@ mod tests {
             value["run"]["definition_blob"],
             events[1].payload.as_value()["properties"]["definition_blob"]
         );
+    }
+
+    #[test]
+    fn run_queued_sets_status() {
+        use fabro_types::run_event::RunStatusTransitionProps;
+
+        let events = vec![test_event(
+            1,
+            EventBody::RunQueued(RunStatusTransitionProps { reason: None }),
+            None,
+        )];
+        let state = RunProjection::apply_events(&events).unwrap();
+        assert_eq!(
+            state.status.as_ref().unwrap().status,
+            fabro_types::RunStatus::Queued
+        );
+    }
+
+    #[test]
+    fn run_blocked_sets_status_and_blocked_reason() {
+        use fabro_types::run_event::{RunBlockedProps, RunStatusTransitionProps};
+        use fabro_types::{BlockedReason, RunStatus};
+
+        let events = vec![
+            test_event(
+                1,
+                EventBody::RunRunning(RunStatusTransitionProps { reason: None }),
+                None,
+            ),
+            test_event(
+                2,
+                EventBody::RunBlocked(RunBlockedProps {
+                    blocked_reason: BlockedReason::HumanInputRequired,
+                }),
+                None,
+            ),
+        ];
+        let state = RunProjection::apply_events(&events).unwrap();
+        let status = state.status.as_ref().unwrap();
+        assert_eq!(status.status, RunStatus::Blocked);
+        assert_eq!(
+            status.blocked_reason,
+            Some(BlockedReason::HumanInputRequired)
+        );
+    }
+
+    #[test]
+    fn run_unblocked_clears_blocked_reason_and_restores_running() {
+        use fabro_types::run_event::{
+            RunBlockedProps, RunStatusTransitionProps, RunUnblockedProps,
+        };
+        use fabro_types::{BlockedReason, RunStatus};
+
+        let events = vec![
+            test_event(
+                1,
+                EventBody::RunRunning(RunStatusTransitionProps { reason: None }),
+                None,
+            ),
+            test_event(
+                2,
+                EventBody::RunBlocked(RunBlockedProps {
+                    blocked_reason: BlockedReason::HumanInputRequired,
+                }),
+                None,
+            ),
+            test_event(3, EventBody::RunUnblocked(RunUnblockedProps {}), None),
+        ];
+        let state = RunProjection::apply_events(&events).unwrap();
+        let status = state.status.as_ref().unwrap();
+        assert_eq!(status.status, RunStatus::Running);
+        assert_eq!(status.blocked_reason, None);
+    }
+
+    #[test]
+    fn paused_over_blocked_preserves_blocked_reason() {
+        use fabro_types::run_event::{
+            RunBlockedProps, RunControlEffectProps, RunStatusTransitionProps,
+        };
+        use fabro_types::{BlockedReason, RunStatus};
+
+        let events = vec![
+            test_event(
+                1,
+                EventBody::RunRunning(RunStatusTransitionProps { reason: None }),
+                None,
+            ),
+            test_event(
+                2,
+                EventBody::RunBlocked(RunBlockedProps {
+                    blocked_reason: BlockedReason::HumanInputRequired,
+                }),
+                None,
+            ),
+            test_event(3, EventBody::RunPaused(RunControlEffectProps {}), None),
+        ];
+        let state = RunProjection::apply_events(&events).unwrap();
+        let status = state.status.as_ref().unwrap();
+        assert_eq!(status.status, RunStatus::Paused);
+        assert_eq!(
+            status.blocked_reason,
+            Some(BlockedReason::HumanInputRequired)
+        );
+    }
+
+    #[test]
+    fn unblocked_while_paused_clears_blocked_reason_keeps_paused() {
+        use fabro_types::run_event::{
+            RunBlockedProps, RunControlEffectProps, RunStatusTransitionProps, RunUnblockedProps,
+        };
+        use fabro_types::{BlockedReason, RunStatus};
+
+        let events = vec![
+            test_event(
+                1,
+                EventBody::RunRunning(RunStatusTransitionProps { reason: None }),
+                None,
+            ),
+            test_event(
+                2,
+                EventBody::RunBlocked(RunBlockedProps {
+                    blocked_reason: BlockedReason::HumanInputRequired,
+                }),
+                None,
+            ),
+            test_event(3, EventBody::RunPaused(RunControlEffectProps {}), None),
+            test_event(4, EventBody::RunUnblocked(RunUnblockedProps {}), None),
+        ];
+        let state = RunProjection::apply_events(&events).unwrap();
+        let status = state.status.as_ref().unwrap();
+        assert_eq!(status.status, RunStatus::Paused);
+        assert_eq!(status.blocked_reason, None);
+    }
+
+    #[test]
+    fn missing_lifecycle_status_synthesizes_submitted() {
+        let state = RunProjection::default();
+        let summary = state.build_summary(&fixtures::RUN_1);
+        assert_eq!(summary.status, Some(fabro_types::RunStatus::Submitted));
     }
 }

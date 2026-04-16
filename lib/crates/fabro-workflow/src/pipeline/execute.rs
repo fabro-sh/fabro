@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::types::{Executed, Initialized};
 use crate::artifact;
+use crate::blocked_state;
 use crate::context::{self, Context};
 use crate::error::Error;
 use crate::event::Event;
@@ -81,6 +82,9 @@ pub async fn execute(init: Initialized) -> Executed {
         }))
     });
 
+    let blocked_state_tracker = Some(Arc::new(blocked_state::BlockedStateTracker::new(
+        Arc::clone(&emitter),
+    )));
     let shared_services = Arc::new(EngineServices {
         registry,
         emitter: Arc::clone(&emitter),
@@ -95,6 +99,7 @@ pub async fn execute(init: Initialized) -> Executed {
         provider,
         workflow_path,
         workflow_bundle,
+        blocked_state_tracker,
     });
 
     let handler = Arc::new(WorkflowNodeHandler {

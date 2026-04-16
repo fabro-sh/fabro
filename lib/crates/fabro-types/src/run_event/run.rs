@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{BilledTokenCounts, RunNoticeLevel};
 use crate::settings::SettingsLayer;
-use crate::{Graph, RunBlobId, RunControlAction, RunProvenance, StatusReason};
+use crate::{BlockedReason, Graph, RunBlobId, RunControlAction, RunProvenance, StatusReason};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCreatedProps {
@@ -116,3 +116,12 @@ pub struct RunNoticeProps {
     pub code: String,
     pub message: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunBlockedProps {
+    pub blocked_reason: BlockedReason,
+}
+
+#[allow(clippy::empty_structs_with_brackets)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RunUnblockedProps {}

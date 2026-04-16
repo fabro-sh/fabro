@@ -627,8 +627,12 @@ export default function Runs({ loaderData }: any) {
   const revalidator = useRevalidator();
 
   const STATUS_EVENTS = new Set([
-    "run.submitted", "run.starting", "run.running",
-    "run.paused", "run.completed", "run.failed",
+    "run.submitted", "run.queued", "run.starting", "run.running",
+    "run.removing", "run.paused", "run.unpaused",
+    "run.blocked", "run.unblocked",
+    "run.completed", "run.failed",
+    "interview.started", "interview.completed",
+    "interview.timeout", "interview.interrupted",
   ]);
 
   useEffect(() => {

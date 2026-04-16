@@ -683,7 +683,7 @@ mod runs {
                 workflow: WorkflowReference {
                     slug: "implement".into(),
                 },
-                status: BoardColumn::Working,
+                status: BoardColumn::Running,
                 pull_request: None,
                 timings: Some(RunTimings {
                     elapsed_secs: 420.0,
@@ -705,7 +705,7 @@ mod runs {
                 workflow: WorkflowReference {
                     slug: "implement".into(),
                 },
-                status: BoardColumn::Working,
+                status: BoardColumn::Running,
                 pull_request: None,
                 timings: Some(RunTimings {
                     elapsed_secs: 8100.0,
@@ -727,7 +727,7 @@ mod runs {
                 workflow: WorkflowReference {
                     slug: "fix_build".into(),
                 },
-                status: BoardColumn::Working,
+                status: BoardColumn::Running,
                 pull_request: None,
                 timings: Some(RunTimings {
                     elapsed_secs: 2700.0,
@@ -809,7 +809,7 @@ mod runs {
                 workflow: WorkflowReference {
                     slug: "implement".into(),
                 },
-                status: BoardColumn::Review,
+                status: BoardColumn::Succeeded,
                 pull_request: Some(RunPullRequest {
                     number: 889,
                     additions: Some(234),
@@ -873,7 +873,7 @@ mod runs {
                 workflow: WorkflowReference {
                     slug: "implement".into(),
                 },
-                status: BoardColumn::Review,
+                status: BoardColumn::Succeeded,
                 pull_request: Some(RunPullRequest {
                     number: 156,
                     additions: Some(412),
@@ -927,7 +927,7 @@ mod runs {
                 workflow: WorkflowReference {
                     slug: "implement".into(),
                 },
-                status: BoardColumn::Merge,
+                status: BoardColumn::Succeeded,
                 pull_request: Some(RunPullRequest {
                     number: 1249,
                     additions: Some(189),
@@ -1016,7 +1016,7 @@ mod runs {
                 workflow: WorkflowReference {
                     slug: "expand".into(),
                 },
-                status: BoardColumn::Merge,
+                status: BoardColumn::Succeeded,
                 pull_request: Some(RunPullRequest {
                     number: 430,
                     additions: Some(56),
@@ -1075,7 +1075,7 @@ mod runs {
                 workflow: WorkflowReference {
                     slug: "sync_drift".into(),
                 },
-                status: BoardColumn::Merge,
+                status: BoardColumn::Succeeded,
                 pull_request: Some(RunPullRequest {
                     number: 76,
                     additions: Some(34),

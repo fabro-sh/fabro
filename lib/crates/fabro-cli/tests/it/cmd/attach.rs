@@ -823,6 +823,15 @@ fn attach_json_errors_without_prompting_for_human_input() {
         "run_id": "[ULID]",
         "stage_id": "approve@1",
         "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "run.blocked",
+        "id": "[EVENT_ID]",
+        "properties": {
+          "blocked_reason": "human_input_required"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       }
     ]
     "#);

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use fabro_types::{RunControlAction, RunEvent, RunId, RunStatus, StatusReason};
+use fabro_types::{BlockedReason, RunControlAction, RunEvent, RunId, RunStatus, StatusReason};
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
@@ -17,6 +17,7 @@ pub struct RunSummary {
     pub start_time: Option<DateTime<Utc>>,
     pub status: Option<RunStatus>,
     pub status_reason: Option<StatusReason>,
+    pub blocked_reason: Option<BlockedReason>,
     pub pending_control: Option<RunControlAction>,
     pub duration_ms: Option<u64>,
     pub total_usd_micros: Option<i64>,

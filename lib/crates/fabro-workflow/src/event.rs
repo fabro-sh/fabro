@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::{
-    ActorRef, BilledTokenCounts, ParallelBranchId, RunBlobId, RunControlAction, RunEvent, RunId,
-    RunProvenance, StageId, StageStatus, StatusReason, run_event as fabro_types,
+    ActorRef, BilledTokenCounts, BlockedReason, ParallelBranchId, RunBlobId, RunControlAction,
+    RunEvent, RunId, RunProvenance, StageId, StageStatus, StatusReason, run_event as fabro_types,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -104,6 +104,14 @@ pub enum Event {
     },
     RunPaused,
     RunUnpaused,
+    RunQueued {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+    },
+    RunBlocked {
+        blocked_reason: BlockedReason,
+    },
+    RunUnblocked,
     RunRewound {
         target_checkpoint_ordinal: usize,
         target_node_id: String,
@@ -597,6 +605,15 @@ impl Event {
             }
             Self::RunUnpaused => {
                 info!("Run unpaused");
+            }
+            Self::RunQueued { .. } => {
+                info!("Run queued");
+            }
+            Self::RunBlocked { blocked_reason } => {
+                info!(?blocked_reason, "Run blocked");
+            }
+            Self::RunUnblocked => {
+                info!("Run unblocked");
             }
             Self::RunRewound {
                 target_checkpoint_ordinal,
@@ -1154,6 +1171,9 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::RunUnpauseRequested { .. } => "run.unpause.requested",
         Event::RunPaused => "run.paused",
         Event::RunUnpaused => "run.unpaused",
+        Event::RunQueued { .. } => "run.queued",
+        Event::RunBlocked { .. } => "run.blocked",
+        Event::RunUnblocked => "run.unblocked",
         Event::RunRewound { .. } => "run.rewound",
         Event::WorkflowRunCompleted { .. } => "run.completed",
         Event::WorkflowRunFailed { .. } => "run.failed",
@@ -1544,6 +1564,15 @@ fn event_body_from_event(event: &Event) -> EventBody {
         }
         Event::RunPaused => EventBody::RunPaused(fabro_types::RunControlEffectProps::default()),
         Event::RunUnpaused => EventBody::RunUnpaused(fabro_types::RunControlEffectProps::default()),
+        Event::RunQueued { reason } => {
+            EventBody::RunQueued(fabro_types::RunStatusTransitionProps { reason: *reason })
+        }
+        Event::RunBlocked { blocked_reason } => {
+            EventBody::RunBlocked(fabro_types::RunBlockedProps {
+                blocked_reason: *blocked_reason,
+            })
+        }
+        Event::RunUnblocked => EventBody::RunUnblocked(fabro_types::RunUnblockedProps::default()),
         Event::RunRewound {
             target_checkpoint_ordinal,
             target_node_id,

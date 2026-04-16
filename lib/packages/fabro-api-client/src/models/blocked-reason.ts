@@ -15,17 +15,13 @@
 
 
 /**
- * Board column status for a run in the list view.
+ * Reason a run is blocked.
  */
 
-export const BoardColumn = {
-    INITIALIZING: 'initializing',
-    RUNNING: 'running',
-    BLOCKED: 'blocked',
-    SUCCEEDED: 'succeeded',
-    FAILED: 'failed'
+export const BlockedReason = {
+    HUMAN_INPUT_REQUIRED: 'human_input_required'
 } as const;
 
-export type BoardColumn = typeof BoardColumn[keyof typeof BoardColumn];
+export type BlockedReason = typeof BlockedReason[keyof typeof BlockedReason];
 
 

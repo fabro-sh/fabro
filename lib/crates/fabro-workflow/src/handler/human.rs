@@ -229,6 +229,9 @@ impl Handler for HumanHandler {
             },
             &stage_scope,
         );
+        if let Some(tracker) = &services.blocked_state_tracker {
+            tracker.on_interview_started();
+        }
         let interview_start = Instant::now();
         let answer = self.interviewer.ask(question).await;
 
@@ -244,6 +247,9 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
+            if let Some(tracker) = &services.blocked_state_tracker {
+                tracker.on_interview_resolved();
+            }
             let default_choice = node
                 .attrs
                 .get("human.default_choice")
@@ -259,6 +265,8 @@ impl Handler for HumanHandler {
         }
 
         if answer.value == AnswerValue::Cancelled {
+            // Don't emit run.unblocked on cancellation; terminal events
+            // end the blocked condition implicitly.
             return Err(Error::Cancelled);
         }
 
@@ -282,6 +290,9 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
+            if let Some(tracker) = &services.blocked_state_tracker {
+                tracker.on_interview_resolved();
+            }
             return Ok(unanswered_human_gate(
                 "human interaction interrupted before an answer was provided",
             ));
@@ -297,6 +308,9 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
+            if let Some(tracker) = &services.blocked_state_tracker {
+                tracker.on_interview_resolved();
+            }
             return Ok(unanswered_human_gate("human skipped interaction"));
         }
 
@@ -311,6 +325,9 @@ impl Handler for HumanHandler {
             },
             &stage_scope,
         );
+        if let Some(tracker) = &services.blocked_state_tracker {
+            tracker.on_interview_resolved();
+        }
 
         // 6. Try fixed-choice match
         if let Some(selected) = find_choice_match(&answer, &choices) {

@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { BlockedReason } from './blocked-reason';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunControlAction } from './run-control-action';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -41,12 +44,12 @@ export interface RunStatusResponse {
      */
     'queue_position'?: number;
     'status_reason'?: StatusReason;
+    'blocked_reason'?: BlockedReason;
     'pending_control'?: RunControlAction;
     /**
      * Timestamp when the run was created.
      */
     'created_at': string;
 }
-
 
 
