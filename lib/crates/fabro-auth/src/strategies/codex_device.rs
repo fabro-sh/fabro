@@ -38,9 +38,9 @@ struct JwtPayload {
     #[serde(default)]
     chatgpt_account_id: Option<String>,
     #[serde(default, rename = "https://api.openai.com/auth")]
-    auth_claim:         Option<AuthClaim>,
+    auth_claim: Option<AuthClaim>,
     #[serde(default)]
-    organizations:      Option<Vec<Organization>>,
+    organizations: Option<Vec<Organization>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,48 +100,48 @@ impl U64OrString {
 #[derive(Debug, Deserialize)]
 struct DeviceCodeInitResponse {
     device_auth_id: String,
-    user_code:      String,
+    user_code: String,
     #[serde(default)]
-    interval:       Option<U64OrString>,
+    interval: Option<U64OrString>,
     #[serde(default)]
-    expires_in:     Option<U64OrString>,
+    expires_in: Option<U64OrString>,
     #[serde(default)]
-    expires_at:     Option<DateTime<Utc>>,
+    expires_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct DeviceCodePollResponse {
     #[serde(default)]
-    status:             Option<String>,
+    status: Option<String>,
     #[serde(default)]
     authorization_code: Option<String>,
     #[serde(default)]
-    code_verifier:      Option<String>,
+    code_verifier: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct DeviceCodeInitRequest<'a> {
     client_id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    scope:     Option<String>,
+    scope: Option<String>,
 }
 
 #[derive(Debug)]
 struct PendingDeviceAuth {
     device_auth_id: String,
-    user_code:      String,
-    poll_interval:  Duration,
-    deadline:       Instant,
+    user_code: String,
+    poll_interval: Duration,
+    deadline: Instant,
 }
 
 #[derive(Debug)]
 struct DeviceAuthorization {
     authorization_code: String,
-    code_verifier:      String,
+    code_verifier: String,
 }
 
 pub struct CodexDeviceStrategy {
-    config:  OAuthConfig,
+    config: OAuthConfig,
     pending: Option<PendingDeviceAuth>,
 }
 
@@ -247,7 +247,7 @@ impl AuthStrategy for CodexDeviceStrategy {
             .header("originator", "fabro")
             .json(&DeviceCodeInitRequest {
                 client_id: &self.config.client_id,
-                scope:     (!self.config.scopes.is_empty()).then(|| self.config.scopes.join(" ")),
+                scope: (!self.config.scopes.is_empty()).then(|| self.config.scopes.join(" ")),
             })
             .send()
             .await?;
@@ -301,13 +301,13 @@ impl AuthStrategy for CodexDeviceStrategy {
 
                 Ok(AuthCredential {
                     provider: fabro_model::Provider::OpenAi,
-                    details:  AuthDetails::CodexOAuth {
-                        tokens:     OAuthTokens {
-                            access_token:  token_response.access_token,
+                    details: AuthDetails::CodexOAuth {
+                        tokens: OAuthTokens {
+                            access_token: token_response.access_token,
                             refresh_token: token_response.refresh_token,
-                            expires_at:    expires_at_from_now(token_response.expires_in),
+                            expires_at: expires_at_from_now(token_response.expires_in),
                         },
-                        config:     self.config.clone(),
+                        config: self.config.clone(),
                         account_id: token_response
                             .id_token
                             .as_deref()
@@ -329,17 +329,17 @@ mod tests {
 
     fn test_config(server: &MockServer) -> OAuthConfig {
         OAuthConfig {
-            auth_url:     server.url(""),
-            token_url:    server.url("/oauth/token"),
-            client_id:    "test-client".to_string(),
-            scopes:       vec![
+            auth_url: server.url(""),
+            token_url: server.url("/oauth/token"),
+            client_id: "test-client".to_string(),
+            scopes: vec![
                 "openid".to_string(),
                 "profile".to_string(),
                 "email".to_string(),
                 "offline_access".to_string(),
             ],
             redirect_uri: Some("https://auth.openai.com/deviceauth/callback".to_string()),
-            use_pkce:     false,
+            use_pkce: false,
         }
     }
 
@@ -415,11 +415,14 @@ mod tests {
 
         let request = strategy.init().await.unwrap();
 
-        assert_eq!(request, AuthContextRequest::DeviceCode {
-            user_code:        "ABCD-EFGH".to_string(),
-            verification_uri: "https://auth.openai.com/codex/device".to_string(),
-            expires_in:       300,
-        });
+        assert_eq!(
+            request,
+            AuthContextRequest::DeviceCode {
+                user_code: "ABCD-EFGH".to_string(),
+                verification_uri: "https://auth.openai.com/codex/device".to_string(),
+                expires_in: 300,
+            }
+        );
         init_mock.assert_async().await;
     }
 

@@ -18,9 +18,9 @@ pub(crate) enum Error {
 }
 
 pub(crate) struct ServerSecrets {
-    path:         PathBuf,
+    path: PathBuf,
     file_entries: HashMap<String, String>,
-    env_lookup:   EnvLookup,
+    env_lookup: EnvLookup,
 }
 
 impl ServerSecrets {
@@ -58,7 +58,7 @@ impl std::fmt::Debug for ServerSecrets {
 
 #[derive(Clone)]
 pub(crate) struct ProviderCredentials {
-    vault:      Arc<AsyncRwLock<Vault>>,
+    vault: Arc<AsyncRwLock<Vault>>,
     env_lookup: EnvLookup,
 }
 
@@ -119,7 +119,7 @@ impl ProviderCredentials {
 }
 
 pub(crate) struct LlmClientResult {
-    pub client:      LlmClient,
+    pub client: LlmClient,
     pub auth_issues: Vec<(Provider, ResolveError)>,
 }
 
@@ -168,9 +168,10 @@ mod tests {
             (name == "OPENAI_API_KEY").then(|| "openai-key".to_string())
         });
 
-        assert_eq!(credentials.configured_providers().await, vec![
-            Provider::OpenAi
-        ]);
+        assert_eq!(
+            credentials.configured_providers().await,
+            vec![Provider::OpenAi]
+        );
     }
 
     #[tokio::test]
@@ -182,7 +183,7 @@ mod tests {
                 "anthropic",
                 &serde_json::to_string(&AuthCredential {
                     provider: Provider::Anthropic,
-                    details:  AuthDetails::ApiKey {
+                    details: AuthDetails::ApiKey {
                         key: "anthropic-key".to_string(),
                     },
                 })
@@ -194,8 +195,9 @@ mod tests {
         let credentials =
             ProviderCredentials::with_env_lookup(Arc::new(AsyncRwLock::new(vault)), |_| None);
 
-        assert_eq!(credentials.configured_providers().await, vec![
-            Provider::Anthropic
-        ]);
+        assert_eq!(
+            credentials.configured_providers().await,
+            vec![Provider::Anthropic]
+        );
     }
 }

@@ -516,9 +516,10 @@ fn settings_local_explicit_workflow_path_uses_workflow_project_layers() {
     assert!(auto_approve_enabled(&cfg));
     // v2 R30: run.prepare.steps replaces the whole ordered list across layers.
     // The highest-precedence layer (workflow) wins.
-    assert_eq!(run_prepare_commands(&cfg), vec![
-        "workflow-setup".to_string()
-    ]);
+    assert_eq!(
+        run_prepare_commands(&cfg),
+        vec!["workflow-setup".to_string()]
+    );
     assert_eq!(run_sandbox(&cfg)["preserve"].as_bool(), Some(true));
 }
 

@@ -15,16 +15,16 @@ fn fixture_path(name: &str) -> PathBuf {
 }
 
 struct PkiPaths {
-    ca_cert:     PathBuf,
+    ca_cert: PathBuf,
     server_cert: PathBuf,
-    server_key:  PathBuf,
+    server_key: PathBuf,
 }
 
 fn fixture_pki() -> PkiPaths {
     PkiPaths {
-        ca_cert:     fixture_path("ca.crt"),
+        ca_cert: fixture_path("ca.crt"),
         server_cert: fixture_path("server.crt"),
-        server_key:  fixture_path("server.key"),
+        server_key: fixture_path("server.key"),
     }
 }
 
@@ -64,7 +64,7 @@ fn install_crypto_provider() {
 fn tls_settings(pki: &PkiPaths) -> TlsConfig {
     TlsConfig {
         cert: InterpString::parse(&pki.server_cert.to_string_lossy()),
-        key:  InterpString::parse(&pki.server_key.to_string_lossy()),
+        key: InterpString::parse(&pki.server_key.to_string_lossy()),
     }
 }
 
@@ -90,7 +90,7 @@ async fn tls_dev_token_auth_does_not_require_client_cert() {
     let pki = fixture_pki();
     let dev_token = "fabro_dev_abababababababababababababababababababababababababababababababab";
     let auth_mode = AuthMode::Enabled(ConfiguredAuth {
-        methods:   vec![ServerAuthMethod::DevToken],
+        methods: vec![ServerAuthMethod::DevToken],
         dev_token: Some(dev_token.to_string()),
     });
     let addr = start_tls_server(&tls_settings(&pki), auth_mode).await;

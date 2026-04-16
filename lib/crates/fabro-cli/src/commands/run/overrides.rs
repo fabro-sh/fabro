@@ -30,8 +30,8 @@ fn model_from_args(model: Option<&str>, provider: Option<&str>) -> Option<RunMod
         return None;
     }
     Some(RunModelLayer {
-        provider:  provider.map(InterpString::parse),
-        name:      model.map(InterpString::parse),
+        provider: provider.map(InterpString::parse),
+        name: model.map(InterpString::parse),
         fallbacks: Vec::new(),
     })
 }
@@ -59,7 +59,7 @@ fn execution_layer(
         return None;
     }
     Some(RunExecutionLayer {
-        mode:     dry_run.map(|d| if d { RunMode::DryRun } else { RunMode::Normal }),
+        mode: dry_run.map(|d| if d { RunMode::DryRun } else { RunMode::Normal }),
         approval: auto_approve.map(|a| {
             if a {
                 ApprovalMode::Auto
@@ -67,7 +67,7 @@ fn execution_layer(
                 ApprovalMode::Prompt
             }
         }),
-        retros:   no_retro.map(|nr| !nr),
+        retros: no_retro.map(|nr| !nr),
     })
 }
 

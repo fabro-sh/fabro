@@ -21,15 +21,15 @@ pub enum CredentialSource {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedAuth {
-    pub login:             String,
-    pub auth_method:       RunAuthMethod,
+    pub login: String,
+    pub auth_method: RunAuthMethod,
     pub credential_source: CredentialSource,
-    pub provider_id:       Option<i64>,
+    pub provider_id: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfiguredAuth {
-    pub methods:   Vec<ServerAuthMethod>,
+    pub methods: Vec<ServerAuthMethod>,
     pub dev_token: Option<String>,
 }
 
@@ -138,10 +138,10 @@ fn authenticate_bearer(token: &str, config: &ConfiguredAuth) -> Result<VerifiedA
         return Err(ApiError::unauthorized());
     }
     Ok(VerifiedAuth {
-        login:             "dev".to_string(),
-        auth_method:       RunAuthMethod::DevToken,
+        login: "dev".to_string(),
+        auth_method: RunAuthMethod::DevToken,
         credential_source: CredentialSource::AuthorizationHeader,
-        provider_id:       None,
+        provider_id: None,
     })
 }
 
@@ -153,10 +153,10 @@ fn authenticate_session(parts: &Parts, config: &ConfiguredAuth) -> Result<Verifi
         return Err(ApiError::unauthorized());
     }
     Ok(VerifiedAuth {
-        login:             session.login.clone(),
-        auth_method:       session.auth_method,
+        login: session.login.clone(),
+        auth_method: session.auth_method,
         credential_source: CredentialSource::SessionCookie,
-        provider_id:       session.provider_id,
+        provider_id: session.provider_id,
     })
 }
 
@@ -195,7 +195,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedService {
 
 /// Axum extractor that authenticates and extracts the request subject.
 pub struct AuthenticatedSubject {
-    pub login:       Option<String>,
+    pub login: Option<String>,
     pub auth_method: RunAuthMethod,
 }
 
@@ -210,7 +210,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
 
         match auth_mode {
             AuthMode::Disabled => Ok(Self {
-                login:       None,
+                login: None,
                 auth_method: RunAuthMethod::Disabled,
             }),
             AuthMode::Enabled(config) => {
@@ -220,7 +220,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
                     authenticate_session(parts, config)?
                 };
                 Ok(Self {
-                    login:       Some(auth.login),
+                    login: Some(auth.login),
                     auth_method: auth.auth_method,
                 })
             }
@@ -304,7 +304,7 @@ mod tests {
 
     fn dev_token_mode() -> AuthMode {
         AuthMode::Enabled(ConfiguredAuth {
-            methods:   vec![ServerAuthMethod::DevToken],
+            methods: vec![ServerAuthMethod::DevToken],
             dev_token: Some(
                 "fabro_dev_abababababababababababababababababababababababababababababababab"
                     .to_string(),
@@ -463,7 +463,7 @@ client_id = "Iv1.test"
     #[tokio::test]
     async fn cookie_session_reports_github_provenance() {
         let app = subject_router(AuthMode::Enabled(ConfiguredAuth {
-            methods:   vec![ServerAuthMethod::Github],
+            methods: vec![ServerAuthMethod::Github],
             dev_token: None,
         }));
         let response = app

@@ -48,19 +48,19 @@ mod tests {
     fn oauth_credential() -> AuthCredential {
         AuthCredential {
             provider: Provider::OpenAi,
-            details:  AuthDetails::CodexOAuth {
-                tokens:     OAuthTokens {
-                    access_token:  "access".to_string(),
+            details: AuthDetails::CodexOAuth {
+                tokens: OAuthTokens {
+                    access_token: "access".to_string(),
                     refresh_token: Some("refresh".to_string()),
-                    expires_at:    Utc::now() + Duration::hours(1),
+                    expires_at: Utc::now() + Duration::hours(1),
                 },
-                config:     OAuthConfig {
-                    auth_url:     "https://auth.openai.com".to_string(),
-                    token_url:    "https://auth.openai.com/oauth/token".to_string(),
-                    client_id:    "client".to_string(),
-                    scopes:       vec!["openid".to_string()],
+                config: OAuthConfig {
+                    auth_url: "https://auth.openai.com".to_string(),
+                    token_url: "https://auth.openai.com/oauth/token".to_string(),
+                    client_id: "client".to_string(),
+                    scopes: vec!["openid".to_string()],
                     redirect_uri: Some("https://auth.openai.com/deviceauth/callback".to_string()),
-                    use_pkce:     true,
+                    use_pkce: true,
                 },
                 account_id: Some("acct_123".to_string()),
             },
@@ -86,12 +86,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault_set_credential(&mut vault, "openai_codex", &oauth_credential()).unwrap();
-        vault_set_credential(&mut vault, "anthropic", &AuthCredential {
-            provider: Provider::Anthropic,
-            details:  AuthDetails::ApiKey {
-                key: "anthropic-key".to_string(),
+        vault_set_credential(
+            &mut vault,
+            "anthropic",
+            &AuthCredential {
+                provider: Provider::Anthropic,
+                details: AuthDetails::ApiKey {
+                    key: "anthropic-key".to_string(),
+                },
             },
-        })
+        )
         .unwrap();
 
         let credentials = vault_credentials_for_provider(&vault, Provider::OpenAi);

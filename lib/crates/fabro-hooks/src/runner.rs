@@ -11,8 +11,8 @@ use crate::types::{HookContext, HookDecision};
 /// Central orchestrator: filters matching hooks, executes them, merges
 /// decisions.
 pub struct HookRunner {
-    config:            HookSettings,
-    executor:          Arc<dyn HookExecutor>,
+    config: HookSettings,
+    executor: Arc<dyn HookExecutor>,
     /// Pre-compiled regexes keyed by matcher pattern string.
     compiled_matchers: HashMap<String, regex::Regex>,
 }
@@ -231,8 +231,8 @@ mod tests {
             _work_dir: Option<&Path>,
         ) -> HookResult {
             HookResult {
-                hook_name:   definition.name.clone(),
-                decision:    self.decision.clone(),
+                hook_name: definition.name.clone(),
+                decision: self.decision.clone(),
                 duration_ms: 1,
             }
         }

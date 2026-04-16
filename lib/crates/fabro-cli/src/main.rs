@@ -140,10 +140,13 @@ async fn main_inner() -> (String, Result<()>) {
         Ok(settings) => settings,
         Err(err) => return (command_name, Err(err)),
     };
-    let combined_settings = combine_files(user_settings, SettingsLayer {
-        cli: Some(cli_layer.clone()),
-        ..SettingsLayer::default()
-    });
+    let combined_settings = combine_files(
+        user_settings,
+        SettingsLayer {
+            cli: Some(cli_layer.clone()),
+            ..SettingsLayer::default()
+        },
+    );
     let cli_settings = match user_config::resolve_cli_settings(&combined_settings) {
         Ok(cli_settings) => cli_settings,
         Err(err) => return (command_name, Err(err)),

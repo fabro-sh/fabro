@@ -25,15 +25,15 @@ pub async fn refresh_oauth_credential(
             .map_err(anyhow::Error::msg)?;
             Ok(AuthCredential {
                 provider: credential.provider,
-                details:  AuthDetails::CodexOAuth {
-                    tokens:     OAuthTokens {
-                        access_token:  response.access_token,
+                details: AuthDetails::CodexOAuth {
+                    tokens: OAuthTokens {
+                        access_token: response.access_token,
                         refresh_token: response
                             .refresh_token
                             .or_else(|| tokens.refresh_token.clone()),
-                        expires_at:    expires_at_from_now(response.expires_in),
+                        expires_at: expires_at_from_now(response.expires_in),
                     },
-                    config:     config.clone(),
+                    config: config.clone(),
                     account_id: account_id.clone(),
                 },
             })

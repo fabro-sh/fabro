@@ -31,11 +31,11 @@ pub fn resolve(file: &SettingsLayer) -> Result<Settings, Vec<ResolveError>> {
     let features_layer = file.features.clone().unwrap_or_default();
 
     let settings = Settings {
-        project:  resolve_project(&project_layer, &mut errors),
+        project: resolve_project(&project_layer, &mut errors),
         workflow: resolve_workflow(&workflow_layer, &mut errors),
-        run:      resolve_run(&run_layer, &mut errors),
-        cli:      resolve_cli(&cli_layer, &mut errors),
-        server:   resolve_server(&server_layer, &mut errors),
+        run: resolve_run(&run_layer, &mut errors),
+        cli: resolve_cli(&cli_layer, &mut errors),
+        server: resolve_server(&server_layer, &mut errors),
         features: resolve_features(&features_layer, &mut errors),
     };
 
@@ -99,7 +99,7 @@ pub(crate) fn parse_socket_addr(
         Ok(address) => address,
         Err(err) => {
             errors.push(ResolveError::ParseFailure {
-                path:   path.to_string(),
+                path: path.to_string(),
                 reason: err.to_string(),
             });
             std::net::SocketAddr::from(([127, 0, 0, 1], 0))
@@ -166,7 +166,7 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
             mcps.get("stdio").map(|mcp| &mcp.transport),
             Some(&McpTransport::Stdio {
                 command: vec!["fabro-mcp".to_string(), "--stdio".to_string()],
-                env:     HashMap::from([(
+                env: HashMap::from([(
                     "TOKEN".to_string(),
                     "Bearer {{ env.MCP_STDIO_TOKEN }}".to_string(),
                 )]),
@@ -175,7 +175,7 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
         assert_eq!(
             mcps.get("http").map(|mcp| &mcp.transport),
             Some(&McpTransport::Http {
-                url:     "https://mcp.example.com".to_string(),
+                url: "https://mcp.example.com".to_string(),
                 headers: HashMap::from([(
                     "Authorization".to_string(),
                     "Bearer {{ env.MCP_HTTP_TOKEN }}".to_string(),
@@ -186,8 +186,8 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
             mcps.get("sandbox").map(|mcp| &mcp.transport),
             Some(&McpTransport::Sandbox {
                 command: vec!["fabro-mcp".to_string(), "--sandbox".to_string()],
-                port:    3333,
-                env:     HashMap::from([(
+                port: 3333,
+                env: HashMap::from([(
                     "TOKEN".to_string(),
                     "{{ env.MCP_SANDBOX_TOKEN }}".to_string(),
                 )]),
@@ -203,13 +203,13 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
         assert_eq!(
             hook.resolved_hook_type().as_deref(),
             Some(&HookType::Http {
-                url:              "https://hooks.example.com".to_string(),
-                headers:          Some(HashMap::from([(
+                url: "https://hooks.example.com".to_string(),
+                headers: Some(HashMap::from([(
                     "Authorization".to_string(),
                     "Bearer {{ env.HOOK_TOKEN }}".to_string(),
                 )])),
                 allowed_env_vars: Vec::new(),
-                tls:              TlsMode::Verify,
+                tls: TlsMode::Verify,
             })
         );
     }

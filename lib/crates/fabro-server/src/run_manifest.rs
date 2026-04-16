@@ -40,14 +40,14 @@ use crate::server_secrets::auth_issue_message;
 
 #[derive(Clone)]
 pub(crate) struct PreparedManifest {
-    pub cwd:               PathBuf,
-    pub git:               Option<types::ManifestGit>,
-    pub root_source:       String,
-    pub run_id:            Option<RunId>,
-    pub settings:          SettingsLayer,
-    pub target_path:       PathBuf,
-    pub workflow_bundle:   WorkflowBundle,
-    pub workflow_input:    BundledWorkflow,
+    pub cwd: PathBuf,
+    pub git: Option<types::ManifestGit>,
+    pub root_source: String,
+    pub run_id: Option<RunId>,
+    pub settings: SettingsLayer,
+    pub target_path: PathBuf,
+    pub workflow_bundle: WorkflowBundle,
+    pub workflow_input: BundledWorkflow,
     pub working_directory: PathBuf,
 }
 
@@ -121,9 +121,9 @@ pub(crate) fn validate_prepared_manifest(
     prepared: &PreparedManifest,
 ) -> Result<Validated, WorkflowError> {
     validate(ValidateInput {
-        workflow:          WorkflowInput::Bundled(prepared.workflow_input.clone()),
-        settings:          prepared.settings.clone(),
-        cwd:               prepared.cwd.clone(),
+        workflow: WorkflowInput::Bundled(prepared.workflow_input.clone()),
+        settings: prepared.settings.clone(),
+        cwd: prepared.cwd.clone(),
         custom_transforms: Vec::new(),
     })
 }
@@ -183,11 +183,14 @@ fn workflow_bundle_from_manifest(
                 .iter()
                 .map(|(key, entry)| (PathBuf::from(key), entry.content.clone()))
                 .collect::<HashMap<_, _>>();
-            Ok::<_, anyhow::Error>((PathBuf::from(path), BundledWorkflow {
-                logical_path: PathBuf::from(path),
-                source: workflow.source.clone(),
-                files,
-            }))
+            Ok::<_, anyhow::Error>((
+                PathBuf::from(path),
+                BundledWorkflow {
+                    logical_path: PathBuf::from(path),
+                    source: workflow.source.clone(),
+                    files,
+                },
+            ))
         })
         .collect::<Result<HashMap<_, _>>>()?;
     Ok(WorkflowBundle::new(workflows))
@@ -222,8 +225,8 @@ fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> SettingsLayer {
     };
 
     let model = (args.model.is_some() || args.provider.is_some()).then(|| RunModelLayer {
-        provider:  args.provider.as_deref().map(InterpString::parse),
-        name:      args.model.as_deref().map(InterpString::parse),
+        provider: args.provider.as_deref().map(InterpString::parse),
+        name: args.model.as_deref().map(InterpString::parse),
         fallbacks: Vec::new(),
     });
     let sandbox =
@@ -236,7 +239,7 @@ fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> SettingsLayer {
     let execution_has_any =
         args.dry_run.is_some() || args.auto_approve.is_some() || args.no_retro.is_some();
     let execution = execution_has_any.then(|| RunExecutionLayer {
-        mode:     args
+        mode: args
             .dry_run
             .map(|d| if d { RunMode::DryRun } else { RunMode::Normal }),
         approval: args.auto_approve.map(|a| {
@@ -246,7 +249,7 @@ fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> SettingsLayer {
                 ApprovalMode::Prompt
             }
         }),
-        retros:   args.no_retro.map(|nr| !nr),
+        retros: args.no_retro.map(|nr| !nr),
     });
 
     let run_has_any =
@@ -345,7 +348,7 @@ async fn build_preflight_report(
     if validated.has_errors() {
         return Ok((
             CheckReport {
-                title:    "Run Preflight".into(),
+                title: "Run Preflight".into(),
                 sections: vec![CheckSection {
                     title: String::new(),
                     checks,
@@ -408,7 +411,7 @@ async fn build_preflight_report(
 
     Ok((
         CheckReport {
-            title:    "Run Preflight".into(),
+            title: "Run Preflight".into(),
             sections: vec![CheckSection {
                 title: String::new(),
                 checks,
@@ -435,10 +438,10 @@ fn base_preflight_checks(prepared: &PreparedManifest, graph: &Graph) -> Vec<Chec
 
     vec![
         CheckResult {
-            name:        "Repository".into(),
-            status:      CheckStatus::Pass,
-            summary:     repo_summary,
-            details:     vec![
+            name: "Repository".into(),
+            status: CheckStatus::Pass,
+            summary: repo_summary,
+            details: vec![
                 CheckDetail::new(format!("Setup commands: {setup_command_count}")),
                 CheckDetail {
                     text: format!(
@@ -455,10 +458,10 @@ fn base_preflight_checks(prepared: &PreparedManifest, graph: &Graph) -> Vec<Chec
             remediation: None,
         },
         CheckResult {
-            name:        "Workflow".into(),
-            status:      CheckStatus::Pass,
-            summary:     graph.name.clone(),
-            details:     vec![
+            name: "Workflow".into(),
+            status: CheckStatus::Pass,
+            summary: graph.name.clone(),
+            details: vec![
                 CheckDetail::new(format!("Nodes: {}", graph.nodes.len())),
                 CheckDetail::new(format!("Edges: {}", graph.edges.len())),
                 CheckDetail::new(format!("Goal: {}", graph.goal())),
@@ -527,10 +530,10 @@ async fn run_sandbox_check(
             Ok(()) => {
                 let _ = sandbox.cleanup().await;
                 checks.push(CheckResult {
-                    name:        "Sandbox".into(),
-                    status:      CheckStatus::Pass,
-                    summary:     sandbox_provider.to_string(),
-                    details:     vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
+                    name: "Sandbox".into(),
+                    status: CheckStatus::Pass,
+                    summary: sandbox_provider.to_string(),
+                    details: vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
                     remediation: None,
                 });
                 true
@@ -538,10 +541,10 @@ async fn run_sandbox_check(
             Err(err) => {
                 let _ = sandbox.cleanup().await;
                 checks.push(CheckResult {
-                    name:        "Sandbox".into(),
-                    status:      CheckStatus::Error,
-                    summary:     "failed".into(),
-                    details:     vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
+                    name: "Sandbox".into(),
+                    status: CheckStatus::Error,
+                    summary: "failed".into(),
+                    details: vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
                     remediation: Some(format!("Sandbox init failed: {err}")),
                 });
                 false
@@ -549,10 +552,10 @@ async fn run_sandbox_check(
         },
         Err(err) => {
             checks.push(CheckResult {
-                name:        "Sandbox".into(),
-                status:      CheckStatus::Error,
-                summary:     "failed".into(),
-                details:     vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
+                name: "Sandbox".into(),
+                status: CheckStatus::Error,
+                summary: "failed".into(),
+                details: vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
                 remediation: Some(err),
             });
             false
@@ -646,12 +649,10 @@ async fn run_llm_check(
                     }
                     Err(err) => {
                         checks.push(CheckResult {
-                            name:        "LLM".into(),
-                            status:      CheckStatus::Error,
-                            summary:     model_id.clone(),
-                            details:     vec![CheckDetail::new(format!(
-                                "Provider: {provider_name}"
-                            ))],
+                            name: "LLM".into(),
+                            status: CheckStatus::Error,
+                            summary: model_id.clone(),
+                            details: vec![CheckDetail::new(format!("Provider: {provider_name}"))],
                             remediation: Some(format!(
                                 "Invalid provider \"{provider_name}\": {err}"
                             )),
@@ -664,10 +665,10 @@ async fn run_llm_check(
         }
         Err(err) => {
             checks.push(CheckResult {
-                name:        "LLM".into(),
-                status:      CheckStatus::Error,
-                summary:     "initialization failed".into(),
-                details:     vec![],
+                name: "LLM".into(),
+                status: CheckStatus::Error,
+                summary: "initialization failed".into(),
+                details: vec![],
                 remediation: Some(format!("LLM client init failed: {err}")),
             });
             false
@@ -715,15 +716,15 @@ fn render_resolve_errors(errors: &[fabro_config::ResolveError]) -> String {
 fn runtime_daytona_config(settings: &DaytonaSettings) -> DaytonaConfig {
     DaytonaConfig {
         auto_stop_interval: settings.auto_stop_interval,
-        labels:             (!settings.labels.is_empty()).then_some(settings.labels.clone()),
-        snapshot:           settings
+        labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
+        snapshot: settings
             .snapshot
             .as_ref()
             .map(|snapshot| DaytonaSnapshotSettings {
-                name:       snapshot.name.clone(),
-                cpu:        snapshot.cpu,
-                memory:     snapshot.memory_gb,
-                disk:       snapshot.disk_gb,
+                name: snapshot.name.clone(),
+                cpu: snapshot.cpu,
+                memory: snapshot.memory_gb,
+                disk: snapshot.disk_gb,
                 dockerfile: snapshot
                     .dockerfile
                     .as_ref()
@@ -736,14 +737,14 @@ fn runtime_daytona_config(settings: &DaytonaSettings) -> DaytonaConfig {
                         }
                     }),
             }),
-        network:            settings.network.as_ref().map(|network| match network {
+        network: settings.network.as_ref().map(|network| match network {
             DaytonaNetworkLayer::Block => DaytonaNetwork::Block,
             DaytonaNetworkLayer::AllowAll => DaytonaNetwork::AllowAll,
             DaytonaNetworkLayer::AllowList { allow_list } => {
                 DaytonaNetwork::AllowList(allow_list.clone())
             }
         }),
-        skip_clone:         settings.skip_clone,
+        skip_clone: settings.skip_clone,
     }
 }
 
@@ -775,26 +776,26 @@ async fn run_github_token_check(
         (Some(creds), Some(git)) => {
             match mint_github_token(creds, &git.origin_url, &github_permissions).await {
                 Ok(_) => checks.push(CheckResult {
-                    name:        "GitHub Token".into(),
-                    status:      CheckStatus::Pass,
-                    summary:     "minted".into(),
-                    details:     perm_details,
+                    name: "GitHub Token".into(),
+                    status: CheckStatus::Pass,
+                    summary: "minted".into(),
+                    details: perm_details,
                     remediation: None,
                 }),
                 Err(err) => checks.push(CheckResult {
-                    name:        "GitHub Token".into(),
-                    status:      CheckStatus::Error,
-                    summary:     "failed".into(),
-                    details:     perm_details,
+                    name: "GitHub Token".into(),
+                    status: CheckStatus::Error,
+                    summary: "failed".into(),
+                    details: perm_details,
                     remediation: Some(format!("Failed to mint GitHub token: {err}")),
                 }),
             }
         }
         _ => checks.push(CheckResult {
-            name:        "GitHub Token".into(),
-            status:      CheckStatus::Warning,
-            summary:     "skipped".into(),
-            details:     vec![],
+            name: "GitHub Token".into(),
+            status: CheckStatus::Warning,
+            summary: "skipped".into(),
+            details: vec![],
             remediation: Some("No GitHub credentials or origin URL available".to_string()),
         }),
     }
@@ -842,11 +843,11 @@ fn preflight_response(
         checks: report_to_api(report),
         workflow: types::PreflightWorkflowSummary {
             diagnostics: diagnostics_to_api(validated.diagnostics()),
-            edges:       i64::try_from(validated.graph().edges.len()).unwrap(),
-            goal:        validated.graph().goal().to_string(),
-            graph_path:  Some(target_path.display().to_string()),
-            name:        validated.graph().name.clone(),
-            nodes:       i64::try_from(validated.graph().nodes.len()).unwrap(),
+            edges: i64::try_from(validated.graph().edges.len()).unwrap(),
+            goal: validated.graph().goal().to_string(),
+            graph_path: Some(target_path.display().to_string()),
+            name: validated.graph().name.clone(),
+            nodes: i64::try_from(validated.graph().nodes.len()).unwrap(),
         },
     }
 }
@@ -857,14 +858,14 @@ fn diagnostics_to_api(
     diagnostics
         .iter()
         .map(|diagnostic| types::WorkflowDiagnostic {
-            edge:     diagnostic
+            edge: diagnostic
                 .edge
                 .as_ref()
                 .map(|edge: &(String, String)| [edge.0.clone(), edge.1.clone()]),
-            fix:      diagnostic.fix.clone(),
-            message:  diagnostic.message.clone(),
-            node_id:  diagnostic.node_id.clone(),
-            rule:     diagnostic.rule.clone(),
+            fix: diagnostic.fix.clone(),
+            message: diagnostic.message.clone(),
+            node_id: diagnostic.node_id.clone(),
+            rule: diagnostic.rule.clone(),
             severity: match diagnostic.severity {
                 Severity::Error => types::WorkflowDiagnosticSeverity::Error,
                 Severity::Warning => types::WorkflowDiagnosticSeverity::Warning,
@@ -884,7 +885,7 @@ fn report_to_api(report: &CheckReport) -> types::PreflightCheckReport {
                     .checks
                     .iter()
                     .map(|check| types::PreflightCheckResult {
-                        details:     check
+                        details: check
                             .details
                             .iter()
                             .map(|detail| types::PreflightCheckDetail {
@@ -892,20 +893,20 @@ fn report_to_api(report: &CheckReport) -> types::PreflightCheckReport {
                                 warn: detail.warn,
                             })
                             .collect(),
-                        name:        check.name.clone(),
+                        name: check.name.clone(),
                         remediation: check.remediation.clone(),
-                        status:      match check.status {
+                        status: match check.status {
                             CheckStatus::Pass => types::PreflightCheckResultStatus::Pass,
                             CheckStatus::Warning => types::PreflightCheckResultStatus::Warning,
                             CheckStatus::Error => types::PreflightCheckResultStatus::Error,
                         },
-                        summary:     check.summary.clone(),
+                        summary: check.summary.clone(),
                     })
                     .collect(),
-                title:  section.title.clone(),
+                title: section.title.clone(),
             })
             .collect(),
-        title:    report.title.clone(),
+        title: report.title.clone(),
     }
 }
 
@@ -915,35 +916,41 @@ mod tests {
 
     fn minimal_manifest() -> types::RunManifest {
         types::RunManifest {
-            args:      None,
-            configs:   Vec::new(),
-            cwd:       "/tmp/project".to_string(),
-            git:       None,
-            goal:      None,
-            run_id:    None,
-            target:    types::ManifestTarget {
+            args: None,
+            configs: Vec::new(),
+            cwd: "/tmp/project".to_string(),
+            git: None,
+            goal: None,
+            run_id: None,
+            target: types::ManifestTarget {
                 identifier: "workflow.fabro".to_string(),
-                path:       "workflow.fabro".to_string(),
+                path: "workflow.fabro".to_string(),
             },
-            version:   1,
-            workflows: HashMap::from([("workflow.fabro".to_string(), types::ManifestWorkflow {
-                config: None,
-                files:  HashMap::new(),
-                source:
-                    "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
-                        .to_string(),
-            })]),
+            version: 1,
+            workflows: HashMap::from([(
+                "workflow.fabro".to_string(),
+                types::ManifestWorkflow {
+                    config: None,
+                    files: HashMap::new(),
+                    source:
+                        "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
+                            .to_string(),
+                },
+            )]),
         }
     }
 
     fn invalid_manifest() -> types::RunManifest {
         types::RunManifest {
-            workflows: HashMap::from([("workflow.fabro".to_string(), types::ManifestWorkflow {
-                config: None,
-                files:  HashMap::new(),
-                source: "digraph Invalid { exit [shape=Msquare] orphan exit -> orphan }"
-                    .to_string(),
-            })]),
+            workflows: HashMap::from([(
+                "workflow.fabro".to_string(),
+                types::ManifestWorkflow {
+                    config: None,
+                    files: HashMap::new(),
+                    source: "digraph Invalid { exit [shape=Msquare] orphan exit -> orphan }"
+                        .to_string(),
+                },
+            )]),
             ..minimal_manifest()
         }
     }
@@ -967,15 +974,15 @@ root = "/srv/fabro"
         );
         let mut manifest = minimal_manifest();
         manifest.args = Some(types::ManifestArgs {
-            auto_approve:     None,
-            dry_run:          Some(true),
-            label:            Vec::new(),
-            model:            None,
-            no_retro:         None,
+            auto_approve: None,
+            dry_run: Some(true),
+            label: Vec::new(),
+            model: None,
+            no_retro: None,
             preserve_sandbox: None,
-            provider:         None,
-            sandbox:          None,
-            verbose:          None,
+            provider: None,
+            sandbox: None,
+            verbose: None,
         });
 
         let prepared = prepare_manifest_with_mode(&server_settings, &manifest, false).unwrap();
@@ -1009,7 +1016,7 @@ app_id = "snapshotted-app-id"
         let mut manifest = minimal_manifest();
         manifest.workflows.get_mut("workflow.fabro").unwrap().config =
             Some(types::ManifestWorkflowConfig {
-                path:   "workflow.toml".to_string(),
+                path: "workflow.toml".to_string(),
                 source: r#"
 _version = 1
 
@@ -1019,7 +1026,7 @@ script = "workflow-setup"
                 .to_string(),
             });
         manifest.configs.push(types::ManifestConfig {
-            path:   Some("/tmp/home/.fabro/settings.toml".to_string()),
+            path: Some("/tmp/home/.fabro/settings.toml".to_string()),
             source: Some(
                 r#"
 _version = 1
@@ -1032,7 +1039,7 @@ app_id = "snapshotted-app-id"
 "#
                 .to_string(),
             ),
-            type_:  types::ManifestConfigType::User,
+            type_: types::ManifestConfigType::User,
         });
 
         let prepared = prepare_manifest_with_mode(&server_settings, &manifest, true).unwrap();
@@ -1041,9 +1048,10 @@ app_id = "snapshotted-app-id"
 
         // v2 merge matrix: run.prepare.steps replaces the whole list across
         // layers, so the higher-precedence workflow layer wins over cli.
-        assert_eq!(resolved_run.prepare.commands, vec![
-            "workflow-setup".to_string()
-        ]);
+        assert_eq!(
+            resolved_run.prepare.commands,
+            vec!["workflow-setup".to_string()]
+        );
         assert_eq!(
             resolved_server
                 .integrations
@@ -1084,7 +1092,7 @@ app_id = "snapshotted-app-id"
         let state = crate::server::create_app_state();
         let mut manifest = minimal_manifest();
         manifest.configs.push(types::ManifestConfig {
-            path:   Some("/tmp/project/.fabro/project.toml".to_string()),
+            path: Some("/tmp/project/.fabro/project.toml".to_string()),
             source: Some(
                 r"
 _version = 1
@@ -1094,7 +1102,7 @@ enabled = true
 "
                 .to_string(),
             ),
-            type_:  types::ManifestConfigType::Project,
+            type_: types::ManifestConfigType::Project,
         });
 
         let prepared =
@@ -1122,7 +1130,7 @@ enabled = true
         let state = crate::server::create_app_state();
         let mut manifest = minimal_manifest();
         manifest.configs.push(types::ManifestConfig {
-            path:   Some("/tmp/project/.fabro/project.toml".to_string()),
+            path: Some("/tmp/project/.fabro/project.toml".to_string()),
             source: Some(
                 r#"
 _version = 1
@@ -1132,7 +1140,7 @@ provider = "daytona"
 "#
                 .to_string(),
             ),
-            type_:  types::ManifestConfigType::Project,
+            type_: types::ManifestConfigType::Project,
         });
 
         let prepared =

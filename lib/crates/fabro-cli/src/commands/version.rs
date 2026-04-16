@@ -31,23 +31,23 @@ pub(crate) async fn version_command(
             Ok(response) => {
                 let response = response.into_inner();
                 ServerVersionInfo::Success {
-                    address:     server_address,
-                    version:     response.version,
-                    git_sha:     response.git_sha,
-                    build_date:  response.build_date,
-                    os:          response.os,
-                    arch:        response.arch,
+                    address: server_address,
+                    version: response.version,
+                    git_sha: response.git_sha,
+                    build_date: response.build_date,
+                    os: response.os,
+                    arch: response.arch,
                     uptime_secs: response.uptime_secs,
                 }
             }
             Err(err) => ServerVersionInfo::Error {
                 address: server_address,
-                error:   err.to_string(),
+                error: err.to_string(),
             },
         },
         Err(err) => ServerVersionInfo::Error {
             address: server_address,
-            error:   err.to_string(),
+            error: err.to_string(),
         },
     };
 
@@ -61,36 +61,36 @@ pub(crate) async fn version_command(
 }
 
 struct ClientVersionInfo {
-    version:    &'static str,
-    git_sha:    &'static str,
+    version: &'static str,
+    git_sha: &'static str,
     build_date: &'static str,
-    os:         &'static str,
-    arch:       &'static str,
+    os: &'static str,
+    arch: &'static str,
 }
 
 enum ServerVersionInfo {
     Success {
-        address:     String,
-        version:     Option<String>,
-        git_sha:     Option<String>,
-        build_date:  Option<String>,
-        os:          Option<String>,
-        arch:        Option<String>,
+        address: String,
+        version: Option<String>,
+        git_sha: Option<String>,
+        build_date: Option<String>,
+        os: Option<String>,
+        arch: Option<String>,
         uptime_secs: Option<i64>,
     },
     Error {
         address: String,
-        error:   String,
+        error: String,
     },
 }
 
 fn client_info() -> ClientVersionInfo {
     ClientVersionInfo {
-        version:    env!("CARGO_PKG_VERSION"),
-        git_sha:    env!("FABRO_GIT_SHA"),
+        version: env!("CARGO_PKG_VERSION"),
+        git_sha: env!("FABRO_GIT_SHA"),
         build_date: env!("FABRO_BUILD_DATE"),
-        os:         std::env::consts::OS,
-        arch:       std::env::consts::ARCH,
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
     }
 }
 

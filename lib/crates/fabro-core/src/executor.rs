@@ -18,15 +18,15 @@ use crate::state::ExecutionState;
 
 #[derive(Default)]
 pub struct ExecutorOptions {
-    pub cancel_token:    Option<Arc<AtomicBool>>,
-    pub stall_token:     Option<CancellationToken>,
+    pub cancel_token: Option<Arc<AtomicBool>>,
+    pub stall_token: Option<CancellationToken>,
     pub max_node_visits: Option<usize>,
 }
 
 pub struct Executor<G: Graph> {
-    handler:   Arc<dyn NodeHandler<G>>,
+    handler: Arc<dyn NodeHandler<G>>,
     lifecycle: Box<dyn RunLifecycle<G>>,
-    options:   ExecutorOptions,
+    options: ExecutorOptions,
 }
 
 enum NextStep {
@@ -37,9 +37,9 @@ enum NextStep {
 }
 
 pub struct ExecutorBuilder<G: Graph> {
-    handler:   Arc<dyn NodeHandler<G>>,
+    handler: Arc<dyn NodeHandler<G>>,
     lifecycle: Option<Box<dyn RunLifecycle<G>>>,
-    options:   ExecutorOptions,
+    options: ExecutorOptions,
 }
 
 impl<G: Graph + 'static> ExecutorBuilder<G> {
@@ -77,9 +77,9 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
 
     pub fn build(self) -> Executor<G> {
         Executor {
-            handler:   self.handler,
+            handler: self.handler,
             lifecycle: self.lifecycle.unwrap_or_else(|| Box::new(NoopLifecycle)),
-            options:   self.options,
+            options: self.options,
         }
     }
 }
@@ -970,26 +970,26 @@ mod tests {
         let handler = Arc::new(
             CountingHandler::new(vec![
                 Err(Error::handler(HandlerErrorDetail {
-                    message:   "fail1".into(),
+                    message: "fail1".into(),
                     retryable: true,
-                    category:  None,
+                    category: None,
                     signature: None,
                 })),
                 Err(Error::handler(HandlerErrorDetail {
-                    message:   "fail2".into(),
+                    message: "fail2".into(),
                     retryable: true,
-                    category:  None,
+                    category: None,
                     signature: None,
                 })),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor:        1.0,
-                    max_delay:     Duration::from_millis(1),
-                    jitter:        false,
+                    factor: 1.0,
+                    max_delay: Duration::from_millis(1),
+                    jitter: false,
                 },
             }),
         );
@@ -1019,11 +1019,11 @@ mod tests {
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor:        1.0,
-                    max_delay:     Duration::from_millis(1),
-                    jitter:        false,
+                    factor: 1.0,
+                    max_delay: Duration::from_millis(1),
+                    jitter: false,
                 },
             }),
         );
@@ -1041,9 +1041,9 @@ mod tests {
     async fn executor_retry_non_retryable_error_no_retry() {
         let handler = Arc::new(
             CountingHandler::new(vec![Err(Error::handler(HandlerErrorDetail {
-                message:   "fatal".into(),
+                message: "fatal".into(),
                 retryable: false,
-                category:  None,
+                category: None,
                 signature: None,
             }))])
             .with_retry_policy(RetryPolicy::with_max_attempts(3)),
@@ -1064,9 +1064,9 @@ mod tests {
         // Default policy is RetryPolicy::none() (max_attempts=1)
         let handler = Arc::new(CountingHandler::new(vec![Err(Error::handler(
             HandlerErrorDetail {
-                message:   "fail".into(),
+                message: "fail".into(),
                 retryable: true,
-                category:  None,
+                category: None,
                 signature: None,
             },
         ))]));
@@ -1099,11 +1099,11 @@ mod tests {
             fn retry_policy(&self, _n: &TestNode, _g: &TestGraph) -> RetryPolicy {
                 RetryPolicy {
                     max_attempts: 2,
-                    backoff:      BackoffPolicy {
+                    backoff: BackoffPolicy {
                         initial_delay: Duration::from_millis(1),
-                        factor:        1.0,
-                        max_delay:     Duration::from_millis(1),
-                        jitter:        false,
+                        factor: 1.0,
+                        max_delay: Duration::from_millis(1),
+                        jitter: false,
                     },
                 }
             }
@@ -1143,20 +1143,20 @@ mod tests {
         let handler = Arc::new(
             CountingHandler::new(vec![
                 Err(Error::handler(HandlerErrorDetail {
-                    message:   "r".into(),
+                    message: "r".into(),
                     retryable: true,
-                    category:  None,
+                    category: None,
                     signature: None,
                 })),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor:        1.0,
-                    max_delay:     Duration::from_millis(1),
-                    jitter:        false,
+                    factor: 1.0,
+                    max_delay: Duration::from_millis(1),
+                    jitter: false,
                 },
             }),
         );
@@ -1187,20 +1187,20 @@ mod tests {
         let handler = Arc::new(
             CountingHandler::new(vec![
                 Err(Error::handler(HandlerErrorDetail {
-                    message:   "r".into(),
+                    message: "r".into(),
                     retryable: true,
-                    category:  None,
+                    category: None,
                     signature: None,
                 })),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor:        1.0,
-                    max_delay:     Duration::from_millis(1),
-                    jitter:        false,
+                    factor: 1.0,
+                    max_delay: Duration::from_millis(1),
+                    jitter: false,
                 },
             }),
         );
@@ -1237,20 +1237,20 @@ mod tests {
         let handler = Arc::new(
             CountingHandler::new(vec![
                 Err(Error::handler(HandlerErrorDetail {
-                    message:   "r".into(),
+                    message: "r".into(),
                     retryable: true,
-                    category:  None,
+                    category: None,
                     signature: None,
                 })),
                 Ok(Outcome::success()), // should not be reached
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor:        1.0,
-                    max_delay:     Duration::from_millis(1),
-                    jitter:        false,
+                    factor: 1.0,
+                    max_delay: Duration::from_millis(1),
+                    jitter: false,
                 },
             }),
         );
@@ -1278,11 +1278,11 @@ mod tests {
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_secs(5),
-                    factor:        2.0,
-                    max_delay:     Duration::from_secs(60),
-                    jitter:        false,
+                    factor: 2.0,
+                    max_delay: Duration::from_secs(60),
+                    jitter: false,
                 },
             }),
         );
@@ -1619,10 +1619,13 @@ mod tests {
         executor.run(&g, state).await.unwrap();
         let checkpoints = log.lock().unwrap().clone();
         // "start" checkpoints with next="work", "work" checkpoints with next="end"
-        assert_eq!(checkpoints, vec![
-            ("start".to_string(), Some("work".to_string())),
-            ("work".to_string(), Some("end".to_string())),
-        ]);
+        assert_eq!(
+            checkpoints,
+            vec![
+                ("start".to_string(), Some("work".to_string())),
+                ("work".to_string(), Some("end".to_string())),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1692,10 +1695,13 @@ mod tests {
 
         executor.run(&g, state).await.unwrap();
 
-        assert_eq!(*log.lock().unwrap(), vec![
-            "after_record:start:start:hello".to_string(),
-            "on_edge_selected:start:hello".to_string(),
-        ]);
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec![
+                "after_record:start:start:hello".to_string(),
+                "on_edge_selected:start:hello".to_string(),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1744,10 +1750,10 @@ mod tests {
         .lifecycle(Box::new(GateTracker(log2.clone())))
         .build();
         executor2.run(&g2, state2).await.unwrap();
-        assert_eq!(log2.lock().unwrap().clone(), vec![(
-            "end".to_string(),
-            false
-        )]);
+        assert_eq!(
+            log2.lock().unwrap().clone(),
+            vec![("end".to_string(), false)]
+        );
     }
 
     #[tokio::test]
@@ -2036,9 +2042,9 @@ mod tests {
                     // First call: fail with retryable, then cancel stall during backoff
                     self.stall.cancel();
                     Err(Error::handler(HandlerErrorDetail {
-                        message:   "transient".into(),
+                        message: "transient".into(),
                         retryable: true,
-                        category:  None,
+                        category: None,
                         signature: None,
                     }))
                 } else {
@@ -2048,11 +2054,11 @@ mod tests {
             fn retry_policy(&self, _n: &TestNode, _g: &TestGraph) -> RetryPolicy {
                 RetryPolicy {
                     max_attempts: 3,
-                    backoff:      BackoffPolicy {
+                    backoff: BackoffPolicy {
                         initial_delay: Duration::from_secs(60),
-                        factor:        1.0,
-                        max_delay:     Duration::from_secs(60),
-                        jitter:        false,
+                        factor: 1.0,
+                        max_delay: Duration::from_secs(60),
+                        jitter: false,
                     },
                 }
             }

@@ -15,9 +15,9 @@ impl Interviewer for AutoApproveInterviewer {
                 question.options.first().map_or_else(
                     || Answer::text("auto-approved"),
                     |first| Answer {
-                        value:           AnswerValue::Selected(first.key.clone()),
+                        value: AnswerValue::Selected(first.key.clone()),
                         selected_option: Some(first.clone()),
-                        text:            None,
+                        text: None,
                     },
                 )
             }
@@ -53,11 +53,11 @@ mod tests {
         let mut q = Question::new("Choose:", QuestionType::MultipleChoice);
         q.options = vec![
             QuestionOption {
-                key:   "A".to_string(),
+                key: "A".to_string(),
                 label: "Alpha".to_string(),
             },
             QuestionOption {
-                key:   "B".to_string(),
+                key: "B".to_string(),
                 label: "Beta".to_string(),
             },
         ];
@@ -66,7 +66,7 @@ mod tests {
         assert_eq!(
             answer.selected_option,
             Some(QuestionOption {
-                key:   "A".to_string(),
+                key: "A".to_string(),
                 label: "Alpha".to_string(),
             })
         );

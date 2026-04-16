@@ -54,16 +54,22 @@ mod tests {
         let emitter = Emitter::new();
         let mut receiver = emitter.subscribe();
 
-        emitter.emit("sess-1".into(), AgentEvent::SessionStarted {
-            provider: Some("anthropic".into()),
-            model:    Some("claude-opus".into()),
-        });
+        emitter.emit(
+            "sess-1".into(),
+            AgentEvent::SessionStarted {
+                provider: Some("anthropic".into()),
+                model: Some("claude-opus".into()),
+            },
+        );
 
         let event = receiver.recv().await.unwrap();
-        assert!(matches!(event.event, AgentEvent::SessionStarted {
-            provider: Some(_),
-            model:    Some(_),
-        }));
+        assert!(matches!(
+            event.event,
+            AgentEvent::SessionStarted {
+                provider: Some(_),
+                model: Some(_),
+            }
+        ));
         assert_eq!(event.session_id, "sess-1");
         assert_eq!(event.parent_session_id, None);
     }
@@ -73,9 +79,12 @@ mod tests {
         let emitter = Emitter::new();
         let mut receiver = emitter.subscribe();
 
-        emitter.emit("sess-2".into(), AgentEvent::Error {
-            error: Error::ToolExecution("something went wrong".into()),
-        });
+        emitter.emit(
+            "sess-2".into(),
+            AgentEvent::Error {
+                error: Error::ToolExecution("something went wrong".into()),
+            },
+        );
 
         let event = receiver.recv().await.unwrap();
         assert!(
@@ -105,9 +114,12 @@ mod tests {
     #[test]
     fn emit_without_subscribers_does_not_panic() {
         let emitter = Emitter::new();
-        emitter.emit("sess-4".into(), AgentEvent::Error {
-            error: Error::ToolExecution("test".into()),
-        });
+        emitter.emit(
+            "sess-4".into(),
+            AgentEvent::Error {
+                error: Error::ToolExecution("test".into()),
+            },
+        );
     }
 
     #[test]
@@ -122,21 +134,24 @@ mod tests {
         let mut receiver = emitter.subscribe();
 
         emitter.forward(SessionEvent {
-            event:             AgentEvent::SessionStarted {
+            event: AgentEvent::SessionStarted {
                 provider: Some("anthropic".into()),
-                model:    Some("claude-opus".into()),
+                model: Some("claude-opus".into()),
             },
-            timestamp:         SystemTime::now(),
-            session_id:        "child".into(),
+            timestamp: SystemTime::now(),
+            session_id: "child".into(),
             parent_session_id: Some("parent".into()),
         });
 
         let event = receiver.recv().await.unwrap();
         assert_eq!(event.session_id, "child");
         assert_eq!(event.parent_session_id.as_deref(), Some("parent"));
-        assert!(matches!(event.event, AgentEvent::SessionStarted {
-            provider: Some(_),
-            model:    Some(_),
-        }));
+        assert!(matches!(
+            event.event,
+            AgentEvent::SessionStarted {
+                provider: Some(_),
+                model: Some(_),
+            }
+        ));
     }
 }

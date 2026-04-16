@@ -17,5 +17,5 @@ pub use types::{EventEnvelope, EventPayload, RunSummary};
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ListRunsQuery {
     pub start: Option<DateTime<Utc>>,
-    pub end:   Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
 }

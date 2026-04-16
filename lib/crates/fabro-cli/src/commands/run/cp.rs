@@ -16,13 +16,13 @@ use crate::shared::{print_json_pretty, split_run_path};
 #[derive(Debug)]
 enum CopyDirection {
     Download {
-        run_prefix:  String,
+        run_prefix: String,
         remote_path: String,
-        local_path:  PathBuf,
+        local_path: PathBuf,
     },
     Upload {
-        local_path:  PathBuf,
-        run_prefix:  String,
+        local_path: PathBuf,
+        run_prefix: String,
         remote_path: String,
     },
 }
@@ -110,13 +110,13 @@ fn parse_direction(src: &str, dst: &str) -> Result<CopyDirection> {
 
     match (src_parts, dst_parts) {
         (Some((run_prefix, remote_path)), None) => Ok(CopyDirection::Download {
-            run_prefix:  run_prefix.to_string(),
+            run_prefix: run_prefix.to_string(),
             remote_path: remote_path.to_string(),
-            local_path:  PathBuf::from(dst),
+            local_path: PathBuf::from(dst),
         }),
         (None, Some((run_prefix, remote_path))) => Ok(CopyDirection::Upload {
-            local_path:  PathBuf::from(src),
-            run_prefix:  run_prefix.to_string(),
+            local_path: PathBuf::from(src),
+            run_prefix: run_prefix.to_string(),
             remote_path: remote_path.to_string(),
         }),
         (Some(_), Some(_)) => {

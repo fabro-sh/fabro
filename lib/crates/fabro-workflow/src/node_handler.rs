@@ -26,8 +26,8 @@ use crate::retry::build_retry_policy;
 /// then diffs and applies changes back.
 pub(crate) struct WorkflowNodeHandler {
     pub services: Arc<EngineServices>,
-    pub run_dir:  PathBuf,
-    pub graph:    Arc<GvGraph>,
+    pub run_dir: PathBuf,
+    pub graph: Arc<GvGraph>,
 }
 
 #[async_trait]
@@ -50,9 +50,9 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         .await
         .map_err(|err| {
             CoreError::handler(HandlerErrorDetail {
-                message:   err.to_string(),
+                message: err.to_string(),
                 retryable: true,
-                category:  Some(FailureCategory::TransientInfra),
+                category: Some(FailureCategory::TransientInfra),
                 signature: None,
             })
         })?;
@@ -78,9 +78,9 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
                 Ok(inner) => inner,
                 Err(_elapsed) => {
                     return Err(CoreError::handler(HandlerErrorDetail {
-                        message:   format!("handler timed out after {}ms", duration.as_millis()),
+                        message: format!("handler timed out after {}ms", duration.as_millis()),
                         retryable: true,
-                        category:  Some(FailureCategory::TransientInfra),
+                        category: Some(FailureCategory::TransientInfra),
                         signature: None,
                     }));
                 }
@@ -114,9 +114,9 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             Err(panic_payload) => {
                 let msg = format_panic_message(&panic_payload);
                 Err(CoreError::handler(HandlerErrorDetail {
-                    message:   msg,
+                    message: msg,
                     retryable: false,
-                    category:  Some(FailureCategory::Deterministic),
+                    category: Some(FailureCategory::Deterministic),
                     signature: None,
                 }))
             }

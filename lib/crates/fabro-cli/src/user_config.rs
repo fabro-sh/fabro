@@ -12,8 +12,8 @@ use tracing::debug;
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub(crate) struct ClientTlsSettings {
     pub cert: PathBuf,
-    pub key:  PathBuf,
-    pub ca:   PathBuf,
+    pub key: PathBuf,
+    pub ca: PathBuf,
 }
 
 use crate::args::ServerTargetArgs;
@@ -85,7 +85,7 @@ pub(crate) fn apply_storage_dir_override(
 pub(crate) enum ServerTarget {
     HttpUrl {
         api_url: String,
-        tls:     Option<ClientTlsSettings>,
+        tls: Option<ClientTlsSettings>,
     },
     UnixSocket(PathBuf),
 }
@@ -99,8 +99,8 @@ fn cli_target_from_settings(settings: &CliSettings) -> Option<(String, Option<Cl
         CliTargetSettings::Http { url, tls } => {
             let tls_settings = tls.as_ref().map(|tls| ClientTlsSettings {
                 cert: PathBuf::from(tls.cert.as_source()),
-                key:  PathBuf::from(tls.key.as_source()),
-                ca:   PathBuf::from(tls.ca.as_source()),
+                key: PathBuf::from(tls.key.as_source()),
+                ca: PathBuf::from(tls.ca.as_source()),
             });
             Some((url.as_source(), tls_settings))
         }
@@ -268,7 +268,7 @@ mod tests {
             .unwrap(),
             Some(ServerTarget::HttpUrl {
                 api_url: "https://cli.example.com".to_string(),
-                tls:     None,
+                tls: None,
             })
         );
     }
@@ -314,7 +314,7 @@ url = "https://config.example.com"
             resolve_server_target(&server_target_args(None), &settings).unwrap(),
             ServerTarget::HttpUrl {
                 api_url: "https://config.example.com".to_string(),
-                tls:     None,
+                tls: None,
             }
         );
     }
@@ -338,7 +338,7 @@ url = "https://config.example.com"
             .unwrap(),
             ServerTarget::HttpUrl {
                 api_url: "https://cli.example.com".to_string(),
-                tls:     None,
+                tls: None,
             }
         );
     }
@@ -371,7 +371,7 @@ url = "https://config.example.com"
             .unwrap(),
             ServerTarget::HttpUrl {
                 api_url: "https://cli.example.com".to_string(),
-                tls:     None,
+                tls: None,
             }
         );
     }
@@ -380,8 +380,8 @@ url = "https://config.example.com"
     fn remote_target_uses_tls_from_config() {
         let expected_tls = ClientTlsSettings {
             cert: PathBuf::from("cert.pem"),
-            key:  PathBuf::from("key.pem"),
-            ca:   PathBuf::from("ca.pem"),
+            key: PathBuf::from("key.pem"),
+            ca: PathBuf::from("ca.pem"),
         };
         let settings = parse_v2(
             r#"
@@ -405,7 +405,7 @@ ca = "ca.pem"
             .unwrap(),
             Some(ServerTarget::HttpUrl {
                 api_url: "https://cli.example.com".to_string(),
-                tls:     Some(expected_tls),
+                tls: Some(expected_tls),
             })
         );
     }

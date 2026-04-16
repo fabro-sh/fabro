@@ -84,8 +84,8 @@ mod tests {
         graph.nodes.insert("plan".to_string(), node);
 
         graph.edges.push(Edge {
-            from:  "start".to_string(),
-            to:    "plan".to_string(),
+            from: "start".to_string(),
+            to: "plan".to_string(),
             attrs: HashMap::from([(
                 "label".to_string(),
                 AttrValue::String("{{ inputs.greeting }}".to_string()),

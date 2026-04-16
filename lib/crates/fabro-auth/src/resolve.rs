@@ -28,18 +28,18 @@ pub enum CredentialUsage {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiCredential {
-    pub provider:      Provider,
-    pub auth_header:   ApiKeyHeader,
+    pub provider: Provider,
+    pub auth_header: ApiKeyHeader,
     pub extra_headers: HashMap<String, String>,
-    pub base_url:      Option<String>,
-    pub codex_mode:    bool,
-    pub org_id:        Option<String>,
-    pub project_id:    Option<String>,
+    pub base_url: Option<String>,
+    pub codex_mode: bool,
+    pub org_id: Option<String>,
+    pub project_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliCredential {
-    pub env_vars:      HashMap<String, String>,
+    pub env_vars: HashMap<String, String>,
     pub login_command: Option<String>,
 }
 
@@ -57,7 +57,7 @@ pub enum ResolveError {
     RefreshFailed {
         provider: Provider,
         #[source]
-        source:   anyhow::Error,
+        source: anyhow::Error,
     },
     #[error("{0} requires re-authentication: missing refresh token")]
     RefreshTokenMissing(Provider),
@@ -65,7 +65,7 @@ pub enum ResolveError {
 
 #[derive(Clone)]
 pub struct CredentialResolver {
-    vault:      Arc<AsyncRwLock<Vault>>,
+    vault: Arc<AsyncRwLock<Vault>>,
     env_lookup: EnvLookup,
 }
 
@@ -200,7 +200,7 @@ impl CredentialResolver {
                 provider: credential.provider,
                 auth_header: match credential.provider {
                     Provider::Anthropic => ApiKeyHeader::Custom {
-                        name:  "x-api-key".to_string(),
+                        name: "x-api-key".to_string(),
                         value: key.clone(),
                     },
                     _ => ApiKeyHeader::Bearer(key.clone()),
@@ -349,13 +349,13 @@ mod tests {
     fn oauth_credential(token_url: String, expires_at: chrono::DateTime<Utc>) -> AuthCredential {
         AuthCredential {
             provider: Provider::OpenAi,
-            details:  AuthDetails::CodexOAuth {
-                tokens:     OAuthTokens {
+            details: AuthDetails::CodexOAuth {
+                tokens: OAuthTokens {
                     access_token: "expired-access".to_string(),
                     refresh_token: Some("refresh-token".to_string()),
                     expires_at,
                 },
-                config:     OAuthConfig {
+                config: OAuthConfig {
                     auth_url: "https://auth.openai.com".to_string(),
                     token_url,
                     client_id: "test-client".to_string(),
@@ -469,10 +469,13 @@ mod tests {
             panic!("expected api credential");
         };
 
-        assert_eq!(api.auth_header, ApiKeyHeader::Custom {
-            name:  "x-api-key".to_string(),
-            value: "anthropic-key".to_string(),
-        });
+        assert_eq!(
+            api.auth_header,
+            ApiKeyHeader::Custom {
+                name: "x-api-key".to_string(),
+                value: "anthropic-key".to_string(),
+            }
+        );
     }
 
     #[tokio::test]
@@ -653,9 +656,10 @@ mod tests {
         let resolver = test_resolver(vault, Arc::new(|_| None));
         let vault = resolver.vault.read().await;
 
-        assert_eq!(resolver.configured_providers(&vault), vec![
-            Provider::OpenAi
-        ]);
+        assert_eq!(
+            resolver.configured_providers(&vault),
+            vec![Provider::OpenAi]
+        );
     }
 
     #[tokio::test]
@@ -668,9 +672,10 @@ mod tests {
         );
         let vault = resolver.vault.read().await;
 
-        assert_eq!(resolver.configured_providers(&vault), vec![
-            Provider::OpenAi
-        ]);
+        assert_eq!(
+            resolver.configured_providers(&vault),
+            vec![Provider::OpenAi]
+        );
     }
 
     #[tokio::test]

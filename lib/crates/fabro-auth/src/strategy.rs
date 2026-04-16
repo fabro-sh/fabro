@@ -25,17 +25,17 @@ pub enum AuthMethod {
 #[must_use]
 pub fn codex_oauth_config() -> OAuthConfig {
     OAuthConfig {
-        auth_url:     CODEX_AUTH_URL.to_string(),
-        token_url:    CODEX_TOKEN_URL.to_string(),
-        client_id:    CODEX_CLIENT_ID.to_string(),
-        scopes:       vec![
+        auth_url: CODEX_AUTH_URL.to_string(),
+        token_url: CODEX_TOKEN_URL.to_string(),
+        client_id: CODEX_CLIENT_ID.to_string(),
+        scopes: vec![
             "openid".to_string(),
             "profile".to_string(),
             "email".to_string(),
             "offline_access".to_string(),
         ],
         redirect_uri: Some(format!("{CODEX_AUTH_URL}/deviceauth/callback")),
-        use_pkce:     false,
+        use_pkce: false,
     }
 }
 
@@ -73,9 +73,12 @@ mod tests {
     async fn api_key_strategy_uses_provider_env_names() {
         let mut strategy = ApiKeyStrategy::new(Provider::Anthropic);
         let request = strategy.init().await.unwrap();
-        assert_eq!(request, AuthContextRequest::ApiKey {
-            provider:      Provider::Anthropic,
-            env_var_names: vec!["ANTHROPIC_API_KEY".to_string()],
-        });
+        assert_eq!(
+            request,
+            AuthContextRequest::ApiKey {
+                provider: Provider::Anthropic,
+                env_var_names: vec!["ANTHROPIC_API_KEY".to_string()],
+            }
+        );
     }
 }

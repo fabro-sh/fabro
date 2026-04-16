@@ -40,7 +40,7 @@ pub enum LearningCategory {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Learning {
     pub category: LearningCategory,
-    pub text:     String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,10 +55,10 @@ pub enum FrictionKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrictionPoint {
-    pub kind:        FrictionKind,
+    pub kind: FrictionKind,
     pub description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stage_id:    Option<String>,
+    pub stage_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,72 +72,72 @@ pub enum OpenItemKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenItem {
-    pub kind:        OpenItemKind,
+    pub kind: OpenItemKind,
     pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StageRetro {
-    pub stage_id:           String,
-    pub stage_label:        String,
-    pub status:             String,
-    pub duration_ms:        u64,
-    pub retries:            u32,
+    pub stage_id: String,
+    pub stage_label: String,
+    pub status: String,
+    pub duration_ms: u64,
+    pub retries: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub billing_usd_micros: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notes:              Option<String>,
+    pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure_reason:     Option<String>,
+    pub failure_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub files_touched:      Vec<String>,
+    pub files_touched: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregateStats {
-    pub total_duration_ms:        u64,
+    pub total_duration_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_billing_usd_micros: Option<i64>,
-    pub total_retries:            u32,
+    pub total_retries: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub files_touched:            Vec<String>,
-    pub stages_completed:         usize,
-    pub stages_failed:            usize,
+    pub files_touched: Vec<String>,
+    pub stages_completed: usize,
+    pub stages_failed: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetroNarrative {
-    pub smoothness:      SmoothnessRating,
-    pub intent:          String,
-    pub outcome:         String,
+    pub smoothness: SmoothnessRating,
+    pub intent: String,
+    pub outcome: String,
     #[serde(default)]
-    pub learnings:       Vec<Learning>,
+    pub learnings: Vec<Learning>,
     #[serde(default)]
     pub friction_points: Vec<FrictionPoint>,
     #[serde(default)]
-    pub open_items:      Vec<OpenItem>,
+    pub open_items: Vec<OpenItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Retro {
-    pub run_id:          RunId,
-    pub workflow_name:   String,
-    pub goal:            String,
-    pub timestamp:       DateTime<Utc>,
+    pub run_id: RunId,
+    pub workflow_name: String,
+    pub goal: String,
+    pub timestamp: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub smoothness:      Option<SmoothnessRating>,
-    pub stages:          Vec<StageRetro>,
-    pub stats:           AggregateStats,
+    pub smoothness: Option<SmoothnessRating>,
+    pub stages: Vec<StageRetro>,
+    pub stats: AggregateStats,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub intent:          Option<String>,
+    pub intent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub outcome:         Option<String>,
+    pub outcome: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub learnings:       Option<Vec<Learning>>,
+    pub learnings: Option<Vec<Learning>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub friction_points: Option<Vec<FrictionPoint>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub open_items:      Option<Vec<OpenItem>>,
+    pub open_items: Option<Vec<OpenItem>>,
 }
 
 impl Retro {

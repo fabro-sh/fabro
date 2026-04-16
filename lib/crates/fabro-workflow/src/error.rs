@@ -202,13 +202,13 @@ pub enum Error {
 
     #[error("Engine error: {message}")]
     Engine {
-        message:       String,
+        message: String,
         failure_class: FailureCategory,
     },
 
     #[error("Handler error: {message}")]
     Handler {
-        message:       String,
+        message: String,
         failure_class: FailureCategory,
     },
 
@@ -308,8 +308,8 @@ impl Error {
     /// Build a fail `Outcome` with structured `FailureDetail`.
     pub fn to_fail_outcome(&self) -> Outcome {
         let failure = FailureDetail {
-            message:   self.to_string(),
-            category:  self.failure_category(),
+            message: self.to_string(),
+            category: self.failure_category(),
             signature: self.failure_signature_hint(),
         };
         Outcome {
@@ -392,12 +392,12 @@ mod tests {
     fn validation_failed_display() {
         let err = Error::ValidationFailed {
             diagnostics: vec![Diagnostic {
-                rule:     "test".to_string(),
+                rule: "test".to_string(),
                 severity: fabro_validate::Severity::Error,
-                message:  "missing start node".to_string(),
-                node_id:  None,
-                edge:     None,
-                fix:      None,
+                message: "missing start node".to_string(),
+                node_id: None,
+                edge: None,
+                fix: None,
             }],
         };
         assert_eq!(err.to_string(), "Validation failed");
@@ -676,7 +676,7 @@ mod tests {
     fn llm_error_display() {
         let sdk_err = SdkError::Network {
             message: "connection refused".into(),
-            source:  None,
+            source: None,
         };
         let err = Error::Llm(sdk_err);
         assert_eq!(
@@ -689,13 +689,13 @@ mod tests {
     fn llm_error_retryable_delegates_to_sdk() {
         let retryable = Error::Llm(SdkError::Network {
             message: "timeout".into(),
-            source:  None,
+            source: None,
         });
         assert!(retryable.is_retryable());
 
         let non_retryable = Error::Llm(SdkError::Configuration {
             message: "bad config".into(),
-            source:  None,
+            source: None,
         });
         assert!(!non_retryable.is_retryable());
     }
@@ -704,7 +704,7 @@ mod tests {
     fn llm_error_from_sdk_error() {
         let sdk_err = SdkError::Stream {
             message: "broken pipe".into(),
-            source:  None,
+            source: None,
         };
         let err = Error::from(sdk_err);
         assert!(matches!(err, Error::Llm(_)));
@@ -755,7 +755,7 @@ mod tests {
     #[test]
     fn failure_class_llm_rate_limit() {
         let err = Error::Llm(SdkError::Provider {
-            kind:   ProviderErrorKind::RateLimit,
+            kind: ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         });
         assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
@@ -764,7 +764,7 @@ mod tests {
     #[test]
     fn failure_class_llm_context_length() {
         let err = Error::Llm(SdkError::Provider {
-            kind:   ProviderErrorKind::ContextLength,
+            kind: ProviderErrorKind::ContextLength,
             detail: Box::new(ProviderErrorDetail::new("too long", "openai")),
         });
         assert_eq!(err.failure_category(), FailureCategory::BudgetExhausted);
@@ -773,7 +773,7 @@ mod tests {
     #[test]
     fn failure_class_llm_auth() {
         let err = Error::Llm(SdkError::Provider {
-            kind:   ProviderErrorKind::Authentication,
+            kind: ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         });
         assert_eq!(err.failure_category(), FailureCategory::Deterministic);
@@ -791,7 +791,7 @@ mod tests {
     fn failure_class_llm_timeout() {
         let err = Error::Llm(SdkError::RequestTimeout {
             message: "timed out".into(),
-            source:  None,
+            source: None,
         });
         assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
     }
@@ -801,7 +801,7 @@ mod tests {
     #[test]
     fn classify_sdk_rate_limit() {
         let err = SdkError::Provider {
-            kind:   ProviderErrorKind::RateLimit,
+            kind: ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::TransientInfra);
@@ -810,7 +810,7 @@ mod tests {
     #[test]
     fn classify_sdk_server() {
         let err = SdkError::Provider {
-            kind:   ProviderErrorKind::Server,
+            kind: ProviderErrorKind::Server,
             detail: Box::new(ProviderErrorDetail::new("500", "openai")),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::TransientInfra);
@@ -819,7 +819,7 @@ mod tests {
     #[test]
     fn classify_sdk_context_length() {
         let err = SdkError::Provider {
-            kind:   ProviderErrorKind::ContextLength,
+            kind: ProviderErrorKind::ContextLength,
             detail: Box::new(ProviderErrorDetail::new("too long", "openai")),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::BudgetExhausted);
@@ -828,7 +828,7 @@ mod tests {
     #[test]
     fn classify_sdk_quota_exceeded() {
         let err = SdkError::Provider {
-            kind:   ProviderErrorKind::QuotaExceeded,
+            kind: ProviderErrorKind::QuotaExceeded,
             detail: Box::new(ProviderErrorDetail::new("out of quota", "openai")),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::BudgetExhausted);
@@ -837,7 +837,7 @@ mod tests {
     #[test]
     fn classify_sdk_auth() {
         let err = SdkError::Provider {
-            kind:   ProviderErrorKind::Authentication,
+            kind: ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::Deterministic);
@@ -847,7 +847,7 @@ mod tests {
     fn classify_sdk_request_timeout() {
         let err = SdkError::RequestTimeout {
             message: "timed out".into(),
-            source:  None,
+            source: None,
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::TransientInfra);
     }
@@ -1492,7 +1492,7 @@ mod tests {
     #[test]
     fn failure_signature_hint_llm_returns_some() {
         let err = Error::Llm(SdkError::Provider {
-            kind:   ProviderErrorKind::Authentication,
+            kind: ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         });
         assert_eq!(
@@ -1518,7 +1518,7 @@ mod tests {
     #[test]
     fn to_fail_outcome_llm_has_class_and_signature() {
         let err = Error::Llm(SdkError::Provider {
-            kind:   ProviderErrorKind::Authentication,
+            kind: ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         });
         let outcome = err.to_fail_outcome();
@@ -1545,7 +1545,7 @@ mod tests {
     fn to_fail_outcome_includes_error_message_as_reason() {
         let err = Error::Llm(SdkError::Network {
             message: "connection refused".into(),
-            source:  None,
+            source: None,
         });
         let outcome = err.to_fail_outcome();
         assert!(
@@ -1560,7 +1560,7 @@ mod tests {
     fn to_fail_outcome_no_context_updates() {
         let err = Error::Llm(SdkError::Network {
             message: "refused".into(),
-            source:  None,
+            source: None,
         });
         let outcome = err.to_fail_outcome();
         assert!(outcome.context_updates.is_empty());
@@ -1604,19 +1604,19 @@ mod tests {
             Error::Validation("bad".into()),
             Error::ValidationFailed {
                 diagnostics: vec![Diagnostic {
-                    rule:     "test".into(),
+                    rule: "test".into(),
                     severity: fabro_validate::Severity::Error,
-                    message:  "bad".into(),
-                    node_id:  None,
-                    edge:     None,
-                    fix:      None,
+                    message: "bad".into(),
+                    node_id: None,
+                    edge: None,
+                    fix: None,
                 }],
             },
             Error::engine("engine err"),
             Error::handler("handler err"),
             Error::Llm(SdkError::Network {
                 message: "refused".into(),
-                source:  None,
+                source: None,
             }),
             Error::Checkpoint("cp err".into()),
             Error::Stylesheet("style err".into()),
@@ -1684,7 +1684,7 @@ mod tests {
 
         // 1. Create SdkError → Error
         let sdk_err = SdkError::Provider {
-            kind:   ProviderErrorKind::RateLimit,
+            kind: ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         };
         let arc_err = Error::Llm(sdk_err);
@@ -1700,11 +1700,11 @@ mod tests {
         // 3. Outcome → StageFailed event
         let failure = outcome.failure.clone().unwrap();
         let event = Event::StageFailed {
-            node_id:     "code".into(),
-            name:        "code".into(),
-            index:       0,
-            failure:     failure.clone(),
-            will_retry:  false,
+            node_id: "code".into(),
+            name: "code".into(),
+            index: 0,
+            failure: failure.clone(),
+            will_retry: false,
             duration_ms: 0,
         };
 
@@ -1770,7 +1770,7 @@ mod tests {
         use fabro_agent::Error as AgentError;
 
         let err = AgentError::Llm(SdkError::Provider {
-            kind:   ProviderErrorKind::RateLimit,
+            kind: ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         });
         let json = serde_json::to_string(&err).unwrap();

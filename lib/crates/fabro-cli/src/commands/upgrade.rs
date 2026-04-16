@@ -192,7 +192,7 @@ const LAST_CHECK_FILE: &str = "last_upgrade_check.json";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct UpgradeCheckState {
-    checked_at:     u64,
+    checked_at: u64,
     latest_version: String,
 }
 
@@ -411,7 +411,7 @@ async fn check_and_print_notice(printer: Printer) -> Result<()> {
         .unwrap_or_default()
         .as_secs();
     let state = UpgradeCheckState {
-        checked_at:     now,
+        checked_at: now,
         latest_version: latest.to_string(),
     };
     let _ = state.save(&state_path);
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn upgrade_check_state_roundtrip() {
         let state = UpgradeCheckState {
-            checked_at:     1_710_000_000,
+            checked_at: 1_710_000_000,
             latest_version: "0.5.0".to_string(),
         };
         let json = serde_json::to_string(&state).unwrap();
@@ -519,7 +519,7 @@ mod tests {
     #[test]
     fn upgrade_check_state_stale() {
         let old = UpgradeCheckState {
-            checked_at:     0, // epoch — definitely stale
+            checked_at: 0, // epoch — definitely stale
             latest_version: "0.1.0".to_string(),
         };
         assert!(old.is_stale());
@@ -532,7 +532,7 @@ mod tests {
             .unwrap()
             .as_secs();
         let fresh = UpgradeCheckState {
-            checked_at:     now,
+            checked_at: now,
             latest_version: "0.5.0".to_string(),
         };
         assert!(!fresh.is_stale());
@@ -543,7 +543,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
         let state = UpgradeCheckState {
-            checked_at:     1_710_000_000,
+            checked_at: 1_710_000_000,
             latest_version: "0.5.0".to_string(),
         };
         state.save(&path).unwrap();

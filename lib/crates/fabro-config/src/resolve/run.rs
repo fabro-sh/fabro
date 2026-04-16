@@ -17,32 +17,32 @@ use super::ResolveError;
 
 pub fn resolve_run(layer: &RunLayer, errors: &mut Vec<ResolveError>) -> RunSettings {
     RunSettings {
-        goal:          resolve_goal(layer.goal.as_ref()),
-        working_dir:   layer.working_dir.clone(),
-        metadata:      layer.metadata.clone(),
-        inputs:        layer.inputs.clone().unwrap_or_default(),
-        model:         resolve_model(layer.model.as_ref()),
-        git:           resolve_git(layer.git.as_ref()),
-        prepare:       resolve_prepare(layer.prepare.as_ref(), errors),
-        execution:     resolve_execution(layer.execution.as_ref()),
-        checkpoint:    resolve_checkpoint(layer.checkpoint.as_ref()),
-        sandbox:       resolve_sandbox(layer.sandbox.as_ref(), errors),
+        goal: resolve_goal(layer.goal.as_ref()),
+        working_dir: layer.working_dir.clone(),
+        metadata: layer.metadata.clone(),
+        inputs: layer.inputs.clone().unwrap_or_default(),
+        model: resolve_model(layer.model.as_ref()),
+        git: resolve_git(layer.git.as_ref()),
+        prepare: resolve_prepare(layer.prepare.as_ref(), errors),
+        execution: resolve_execution(layer.execution.as_ref()),
+        checkpoint: resolve_checkpoint(layer.checkpoint.as_ref()),
+        sandbox: resolve_sandbox(layer.sandbox.as_ref(), errors),
         notifications: layer
             .notifications
             .iter()
             .map(|(name, route)| (name.clone(), resolve_notification_route(route)))
             .collect(),
-        interviews:    resolve_interviews(layer.interviews.as_ref()),
-        agent:         resolve_agent(layer.agent.as_ref()),
-        hooks:         layer
+        interviews: resolve_interviews(layer.interviews.as_ref()),
+        agent: resolve_agent(layer.agent.as_ref()),
+        hooks: layer
             .hooks
             .iter()
             .enumerate()
             .map(|(index, hook)| resolve_hook(hook, index, errors))
             .collect(),
-        scm:           resolve_scm(layer.scm.as_ref()),
-        pull_request:  resolve_pull_request(layer.pull_request.as_ref()),
-        artifacts:     resolve_artifacts(layer.artifacts.as_ref()),
+        scm: resolve_scm(layer.scm.as_ref()),
+        pull_request: resolve_pull_request(layer.pull_request.as_ref()),
+        artifacts: resolve_artifacts(layer.artifacts.as_ref()),
     }
 }
 
@@ -59,8 +59,8 @@ fn resolve_model(model: Option<&RunModelLayer>) -> RunModelSettings {
     };
 
     RunModelSettings {
-        provider:  model.provider.clone(),
-        name:      model.name.clone(),
+        provider: model.provider.clone(),
+        name: model.name.clone(),
         fallbacks: model
             .fallbacks
             .iter()
@@ -76,7 +76,7 @@ fn resolve_git(git: Option<&RunGitLayer>) -> RunGitSettings {
     RunGitSettings {
         author: git.and_then(|git| {
             git.author.as_ref().map(|author| GitAuthorSettings {
-                name:  author.name.clone(),
+                name: author.name.clone(),
                 email: author.email.clone(),
             })
         }),
@@ -100,7 +100,7 @@ fn resolve_prepare(
                     .join(" "),
             ),
             (Some(_), Some(_)) | (None, None) => errors.push(ResolveError::Invalid {
-                path:   format!("run.prepare.steps[{index}]"),
+                path: format!("run.prepare.steps[{index}]"),
                 reason: "exactly one of script or command must be set".to_string(),
             }),
         }
@@ -118,13 +118,13 @@ fn resolve_execution(execution: Option<&RunExecutionLayer>) -> RunExecutionSetti
     let execution = execution.expect("defaults.toml should provide run.execution defaults");
 
     RunExecutionSettings {
-        mode:     execution
+        mode: execution
             .mode
             .expect("defaults.toml should provide run.execution.mode"),
         approval: execution
             .approval
             .expect("defaults.toml should provide run.execution.approval"),
-        retros:   execution
+        retros: execution
             .retros
             .expect("defaults.toml should provide run.execution.retros"),
     }
@@ -151,7 +151,7 @@ fn resolve_sandbox(
     match provider.as_str() {
         "local" | "docker" | "daytona" => {}
         other => errors.push(ResolveError::Invalid {
-            path:   "run.sandbox.provider".to_string(),
+            path: "run.sandbox.provider".to_string(),
             reason: format!("unknown sandbox provider: {other}"),
         }),
     }
@@ -186,13 +186,13 @@ fn resolve_local_sandbox(sandbox: &RunSandboxLayer) -> LocalSandboxSettings {
 fn resolve_daytona(daytona: &DaytonaSandboxLayer) -> DaytonaSettings {
     DaytonaSettings {
         auto_stop_interval: daytona.auto_stop_interval,
-        labels:             daytona.labels.clone(),
-        snapshot:           daytona.snapshot.as_ref().and_then(|snapshot| {
+        labels: daytona.labels.clone(),
+        snapshot: daytona.snapshot.as_ref().and_then(|snapshot| {
             snapshot.name.as_ref().map(|name| DaytonaSnapshotSettings {
-                name:       name.clone(),
-                cpu:        snapshot.cpu,
-                memory_gb:  snapshot.memory.map(|size| size_to_gb_i32(size.as_bytes())),
-                disk_gb:    snapshot.disk.map(|size| size_to_gb_i32(size.as_bytes())),
+                name: name.clone(),
+                cpu: snapshot.cpu,
+                memory_gb: snapshot.memory.map(|size| size_to_gb_i32(size.as_bytes())),
+                disk_gb: snapshot.disk.map(|size| size_to_gb_i32(size.as_bytes())),
                 dockerfile: snapshot
                     .dockerfile
                     .as_ref()
@@ -206,16 +206,16 @@ fn resolve_daytona(daytona: &DaytonaSandboxLayer) -> DaytonaSettings {
                     }),
             })
         }),
-        network:            daytona.network.clone(),
-        skip_clone:         daytona.skip_clone.unwrap_or(false),
+        network: daytona.network.clone(),
+        skip_clone: daytona.skip_clone.unwrap_or(false),
     }
 }
 
 fn resolve_notification_route(route: &NotificationRouteLayer) -> NotificationRouteSettings {
     NotificationRouteSettings {
-        enabled:  route.enabled.unwrap_or(false),
+        enabled: route.enabled.unwrap_or(false),
         provider: route.provider.clone(),
-        events:   route
+        events: route
             .events
             .iter()
             .filter_map(|event| match event {
@@ -223,9 +223,9 @@ fn resolve_notification_route(route: &NotificationRouteLayer) -> NotificationRou
                 StringOrSplice::Splice => None,
             })
             .collect(),
-        slack:    route.slack.as_ref().map(resolve_notification_provider),
-        discord:  route.discord.as_ref().map(resolve_notification_provider),
-        teams:    route.teams.as_ref().map(resolve_notification_provider),
+        slack: route.slack.as_ref().map(resolve_notification_provider),
+        discord: route.discord.as_ref().map(resolve_notification_provider),
+        teams: route.teams.as_ref().map(resolve_notification_provider),
     }
 }
 
@@ -244,9 +244,9 @@ fn resolve_interviews(interviews: Option<&InterviewsLayer>) -> RunInterviewsSett
 
     RunInterviewsSettings {
         provider: interviews.provider.clone(),
-        slack:    interviews.slack.as_ref().map(resolve_interview_provider),
-        discord:  interviews.discord.as_ref().map(resolve_interview_provider),
-        teams:    interviews.teams.as_ref().map(resolve_interview_provider),
+        slack: interviews.slack.as_ref().map(resolve_interview_provider),
+        discord: interviews.discord.as_ref().map(resolve_interview_provider),
+        teams: interviews.teams.as_ref().map(resolve_interview_provider),
     }
 }
 
@@ -263,7 +263,7 @@ fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
 
     RunAgentSettings {
         permissions: agent.permissions,
-        mcps:        agent
+        mcps: agent
             .mcps
             .iter()
             .map(|(name, entry)| (name.clone(), resolve_mcp_entry(name, entry)))
@@ -280,13 +280,13 @@ pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerS
             ..
         } => McpTransport::Stdio {
             command: resolve_mcp_command(script.as_ref(), command.as_ref()),
-            env:     env
+            env: env
                 .iter()
                 .map(|(key, value)| (key.clone(), value.as_source()))
                 .collect(),
         },
         McpEntryLayer::Http { url, headers, .. } => McpTransport::Http {
-            url:     url.as_source(),
+            url: url.as_source(),
             headers: headers
                 .iter()
                 .map(|(key, value)| (key.clone(), value.as_source()))
@@ -300,8 +300,8 @@ pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerS
             ..
         } => McpTransport::Sandbox {
             command: resolve_mcp_command(script.as_ref(), command.as_ref()),
-            port:    *port,
-            env:     env
+            port: *port,
+            env: env
                 .iter()
                 .map(|(key, value)| (key.clone(), value.as_source()))
                 .collect(),
@@ -362,7 +362,7 @@ fn resolve_hook(hook: &HookEntry, index: usize, errors: &mut Vec<ResolveError>) 
 
     if variants != 1 {
         errors.push(ResolveError::Invalid {
-            path:   format!("run.hooks[{index}]"),
+            path: format!("run.hooks[{index}]"),
             reason: "exactly one hook transport must be configured".to_string(),
         });
     }
@@ -426,19 +426,19 @@ fn resolve_hook_type(hook: &HookEntry) -> Option<HookType> {
 
     if hook.agent == Some(HookAgentMarker::Enabled) {
         return Some(HookType::Agent {
-            prompt:          hook
+            prompt: hook
                 .prompt
                 .as_ref()
                 .map(InterpString::as_source)
                 .unwrap_or_default(),
-            model:           hook.model.as_ref().map(InterpString::as_source),
+            model: hook.model.as_ref().map(InterpString::as_source),
             max_tool_rounds: hook.max_tool_rounds,
         });
     }
 
     hook.prompt.as_ref().map(|prompt| HookType::Prompt {
         prompt: prompt.as_source(),
-        model:  hook.model.as_ref().map(InterpString::as_source),
+        model: hook.model.as_ref().map(InterpString::as_source),
     })
 }
 
@@ -448,10 +448,10 @@ fn resolve_scm(scm: Option<&RunScmLayer>) -> RunScmSettings {
     };
 
     RunScmSettings {
-        provider:   scm.provider.clone(),
-        owner:      scm.owner.clone(),
+        provider: scm.provider.clone(),
+        owner: scm.owner.clone(),
         repository: scm.repository.clone(),
-        github:     scm.github.as_ref().map(|_| ScmGitHubSettings),
+        github: scm.github.as_ref().map(|_| ScmGitHubSettings),
     }
 }
 
@@ -462,9 +462,9 @@ fn resolve_pull_request(pull_request: Option<&RunPullRequestLayer>) -> Option<Pu
     }
 
     Some(PullRequestSettings {
-        enabled:        true,
-        draft:          pull_request.draft.unwrap_or(true),
-        auto_merge:     pull_request.auto_merge.unwrap_or(false),
+        enabled: true,
+        draft: pull_request.draft.unwrap_or(true),
+        auto_merge: pull_request.auto_merge.unwrap_or(false),
         merge_strategy: pull_request.merge_strategy.unwrap_or(MergeStrategy::Squash),
     })
 }
