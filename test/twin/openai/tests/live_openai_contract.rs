@@ -24,7 +24,7 @@ const RESPONSES_STREAM_MILESTONES: &[&str] = &[
 
 #[derive(Clone)]
 struct LiveOptions {
-    api:   common::ApiClient,
+    api: common::ApiClient,
     model: String,
 }
 
@@ -46,7 +46,7 @@ enum ChatStreamMilestone {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ToolCallObservation {
-    name:      String,
+    name: String,
     arguments: Value,
 }
 
@@ -1526,7 +1526,7 @@ fn extract_response_tool_call(body: &Value) -> Option<ToolCallObservation> {
         .find(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
         .and_then(|tool_call| {
             Some(ToolCallObservation {
-                name:      tool_call.get("name")?.as_str()?.to_owned(),
+                name: tool_call.get("name")?.as_str()?.to_owned(),
                 arguments: parse_json_object_string(tool_call.get("arguments")?.as_str()?)?,
             })
         })
@@ -1628,7 +1628,7 @@ fn extract_chat_tool_call(body: &Value) -> Option<ToolCallObservation> {
         .iter()
         .find_map(|tool_call| {
             Some(ToolCallObservation {
-                name:      tool_call.get("function")?.get("name")?.as_str()?.to_owned(),
+                name: tool_call.get("function")?.get("name")?.as_str()?.to_owned(),
                 arguments: parse_json_object_string(
                     tool_call.get("function")?.get("arguments")?.as_str()?,
                 )?,

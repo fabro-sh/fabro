@@ -15,7 +15,7 @@ static GLOBAL_CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FallbackTarget {
     pub provider: String,
-    pub model:    String,
+    pub model: String,
 }
 
 /// Typed model catalog backed by a `Vec<Model>`.
@@ -162,7 +162,7 @@ impl Catalog {
                 let provider = provider_str.parse::<Provider>().ok()?;
                 self.closest(provider, reference).map(|m| FallbackTarget {
                     provider: provider_str.clone(),
-                    model:    m.id.clone(),
+                    model: m.id.clone(),
                 })
             })
             .collect()
@@ -283,10 +283,10 @@ mod tests {
 
     #[test]
     fn builtin_build_fallback_chain() {
-        let fallbacks = HashMap::from([("anthropic".to_string(), vec![
-            "gemini".to_string(),
-            "openai".to_string(),
-        ])]);
+        let fallbacks = HashMap::from([(
+            "anthropic".to_string(),
+            vec!["gemini".to_string(), "openai".to_string()],
+        )]);
         let chain = Catalog::builtin().build_fallback_chain(
             Provider::Anthropic,
             "claude-opus-4-6",
@@ -320,10 +320,10 @@ mod tests {
 
     #[test]
     fn builtin_build_fallback_chain_skips_no_capability_match() {
-        let fallbacks = HashMap::from([("anthropic".to_string(), vec![
-            "openai".to_string(),
-            "kimi".to_string(),
-        ])]);
+        let fallbacks = HashMap::from([(
+            "anthropic".to_string(),
+            vec!["openai".to_string(), "kimi".to_string()],
+        )]);
         let chain = Catalog::builtin().build_fallback_chain(
             Provider::Anthropic,
             "claude-haiku-4-5",
@@ -350,30 +350,30 @@ mod tests {
         use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits};
 
         let models = vec![Model {
-            id:                   "test-model".to_string(),
-            provider:             Provider::Anthropic,
-            family:               "test".to_string(),
-            display_name:         "Test Model".to_string(),
-            limits:               ModelLimits {
+            id: "test-model".to_string(),
+            provider: Provider::Anthropic,
+            family: "test".to_string(),
+            display_name: "Test Model".to_string(),
+            limits: ModelLimits {
                 context_window: 100_000,
-                max_output:     Some(4096),
+                max_output: Some(4096),
             },
-            training:             None,
-            knowledge_cutoff:     None,
-            features:             ModelFeatures {
-                tools:     true,
-                vision:    false,
+            training: None,
+            knowledge_cutoff: None,
+            features: ModelFeatures {
+                tools: true,
+                vision: false,
                 reasoning: false,
-                effort:    false,
+                effort: false,
             },
-            costs:                ModelCosts {
-                input_cost_per_mtok:       Some(1.0),
-                output_cost_per_mtok:      Some(5.0),
+            costs: ModelCosts {
+                input_cost_per_mtok: Some(1.0),
+                output_cost_per_mtok: Some(5.0),
                 cache_input_cost_per_mtok: None,
             },
             estimated_output_tps: None,
-            aliases:              vec!["test".to_string()],
-            default:              true,
+            aliases: vec!["test".to_string()],
+            default: true,
         }];
 
         let catalog = Catalog::from_models(models);

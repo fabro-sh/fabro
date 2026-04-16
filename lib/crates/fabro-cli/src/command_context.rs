@@ -19,20 +19,20 @@ pub(crate) enum ServerMode {
         target_override: Option<String>,
     },
     ByStorageDir {
-        target_override:      Option<String>,
+        target_override: Option<String>,
         storage_dir_override: Option<PathBuf>,
     },
 }
 
 pub(crate) struct CommandContext {
     #[allow(dead_code)]
-    printer:          Printer,
-    cwd:              PathBuf,
+    printer: Printer,
+    cwd: PathBuf,
     base_config_path: PathBuf,
     machine_settings: SettingsLayer,
-    cli_settings:     CliSettings,
-    server_mode:      ServerMode,
-    server:           OnceCell<Arc<ServerStoreClient>>,
+    cli_settings: CliSettings,
+    server_mode: ServerMode,
+    server: OnceCell<Arc<ServerStoreClient>>,
 }
 
 impl CommandContext {
@@ -69,7 +69,7 @@ impl CommandContext {
         Self::new(
             printer,
             ServerMode::ByStorageDir {
-                target_override:      args.target.server.clone(),
+                target_override: args.target.server.clone(),
                 storage_dir_override: args.storage_dir.clone_path(),
             },
             cli_settings,
@@ -92,10 +92,13 @@ impl CommandContext {
                 ..
             } => user_config::load_settings_with_storage_dir(storage_dir_override.as_deref())?,
         };
-        let machine_settings = combine_files(disk_settings, SettingsLayer {
-            cli: Some(cli_layer.clone()),
-            ..SettingsLayer::default()
-        });
+        let machine_settings = combine_files(
+            disk_settings,
+            SettingsLayer {
+                cli: Some(cli_layer.clone()),
+                ..SettingsLayer::default()
+            },
+        );
 
         Ok(Self {
             printer,

@@ -18,9 +18,9 @@ use crate::outcome::{Outcome, OutcomeExt};
 
 /// A choice derived from an outgoing edge.
 struct Choice {
-    key:   String,
+    key: String,
     label: String,
-    to:    String,
+    to: String,
 }
 
 /// Parse an accelerator key from a label.
@@ -69,7 +69,7 @@ fn parse_accelerator_key(label: &str) -> String {
 /// Blocks until a human selects an option derived from outgoing edges.
 pub struct HumanHandler {
     interviewer: Arc<dyn Interviewer>,
-    emitter:     Option<Arc<Emitter>>,
+    emitter: Option<Arc<Emitter>>,
 }
 
 impl HumanHandler {
@@ -176,7 +176,7 @@ impl Handler for HumanHandler {
         let options: Vec<QuestionOption> = choices
             .iter()
             .map(|c| QuestionOption {
-                key:   c.key.clone(),
+                key: c.key.clone(),
                 label: c.label.clone(),
             })
             .collect();
@@ -211,19 +211,19 @@ impl Handler for HumanHandler {
         self.emit(
             &services.emitter,
             &Event::InterviewStarted {
-                question_id:     question_id.clone(),
-                question:        question_text.clone(),
-                stage:           node.id.clone(),
-                question_type:   question.question_type.to_string(),
-                options:         question
+                question_id: question_id.clone(),
+                question: question_text.clone(),
+                stage: node.id.clone(),
+                question_type: question.question_type.to_string(),
+                options: question
                     .options
                     .iter()
                     .map(|option| InterviewOption {
-                        key:   option.key.clone(),
+                        key: option.key.clone(),
                         label: option.label.clone(),
                     })
                     .collect(),
-                allow_freeform:  question.allow_freeform,
+                allow_freeform: question.allow_freeform,
                 timeout_seconds: question.timeout_seconds,
                 context_display: question.context_display.clone(),
             },
@@ -238,8 +238,8 @@ impl Handler for HumanHandler {
                 &services.emitter,
                 &Event::InterviewTimeout {
                     question_id: question_id.clone(),
-                    question:    question_text,
-                    stage:       node.id.clone(),
+                    question: question_text,
+                    stage: node.id.clone(),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
                 &stage_scope,
@@ -275,9 +275,9 @@ impl Handler for HumanHandler {
                 &services.emitter,
                 &Event::InterviewInterrupted {
                     question_id: question_id.clone(),
-                    question:    question_text,
-                    stage:       node.id.clone(),
-                    reason:      "interrupted".to_string(),
+                    question: question_text,
+                    stage: node.id.clone(),
+                    reason: "interrupted".to_string(),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
                 &stage_scope,

@@ -29,13 +29,13 @@ impl Selector {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Declaration {
     pub property: String,
-    pub value:    String,
+    pub value: String,
 }
 
 /// A stylesheet rule: selector + declarations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {
-    pub selector:     Selector,
+    pub selector: Selector,
     pub declarations: Vec<Declaration>,
 }
 

@@ -126,7 +126,7 @@ pub fn default_page_limit() -> u32 {
 #[derive(serde::Deserialize)]
 pub struct PaginationParams {
     #[serde(rename = "page[limit]", default = "default_page_limit")]
-    pub limit:  u32,
+    pub limit: u32,
     #[serde(rename = "page[offset]", default)]
     pub offset: u32,
 }
@@ -134,13 +134,13 @@ pub struct PaginationParams {
 #[derive(serde::Deserialize)]
 struct ModelListParams {
     #[serde(rename = "page[limit]", default = "default_page_limit")]
-    limit:    u32,
+    limit: u32,
     #[serde(rename = "page[offset]", default)]
-    offset:   u32,
+    offset: u32,
     #[serde(default)]
     provider: Option<String>,
     #[serde(default)]
-    query:    Option<String>,
+    query: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -154,7 +154,7 @@ struct EventListParams {
     #[serde(default)]
     since_seq: Option<u32>,
     #[serde(default)]
-    limit:     Option<usize>,
+    limit: Option<usize>,
 }
 
 impl EventListParams {
@@ -193,7 +193,7 @@ struct ArtifactFilenameParams {
 
 #[derive(serde::Deserialize)]
 struct SandboxFilesParams {
-    path:  String,
+    path: String,
     #[serde(default)]
     depth: Option<usize>,
 }
@@ -221,22 +221,22 @@ impl<T: serde::Serialize> ListResponse<T> {
 
 /// Snapshot of a managed run.
 struct ManagedRun {
-    dot_source:         String,
-    status:             RunStatus,
-    error:              Option<String>,
-    created_at:         chrono::DateTime<chrono::Utc>,
-    enqueued_at:        Instant,
+    dot_source: String,
+    status: RunStatus,
+    error: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    enqueued_at: Instant,
     // Populated when running:
-    answer_transport:   Option<RunAnswerTransport>,
+    answer_transport: Option<RunAnswerTransport>,
     accepted_questions: HashSet<String>,
-    event_tx:           Option<broadcast::Sender<RunEvent>>,
-    checkpoint:         Option<Checkpoint>,
-    cancel_tx:          Option<oneshot::Sender<()>>,
-    cancel_token:       Option<Arc<AtomicBool>>,
-    worker_pid:         Option<u32>,
-    worker_pgid:        Option<u32>,
-    run_dir:            Option<std::path::PathBuf>,
-    execution_mode:     RunExecutionMode,
+    event_tx: Option<broadcast::Sender<RunEvent>>,
+    checkpoint: Option<Checkpoint>,
+    cancel_tx: Option<oneshot::Sender<()>>,
+    cancel_token: Option<Arc<AtomicBool>>,
+    worker_pid: Option<u32>,
+    worker_pgid: Option<u32>,
+    run_dir: Option<std::path::PathBuf>,
+    execution_mode: RunExecutionMode,
 }
 
 #[derive(Clone, Copy)]
@@ -281,18 +281,18 @@ const MAX_MULTIPART_MANIFEST_BYTES: usize = 256 * 1024;
 
 #[derive(Clone)]
 struct ArtifactUploadTokenKeys {
-    encoding:   Arc<EncodingKey>,
-    decoding:   Arc<DecodingKey>,
+    encoding: Arc<EncodingKey>,
+    decoding: Arc<DecodingKey>,
     validation: Arc<Validation>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ArtifactUploadClaims {
-    iss:    String,
-    iat:    u64,
-    exp:    u64,
+    iss: String,
+    iat: u64,
+    exp: u64,
     run_id: String,
-    scope:  String,
+    scope: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -302,29 +302,29 @@ struct ArtifactBatchUploadManifest {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ArtifactBatchUploadEntry {
-    part:           String,
-    path:           String,
+    part: String,
+    path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    sha256:         Option<String>,
+    sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     expected_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    content_type:   Option<String>,
+    content_type: Option<String>,
 }
 
 /// Per-model billing totals.
 #[derive(Default)]
 struct ModelBillingTotals {
-    stages:  i64,
+    stages: i64,
     billing: BilledTokenCounts,
 }
 
 /// In-memory aggregate billing counters, reset on server restart.
 #[derive(Default)]
 struct BillingAccumulator {
-    total_runs:         i64,
+    total_runs: i64,
     total_runtime_secs: f64,
-    by_model:           HashMap<String, ModelBillingTotals>,
+    by_model: HashMap<String, ModelBillingTotals>,
 }
 
 pub(crate) type RegistryFactoryOverride =
@@ -382,15 +382,15 @@ impl RunAnswerTransport {
 
 #[derive(Debug, Clone)]
 struct LoadedPendingInterview {
-    run_id:   RunId,
-    qid:      String,
+    run_id: RunId,
+    qid: String,
     question: InterviewQuestionRecord,
 }
 
 #[derive(Clone)]
 struct SlackService {
-    client:          SlackClient,
-    app_token:       String,
+    client: SlackClient,
+    app_token: String,
     default_channel: String,
     posted_messages: Arc<Mutex<HashMap<(RunId, String), SlackPostedMessage>>>,
     thread_registry: Arc<ThreadRegistry>,
@@ -424,12 +424,12 @@ impl SlackService {
                 }
 
                 let question = runtime_question_from_interview_record(&InterviewQuestionRecord {
-                    id:              props.question_id.clone(),
-                    text:            props.question.clone(),
-                    stage:           props.stage.clone(),
-                    question_type:   InterviewQuestionType::from_wire_name(&props.question_type),
-                    options:         props.options.clone(),
-                    allow_freeform:  props.allow_freeform,
+                    id: props.question_id.clone(),
+                    text: props.question.clone(),
+                    stage: props.stage.clone(),
+                    question_type: InterviewQuestionType::from_wire_name(&props.question_type),
+                    options: props.options.clone(),
+                    allow_freeform: props.allow_freeform,
                     timeout_seconds: props.timeout_seconds,
                     context_display: props.context_display.clone(),
                 });
@@ -528,38 +528,38 @@ impl SlackService {
 
 /// Shared application state for the server.
 pub struct AppState {
-    runs:                   Mutex<HashMap<RunId, ManagedRun>>,
-    aggregate_billing:      Mutex<BillingAccumulator>,
-    store:                  Arc<Database>,
-    artifact_store:         ArtifactStore,
+    runs: Mutex<HashMap<RunId, ManagedRun>>,
+    aggregate_billing: Mutex<BillingAccumulator>,
+    store: Arc<Database>,
+    artifact_store: ArtifactStore,
     artifact_upload_tokens: ArtifactUploadTokenKeys,
-    started_at:             Instant,
-    max_concurrent_runs:    usize,
-    scheduler_notify:       Notify,
-    global_event_tx:        broadcast::Sender<EventEnvelope>,
+    started_at: Instant,
+    max_concurrent_runs: usize,
+    scheduler_notify: Notify,
+    global_event_tx: broadcast::Sender<EventEnvelope>,
 
-    pub(crate) vault:                Arc<AsyncRwLock<Vault>>,
-    pub(crate) server_secrets:       ServerSecrets,
+    pub(crate) vault: Arc<AsyncRwLock<Vault>>,
+    pub(crate) server_secrets: ServerSecrets,
     pub(crate) provider_credentials: ProviderCredentials,
-    pub(crate) settings:             Arc<RwLock<SettingsLayer>>,
-    pub(crate) server_settings:      RwLock<Arc<ResolvedServerSettings>>,
-    pub(crate) local_daemon_mode:    bool,
-    shutting_down:                   AtomicBool,
-    registry_factory_override:       Option<Box<RegistryFactoryOverride>>,
-    slack_service:                   Option<Arc<SlackService>>,
-    slack_started:                   AtomicBool,
+    pub(crate) settings: Arc<RwLock<SettingsLayer>>,
+    pub(crate) server_settings: RwLock<Arc<ResolvedServerSettings>>,
+    pub(crate) local_daemon_mode: bool,
+    shutting_down: AtomicBool,
+    registry_factory_override: Option<Box<RegistryFactoryOverride>>,
+    slack_service: Option<Arc<SlackService>>,
+    slack_started: AtomicBool,
 }
 
 pub(crate) struct AppStateConfig {
-    pub(crate) settings:                  Arc<RwLock<SettingsLayer>>,
+    pub(crate) settings: Arc<RwLock<SettingsLayer>>,
     pub(crate) registry_factory_override: Option<Box<RegistryFactoryOverride>>,
-    pub(crate) max_concurrent_runs:       usize,
-    pub(crate) store:                     Arc<Database>,
-    pub(crate) artifact_store:            ArtifactStore,
-    pub(crate) vault_path:                PathBuf,
-    pub(crate) server_env_path:           PathBuf,
-    pub(crate) local_daemon_mode:         bool,
-    pub(crate) env_lookup:                EnvLookup,
+    pub(crate) max_concurrent_runs: usize,
+    pub(crate) store: Arc<Database>,
+    pub(crate) artifact_store: ArtifactStore,
+    pub(crate) vault_path: PathBuf,
+    pub(crate) server_env_path: PathBuf,
+    pub(crate) local_daemon_mode: bool,
+    pub(crate) env_lookup: EnvLookup,
 }
 
 fn nonzero_i64(value: i64) -> Option<i64> {
@@ -568,26 +568,26 @@ fn nonzero_i64(value: i64) -> Option<i64> {
 
 fn api_billed_token_counts_from_domain(billing: &BilledTokenCounts) -> ApiBilledTokenCounts {
     ApiBilledTokenCounts {
-        cache_read_tokens:  nonzero_i64(billing.cache_read_tokens),
+        cache_read_tokens: nonzero_i64(billing.cache_read_tokens),
         cache_write_tokens: nonzero_i64(billing.cache_write_tokens),
-        input_tokens:       billing.input_tokens,
-        output_tokens:      billing.output_tokens,
-        reasoning_tokens:   nonzero_i64(billing.reasoning_tokens),
-        total_tokens:       billing.total_tokens,
-        total_usd_micros:   billing.total_usd_micros,
+        input_tokens: billing.input_tokens,
+        output_tokens: billing.output_tokens,
+        reasoning_tokens: nonzero_i64(billing.reasoning_tokens),
+        total_tokens: billing.total_tokens,
+        total_usd_micros: billing.total_usd_micros,
     }
 }
 
 fn api_billed_token_counts_from_usage(usage: &BilledModelUsage) -> ApiBilledTokenCounts {
     let tokens = usage.tokens();
     ApiBilledTokenCounts {
-        cache_read_tokens:  nonzero_i64(tokens.cache_read_tokens),
+        cache_read_tokens: nonzero_i64(tokens.cache_read_tokens),
         cache_write_tokens: nonzero_i64(tokens.cache_write_tokens),
-        input_tokens:       tokens.input_tokens,
-        output_tokens:      tokens.output_tokens,
-        reasoning_tokens:   nonzero_i64(tokens.reasoning_tokens),
-        total_tokens:       tokens.total_tokens(),
-        total_usd_micros:   usage.total_usd_micros,
+        input_tokens: tokens.input_tokens,
+        output_tokens: tokens.output_tokens,
+        reasoning_tokens: nonzero_i64(tokens.reasoning_tokens),
+        total_tokens: tokens.total_tokens(),
+        total_usd_micros: usage.total_usd_micros,
     }
 }
 
@@ -690,11 +690,11 @@ impl AppState {
             .map(|duration| duration.as_secs())
             .unwrap_or(0);
         let claims = ArtifactUploadClaims {
-            iss:    ARTIFACT_UPLOAD_TOKEN_ISSUER.to_string(),
-            iat:    now,
-            exp:    now + ARTIFACT_UPLOAD_TOKEN_TTL_SECS,
+            iss: ARTIFACT_UPLOAD_TOKEN_ISSUER.to_string(),
+            iat: now,
+            exp: now + ARTIFACT_UPLOAD_TOKEN_TTL_SECS,
             run_id: run_id.to_string(),
-            scope:  ARTIFACT_UPLOAD_TOKEN_SCOPE.to_string(),
+            scope: ARTIFACT_UPLOAD_TOKEN_SCOPE.to_string(),
         };
         jsonwebtoken::encode(
             &Header::new(Algorithm::HS256),
@@ -748,8 +748,8 @@ fn artifact_upload_token_keys() -> ArtifactUploadTokenKeys {
     validation.set_issuer(&[ARTIFACT_UPLOAD_TOKEN_ISSUER]);
 
     ArtifactUploadTokenKeys {
-        encoding:   Arc::new(EncodingKey::from_secret(&secret)),
-        decoding:   Arc::new(DecodingKey::from_secret(&secret)),
+        encoding: Arc::new(EncodingKey::from_secret(&secret)),
+        decoding: Arc::new(DecodingKey::from_secret(&secret)),
         validation: Arc::new(validation),
     }
 }
@@ -1223,20 +1223,20 @@ async fn get_system_info(
     };
 
     let response = SystemInfoResponse {
-        version:          Some(FABRO_VERSION.to_string()),
-        git_sha:          option_env!("FABRO_GIT_SHA").map(str::to_string),
-        build_date:       option_env!("FABRO_BUILD_DATE").map(str::to_string),
-        os:               Some(std::env::consts::OS.to_string()),
-        arch:             Some(std::env::consts::ARCH.to_string()),
-        storage_engine:   Some("slatedb".to_string()),
-        storage_dir:      Some(state.server_storage_dir().display().to_string()),
-        uptime_secs:      Some(to_i64(state.started_at.elapsed().as_secs())),
-        runs:             Some(SystemRunCounts {
-            total:  Some(to_i64(total_runs)),
+        version: Some(FABRO_VERSION.to_string()),
+        git_sha: option_env!("FABRO_GIT_SHA").map(str::to_string),
+        build_date: option_env!("FABRO_BUILD_DATE").map(str::to_string),
+        os: Some(std::env::consts::OS.to_string()),
+        arch: Some(std::env::consts::ARCH.to_string()),
+        storage_engine: Some("slatedb".to_string()),
+        storage_dir: Some(state.server_storage_dir().display().to_string()),
+        uptime_secs: Some(to_i64(state.started_at.elapsed().as_secs())),
+        runs: Some(SystemRunCounts {
+            total: Some(to_i64(total_runs)),
             active: Some(to_i64(active_runs)),
         }),
         sandbox_provider: Some(system_sandbox_provider(&settings)),
-        features:         Some(system_features(&settings)),
+        features: Some(system_features(&settings)),
     };
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -1250,7 +1250,7 @@ fn system_features(settings: &SettingsLayer) -> SystemFeatures {
         .unwrap_or(false);
     SystemFeatures {
         session_sandboxes: Some(session_sandboxes),
-        retros:            Some(retros),
+        retros: Some(retros),
     }
 }
 
@@ -1329,12 +1329,12 @@ async fn prune_runs(
         return (
             StatusCode::OK,
             Json(PruneRunsResponse {
-                dry_run:          Some(true),
-                runs:             Some(prune_plan.rows),
-                total_count:      Some(to_i64(prune_plan.run_ids.len())),
+                dry_run: Some(true),
+                runs: Some(prune_plan.rows),
+                total_count: Some(to_i64(prune_plan.run_ids.len())),
                 total_size_bytes: Some(to_i64(prune_plan.total_size_bytes)),
-                deleted_count:    Some(0),
-                freed_bytes:      Some(0),
+                deleted_count: Some(0),
+                freed_bytes: Some(0),
             }),
         )
             .into_response();
@@ -1349,12 +1349,12 @@ async fn prune_runs(
     (
         StatusCode::OK,
         Json(PruneRunsResponse {
-            dry_run:          Some(false),
-            runs:             None,
-            total_count:      Some(to_i64(prune_plan.run_ids.len())),
+            dry_run: Some(false),
+            runs: None,
+            total_count: Some(to_i64(prune_plan.run_ids.len())),
             total_size_bytes: Some(to_i64(prune_plan.total_size_bytes)),
-            deleted_count:    Some(to_i64(prune_plan.run_ids.len())),
-            freed_bytes:      Some(to_i64(prune_plan.total_size_bytes)),
+            deleted_count: Some(to_i64(prune_plan.run_ids.len())),
+            freed_bytes: Some(to_i64(prune_plan.total_size_bytes)),
         }),
     )
         .into_response()
@@ -1389,8 +1389,8 @@ async fn attach_events(
 }
 
 struct PrunePlan {
-    run_ids:          Vec<RunId>,
-    rows:             Vec<PruneRunEntry>,
+    run_ids: Vec<RunId>,
+    rows: Vec<PruneRunEntry>,
     total_size_bytes: u64,
 }
 
@@ -1418,12 +1418,12 @@ fn build_disk_usage_response(
         }
         if verbose {
             run_rows.push(DiskUsageRunRow {
-                run_id:        Some(run.run_id().to_string()),
+                run_id: Some(run.run_id().to_string()),
                 workflow_name: Some(run.workflow_name()),
-                status:        Some(run.status().to_string()),
-                start_time:    Some(run.start_time()),
-                size_bytes:    Some(to_i64(size)),
-                reclaimable:   Some(!run.status().is_active()),
+                status: Some(run.status().to_string()),
+                start_time: Some(run.start_time()),
+                size_bytes: Some(to_i64(size)),
+                reclaimable: Some(!run.status().is_active()),
             });
         }
     }
@@ -1444,25 +1444,25 @@ fn build_disk_usage_response(
     }
 
     Ok(DiskUsageResponse {
-        summary:                 vec![
+        summary: vec![
             DiskUsageSummaryRow {
-                type_:             Some("runs".to_string()),
-                count:             Some(to_i64(runs.len())),
-                active:            Some(to_i64(active_count)),
-                size_bytes:        Some(to_i64(total_run_size)),
+                type_: Some("runs".to_string()),
+                count: Some(to_i64(runs.len())),
+                active: Some(to_i64(active_count)),
+                size_bytes: Some(to_i64(total_run_size)),
                 reclaimable_bytes: Some(to_i64(reclaimable_run_size)),
             },
             DiskUsageSummaryRow {
-                type_:             Some("logs".to_string()),
-                count:             Some(to_i64(log_count)),
-                active:            None,
-                size_bytes:        Some(to_i64(total_log_size)),
+                type_: Some("logs".to_string()),
+                count: Some(to_i64(log_count)),
+                active: None,
+                size_bytes: Some(to_i64(total_log_size)),
                 reclaimable_bytes: Some(to_i64(total_log_size)),
             },
         ],
-        total_size_bytes:        Some(to_i64(total_run_size + total_log_size)),
+        total_size_bytes: Some(to_i64(total_run_size + total_log_size)),
         total_reclaimable_bytes: Some(to_i64(reclaimable_run_size + total_log_size)),
-        runs:                    verbose.then_some(run_rows),
+        runs: verbose.then_some(run_rows),
     })
 }
 
@@ -1512,10 +1512,10 @@ fn build_prune_plan(
     let rows = filtered
         .iter()
         .map(|run| PruneRunEntry {
-            run_id:        Some(run.run_id().to_string()),
-            dir_name:      Some(run.dir_name.clone()),
+            run_id: Some(run.run_id().to_string()),
+            dir_name: Some(run.dir_name.clone()),
             workflow_name: Some(run.workflow_name()),
-            size_bytes:    Some(to_i64(dir_size(&run.path))),
+            size_bytes: Some(to_i64(dir_size(&run.path))),
         })
         .collect::<Vec<_>>();
     let total_size_bytes = rows
@@ -1763,8 +1763,8 @@ async fn delete_secret_by_name(
 #[derive(serde::Deserialize)]
 struct GitHubRepoResponse {
     default_branch: String,
-    private:        bool,
-    permissions:    Option<serde_json::Value>,
+    private: bool,
+    permissions: Option<serde_json::Value>,
 }
 
 async fn get_github_repo(
@@ -2025,8 +2025,8 @@ async fn get_aggregate_billing(
         .iter()
         .map(|(model, totals)| BillingByModel {
             billing: api_billed_token_counts_from_domain(&totals.billing),
-            model:   ModelReference { id: model.clone() },
-            stages:  totals.stages,
+            model: ModelReference { id: model.clone() },
+            stages: totals.stages,
         })
         .collect();
     let total_billing = by_model
@@ -2045,15 +2045,15 @@ async fn get_aggregate_billing(
         });
     let response = AggregateBilling {
         totals: AggregateBillingTotals {
-            cache_read_tokens:  nonzero_i64(total_billing.cache_read_tokens),
+            cache_read_tokens: nonzero_i64(total_billing.cache_read_tokens),
             cache_write_tokens: nonzero_i64(total_billing.cache_write_tokens),
-            input_tokens:       total_billing.input_tokens,
-            output_tokens:      total_billing.output_tokens,
-            reasoning_tokens:   nonzero_i64(total_billing.reasoning_tokens),
-            runs:               agg.total_runs,
-            runtime_secs:       agg.total_runtime_secs,
-            total_tokens:       total_billing.total_tokens,
-            total_usd_micros:   total_billing.total_usd_micros,
+            input_tokens: total_billing.input_tokens,
+            output_tokens: total_billing.output_tokens,
+            reasoning_tokens: nonzero_i64(total_billing.reasoning_tokens),
+            runs: agg.total_runs,
+            runtime_secs: agg.total_runtime_secs,
+            total_tokens: total_billing.total_tokens,
+            total_usd_micros: total_billing.total_usd_micros,
         },
         by_model,
     };
@@ -2152,11 +2152,11 @@ async fn list_run_stages(
     if let Some(next_id) = &checkpoint.next_node_id {
         if run_is_active && next_id != "exit" && !checkpoint.completed_nodes.contains(next_id) {
             stages.push(RunStage {
-                id:            next_id.clone(),
-                name:          next_id.clone(),
-                status:        ApiStageStatus::Running,
+                id: next_id.clone(),
+                name: next_id.clone(),
+                status: ApiStageStatus::Running,
                 duration_secs: None,
-                dot_id:        Some(next_id.clone()),
+                dot_id: Some(next_id.clone()),
             });
         }
     }
@@ -2187,16 +2187,16 @@ async fn get_run_billing(
     let Some(checkpoint) = checkpoint else {
         let empty = RunBilling {
             by_model: Vec::new(),
-            stages:   Vec::new(),
-            totals:   RunBillingTotals {
-                cache_read_tokens:  None,
+            stages: Vec::new(),
+            totals: RunBillingTotals {
+                cache_read_tokens: None,
                 cache_write_tokens: None,
-                input_tokens:       0,
-                output_tokens:      0,
-                reasoning_tokens:   None,
-                runtime_secs:       0.0,
-                total_tokens:       0,
-                total_usd_micros:   None,
+                input_tokens: 0,
+                output_tokens: 0,
+                reasoning_tokens: None,
+                runtime_secs: 0.0,
+                total_tokens: 0,
+                total_usd_micros: None,
             },
         };
         return (StatusCode::OK, Json(empty)).into_response();
@@ -2236,7 +2236,7 @@ async fn get_run_billing(
             model: ModelReference { id: model_id },
             runtime_secs: duration_ms as f64 / 1000.0,
             stage: BillingStageRef {
-                id:   node_id.clone(),
+                id: node_id.clone(),
                 name: node_id.clone(),
             },
         });
@@ -2247,8 +2247,8 @@ async fn get_run_billing(
         .into_iter()
         .map(|(model, totals)| BillingByModel {
             billing: api_billed_token_counts_from_domain(&totals.billing),
-            model:   ModelReference { id: model },
-            stages:  totals.stages,
+            model: ModelReference { id: model },
+            stages: totals.stages,
         })
         .collect::<Vec<_>>();
 
@@ -2918,7 +2918,7 @@ fn release_run_answer_claim(state: &AppState, run_id: RunId, qid: &str) {
 
 #[derive(Clone, Copy)]
 struct LiveWorkerProcess {
-    run_id:           RunId,
+    run_id: RunId,
     process_group_id: u32,
 }
 
@@ -3104,9 +3104,9 @@ async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow
         &run_store,
         &run_id,
         &workflow_event::Event::WorkflowRunFailed {
-            error:          WorkflowError::Cancelled,
-            duration_ms:    0,
-            reason:         Some(WorkflowStatusReason::Cancelled),
+            error: WorkflowError::Cancelled,
+            duration_ms: 0,
+            reason: Some(WorkflowStatusReason::Cancelled),
             git_commit_sha: None,
         },
     )
@@ -3425,41 +3425,41 @@ fn runtime_question_type(question_type: InterviewQuestionType) -> QuestionType {
 
 fn runtime_question_from_interview_record(question: &InterviewQuestionRecord) -> Question {
     Question {
-        id:              question.id.clone(),
-        text:            question.text.clone(),
-        question_type:   runtime_question_type(question.question_type),
-        options:         question
+        id: question.id.clone(),
+        text: question.text.clone(),
+        question_type: runtime_question_type(question.question_type),
+        options: question
             .options
             .iter()
             .map(|option| fabro_interview::QuestionOption {
-                key:   option.key.clone(),
+                key: option.key.clone(),
                 label: option.label.clone(),
             })
             .collect(),
-        allow_freeform:  question.allow_freeform,
-        default:         None,
+        allow_freeform: question.allow_freeform,
+        default: None,
         timeout_seconds: question.timeout_seconds,
-        stage:           question.stage.clone(),
-        metadata:        HashMap::new(),
+        stage: question.stage.clone(),
+        metadata: HashMap::new(),
         context_display: question.context_display.clone(),
     }
 }
 
 fn api_question_from_interview_record(question: &InterviewQuestionRecord) -> ApiQuestion {
     ApiQuestion {
-        id:              question.id.clone(),
-        text:            question.text.clone(),
-        stage:           question.stage.clone(),
-        question_type:   api_question_type(question.question_type),
-        options:         question
+        id: question.id.clone(),
+        text: question.text.clone(),
+        stage: question.stage.clone(),
+        question_type: api_question_type(question.question_type),
+        options: question
             .options
             .iter()
             .map(|option| ApiQuestionOption {
-                key:   option.key.clone(),
+                key: option.key.clone(),
                 label: option.label.clone(),
             })
             .collect(),
-        allow_freeform:  question.allow_freeform,
+        allow_freeform: question.allow_freeform,
         timeout_seconds: question.timeout_seconds,
         context_display: question.context_display.clone(),
     }
@@ -3616,10 +3616,13 @@ fn answer_from_request(
             .find(|option| option.key == key)
             .cloned();
         match option {
-            Some(option) => Ok(Answer::selected(key, fabro_interview::QuestionOption {
-                key:   option.key,
-                label: option.label,
-            })),
+            Some(option) => Ok(Answer::selected(
+                key,
+                fabro_interview::QuestionOption {
+                    key: option.key,
+                    label: option.label,
+                },
+            )),
             None => Err(ApiError::bad_request("Invalid option key.").into_response()),
         }
     } else if !req.selected_option_keys.is_empty() {
@@ -3713,12 +3716,12 @@ async fn create_run(
 
 fn run_provenance(headers: &HeaderMap, subject: &AuthenticatedSubject) -> RunProvenance {
     RunProvenance {
-        server:  Some(RunServerProvenance {
+        server: Some(RunServerProvenance {
             version: FABRO_VERSION.to_string(),
         }),
-        client:  run_client_provenance(headers),
+        client: run_client_provenance(headers),
         subject: Some(RunSubjectProvenance {
-            login:       subject.login.clone(),
+            login: subject.login.clone(),
             auth_method: subject.auth_method,
         }),
     }
@@ -3922,13 +3925,13 @@ async fn start_run(
     (
         StatusCode::OK,
         Json(RunStatusResponse {
-            id:              id.to_string(),
-            status:          RunStatus::Queued,
-            error:           None,
-            queue_position:  None,
-            status_reason:   None,
+            id: id.to_string(),
+            status: RunStatus::Queued,
+            error: None,
+            queue_position: None,
+            status_reason: None,
             pending_control: None,
-            created_at:      id.created_at(),
+            created_at: id.created_at(),
         }),
     )
         .into_response()
@@ -4270,9 +4273,9 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 &run_store,
                 &run_id,
                 &workflow_event::Event::WorkflowRunFailed {
-                    error:          WorkflowError::engine(err.to_string()),
-                    duration_ms:    0,
-                    reason:         Some(WorkflowStatusReason::LaunchFailed),
+                    error: WorkflowError::engine(err.to_string()),
+                    duration_ms: 0,
+                    reason: Some(WorkflowStatusReason::LaunchFailed),
                     git_commit_sha: None,
                 },
             )
@@ -4291,9 +4294,9 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             &run_store,
             &run_id,
             &workflow_event::Event::WorkflowRunFailed {
-                error:          WorkflowError::engine(message.clone()),
-                duration_ms:    0,
-                reason:         Some(WorkflowStatusReason::LaunchFailed),
+                error: WorkflowError::engine(message.clone()),
+                duration_ms: 0,
+                reason: Some(WorkflowStatusReason::LaunchFailed),
                 git_commit_sha: None,
             },
         )
@@ -4320,9 +4323,9 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             &run_store,
             &run_id,
             &workflow_event::Event::WorkflowRunFailed {
-                error:          WorkflowError::engine(message.clone()),
-                duration_ms:    0,
-                reason:         Some(WorkflowStatusReason::LaunchFailed),
+                error: WorkflowError::engine(message.clone()),
+                duration_ms: 0,
+                reason: Some(WorkflowStatusReason::LaunchFailed),
                 git_commit_sha: None,
             },
         )
@@ -4340,9 +4343,9 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             &run_store,
             &run_id,
             &workflow_event::Event::WorkflowRunFailed {
-                error:          WorkflowError::engine(message.clone()),
-                duration_ms:    0,
-                reason:         Some(WorkflowStatusReason::LaunchFailed),
+                error: WorkflowError::engine(message.clone()),
+                duration_ms: 0,
+                reason: Some(WorkflowStatusReason::LaunchFailed),
                 git_commit_sha: None,
             },
         )
@@ -4372,9 +4375,9 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 &run_store,
                 &run_id,
                 &workflow_event::Event::WorkflowRunFailed {
-                    error:          WorkflowError::engine(err.to_string()),
-                    duration_ms:    0,
-                    reason:         Some(WorkflowStatusReason::Terminated),
+                    error: WorkflowError::engine(err.to_string()),
+                    duration_ms: 0,
+                    reason: Some(WorkflowStatusReason::Terminated),
                     git_commit_sha: None,
                 },
             )
@@ -4996,11 +4999,11 @@ async fn list_run_artifacts(
             data: entries
                 .into_iter()
                 .map(|entry| RunArtifactEntry {
-                    stage_id:      entry.node.to_string(),
-                    node_slug:     entry.node.node_id().to_string(),
-                    retry:         entry.node.visit().cast_signed(),
+                    stage_id: entry.node.to_string(),
+                    node_slug: entry.node.node_id().to_string(),
+                    retry: entry.node.visit().cast_signed(),
                     relative_path: entry.filename,
-                    size:          entry.size.cast_signed(),
+                    size: entry.size.cast_signed(),
                 })
                 .collect(),
         })
@@ -5048,8 +5051,8 @@ enum ArtifactUploadContentType {
 }
 
 struct ValidatedArtifactBatchEntry {
-    path:           String,
-    sha256:         Option<String>,
+    path: String,
+    sha256: Option<String>,
     expected_bytes: Option<u64>,
 }
 
@@ -5181,11 +5184,14 @@ fn validate_artifact_batch_manifest(
             }
         }
         if entries
-            .insert(entry.part.clone(), ValidatedArtifactBatchEntry {
-                path,
-                sha256: entry.sha256.map(|value| value.to_ascii_lowercase()),
-                expected_bytes: entry.expected_bytes,
-            })
+            .insert(
+                entry.part.clone(),
+                ValidatedArtifactBatchEntry {
+                    path,
+                    sha256: entry.sha256.map(|value| value.to_ascii_lowercase()),
+                    expected_bytes: entry.expected_bytes,
+                },
+            )
             .is_some()
         {
             return Err(bad_request_response(format!(
@@ -5505,7 +5511,7 @@ async fn generate_preview_url(
         {
             Ok(preview) => PreviewUrlResponse {
                 token: None,
-                url:   preview.url,
+                url: preview.url,
             },
             Err(err) => {
                 return ApiError::new(StatusCode::CONFLICT, err).into_response();
@@ -5515,7 +5521,7 @@ async fn generate_preview_url(
         match sandbox.get_preview_link(port).await {
             Ok(preview) => PreviewUrlResponse {
                 token: Some(preview.token),
-                url:   preview.url,
+                url: preview.url,
             },
             Err(err) => {
                 return ApiError::new(StatusCode::CONFLICT, err).into_response();
@@ -5566,8 +5572,8 @@ async fn list_sandbox_files(
                 .into_iter()
                 .map(|entry| SandboxFileEntry {
                     is_dir: entry.is_dir,
-                    name:   entry.name,
-                    size:   entry.size.map(u64::cast_signed),
+                    name: entry.name,
+                    size: entry.size.map(u64::cast_signed),
                 })
                 .collect(),
         })
@@ -6192,9 +6198,9 @@ async fn create_completion(
             req.tools
                 .into_iter()
                 .map(|t| ToolDefinition {
-                    name:        t.name,
+                    name: t.name,
                     description: t.description,
-                    parameters:  t.parameters,
+                    parameters: t.parameters,
                 })
                 .collect(),
         )
@@ -6315,15 +6321,15 @@ async fn create_completion(
             }
             match generate_object(params, schema).await {
                 Ok(result) => Json(CompletionResponse {
-                    id:          msg_id,
-                    model:       model_id,
-                    message:     convert_llm_message(&result.response.message),
+                    id: msg_id,
+                    model: model_id,
+                    message: convert_llm_message(&result.response.message),
                     stop_reason: finish_reason_to_api_stop_reason(&result.finish_reason),
-                    usage:       CompletionUsage {
-                        input_tokens:  result.usage.input_tokens,
+                    usage: CompletionUsage {
+                        input_tokens: result.usage.input_tokens,
                         output_tokens: result.usage.output_tokens,
                     },
-                    output:      result.output,
+                    output: result.output,
                 })
                 .into_response(),
                 Err(e) => ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))
@@ -6332,15 +6338,15 @@ async fn create_completion(
         } else {
             match client.complete(&request).await {
                 Ok(response) => Json(CompletionResponse {
-                    id:          response.id,
-                    model:       response.model,
-                    message:     convert_llm_message(&response.message),
+                    id: response.id,
+                    model: response.model,
+                    message: convert_llm_message(&response.message),
                     stop_reason: finish_reason_to_api_stop_reason(&response.finish_reason),
-                    usage:       CompletionUsage {
-                        input_tokens:  response.usage.input_tokens,
+                    usage: CompletionUsage {
+                        input_tokens: response.usage.input_tokens,
                         output_tokens: response.usage.output_tokens,
                     },
-                    output:      None,
+                    output: None,
                 })
                 .into_response(),
                 Err(e) => ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))
@@ -6662,10 +6668,10 @@ type = "http"
 
         let vault = state.vault.read().await;
         assert!(!vault.snapshot().contains_key("/tmp/test.pem"));
-        assert_eq!(vault.file_secrets(), vec![(
-            "/tmp/test.pem".to_string(),
-            "pem-data".to_string()
-        )]);
+        assert_eq!(
+            vault.file_secrets(),
+            vec![("/tmp/test.pem".to_string(), "pem-data".to_string())]
+        );
     }
 
     #[tokio::test]
@@ -6674,21 +6680,21 @@ type = "http"
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
         let credential = fabro_auth::AuthCredential {
             provider: Provider::OpenAi,
-            details:  fabro_auth::AuthDetails::CodexOAuth {
-                tokens:     fabro_auth::OAuthTokens {
-                    access_token:  "access".to_string(),
+            details: fabro_auth::AuthDetails::CodexOAuth {
+                tokens: fabro_auth::OAuthTokens {
+                    access_token: "access".to_string(),
                     refresh_token: Some("refresh".to_string()),
-                    expires_at:    chrono::DateTime::parse_from_rfc3339("2030-01-01T00:00:00Z")
+                    expires_at: chrono::DateTime::parse_from_rfc3339("2030-01-01T00:00:00Z")
                         .unwrap()
                         .with_timezone(&chrono::Utc),
                 },
-                config:     fabro_auth::OAuthConfig {
-                    auth_url:     "https://auth.openai.com".to_string(),
-                    token_url:    "https://auth.openai.com/oauth/token".to_string(),
-                    client_id:    "client".to_string(),
-                    scopes:       vec!["openid".to_string()],
+                config: fabro_auth::OAuthConfig {
+                    auth_url: "https://auth.openai.com".to_string(),
+                    token_url: "https://auth.openai.com/oauth/token".to_string(),
+                    client_id: "client".to_string(),
+                    scopes: vec!["openid".to_string()],
                     redirect_uri: Some("https://auth.openai.com/deviceauth/callback".to_string()),
-                    use_pkce:     true,
+                    use_pkce: true,
                 },
                 account_id: Some("acct_123".to_string()),
             },
@@ -7117,11 +7123,14 @@ type = "http"
             .iter()
             .map(|model| model["id"].as_str().unwrap().to_string())
             .collect::<Vec<_>>();
-        assert_eq!(model_ids, vec![
-            "gpt-5.2-codex".to_string(),
-            "gpt-5.3-codex".to_string(),
-            "gpt-5.3-codex-spark".to_string()
-        ]);
+        assert_eq!(
+            model_ids,
+            vec![
+                "gpt-5.2-codex".to_string(),
+                "gpt-5.3-codex".to_string(),
+                "gpt-5.3-codex-spark".to_string()
+            ]
+        );
     }
 
     #[tokio::test]
@@ -7162,7 +7171,7 @@ slug = "fabro"
                 false,
             ),
             AuthMode::Enabled(ConfiguredAuth {
-                methods:   vec![ServerAuthMethod::Github],
+                methods: vec![ServerAuthMethod::Github],
                 dev_token: None,
             }),
         );
@@ -7363,18 +7372,18 @@ slug = "fabro"
     async fn submit_pending_interview_answer_rejects_invalid_answer_shape() {
         let state = create_app_state();
         let pending = LoadedPendingInterview {
-            run_id:   fixtures::RUN_1,
-            qid:      "q-1".to_string(),
+            run_id: fixtures::RUN_1,
+            qid: "q-1".to_string(),
             question: InterviewQuestionRecord {
-                id:              "q-1".to_string(),
-                text:            "Approve deploy?".to_string(),
-                stage:           "gate".to_string(),
-                question_type:   InterviewQuestionType::MultipleChoice,
-                options:         vec![fabro_types::run_event::InterviewOption {
-                    key:   "approve".to_string(),
+                id: "q-1".to_string(),
+                text: "Approve deploy?".to_string(),
+                stage: "gate".to_string(),
+                question_type: InterviewQuestionType::MultipleChoice,
+                options: vec![fabro_types::run_event::InterviewOption {
+                    key: "approve".to_string(),
                     label: "Approve".to_string(),
                 }],
-                allow_freeform:  false,
+                allow_freeform: false,
                 timeout_seconds: None,
                 context_display: None,
             },
@@ -7490,7 +7499,7 @@ slug = "fabro"
         let app = build_router(
             Arc::clone(&state),
             AuthMode::Enabled(ConfiguredAuth {
-                methods:   vec![ServerAuthMethod::DevToken],
+                methods: vec![ServerAuthMethod::DevToken],
                 dev_token: Some(DEV_TOKEN.to_string()),
             }),
         );
@@ -7866,10 +7875,14 @@ slug = "fabro"
                 "content-type",
                 format!("multipart/form-data; boundary={boundary}"),
             )
-            .body(multipart_body(boundary, &manifest, &[
-                ("file1", "src/lib.rs", source_bytes),
-                ("file2", "logs/output.txt", log_bytes),
-            ]))
+            .body(multipart_body(
+                boundary,
+                &manifest,
+                &[
+                    ("file1", "src/lib.rs", source_bytes),
+                    ("file2", "logs/output.txt", log_bytes),
+                ],
+            ))
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
         if response.status() != StatusCode::NO_CONTENT {
@@ -8704,32 +8717,42 @@ level = "debug"
     async fn startup_reconciliation_marks_inflight_runs_terminal() {
         let state = create_app_state();
 
-        create_durable_run_with_events(&state, fixtures::RUN_1, &[
-            workflow_event::Event::RunSubmitted {
-                reason:          None,
+        create_durable_run_with_events(
+            &state,
+            fixtures::RUN_1,
+            &[workflow_event::Event::RunSubmitted {
+                reason: None,
                 definition_blob: None,
-            },
-        ])
+            }],
+        )
         .await;
-        create_durable_run_with_events(&state, fixtures::RUN_2, &[
-            workflow_event::Event::RunSubmitted {
-                reason:          None,
-                definition_blob: None,
-            },
-            workflow_event::Event::RunStarting { reason: None },
-            workflow_event::Event::RunRunning { reason: None },
-        ])
+        create_durable_run_with_events(
+            &state,
+            fixtures::RUN_2,
+            &[
+                workflow_event::Event::RunSubmitted {
+                    reason: None,
+                    definition_blob: None,
+                },
+                workflow_event::Event::RunStarting { reason: None },
+                workflow_event::Event::RunRunning { reason: None },
+            ],
+        )
         .await;
-        create_durable_run_with_events(&state, fixtures::RUN_3, &[
-            workflow_event::Event::RunSubmitted {
-                reason:          None,
-                definition_blob: None,
-            },
-            workflow_event::Event::RunStarting { reason: None },
-            workflow_event::Event::RunRunning { reason: None },
-            workflow_event::Event::RunPaused,
-            workflow_event::Event::RunCancelRequested { actor: None },
-        ])
+        create_durable_run_with_events(
+            &state,
+            fixtures::RUN_3,
+            &[
+                workflow_event::Event::RunSubmitted {
+                    reason: None,
+                    definition_blob: None,
+                },
+                workflow_event::Event::RunStarting { reason: None },
+                workflow_event::Event::RunRunning { reason: None },
+                workflow_event::Event::RunPaused,
+                workflow_event::Event::RunCancelRequested { actor: None },
+            ],
+        )
         .await;
 
         let reconciled = reconcile_incomplete_runs_on_startup(&state).await.unwrap();
@@ -8777,14 +8800,18 @@ level = "debug"
         let state = create_app_state();
         let run_id = fixtures::RUN_4;
 
-        create_durable_run_with_events(&state, run_id, &[
-            workflow_event::Event::RunSubmitted {
-                reason:          None,
-                definition_blob: None,
-            },
-            workflow_event::Event::RunStarting { reason: None },
-            workflow_event::Event::RunRunning { reason: None },
-        ])
+        create_durable_run_with_events(
+            &state,
+            run_id,
+            &[
+                workflow_event::Event::RunSubmitted {
+                    reason: None,
+                    definition_blob: None,
+                },
+                workflow_event::Event::RunStarting { reason: None },
+                workflow_event::Event::RunRunning { reason: None },
+            ],
+        )
         .await;
 
         let temp_dir = tempfile::tempdir().unwrap();
@@ -9151,15 +9178,19 @@ timeout = "30s"
         let run_id = fixtures::RUN_1;
 
         // A run in Removing status should not appear on the board
-        create_durable_run_with_events(&state, run_id, &[
-            workflow_event::Event::RunSubmitted {
-                reason:          None,
-                definition_blob: None,
-            },
-            workflow_event::Event::RunStarting { reason: None },
-            workflow_event::Event::RunRunning { reason: None },
-            workflow_event::Event::RunRemoving { reason: None },
-        ])
+        create_durable_run_with_events(
+            &state,
+            run_id,
+            &[
+                workflow_event::Event::RunSubmitted {
+                    reason: None,
+                    definition_blob: None,
+                },
+                workflow_event::Event::RunStarting { reason: None },
+                workflow_event::Event::RunRunning { reason: None },
+                workflow_event::Event::RunRemoving { reason: None },
+            ],
+        )
         .await;
 
         let req = Request::builder()
@@ -9185,34 +9216,42 @@ timeout = "30s"
         let paused_id = fixtures::RUN_1;
         let succeeded_id = fixtures::RUN_2;
 
-        create_durable_run_with_events(&state, paused_id, &[
-            workflow_event::Event::RunSubmitted {
-                reason:          None,
-                definition_blob: None,
-            },
-            workflow_event::Event::RunStarting { reason: None },
-            workflow_event::Event::RunRunning { reason: None },
-            workflow_event::Event::RunPaused,
-        ])
+        create_durable_run_with_events(
+            &state,
+            paused_id,
+            &[
+                workflow_event::Event::RunSubmitted {
+                    reason: None,
+                    definition_blob: None,
+                },
+                workflow_event::Event::RunStarting { reason: None },
+                workflow_event::Event::RunRunning { reason: None },
+                workflow_event::Event::RunPaused,
+            ],
+        )
         .await;
-        create_durable_run_with_events(&state, succeeded_id, &[
-            workflow_event::Event::RunSubmitted {
-                reason:          None,
-                definition_blob: None,
-            },
-            workflow_event::Event::RunStarting { reason: None },
-            workflow_event::Event::RunRunning { reason: None },
-            workflow_event::Event::WorkflowRunCompleted {
-                duration_ms:          1000,
-                artifact_count:       0,
-                status:               "success".to_string(),
-                reason:               None,
-                total_usd_micros:     None,
-                final_git_commit_sha: None,
-                final_patch:          None,
-                billing:              None,
-            },
-        ])
+        create_durable_run_with_events(
+            &state,
+            succeeded_id,
+            &[
+                workflow_event::Event::RunSubmitted {
+                    reason: None,
+                    definition_blob: None,
+                },
+                workflow_event::Event::RunStarting { reason: None },
+                workflow_event::Event::RunRunning { reason: None },
+                workflow_event::Event::WorkflowRunCompleted {
+                    duration_ms: 1000,
+                    artifact_count: 0,
+                    status: "success".to_string(),
+                    reason: None,
+                    total_usd_micros: None,
+                    final_git_commit_sha: None,
+                    final_patch: None,
+                    billing: None,
+                },
+            ],
+        )
         .await;
 
         let req = Request::builder()

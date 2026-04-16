@@ -26,12 +26,12 @@ pub(crate) async fn execute(
     args.verbose = args.verbose || cli.output.verbosity == OutputVerbosity::Verbose;
 
     let manifest = build_run_manifest(ManifestBuildInput {
-        workflow:           args.workflow.clone(),
-        cwd:                ctx.cwd().to_path_buf(),
-        args_layer:         preflight_args_layer(&args)?,
-        args:               preflight_manifest_args(&args),
-        run_id:             None,
-        user_layer:         load_settings_user()?,
+        workflow: args.workflow.clone(),
+        cwd: ctx.cwd().to_path_buf(),
+        args_layer: preflight_args_layer(&args)?,
+        args: preflight_manifest_args(&args),
+        run_id: None,
+        user_layer: load_settings_user()?,
         user_settings_path: Some(active_settings_path(None)),
     })?;
     let client = ctx.server().await?;

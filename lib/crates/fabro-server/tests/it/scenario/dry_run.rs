@@ -15,7 +15,7 @@ use crate::helpers::{
 static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 struct ProxyPolicyGuard {
-    _lock:    MutexGuard<'static, ()>,
+    _lock: MutexGuard<'static, ()>,
     previous: Option<OsString>,
 }
 

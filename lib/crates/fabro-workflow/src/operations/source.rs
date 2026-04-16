@@ -13,7 +13,7 @@ use crate::workflow_bundle::BundledWorkflow;
 pub enum WorkflowInput {
     Path(PathBuf),
     DotSource {
-        source:   String,
+        source: String,
         base_dir: Option<PathBuf>,
     },
     Bundled(BundledWorkflow),
@@ -23,20 +23,20 @@ pub enum WorkflowInput {
 pub(crate) struct ResolveWorkflowInput {
     pub workflow: WorkflowInput,
     pub settings: SettingsLayer,
-    pub cwd:      PathBuf,
+    pub cwd: PathBuf,
 }
 
 #[derive(Clone)]
 pub(crate) struct ResolvedWorkflow {
-    pub raw_source:         String,
-    pub settings:           SettingsLayer,
-    pub workflow_slug:      Option<String>,
+    pub raw_source: String,
+    pub settings: SettingsLayer,
+    pub workflow_slug: Option<String>,
     pub workflow_toml_path: Option<PathBuf>,
-    pub dot_path:           Option<PathBuf>,
-    pub current_dir:        Option<PathBuf>,
-    pub file_resolver:      Option<Arc<dyn FileResolver>>,
-    pub goal_override:      Option<String>,
-    pub working_directory:  PathBuf,
+    pub dot_path: Option<PathBuf>,
+    pub current_dir: Option<PathBuf>,
+    pub file_resolver: Option<Arc<dyn FileResolver>>,
+    pub goal_override: Option<String>,
+    pub working_directory: PathBuf,
 }
 
 fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
@@ -155,7 +155,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let resolved = resolve_workflow(ResolveWorkflowInput {
             workflow: WorkflowInput::DotSource {
-                source:   "digraph Test { start -> exit }".to_string(),
+                source: "digraph Test { start -> exit }".to_string(),
                 base_dir: None,
             },
             settings: SettingsLayer {
@@ -165,7 +165,7 @@ mod tests {
                 }),
                 ..SettingsLayer::default()
             },
-            cwd:      dir.path().to_path_buf(),
+            cwd: dir.path().to_path_buf(),
         })
         .unwrap();
 

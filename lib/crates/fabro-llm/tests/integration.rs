@@ -5,19 +5,19 @@ use fabro_llm::types::{FinishReason, Message, Request};
 
 fn make_request(model: &str) -> Request {
     Request {
-        model:            model.to_string(),
-        messages:         vec![Message::user("Say hello in exactly one word")],
-        provider:         None,
-        tools:            None,
-        tool_choice:      None,
-        response_format:  None,
-        temperature:      Some(0.0),
-        top_p:            None,
-        max_tokens:       Some(50),
-        stop_sequences:   None,
+        model: model.to_string(),
+        messages: vec![Message::user("Say hello in exactly one word")],
+        provider: None,
+        tools: None,
+        tool_choice: None,
+        response_format: None,
+        temperature: Some(0.0),
+        top_p: None,
+        max_tokens: Some(50),
+        stop_sequences: None,
         reasoning_effort: None,
-        speed:            None,
-        metadata:         None,
+        speed: None,
+        metadata: None,
         provider_options: None,
     }
 }
@@ -157,19 +157,19 @@ async fn run_multi_turn_cache_test(
 
     for turn in 0..6 {
         let request = Request {
-            model:            model.to_string(),
-            messages:         messages.clone(),
-            provider:         None,
-            tools:            None,
-            tool_choice:      None,
-            response_format:  None,
-            temperature:      Some(0.0),
-            top_p:            None,
-            max_tokens:       Some(100),
-            stop_sequences:   None,
+            model: model.to_string(),
+            messages: messages.clone(),
+            provider: None,
+            tools: None,
+            tool_choice: None,
+            response_format: None,
+            temperature: Some(0.0),
+            top_p: None,
+            max_tokens: Some(100),
+            stop_sequences: None,
             reasoning_effort: None,
-            speed:            None,
-            metadata:         None,
+            speed: None,
+            metadata: None,
             provider_options: None,
         };
 

@@ -141,12 +141,10 @@ mod tests {
         let run_id: RunId = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
         let key = run_event_key(&run_id, 7, 123);
         let segments: Vec<&str> = SlateKey::segments(key.as_str()).collect();
-        assert_eq!(segments, [
-            "runs",
-            "01JT56VE4Z5NZ814GZN2JZD65A",
-            "events",
-            "000007-123"
-        ]);
+        assert_eq!(
+            segments,
+            ["runs", "01JT56VE4Z5NZ814GZN2JZD65A", "events", "000007-123"]
+        );
     }
 
     #[test]
@@ -154,13 +152,16 @@ mod tests {
         let run_id: RunId = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
         let key = runs_index_by_start_key(&run_id);
         let segments: Vec<&str> = SlateKey::segments(key.as_str()).collect();
-        assert_eq!(segments, [
-            "runs",
-            "_index",
-            "by-start",
-            &run_id.created_at().format("%Y-%m-%d").to_string(),
-            &run_id.to_string(),
-        ]);
+        assert_eq!(
+            segments,
+            [
+                "runs",
+                "_index",
+                "by-start",
+                &run_id.created_at().format("%Y-%m-%d").to_string(),
+                &run_id.to_string(),
+            ]
+        );
     }
 
     #[test]

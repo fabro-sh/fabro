@@ -54,24 +54,24 @@ fn build_checkpoint(
 /// Result of a git checkpoint operation, shared with EventLifecycle.
 #[derive(Debug, Clone)]
 pub(crate) struct GitCheckpointResult {
-    pub commit_sha:   Option<String>,
+    pub commit_sha: Option<String>,
     pub push_results: Vec<(String, bool)>,
-    pub diff:         Option<String>,
+    pub diff: Option<String>,
 }
 
 /// Sub-lifecycle responsible for git operations (checkpoint commits, pushes,
 /// diffs).
 pub(crate) struct GitLifecycle {
-    pub sandbox:               Arc<dyn fabro_sandbox::Sandbox>,
-    pub emitter:               Arc<Emitter>,
-    pub run_id:                RunId,
-    pub run_store:             RunStoreHandle,
-    pub run_options:           Arc<RunOptions>,
-    pub start_node_id:         Option<String>,
+    pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
+    pub emitter: Arc<Emitter>,
+    pub run_id: RunId,
+    pub run_store: RunStoreHandle,
+    pub run_options: Arc<RunOptions>,
+    pub start_node_id: Option<String>,
     // Cross-lifecycle data (shared with EventLifecycle)
     pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
-    pub last_git_sha:          Arc<Mutex<Option<String>>>,
-    pub final_patch:           Arc<Mutex<Option<String>>>,
+    pub last_git_sha: Arc<Mutex<Option<String>>>,
+    pub final_patch: Arc<Mutex<Option<String>>>,
 }
 
 #[async_trait]
@@ -165,8 +165,8 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     Ok(sha) => Some(sha),
                     Err(e) => {
                         self.emitter.emit(&Event::RunNotice {
-                            level:   RunNoticeLevel::Warn,
-                            code:    "checkpoint_metadata_write_failed".to_string(),
+                            level: RunNoticeLevel::Warn,
+                            code: "checkpoint_metadata_write_failed".to_string(),
                             message: format!(
                                 "[node: {node_id}] metadata checkpoint write failed: {e}"
                             ),
@@ -199,9 +199,9 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         match commit_result {
             Ok(sha) => {
                 let mut git_result = GitCheckpointResult {
-                    commit_sha:   Some(sha.clone()),
+                    commit_sha: Some(sha.clone()),
                     push_results: Vec::new(),
-                    diff:         None,
+                    diff: None,
                 };
 
                 // Push run branch (skip in dry-run mode)
@@ -270,8 +270,8 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     Ok(_) => {}
                     Err(err) => {
                         self.emitter.emit(&Event::RunNotice {
-                            level:   RunNoticeLevel::Warn,
-                            code:    "git_diff_failed".to_string(),
+                            level: RunNoticeLevel::Warn,
+                            code: "git_diff_failed".to_string(),
                             message: format!("[node: {node_id}] git diff failed: {err}"),
                         });
                     }
@@ -287,7 +287,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 self.emitter.emit_scoped(
                     &Event::CheckpointFailed {
                         node_id: node_id.to_string(),
-                        error:   e.clone(),
+                        error: e.clone(),
                     },
                     &scope,
                 );
@@ -321,8 +321,8 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     Err(err) => {
                         *self.final_patch.lock().unwrap() = None;
                         self.emitter.emit(&Event::RunNotice {
-                            level:   RunNoticeLevel::Warn,
-                            code:    "git_diff_failed".to_string(),
+                            level: RunNoticeLevel::Warn,
+                            code: "git_diff_failed".to_string(),
                             message: format!("final diff failed: {err}"),
                         });
                     }

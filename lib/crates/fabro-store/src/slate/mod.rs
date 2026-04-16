@@ -17,12 +17,12 @@ use crate::{Error, ListRunsQuery, Result, RunSummary, keys};
 
 #[derive(Clone)]
 pub struct Database {
-    object_store:   Arc<dyn ObjectStore>,
-    base_prefix:    String,
+    object_store: Arc<dyn ObjectStore>,
+    base_prefix: String,
     flush_interval: Duration,
-    cache_path:     Option<PathBuf>,
-    db:             Arc<OnceCell<slatedb::Db>>,
-    active_runs:    Arc<Mutex<HashMap<RunId, Arc<RunDatabaseInner>>>>,
+    cache_path: Option<PathBuf>,
+    db: Arc<OnceCell<slatedb::Db>>,
+    active_runs: Arc<Mutex<HashMap<RunId, Arc<RunDatabaseInner>>>>,
 }
 
 impl std::fmt::Debug for Database {

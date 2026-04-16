@@ -16,7 +16,7 @@ use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, run_manife
 use crate::user_config::{self, ServerTarget};
 
 pub(crate) struct CreatedRun {
-    pub(crate) run_id:        RunId,
+    pub(crate) run_id: RunId,
     pub(crate) local_run_dir: Option<PathBuf>,
 }
 

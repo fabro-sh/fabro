@@ -31,20 +31,20 @@ use crate::{sse, user_config};
 
 #[derive(Clone)]
 pub(crate) struct ServerStoreClient {
-    client:      fabro_api::Client,
+    client: fabro_api::Client,
     http_client: fabro_http::HttpClient,
-    base_url:    String,
+    base_url: String,
 }
 
 #[derive(Debug, Clone)]
 struct LocalServerRuntime {
     active_config_path: PathBuf,
-    storage_dir:        PathBuf,
+    storage_dir: PathBuf,
 }
 
 pub(crate) struct RunAttachEventStream {
-    stream:          progenitor_client::ByteStream,
-    pending_bytes:   Vec<u8>,
+    stream: progenitor_client::ByteStream,
+    pending_bytes: Vec<u8>,
     buffered_events: VecDeque<EventEnvelope>,
 }
 
@@ -109,7 +109,7 @@ pub(crate) async fn connect_server_with_settings(
     let target = user_config::resolve_server_target(args, settings)?;
     let runtime = LocalServerRuntime {
         active_config_path: base_config_path.to_path_buf(),
-        storage_dir:        user_config::storage_dir(settings)?,
+        storage_dir: user_config::storage_dir(settings)?,
     };
     connect_target_api_client_bundle(&target, &runtime).await
 }
@@ -436,14 +436,14 @@ struct ArtifactBatchUploadManifest {
 
 #[derive(Debug, Serialize)]
 struct ArtifactBatchUploadEntry {
-    part:           String,
-    path:           String,
+    part: String,
+    path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    sha256:         Option<String>,
+    sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     expected_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content_type:   Option<String>,
+    content_type: Option<String>,
 }
 
 impl ServerStoreClient {
@@ -887,11 +887,11 @@ impl ServerStoreClient {
                 .len();
 
             manifest_entries.push(ArtifactBatchUploadEntry {
-                part:           part_name.clone(),
-                path:           artifact.path.clone(),
-                sha256:         Some(artifact.content_sha256.clone()),
+                part: part_name.clone(),
+                path: artifact.path.clone(),
+                sha256: Some(artifact.content_sha256.clone()),
                 expected_bytes: Some(artifact.bytes),
-                content_type:   Some(artifact.mime.clone()),
+                content_type: Some(artifact.mime.clone()),
             });
 
             file_parts.push((
@@ -1168,13 +1168,16 @@ mod tests {
         let record_path = fabro_config::Storage::new(storage.path())
             .server_state()
             .record_path();
-        record::write_server_record(&record_path, &record::ServerRecord {
-            pid:            std::process::id(),
-            bind:           Bind::Unix(temp_home.path().join("fabro.sock")),
-            log_path:       storage.path().join("server.log"),
-            dev_token_path: Some(token_path),
-            started_at:     chrono::Utc::now(),
-        })
+        record::write_server_record(
+            &record_path,
+            &record::ServerRecord {
+                pid: std::process::id(),
+                bind: Bind::Unix(temp_home.path().join("fabro.sock")),
+                log_path: storage.path().join("server.log"),
+                dev_token_path: Some(token_path),
+                started_at: chrono::Utc::now(),
+            },
+        )
         .unwrap();
 
         std::env::remove_var("FABRO_DEV_TOKEN");

@@ -41,19 +41,19 @@ mod tests {
     #[tokio::test]
     async fn manifest_conversion_returns_app_credentials() {
         let mut state = AppState::new();
-        state
-            .manifest_conversions
-            .insert("test-code".to_string(), ManifestConversion {
-                code:           "test-code".to_string(),
-                app_id:         99,
-                slug:           "test-dev".to_string(),
-                client_id:      "Iv1.abc123".to_string(),
-                client_secret:  "secret123".to_string(),
+        state.manifest_conversions.insert(
+            "test-code".to_string(),
+            ManifestConversion {
+                code: "test-code".to_string(),
+                app_id: 99,
+                slug: "test-dev".to_string(),
+                client_id: "Iv1.abc123".to_string(),
+                client_secret: "secret123".to_string(),
                 webhook_secret: Some("whsecret".to_string()),
-                pem:
-                    "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----"
-                        .to_string(),
-            });
+                pem: "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----"
+                    .to_string(),
+            },
+        );
         let server = TestServer::start(state).await;
 
         let client = crate::test_support::test_http_client();

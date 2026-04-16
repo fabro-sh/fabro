@@ -65,8 +65,8 @@ pub fn question_to_blocks(run_id: &str, question_id: &str, question: &Question) 
                         &opt.label,
                         &encode_action_value(&SlackActionPayload::Selected {
                             run_id: run_id.to_string(),
-                            qid:    question_id.to_string(),
-                            key:    opt.key.clone(),
+                            qid: question_id.to_string(),
+                            key: opt.key.clone(),
                         }),
                         ANSWER_ACTION_ID,
                     )
@@ -165,15 +165,15 @@ mod tests {
         let mut q = Question::new("Pick a language:", QuestionType::MultipleChoice);
         q.options = vec![
             QuestionOption {
-                key:   "rs".to_string(),
+                key: "rs".to_string(),
                 label: "Rust".to_string(),
             },
             QuestionOption {
-                key:   "ts".to_string(),
+                key: "ts".to_string(),
                 label: "TypeScript".to_string(),
             },
             QuestionOption {
-                key:   "py".to_string(),
+                key: "py".to_string(),
                 label: "Python".to_string(),
             },
         ];
@@ -251,11 +251,11 @@ mod tests {
         let mut q = Question::new("Select features:", QuestionType::MultiSelect);
         q.options = vec![
             QuestionOption {
-                key:   "a".to_string(),
+                key: "a".to_string(),
                 label: "Auth".to_string(),
             },
             QuestionOption {
-                key:   "b".to_string(),
+                key: "b".to_string(),
                 label: "Billing".to_string(),
             },
         ];

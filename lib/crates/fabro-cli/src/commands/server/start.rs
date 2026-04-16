@@ -278,13 +278,16 @@ async fn execute_foreground(
         Some(storage_dir),
         move |resolved_bind| {
             print_dev_token(printer, &home, &token);
-            record::write_server_record(&record_path, &record::ServerRecord {
-                pid,
-                bind: resolved_bind.clone(),
-                log_path: log_path.clone(),
-                dev_token_path: Some(home.dev_token_path()),
-                started_at: Utc::now(),
-            })
+            record::write_server_record(
+                &record_path,
+                &record::ServerRecord {
+                    pid,
+                    bind: resolved_bind.clone(),
+                    log_path: log_path.clone(),
+                    dev_token_path: Some(home.dev_token_path()),
+                    started_at: Utc::now(),
+                },
+            )
         },
     ))
     .await

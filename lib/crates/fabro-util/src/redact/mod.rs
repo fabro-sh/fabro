@@ -8,7 +8,7 @@ pub use jsonl::{redact_json_value, redact_jsonl_line};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Region {
     pub start: usize,
-    pub end:   usize,
+    pub end: usize,
 }
 
 /// Replace all detected secrets in `s` with "REDACTED".

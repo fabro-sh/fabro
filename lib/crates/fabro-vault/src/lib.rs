@@ -13,24 +13,24 @@ pub enum SecretType {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SecretEntry {
-    pub value:       String,
+    pub value: String,
     #[serde(rename = "type", default)]
     pub secret_type: SecretType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub created_at:  String,
-    pub updated_at:  String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SecretMetadata {
-    pub name:        String,
+    pub name: String,
     #[serde(rename = "type")]
     pub secret_type: SecretType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub created_at:  String,
-    pub updated_at:  String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug)]
@@ -68,7 +68,7 @@ impl From<serde_json::Error> for Error {
 
 #[derive(Debug)]
 pub struct Vault {
-    path:    PathBuf,
+    path: PathBuf,
     entries: HashMap<String, SecretEntry>,
 }
 
@@ -136,11 +136,11 @@ impl Vault {
             .entries
             .iter()
             .map(|(name, entry)| SecretMetadata {
-                name:        name.clone(),
+                name: name.clone(),
                 secret_type: entry.secret_type,
                 description: entry.description.clone(),
-                created_at:  entry.created_at.clone(),
-                updated_at:  entry.updated_at.clone(),
+                created_at: entry.created_at.clone(),
+                updated_at: entry.updated_at.clone(),
             })
             .collect::<Vec<_>>();
         data.sort_by(|a, b| a.name.cmp(&b.name));
@@ -343,10 +343,10 @@ mod tests {
             .unwrap();
 
         let reloaded = Vault::load(path).unwrap();
-        assert_eq!(reloaded.file_secrets(), vec![(
-            "/tmp/key.pem".to_string(),
-            "pem".to_string()
-        )]);
+        assert_eq!(
+            reloaded.file_secrets(),
+            vec![("/tmp/key.pem".to_string(), "pem".to_string())]
+        );
     }
 
     #[test]

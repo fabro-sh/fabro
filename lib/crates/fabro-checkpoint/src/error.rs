@@ -9,7 +9,7 @@ pub enum Error {
 
     #[error("reading file {path}: {source}")]
     ReadFile {
-        path:   PathBuf,
+        path: PathBuf,
         source: std::io::Error,
     },
 

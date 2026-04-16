@@ -73,7 +73,7 @@ fn subgraph_stmt(input: &str) -> IResult<&str, Statement> {
     Ok((
         rest,
         Statement::Subgraph(SubgraphStmt {
-            name:       name.map(String::from),
+            name: name.map(String::from),
             statements: stmts,
         }),
     ))
@@ -141,10 +141,13 @@ pub fn parse_dot_graph(input: &str) -> IResult<&str, DotGraph> {
     let (rest, _) = preceded(ws, char('{'))(rest)?;
     let (rest, stmts) = many0(statement)(rest)?;
     let (rest, _) = preceded(ws, char('}'))(rest)?;
-    Ok((rest, DotGraph {
-        name:       name.to_string(),
-        statements: stmts,
-    }))
+    Ok((
+        rest,
+        DotGraph {
+            name: name.to_string(),
+            statements: stmts,
+        },
+    ))
 }
 
 // We need arrow to work with explicit error types

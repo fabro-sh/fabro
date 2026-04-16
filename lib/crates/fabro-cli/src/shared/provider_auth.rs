@@ -71,7 +71,7 @@ pub(crate) enum ApiKeySource {
 pub(crate) async fn validate_api_key(provider: Provider, api_key: &str) -> Result<(), String> {
     let auth_header = if provider == Provider::Anthropic {
         ApiKeyHeader::Custom {
-            name:  "x-api-key".to_string(),
+            name: "x-api-key".to_string(),
             value: api_key.to_string(),
         }
     } else {

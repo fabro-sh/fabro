@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StageId {
     node_id: String,
-    visit:   u32,
+    visit: u32,
 }
 
 impl StageId {
@@ -190,11 +190,14 @@ mod tests {
             StageId::new("code", 1),
         ];
         stages.sort();
-        assert_eq!(stages, vec![
-            StageId::new("build", 1),
-            StageId::new("code", 1),
-            StageId::new("code", 2),
-        ]);
+        assert_eq!(
+            stages,
+            vec![
+                StageId::new("build", 1),
+                StageId::new("code", 1),
+                StageId::new("code", 2),
+            ]
+        );
     }
 
     #[test]

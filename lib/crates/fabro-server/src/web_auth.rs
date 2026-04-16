@@ -22,21 +22,21 @@ const OAUTH_STATE_COOKIE_NAME: &str = "fabro_oauth_state";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionCookie {
-    pub v:           u8,
-    pub login:       String,
+    pub v: u8,
+    pub login: String,
     pub auth_method: RunAuthMethod,
     pub provider_id: Option<i64>,
-    pub name:        String,
-    pub email:       String,
-    pub avatar_url:  String,
-    pub user_url:    String,
-    pub iat:         i64,
-    pub exp:         i64,
+    pub name: String,
+    pub email: String,
+    pub avatar_url: String,
+    pub user_url: String,
+    pub iat: i64,
+    pub exp: i64,
 }
 
 #[derive(Deserialize)]
 struct OAuthCallbackParams {
-    code:  String,
+    code: String,
     state: String,
 }
 
@@ -57,21 +57,21 @@ struct AuthConfigResponse {
 
 #[derive(Serialize)]
 struct AuthMeResponse {
-    user:      SessionUser,
-    provider:  String,
+    user: SessionUser,
+    provider: String,
     #[serde(rename = "demoMode")]
     demo_mode: bool,
 }
 
 #[derive(Serialize)]
 struct SessionUser {
-    login:      String,
-    name:       String,
-    email:      String,
+    login: String,
+    name: String,
+    email: String,
     #[serde(rename = "avatarUrl")]
     avatar_url: String,
     #[serde(rename = "userUrl")]
-    user_url:   String,
+    user_url: String,
 }
 
 #[derive(Deserialize)]
@@ -81,16 +81,16 @@ struct GitHubTokenResponse {
 
 #[derive(Deserialize)]
 struct GitHubUser {
-    id:         i64,
-    login:      String,
-    name:       Option<String>,
+    id: i64,
+    login: String,
+    name: Option<String>,
     avatar_url: String,
 }
 
 #[derive(Deserialize)]
 struct GitHubEmail {
-    email:    String,
-    primary:  bool,
+    email: String,
+    primary: bool,
     verified: bool,
 }
 
@@ -245,16 +245,16 @@ async fn login_dev_token(
 
     let now = chrono::Utc::now();
     let session = SessionCookie {
-        v:           1,
-        login:       "dev".to_string(),
+        v: 1,
+        login: "dev".to_string(),
         auth_method: RunAuthMethod::DevToken,
         provider_id: None,
-        name:        "Development User".to_string(),
-        email:       "dev@localhost".to_string(),
-        avatar_url:  "/logo.svg".to_string(),
-        user_url:    String::new(),
-        iat:         now.timestamp(),
-        exp:         (now + chrono::Duration::days(30)).timestamp(),
+        name: "Development User".to_string(),
+        email: "dev@localhost".to_string(),
+        avatar_url: "/logo.svg".to_string(),
+        user_url: String::new(),
+        iat: now.timestamp(),
+        exp: (now + chrono::Duration::days(30)).timestamp(),
     };
 
     let mut jar = CookieJar::new();
@@ -334,14 +334,16 @@ async fn login_github(
     }
 
     let state_token = format!("fabro-{}", ulid::Ulid::new());
-    let authorize_url =
-        fabro_http::Url::parse_with_params("https://github.com/login/oauth/authorize", &[
+    let authorize_url = fabro_http::Url::parse_with_params(
+        "https://github.com/login/oauth/authorize",
+        &[
             ("client_id", client_id.as_str()),
             ("redirect_uri", &format!("{web_url}/auth/callback/github")),
             ("scope", "read:user user:email"),
             ("state", state_token.as_str()),
-        ])
-        .expect("GitHub authorize URL should be valid");
+        ],
+    )
+    .expect("GitHub authorize URL should be valid");
 
     debug!(redirect_uri = %format!("{web_url}/auth/callback/github"), "OAuth login redirecting to GitHub");
 
@@ -533,16 +535,16 @@ async fn callback_github(
         .unwrap_or_default();
     let now = chrono::Utc::now();
     let session = SessionCookie {
-        v:           1,
-        login:       profile.login.clone(),
+        v: 1,
+        login: profile.login.clone(),
         auth_method: RunAuthMethod::Github,
         provider_id: Some(profile.id),
-        name:        profile.name.unwrap_or_else(|| profile.login.clone()),
-        email:       primary_email,
-        avatar_url:  profile.avatar_url,
-        user_url:    format!("https://github.com/{}", profile.login),
-        iat:         now.timestamp(),
-        exp:         (now + chrono::Duration::days(30)).timestamp(),
+        name: profile.name.unwrap_or_else(|| profile.login.clone()),
+        email: primary_email,
+        avatar_url: profile.avatar_url,
+        user_url: format!("https://github.com/{}", profile.login),
+        iat: now.timestamp(),
+        exp: (now + chrono::Duration::days(30)).timestamp(),
     };
 
     info!(login = %session.login, "OAuth login succeeded");
@@ -609,11 +611,11 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
         .is_some_and(|cookie| cookie.value() == "1");
     Json(AuthMeResponse {
         user: SessionUser {
-            login:      session.login,
-            name:       session.name,
-            email:      session.email,
+            login: session.login,
+            name: session.name,
+            email: session.email,
             avatar_url: session.avatar_url,
-            user_url:   session.user_url,
+            user_url: session.user_url,
         },
         provider: session_provider(session.auth_method).to_string(),
         demo_mode,
@@ -662,14 +664,14 @@ mod tests {
 
     fn dev_token_auth_mode() -> AuthMode {
         AuthMode::Enabled(ConfiguredAuth {
-            methods:   vec![ServerAuthMethod::DevToken],
+            methods: vec![ServerAuthMethod::DevToken],
             dev_token: Some(DEV_TOKEN.to_string()),
         })
     }
 
     fn github_auth_mode() -> AuthMode {
         AuthMode::Enabled(ConfiguredAuth {
-            methods:   vec![ServerAuthMethod::Github],
+            methods: vec![ServerAuthMethod::Github],
             dev_token: None,
         })
     }
@@ -679,11 +681,11 @@ mod tests {
             server: Some(ServerLayer {
                 web: Some(ServerWebLayer {
                     enabled: Some(true),
-                    url:     Some(web_url.into()),
+                    url: Some(web_url.into()),
                 }),
                 auth: Some(ServerAuthLayer {
                     methods: Some(vec![ServerAuthMethod::Github]),
-                    github:  Some(ServerAuthGithubLayer {
+                    github: Some(ServerAuthGithubLayer {
                         allowed_usernames: vec!["octocat".to_string()],
                     }),
                 }),

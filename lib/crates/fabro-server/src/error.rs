@@ -54,7 +54,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Serialize)]
 struct ErrorEntry {
     status: String,
-    title:  String,
+    title: String,
     detail: String,
 }
 

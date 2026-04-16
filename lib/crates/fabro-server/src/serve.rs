@@ -223,7 +223,7 @@ fn bind_override_layer(bind: BindRequest) -> SettingsLayer {
         },
         BindRequest::Tcp(address) => ServerListenLayer::Tcp {
             address: Some(InterpString::parse(&address.to_string())),
-            tls:     None,
+            tls: None,
         },
         BindRequest::TcpHost(_) => {
             unreachable!("host-only bind requests are handled before building a settings override")
@@ -501,6 +501,10 @@ where
     let mut watch_web_child = if watch_web {
         let web_dir = std::env::current_dir()?.join("apps/fabro-web");
         info!(dir = %web_dir.display(), "Starting bun run dev (--watch-web)");
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "Intentional synchronous spawn of long-lived child process managed outside the Tokio runtime"
+        )]
         let child = std::process::Command::new("bun")
             .args(["run", "dev"])
             .current_dir(&web_dir)
@@ -719,14 +723,14 @@ mod tests {
     fn apply_runtime_settings_preserves_storage_dir() {
         let base = SettingsLayer::default();
         let args = ServeArgs {
-            bind:                None,
-            model:               None,
-            provider:            None,
-            sandbox:             None,
-            web:                 false,
-            no_web:              false,
+            bind: None,
+            model: None,
+            provider: None,
+            sandbox: None,
+            web: false,
+            no_web: false,
             max_concurrent_runs: None,
-            config:              None,
+            config: None,
         };
 
         let resolved = apply_runtime_settings(&base, &args, &PathBuf::from("/srv/fabro-storage"));
@@ -751,14 +755,14 @@ enabled = false
 ",
         );
         let args = ServeArgs {
-            bind:                None,
-            model:               None,
-            provider:            None,
-            sandbox:             None,
-            web:                 true,
-            no_web:              false,
+            bind: None,
+            model: None,
+            provider: None,
+            sandbox: None,
+            web: true,
+            no_web: false,
             max_concurrent_runs: None,
-            config:              None,
+            config: None,
         };
 
         let resolved = apply_runtime_settings(&base, &args, &PathBuf::from("/srv/fabro"));
@@ -777,14 +781,14 @@ enabled = false
     fn apply_runtime_settings_disables_web_from_cli_flag() {
         let base = SettingsLayer::default();
         let args = ServeArgs {
-            bind:                None,
-            model:               None,
-            provider:            None,
-            sandbox:             None,
-            web:                 false,
-            no_web:              true,
+            bind: None,
+            model: None,
+            provider: None,
+            sandbox: None,
+            web: false,
+            no_web: true,
             max_concurrent_runs: None,
-            config:              None,
+            config: None,
         };
 
         let resolved = apply_runtime_settings(&base, &args, &PathBuf::from("/srv/fabro"));

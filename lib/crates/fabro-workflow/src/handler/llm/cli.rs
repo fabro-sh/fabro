@@ -211,8 +211,8 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
 /// Parsed response from a CLI tool invocation.
 #[derive(Debug)]
 pub struct CliResponse {
-    pub text:          String,
-    pub input_tokens:  i64,
+    pub text: String,
+    pub input_tokens: i64,
     pub output_tokens: i64,
 }
 
@@ -380,11 +380,11 @@ fn shell_quote(val: &str) -> String {
 /// CLI backend that invokes external CLI tools (claude, codex, gemini) via
 /// `exec_command()`.
 pub struct AgentCliBackend {
-    model:         String,
-    provider:      Provider,
-    env:           HashMap<String, String>,
+    model: String,
+    provider: Provider,
+    env: HashMap<String, String>,
     poll_interval: std::time::Duration,
-    resolver:      Option<CredentialResolver>,
+    resolver: Option<CredentialResolver>,
 }
 
 impl AgentCliBackend {
@@ -517,12 +517,12 @@ impl CodergenBackend for AgentCliBackend {
         let stage_scope = StageScope::for_handler(context, &node.id);
         emitter.emit_scoped(
             &Event::AgentCliStarted {
-                node_id:  node.id.clone(),
-                visit:    stage_scope.visit,
-                mode:     "cli".to_string(),
+                node_id: node.id.clone(),
+                visit: stage_scope.visit,
+                mode: "cli".to_string(),
                 provider: provider.as_str().to_string(),
-                model:    model.to_string(),
-                command:  command.clone(),
+                model: model.to_string(),
+                command: command.clone(),
             },
             &stage_scope,
         );
@@ -654,10 +654,10 @@ impl CodergenBackend for AgentCliBackend {
         };
         emitter.emit_scoped(
             &Event::AgentCliCompleted {
-                node_id:     node.id.clone(),
-                stdout:      result.stdout.clone(),
-                stderr:      result.stderr.clone(),
-                exit_code:   result.exit_code,
+                node_id: node.id.clone(),
+                stdout: result.stdout.clone(),
+                stderr: result.stderr.clone(),
+                exit_code: result.exit_code,
                 duration_ms: result.duration_ms,
             },
             &stage_scope,
@@ -724,12 +724,16 @@ impl CodergenBackend for AgentCliBackend {
             }
         };
 
-        let stage_usage =
-            billed_model_usage_from_llm(model, provider, node.speed(), &TokenCounts {
+        let stage_usage = billed_model_usage_from_llm(
+            model,
+            provider,
+            node.speed(),
+            &TokenCounts {
                 input_tokens: parsed.input_tokens,
                 output_tokens: parsed.output_tokens,
                 ..TokenCounts::default()
-            });
+            },
+        );
 
         Ok(CodergenResult::Text {
             text: parsed.text,
@@ -859,7 +863,7 @@ mod tests {
 
     /// Mock sandbox that returns pre-configured ExecResults in FIFO order.
     struct CliMockSandbox {
-        results:  Mutex<VecDeque<ExecResult>>,
+        results: Mutex<VecDeque<ExecResult>>,
         commands: Arc<Mutex<Vec<String>>>,
     }
 
@@ -952,20 +956,20 @@ mod tests {
 
     fn ok_result() -> ExecResult {
         ExecResult {
-            exit_code:   0,
-            stdout:      String::new(),
-            stderr:      String::new(),
-            timed_out:   false,
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            timed_out: false,
             duration_ms: 10,
         }
     }
 
     fn fail_result(code: i32) -> ExecResult {
         ExecResult {
-            exit_code:   code,
-            stdout:      String::new(),
-            stderr:      "error".to_string(),
-            timed_out:   false,
+            exit_code: code,
+            stdout: String::new(),
+            stderr: "error".to_string(),
+            timed_out: false,
             duration_ms: 10,
         }
     }
@@ -1229,9 +1233,9 @@ mod tests {
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         ) -> Result<CodergenResult, Error> {
             Ok(CodergenResult::Text {
-                text:              "stub".to_string(),
-                usage:             None,
-                files_touched:     Vec::new(),
+                text: "stub".to_string(),
+                usage: None,
+                files_touched: Vec::new(),
                 last_file_touched: None,
             })
         }

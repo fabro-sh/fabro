@@ -4,13 +4,13 @@ use serde_json::Value;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Track {
     #[serde(flatten)]
-    pub user:       User,
-    pub event:      String,
+    pub user: User,
+    pub event: String,
     pub properties: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context:    Option<Value>,
+    pub context: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub timestamp:  Option<String>,
+    pub timestamp: Option<String>,
     #[serde(rename = "messageId")]
     pub message_id: String,
 }
@@ -20,7 +20,7 @@ pub struct Track {
 pub enum User {
     Both {
         #[serde(rename = "userId")]
-        user_id:      String,
+        user_id: String,
         #[serde(rename = "anonymousId")]
         anonymous_id: String,
     },
@@ -43,13 +43,13 @@ mod tests {
     #[test]
     fn track_serialization_anonymous() {
         let track = Track {
-            user:       User::AnonymousId {
+            user: User::AnonymousId {
                 anonymous_id: "abc-123".to_string(),
             },
-            event:      "Command Invoked".to_string(),
+            event: "Command Invoked".to_string(),
             properties: json!({"command": "run"}),
-            context:    Some(json!({"os": {"name": "macos"}})),
-            timestamp:  Some("2025-01-01T00:00:00Z".to_string()),
+            context: Some(json!({"os": {"name": "macos"}})),
+            timestamp: Some("2025-01-01T00:00:00Z".to_string()),
             message_id: "msg-1".to_string(),
         };
 
@@ -74,13 +74,13 @@ mod tests {
     #[test]
     fn track_serialization_user_id() {
         let track = Track {
-            user:       User::UserId {
+            user: User::UserId {
                 user_id: "user-456".to_string(),
             },
-            event:      "test".to_string(),
+            event: "test".to_string(),
             properties: json!({}),
-            context:    None,
-            timestamp:  None,
+            context: None,
+            timestamp: None,
             message_id: "msg-2".to_string(),
         };
 
@@ -97,14 +97,14 @@ mod tests {
     #[test]
     fn track_serialization_both() {
         let track = Track {
-            user:       User::Both {
-                user_id:      "user-456".to_string(),
+            user: User::Both {
+                user_id: "user-456".to_string(),
                 anonymous_id: "abc-123".to_string(),
             },
-            event:      "test".to_string(),
+            event: "test".to_string(),
             properties: json!({}),
-            context:    None,
-            timestamp:  None,
+            context: None,
+            timestamp: None,
             message_id: "msg-3".to_string(),
         };
 
@@ -122,13 +122,13 @@ mod tests {
     #[test]
     fn track_round_trip() {
         let track = Track {
-            user:       User::AnonymousId {
+            user: User::AnonymousId {
                 anonymous_id: "abc".to_string(),
             },
-            event:      "test".to_string(),
+            event: "test".to_string(),
             properties: json!({"key": "value"}),
-            context:    Some(json!({"app": {"name": "fabro"}})),
-            timestamp:  Some("2025-06-01T12:00:00Z".to_string()),
+            context: Some(json!({"app": {"name": "fabro"}})),
+            timestamp: Some("2025-06-01T12:00:00Z".to_string()),
             message_id: "msg-rt".to_string(),
         };
 

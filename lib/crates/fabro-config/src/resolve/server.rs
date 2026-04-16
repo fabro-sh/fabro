@@ -108,7 +108,7 @@ fn resolve_web(_api: Option<&ServerApiLayer>, layer: Option<&ServerWebLayer>) ->
         enabled: layer
             .enabled
             .expect("defaults.toml should provide server.web.enabled"),
-        url:     layer
+        url: layer
             .url
             .clone()
             .expect("defaults.toml should provide server.web.url"),
@@ -124,7 +124,7 @@ fn resolve_auth(
         .unwrap_or_else(|| vec![ServerAuthMethod::DevToken]);
     if methods.is_empty() {
         errors.push(ResolveError::Invalid {
-            path:   "server.auth.methods".to_string(),
+            path: "server.auth.methods".to_string(),
             reason: "must not be empty".to_string(),
         });
     }
@@ -136,7 +136,7 @@ fn resolve_auth(
         .unwrap_or_default();
     if methods.contains(&ServerAuthMethod::Github) && github.allowed_usernames.is_empty() {
         errors.push(ResolveError::Invalid {
-            path:   "server.auth.github.allowed_usernames".to_string(),
+            path: "server.auth.github.allowed_usernames".to_string(),
             reason: "must not be empty when github auth is enabled".to_string(),
         });
     }
@@ -162,7 +162,7 @@ fn resolve_artifacts(
         prefix: layer
             .and_then(|artifacts| artifacts.prefix.clone())
             .expect("defaults.toml should provide server.artifacts.prefix"),
-        store:  resolve_object_store(
+        store: resolve_object_store(
             provider,
             layer.and_then(|artifacts| artifacts.local.as_ref()),
             layer.and_then(|artifacts| artifacts.s3.as_ref()),
@@ -257,16 +257,16 @@ fn object_store_default_root(storage_root: &InterpString, domain: &str) -> Inter
 
 fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegrationsSettings {
     ServerIntegrationsSettings {
-        github:  layer
+        github: layer
             .and_then(|integrations| integrations.github.as_ref())
             .map(|github| GithubIntegrationSettings {
-                enabled:     github.enabled.unwrap_or(true),
-                strategy:    github.strategy.unwrap_or_default(),
-                app_id:      github.app_id.clone(),
-                client_id:   github.client_id.clone(),
-                slug:        github.slug.clone(),
+                enabled: github.enabled.unwrap_or(true),
+                strategy: github.strategy.unwrap_or_default(),
+                app_id: github.app_id.clone(),
+                client_id: github.client_id.clone(),
+                slug: github.slug.clone(),
                 permissions: github.permissions.clone(),
-                webhooks:    github
+                webhooks: github
                     .webhooks
                     .as_ref()
                     .map(|webhooks| IntegrationWebhooksSettings {
@@ -274,10 +274,10 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
                     }),
             })
             .unwrap_or_default(),
-        slack:   layer
+        slack: layer
             .and_then(|integrations| integrations.slack.as_ref())
             .map(|slack| SlackIntegrationSettings {
-                enabled:         slack.enabled.unwrap_or(true),
+                enabled: slack.enabled.unwrap_or(true),
                 default_channel: slack.default_channel.clone(),
             })
             .unwrap_or_default(),
@@ -287,7 +287,7 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
                 enabled: discord.enabled.unwrap_or(true),
             })
             .unwrap_or_default(),
-        teams:   layer
+        teams: layer
             .and_then(|integrations| integrations.teams.as_ref())
             .map(|teams| TeamsIntegrationSettings {
                 enabled: teams.enabled.unwrap_or(true),
