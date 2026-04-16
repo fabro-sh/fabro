@@ -1,0 +1,6 @@
+{
+  "status": "fail",
+  "notes": null,
+  "failure_reason": "Script failed with exit code: 101\n\n## stdout\nerror: use of a disallowed method `std::process::Command::new`\n   --> lib/crates/fabro-server/src/serve.rs:504:21\n    |\n504 |         let child = std::process::Command::new(\"bun\")\n    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\n    = note: Prefer tokio::process::Command on Tokio paths; document intentional synchronous subprocesses with #[expect(clippy::disallowed_methods, reason = \"...\")]\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#disallowed_methods\n    = note: requested on the command line with `-D clippy::disallowed-methods`\n\nerror: could not compile `fabro-server` (lib) due to 1 previous error\n",
+  "timestamp": "2026-04-16T17:18:10.630122Z"
+}
