@@ -20,7 +20,7 @@ fn help() {
     // only appears in debug-build help output. Strip it so the snapshot is
     // consistent across debug and release builds.
     filters.push((
-        r"(?m)^ {6}--watch-web\n {14}Run `bun run dev`.*\n".to_string(),
+        r"(?m)^ {6}--watch-web\n {10}Run `bun run dev`.*\n".to_string(),
         String::new(),
     ));
     fabro_snapshot!(filters, cmd, @"

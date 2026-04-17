@@ -209,9 +209,16 @@ pub fn telemetry_level_from(env_value: Option<&str>) -> TelemetryLevel {
 mod tests {
     use super::*;
 
+    #[cfg(debug_assertions)]
     #[test]
     fn telemetry_level_defaults_to_off_in_debug() {
         assert_eq!(telemetry_level_from(None), TelemetryLevel::Off);
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn telemetry_level_defaults_to_all_in_release() {
+        assert_eq!(telemetry_level_from(None), TelemetryLevel::All);
     }
 
     #[test]
