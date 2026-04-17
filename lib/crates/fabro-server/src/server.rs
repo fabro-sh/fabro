@@ -8167,7 +8167,7 @@ slug = "fabro"
     #[tokio::test]
     async fn render_graph_bytes_returns_bad_request_for_render_error_protocol() {
         let (_dir, script_path) = write_test_executable(
-            "#!/bin/sh\nprintf 'RENDER_ERROR:failed to parse DOT source'\nexit 0\n",
+            "#!/bin/sh\ncat >/dev/null\nprintf 'RENDER_ERROR:failed to parse DOT source'\nexit 0\n",
         );
 
         let response =
