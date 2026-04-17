@@ -243,7 +243,17 @@ fn shorten_session_id(id: &str) -> String {
 }
 
 fn session_lock_path(root: &Path) -> PathBuf {
-    root.join("session.lock")
+    // Keep the lock outside the session root so cleanup can remove the
+    // session directory without unlinking the lock file another process
+    // is relying on for exclusion.
+    let lock_dir = root
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(".locks");
+    let lock_name = root
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("session"));
+    lock_dir.join(Path::new(lock_name)).with_extension("lock")
 }
 
 fn session_clients_dir(root: &Path) -> PathBuf {
@@ -1853,6 +1863,18 @@ mod tests {
         );
         assert_eq!(paths.server.storage_dir, paths.root.join("storage"));
         assert_eq!(paths.server.socket_path, paths.root.join("fabro.sock"));
+    }
+
+    #[test]
+    fn session_lock_path_lives_outside_session_root() {
+        let root = Path::new("/tmp/fx/n-session");
+        let lock_path = session_lock_path(root);
+
+        assert!(
+            !lock_path.starts_with(root),
+            "session lock must survive remove_dir_all({})",
+            root.display()
+        );
     }
 
     #[test]
