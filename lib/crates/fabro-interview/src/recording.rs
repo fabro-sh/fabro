@@ -53,7 +53,12 @@ impl RecordingInterviewer {
     /// Returns an error if serialization or file writing fails.
     pub fn save_to_file(&self, path: &Path) -> std::io::Result<()> {
         let json = self.to_json()?;
-        std::fs::write(path, json)?;
+        std::fs::write(path, json).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!("write interview recording {}: {err}", path.display()),
+            )
+        })?;
         Ok(())
     }
 
@@ -62,7 +67,12 @@ impl RecordingInterviewer {
     /// # Errors
     /// Returns an error if file reading or deserialization fails.
     pub fn load_from_file(path: &Path) -> std::io::Result<Vec<(Question, Answer)>> {
-        let json = std::fs::read_to_string(path)?;
+        let json = std::fs::read_to_string(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!("read interview recording {}: {err}", path.display()),
+            )
+        })?;
         Self::from_json(&json)
     }
 }

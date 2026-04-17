@@ -1326,10 +1326,9 @@ fn persist_server_env_secrets(storage_dir: &Path, secrets: &[(String, String)]) 
         return Ok(());
     }
 
-    envfile::merge_env_file(
-        &Storage::new(storage_dir).server_state().env_path(),
-        secrets.iter().cloned(),
-    )?;
+    let env_path = Storage::new(storage_dir).server_state().env_path();
+    envfile::merge_env_file(&env_path, secrets.iter().cloned())
+        .with_context(|| format!("merging server env secrets into {}", env_path.display()))?;
     Ok(())
 }
 
@@ -1364,14 +1363,18 @@ fn restore_optional_file(path: &Path, previous_contents: Option<&str>) -> Result
     match previous_contents {
         Some(contents) => {
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("creating directory {}", parent.display()))?;
             }
-            std::fs::write(path, contents)?;
+            std::fs::write(path, contents)
+                .with_context(|| format!("restoring {}", path.display()))?;
         }
         None => match std::fs::remove_file(path) {
             Ok(()) => {}
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err.into()),
+            Err(err) => {
+                return Err(anyhow::Error::new(err).context(format!("removing {}", path.display())));
+            }
         },
     }
 
@@ -1389,7 +1392,8 @@ fn persist_github_install_changes(
     let previous_vault = std::fs::read_to_string(&vault_path).ok();
 
     let result = (|| -> Result<()> {
-        let mut server_env = envfile::read_env_file(&server_env_path)?;
+        let mut server_env = envfile::read_env_file(&server_env_path)
+            .with_context(|| format!("reading env file {}", server_env_path.display()))?;
         for key in &writes.server_env_remove {
             server_env.remove(*key);
         }
@@ -1399,7 +1403,8 @@ fn persist_github_install_changes(
         if server_env.is_empty() {
             restore_optional_file(&server_env_path, None)?;
         } else {
-            envfile::write_env_file(&server_env_path, &server_env)?;
+            envfile::write_env_file(&server_env_path, &server_env)
+                .with_context(|| format!("writing env file {}", server_env_path.display()))?;
         }
 
         let mut vault = Vault::load(vault_path.clone()).map_err(anyhow::Error::from)?;
@@ -1415,7 +1420,14 @@ fn persist_github_install_changes(
                 .map_err(anyhow::Error::from)?;
         }
 
-        std::fs::write(writes.settings_write.path, writes.settings_write.contents)?;
+        std::fs::write(writes.settings_write.path, writes.settings_write.contents).with_context(
+            || {
+                format!(
+                    "writing settings file {}",
+                    writes.settings_write.path.display()
+                )
+            },
+        )?;
         Ok(())
     })();
 
@@ -1467,7 +1479,8 @@ async fn persist_install_outputs_with_settings(
     persist_server_env_secrets(storage_dir, server_env_secrets)?;
 
     if let Some(write) = settings_write {
-        std::fs::write(write.path, write.contents)?;
+        std::fs::write(write.path, write.contents)
+            .with_context(|| format!("writing settings file {}", write.path.display()))?;
     }
 
     let persist_result = persist_vault_secrets_with(
@@ -1482,8 +1495,10 @@ async fn persist_install_outputs_with_settings(
     if let Err(err) = persist_result {
         if let Some(write) = settings_write {
             match write.previous_contents {
-                Some(previous) => std::fs::write(write.path, previous)?,
-                None if write.path.exists() => std::fs::remove_file(write.path)?,
+                Some(previous) => std::fs::write(write.path, previous)
+                    .with_context(|| format!("restoring settings file {}", write.path.display()))?,
+                None if write.path.exists() => std::fs::remove_file(write.path)
+                    .with_context(|| format!("removing settings file {}", write.path.display()))?,
                 None => {}
             }
         }
@@ -1818,7 +1833,8 @@ async fn run_install_inner(
     );
     fabro_util::printerr!(printer, "");
 
-    std::fs::create_dir_all(&fabro_dir)?;
+    std::fs::create_dir_all(&fabro_dir)
+        .with_context(|| format!("creating fabro home directory {}", fabro_dir.display()))?;
 
     {
         let env_path = legacy_env::legacy_env_file_path();

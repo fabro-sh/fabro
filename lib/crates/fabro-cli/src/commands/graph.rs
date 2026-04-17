@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use anyhow::bail;
+use anyhow::{Context, bail};
 use fabro_api::types;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
@@ -62,7 +62,8 @@ pub(crate) async fn run(
         .await?;
 
     if let Some(ref output_path) = args.output {
-        std::fs::write(output_path, &rendered)?;
+        std::fs::write(output_path, &rendered)
+            .with_context(|| format!("writing rendered graph to {}", output_path.display()))?;
         if cli.output.format == OutputFormat::Json {
             print_json_pretty(&serde_json::json!({
                 "path": absolute_or_current(output_path),

@@ -1,6 +1,7 @@
 use std::panic::PanicHookInfo;
 use std::path::Path;
 
+use anyhow::Context as _;
 use sentry::integrations::backtrace;
 use sentry::protocol::{Context, Event, Exception, Mechanism, OsContext, Values};
 
@@ -116,7 +117,8 @@ fn spawn_panic_sender(event: &Event<'static>) {
 pub fn capture(path: &Path) -> anyhow::Result<()> {
     let dsn = SENTRY_DSN.ok_or_else(|| anyhow::anyhow!("SENTRY_DSN not set at compile time"))?;
 
-    let json = std::fs::read(path)?;
+    let json =
+        std::fs::read(path).with_context(|| format!("read panic payload {}", path.display()))?;
     let event: Event<'static> = serde_json::from_slice(&json)?;
 
     let guard = sentry::init((dsn, sentry::ClientOptions::default()));

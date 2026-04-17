@@ -157,7 +157,8 @@ fn build_local_object_store_with_preference(
         return Ok(Arc::new(InMemory::new()));
     }
 
-    std::fs::create_dir_all(store_path)?;
+    std::fs::create_dir_all(store_path)
+        .with_context(|| format!("creating object store directory {}", store_path.display()))?;
     Ok(Arc::new(LocalFileSystem::new_with_prefix(store_path)?))
 }
 
@@ -318,7 +319,8 @@ where
     let bind_request =
         resolve_bind_request_from_settings(&effective_settings, args.bind.as_deref())?;
     let shared_settings = Arc::new(RwLock::new(effective_settings));
-    std::fs::create_dir_all(&data_dir)?;
+    std::fs::create_dir_all(&data_dir)
+        .with_context(|| format!("creating data directory {}", data_dir.display()))?;
     let (auth_mode, max_concurrent_runs) = {
         let auth_mode = resolve_auth_mode_with_lookup(&resolved_server_settings, |name| {
             server_secrets.get(name)
@@ -499,7 +501,9 @@ where
 
     #[cfg(debug_assertions)]
     let mut watch_web_child = if watch_web {
-        let web_dir = std::env::current_dir()?.join("apps/fabro-web");
+        let web_dir = std::env::current_dir()
+            .context("reading current directory for --watch-web")?
+            .join("apps/fabro-web");
         info!(dir = %web_dir.display(), "Starting bun run dev (--watch-web)");
         #[expect(
             clippy::disallowed_methods,
@@ -508,7 +512,8 @@ where
         let child = std::process::Command::new("bun")
             .args(["run", "dev"])
             .current_dir(&web_dir)
-            .spawn()?;
+            .spawn()
+            .with_context(|| format!("spawning `bun run dev` in {}", web_dir.display()))?;
         Some(child)
     } else {
         None
@@ -577,10 +582,12 @@ async fn bind_listener(requested: &BindRequest) -> anyhow::Result<BoundServerLis
     match requested {
         BindRequest::Unix(path) => {
             if path.exists() {
-                std::fs::remove_file(path)?;
+                std::fs::remove_file(path)
+                    .with_context(|| format!("removing stale unix socket {}", path.display()))?;
             }
 
-            let listener = UnixListener::bind(path)?;
+            let listener = UnixListener::bind(path)
+                .with_context(|| format!("binding unix socket {}", path.display()))?;
             Ok(BoundServerListener {
                 listener: BoundListener::Unix(listener),
                 bind: Bind::Unix(path.clone()),

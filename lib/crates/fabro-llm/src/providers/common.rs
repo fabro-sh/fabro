@@ -100,7 +100,9 @@ pub fn load_file_as_base64(path: &str) -> Result<(String, String), std::io::Erro
             format!("{home}/{rest}")
         },
     );
-    let data = std::fs::read(&expanded)?;
+    let data = std::fs::read(&expanded).map_err(|err| {
+        std::io::Error::new(err.kind(), format!("read attachment {expanded}: {err}"))
+    })?;
     let mime = mime_from_extension(&expanded).to_string();
     let b64 = BASE64_STANDARD.encode(&data);
     Ok((b64, mime))

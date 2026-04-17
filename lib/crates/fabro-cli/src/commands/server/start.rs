@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use fabro_config::user::load_settings_config;
 use fabro_config::{Storage, envfile, resolve_server_from_file};
@@ -174,13 +174,33 @@ fn load_or_create_local_dev_token(storage_dir: &Path, home: &Home) -> Result<Str
         .and_then(|entries| entries.get("FABRO_DEV_TOKEN").cloned())
         .filter(|token| dev_token::validate_dev_token_format(token))
     {
-        dev_token::write_dev_token(&home.dev_token_path(), &token)?;
-        dev_token::write_dev_token(&storage.server_state().dev_token_path(), &token)?;
+        dev_token::write_dev_token(&home.dev_token_path(), &token)
+            .with_context(|| format!("writing dev token to {}", home.dev_token_path().display()))?;
+        dev_token::write_dev_token(&storage.server_state().dev_token_path(), &token).with_context(
+            || {
+                format!(
+                    "writing dev token to {}",
+                    storage.server_state().dev_token_path().display()
+                )
+            },
+        )?;
         return Ok(token);
     }
 
-    let token = dev_token::load_or_create_dev_token(&home.dev_token_path())?;
-    dev_token::write_dev_token(&storage.server_state().dev_token_path(), &token)?;
+    let token = dev_token::load_or_create_dev_token(&home.dev_token_path()).with_context(|| {
+        format!(
+            "loading or creating dev token at {}",
+            home.dev_token_path().display()
+        )
+    })?;
+    dev_token::write_dev_token(&storage.server_state().dev_token_path(), &token).with_context(
+        || {
+            format!(
+                "writing dev token to {}",
+                storage.server_state().dev_token_path().display()
+            )
+        },
+    )?;
     Ok(token)
 }
 
@@ -207,7 +227,8 @@ fn load_or_create_local_session_secret(storage_dir: &Path) -> Result<String> {
     }
 
     let secret = session_secret::generate_session_secret();
-    envfile::merge_env_file(&server_env_path, [("SESSION_SECRET", secret.as_str())])?;
+    envfile::merge_env_file(&server_env_path, [("SESSION_SECRET", secret.as_str())])
+        .with_context(|| format!("merging session secret into {}", server_env_path.display()))?;
     Ok(secret)
 }
 
@@ -319,13 +340,17 @@ async fn execute_daemon(
     let server_state = Storage::new(storage_dir).server_state();
     let log_path = server_state.log_path();
     if let Some(parent) = log_path.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating log directory {}", parent.display()))?;
     }
 
     let record_path = server_state.record_path();
-    let log_file = std::fs::File::create(&log_path)?;
-    let stdout_log = log_file.try_clone()?;
-    let exe = std::env::current_exe()?;
+    let log_file = std::fs::File::create(&log_path)
+        .with_context(|| format!("creating server log file {}", log_path.display()))?;
+    let stdout_log = log_file
+        .try_clone()
+        .with_context(|| format!("cloning server log file handle for {}", log_path.display()))?;
+    let exe = std::env::current_exe().context("resolving current fabro executable path")?;
 
     let mut cmd = TokioCommand::new(&exe);
     cmd.args(["server", "__serve"])
@@ -376,7 +401,9 @@ async fn execute_daemon(
     #[cfg(unix)]
     fabro_proc::pre_exec_setsid(cmd.as_std_mut());
 
-    let mut child = cmd.spawn()?;
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("spawning fabro server subprocess {}", exe.display()))?;
 
     if let Ok(Some(status)) = child.try_wait() {
         record::remove_server_record(&record_path);
@@ -464,13 +491,15 @@ fn print_dev_token(printer: Printer, home: &Home, token: &str) {
 async fn acquire_lock(storage_dir: &Path) -> Result<std::fs::File> {
     let lock_path = Storage::new(storage_dir).server_state().lock_path();
     if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating server lock directory {}", parent.display()))?;
     }
     let lock_file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
-        .open(&lock_path)?;
+        .open(&lock_path)
+        .with_context(|| format!("opening server lock file {}", lock_path.display()))?;
 
     let poll_interval = Duration::from_millis(50);
     let timeout = Duration::from_secs(5);

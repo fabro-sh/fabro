@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 pub(crate) use fabro_config::user::*;
 use fabro_types::settings::cli::CliTargetSettings;
 use fabro_types::settings::{CliSettings, SettingsLayer};
@@ -208,9 +208,12 @@ pub(crate) fn build_server_client_builder(
     let key_path = fabro_config::expand_tilde(&tls.key);
     let ca_path = fabro_config::expand_tilde(&tls.ca);
 
-    let cert_pem = std::fs::read(&cert_path)?;
-    let key_pem = std::fs::read(&key_path)?;
-    let ca_pem = std::fs::read(&ca_path)?;
+    let cert_pem = std::fs::read(&cert_path)
+        .with_context(|| format!("reading TLS client certificate {}", cert_path.display()))?;
+    let key_pem = std::fs::read(&key_path)
+        .with_context(|| format!("reading TLS client key {}", key_path.display()))?;
+    let ca_pem = std::fs::read(&ca_path)
+        .with_context(|| format!("reading TLS CA certificate {}", ca_path.display()))?;
 
     let mut identity_pem = cert_pem;
     identity_pem.push(b'\n');

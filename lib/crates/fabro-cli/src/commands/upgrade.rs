@@ -144,8 +144,10 @@ impl Backend {
                     bail!("download failed: HTTP {}", resp.status());
                 }
                 let bytes = resp.bytes().await?;
-                let mut file = fs::File::create(&dest)?;
-                file.write_all(&bytes)?;
+                let mut file = fs::File::create(&dest)
+                    .with_context(|| format!("creating download file {}", dest.display()))?;
+                file.write_all(&bytes)
+                    .with_context(|| format!("writing download to {}", dest.display()))?;
             }
         }
         Ok(dest)
@@ -231,7 +233,8 @@ fn verify_checksum(path: &Path, expected_hex: &str) -> Result<()> {
     let mut file = std::io::BufReader::new(
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?,
     );
-    std::io::copy(&mut file, &mut hasher)?;
+    std::io::copy(&mut file, &mut hasher)
+        .with_context(|| format!("reading {} for checksum", path.display()))?;
     let computed = format!("{:x}", hasher.finalize());
     // The .sha256 file may contain "hash  filename" or just "hash"
     let expected = expected_hex
@@ -272,10 +275,12 @@ impl UpgradeCheckState {
 
     fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent)
+                .with_context(|| format!("creating directory {}", parent.display()))?;
         }
         let json = serde_json::to_string(self)?;
-        fs::write(path, json)?;
+        fs::write(path, json)
+            .with_context(|| format!("writing upgrade check state {}", path.display()))?;
         Ok(())
     }
 }
@@ -365,7 +370,10 @@ pub(crate) async fn run_upgrade(
     let tarball_name = format!("fabro-{triple}.tar.gz");
     let checksum_name = format!("{tarball_name}.sha256");
 
-    let current_exe = std::env::current_exe()?.canonicalize()?;
+    let current_exe = std::env::current_exe()
+        .context("resolving current fabro executable path")?
+        .canonicalize()
+        .context("canonicalizing current fabro executable path")?;
     let exe_dir = current_exe
         .parent()
         .context("could not determine executable directory")?;
@@ -382,7 +390,8 @@ pub(crate) async fn run_upgrade(
     )?;
 
     // Verify SHA256 using streaming hash
-    let checksum_content = fs::read_to_string(&checksum_path)?;
+    let checksum_content = fs::read_to_string(&checksum_path)
+        .with_context(|| format!("reading checksum file {}", checksum_path.display()))?;
     verify_checksum(&tarball_path, &checksum_content)?;
     debug!("SHA256 checksum verified");
 

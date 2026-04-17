@@ -23,11 +23,15 @@ pub(crate) fn parse_compose(
     compose_path: &Path,
     service_name: &str,
 ) -> Result<ComposeServiceSpec, String> {
-    let contents = std::fs::read_to_string(compose_path)
-        .map_err(|e| format!("failed to read compose file: {e}"))?;
+    let contents = std::fs::read_to_string(compose_path).map_err(|e| {
+        format!(
+            "failed to read compose file {}: {e}",
+            compose_path.display()
+        )
+    })?;
 
-    let doc: serde_yaml::Value =
-        serde_yaml::from_str(&contents).map_err(|e| format!("failed to parse YAML: {e}"))?;
+    let doc: serde_yaml::Value = serde_yaml::from_str(&contents)
+        .map_err(|e| format!("failed to parse YAML {}: {e}", compose_path.display()))?;
 
     let service = doc
         .get("services")

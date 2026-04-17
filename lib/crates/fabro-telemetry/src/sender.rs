@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use anyhow::Context;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use uuid::Uuid;
@@ -122,7 +123,8 @@ pub async fn upload(path: &Path) -> anyhow::Result<()> {
     let write_key = SEGMENT_WRITE_KEY
         .ok_or_else(|| anyhow::anyhow!("SEGMENT_WRITE_KEY not set at compile time"))?;
 
-    let content = std::fs::read_to_string(path)?;
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("read telemetry batch {}", path.display()))?;
     let Some(payload) = build_segment_batch(&content) else {
         return Ok(());
     };

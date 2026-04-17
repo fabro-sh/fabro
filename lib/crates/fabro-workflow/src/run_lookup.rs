@@ -148,7 +148,10 @@ fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
     let entries = match std::fs::read_dir(base) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(err.into()),
+        Err(err) => {
+            return Err(anyhow::Error::new(err)
+                .context(format!("reading orphan runs directory {}", base.display())));
+        }
     };
 
     let mut runs = Vec::new();

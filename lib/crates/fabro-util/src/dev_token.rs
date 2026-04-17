@@ -2,7 +2,7 @@ use std::fs;
 use std::io::Write as _;
 use std::path::Path;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use rand::TryRngCore;
 use rand::rngs::OsRng;
 
@@ -52,7 +52,10 @@ pub fn load_or_create_dev_token(path: &Path) -> Result<String> {
             return Err(anyhow!("invalid dev token format in {}", path.display()));
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => return Err(err.into()),
+        Err(err) => {
+            return Err(anyhow::Error::from(err))
+                .with_context(|| format!("read dev token {}", path.display()));
+        }
     }
 
     let token = generate_dev_token();
@@ -70,7 +73,8 @@ pub fn write_dev_token(path: &Path, token: &str) -> Result<()> {
 
 fn atomic_write_private(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create directory {}", parent.display()))?;
     }
 
     let temp_path = path.with_file_name(format!(
@@ -81,7 +85,8 @@ fn atomic_write_private(path: &Path, contents: &str) -> Result<()> {
         rand::random::<u64>()
     ));
     write_private_file(&temp_path, contents)?;
-    fs::rename(&temp_path, path)?;
+    fs::rename(&temp_path, path)
+        .with_context(|| format!("rename {} to {}", temp_path.display(), path.display()))?;
     Ok(())
 }
 
@@ -96,13 +101,17 @@ fn write_private_file(path: &Path, contents: &str) -> Result<()> {
             .create(true)
             .truncate(true)
             .mode(0o600)
-            .open(path)?
+            .open(path)
+            .with_context(|| format!("open {} for writing", path.display()))?
     };
 
     #[cfg(not(unix))]
-    let mut file = std::fs::File::create(path)?;
+    let mut file =
+        std::fs::File::create(path).with_context(|| format!("create {}", path.display()))?;
 
-    file.write_all(contents.as_bytes())?;
-    file.sync_all()?;
+    file.write_all(contents.as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("sync {}", path.display()))?;
     Ok(())
 }

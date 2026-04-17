@@ -13,7 +13,12 @@ pub(crate) fn persist(
     let (graph, source, diagnostics) = validated.into_parts();
     options.run_record.graph = graph.clone();
 
-    std::fs::create_dir_all(&options.run_dir)?;
+    std::fs::create_dir_all(&options.run_dir).map_err(|err| {
+        Error::Io(format!(
+            "creating run directory {}: {err}",
+            options.run_dir.display()
+        ))
+    })?;
 
     Ok(Persisted::new(
         graph,

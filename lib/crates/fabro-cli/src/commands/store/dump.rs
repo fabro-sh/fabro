@@ -277,7 +277,9 @@ fn inspect_output_dir(path: &Path) -> Result<OutputDirState> {
             Ok(OutputDirState::ExistingEmpty)
         }
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(OutputDirState::Missing),
-        Err(err) => Err(err.into()),
+        Err(err) => {
+            Err(anyhow::Error::new(err).context(format!("reading metadata for {}", path.display())))
+        }
     }
 }
 

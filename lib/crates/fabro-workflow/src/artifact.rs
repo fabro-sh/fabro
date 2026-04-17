@@ -282,9 +282,16 @@ async fn materialize_blob_ref(
         let path = local_materialized_blob_path(run_dir, blob_id);
         if !path.exists() {
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
+                std::fs::create_dir_all(parent).map_err(|err| {
+                    Error::Io(format!(
+                        "creating artifact blob directory {}: {err}",
+                        parent.display()
+                    ))
+                })?;
             }
-            std::fs::write(&path, &bytes)?;
+            std::fs::write(&path, &bytes).map_err(|err| {
+                Error::Io(format!("writing artifact blob {}: {err}", path.display()))
+            })?;
         }
         return Ok(format!("{ARTIFACT_POINTER_PREFIX}{}", path.display()));
     }

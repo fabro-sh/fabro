@@ -141,7 +141,8 @@ async fn write_artifact_file(
     dest_file: &Path,
 ) -> Result<()> {
     if let Some(parent) = dest_file.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating directory {}", parent.display()))?;
     }
     let bytes = client
         .download_stage_artifact(run_id, &entry.stage_id, &entry.relative_path)

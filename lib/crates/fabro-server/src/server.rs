@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use anyhow::Context as _;
 use axum::body::Body;
 #[cfg(test)]
 use axum::body::to_bytes;
@@ -3363,8 +3364,8 @@ fn worker_command(
     mode: RunExecutionMode,
     run_dir: &std::path::Path,
 ) -> anyhow::Result<Command> {
-    let exe =
-        std::env::var_os("CARGO_BIN_EXE_fabro").map_or(std::env::current_exe()?, PathBuf::from);
+    let current_exe = std::env::current_exe().context("reading current executable path")?;
+    let exe = std::env::var_os("CARGO_BIN_EXE_fabro").map_or(current_exe, PathBuf::from);
     let storage_dir = state.server_storage_dir();
     let server_target = current_server_target(&storage_dir)?;
     let artifact_upload_token = state
@@ -4257,7 +4258,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
     ));
 
     let mut child = match worker_command(state.as_ref(), run_id, execution_mode, &run_dir)
-        .and_then(|mut cmd| cmd.spawn().map_err(anyhow::Error::from))
+        .and_then(|mut cmd| cmd.spawn().context("spawning run worker process"))
     {
         Ok(child) => child,
         Err(err) => {

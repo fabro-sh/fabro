@@ -564,9 +564,12 @@ pub(crate) async fn resolve_features(
             .as_nanos()
     );
     let tmp_dir = std::env::temp_dir().join(unique_id);
-    fs::create_dir_all(&tmp_dir)
-        .await
-        .map_err(|e| DevcontainerError::Feature(format!("failed to create temp dir: {e}")))?;
+    fs::create_dir_all(&tmp_dir).await.map_err(|e| {
+        DevcontainerError::Feature(format!(
+            "failed to create temp dir {}: {e}",
+            tmp_dir.display()
+        ))
+    })?;
 
     // Collect feature IDs in a stable order
     let mut feature_ids: Vec<String> = features.keys().cloned().collect();

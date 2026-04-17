@@ -25,7 +25,8 @@ pub(crate) struct ActiveServerRecord {
 
 pub(crate) fn write_server_record(path: &Path, record: &ServerRecord) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating server record directory {}", parent.display()))?;
     }
     std::fs::write(path, serde_json::to_string_pretty(record)?)
         .with_context(|| format!("Failed to write server metadata to {}", path.display()))

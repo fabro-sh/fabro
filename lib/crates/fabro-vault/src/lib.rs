@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::path::{Component, Path, PathBuf};
+use std::{fmt, io};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -77,7 +77,7 @@ impl Vault {
         let entries = match std::fs::read_to_string(&path) {
             Ok(contents) => serde_json::from_str(&contents)?,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
-            Err(err) => return Err(err.into()),
+            Err(err) => return Err(io_context("read vault", &path, &err).into()),
         };
 
         Ok(Self { path, entries })
@@ -231,7 +231,8 @@ impl Vault {
             .path
             .parent()
             .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-        std::fs::create_dir_all(&parent)?;
+        std::fs::create_dir_all(&parent)
+            .map_err(|err| io_context("create vault directory", &parent, &err))?;
 
         let file_name = self
             .path
@@ -240,18 +241,32 @@ impl Vault {
             .unwrap_or("secrets.json");
         let tmp_path = parent.join(format!(".{file_name}.tmp-{}", ulid::Ulid::new()));
         let json = serde_json::to_vec_pretty(&self.entries)?;
-        std::fs::write(&tmp_path, json)?;
+        std::fs::write(&tmp_path, json)
+            .map_err(|err| io_context("write vault temp file", &tmp_path, &err))?;
         set_private_permissions(&tmp_path)?;
-        std::fs::rename(&tmp_path, &self.path)?;
+        std::fs::rename(&tmp_path, &self.path).map_err(|err| {
+            io_context(
+                &format!("rename vault temp file to {}", self.path.display()),
+                &tmp_path,
+                &err,
+            )
+        })?;
         Ok(())
     }
+}
+
+/// Wrap an `io::Error` with a human-readable verb and path so downstream
+/// reporting shows which operation failed on which file.
+fn io_context(op: &str, path: &Path, source: &io::Error) -> io::Error {
+    io::Error::new(source.kind(), format!("{op} {}: {source}", path.display()))
 }
 
 #[cfg(unix)]
 fn set_private_permissions(path: &Path) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt;
 
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|err| io_context("set permissions on", path, &err))?;
     Ok(())
 }
 
