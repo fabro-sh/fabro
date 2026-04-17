@@ -632,6 +632,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_upgrade_prerelease_conflicts_with_version() {
+        use clap::error::ErrorKind;
+        let err = Cli::try_parse_from(["fabro", "upgrade", "--prerelease", "--version", "0.1.0"])
+            .err()
+            .expect("should reject --prerelease combined with --version");
+        assert_eq!(
+            err.kind(),
+            ErrorKind::ArgumentConflict,
+            "expected ArgumentConflict, got {:?}: {err}",
+            err.kind()
+        );
+    }
+
+    #[test]
     fn parse_store_dump_command() {
         let cli = Cli::try_parse_from(["fabro", "store", "dump", "ABC123", "-o", "./out"])
             .expect("should parse");

@@ -853,6 +853,10 @@ pub(crate) struct UpgradeArgs {
     #[arg(long)]
     pub(crate) version: Option<String>,
 
+    /// Include prereleases (alpha, beta, rc) when selecting the latest version
+    #[arg(long, conflicts_with = "version")]
+    pub(crate) prerelease: bool,
+
     /// Upgrade even if already on the target version
     #[arg(long)]
     pub(crate) force: bool,

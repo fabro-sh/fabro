@@ -73,6 +73,41 @@ impl Backend {
         }
     }
 
+    async fn fetch_releases(&self) -> Result<Vec<ReleaseSummary>> {
+        match self {
+            Self::Gh => {
+                let output = TokioCommand::new("gh")
+                    .args(["api", &format!("repos/{GITHUB_REPO}/releases")])
+                    .output()
+                    .await
+                    .context("failed to run `gh api repos/.../releases`")?;
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    bail!("gh api repos/.../releases failed: {stderr}");
+                }
+                let releases: Vec<ReleaseSummary> = serde_json::from_slice(&output.stdout)
+                    .context("failed to parse gh releases JSON")?;
+                Ok(releases)
+            }
+            Self::Http(client) => {
+                let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases");
+                let resp = client
+                    .get(&url)
+                    .send()
+                    .await
+                    .context("failed to fetch releases from GitHub API")?;
+                if !resp.status().is_success() {
+                    bail!(
+                        "GitHub API returned status {} when fetching releases",
+                        resp.status()
+                    );
+                }
+                let releases: Vec<ReleaseSummary> = resp.json().await?;
+                Ok(releases)
+            }
+        }
+    }
+
     async fn download_release(&self, tag: &str, asset: &str, dest_dir: &Path) -> Result<PathBuf> {
         let dest = dest_dir.join(asset);
         match self {
@@ -164,6 +199,31 @@ fn parse_version_from_tag(tag: &str) -> Result<Version> {
     Version::parse(stripped).with_context(|| format!("invalid version: {tag}"))
 }
 
+// ── Release listing (for --prerelease) ─────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct ReleaseSummary {
+    tag_name: String,
+    #[serde(default)]
+    draft:    bool,
+}
+
+/// Pick the `tag_name` with the highest semver from `releases`, skipping
+/// drafts and entries whose `tag_name` does not parse as semver. Returns
+/// `None` if no candidate remains (caller may fall back to stable-latest).
+fn pick_latest_tag(releases: &[ReleaseSummary]) -> Option<String> {
+    releases
+        .iter()
+        .filter(|r| !r.draft)
+        .filter_map(|r| {
+            parse_version_from_tag(&r.tag_name)
+                .ok()
+                .map(|v| (v, &r.tag_name))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, tag)| tag.clone())
+}
+
 // ── SHA256 verification ────────────────────────────────────────────────────
 
 fn verify_checksum(path: &Path, expected_hex: &str) -> Result<()> {
@@ -238,7 +298,14 @@ pub(crate) async fn run_upgrade(
         let tag = format!("v{version}");
         (version, tag)
     } else {
-        let tag = backend.fetch_latest_release_tag().await?;
+        let tag = if args.prerelease {
+            match pick_latest_tag(&backend.fetch_releases().await?) {
+                Some(t) => t,
+                None => backend.fetch_latest_release_tag().await?,
+            }
+        } else {
+            backend.fetch_latest_release_tag().await?
+        };
         let version = parse_version_from_tag(&tag)?;
         (version, tag)
     };
@@ -558,5 +625,73 @@ mod tests {
     async fn select_backend_returns_a_variant() {
         // Just ensure it doesn't panic; actual variant depends on environment
         let _backend = select_backend().await;
+    }
+
+    // -- Release selection --
+
+    fn release(tag: &str, draft: bool) -> ReleaseSummary {
+        ReleaseSummary {
+            tag_name: tag.to_string(),
+            draft,
+        }
+    }
+
+    #[test]
+    fn pick_latest_tag_prefers_newer_prerelease_when_stable_is_older() {
+        let releases = [
+            release("v0.204.0-beta.0", false),
+            release("v0.203.0", false),
+            release("v0.202.0", false),
+        ];
+        assert_eq!(
+            pick_latest_tag(&releases).as_deref(),
+            Some("v0.204.0-beta.0")
+        );
+    }
+
+    #[test]
+    fn pick_latest_tag_prefers_newer_stable_over_older_prerelease() {
+        let releases = [
+            release("v0.205.0", false),
+            release("v0.205.0-beta.1", false),
+            release("v0.204.0", false),
+        ];
+        assert_eq!(pick_latest_tag(&releases).as_deref(), Some("v0.205.0"));
+    }
+
+    #[test]
+    fn pick_latest_tag_filters_drafts() {
+        let releases = [
+            release("v0.300.0", true),
+            release("v0.204.0-beta.0", false),
+            release("v0.203.0", false),
+        ];
+        assert_eq!(
+            pick_latest_tag(&releases).as_deref(),
+            Some("v0.204.0-beta.0")
+        );
+    }
+
+    #[test]
+    fn pick_latest_tag_skips_unparseable_tags() {
+        let releases = [
+            release("weekly-build-3", false),
+            release("v0.204.0-beta.0", false),
+        ];
+        assert_eq!(
+            pick_latest_tag(&releases).as_deref(),
+            Some("v0.204.0-beta.0")
+        );
+    }
+
+    #[test]
+    fn pick_latest_tag_returns_none_when_all_drafts() {
+        let releases = [release("v0.300.0", true), release("v0.299.0", true)];
+        assert_eq!(pick_latest_tag(&releases), None);
+    }
+
+    #[test]
+    fn pick_latest_tag_returns_none_for_empty_input() {
+        assert_eq!(pick_latest_tag(&[]), None);
     }
 }
