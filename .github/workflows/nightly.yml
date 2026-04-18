@@ -9,14 +9,15 @@ concurrency:
   group: nightly-release
   cancel-in-progress: false
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   tag-nightly:
     name: Tag nightly
     runs-on: ubuntu-latest
     environment: nightly
+    permissions:
+      contents: read
     env:
       CARGO_TERM_COLOR: always
     steps:
