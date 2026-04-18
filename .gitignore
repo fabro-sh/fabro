@@ -17,3 +17,4 @@ __pycache__
 .worktrees
 .fabro/workflows/implement-plan/prompts/
 .claude/scheduled_tasks.lock
+.mcp.json
