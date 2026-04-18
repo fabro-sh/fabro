@@ -1764,11 +1764,34 @@ struct GitHubRepoResponse {
     permissions:    Option<serde_json::Value>,
 }
 
+/// Reject owner/repo path segments that could rewrite the GitHub API endpoint
+/// via `..` traversal after URL normalization. Conservative compared to
+/// GitHub's real rules, which is fine for server-side input validation.
+#[allow(clippy::result_large_err)]
+fn validate_github_slug(kind: &str, value: &str, max_len: usize) -> Result<(), Response> {
+    if value.is_empty() || value.len() > max_len || matches!(value, "." | "..") {
+        return Err(ApiError::bad_request(format!("invalid github {kind}")).into_response());
+    }
+    if !value
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    {
+        return Err(ApiError::bad_request(format!("invalid github {kind}")).into_response());
+    }
+    Ok(())
+}
+
 async fn get_github_repo(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path((owner, name)): Path<(String, String)>,
 ) -> Response {
+    if let Err(response) = validate_github_slug("owner", &owner, 39) {
+        return response;
+    }
+    if let Err(response) = validate_github_slug("repo", &name, 100) {
+        return response;
+    }
     let settings = state.server_settings();
     let github_settings = &settings.integrations.github;
     let base_url = fabro_github::github_api_base_url();
@@ -9242,5 +9265,28 @@ timeout = "30s"
                 .iter()
                 .any(|c| c["id"].as_str() == Some("succeeded"))
         );
+    }
+
+    #[test]
+    fn validate_github_slug_accepts_real_names() {
+        assert!(super::validate_github_slug("owner", "anthropic", 39).is_ok());
+        assert!(super::validate_github_slug("repo", "claude-code", 100).is_ok());
+        assert!(super::validate_github_slug("repo", "repo.name_1", 100).is_ok());
+    }
+
+    #[test]
+    fn validate_github_slug_rejects_path_traversal_and_separators() {
+        for bad in ["", "..", "foo/bar", "foo%2Fbar", "foo\\bar", "foo?x", "a b"] {
+            assert!(
+                super::validate_github_slug("owner", bad, 39).is_err(),
+                "expected rejection for {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_github_slug_rejects_overlong() {
+        let long = "a".repeat(40);
+        assert!(super::validate_github_slug("owner", &long, 39).is_err());
     }
 }
