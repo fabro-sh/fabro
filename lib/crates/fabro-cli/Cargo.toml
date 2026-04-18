@@ -92,6 +92,12 @@ tokio-util.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = { version = "0.9", optional = true }
 
+# Vendor openssl only for musl targets. daytona-sdk transitively pulls
+# native-tls via reqwest, which needs libssl. On glibc runners the system
+# libssl is used; on musl runners we compile openssl from source.
+[target.'cfg(target_env = "musl")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
+
 [build-dependencies]
 chrono = { workspace = true }
 
