@@ -164,6 +164,87 @@ async fn web_enabled_serves_web_only_routes() {
 }
 
 #[tokio::test]
+async fn security_headers_are_applied_to_all_responses() {
+    let app = build_router(create_app_state(), AuthMode::Disabled);
+
+    // Plain HTTP: HSTS must NOT be present.
+    let api_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let headers = api_response.headers();
+    assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
+    assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
+    assert_eq!(
+        headers.get("referrer-policy").unwrap(),
+        "strict-origin-when-cross-origin"
+    );
+    assert_eq!(
+        headers.get("cross-origin-opener-policy").unwrap(),
+        "same-origin"
+    );
+    assert!(headers.contains_key("permissions-policy"));
+    assert_eq!(headers.get("x-xss-protection").unwrap(), "0");
+    assert_eq!(headers.get("pragma").unwrap(), "no-cache");
+    assert!(
+        !headers.contains_key("strict-transport-security"),
+        "HSTS must not be emitted over plain HTTP"
+    );
+
+    // X-Forwarded-Proto: https signals the request reached an HTTPS edge.
+    let https_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        https_response
+            .headers()
+            .get("strict-transport-security")
+            .unwrap(),
+        "max-age=63072000; includeSubDomains"
+    );
+
+    // SPA fallback path must also get the headers.
+    let spa_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/runs/abc123")
+                .header("accept", "text/html")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(spa_response.status(), StatusCode::OK);
+    assert_eq!(
+        spa_response.headers().get("x-frame-options").unwrap(),
+        "DENY"
+    );
+    // Static files set their own cache-control (no-cache for index.html);
+    // the middleware default must not stomp on it.
+    assert_eq!(
+        spa_response.headers().get("cache-control").unwrap(),
+        "no-cache"
+    );
+}
+
+#[tokio::test]
 async fn web_disabled_returns_404_for_web_routes_and_keeps_machine_api() {
     let settings: SettingsLayer = parse_settings_layer(
         r"

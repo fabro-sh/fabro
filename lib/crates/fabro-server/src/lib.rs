@@ -11,6 +11,7 @@ pub mod error;
 pub mod github_webhooks;
 pub mod jwt_auth;
 mod run_manifest;
+pub mod security_headers;
 pub mod serve;
 pub mod server;
 mod server_secrets;

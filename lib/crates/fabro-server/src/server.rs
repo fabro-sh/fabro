@@ -116,7 +116,9 @@ use crate::jwt_auth::{
 use crate::server_secrets::{
     LlmClientResult, ProviderCredentials, ServerSecrets, auth_issue_message,
 };
-use crate::{demo, diagnostics, run_manifest, settings_view, static_files, web_auth};
+use crate::{
+    demo, diagnostics, run_manifest, security_headers, settings_view, static_files, web_auth,
+};
 
 pub(crate) type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
@@ -975,7 +977,9 @@ pub fn build_router_with_options(
         ));
     }
 
-    router.layer(trace_layer)
+    router
+        .layer(middleware::from_fn(security_headers::layer))
+        .layer(trace_layer)
 }
 
 fn demo_routes() -> Router<Arc<AppState>> {
