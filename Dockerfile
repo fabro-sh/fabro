@@ -6,8 +6,10 @@
 #   docker-context/amd64/fabro  (x86_64-unknown-linux-gnu)
 #   docker-context/arm64/fabro  (aarch64-unknown-linux-gnu)
 #
-# The image serves the HTTP API (with embedded web UI) on port 32276,
-# persists state to /storage, and runs as the unprivileged `fabro` user.
+# The image serves the HTTP API (with embedded web UI) on $PORT (default
+# 32276), persists state to /storage, and runs as the unprivileged `fabro`
+# user. Honoring $PORT lets PaaS providers (Railway, Fly, Render, Heroku,
+# Cloud Run) route traffic without extra configuration.
 
 FROM debian:trixie-slim
 
@@ -39,4 +41,4 @@ VOLUME ["/storage"]
 EXPOSE 32276
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/fabro-entrypoint"]
-CMD ["fabro", "server", "start", "--foreground", "--bind", "0.0.0.0:32276"]
+CMD ["sh", "-c", "exec fabro server start --foreground --bind 0.0.0.0:${PORT:-32276}"]
