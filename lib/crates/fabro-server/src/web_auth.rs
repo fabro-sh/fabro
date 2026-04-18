@@ -620,12 +620,17 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
     .into_response()
 }
 
-async fn toggle_demo(Json(payload): Json<DemoToggleRequest>) -> Response {
+async fn toggle_demo(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DemoToggleRequest>,
+) -> Response {
     let mut jar = CookieJar::new();
     jar.add(
         Cookie::build(("fabro-demo", if payload.enabled { "1" } else { "0" }))
             .path("/")
+            .http_only(true)
             .same_site(SameSite::Lax)
+            .secure(session_cookie_secure(state.as_ref()))
             .max_age(Duration::days(365))
             .build(),
     );
