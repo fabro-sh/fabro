@@ -42,7 +42,7 @@ The following decisions were made during brainstorming and are load-bearing for 
 | 9 | Server config screen detects canonical URL from forwarded headers, prefills, user confirms | Works for any reverse proxy; no per-PaaS detection in the prefill path |
 | 10 | Per-step API calls with in-memory server-side install session | Live validation; GitHub App OAuth needs server-side state regardless |
 | 11 | Install endpoints in main `fabro-api.yaml`, tagged for exclusion from Mintlify | Reuses progenitor + openapi-generator pipelines and the conformance test |
-| 12 | Same bundle (`fabro-web`) hosts install wizard | One codebase, one design system; bundle bloat is negligible |
+| 12 | Same bundle (`fabro-web`) hosts install wizard, with a server-injected mode flag in `index.html` controlling which router tree mounts at boot | One codebase, one design system; the existing route loaders (`redirect-home.tsx:6`, `auth-login.tsx:7`, `app-shell.tsx:26`) call `/api/v1/auth/*` which 404s in install mode, so install mode must mount a different router tree without invoking those loaders |
 | 13 | After install, `/install/*` routes return 404 (not 401) | Routes are permanently absent in normal mode, not auth-gated |
 | 14 | Detection trigger: absence of `~/.fabro/settings.toml`. Parse errors fail loudly | Matches `install.rs:1647`; one-line check; no ambiguity |
 | 15 | Refactor shared persistence into a new `fabro-install` crate | Avoids circular deps; both `fabro-cli` and `fabro-server` depend on it |
@@ -51,20 +51,39 @@ The following decisions were made during brainstorming and are load-bearing for 
 
 ### Process model
 
-`fabro server` (and the `serve` library entrypoint) gains a startup precheck that runs after CLI/env arg parsing and before the main router is built:
+The detection fork happens at the **dispatch layer**, not inside `serve::run`. Today `commands::server::dispatch` (`lib/crates/fabro-cli/src/commands/server/mod.rs:31`) calls `user_config::load_settings_with_config_and_storage_dir` and then `resolve_bind_request_from_settings` before `serve::execute` is ever invoked — both of those would error on missing `settings.toml`. The bootstrap therefore has to fork before the settings-load:
 
-1. Resolve the path to `~/.fabro/settings.toml` (honoring `--storage-dir` / env overrides).
-2. If it exists → parse and proceed with the existing `serve::run` path. Parse errors fail loudly as today.
-3. If it does **not** exist → enter install mode:
+1. **Resolve the settings path only** (no load yet). Honors `--storage-dir`, `--config`, env overrides. Effectively the same path-resolution logic `load_settings_with_config_and_storage_dir` does internally before reading the file.
+2. **If the file exists →** existing path: load settings, resolve storage_dir / bind, and continue into `start::execute` / `serve::execute` as today. Parse errors fail loudly.
+3. **If the file does NOT exist →** install bootstrap path:
+   - Resolve `storage_dir` from `--storage-dir` / `FABRO_STORAGE_DIR` / `legacy_default_storage_root().join("storage")` (the same fallback the CLI install uses at `install.rs:1661`). Do not require settings to derive it.
+   - Resolve a bind address from `--bind` / env / default (`0.0.0.0:32276` in container env-detected scenarios, `127.0.0.1:32276` otherwise — picking a sensible default without a settings file is a small new helper).
    - Generate a one-time install token (`ring::rand::SystemRandom`, 32 bytes, base64url, no padding).
    - Print the token + a fully formed install URL to stderr (visible in `journalctl`, `docker logs`, Railway logs).
    - Create an in-memory `InstallSession` registry holding a single `PendingInstall`.
-   - Build an install-only router (`build_install_router`) mounting: `/install/*` API endpoints, the static-asset routes serving the existing `fabro-web` bundle, a `GET /health` endpoint returning `{ "mode": "install" }`, and a catch-all that returns the SPA `index.html`. Normal `/api/v1/*` routes are not mounted.
-   - Bind to whatever the boot-time bind config dictates (env var, default `0.0.0.0` in containers / `127.0.0.1` for local).
+   - Build an install-only router (`build_install_router`) mounting: `/install/*` API endpoints (install-token middleware, except the OAuth callback — see below), the static-asset routes serving the existing `fabro-web` bundle but with a **server-injected mode flag** (see *Frontend mode-aware boot* below), `GET /health` returning `{ "mode": "install" }`, and a catch-all that returns the install-mode `index.html`. Normal `/api/v1/*` routes are not mounted.
+   - **Skip** the eager `load_or_create_local_dev_token` / `load_or_create_local_session_secret` calls that `start.rs:247-248, 389-390` perform — the install router authenticates via its own middleware and doesn't use the JWT/session machinery.
+   - Run the same daemonization or foreground machinery as a normal start (lock file, server record, log files), so `fabro server status` / `stop` work uniformly.
 
-When `POST /install/finish` succeeds, the handler persists outputs to disk, returns 202, then schedules a clean process exit (~500ms after responding). The supervisor restarts the process; the new process finds `settings.toml` present and boots into normal mode.
+When `POST /install/finish` succeeds, the handler persists outputs to disk, returns 202, then schedules a clean process exit (~500ms after responding). The supervisor restarts the process; the new process finds `settings.toml` present and boots into normal mode (which now does its own eager dev-token/session-secret creation as today).
 
 **No mode-transition inside a running process.** Avoiding hot-swap means we don't reason about half-mounted routers, in-flight install requests during shutdown, or partial state after a failed finalize. Process exit is the boundary.
+
+### Frontend mode-aware boot
+
+The existing `fabro-web` SPA root + login + app-shell loaders all call `/api/v1/auth/*` (`apps/fabro-web/app/routes/redirect-home.tsx:6`, `auth-login.tsx:7`, `app-shell.tsx:26`). In install mode `/api/v1/*` returns 404, so any of these loaders running would throw before the install UI could render. The install mode therefore needs a different React entry path, in the same bundle.
+
+The cleanest approach: the install-mode static handler serves a slightly different `index.html` that exposes a global flag the React entry reads at boot:
+
+```html
+<script>window.__FABRO_MODE__ = "install";</script>
+```
+
+The React entry (`apps/fabro-web/app/entry.client.tsx` or equivalent) checks `window.__FABRO_MODE__`. If `"install"`, it mounts an install-only React Router tree (a separate `createBrowserRouter` rooted at the install routes) and the normal router never instantiates. Existing loaders never fire.
+
+In normal mode, the flag is absent (or `"normal"`) and the existing router boots as today.
+
+The two router trees live side-by-side in the bundle. Install mode pays for normal-mode code in download size (negligible — the install wizard is the larger of the two). Normal mode pays for install-mode code (also negligible).
 
 ### Crate placement
 
@@ -146,7 +165,7 @@ Linear flow with a sidebar showing progress. Users can back up to any prior comp
 | 1 | `/install` | Landing / token entry. If query-param token validates → redirect to (2). Else: explainer page with paste-token textarea. |
 | 2 | `/install/welcome` | One-paragraph "here's what we'll do" + Next. |
 | 3 | `/install/llm` | Multi-select Anthropic / OpenAI / Gemini / OpenAI-compatible. Per-provider sub-form for API key. Each key live-validated against the provider's `/models` endpoint before advancing. |
-| 4 | `/install/github` | Choose **App** or **Token**. Token path: paste PAT, validate via `GET /user`, capture username. App path: collect owner + display name → server builds manifest → user redirected to `https://github.com/settings/apps/new` (or org equivalent) → GitHub posts back to `/install/github/app/callback`. |
+| 4 | `/install/github` | Choose **App** or **Token**. Token path: paste PAT, validate via `GET /user`, capture username. App path: collect owner + display name → server builds the GitHub App manifest with `redirect_url` set to `<canonical_url>/install/github/app/redirect?state=<random>` and `callback_urls` set to `<canonical_url>/auth/callback/github` (the latter is for runtime OAuth login, not the install handoff) → user is redirected to `https://github.com/settings/apps/new` (or org equivalent) with the manifest as a form POST → after the user creates the App, GitHub redirects their browser back to `/install/github/app/redirect?code=…&state=…`. The endpoint validates `state` against the install session, exchanges the `code` via `POST https://api.github.com/app-manifests/{code}/conversions` for the App credentials (id, slug, client_id, client_secret, webhook_secret, pem), stores them in the session, then redirects the browser to `/install/github/done`. |
 | 5 | `/install/server` | Single screen with prefilled canonical URL (from forwarded headers) and confirm/edit field. Listen address is read-only display. |
 | 6 | `/install/review` | Read-only summary of every choice. "Install" button → `POST /install/finish`. |
 | 7 | `/install/finishing` | Server: writes settings.toml, server.env, vault, dev token, then schedules process exit ~500ms after responding. Client renders the dev token (returned in the `/install/finish` response body) for the operator's records, then polls `GET /health` until the response no longer reports `"mode": "install"`, and redirects to the confirmed canonical URL. Includes a "if this takes more than 30s, check your supervisor logs" fallback. |
@@ -160,13 +179,15 @@ Linear flow with a sidebar showing progress. Users can back up to any prior comp
 
 ### Generated secrets
 
-Session secret, JWT keypair, dev token are produced server-side at `/install/finish` time. Never exposed to the client. The dev token is shown to the user on the completion screen for their records (they may want it for `fabro` CLI auth against the server later).
+Session secret, JWT keypair, and dev token are generated server-side at `/install/finish` time and persisted to the appropriate locations (`server.env`, `server.dev-token`). The session secret and JWT keys are never exposed to the client — they exist only on disk on the server.
+
+The dev token is a special case: the operator typically needs it to authenticate the `fabro` CLI against the new server, and forcing them to SSH/`docker exec` in to read `~/.fabro/storage/server.dev-token` defeats some of the value of the web wizard. So the dev token is **returned in the `/install/finish` response body** and rendered on the completion screen with a copy-to-clipboard control. The install token already authenticates the operator at that moment, so handing them the dev token over the same channel is no privilege escalation. No other secret leaves the server.
 
 ## API surface
 
 Install endpoints live in `docs/api-reference/fabro-api.yaml` under a dedicated `install` tag. Mintlify exclusion via the existing tag-filter mechanism.
 
-All endpoints require the install-token middleware. All under `/install`.
+All endpoints under `/install`. Most require the install-token middleware; the one exception is `GET /install/github/app/redirect` (GitHub's manifest-conversion target — see row below for why it can't carry the install token, and how it's authorized by `state` instead).
 
 | Method & path | Purpose | Notable request/response |
 |---|---|---|
@@ -175,10 +196,10 @@ All endpoints require the install-token middleware. All under `/install`.
 | `PUT /install/llm` | Records the chosen providers + keys into the session. | Req: `LlmProvidersInput` |
 | `POST /install/github/token/test` | Validates a GitHub PAT via `GET /user`, returns username. | Req: `{ token }`, Resp: `{ username }` |
 | `PUT /install/github/token` | Records the PAT + username. | Req: `GithubTokenInput` |
-| `POST /install/github/app/manifest` | Builds the GitHub App manifest, returns the manifest JSON + the GitHub URL the client redirects to. Stores expected callback `state` in session. | Req: `{ owner, app_name }`, Resp: `{ manifest, github_url }` |
-| `GET /install/github/app/callback` | OAuth callback target. Validates `state`, exchanges code for app credentials, stores in session, redirects browser to `/install/github/done`. | Query: `code`, `state` |
+| `POST /install/github/app/manifest` | Builds the GitHub App manifest. Returns the manifest JSON and the GitHub form-action URL the client should auto-submit the manifest to (`https://github.com/settings/apps/new` or `/organizations/<org>/settings/apps/new`). Stores the expected `state` in the install session for callback validation. The manifest's `redirect_url` is set to `<canonical_url>/install/github/app/redirect?state=<state>` (where the install token cannot travel because GitHub strips Authorization headers across redirects); `callback_urls` is set to `<canonical_url>/auth/callback/github` for later runtime OAuth login (matches what the CLI install does at `install.rs:1023`). | Req: `{ owner, app_name }`, Resp: `{ manifest, github_form_action }` |
+| `GET /install/github/app/redirect` | GitHub manifest-conversion redirect target. **Not protected by install-token middleware** — GitHub strips Authorization headers, so this endpoint can only be authorized by validating the `state` query param against the install session. The handler validates `state`, then exchanges `code` via `POST https://api.github.com/app-manifests/{code}/conversions` to obtain the App's `id`, `slug`, `client_id`, `client_secret`, `webhook_secret`, and `pem`. Stores them in the session. Responds with a 302 to `/install/github/done?token=<install_token>` so the SPA picks back up with the token re-attached to the URL. | Query: `code`, `state` |
 | `PUT /install/server` | Records canonical URL confirmation. | Req: `ServerConfigInput` |
-| `POST /install/finish` | Validates session is complete, persists outputs, schedules clean exit, returns 202. | Resp: `{ status: "completing", restart_url }` |
+| `POST /install/finish` | Validates session is complete, persists outputs, schedules clean exit, returns 202. The response carries the dev token so the operator can copy it from the completion screen without SSH-ing in. | Resp: `{ status: "completing", restart_url, dev_token }` |
 
 ### Why per-step `PUT` plus separate `test`
 
@@ -186,7 +207,7 @@ The validation calls (`POST /…/test`) make outbound network requests to the LL
 
 ### Routing wiring
 
-`build_install_router()` in `fabro_server::install::router` returns an `axum::Router` that mounts the table above plus the install-token middleware. The startup precheck calls `build_install_router()` (install mode) or the existing `build_router()` (normal mode); never both.
+`build_install_router()` in `fabro_server::install::router` returns an `axum::Router` that mounts the table above. Install-token middleware is applied to all routes except `GET /install/github/app/redirect` (which is `state`-validated instead). The dispatch-layer fork (see *Process model* above) calls `build_install_router()` (install mode) or the existing `build_router()` (normal mode); never both.
 
 ## Persistence parity
 
@@ -195,14 +216,14 @@ The web wizard produces **identical** on-disk state to the CLI install, using th
 - `~/.fabro/settings.toml` — server config, auth methods, GitHub integration strategy
 - `<storage_dir>/server.env` — `FABRO_JWT_PRIVATE_KEY`, `FABRO_JWT_PUBLIC_KEY`, `SESSION_SECRET`, `FABRO_DEV_TOKEN`, plus GitHub App env pairs if applicable
 - `<storage_dir>/secrets/…` — vault entries for LLM API keys and (if Token strategy) `GITHUB_TOKEN`
-- `<storage_dir>/server-state/dev-token` — the dev token file
+- `<storage_dir>/server.dev-token` — the dev token file (path matches `Storage::server_state().dev_token_path()` at `lib/crates/fabro-config/src/storage.rs:103`)
 - artifact store metadata stamped with `FABRO_VERSION`
 
 The `/install/finish` handler is essentially the back half of `run_install_inner` (`install.rs:1925–:2061`) with the input source replaced by the in-memory `PendingInstall`.
 
 ### `setup_github_app` refactor
 
-The CLI version (`install.rs:1064`) spins up its own callback HTTP server because no other server is running at install time. The web version doesn't need that — the install-mode server is already running and exposes the callback at `/install/github/app/callback`. The refactor extracts the manifest-building, code-exchange, and credential-recording logic into transport-agnostic functions; the CLI keeps its embedded callback server, the web flow uses the install router.
+The CLI version (`install.rs:1064`) spins up its own callback HTTP server because no other server is running at install time. The web version doesn't need that — the install-mode server is already running and exposes the manifest-conversion redirect target at `/install/github/app/redirect`. The refactor extracts the manifest-building, code-exchange, and credential-recording logic into transport-agnostic functions; the CLI keeps its embedded callback server, the web flow uses the install router.
 
 ## Error handling and edge cases
 
@@ -227,7 +248,7 @@ User starts the App-creation flow on github.com, closes the tab, never returns. 
 
 ### OAuth `state` CSRF protection
 
-`POST /install/github/app/manifest` generates a 32-byte `state` value, stores it in the session, includes it in the GitHub redirect URL. `/install/github/app/callback` validates `state` matches before doing anything. Closes the open-redirect / CSRF angle on the only GET endpoint that mutates session state.
+`POST /install/github/app/manifest` generates a 32-byte `state` value, stores it in the install session, and embeds it in the manifest's `redirect_url` query string. `/install/github/app/redirect` validates `state` matches before exchanging the `code` with GitHub. This is the **only** authorization on that endpoint — the install token cannot be used because GitHub's manifest-conversion flow uses a 302 redirect to the user's browser and the `Authorization` header does not survive cross-origin redirects. Treating `state` as a single-use bearer-equivalent (consumed on first use, regenerated on retry) closes the CSRF / replay angle.
 
 ### Process restart mid-install
 
@@ -270,12 +291,13 @@ Per `files-internal/testing-strategy.md` (re-read before implementing).
 
 ### Integration tests (`fabro-server/tests/it/install/`)
 
-- **Spec/router conformance.** Existing fabro-server conformance test covers install endpoints automatically.
+- **Spec/router conformance, expanded.** The existing test at `lib/crates/fabro-server/tests/it/openapi_conformance.rs:62` only instantiates `build_router(...)`. With install endpoints in the spec but only mounted in `build_install_router`, those paths would hit nothing in `build_router` → 404 (not 405), which the test treats as passing. So the test would silently miss install drift. The fix: split spec iteration by tag — paths tagged `install` are sent to `build_install_router`, all other paths to `build_router`. Add a second pass that asserts install paths *do not* resolve in `build_router` and normal paths *do not* resolve in `build_install_router`, so cross-mounting is caught too.
 - **End-to-end happy path with stub providers.** Boot a server with temp empty `~/.fabro`, follow the per-step API: test LLM key → record → test GitHub PAT → record → finish. Assert resulting `settings.toml`, `server.env`, vault contents match snapshot. Use `httpmock` for upstream calls.
-- **Mode detection.** Server boots without `settings.toml` → install mode (install endpoints respond, `/api/v1/*` 404s). With `settings.toml` → normal mode (install endpoints 404, `/api/v1/*` works).
-- **Parse-error fail-loud.** Boot with malformed `settings.toml` → server exits with parse error, does NOT fall back to install mode.
-- **Token rejection.** All install endpoints called without token → 401. Wrong token → 401. Valid token → 200/422.
-- **GitHub App `state` validation.** Callback called with mismatched `state` → 400, session unchanged.
+- **Mode detection at dispatch.** A direct unit test of the `commands::server::dispatch` fork: with empty home directory → install bootstrap path is selected (no settings load attempted). With valid `settings.toml` → existing path. With malformed `settings.toml` → parse error (does not fall back to install mode).
+- **Install router behavior.** Boot the install router directly: install endpoints respond (with valid token), `/api/v1/*` returns 404, `/health` returns `{"mode":"install"}`, the SPA shell HTML includes `window.__FABRO_MODE__ = "install"`.
+- **Normal router behavior.** Boot the normal router directly: install endpoints return 404, `/api/v1/*` works, the SPA shell HTML does not include the install mode flag.
+- **Token rejection.** All install endpoints (except `GET /install/github/app/redirect`) called without token → 401. Wrong token → 401. Valid token → 200/422.
+- **GitHub App `state` validation.** `GET /install/github/app/redirect` called with mismatched or missing `state` → 400, session unchanged, no GitHub API call attempted.
 - **Finish failure rollback.** Force a vault write to fail; assert `settings.toml` is restored and process does not exit.
 - **Forwarded-host detection.** Request with `X-Forwarded-Host: foo.com` + `X-Forwarded-Proto: https` → `GET /install/session` returns prefilled canonical URL `https://foo.com`.
 
