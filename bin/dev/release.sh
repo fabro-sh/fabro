@@ -12,10 +12,7 @@ release_date() {
 
 days_since_2026() {
   local target_date="$1"
-  local epoch_2026 epoch_target
-  epoch_2026=$(date -j -f "%Y-%m-%d" "2026-01-01" "+%s")
-  epoch_target=$(date -j -f "%Y-%m-%d" "$target_date" "+%s")
-  printf '%s\n' $(( (epoch_target - epoch_2026) / 86400 ))
+  python3 -c "from datetime import date; print((date.fromisoformat('$target_date') - date(2026, 1, 1)).days)"
 }
 
 next_base_version() {
@@ -150,7 +147,8 @@ main() {
     return 0
   fi
 
-  sed -i '' "s/^version = \"$current_version\"/version = \"$new_version\"/" "$cargo_toml"
+  sed -i.bak "s/^version = \"$current_version\"/version = \"$new_version\"/" "$cargo_toml"
+  rm "${cargo_toml}.bak"
   echo "Updated $cargo_toml"
 
   cargo update --workspace
