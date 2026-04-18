@@ -1,8 +1,136 @@
 ---
-title: "Digital Ocean"
-description: "Deploy Fabro to Digital Ocean"
+title: "DigitalOcean"
+description: "Deploy Fabro to a DigitalOcean Droplet with docker compose and Caddy for automatic TLS"
 ---
 
 <Warning>
-This guide is coming soon. Deployment guides are currently in development.
+  The server interface is in private early access. Contact [bryan@qlty.sh](mailto:bryan@qlty.sh) if you're interested in trying it.
 </Warning>
+
+DigitalOcean is a good fit for self-hosting Fabro on a Droplet — a plain Linux VPS running `docker compose`. The repo ships everything you need:
+
+- `docker-compose.yaml` pulls the pre-built image from GHCR and declares a named volume for `/storage`
+- `docker-compose.prod.yaml` adds a [Caddy](https://caddyserver.com) sidecar that terminates TLS and auto-provisions Let's Encrypt certificates
+- `Caddyfile` reverse-proxies HTTPS traffic to the Fabro server
+
+<Note>
+  **Why not App Platform?** DigitalOcean App Platform has no persistent volumes — it is designed for stateless workloads that offload state to managed Postgres or Spaces. Fabro writes runs, checkpoints, sessions, and JWT keys to `/storage`, so a Droplet (or any VPS) is the right fit. If you prefer Kubernetes, DOKS works too — that path is not documented here.
+</Note>
+
+## Prerequisites
+
+- A DigitalOcean account and (optionally) the [`doctl`](https://docs.digitalocean.com/reference/doctl/how-to/install/) CLI
+- A domain name with DNS you can edit (required for Caddy to issue a Let's Encrypt cert)
+- LLM provider API keys (Anthropic, OpenAI, etc.) and any secrets you want set via `.env`
+
+## 1. Create a Droplet
+
+Pick the **Docker on Ubuntu** image from the DigitalOcean Marketplace — it ships with Docker Engine and the Compose plugin preinstalled, so there's no manual Docker install step.
+
+From the control panel, or with `doctl`:
+
+```bash
+doctl compute droplet create fabro \
+  --image docker-20-04 \
+  --size s-2vcpu-2gb \
+  --region nyc3 \
+  --ssh-keys <your-ssh-key-fingerprint>
+```
+
+`s-2vcpu-2gb` is a reasonable starting size for light usage; grow later as your workflow load increases. Any region works — pick the one closest to you.
+
+## 2. Point DNS at the Droplet
+
+Caddy needs the domain to resolve to the Droplet's public IP **before** you start the stack, or the first cert issuance will fail. Create an `A` record for your chosen hostname (e.g. `fabro.example.com`) pointing at the Droplet's IPv4 address. Wait for propagation before continuing.
+
+## 3. Configure and launch
+
+SSH into the Droplet and pull the repo:
+
+```bash
+ssh root@<droplet-ip>
+git clone https://github.com/fabro-sh/fabro
+cd fabro
+cp .env.example .env
+```
+
+Edit `.env`. At minimum:
+
+```
+FABRO_DOMAIN=fabro.example.com
+ANTHROPIC_API_KEY=...
+SESSION_SECRET=...
+```
+
+The [Server Configuration](/administration/server-configuration) reference has the full list of variables; the minimum useful set is:
+
+| Variable | Purpose |
+|---|---|
+| `FABRO_DOMAIN` | Public hostname Caddy serves. Must resolve to this Droplet for Let's Encrypt to issue a cert. |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / ... | At least one LLM provider key for the models you'll run |
+| `FABRO_DEV_TOKEN` | Optional — pre-set the dev token instead of reading the one written to `/storage` on first boot |
+| `SESSION_SECRET` | 64-character hex string; required when the web UI is enabled |
+| `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | Only if you enable GitHub OAuth or the GitHub App integration |
+
+Bring up the stack:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d
+```
+
+This starts two containers: `fabro` (the server, state in the `fabro-storage` named volume) and `caddy` (listening on ports 80/443, cert state in the `caddy_data` named volume). Caddy requests a Let's Encrypt cert on first boot; watch progress with `docker compose logs -f caddy`.
+
+## Accessing your Fabro server
+
+Once `https://<FABRO_DOMAIN>/health` returns `ok`, two things to grab:
+
+1. **The dev token** — on first boot, Fabro writes one to `/var/fabro/dev-token` and logs it:
+
+   ```bash
+   docker compose exec fabro cat /var/fabro/dev-token
+   ```
+
+2. **Point your local CLI at the server** — add the URL to `~/.fabro/settings.toml`:
+
+   ```toml title="~/.fabro/settings.toml"
+   [server]
+   target = "https://fabro.example.com/api/v1"
+   ```
+
+   Then commands like `fabro model list --server <url>` will hit your Droplet.
+
+See [Running the Fabro Server](/administration/deploy-server) for the full auth and CLI-pointing story.
+
+## Updates
+
+To pull the latest nightly image and restart:
+
+```bash
+cd /root/fabro
+git pull
+docker compose -f docker-compose.yaml -f docker-compose.prod.yaml pull
+docker compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d
+```
+
+The `fabro-storage` and `caddy_data` named volumes survive `pull` and `up`, so runs, checkpoints, and TLS certs persist.
+
+To pin a specific version instead of `:nightly`, edit `docker-compose.yaml` and change `image: ghcr.io/fabro-sh/fabro:nightly` to the tag you want.
+
+## Caveats
+
+- **DNS must resolve before first `up`.** Caddy will retry Let's Encrypt failures, but an obviously bad DNS config will lock you into the staging CA's low rate limits. Verify with `dig +short fabro.example.com` before starting.
+- **Firewall.** The Docker Marketplace image opens 22, 80, and 443 by default — good. Keep port 32276 **closed** on the public interface; Caddy fronts the Fabro server on the private Docker network. Use `ufw status` to verify.
+- **State lives in named volumes.** `fabro-storage` and `caddy_data` are the load-bearing pieces. Back them up (for example, via `docker run --rm -v fabro_fabro-storage:/src -v $(pwd):/dst alpine tar czf /dst/backup.tgz -C /src .`) before destructive operations.
+- **Single-host deploy.** This setup assumes one Droplet owns the data. For HA you'd need a different architecture (external block storage, managed DB, etc.) — Fabro's server currently assumes a single writer on `/storage`.
+- **Architecture.** The compose file pins `platform: linux/amd64`; the `:nightly` tag is multi-arch but the arm64 variant is not currently usable. Use x86_64 Droplets.
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Running the Fabro Server" icon="server" href="/administration/deploy-server">
+    Auth, dev tokens, submitting runs, and pointing the CLI at your deployment.
+  </Card>
+  <Card title="Server Configuration" icon="gear" href="/administration/server-configuration">
+    Full `settings.toml` reference — TLS, auth methods, concurrency, and more.
+  </Card>
+</Columns>
