@@ -190,6 +190,30 @@ jobs:
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
             type=raw,value=nightly,enable=${{ contains(github.ref_name, '-nightly.') }}
 
+      - name: Build amd64 image for smoke test
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: fabro-smoke:amd64
+
+      - name: Smoke-test amd64 image
+        run: docker run --rm --platform linux/amd64 fabro-smoke:amd64 fabro version
+
+      - name: Build arm64 image for smoke test
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          load: true
+          tags: fabro-smoke:arm64
+
+      - name: Smoke-test arm64 image
+        run: docker run --rm --platform linux/arm64 fabro-smoke:arm64 fabro version
+
       - id: build
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
