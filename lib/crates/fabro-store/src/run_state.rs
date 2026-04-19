@@ -8,10 +8,10 @@ use fabro_types::run_event::{
     RunFailedProps, StageCompletedProps, StagePromptProps,
 };
 use fabro_types::{
-    BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
-    InterviewQuestionType, NodeStatusRecord, Outcome, PullRequestRecord, Retro, RunControlAction,
-    RunEvent, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus,
-    StartRecord, StatusReason,
+    BilledModelUsage, BlockedReason, Checkpoint, Conclusion, EventBody, FailureSignature,
+    InterviewQuestionRecord, InterviewQuestionType, NodeStatusRecord, Outcome, PullRequestRecord,
+    Retro, RunControlAction, RunEvent, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord,
+    StageStatus, StartRecord, StatusReason,
 };
 use serde_json::Value;
 
@@ -113,11 +113,54 @@ impl RunProjection {
                 }
                 self.status = Some(run_status_record(RunStatus::Submitted, props.reason, ts));
             }
+            EventBody::RunQueued(_) => {
+                self.status = Some(run_status_record(RunStatus::Queued, None, ts));
+            }
             EventBody::RunStarting(props) => {
                 self.status = Some(run_status_record(RunStatus::Starting, props.reason, ts));
             }
             EventBody::RunRunning(props) => {
                 self.status = Some(run_status_record(RunStatus::Running, props.reason, ts));
+            }
+            EventBody::RunBlocked(props) => {
+                let visible_status = if self
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| status.status == RunStatus::Paused)
+                {
+                    RunStatus::Paused
+                } else {
+                    RunStatus::Blocked
+                };
+                self.status = Some(run_status_record_with_blocked_reason(
+                    visible_status,
+                    None,
+                    Some(props.blocked_reason),
+                    ts,
+                ));
+            }
+            EventBody::RunUnblocked(_) => {
+                self.status = Some(match self.status.as_ref() {
+                    Some(status) if status.status == RunStatus::Paused => {
+                        run_status_record_with_blocked_reason(
+                            RunStatus::Paused,
+                            status.status_reason,
+                            None,
+                            ts,
+                        )
+                    }
+                    Some(status) => run_status_record_with_blocked_reason(
+                        if status.status == RunStatus::Blocked {
+                            RunStatus::Running
+                        } else {
+                            status.status
+                        },
+                        status.status_reason,
+                        None,
+                        ts,
+                    ),
+                    None => run_status_record(RunStatus::Running, None, ts),
+                });
             }
             EventBody::RunRemoving(props) => {
                 self.status = Some(run_status_record(RunStatus::Removing, props.reason, ts));
@@ -132,11 +175,25 @@ impl RunProjection {
                 self.pending_control = Some(RunControlAction::Unpause);
             }
             EventBody::RunPaused(_) => {
-                self.status = Some(run_status_record(RunStatus::Paused, None, ts));
+                self.status = Some(run_status_record_with_blocked_reason(
+                    RunStatus::Paused,
+                    None,
+                    self.status
+                        .as_ref()
+                        .and_then(|status| status.blocked_reason),
+                    ts,
+                ));
                 self.pending_control = None;
             }
             EventBody::RunUnpaused(_) => {
-                self.status = Some(run_status_record(RunStatus::Running, None, ts));
+                self.status = Some(run_status_record_with_blocked_reason(
+                    RunStatus::Running,
+                    None,
+                    self.status
+                        .as_ref()
+                        .and_then(|status| status.blocked_reason),
+                    ts,
+                ));
                 self.pending_control = None;
             }
             EventBody::RunCompleted(props) => {
@@ -377,8 +434,15 @@ impl RunProjection {
                 .unwrap_or_default(),
             host_repo_path: self.run.as_ref().and_then(|run| run.host_repo_path.clone()),
             start_time: self.start.as_ref().map(|start| start.start_time),
-            status: self.status.as_ref().map(|status| status.status),
-            status_reason: self.status.as_ref().and_then(|status| status.reason),
+            status: self
+                .status
+                .as_ref()
+                .map_or(RunStatus::Submitted, |status| status.status),
+            status_reason: self.status.as_ref().and_then(|status| status.status_reason),
+            blocked_reason: self
+                .status
+                .as_ref()
+                .and_then(|status| status.blocked_reason),
             pending_control: self.pending_control,
             duration_ms: self
                 .conclusion
@@ -423,12 +487,22 @@ impl RunProjection {
 
 fn run_status_record(
     status: RunStatus,
-    reason: Option<StatusReason>,
+    status_reason: Option<StatusReason>,
+    updated_at: DateTime<Utc>,
+) -> RunStatusRecord {
+    run_status_record_with_blocked_reason(status, status_reason, None, updated_at)
+}
+
+fn run_status_record_with_blocked_reason(
+    status: RunStatus,
+    status_reason: Option<StatusReason>,
+    blocked_reason: Option<BlockedReason>,
     updated_at: DateTime<Utc>,
 ) -> RunStatusRecord {
     RunStatusRecord {
         status,
-        reason,
+        status_reason,
+        blocked_reason,
         updated_at,
     }
 }
@@ -616,6 +690,29 @@ mod tests {
         }
     }
 
+    fn test_raw_event(
+        seq: u32,
+        event: &str,
+        properties: serde_json::Value,
+        node_id: Option<&str>,
+    ) -> EventEnvelope {
+        EventEnvelope {
+            seq,
+            payload: EventPayload::new(
+                json!({
+                    "id": format!("evt-{seq}"),
+                    "ts": Utc::now().to_rfc3339(),
+                    "run_id": fixtures::RUN_1,
+                    "event": event,
+                    "node_id": node_id,
+                    "properties": properties,
+                }),
+                &fixtures::RUN_1,
+            )
+            .unwrap(),
+        }
+    }
+
     #[test]
     fn deserialize_projection_defaults_missing_nodes_and_checkpoints() {
         let state: RunProjection = serde_json::from_value(serde_json::json!({
@@ -778,6 +875,92 @@ mod tests {
             state.pending_interviews.is_empty(),
             "completed interview should clear pending state"
         );
+    }
+
+    #[test]
+    fn queued_and_blocked_events_drive_projection_and_summary_fields() {
+        let mut state = RunProjection::default();
+
+        state
+            .apply_event(&test_raw_event(1, "run.queued", json!({}), None))
+            .unwrap();
+        assert_eq!(
+            state
+                .status
+                .as_ref()
+                .map(|status| status.status.to_string()),
+            Some("queued".to_string())
+        );
+
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::RunPaused(Default::default()),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event(
+                3,
+                "run.blocked",
+                json!({ "blocked_reason": "human_input_required" }),
+                None,
+            ))
+            .unwrap();
+
+        let status_json = serde_json::to_value(state.status.as_ref().unwrap()).unwrap();
+        assert_eq!(status_json["status"], "paused");
+        assert_eq!(status_json["status_reason"], serde_json::Value::Null);
+        assert_eq!(status_json["blocked_reason"], "human_input_required");
+
+        let summary = state.build_summary(&fixtures::RUN_1);
+        let summary_json = serde_json::to_value(summary).unwrap();
+        assert_eq!(summary_json["status"], "paused");
+        assert_eq!(summary_json["status_reason"], serde_json::Value::Null);
+        assert_eq!(summary_json["blocked_reason"], "human_input_required");
+    }
+
+    #[test]
+    fn run_unblocked_clears_blocked_reason_and_restores_running() {
+        let mut state = RunProjection::default();
+
+        state
+            .apply_event(&test_raw_event(
+                1,
+                "run.blocked",
+                json!({ "blocked_reason": "human_input_required" }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event(2, "run.unblocked", json!({}), None))
+            .unwrap();
+
+        let status_json = serde_json::to_value(state.status.as_ref().unwrap()).unwrap();
+        assert_eq!(status_json["status"], "running");
+        assert_eq!(status_json["blocked_reason"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn summary_synthesizes_submitted_when_run_exists_without_status() {
+        let mut state = RunProjection::default();
+        state.run = Some(fabro_types::RunRecord {
+            run_id:            fixtures::RUN_1,
+            settings:          SettingsLayer::default(),
+            graph:             fabro_types::Graph::new("test"),
+            workflow_slug:     Some("test".to_string()),
+            working_directory: std::path::PathBuf::from("/tmp/run"),
+            host_repo_path:    Some("/tmp/repo".to_string()),
+            repo_origin_url:   None,
+            base_branch:       None,
+            labels:            HashMap::new(),
+            provenance:        None,
+            manifest_blob:     None,
+            definition_blob:   None,
+        });
+
+        let summary_json = serde_json::to_value(state.build_summary(&fixtures::RUN_1)).unwrap();
+        assert_eq!(summary_json["status"], "submitted");
     }
 
     #[test]

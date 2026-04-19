@@ -16,7 +16,7 @@ use fabro_vault::Vault;
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use fabro_workflow::artifact_upload::{ArtifactSink, StageArtifactUploader};
 use fabro_workflow::event::{Emitter, RunEventSink};
-use fabro_workflow::operations::{self, StartServices};
+use fabro_workflow::operations::{self, BlockedStateTracker, StartServices};
 use fabro_workflow::run_control::RunControlState;
 use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
 #[cfg(unix)]
@@ -101,6 +101,7 @@ pub(crate) async fn execute(
         ]),
         artifact_sink,
         run_control: Some(run_control),
+        blocked_state_tracker: Some(BlockedStateTracker::new()),
         github_app,
         vault,
         on_node: None,

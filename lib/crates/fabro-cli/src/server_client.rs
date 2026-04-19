@@ -602,6 +602,17 @@ impl ServerStoreClient {
             .collect::<Result<Vec<_>>>()
     }
 
+    pub(crate) async fn retrieve_run(&self, run_id: &RunId) -> Result<RunSummary> {
+        let response = self
+            .client
+            .retrieve_run()
+            .id(run_id.to_string())
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        convert_type(response.into_inner())
+    }
+
     pub(crate) async fn get_run_state(&self, run_id: &RunId) -> Result<RunProjection> {
         let response = self
             .client

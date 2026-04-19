@@ -229,6 +229,9 @@ impl Handler for HumanHandler {
             },
             &stage_scope,
         );
+        if let Some(tracker) = &services.blocked_state_tracker {
+            tracker.interview_started(services.emitter.as_ref());
+        }
         let interview_start = Instant::now();
         let answer = self.interviewer.ask(question).await;
 
@@ -244,6 +247,9 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
+            if let Some(tracker) = &services.blocked_state_tracker {
+                tracker.interview_resolved(services.emitter.as_ref());
+            }
             let default_choice = node
                 .attrs
                 .get("human.default_choice")
@@ -282,6 +288,9 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
+            if let Some(tracker) = &services.blocked_state_tracker {
+                tracker.interview_resolved(services.emitter.as_ref());
+            }
             return Ok(unanswered_human_gate(
                 "human interaction interrupted before an answer was provided",
             ));
@@ -297,6 +306,9 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
+            if let Some(tracker) = &services.blocked_state_tracker {
+                tracker.interview_resolved(services.emitter.as_ref());
+            }
             return Ok(unanswered_human_gate("human skipped interaction"));
         }
 
@@ -311,6 +323,9 @@ impl Handler for HumanHandler {
             },
             &stage_scope,
         );
+        if let Some(tracker) = &services.blocked_state_tracker {
+            tracker.interview_resolved(services.emitter.as_ref());
+        }
 
         // 6. Try fixed-choice match
         if let Some(selected) = find_choice_match(&answer, &choices) {
@@ -420,6 +435,7 @@ mod tests {
                 .push(event.clone());
         });
         services.emitter = emitter;
+        services.blocked_state_tracker = Some(crate::operations::BlockedStateTracker::new());
         services
     }
 
@@ -649,6 +665,47 @@ mod tests {
                         if props.answer == "skipped"
                 ))
         );
+    }
+
+    #[tokio::test]
+    async fn wait_human_emits_blocked_then_unblocked_around_interview() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| {
+            Answer::selected("A", QuestionOption {
+                key:   "A".to_string(),
+                label: "Approve".to_string(),
+            })
+        }));
+        let handler = HumanHandler::new(interviewer);
+        let graph = build_graph_with_human_gate();
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        handler
+            .execute(
+                node,
+                &context,
+                &graph,
+                run_dir,
+                &make_services_with_events(Arc::clone(&events)),
+            )
+            .await
+            .unwrap();
+
+        let event_names = events
+            .lock()
+            .expect("event log lock poisoned")
+            .iter()
+            .map(|event| event.event_name().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(event_names, vec![
+            "interview.started",
+            "run.blocked",
+            "interview.completed",
+            "run.unblocked",
+        ]);
     }
 
     #[tokio::test]

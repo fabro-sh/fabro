@@ -15,23 +15,14 @@
 
 
 /**
- * Lifecycle status of a run.
+ * Specific reason a run is blocked on external intervention.
  */
 
-export const RunStatus = {
-    SUBMITTED: 'submitted',
-    QUEUED: 'queued',
-    STARTING: 'starting',
-    RUNNING: 'running',
-    BLOCKED: 'blocked',
-    PAUSED: 'paused',
-    REMOVING: 'removing',
-    SUCCEEDED: 'succeeded',
-    FAILED: 'failed',
-    DEAD: 'dead'
+export const BlockedReason = {
+    HUMAN_INPUT_REQUIRED: 'human_input_required'
 } as const;
 
-export type RunStatus = typeof RunStatus[keyof typeof RunStatus];
+export type BlockedReason = typeof BlockedReason[keyof typeof BlockedReason];
 
 
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mapRunSummaryToRunItem } from "./runs";
+import { columnNames, isRunStatus, mapRunSummaryToRunItem, runStatusDisplay, statusColors } from "./runs";
 
 describe("mapRunSummaryToRunItem", () => {
   test("maps store run summary to RunItem", () => {
@@ -45,5 +45,19 @@ describe("mapRunSummaryToRunItem", () => {
     expect(item.title).toBe("Untitled run");
     expect(item.workflow).toBe("unknown");
     expect(item.repo).toBe("unknown");
+  });
+
+  test("recognizes canonical blocked and queued run statuses", () => {
+    expect(isRunStatus("queued")).toBe(true);
+    expect(isRunStatus("blocked")).toBe(true);
+    expect(runStatusDisplay).toHaveProperty("queued");
+    expect(runStatusDisplay).toHaveProperty("blocked");
+  });
+
+  test("uses blocked board column instead of waiting", () => {
+    expect(columnNames).toHaveProperty("blocked");
+    expect(statusColors).toHaveProperty("blocked");
+    expect(columnNames).not.toHaveProperty("waiting");
+    expect(statusColors).not.toHaveProperty("waiting");
   });
 });

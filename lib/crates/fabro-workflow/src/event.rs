@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::{
-    ActorRef, BilledTokenCounts, ParallelBranchId, RunBlobId, RunControlAction, RunEvent, RunId,
-    RunProvenance, StageId, StageStatus, StatusReason, run_event as fabro_types,
+    ActorRef, BilledTokenCounts, BlockedReason, ParallelBranchId, RunBlobId, RunControlAction,
+    RunEvent, RunId, RunProvenance, StageId, StageStatus, StatusReason, run_event as fabro_types,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -78,6 +78,7 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         definition_blob: Option<RunBlobId>,
     },
+    RunQueued,
     RunStarting {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<StatusReason>,
@@ -86,6 +87,10 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<StatusReason>,
     },
+    RunBlocked {
+        blocked_reason: BlockedReason,
+    },
+    RunUnblocked,
     RunRemoving {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<StatusReason>,
@@ -574,11 +579,20 @@ impl Event {
             } => {
                 info!(?reason, ?definition_blob, "Run submitted");
             }
+            Self::RunQueued => {
+                info!("Run queued");
+            }
             Self::RunStarting { reason } => {
                 info!(?reason, "Run starting");
             }
             Self::RunRunning { reason } => {
                 info!(?reason, "Run running");
+            }
+            Self::RunBlocked { blocked_reason } => {
+                info!(?blocked_reason, "Run blocked");
+            }
+            Self::RunUnblocked => {
+                info!("Run unblocked");
             }
             Self::RunRemoving { reason } => {
                 info!(?reason, "Run removing");
@@ -1146,8 +1160,11 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::RunCreated { .. } => "run.created",
         Event::WorkflowRunStarted { .. } => "run.started",
         Event::RunSubmitted { .. } => "run.submitted",
+        Event::RunQueued => "run.queued",
         Event::RunStarting { .. } => "run.starting",
         Event::RunRunning { .. } => "run.running",
+        Event::RunBlocked { .. } => "run.blocked",
+        Event::RunUnblocked => "run.unblocked",
         Event::RunRemoving { .. } => "run.removing",
         Event::RunCancelRequested { .. } => "run.cancel.requested",
         Event::RunPauseRequested { .. } => "run.pause.requested",
@@ -1519,11 +1536,20 @@ fn event_body_from_event(event: &Event) -> EventBody {
             reason:          *reason,
             definition_blob: *definition_blob,
         }),
+        Event::RunQueued => EventBody::RunQueued(fabro_types::RunStatusEffectProps::default()),
         Event::RunStarting { reason } => {
             EventBody::RunStarting(fabro_types::RunStatusTransitionProps { reason: *reason })
         }
         Event::RunRunning { reason } => {
             EventBody::RunRunning(fabro_types::RunStatusTransitionProps { reason: *reason })
+        }
+        Event::RunBlocked { blocked_reason } => {
+            EventBody::RunBlocked(fabro_types::RunBlockedProps {
+                blocked_reason: *blocked_reason,
+            })
+        }
+        Event::RunUnblocked => {
+            EventBody::RunUnblocked(fabro_types::RunStatusEffectProps::default())
         }
         Event::RunRemoving { reason } => {
             EventBody::RunRemoving(fabro_types::RunStatusTransitionProps { reason: *reason })

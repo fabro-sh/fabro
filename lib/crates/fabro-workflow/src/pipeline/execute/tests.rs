@@ -224,6 +224,7 @@ async fn execute_test_run_with_options(
             git: git_options,
             worktree_mode: None,
             run_control: None,
+            blocked_state_tracker: None,
             registry_override,
             artifact_sink: None,
             checkpoint: None,
@@ -247,45 +248,46 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
     let initialized = initialize(
         persisted_workflow(graph, source, &run_dir, test_run_id("run-test")),
         InitOptions {
-            run_id:            test_run_id("run-test"),
-            run_store:         test_run_store(&test_run_id("run-test")).await.into(),
-            dry_run:           false,
-            emitter:           test_emitter_arc("run-test"),
-            sandbox:           SandboxSpec::Local {
+            run_id:                test_run_id("run-test"),
+            run_store:             test_run_store(&test_run_id("run-test")).await.into(),
+            dry_run:               false,
+            emitter:               test_emitter_arc("run-test"),
+            sandbox:               SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
-            llm:               LlmSpec {
+            llm:                   LlmSpec {
                 model:          "test-model".to_string(),
                 provider:       fabro_llm::Provider::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer:       Arc::new(AutoApproveInterviewer),
-            lifecycle:         LifecycleOptions {
+            interviewer:           Arc::new(AutoApproveInterviewer),
+            lifecycle:             LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
                 devcontainer_phases:      vec![],
             },
-            run_options:       test_run_options(&run_dir, "run-test"),
-            workflow_path:     None,
-            workflow_bundle:   None,
-            hooks:             HookSettings { hooks: vec![] },
-            sandbox_env:       SandboxEnvSpec {
+            run_options:           test_run_options(&run_dir, "run-test"),
+            workflow_path:         None,
+            workflow_bundle:       None,
+            hooks:                 HookSettings { hooks: vec![] },
+            sandbox_env:           SandboxEnvSpec {
                 devcontainer_env:   HashMap::new(),
                 toml_env:           HashMap::new(),
                 github_permissions: None,
                 origin_url:         None,
             },
-            vault:             None,
-            devcontainer:      None,
-            git:               None,
-            worktree_mode:     None,
-            run_control:       None,
-            registry_override: None,
-            artifact_sink:     None,
-            checkpoint:        None,
-            seed_context:      None,
+            vault:                 None,
+            devcontainer:          None,
+            git:                   None,
+            worktree_mode:         None,
+            run_control:           None,
+            blocked_state_tracker: None,
+            registry_override:     None,
+            artifact_sink:         None,
+            checkpoint:            None,
+            seed_context:          None,
         },
     )
     .await
@@ -350,6 +352,7 @@ async fn run_with_lifecycle(
             git: None,
             worktree_mode: None,
             run_control: None,
+            blocked_state_tracker: None,
             registry_override: Some(Arc::new(registry)),
             artifact_sink: None,
             checkpoint: None,
@@ -788,7 +791,7 @@ async fn execute_cancelled_mid_run_persists_cancelled_status() {
     assert!(matches!(executed.outcome, Err(Error::Cancelled)));
     let status = executed.run_store.state().await.unwrap().status.unwrap();
     assert_eq!(status.status, RunStatus::Failed);
-    assert_eq!(status.reason, Some(StatusReason::Cancelled));
+    assert_eq!(status.status_reason, Some(StatusReason::Cancelled));
 }
 
 #[tokio::test]

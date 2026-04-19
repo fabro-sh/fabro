@@ -57,10 +57,11 @@ pub(crate) async fn list_board_runs(
     let has_more = data.len() > limit;
     data.truncate(limit);
     let columns = json!([
-        {"id": "working", "name": "Working"},
-        {"id": "pending", "name": "Pending"},
-        {"id": "review", "name": "Review"},
-        {"id": "merge", "name": "Merge"},
+        {"id": "initializing", "name": "Initializing"},
+        {"id": "running", "name": "Running"},
+        {"id": "blocked", "name": "Blocked"},
+        {"id": "succeeded", "name": "Succeeded"},
+        {"id": "failed", "name": "Failed"},
     ]);
     (
         StatusCode::OK,
@@ -209,6 +210,13 @@ pub(crate) async fn get_run_status(
                 .as_ref()
                 .and_then(|t| Duration::try_from_secs_f64(t.elapsed_secs).ok())
                 .and_then(|duration| u64::try_from(duration.as_millis()).ok());
+            let status = match item.status {
+                fabro_api::types::BoardColumn::Initializing => "queued",
+                fabro_api::types::BoardColumn::Running => "running",
+                fabro_api::types::BoardColumn::Blocked => "blocked",
+                fabro_api::types::BoardColumn::Succeeded => "succeeded",
+                fabro_api::types::BoardColumn::Failed => "failed",
+            };
             (
                 StatusCode::OK,
                 Json(json!({
@@ -219,7 +227,8 @@ pub(crate) async fn get_run_status(
                     "host_repo_path": format!("/demo/{}", item.repository.name),
                     "labels": {},
                     "start_time": item.created_at.to_rfc3339(),
-                    "status": "running",
+                    "status": status,
+                    "blocked_reason": if status == "blocked" { json!("human_input_required") } else { serde_json::Value::Null },
                     "status_reason": null,
                     "pending_control": null,
                     "duration_ms": elapsed_ms,
@@ -287,7 +296,16 @@ pub(crate) async fn cancel_stub(
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    (StatusCode::OK, Json(serde_json::json!({"id": id, "status": "cancelled", "created_at": "2026-03-06T14:30:00Z"}))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "id": id,
+            "status": "failed",
+            "status_reason": "cancelled",
+            "created_at": "2026-03-06T14:30:00Z"
+        })),
+    )
+        .into_response()
 }
 
 pub(crate) async fn pause_stub(
@@ -684,7 +702,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "implement".into(),
                 },
-                status:       BoardColumn::Working,
+                status:       BoardColumn::Running,
                 pull_request: None,
                 timings:      Some(RunTimings {
                     elapsed_secs:    420.0,
@@ -709,7 +727,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "implement".into(),
                 },
-                status:       BoardColumn::Working,
+                status:       BoardColumn::Running,
                 pull_request: None,
                 timings:      Some(RunTimings {
                     elapsed_secs:    8100.0,
@@ -734,7 +752,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "fix_build".into(),
                 },
-                status:       BoardColumn::Working,
+                status:       BoardColumn::Running,
                 pull_request: None,
                 timings:      Some(RunTimings {
                     elapsed_secs:    2700.0,
@@ -759,7 +777,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "expand".into(),
                 },
-                status:       BoardColumn::Initializing,
+                status:       BoardColumn::Blocked,
                 pull_request: Some(RunPullRequest {
                     number:    0,
                     additions: Some(567),
@@ -789,7 +807,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "implement".into(),
                 },
-                status:       BoardColumn::Initializing,
+                status:       BoardColumn::Blocked,
                 pull_request: Some(RunPullRequest {
                     number:    0,
                     additions: Some(145),
@@ -819,7 +837,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "implement".into(),
                 },
-                status:       BoardColumn::Review,
+                status:       BoardColumn::Failed,
                 pull_request: Some(RunPullRequest {
                     number:    889,
                     additions: Some(234),
@@ -883,7 +901,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "implement".into(),
                 },
-                status:       BoardColumn::Review,
+                status:       BoardColumn::Running,
                 pull_request: Some(RunPullRequest {
                     number:    156,
                     additions: Some(412),
@@ -937,7 +955,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "implement".into(),
                 },
-                status:       BoardColumn::Merge,
+                status:       BoardColumn::Succeeded,
                 pull_request: Some(RunPullRequest {
                     number:    1249,
                     additions: Some(189),
@@ -1026,7 +1044,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "expand".into(),
                 },
-                status:       BoardColumn::Merge,
+                status:       BoardColumn::Succeeded,
                 pull_request: Some(RunPullRequest {
                     number:    430,
                     additions: Some(56),
@@ -1085,7 +1103,7 @@ mod runs {
                 workflow:     WorkflowReference {
                     slug: "sync_drift".into(),
                 },
-                status:       BoardColumn::Merge,
+                status:       BoardColumn::Succeeded,
                 pull_request: Some(RunPullRequest {
                     number:    76,
                     additions: Some(34),

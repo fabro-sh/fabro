@@ -133,6 +133,7 @@ async fn initialized(
             on_node: None,
             artifact_sink: Some(ArtifactSink::Store(artifact_store)),
             run_control: None,
+            blocked_state_tracker: None,
             hook_runner: options.hook_runner,
             env: options.env,
             dry_run: run_options.dry_run_enabled(),
