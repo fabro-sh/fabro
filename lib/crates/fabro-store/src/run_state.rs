@@ -655,7 +655,9 @@ mod tests {
     use std::collections::HashMap;
 
     use chrono::Utc;
-    use fabro_types::run_event::{InterviewCompletedProps, InterviewOption, InterviewStartedProps};
+    use fabro_types::run_event::{
+        InterviewCompletedProps, InterviewOption, InterviewStartedProps, RunControlEffectProps,
+    };
     use fabro_types::settings::SettingsLayer;
     use fabro_types::{
         Checkpoint, EventBody, InterviewQuestionType, RunBlobId, RunControlAction, RunEvent,
@@ -693,7 +695,7 @@ mod tests {
     fn test_raw_event(
         seq: u32,
         event: &str,
-        properties: serde_json::Value,
+        properties: &serde_json::Value,
         node_id: Option<&str>,
     ) -> EventEnvelope {
         EventEnvelope {
@@ -882,7 +884,7 @@ mod tests {
         let mut state = RunProjection::default();
 
         state
-            .apply_event(&test_raw_event(1, "run.queued", json!({}), None))
+            .apply_event(&test_raw_event(1, "run.queued", &json!({}), None))
             .unwrap();
         assert_eq!(
             state
@@ -895,7 +897,7 @@ mod tests {
         state
             .apply_event(&test_event(
                 2,
-                EventBody::RunPaused(Default::default()),
+                EventBody::RunPaused(RunControlEffectProps::default()),
                 None,
             ))
             .unwrap();
@@ -903,7 +905,7 @@ mod tests {
             .apply_event(&test_raw_event(
                 3,
                 "run.blocked",
-                json!({ "blocked_reason": "human_input_required" }),
+                &json!({ "blocked_reason": "human_input_required" }),
                 None,
             ))
             .unwrap();
@@ -928,12 +930,12 @@ mod tests {
             .apply_event(&test_raw_event(
                 1,
                 "run.blocked",
-                json!({ "blocked_reason": "human_input_required" }),
+                &json!({ "blocked_reason": "human_input_required" }),
                 None,
             ))
             .unwrap();
         state
-            .apply_event(&test_raw_event(2, "run.unblocked", json!({}), None))
+            .apply_event(&test_raw_event(2, "run.unblocked", &json!({}), None))
             .unwrap();
 
         let status_json = serde_json::to_value(state.status.as_ref().unwrap()).unwrap();
@@ -949,19 +951,19 @@ mod tests {
             .apply_event(&test_raw_event(
                 1,
                 "run.blocked",
-                json!({ "blocked_reason": "human_input_required" }),
+                &json!({ "blocked_reason": "human_input_required" }),
                 None,
             ))
             .unwrap();
         state
             .apply_event(&test_event(
                 2,
-                EventBody::RunPaused(Default::default()),
+                EventBody::RunPaused(RunControlEffectProps::default()),
                 None,
             ))
             .unwrap();
         state
-            .apply_event(&test_raw_event(3, "run.unblocked", json!({}), None))
+            .apply_event(&test_raw_event(3, "run.unblocked", &json!({}), None))
             .unwrap();
 
         let status_json = serde_json::to_value(state.status.as_ref().unwrap()).unwrap();
@@ -977,21 +979,21 @@ mod tests {
             .apply_event(&test_raw_event(
                 1,
                 "run.blocked",
-                json!({ "blocked_reason": "human_input_required" }),
+                &json!({ "blocked_reason": "human_input_required" }),
                 None,
             ))
             .unwrap();
         state
             .apply_event(&test_event(
                 2,
-                EventBody::RunPaused(Default::default()),
+                EventBody::RunPaused(RunControlEffectProps::default()),
                 None,
             ))
             .unwrap();
         state
             .apply_event(&test_event(
                 3,
-                EventBody::RunUnpaused(Default::default()),
+                EventBody::RunUnpaused(RunControlEffectProps::default()),
                 None,
             ))
             .unwrap();
@@ -999,7 +1001,7 @@ mod tests {
             .apply_event(&test_raw_event(
                 4,
                 "run.blocked",
-                json!({ "blocked_reason": "human_input_required" }),
+                &json!({ "blocked_reason": "human_input_required" }),
                 None,
             ))
             .unwrap();
@@ -1011,21 +1013,23 @@ mod tests {
 
     #[test]
     fn summary_synthesizes_submitted_when_run_exists_without_status() {
-        let mut state = RunProjection::default();
-        state.run = Some(fabro_types::RunRecord {
-            run_id:            fixtures::RUN_1,
-            settings:          SettingsLayer::default(),
-            graph:             fabro_types::Graph::new("test"),
-            workflow_slug:     Some("test".to_string()),
-            working_directory: std::path::PathBuf::from("/tmp/run"),
-            host_repo_path:    Some("/tmp/repo".to_string()),
-            repo_origin_url:   None,
-            base_branch:       None,
-            labels:            HashMap::new(),
-            provenance:        None,
-            manifest_blob:     None,
-            definition_blob:   None,
-        });
+        let state = RunProjection {
+            run: Some(fabro_types::RunRecord {
+                run_id:            fixtures::RUN_1,
+                settings:          SettingsLayer::default(),
+                graph:             fabro_types::Graph::new("test"),
+                workflow_slug:     Some("test".to_string()),
+                working_directory: std::path::PathBuf::from("/tmp/run"),
+                host_repo_path:    Some("/tmp/repo".to_string()),
+                repo_origin_url:   None,
+                base_branch:       None,
+                labels:            HashMap::new(),
+                provenance:        None,
+                manifest_blob:     None,
+                definition_blob:   None,
+            }),
+            ..RunProjection::default()
+        };
 
         let summary_json = serde_json::to_value(state.build_summary(&fixtures::RUN_1)).unwrap();
         assert_eq!(summary_json["status"], "submitted");
