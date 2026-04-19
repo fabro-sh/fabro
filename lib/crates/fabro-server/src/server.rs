@@ -5951,6 +5951,26 @@ async fn cancel_run(
         .into_response()
 }
 
+/// How `pause_run` should enact the transition, chosen from the current run
+/// status.
+enum PauseMode {
+    /// Worker is running; ask it to pause via SIGUSR1. Status flips to
+    /// `Paused` once the worker acknowledges.
+    Signal { worker_pid: u32 },
+    /// Worker is blocked on a human gate; flip to `Paused` directly by
+    /// appending `RunPaused` ourselves.
+    AppendEvent,
+}
+
+/// How `unpause_run` should enact the transition.
+enum UnpauseMode {
+    /// No outstanding block; ask the worker to resume via SIGUSR2.
+    Signal { worker_pid: u32 },
+    /// Was paused while blocked; append `RunUnpaused` then re-assert
+    /// `RunBlocked` so the projection reports `Blocked`.
+    AppendEvents { blocked_reason: BlockedReason },
+}
+
 async fn pause_run(
     subject: AuthenticatedSubject,
     State(state): State<Arc<AppState>>,
@@ -5967,14 +5987,18 @@ async fn pause_run(
                 .into_response();
         }
     };
-    let (created_at, worker_pid, immediate_pause) = {
+    let (created_at, mode) = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get(&id) {
             Some(managed_run) if managed_run.status == RunStatus::Running => {
-                (managed_run.created_at, managed_run.worker_pid, false)
+                let Some(worker_pid) = managed_run.worker_pid else {
+                    return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.")
+                        .into_response();
+                };
+                (managed_run.created_at, PauseMode::Signal { worker_pid })
             }
             Some(managed_run) if managed_run.status == RunStatus::Blocked => {
-                (managed_run.created_at, managed_run.worker_pid, true)
+                (managed_run.created_at, PauseMode::AppendEvent)
             }
             Some(_) => {
                 return ApiError::new(StatusCode::CONFLICT, "Run is not pausable.").into_response();
@@ -6000,33 +6024,26 @@ async fn pause_run(
     {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
-    if immediate_pause {
-        let run_store = match state.store.open_run(&id).await {
-            Ok(run_store) => run_store,
-            Err(err) => {
-                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                    .into_response();
-            }
-        };
-        if let Err(err) =
-            workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunPaused).await
-        {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
+    let response_status = match mode {
+        PauseMode::Signal { worker_pid } => {
+            #[cfg(unix)]
+            fabro_proc::sigusr1(worker_pid);
+            #[cfg(not(unix))]
+            let _ = worker_pid;
+            RunStatus::Running
         }
-        if let Ok(mut runs) = state.runs.lock() {
-            if let Some(managed_run) = runs.get_mut(&id) {
-                managed_run.status = RunStatus::Paused;
+        PauseMode::AppendEvent => {
+            if let Some(response) =
+                synchronous_transition(state.as_ref(), id, RunStatus::Paused, |events| {
+                    events.push(workflow_event::Event::RunPaused);
+                })
+                .await
+            {
+                return response;
             }
+            RunStatus::Paused
         }
-    } else {
-        let Some(worker_pid) = worker_pid else {
-            return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.")
-                .into_response();
-        };
-        #[cfg(unix)]
-        fabro_proc::sigusr1(worker_pid);
-    }
+    };
     let (status_reason, blocked_reason, pending_control) =
         load_run_status_metadata(state.as_ref(), id).await;
 
@@ -6035,11 +6052,7 @@ async fn pause_run(
         Json(RunStatusResponse {
             id: id.to_string(),
             blocked_reason,
-            status: if immediate_pause {
-                RunStatus::Paused
-            } else {
-                RunStatus::Running
-            },
+            status: response_status,
             error: None,
             queue_position: None,
             status_reason,
@@ -6074,11 +6087,20 @@ async fn unpause_run(
                 .into_response();
         }
     };
-    let (created_at, worker_pid) = {
+    let (created_at, mode) = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get(&id) {
             Some(managed_run) if managed_run.status == RunStatus::Paused => {
-                (managed_run.created_at, managed_run.worker_pid)
+                let mode = if let Some(blocked_reason) = paused_blocked_reason {
+                    UnpauseMode::AppendEvents { blocked_reason }
+                } else {
+                    let Some(worker_pid) = managed_run.worker_pid else {
+                        return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.")
+                            .into_response();
+                    };
+                    UnpauseMode::Signal { worker_pid }
+                };
+                (managed_run.created_at, mode)
             }
             Some(_) => {
                 return ApiError::new(StatusCode::CONFLICT, "Run is not paused.").into_response();
@@ -6104,36 +6126,27 @@ async fn unpause_run(
     {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
-    if let Some(blocked_reason) = paused_blocked_reason {
-        let run_store = match state.store.open_run(&id).await {
-            Ok(run_store) => run_store,
-            Err(err) => {
-                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                    .into_response();
-            }
-        };
-        for event in [
-            workflow_event::Event::RunUnpaused,
-            workflow_event::Event::RunBlocked { blocked_reason },
-        ] {
-            if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
-                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                    .into_response();
-            }
+    let response_status = match mode {
+        UnpauseMode::Signal { worker_pid } => {
+            #[cfg(unix)]
+            fabro_proc::sigusr2(worker_pid);
+            #[cfg(not(unix))]
+            let _ = worker_pid;
+            RunStatus::Paused
         }
-        if let Ok(mut runs) = state.runs.lock() {
-            if let Some(managed_run) = runs.get_mut(&id) {
-                managed_run.status = RunStatus::Blocked;
+        UnpauseMode::AppendEvents { blocked_reason } => {
+            if let Some(response) =
+                synchronous_transition(state.as_ref(), id, RunStatus::Blocked, |events| {
+                    events.push(workflow_event::Event::RunUnpaused);
+                    events.push(workflow_event::Event::RunBlocked { blocked_reason });
+                })
+                .await
+            {
+                return response;
             }
+            RunStatus::Blocked
         }
-    } else {
-        let Some(worker_pid) = worker_pid else {
-            return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.")
-                .into_response();
-        };
-        #[cfg(unix)]
-        fabro_proc::sigusr2(worker_pid);
-    }
+    };
     let (status_reason, blocked_reason, pending_control) =
         load_run_status_metadata(state.as_ref(), id).await;
 
@@ -6142,11 +6155,7 @@ async fn unpause_run(
         Json(RunStatusResponse {
             id: id.to_string(),
             blocked_reason,
-            status: if paused_blocked_reason.is_some() {
-                RunStatus::Blocked
-            } else {
-                RunStatus::Paused
-            },
+            status: response_status,
             error: None,
             queue_position: None,
             status_reason,
@@ -6155,6 +6164,40 @@ async fn unpause_run(
         }),
     )
         .into_response()
+}
+
+/// Persist a synchronous pause/unpause transition: append the caller-supplied
+/// events to the run store and mirror the new status in the in-memory run map.
+/// Returns `Some(Response)` on error, `None` on success.
+async fn synchronous_transition(
+    state: &AppState,
+    id: RunId,
+    new_status: RunStatus,
+    append_events: impl FnOnce(&mut Vec<workflow_event::Event>),
+) -> Option<Response> {
+    let run_store = match state.store.open_run(&id).await {
+        Ok(run_store) => run_store,
+        Err(err) => {
+            return Some(
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            );
+        }
+    };
+    let mut events = Vec::new();
+    append_events(&mut events);
+    for event in events {
+        if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
+            return Some(
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            );
+        }
+    }
+    if let Ok(mut runs) = state.runs.lock() {
+        if let Some(managed_run) = runs.get_mut(&id) {
+            managed_run.status = new_status;
+        }
+    }
+    None
 }
 
 async fn list_models(

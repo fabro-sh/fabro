@@ -31,12 +31,12 @@ export interface RunItem {
 
 export type ColumnStatus = "initializing" | "running" | "blocked" | "succeeded" | "failed";
 
-export const columnNames: Record<ColumnStatus, string> = {
-  initializing: "Initializing",
-  running: "Running",
-  blocked: "Blocked",
-  succeeded: "Succeeded",
-  failed: "Failed",
+export const columnStatusDisplay: Record<ColumnStatus, { label: string; dot: string; text: string }> = {
+  initializing: { label: "Initializing", dot: "bg-amber",     text: "text-amber" },
+  running:      { label: "Running",      dot: "bg-teal-500",  text: "text-teal-500" },
+  blocked:      { label: "Blocked",      dot: "bg-amber",     text: "text-amber" },
+  succeeded:    { label: "Succeeded",    dot: "bg-teal-300",  text: "text-teal-300" },
+  failed:       { label: "Failed",       dot: "bg-coral",     text: "text-coral" },
 };
 
 export interface RunWithStatus extends RunItem {
@@ -108,14 +108,6 @@ export function deriveCiStatus(checks: CheckRun[]): CiStatus {
   if (checks.some((c) => c.status === "pending" || c.status === "queued")) return "pending";
   return "passing";
 }
-
-export const statusColors: Record<ColumnStatus, { dot: string; text: string }> = {
-  initializing: { dot: "bg-amber", text: "text-amber" },
-  running: { dot: "bg-teal-500", text: "text-teal-500" },
-  blocked: { dot: "bg-amber", text: "text-amber" },
-  succeeded: { dot: "bg-teal-300", text: "text-teal-300" },
-  failed: { dot: "bg-coral", text: "text-coral" },
-};
 
 export type RunStatus =
   | "submitted"

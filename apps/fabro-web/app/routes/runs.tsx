@@ -18,7 +18,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ciConfig, deriveCiStatus, mapRunListItem } from "../data/runs";
+import { ciConfig, columnStatusDisplay, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
 import { apiJson } from "../api";
 import type { PaginatedRunList } from "@qltysh/fabro-api-client";
@@ -28,21 +28,20 @@ export function meta({}: any) {
 }
 
 interface ColumnStyle {
-  accent: string;
-  iconColor: string;
   iconType: "branch" | "pr";
   actions: string[];
 }
 
-const columnStyles: Record<string, ColumnStyle> = {
-  initializing: { accent: "bg-amber", iconColor: "text-amber", iconType: "branch", actions: [] },
-  running:   { accent: "bg-teal-500", iconColor: "text-teal-500", iconType: "branch", actions: ["Watch", "Steer"] },
-  blocked:   { accent: "bg-amber",    iconColor: "text-amber",    iconType: "branch", actions: ["Answer Question"] },
-  succeeded: { accent: "bg-teal-300", iconColor: "text-teal-300", iconType: "pr",     actions: [] },
-  failed:    { accent: "bg-coral",    iconColor: "text-coral",    iconType: "branch", actions: [] },
+const columnStyles: Record<ColumnStatus, ColumnStyle> = {
+  initializing: { iconType: "branch", actions: [] },
+  running:      { iconType: "branch", actions: ["Watch", "Steer"] },
+  blocked:      { iconType: "branch", actions: ["Answer Question"] },
+  succeeded:    { iconType: "pr",     actions: [] },
+  failed:       { iconType: "branch", actions: [] },
 };
 
-const defaultColumnStyle: ColumnStyle = { accent: "bg-fg-muted", iconColor: "text-fg-muted", iconType: "branch", actions: [] };
+const defaultColumnStyle: ColumnStyle = { iconType: "branch", actions: [] };
+const defaultColumnColors = { dot: "bg-fg-muted", text: "text-fg-muted" };
 
 interface BoardRunsResponse {
   columns: { id: string; name: string }[];
@@ -53,8 +52,8 @@ interface BoardRunsResponse {
 type Column = {
   id: ColumnStatus;
   name: string;
-  accent: string;
-  iconColor: string;
+  dot: string;
+  text: string;
   iconType: "branch" | "pr";
   actions: string[];
   items: RunItem[];
@@ -93,12 +92,18 @@ export function buildBoardColumns(response: BoardRunsResponse): Column[] {
     }
   }
 
-  return response.columns.map((col) => ({
-    id: col.id as ColumnStatus,
-    name: col.name,
-    ...(columnStyles[col.id] ?? defaultColumnStyle),
-    items: grouped.get(col.id) ?? [],
-  }));
+  return response.columns.map((col) => {
+    const id = col.id as ColumnStatus;
+    const colors = columnStatusDisplay[id] ?? defaultColumnColors;
+    return {
+      id,
+      name: col.name,
+      dot: colors.dot,
+      text: colors.text,
+      ...(columnStyles[id] ?? defaultColumnStyle),
+      items: grouped.get(col.id) ?? [],
+    };
+  });
 }
 
 export async function loader({ request }: any) {
@@ -430,7 +435,7 @@ function BoardColumn({ column }: { column: Column }) {
   return (
     <div className="flex min-w-0 flex-col">
       <div className="mb-4 flex items-center gap-3">
-        <div className={`h-2.5 w-2.5 rounded-full ${column.accent}`} />
+        <div className={`h-2.5 w-2.5 rounded-full ${column.dot}`} />
         <h3 className="text-sm font-semibold tracking-wide text-fg-2">
           {column.name}
         </h3>
@@ -446,7 +451,7 @@ function BoardColumn({ column }: { column: Column }) {
               key={pr.id}
               pr={pr}
               icon={Icon}
-              iconColor={column.iconColor}
+              iconColor={column.text}
               actions={column.actions}
             />
           ))}
@@ -788,7 +793,7 @@ export default function Runs({ loaderData }: any) {
                       {isCollapsed
                         ? <ChevronRightIcon className="size-3.5 text-fg-muted" />
                         : <ChevronDownIcon className="size-3.5 text-fg-muted" />}
-                      <div className={`h-2.5 w-2.5 rounded-full ${col.accent}`} />
+                      <div className={`h-2.5 w-2.5 rounded-full ${col.dot}`} />
                       <h3 className="text-sm font-semibold tracking-wide text-fg-2">{col.name}</h3>
                       <span className="rounded-full bg-overlay px-2 py-0.5 font-mono text-xs text-fg-muted">
                         {col.items.length}

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { columnNames, isRunStatus, mapRunSummaryToRunItem, runStatusDisplay, statusColors } from "./runs";
+import { columnStatusDisplay, isRunStatus, mapRunSummaryToRunItem, runStatusDisplay } from "./runs";
 
 describe("mapRunSummaryToRunItem", () => {
   test("maps store run summary to RunItem", () => {
@@ -55,9 +55,7 @@ describe("mapRunSummaryToRunItem", () => {
   });
 
   test("uses blocked board column instead of waiting", () => {
-    expect(columnNames).toHaveProperty("blocked");
-    expect(statusColors).toHaveProperty("blocked");
-    expect(columnNames).not.toHaveProperty("waiting");
-    expect(statusColors).not.toHaveProperty("waiting");
+    expect(columnStatusDisplay).toHaveProperty("blocked");
+    expect(columnStatusDisplay).not.toHaveProperty("waiting");
   });
 });
