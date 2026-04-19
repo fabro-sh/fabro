@@ -1,6 +1,11 @@
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+
 use axum::body::{Body, to_bytes};
+use axum::extract::ConnectInfo;
 use axum::http::{Method, Request, StatusCode};
 use fabro_config::parse_settings_layer;
+use fabro_server::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{
     RouterOptions, build_router, build_router_with_options, create_app_state,
@@ -286,6 +291,7 @@ enabled = false
     let app = build_router_with_options(
         create_app_state_with_options(settings, 5),
         AuthMode::Disabled,
+        Arc::new(IpAllowlistConfig::default()),
         RouterOptions { web_enabled: false },
     );
 
@@ -344,6 +350,7 @@ enabled = false
     let app = build_router_with_options(
         create_app_state_with_options(settings, 5),
         AuthMode::Disabled,
+        Arc::new(IpAllowlistConfig::default()),
         RouterOptions { web_enabled: false },
     );
     let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -357,4 +364,63 @@ enabled = false
 
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn allowlist_blocks_non_allowlisted_api_requests() {
+    let app = build_router_with_options(
+        create_app_state(),
+        AuthMode::Disabled,
+        Arc::new(IpAllowlistConfig {
+            allowlist:           IpAllowlist::new(vec!["10.0.0.0/8".parse().unwrap()]),
+            trusted_proxy_count: 0,
+        }),
+        RouterOptions::default(),
+    );
+
+    let response = app
+        .oneshot(request_with_connect_info(
+            "/api/v1/runs",
+            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn allowlist_exempts_health_checks() {
+    let app = build_router_with_options(
+        create_app_state(),
+        AuthMode::Disabled,
+        Arc::new(IpAllowlistConfig {
+            allowlist:           IpAllowlist::new(vec!["10.0.0.0/8".parse().unwrap()]),
+            trusted_proxy_count: 0,
+        }),
+        RouterOptions::default(),
+    );
+
+    let response = app
+        .oneshot(request_with_connect_info(
+            "/health",
+            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+fn request_with_connect_info(path: &str, ip: IpAddr) -> Request<Body> {
+    let request = Request::builder()
+        .method("GET")
+        .uri(path)
+        .body(Body::empty())
+        .unwrap();
+    let mut request = request;
+    request
+        .extensions_mut()
+        .insert(ConnectInfo(SocketAddr::new(ip, 8080)));
+    request
 }

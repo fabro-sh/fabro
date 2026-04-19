@@ -47,11 +47,12 @@ pub use run::{
 };
 pub use server::{
     DiscordIntegrationSettings, GithubIntegrationSettings, IntegrationWebhooksSettings,
-    ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings, ServerAuthGithubSettings,
-    ServerAuthMethod, ServerAuthSettings, ServerIntegrationsSettings, ServerLayer,
-    ServerListenSettings, ServerLoggingSettings, ServerSchedulerSettings, ServerSettings,
-    ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
-    TeamsIntegrationSettings, TlsConfig,
+    IpAllowEntry, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
+    ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings, ServerIntegrationsSettings,
+    ServerIpAllowlistLayer, ServerIpAllowlistOverrideLayer, ServerIpAllowlistOverrideSettings,
+    ServerIpAllowlistSettings, ServerLayer, ServerListenSettings, ServerLoggingSettings,
+    ServerSchedulerSettings, ServerSettings, ServerSlateDbSettings, ServerStorageSettings,
+    ServerWebSettings, SlackIntegrationSettings, TeamsIntegrationSettings, TlsConfig,
 };
 pub use size::{ParseSizeError, Size};
 pub use splice_array::{SPLICE_MARKER, SpliceArray, SpliceArrayError};

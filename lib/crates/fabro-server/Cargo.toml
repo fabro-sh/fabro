@@ -78,6 +78,7 @@ semver.workspace = true
 walkdir.workspace = true
 multer = "3"
 thiserror.workspace = true
+ipnet = "2.11.0"
 
 [build-dependencies]
 chrono = { workspace = true }

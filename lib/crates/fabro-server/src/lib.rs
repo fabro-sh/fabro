@@ -10,6 +10,7 @@ mod demo;
 pub mod diagnostics;
 pub mod error;
 pub mod github_webhooks;
+pub mod ip_allowlist;
 pub mod jwt_auth;
 mod run_manifest;
 pub mod security_headers;

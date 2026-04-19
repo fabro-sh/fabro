@@ -4,6 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Context;
+use axum::extract::ConnectInfo;
 use fabro_types::settings::{InterpString, TlsConfig};
 use rustls::ServerConfig;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
@@ -75,9 +76,12 @@ where
 
             let io = TokioIo::new(tls_stream);
 
-            let service = service_fn(move |req: hyper::Request<Incoming>| {
+            let service = service_fn(move |mut req: hyper::Request<Incoming>| {
                 let mut router = router.clone();
-                async move { router.call(req).await }
+                async move {
+                    req.extensions_mut().insert(ConnectInfo(remote_addr));
+                    router.call(req).await
+                }
             });
 
             if let Err(e) = builder.serve_connection(io, service).await {

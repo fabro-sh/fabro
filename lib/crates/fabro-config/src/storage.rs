@@ -35,6 +35,11 @@ impl Storage {
     }
 
     #[must_use]
+    pub fn cache_dir(&self) -> PathBuf {
+        self.root.join("cache")
+    }
+
+    #[must_use]
     pub fn secrets_path(&self) -> PathBuf {
         self.root
             .join("vaults")
@@ -163,6 +168,10 @@ mod tests {
         assert_eq!(
             storage.logs_dir(),
             std::path::Path::new("/tmp/fabro-data/logs")
+        );
+        assert_eq!(
+            storage.cache_dir(),
+            std::path::Path::new("/tmp/fabro-data/cache")
         );
         assert_eq!(
             storage.secrets_path(),

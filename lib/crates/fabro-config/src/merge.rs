@@ -22,8 +22,11 @@ use fabro_types::settings::run::{
     StringOrSplice,
 };
 use fabro_types::settings::server::{
-    ServerArtifactsLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerLayer, ServerListenLayer,
-    ServerSchedulerLayer, ServerSlateDbLayer, ServerStorageLayer, ServerWebLayer,
+    DiscordIntegrationLayer, GithubIntegrationLayer, IntegrationWebhooksLayer,
+    ServerArtifactsLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerIpAllowlistLayer,
+    ServerIpAllowlistOverrideLayer, ServerLayer, ServerListenLayer, ServerSchedulerLayer,
+    ServerSlateDbLayer, ServerStorageLayer, ServerWebLayer, SlackIntegrationLayer,
+    TeamsIntegrationLayer,
 };
 use fabro_types::settings::workflow::WorkflowLayer;
 
@@ -404,6 +407,11 @@ fn combine_server(lower: ServerLayer, higher: ServerLayer) -> ServerLayer {
         api:          higher.api.or(lower.api),
         web:          merge_option(lower.web, higher.web, combine_server_web),
         auth:         merge_option(lower.auth, higher.auth, combine_server_auth),
+        ip_allowlist: merge_option(
+            lower.ip_allowlist,
+            higher.ip_allowlist,
+            combine_server_ip_allowlist,
+        ),
         storage:      merge_option(lower.storage, higher.storage, combine_server_storage),
         artifacts:    merge_option(lower.artifacts, higher.artifacts, combine_server_artifacts),
         slatedb:      merge_option(lower.slatedb, higher.slatedb, combine_server_slatedb),
@@ -433,6 +441,16 @@ fn combine_server_auth(lower: ServerAuthLayer, higher: ServerAuthLayer) -> Serve
     ServerAuthLayer {
         methods: higher.methods.or(lower.methods),
         github:  higher.github.or(lower.github),
+    }
+}
+
+fn combine_server_ip_allowlist(
+    lower: ServerIpAllowlistLayer,
+    higher: ServerIpAllowlistLayer,
+) -> ServerIpAllowlistLayer {
+    ServerIpAllowlistLayer {
+        entries:             higher.entries.or(lower.entries),
+        trusted_proxy_count: higher.trusted_proxy_count.or(lower.trusted_proxy_count),
     }
 }
 
@@ -485,10 +503,81 @@ fn combine_server_integrations(
     higher: ServerIntegrationsLayer,
 ) -> ServerIntegrationsLayer {
     ServerIntegrationsLayer {
-        github:  higher.github.or(lower.github),
-        slack:   higher.slack.or(lower.slack),
-        discord: higher.discord.or(lower.discord),
-        teams:   higher.teams.or(lower.teams),
+        github:  merge_option(lower.github, higher.github, combine_github_integration),
+        slack:   merge_option(lower.slack, higher.slack, combine_slack_integration),
+        discord: merge_option(lower.discord, higher.discord, combine_discord_integration),
+        teams:   merge_option(lower.teams, higher.teams, combine_teams_integration),
+    }
+}
+
+fn combine_github_integration(
+    lower: GithubIntegrationLayer,
+    higher: GithubIntegrationLayer,
+) -> GithubIntegrationLayer {
+    GithubIntegrationLayer {
+        enabled:     higher.enabled.or(lower.enabled),
+        strategy:    higher.strategy.or(lower.strategy),
+        app_id:      higher.app_id.or(lower.app_id),
+        client_id:   higher.client_id.or(lower.client_id),
+        slug:        higher.slug.or(lower.slug),
+        permissions: merge_string_map_sticky(lower.permissions, higher.permissions),
+        webhooks:    merge_option(
+            lower.webhooks,
+            higher.webhooks,
+            combine_integration_webhooks,
+        ),
+    }
+}
+
+fn combine_integration_webhooks(
+    lower: IntegrationWebhooksLayer,
+    higher: IntegrationWebhooksLayer,
+) -> IntegrationWebhooksLayer {
+    IntegrationWebhooksLayer {
+        strategy:     higher.strategy.or(lower.strategy),
+        ip_allowlist: merge_option(
+            lower.ip_allowlist,
+            higher.ip_allowlist,
+            combine_server_ip_allowlist_override,
+        ),
+    }
+}
+
+fn combine_server_ip_allowlist_override(
+    lower: ServerIpAllowlistOverrideLayer,
+    higher: ServerIpAllowlistOverrideLayer,
+) -> ServerIpAllowlistOverrideLayer {
+    ServerIpAllowlistOverrideLayer {
+        entries:             higher.entries.or(lower.entries),
+        trusted_proxy_count: higher.trusted_proxy_count.or(lower.trusted_proxy_count),
+    }
+}
+
+fn combine_slack_integration(
+    lower: SlackIntegrationLayer,
+    higher: SlackIntegrationLayer,
+) -> SlackIntegrationLayer {
+    SlackIntegrationLayer {
+        enabled:         higher.enabled.or(lower.enabled),
+        default_channel: higher.default_channel.or(lower.default_channel),
+    }
+}
+
+fn combine_discord_integration(
+    lower: DiscordIntegrationLayer,
+    higher: DiscordIntegrationLayer,
+) -> DiscordIntegrationLayer {
+    DiscordIntegrationLayer {
+        enabled: higher.enabled.or(lower.enabled),
+    }
+}
+
+fn combine_teams_integration(
+    lower: TeamsIntegrationLayer,
+    higher: TeamsIntegrationLayer,
+) -> TeamsIntegrationLayer {
+    TeamsIntegrationLayer {
+        enabled: higher.enabled.or(lower.enabled),
     }
 }
 
