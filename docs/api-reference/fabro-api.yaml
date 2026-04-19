@@ -2600,10 +2600,12 @@ components:
         - queued
         - starting
         - running
-        - completed
-        - failed
-        - cancelled
+        - blocked
         - paused
+        - removing
+        - succeeded
+        - failed
+        - dead
 
     RunManifest:
       description: Self-contained workflow run manifest.
@@ -2982,6 +2984,10 @@ components:
           oneOf:
             - $ref: "#/components/schemas/StatusReason"
             - type: "null"
+        blocked_reason:
+          oneOf:
+            - $ref: "#/components/schemas/BlockedReason"
+            - type: "null"
         pending_control:
           oneOf:
             - $ref: "#/components/schemas/RunControlAction"
@@ -3359,19 +3365,6 @@ components:
           items:
             $ref: "#/components/schemas/RunArtifactEntry"
 
-    InternalRunStatus:
-      description: Internal event-sourced run status.
-      type: string
-      enum:
-        - submitted
-        - starting
-        - running
-        - paused
-        - removing
-        - succeeded
-        - failed
-        - dead
-
     StatusReason:
       description: Optional reason attached to a run status transition.
       type: string
@@ -3387,6 +3380,12 @@ components:
         - bootstrap_failed
         - sandbox_init_failed
         - sandbox_initializing
+
+    BlockedReason:
+      description: Specific reason a run is blocked on external intervention.
+      type: string
+      enum:
+        - human_input_required
 
     RunControlAction:
       description: Run control action requested by the API.
@@ -3404,10 +3403,14 @@ components:
         - updated_at
       properties:
         status:
-          $ref: "#/components/schemas/InternalRunStatus"
-        reason:
+          $ref: "#/components/schemas/RunStatus"
+        status_reason:
           oneOf:
             - $ref: "#/components/schemas/StatusReason"
+            - type: "null"
+        blocked_reason:
+          oneOf:
+            - $ref: "#/components/schemas/BlockedReason"
             - type: "null"
         updated_at:
           type: string
@@ -3463,6 +3466,16 @@ components:
         stderr:
           type: ["string", "null"]
 
+    PendingInterviewRecord:
+      description: Pending interview question plus the time it entered the unresolved set.
+      type: object
+      properties:
+        question:
+          $ref: "#/components/schemas/ApiQuestion"
+        started_at:
+          type: ["string", "null"]
+          format: date-time
+
     RunProjection:
       description: Raw internal run projection derived from the event log.
       type: object
@@ -3514,6 +3527,10 @@ components:
         pull_request:
           type: ["object", "null"]
           additionalProperties: true
+        pending_interviews:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/PendingInterviewRecord"
         nodes:
           type: object
           description: Map from StageId (`node_id@visit`) to NodeState.
@@ -3528,6 +3545,7 @@ components:
         - goal
         - title
         - labels
+        - status
         - repository
         - created_at
       properties:
@@ -3556,10 +3574,14 @@ components:
           type: string
           format: date-time
         status:
-          type: ["string", "null"]
+          $ref: "#/components/schemas/RunStatus"
         status_reason:
           oneOf:
             - $ref: "#/components/schemas/StatusReason"
+            - type: "null"
+        blocked_reason:
+          oneOf:
+            - $ref: "#/components/schemas/BlockedReason"
             - type: "null"
         pending_control:
           oneOf:
@@ -3583,7 +3605,7 @@ components:
       enum:
         - initializing
         - running
-        - waiting
+        - blocked
         - succeeded
         - failed
 

@@ -247,9 +247,9 @@ fn store_dump_exports_completed_run_snapshot() {
 
     assert_snapshot!(dump_file_summary(&output_dir), @"
     checkpoint.json
-    checkpoints/0012.json
-    checkpoints/0016.json
-    checkpoints/0020.json
+    checkpoints/0013.json
+    checkpoints/0017.json
+    checkpoints/0021.json
     conclusion.json
     events.jsonl
     graph.fabro

@@ -63,7 +63,7 @@ impl ServerRunSummaryInfo {
     }
 
     pub(crate) fn status(&self) -> RunStatus {
-        self.summary.status.unwrap_or(RunStatus::Dead)
+        self.summary.status
     }
 
     pub(crate) fn status_reason(&self) -> Option<StatusReason> {

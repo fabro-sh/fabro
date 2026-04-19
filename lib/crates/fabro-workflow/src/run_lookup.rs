@@ -71,8 +71,7 @@ impl RunInfo {
     pub fn status(&self) -> RunStatus {
         self.summary
             .as_ref()
-            .and_then(|summary| summary.status)
-            .unwrap_or(RunStatus::Dead)
+            .map_or(RunStatus::Submitted, |summary| summary.status)
     }
 
     pub fn status_reason(&self) -> Option<StatusReason> {
@@ -235,7 +234,7 @@ fn run_info_from_summary(summary: &RunSummary, scratch_base: &Path) -> Option<Ru
     }
     let dir_name = path.file_name()?.to_string_lossy().to_string();
     let start_time_dt = summary.run_id.created_at();
-    let end_time = if summary.status.is_some_and(RunStatus::is_terminal) {
+    let end_time = if summary.status.is_terminal() {
         summary.duration_ms.and_then(|duration_ms| {
             Some(start_time_dt + chrono::Duration::milliseconds(i64::try_from(duration_ms).ok()?))
         })

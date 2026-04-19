@@ -37,7 +37,7 @@ env:
 jobs:
   fmt:
     name: Format
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-x86-32-cores
     permissions:
       contents: read
     steps:
@@ -52,7 +52,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-x86-32-cores
     permissions:
       contents: read
     steps:
@@ -70,7 +70,7 @@ jobs:
 
   test:
     name: Test (Linux)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-x86-32-cores
     permissions:
       contents: read
     steps:

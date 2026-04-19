@@ -16,11 +16,6 @@ use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::{format_duration_ms, format_usd_micros};
 
-#[cfg(test)]
-const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
-#[cfg(not(test))]
-const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
-
 pub(crate) async fn run(
     args: &WaitArgs,
     styles: &Styles,
@@ -40,21 +35,8 @@ pub(crate) async fn run(
         .timeout
         .map(|secs| std::time::Instant::now() + std::time::Duration::from_secs(secs));
     let interval = std::time::Duration::from_millis(args.interval);
-    let started_waiting_at = std::time::Instant::now();
-
     let final_status = loop {
-        let status = client
-            .get_run_state(&run_id)
-            .await?
-            .status
-            .map(|record| record.status);
-        let status = status.unwrap_or_else(|| {
-            if started_waiting_at.elapsed() < WAIT_STARTUP_GRACE {
-                RunStatus::Submitted
-            } else {
-                RunStatus::Dead
-            }
-        });
+        let status = client.retrieve_run(&run_id).await?.status;
 
         if status.is_terminal() {
             break status;
@@ -287,16 +269,5 @@ mod tests {
         .status;
         assert!(status.is_terminal());
         assert_eq!(status, RunStatus::Succeeded);
-    }
-
-    #[test]
-    fn missing_status_treated_as_dead() {
-        let status = match std::fs::read_to_string(std::path::Path::new("/nonexistent/status.json"))
-        {
-            Ok(data) => serde_json::from_str::<RunStatusRecord>(&data)
-                .map_or(RunStatus::Dead, |record| record.status),
-            Err(_) => RunStatus::Dead,
-        };
-        assert_eq!(status, RunStatus::Dead);
     }
 }

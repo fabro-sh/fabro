@@ -25,14 +25,14 @@ use bytes::Bytes;
 pub use fabro_api::types::{
     AggregateBilling, AggregateBillingTotals, ApiQuestion, ApiQuestionOption, AppendEventResponse,
     ArtifactEntry, ArtifactListResponse, BilledTokenCounts as ApiBilledTokenCounts, BillingByModel,
-    BillingStageRef, CompletionContentPart, CompletionMessage, CompletionMessageRole,
-    CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
-    CreateSecretRequest, DeleteSecretRequest, DiskUsageResponse, DiskUsageRunRow,
-    DiskUsageSummaryRow, EventEnvelope as ApiEventEnvelope, ModelReference, PaginatedEventList,
-    PaginatedRunList, PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse,
-    PruneRunEntry, PruneRunsRequest, PruneRunsResponse, QuestionType as ApiQuestionType,
-    RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RunArtifactEntry,
-    RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
+    BillingStageRef, BlockedReason as ApiBlockedReason, CompletionContentPart, CompletionMessage,
+    CompletionMessageRole, CompletionResponse, CompletionToolChoiceMode, CompletionUsage,
+    CreateCompletionRequest, CreateSecretRequest, DeleteSecretRequest, DiskUsageResponse,
+    DiskUsageRunRow, DiskUsageSummaryRow, EventEnvelope as ApiEventEnvelope, ModelReference,
+    PaginatedEventList, PaginatedRunList, PaginationMeta, PreflightResponse, PreviewUrlRequest,
+    PreviewUrlResponse, PruneRunEntry, PruneRunsRequest, PruneRunsResponse,
+    QuestionType as ApiQuestionType, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest,
+    RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
     RunControlAction as ApiRunControlAction, RunError, RunManifest, RunStage, RunStatus,
     RunStatusResponse, SandboxFileEntry, SandboxFileListResponse, SecretType as ApiSecretType,
     ServerSettings, SshAccessRequest, SshAccessResponse, StageStatus as ApiStageStatus,
@@ -68,7 +68,7 @@ use fabro_types::settings::{
     InterpString, ServerSettings as ResolvedServerSettings, SettingsLayer,
 };
 use fabro_types::{
-    ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId,
+    ActorRef, BlockedReason, EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId,
     RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance,
     RunSubjectProvenance,
 };
@@ -1242,6 +1242,7 @@ async fn get_system_info(
                     RunStatus::Queued
                         | RunStatus::Starting
                         | RunStatus::Running
+                        | RunStatus::Blocked
                         | RunStatus::Paused
                 )
             })
@@ -2126,7 +2127,7 @@ async fn list_run_stages(
             Some(managed_run) => {
                 let active = !matches!(
                     managed_run.status,
-                    RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled
+                    RunStatus::Succeeded | RunStatus::Failed | RunStatus::Dead
                 );
                 (managed_run.checkpoint.clone(), active)
             }
@@ -2585,20 +2586,22 @@ fn test_secret_store_path() -> PathBuf {
 
 fn board_column(status: WorkflowRunStatus) -> Option<&'static str> {
     match status {
-        WorkflowRunStatus::Submitted | WorkflowRunStatus::Starting => Some("initializing"),
-        WorkflowRunStatus::Running => Some("running"),
-        WorkflowRunStatus::Paused => Some("waiting"),
+        WorkflowRunStatus::Submitted | WorkflowRunStatus::Queued | WorkflowRunStatus::Starting => {
+            Some("initializing")
+        }
+        WorkflowRunStatus::Running | WorkflowRunStatus::Paused => Some("running"),
+        WorkflowRunStatus::Blocked => Some("blocked"),
         WorkflowRunStatus::Succeeded => Some("succeeded"),
         WorkflowRunStatus::Failed | WorkflowRunStatus::Dead => Some("failed"),
         WorkflowRunStatus::Removing => None,
     }
 }
 
-fn board_columns() -> serde_json::Value {
+pub(crate) fn board_columns() -> serde_json::Value {
     serde_json::json!([
         {"id": "initializing", "name": "Initializing"},
         {"id": "running", "name": "Running"},
-        {"id": "waiting", "name": "Waiting"},
+        {"id": "blocked", "name": "Blocked"},
         {"id": "succeeded", "name": "Succeeded"},
         {"id": "failed", "name": "Failed"},
     ])
@@ -2646,6 +2649,7 @@ fn summary_to_api_run_summary(summary: fabro_store::RunSummary) -> serde_json::V
         "start_time": summary.start_time.map(|time| time.to_rfc3339()),
         "status": summary.status,
         "status_reason": summary.status_reason.map(api_status_reason),
+        "blocked_reason": summary.blocked_reason.map(api_blocked_reason),
         "pending_control": summary.pending_control.map(api_pending_control),
         "duration_ms": summary.duration_ms,
         "elapsed_secs": elapsed_secs(summary.duration_ms),
@@ -2686,11 +2690,20 @@ async fn board_run_metadata(
         }
     }
 
-    if let Some(question) = run_state.pending_interviews.values().next() {
+    if let Some((_, record)) =
+        run_state
+            .pending_interviews
+            .iter()
+            .min_by(|(left_id, left), (right_id, right)| {
+                left.started_at
+                    .cmp(&right.started_at)
+                    .then_with(|| left_id.cmp(right_id))
+            })
+    {
         metadata.insert(
             "question".to_string(),
             serde_json::json!({
-                "text": question.question.text,
+                "text": record.question.text,
             }),
         );
     }
@@ -2726,8 +2739,7 @@ async fn list_board_runs(
     let board_summaries: Vec<_> = summaries
         .into_iter()
         .filter_map(|summary| {
-            let status = summary.status?;
-            let column = board_column(status)?;
+            let column = board_column(summary.status)?;
             Some((summary, column))
         })
         .collect();
@@ -2826,6 +2838,7 @@ async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Res
                 | RunStatus::Queued
                 | RunStatus::Starting
                 | RunStatus::Running
+                | RunStatus::Blocked
                 | RunStatus::Paused
         ) {
             WORKER_CANCEL_GRACE
@@ -3104,8 +3117,10 @@ fn failure_for_incomplete_run(
 fn should_reconcile_run_on_startup(status: WorkflowRunStatus) -> bool {
     matches!(
         status,
-        WorkflowRunStatus::Starting
+        WorkflowRunStatus::Queued
+            | WorkflowRunStatus::Starting
             | WorkflowRunStatus::Running
+            | WorkflowRunStatus::Blocked
             | WorkflowRunStatus::Paused
             | WorkflowRunStatus::Removing
     )
@@ -3121,10 +3136,7 @@ pub(crate) async fn reconcile_incomplete_runs_on_startup(
     let mut reconciled = 0usize;
 
     for summary in summaries {
-        let Some(status) = summary.status else {
-            continue;
-        };
-        if !should_reconcile_run_on_startup(status) {
+        if !should_reconcile_run_on_startup(summary.status) {
             continue;
         }
 
@@ -3323,20 +3335,24 @@ fn managed_run(
     }
 }
 
-fn api_status_from_workflow(
-    status: WorkflowRunStatus,
-    reason: Option<WorkflowStatusReason>,
-) -> RunStatus {
+fn api_status_from_workflow(status: WorkflowRunStatus) -> RunStatus {
     match status {
         WorkflowRunStatus::Submitted => RunStatus::Submitted,
+        WorkflowRunStatus::Queued => RunStatus::Queued,
         WorkflowRunStatus::Starting => RunStatus::Starting,
-        WorkflowRunStatus::Running | WorkflowRunStatus::Removing => RunStatus::Running,
+        WorkflowRunStatus::Running => RunStatus::Running,
+        WorkflowRunStatus::Blocked => RunStatus::Blocked,
         WorkflowRunStatus::Paused => RunStatus::Paused,
-        WorkflowRunStatus::Succeeded => RunStatus::Completed,
-        WorkflowRunStatus::Failed if reason == Some(WorkflowStatusReason::Cancelled) => {
-            RunStatus::Cancelled
-        }
-        WorkflowRunStatus::Failed | WorkflowRunStatus::Dead => RunStatus::Failed,
+        WorkflowRunStatus::Removing => RunStatus::Removing,
+        WorkflowRunStatus::Succeeded => RunStatus::Succeeded,
+        WorkflowRunStatus::Failed => RunStatus::Failed,
+        WorkflowRunStatus::Dead => RunStatus::Dead,
+    }
+}
+
+fn api_blocked_reason(reason: BlockedReason) -> ApiBlockedReason {
+    match reason {
+        BlockedReason::HumanInputRequired => ApiBlockedReason::HumanInputRequired,
     }
 }
 
@@ -3374,13 +3390,18 @@ fn api_pending_control(action: RunControlAction) -> ApiRunControlAction {
 async fn load_run_status_metadata(
     state: &AppState,
     run_id: RunId,
-) -> (Option<ApiStatusReason>, Option<ApiRunControlAction>) {
+) -> (
+    Option<ApiStatusReason>,
+    Option<ApiBlockedReason>,
+    Option<ApiRunControlAction>,
+) {
     match state.store.runs().find(&run_id).await {
         Ok(Some(summary)) => (
             summary.status_reason.map(api_status_reason),
+            summary.blocked_reason.map(api_blocked_reason),
             summary.pending_control.map(api_pending_control),
         ),
-        _ => (None, None),
+        _ => (None, None, None),
     }
 }
 
@@ -3414,21 +3435,25 @@ fn update_live_run_from_event(state: &Arc<AppState>, run_id: RunId, event: &RunE
     };
 
     match &event.body {
+        EventBody::RunQueued(_) => managed_run.status = RunStatus::Queued,
         EventBody::RunStarting(_) => managed_run.status = RunStatus::Starting,
         EventBody::RunRunning(_) | EventBody::RunUnpaused(_) => {
             managed_run.status = RunStatus::Running;
         }
+        EventBody::RunBlocked(_) if managed_run.status != RunStatus::Paused => {
+            managed_run.status = RunStatus::Blocked;
+        }
+        EventBody::RunUnblocked(_) if managed_run.status != RunStatus::Paused => {
+            managed_run.status = RunStatus::Running;
+        }
         EventBody::RunPaused(_) => managed_run.status = RunStatus::Paused,
+        EventBody::RunRemoving(_) => managed_run.status = RunStatus::Removing,
         EventBody::RunCompleted(_) => {
-            managed_run.status = RunStatus::Completed;
+            managed_run.status = RunStatus::Succeeded;
             managed_run.error = None;
         }
         EventBody::RunFailed(props) => {
-            managed_run.status = if props.reason == Some(WorkflowStatusReason::Cancelled) {
-                RunStatus::Cancelled
-            } else {
-                RunStatus::Failed
-            };
+            managed_run.status = RunStatus::Failed;
             managed_run.error = Some(props.error.clone());
         }
         _ => {}
@@ -3861,6 +3886,7 @@ async fn create_run(
     (
         StatusCode::CREATED,
         Json(RunStatusResponse {
+            blocked_reason: None,
             id: run_id.to_string(),
             status: RunStatus::Submitted,
             error: None,
@@ -3990,7 +4016,11 @@ async fn start_run(
         if let Some(managed_run) = runs.get(&id) {
             if matches!(
                 managed_run.status,
-                RunStatus::Queued | RunStatus::Starting | RunStatus::Running
+                RunStatus::Queued
+                    | RunStatus::Starting
+                    | RunStatus::Running
+                    | RunStatus::Blocked
+                    | RunStatus::Paused
             ) {
                 return ApiError::new(
                     StatusCode::CONFLICT,
@@ -4027,7 +4057,7 @@ async fn start_run(
     } else if let Some(record) = run_state.status.as_ref() {
         if !matches!(
             record.status,
-            WorkflowRunStatus::Submitted | WorkflowRunStatus::Starting
+            WorkflowRunStatus::Submitted | WorkflowRunStatus::Queued | WorkflowRunStatus::Starting
         ) {
             return ApiError::new(
                 StatusCode::CONFLICT,
@@ -4061,6 +4091,11 @@ async fn start_run(
         }
     };
     let dot_source = run_state.graph_source.unwrap_or_default();
+    if let Err(err) =
+        workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunQueued).await
+    {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
 
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -4084,6 +4119,7 @@ async fn start_run(
     (
         StatusCode::OK,
         Json(RunStatusResponse {
+            blocked_reason:  None,
             id:              id.to_string(),
             status:          RunStatus::Queued,
             error:           None,
@@ -4355,11 +4391,11 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
                 Ok(started) => match &started.finalized.outcome {
                     Ok(_) => {
                         info!(run_id = %run_id, "Run completed");
-                        managed_run.status = RunStatus::Completed;
+                        managed_run.status = RunStatus::Succeeded;
                     }
                     Err(WorkflowError::Cancelled) => {
                         info!(run_id = %run_id, "Run cancelled");
-                        managed_run.status = RunStatus::Cancelled;
+                        managed_run.status = RunStatus::Failed;
                     }
                     Err(e) => {
                         error!(run_id = %run_id, error = %e, "Run failed");
@@ -4369,7 +4405,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
                 },
                 Err(WorkflowError::Cancelled) => {
                     info!(run_id = %run_id, "Run cancelled");
-                    managed_run.status = RunStatus::Cancelled;
+                    managed_run.status = RunStatus::Failed;
                 }
                 Err(e) => {
                     error!(run_id = %run_id, error = %e, "Run failed");
@@ -4379,7 +4415,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
             },
             ExecutionResult::CancelledBySignal => {
                 info!(run_id = %run_id, "Run cancelled");
-                managed_run.status = RunStatus::Cancelled;
+                managed_run.status = RunStatus::Failed;
             }
         }
         managed_run.checkpoint = checkpoint;
@@ -4621,7 +4657,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
         if let Some(status) = final_state.status.as_ref() {
-            managed_run.status = api_status_from_workflow(status.status, status.reason);
+            managed_run.status = api_status_from_workflow(status.status);
         } else if !wait_status.success() {
             managed_run.status = RunStatus::Failed;
         }
@@ -4659,7 +4695,13 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
                     let active = runs
                         .values()
                         .filter(|r| {
-                            r.status == RunStatus::Starting || r.status == RunStatus::Running
+                            matches!(
+                                r.status,
+                                RunStatus::Starting
+                                    | RunStatus::Running
+                                    | RunStatus::Blocked
+                                    | RunStatus::Paused
+                            )
                         })
                         .count();
                     if active >= state.max_concurrent_runs {
@@ -5925,6 +5967,7 @@ async fn cancel_run(
                 | RunStatus::Queued
                 | RunStatus::Starting
                 | RunStatus::Running
+                | RunStatus::Blocked
                 | RunStatus::Paused => {
                     let use_cancel_signal = !matches!(
                         managed_run.answer_transport,
@@ -5933,8 +5976,8 @@ async fn cancel_run(
                     let persist_cancelled_status =
                         matches!(managed_run.status, RunStatus::Submitted | RunStatus::Queued);
                     let response_status = if persist_cancelled_status {
-                        managed_run.status = RunStatus::Cancelled;
-                        RunStatus::Cancelled
+                        managed_run.status = RunStatus::Failed;
+                        RunStatus::Failed
                     } else {
                         managed_run.status
                     };
@@ -6000,11 +6043,13 @@ async fn cancel_run(
                 .into_response();
         }
     }
-    let (status_reason, pending_control) = load_run_status_metadata(state.as_ref(), id).await;
+    let (status_reason, blocked_reason, pending_control) =
+        load_run_status_metadata(state.as_ref(), id).await;
 
     (
         StatusCode::OK,
         Json(RunStatusResponse {
+            blocked_reason,
             id: id.to_string(),
             status: response_status,
             error: None,
@@ -6015,6 +6060,26 @@ async fn cancel_run(
         }),
     )
         .into_response()
+}
+
+/// How `pause_run` should enact the transition, chosen from the current run
+/// status.
+enum PauseMode {
+    /// Worker is running; ask it to pause via SIGUSR1. Status flips to
+    /// `Paused` once the worker acknowledges.
+    Signal { worker_pid: u32 },
+    /// Worker is blocked on a human gate; flip to `Paused` directly by
+    /// appending `RunPaused` ourselves.
+    AppendEvent,
+}
+
+/// How `unpause_run` should enact the transition.
+enum UnpauseMode {
+    /// No outstanding block; ask the worker to resume via SIGUSR2.
+    Signal { worker_pid: u32 },
+    /// Was paused while blocked; append `RunUnpaused` then re-assert
+    /// `RunBlocked` so the projection reports `Blocked`.
+    AppendEvents { blocked_reason: BlockedReason },
 }
 
 async fn pause_run(
@@ -6033,11 +6098,18 @@ async fn pause_run(
                 .into_response();
         }
     };
-    let (created_at, worker_pid) = {
+    let (created_at, mode) = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get(&id) {
             Some(managed_run) if managed_run.status == RunStatus::Running => {
-                (managed_run.created_at, managed_run.worker_pid)
+                let Some(worker_pid) = managed_run.worker_pid else {
+                    return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.")
+                        .into_response();
+                };
+                (managed_run.created_at, PauseMode::Signal { worker_pid })
+            }
+            Some(managed_run) if managed_run.status == RunStatus::Blocked => {
+                (managed_run.created_at, PauseMode::AppendEvent)
             }
             Some(_) => {
                 return ApiError::new(StatusCode::CONFLICT, "Run is not pausable.").into_response();
@@ -6053,9 +6125,6 @@ async fn pause_run(
         )
         .into_response();
     }
-    let Some(worker_pid) = worker_pid else {
-        return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.").into_response();
-    };
     if let Err(err) = append_control_request(
         state.as_ref(),
         id,
@@ -6066,15 +6135,35 @@ async fn pause_run(
     {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
-    #[cfg(unix)]
-    fabro_proc::sigusr1(worker_pid);
-    let (status_reason, pending_control) = load_run_status_metadata(state.as_ref(), id).await;
+    let response_status = match mode {
+        PauseMode::Signal { worker_pid } => {
+            #[cfg(unix)]
+            fabro_proc::sigusr1(worker_pid);
+            #[cfg(not(unix))]
+            let _ = worker_pid;
+            RunStatus::Running
+        }
+        PauseMode::AppendEvent => {
+            if let Some(response) =
+                synchronous_transition(state.as_ref(), id, RunStatus::Paused, |events| {
+                    events.push(workflow_event::Event::RunPaused);
+                })
+                .await
+            {
+                return response;
+            }
+            RunStatus::Paused
+        }
+    };
+    let (status_reason, blocked_reason, pending_control) =
+        load_run_status_metadata(state.as_ref(), id).await;
 
     (
         StatusCode::OK,
         Json(RunStatusResponse {
             id: id.to_string(),
-            status: RunStatus::Running,
+            blocked_reason,
+            status: response_status,
             error: None,
             queue_position: None,
             status_reason,
@@ -6101,11 +6190,28 @@ async fn unpause_run(
                 .into_response();
         }
     };
-    let (created_at, worker_pid) = {
+    let paused_blocked_reason = match state.store.runs().find(&id).await {
+        Ok(Some(summary)) => summary.blocked_reason,
+        Ok(None) => None,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    let (created_at, mode) = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get(&id) {
             Some(managed_run) if managed_run.status == RunStatus::Paused => {
-                (managed_run.created_at, managed_run.worker_pid)
+                let mode = if let Some(blocked_reason) = paused_blocked_reason {
+                    UnpauseMode::AppendEvents { blocked_reason }
+                } else {
+                    let Some(worker_pid) = managed_run.worker_pid else {
+                        return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.")
+                            .into_response();
+                    };
+                    UnpauseMode::Signal { worker_pid }
+                };
+                (managed_run.created_at, mode)
             }
             Some(_) => {
                 return ApiError::new(StatusCode::CONFLICT, "Run is not paused.").into_response();
@@ -6121,9 +6227,6 @@ async fn unpause_run(
         )
         .into_response();
     }
-    let Some(worker_pid) = worker_pid else {
-        return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.").into_response();
-    };
     if let Err(err) = append_control_request(
         state.as_ref(),
         id,
@@ -6134,15 +6237,36 @@ async fn unpause_run(
     {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
-    #[cfg(unix)]
-    fabro_proc::sigusr2(worker_pid);
-    let (status_reason, pending_control) = load_run_status_metadata(state.as_ref(), id).await;
+    let response_status = match mode {
+        UnpauseMode::Signal { worker_pid } => {
+            #[cfg(unix)]
+            fabro_proc::sigusr2(worker_pid);
+            #[cfg(not(unix))]
+            let _ = worker_pid;
+            RunStatus::Paused
+        }
+        UnpauseMode::AppendEvents { blocked_reason } => {
+            if let Some(response) =
+                synchronous_transition(state.as_ref(), id, RunStatus::Blocked, |events| {
+                    events.push(workflow_event::Event::RunUnpaused);
+                    events.push(workflow_event::Event::RunBlocked { blocked_reason });
+                })
+                .await
+            {
+                return response;
+            }
+            RunStatus::Blocked
+        }
+    };
+    let (status_reason, blocked_reason, pending_control) =
+        load_run_status_metadata(state.as_ref(), id).await;
 
     (
         StatusCode::OK,
         Json(RunStatusResponse {
             id: id.to_string(),
-            status: RunStatus::Paused,
+            blocked_reason,
+            status: response_status,
             error: None,
             queue_position: None,
             status_reason,
@@ -6151,6 +6275,40 @@ async fn unpause_run(
         }),
     )
         .into_response()
+}
+
+/// Persist a synchronous pause/unpause transition: append the caller-supplied
+/// events to the run store and mirror the new status in the in-memory run map.
+/// Returns `Some(Response)` on error, `None` on success.
+async fn synchronous_transition(
+    state: &AppState,
+    id: RunId,
+    new_status: RunStatus,
+    append_events: impl FnOnce(&mut Vec<workflow_event::Event>),
+) -> Option<Response> {
+    let run_store = match state.store.open_run(&id).await {
+        Ok(run_store) => run_store,
+        Err(err) => {
+            return Some(
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            );
+        }
+    };
+    let mut events = Vec::new();
+    append_events(&mut events);
+    for event in events {
+        if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
+            return Some(
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            );
+        }
+    }
+    if let Ok(mut runs) = state.runs.lock() {
+        if let Some(managed_run) = runs.get_mut(&id) {
+            managed_run.status = new_status;
+        }
+    }
+    None
 }
 
 async fn list_models(
@@ -7185,6 +7343,31 @@ type = "http"
         }
     }
 
+    async fn append_raw_run_event(
+        state: &Arc<AppState>,
+        run_id: RunId,
+        seq_hint: &str,
+        ts: &str,
+        event: &str,
+        properties: serde_json::Value,
+        node_id: Option<&str>,
+    ) {
+        let run_store = state.store.open_run(&run_id).await.unwrap();
+        let payload = fabro_store::EventPayload::new(
+            json!({
+                "id": format!("evt-{seq_hint}"),
+                "ts": ts,
+                "run_id": run_id,
+                "event": event,
+                "node_id": node_id,
+                "properties": properties,
+            }),
+            &run_id,
+        )
+        .unwrap();
+        run_store.append_event(&payload).await.unwrap();
+    }
+
     #[tokio::test]
     async fn test_model_unknown_returns_404() {
         let app = test_app_with();
@@ -7599,6 +7782,60 @@ slug = "fabro"
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response.into_body()).await;
         assert!(body["nodes"].is_object());
+    }
+
+    #[tokio::test]
+    async fn get_run_state_exposes_pending_interviews() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = fixtures::RUN_1;
+
+        create_durable_run_with_events(&state, run_id, &[
+            workflow_event::Event::RunSubmitted {
+                reason:          None,
+                definition_blob: None,
+            },
+            workflow_event::Event::RunStarting { reason: None },
+            workflow_event::Event::RunRunning { reason: None },
+        ])
+        .await;
+        append_raw_run_event(
+            &state,
+            run_id,
+            "pending-question",
+            "2026-04-19T12:00:00Z",
+            "interview.started",
+            json!({
+                "question_id": "q-1",
+                "question": "Approve deploy?",
+                "stage": "gate",
+                "question_type": "multiple_choice",
+                "options": [],
+                "allow_freeform": false,
+                "context_display": null,
+                "timeout_seconds": null,
+            }),
+            Some("gate"),
+        )
+        .await;
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/state")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(
+            body["pending_interviews"]["q-1"]["question"]["text"].as_str(),
+            Some("Approve deploy?")
+        );
+        assert_eq!(
+            body["pending_interviews"]["q-1"]["question"]["stage"].as_str(),
+            Some("gate")
+        );
     }
 
     #[tokio::test]
@@ -8137,6 +8374,18 @@ slug = "fabro"
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response.into_body()).await;
         assert_eq!(body["status"], "queued");
+
+        let status = state
+            .store
+            .open_run_reader(&run_id.parse::<RunId>().unwrap())
+            .await
+            .unwrap()
+            .state()
+            .await
+            .unwrap()
+            .status
+            .unwrap();
+        assert_eq!(status.status.to_string(), "queued");
     }
 
     #[tokio::test]
@@ -8732,7 +8981,7 @@ level = "debug"
         let run_store = state.store.open_run_reader(&run_id).await.unwrap();
         let status = run_store.state().await.unwrap().status.unwrap();
         assert_eq!(status.status, WorkflowRunStatus::Failed);
-        assert_eq!(status.reason, Some(WorkflowStatusReason::Cancelled));
+        assert_eq!(status.status_reason, Some(WorkflowStatusReason::Cancelled));
     }
 
     #[tokio::test]
@@ -8851,6 +9100,55 @@ level = "debug"
     }
 
     #[tokio::test]
+    async fn pause_run_immediately_pauses_blocked_run() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let run_id = run_id_str.parse::<RunId>().unwrap();
+
+        append_raw_run_event(
+            &state,
+            run_id,
+            "pause-blocked",
+            "2026-04-19T12:00:00Z",
+            "run.blocked",
+            json!({ "blocked_reason": "human_input_required" }),
+            None,
+        )
+        .await;
+
+        {
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            let managed_run = runs.get_mut(&run_id).expect("run should exist");
+            managed_run.status = RunStatus::Blocked;
+            managed_run.worker_pid = Some(u32::MAX);
+        }
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/pause")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["status"].as_str(), Some("paused"));
+        assert_eq!(
+            body["blocked_reason"].as_str(),
+            Some("human_input_required")
+        );
+        assert_eq!(body["pending_control"], serde_json::Value::Null);
+
+        let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
+        assert_eq!(summary.status, WorkflowRunStatus::Paused);
+        assert_eq!(
+            summary.blocked_reason,
+            Some(BlockedReason::HumanInputRequired)
+        );
+        assert_eq!(summary.pending_control, None);
+    }
+
+    #[tokio::test]
     async fn unpause_run_sets_pending_control() {
         let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
@@ -8877,6 +9175,65 @@ level = "debug"
 
         let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
         assert_eq!(summary.pending_control, Some(RunControlAction::Unpause));
+    }
+
+    #[tokio::test]
+    async fn unpause_run_returns_blocked_when_human_gate_is_still_unresolved() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let run_id = run_id_str.parse::<RunId>().unwrap();
+
+        append_raw_run_event(
+            &state,
+            run_id,
+            "paused-blocked-paused",
+            "2026-04-19T12:00:00Z",
+            "run.paused",
+            json!({}),
+            None,
+        )
+        .await;
+        append_raw_run_event(
+            &state,
+            run_id,
+            "paused-blocked-status",
+            "2026-04-19T12:00:01Z",
+            "run.blocked",
+            json!({ "blocked_reason": "human_input_required" }),
+            None,
+        )
+        .await;
+
+        {
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            let managed_run = runs.get_mut(&run_id).expect("run should exist");
+            managed_run.status = RunStatus::Paused;
+            managed_run.worker_pid = Some(u32::MAX);
+        }
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/unpause")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["status"].as_str(), Some("blocked"));
+        assert_eq!(
+            body["blocked_reason"].as_str(),
+            Some("human_input_required")
+        );
+        assert_eq!(body["pending_control"], serde_json::Value::Null);
+
+        let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
+        assert_eq!(summary.status, WorkflowRunStatus::Blocked);
+        assert_eq!(
+            summary.blocked_reason,
+            Some(BlockedReason::HumanInputRequired)
+        );
+        assert_eq!(summary.pending_control, None);
     }
 
     #[tokio::test]
@@ -8934,7 +9291,10 @@ level = "debug"
             .unwrap();
         let run_2_status = run_2.status.unwrap();
         assert_eq!(run_2_status.status, WorkflowRunStatus::Failed);
-        assert_eq!(run_2_status.reason, Some(WorkflowStatusReason::Terminated));
+        assert_eq!(
+            run_2_status.status_reason,
+            Some(WorkflowStatusReason::Terminated)
+        );
 
         let run_3 = state
             .store
@@ -8946,7 +9306,10 @@ level = "debug"
             .unwrap();
         let run_3_status = run_3.status.unwrap();
         assert_eq!(run_3_status.status, WorkflowRunStatus::Failed);
-        assert_eq!(run_3_status.reason, Some(WorkflowStatusReason::Cancelled));
+        assert_eq!(
+            run_3_status.status_reason,
+            Some(WorkflowStatusReason::Cancelled)
+        );
         assert_eq!(run_3.pending_control, None);
     }
 
@@ -9018,7 +9381,10 @@ level = "debug"
             .unwrap();
         let run_status = run_state.status.unwrap();
         assert_eq!(run_status.status, WorkflowRunStatus::Failed);
-        assert_eq!(run_status.reason, Some(WorkflowStatusReason::Terminated));
+        assert_eq!(
+            run_status.status_reason,
+            Some(WorkflowStatusReason::Terminated)
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -9044,7 +9410,39 @@ timeout = "30s"
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
         let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id));
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let mut live_status_before_cancel = None;
+        for _ in 0..50 {
+            live_status_before_cancel = {
+                let runs = state.runs.lock().expect("runs lock poisoned");
+                runs.get(&run_id).map(|run| run.status)
+            };
+            if matches!(
+                live_status_before_cancel,
+                Some(
+                    RunStatus::Queued
+                        | RunStatus::Starting
+                        | RunStatus::Running
+                        | RunStatus::Blocked
+                        | RunStatus::Paused
+                )
+            ) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            matches!(
+                live_status_before_cancel,
+                Some(
+                    RunStatus::Queued
+                        | RunStatus::Starting
+                        | RunStatus::Running
+                        | RunStatus::Blocked
+                        | RunStatus::Paused
+                )
+            ),
+            "run should become cancellable before finishing, saw {live_status_before_cancel:?}"
+        );
 
         let req = Request::builder()
             .method("POST")
@@ -9052,13 +9450,19 @@ timeout = "30s"
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        let response_status = response.status();
+        let response_body = body_json(response.into_body()).await;
+        assert_eq!(
+            response_status,
+            StatusCode::OK,
+            "unexpected cancel response body: {response_body}; live status before cancel: {live_status_before_cancel:?}"
+        );
 
         runner.await.unwrap();
 
         let runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = runs.get(&run_id).expect("run should exist");
-        assert_eq!(managed_run.status, RunStatus::Cancelled);
+        assert_eq!(managed_run.status, RunStatus::Failed);
         drop(runs);
 
         let run_store = state.store.open_run_reader(&run_id).await.unwrap();
@@ -9067,7 +9471,7 @@ timeout = "30s"
         for _ in 0..50 {
             if let Some(record) = run_store.state().await.unwrap().status {
                 if record.status == WorkflowRunStatus::Failed
-                    && record.reason == Some(WorkflowStatusReason::Cancelled)
+                    && record.status_reason == Some(WorkflowStatusReason::Cancelled)
                 {
                     status_record = Some(record);
                     break;
@@ -9078,7 +9482,10 @@ timeout = "30s"
 
         let status_record = status_record.expect("status record should be persisted");
         assert_eq!(status_record.status, WorkflowRunStatus::Failed);
-        assert_eq!(status_record.reason, Some(WorkflowStatusReason::Cancelled));
+        assert_eq!(
+            status_record.status_reason,
+            Some(WorkflowStatusReason::Cancelled)
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -9362,12 +9769,89 @@ timeout = "30s"
     }
 
     #[tokio::test]
+    async fn get_run_exposes_canonical_operator_statuses() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let succeeded_id = fixtures::RUN_1;
+        let removing_id = fixtures::RUN_2;
+        let blocked_id = fixtures::RUN_3;
+
+        create_durable_run_with_events(&state, succeeded_id, &[
+            workflow_event::Event::RunSubmitted {
+                reason:          None,
+                definition_blob: None,
+            },
+            workflow_event::Event::RunStarting { reason: None },
+            workflow_event::Event::RunRunning { reason: None },
+            workflow_event::Event::WorkflowRunCompleted {
+                duration_ms:          1000,
+                artifact_count:       0,
+                status:               "success".to_string(),
+                reason:               None,
+                total_usd_micros:     None,
+                final_git_commit_sha: None,
+                final_patch:          None,
+                billing:              None,
+            },
+        ])
+        .await;
+
+        create_durable_run_with_events(&state, removing_id, &[
+            workflow_event::Event::RunSubmitted {
+                reason:          None,
+                definition_blob: None,
+            },
+            workflow_event::Event::RunStarting { reason: None },
+            workflow_event::Event::RunRunning { reason: None },
+            workflow_event::Event::RunRemoving { reason: None },
+        ])
+        .await;
+        create_durable_run_with_events(&state, blocked_id, &[
+            workflow_event::Event::RunSubmitted {
+                reason:          None,
+                definition_blob: None,
+            },
+            workflow_event::Event::RunStarting { reason: None },
+            workflow_event::Event::RunRunning { reason: None },
+        ])
+        .await;
+        append_raw_run_event(
+            &state,
+            blocked_id,
+            "status-blocked",
+            "2026-04-19T12:00:00Z",
+            "run.blocked",
+            json!({ "blocked_reason": "human_input_required" }),
+            None,
+        )
+        .await;
+
+        for (run_id, expected_status) in [
+            (succeeded_id, "succeeded"),
+            (removing_id, "removing"),
+            (blocked_id, "blocked"),
+        ] {
+            let req = Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}")))
+                .body(Body::empty())
+                .unwrap();
+            let response = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = body_json(response.into_body()).await;
+            assert_eq!(body["status"].as_str(), Some(expected_status));
+        }
+    }
+
+    #[tokio::test]
     async fn boards_runs_maps_statuses_to_columns() {
         let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         let paused_id = fixtures::RUN_1;
         let succeeded_id = fixtures::RUN_2;
+        let blocked_id = fixtures::RUN_3;
 
         create_durable_run_with_events(&state, paused_id, &[
             workflow_event::Event::RunSubmitted {
@@ -9398,6 +9882,63 @@ timeout = "30s"
             },
         ])
         .await;
+        create_durable_run_with_events(&state, blocked_id, &[
+            workflow_event::Event::RunSubmitted {
+                reason:          None,
+                definition_blob: None,
+            },
+            workflow_event::Event::RunStarting { reason: None },
+            workflow_event::Event::RunRunning { reason: None },
+        ])
+        .await;
+        append_raw_run_event(
+            &state,
+            blocked_id,
+            "blocked-question-1",
+            "2026-04-19T12:00:00Z",
+            "interview.started",
+            json!({
+                "question_id": "q-older",
+                "question": "Older unresolved question?",
+                "stage": "gate",
+                "question_type": "multiple_choice",
+                "options": [],
+                "allow_freeform": false,
+                "context_display": null,
+                "timeout_seconds": null,
+            }),
+            Some("gate"),
+        )
+        .await;
+        append_raw_run_event(
+            &state,
+            blocked_id,
+            "blocked-question-2",
+            "2026-04-19T12:00:01Z",
+            "interview.started",
+            json!({
+                "question_id": "q-newer",
+                "question": "Newer unresolved question?",
+                "stage": "gate",
+                "question_type": "multiple_choice",
+                "options": [],
+                "allow_freeform": false,
+                "context_display": null,
+                "timeout_seconds": null,
+            }),
+            Some("gate"),
+        )
+        .await;
+        append_raw_run_event(
+            &state,
+            blocked_id,
+            "blocked-status",
+            "2026-04-19T12:00:02Z",
+            "run.blocked",
+            json!({ "blocked_reason": "human_input_required" }),
+            None,
+        )
+        .await;
 
         let req = Request::builder()
             .method("GET")
@@ -9413,7 +9954,7 @@ timeout = "30s"
             .find(|i| i["run_id"].as_str() == Some(&paused_id.to_string()))
             .expect("paused run should be on board");
         assert_eq!(paused_item["status"].as_str().unwrap(), "paused");
-        assert_eq!(paused_item["column"].as_str().unwrap(), "waiting");
+        assert_eq!(paused_item["column"].as_str().unwrap(), "running");
 
         let succeeded_item = data
             .iter()
@@ -9422,10 +9963,22 @@ timeout = "30s"
         assert_eq!(succeeded_item["status"].as_str().unwrap(), "succeeded");
         assert_eq!(succeeded_item["column"].as_str().unwrap(), "succeeded");
 
+        let blocked_item = data
+            .iter()
+            .find(|i| i["run_id"].as_str() == Some(&blocked_id.to_string()))
+            .expect("blocked run should be on board");
+        assert_eq!(blocked_item["status"].as_str().unwrap(), "blocked");
+        assert_eq!(blocked_item["column"].as_str().unwrap(), "blocked");
+        assert_eq!(
+            blocked_item["question"]["text"].as_str(),
+            Some("Older unresolved question?")
+        );
+
         // Verify columns are included in the response
         let columns = body["columns"].as_array().expect("columns should be array");
         assert!(!columns.is_empty());
-        assert!(columns.iter().any(|c| c["id"].as_str() == Some("waiting")));
+        assert!(columns.iter().any(|c| c["id"].as_str() == Some("running")));
+        assert!(columns.iter().any(|c| c["id"].as_str() == Some("blocked")));
         assert!(
             columns
                 .iter()

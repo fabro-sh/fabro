@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { columnForStatus, mapRunListItem, mapRunSummaryToRunItem } from "./runs";
+import {
+  columnForStatus,
+  columnStatusDisplay,
+  isRunStatus,
+  mapRunListItem,
+  mapRunSummaryToRunItem,
+  runStatusDisplay,
+} from "./runs";
 
 describe("mapRunListItem", () => {
   test("trusts shared server fields for board items", () => {
@@ -110,6 +117,18 @@ describe("mapRunSummaryToRunItem", () => {
     expect(item.title).toBe("Untitled run");
     expect(item.workflow).toBe("unknown");
     expect(item.repo).toBe("unknown");
+  });
+
+  test("recognizes canonical blocked and queued run statuses", () => {
+    expect(isRunStatus("queued")).toBe(true);
+    expect(isRunStatus("blocked")).toBe(true);
+    expect(runStatusDisplay).toHaveProperty("queued");
+    expect(runStatusDisplay).toHaveProperty("blocked");
+  });
+
+  test("uses blocked board column instead of waiting", () => {
+    expect(columnStatusDisplay).toHaveProperty("blocked");
+    expect(columnStatusDisplay).not.toHaveProperty("waiting");
   });
 });
 

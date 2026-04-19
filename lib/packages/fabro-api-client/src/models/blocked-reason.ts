@@ -15,21 +15,14 @@
 
 
 /**
- * Internal event-sourced run status.
+ * Specific reason a run is blocked on external intervention.
  */
 
-export const InternalRunStatus = {
-    SUBMITTED: 'submitted',
-    STARTING: 'starting',
-    RUNNING: 'running',
-    PAUSED: 'paused',
-    REMOVING: 'removing',
-    SUCCEEDED: 'succeeded',
-    FAILED: 'failed',
-    DEAD: 'dead'
+export const BlockedReason = {
+    HUMAN_INPUT_REQUIRED: 'human_input_required'
 } as const;
 
-export type InternalRunStatus = typeof InternalRunStatus[keyof typeof InternalRunStatus];
+export type BlockedReason = typeof BlockedReason[keyof typeof BlockedReason];
 
 
 

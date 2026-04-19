@@ -125,7 +125,10 @@ pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, E
     }
 
     if let Some(record) = state.status {
-        if !matches!(record.status, RunStatus::Submitted | RunStatus::Starting) {
+        if !matches!(
+            record.status,
+            RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting
+        ) {
             return Err(Error::Precondition(format!(
                 "cannot start run: status is {:?}, expected submitted",
                 record.status
@@ -975,8 +978,8 @@ async fn persist_detached_failure(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use chrono::Utc;
@@ -988,7 +991,7 @@ mod tests {
 
     use super::*;
     use crate::context::Context;
-    use crate::event::Emitter;
+    use crate::event::{Emitter, EventBody};
     use crate::handler::HandlerRegistry;
     use crate::handler::exit::ExitHandler;
     use crate::handler::manager_loop::SubWorkflowHandler;

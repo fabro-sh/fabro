@@ -373,9 +373,10 @@ mod tests {
 
     fn sample_status() -> RunStatusRecord {
         RunStatusRecord {
-            status:     RunStatus::Running,
-            reason:     Some(StatusReason::SandboxInitializing),
-            updated_at: dt("2026-03-27T12:05:00Z"),
+            status:         RunStatus::Running,
+            status_reason:  Some(StatusReason::SandboxInitializing),
+            blocked_reason: None,
+            updated_at:     dt("2026-03-27T12:05:00Z"),
         }
     }
 
@@ -520,7 +521,7 @@ mod tests {
         .await
         .unwrap();
         append_event(&run, &run_id, &Event::RunRunning {
-            reason: status_record.reason,
+            reason: status_record.status_reason,
         })
         .await
         .unwrap();

@@ -13,20 +13,15 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ApiQuestion } from './api-question';
 
 /**
- * Board column status for a run in the list view.
+ * Pending interview question plus the time it entered the unresolved set.
  */
-
-export const BoardColumn = {
-    INITIALIZING: 'initializing',
-    RUNNING: 'running',
-    BLOCKED: 'blocked',
-    SUCCEEDED: 'succeeded',
-    FAILED: 'failed'
-} as const;
-
-export type BoardColumn = typeof BoardColumn[keyof typeof BoardColumn];
-
-
+export interface PendingInterviewRecord {
+    'question'?: ApiQuestion;
+    'started_at'?: string | null;
+}
 

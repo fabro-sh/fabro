@@ -260,7 +260,16 @@ pub(crate) async fn cancel_stub(
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    (StatusCode::OK, Json(serde_json::json!({"id": id, "status": "cancelled", "created_at": "2026-03-06T14:30:00Z"}))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "id": id,
+            "status": "failed",
+            "status_reason": "cancelled",
+            "created_at": "2026-03-06T14:30:00Z"
+        })),
+    )
+        .into_response()
 }
 
 pub(crate) async fn pause_stub(
@@ -664,7 +673,7 @@ mod runs {
         workflow_slug: &str,
         workflow_name: &str,
         goal: &str,
-        status: Option<&str>,
+        status: &str,
         created_at: &str,
         elapsed_secs: Option<f64>,
         status_reason: Option<&str>,
@@ -687,8 +696,10 @@ mod runs {
             },
             run_id: run_id.into(),
             start_time: Some(ts(created_at)),
-            status: status.map(str::to_string),
+            status: RunStatus::from_str(status)
+                .unwrap_or_else(|_| panic!("invalid demo run status: {status}")),
             status_reason,
+            blocked_reason: None,
             title: truncate_goal(goal),
             total_usd_micros,
             workflow_name: Some(workflow_name.into()),
@@ -736,7 +747,7 @@ mod runs {
             run_id: summary.run_id,
             sandbox,
             start_time: summary.start_time,
-            status: summary.status.unwrap_or_default(),
+            status: summary.status.to_string(),
             status_reason: summary.status_reason,
             title: summary.title,
             total_usd_micros: summary.total_usd_micros,
@@ -787,8 +798,8 @@ mod runs {
                 name: "Running".into(),
             },
             BoardColumnDefinition {
-                id:   "waiting".into(),
-                name: "Waiting".into(),
+                id:   "blocked".into(),
+                name: "Blocked".into(),
             },
             BoardColumnDefinition {
                 id:   "succeeded".into(),
@@ -809,7 +820,7 @@ mod runs {
                 "implement",
                 "Implement",
                 "Add rate limiting to auth endpoints",
-                Some("running"),
+                "running",
                 "2026-03-06T14:30:00Z",
                 Some(420.0),
                 None,
@@ -823,7 +834,7 @@ mod runs {
                 "implement",
                 "Implement",
                 "Migrate to React Router v7",
-                Some("running"),
+                "running",
                 "2026-03-06T12:00:00Z",
                 Some(8100.0),
                 None,
@@ -837,7 +848,7 @@ mod runs {
                 "expand",
                 "Expand",
                 "Update OpenAPI spec for v3",
-                Some("starting"),
+                "starting",
                 "2026-03-04T15:00:00Z",
                 Some(4320.0),
                 None,
@@ -851,7 +862,7 @@ mod runs {
                 "implement",
                 "Implement",
                 "Add pipeline event types",
-                Some("paused"),
+                "blocked",
                 "2026-03-04T10:00:00Z",
                 Some(1680.0),
                 None,
@@ -865,7 +876,7 @@ mod runs {
                 "implement",
                 "Implement",
                 "Add dark mode toggle",
-                Some("failed"),
+                "failed",
                 "2026-03-03T16:45:00Z",
                 Some(2100.0),
                 Some("workflow_error"),
@@ -879,7 +890,7 @@ mod runs {
                 "implement",
                 "Implement",
                 "Implement webhook retry logic",
-                Some("succeeded"),
+                "succeeded",
                 "2026-02-28T14:00:00Z",
                 Some(259200.0),
                 Some("completed"),
@@ -922,7 +933,7 @@ mod runs {
             ),
             board_item(
                 take_summary(&mut summaries, "run-4"),
-                BoardColumn::Waiting,
+                BoardColumn::Blocked,
                 Some(pull_request(0, 145, 23, 0, vec![])),
                 Some(sandbox("sb-u1v2w3x4", 4, 8)),
                 Some(RunQuestion {
@@ -1237,7 +1248,7 @@ mod runs {
                 "implement",
                 "Implement",
                 "Goal",
-                Some("failed"),
+                "failed",
                 "2026-03-06T14:30:00Z",
                 Some(1.0),
                 Some("cancelled"),
@@ -1257,7 +1268,7 @@ mod runs {
                 "implement",
                 "Implement",
                 "Goal",
-                Some("failed"),
+                "failed",
                 "2026-03-06T14:30:00Z",
                 Some(1.0),
                 Some("unexpected_reason"),
@@ -1278,7 +1289,7 @@ mod runs {
                 "implement",
                 "Implement",
                 &goal,
-                Some("running"),
+                "running",
                 "2026-03-06T14:30:00Z",
                 Some(1.0),
                 None,
