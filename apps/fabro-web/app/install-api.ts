@@ -1,52 +1,20 @@
-export type InstallGithubAppOwner =
-  | { kind: "personal" }
-  | { kind: "org"; slug: string };
+import type {
+  InstallFinishResponse,
+  InstallGithubAppManifestInput,
+  InstallGithubAppManifestResponse,
+  InstallGithubAppOwner,
+  InstallLlmProviderInput,
+  InstallSessionResponse,
+} from "@qltysh/fabro-api-client";
 
-export interface InstallSessionResponse {
-  completed_steps: string[];
-  llm:
-    | {
-        providers: Array<{
-          provider: string;
-          configured: boolean;
-        }>;
-      }
-    | null;
-  server: { canonical_url: string } | null;
-  github:
-    | {
-        strategy: string;
-        username?: string;
-        owner?: InstallGithubAppOwner;
-        app_name?: string;
-        slug?: string;
-        allowed_username?: string;
-      }
-    | null;
-  prefill: { canonical_url: string };
-}
-
-export interface InstallFinishResponse {
-  status: "completing";
-  restart_url: string;
-  dev_token: string;
-}
-
-export interface InstallLlmProviderInput {
-  provider: string;
-  api_key: string;
-}
-
-export interface InstallGithubAppManifestInput {
-  owner: InstallGithubAppOwner;
-  app_name: string;
-  allowed_username: string;
-}
-
-export interface InstallGithubAppManifestResponse {
-  manifest: Record<string, unknown>;
-  github_form_action: string;
-}
+export type {
+  InstallFinishResponse,
+  InstallGithubAppManifestInput,
+  InstallGithubAppManifestResponse,
+  InstallGithubAppOwner,
+  InstallLlmProviderInput,
+  InstallSessionResponse,
+};
 
 const INSTALL_TOKEN_KEY = "fabro-install-token";
 

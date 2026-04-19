@@ -19,6 +19,7 @@ export * from './api/completions-api';
 export * from './api/discovery-api';
 export * from './api/human-in-the-loop-api';
 export * from './api/insights-api';
+export * from './api/install-api';
 export * from './api/models-api';
 export * from './api/repos-api';
 export * from './api/run-internals-api';
