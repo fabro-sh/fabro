@@ -227,6 +227,9 @@ pub enum Error {
     #[error("Precondition failed: {0}")]
     Precondition(String),
 
+    #[error("Run not found: {0}")]
+    RunNotFound(String),
+
     #[error("Pipeline cancelled")]
     Cancelled,
 }
@@ -272,6 +275,7 @@ impl Error {
             | Self::Stylesheet(_)
             | Self::Checkpoint(_)
             | Self::Precondition(_)
+            | Self::RunNotFound(_)
             | Self::Cancelled => false,
         }
     }
@@ -288,7 +292,7 @@ impl Error {
             | Self::ValidationFailed { .. }
             | Self::Stylesheet(_)
             | Self::Checkpoint(_) => FailureCategory::Deterministic,
-            Self::Precondition(_) => FailureCategory::Structural,
+            Self::Precondition(_) | Self::RunNotFound(_) => FailureCategory::Structural,
             Self::Handler { failure_class, .. } | Self::Engine { failure_class, .. } => {
                 *failure_class
             }

@@ -1,8 +1,34 @@
-use fabro_store::Database;
+use fabro_store::{Database, Error as StoreError};
 use fabro_types::{ActorRef, RunId, RunStatus};
 
 use crate::error::Error;
 use crate::event::{self, Event};
+
+fn map_open_run_error(run_id: &RunId, err: StoreError) -> Error {
+    match err {
+        StoreError::RunNotFound(id) => Error::RunNotFound(id),
+        other => Error::engine(format!("failed to open run {run_id}: {other}")),
+    }
+}
+
+/// The canonical "run is archived — mutation rejected" error message. Shared
+/// by the operations layer, the CLI rewind precheck, and the server HTTP
+/// guards so the user sees the same actionable guidance everywhere.
+#[must_use]
+pub(crate) fn archived_rejection_message(run_id: &RunId) -> String {
+    format!("run {run_id} is archived; run `fabro unarchive {run_id}` to restore it and try again")
+}
+
+/// Returns `Err(Error::Precondition)` when the given status represents an
+/// archived run. Use this at any mutation entry point that would otherwise
+/// transition or emit events against the run (rewind, resume, etc.).
+pub(crate) fn ensure_not_archived(status: Option<RunStatus>, run_id: &RunId) -> Result<(), Error> {
+    if status == Some(RunStatus::Archived) {
+        Err(Error::Precondition(archived_rejection_message(run_id)))
+    } else {
+        Ok(())
+    }
+}
 
 /// Outcome of an `archive` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,7 +58,7 @@ pub async fn archive(
     let run_store = store
         .open_run(run_id)
         .await
-        .map_err(|err| Error::engine(err.to_string()))?;
+        .map_err(|err| map_open_run_error(run_id, err))?;
     let projection = run_store
         .state()
         .await
@@ -79,7 +105,7 @@ pub async fn unarchive(
     let run_store = store
         .open_run(run_id)
         .await
-        .map_err(|err| Error::engine(err.to_string()))?;
+        .map_err(|err| map_open_run_error(run_id, err))?;
     let projection = run_store
         .state()
         .await
@@ -305,6 +331,30 @@ mod tests {
             status: RunStatus::Succeeded,
         });
         assert_eq!(events_before, events_after);
+    }
+
+    #[tokio::test]
+    async fn archive_on_unknown_run_returns_run_not_found() {
+        let store = memory_store();
+        let run_id = fixtures::RUN_3;
+
+        let err = archive(&store, &run_id, None).await.unwrap_err();
+        assert!(
+            matches!(err, Error::RunNotFound(_)),
+            "expected RunNotFound, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unarchive_on_unknown_run_returns_run_not_found() {
+        let store = memory_store();
+        let run_id = fixtures::RUN_3;
+
+        let err = unarchive(&store, &run_id, None).await.unwrap_err();
+        assert!(
+            matches!(err, Error::RunNotFound(_)),
+            "expected RunNotFound, got {err:?}"
+        );
     }
 
     #[tokio::test]

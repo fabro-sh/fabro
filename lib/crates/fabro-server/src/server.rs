@@ -5163,6 +5163,9 @@ async fn write_run_blob(
         Ok(id) => id,
         Err(response) => return response,
     };
+    if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
+        return response;
+    }
     match state.store.open_run(&id).await {
         Ok(run_store) => match run_store.write_blob(&body).await {
             Ok(blob_id) => Json(WriteBlobResponse {
@@ -5646,6 +5649,9 @@ async fn put_stage_artifact(
     if let Err(err) = authorize_artifact_upload(&parts, state.as_ref(), &id) {
         return err.into_response();
     }
+    if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
+        return response;
+    }
     if let Err(response) = load_run_record(state.as_ref(), &id).await.map(|_| ()) {
         return response;
     }
@@ -5867,6 +5873,9 @@ async fn put_sandbox_file(
         Ok(id) => id,
         Err(response) => return response,
     };
+    if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
+        return response;
+    }
     let sandbox = match reconnect_run_sandbox(&state, &id).await {
         Ok(sandbox) => sandbox,
         Err(response) => return response,
@@ -5962,16 +5971,20 @@ fn actor_from_subject(subject: &AuthenticatedSubject) -> Option<ActorRef> {
     subject.login.clone().map(ActorRef::user)
 }
 
-/// Returns the wire event name if the given body is a user-initiated
-/// lifecycle-transition event that clients must not inject via
-/// `append_run_event`. These events are reserved for the operations layer,
-/// which runs authorization and precondition checks. Worker-emitted lifecycle
-/// events (`run.completed`, `run.failed`, etc.) still flow through this
-/// endpoint.
+/// Returns the wire event name if the given body has a dedicated operation
+/// endpoint that clients must use instead of injecting via `append_run_event`.
+/// These endpoints enforce authorization and status-transition preconditions
+/// (e.g. "archive only from terminal") that a direct event append would
+/// bypass. Other run-lifecycle events flow through this endpoint legitimately:
+/// the worker subprocess emits state transitions during execution, and the
+/// rewind CLI relays `RunRewound` / `RunSubmitted` here.
 fn denied_lifecycle_event_name(body: &EventBody) -> Option<&'static str> {
     match body {
         EventBody::RunArchived(_) => Some("run.archived"),
         EventBody::RunUnarchived(_) => Some("run.unarchived"),
+        EventBody::RunCancelRequested(_) => Some("run.cancel.requested"),
+        EventBody::RunPauseRequested(_) => Some("run.pause.requested"),
+        EventBody::RunUnpauseRequested(_) => Some("run.unpause.requested"),
         _ => None,
     }
 }
@@ -6378,6 +6391,7 @@ async fn archive_run(
         Err(WorkflowError::Precondition(message)) => {
             ApiError::new(StatusCode::CONFLICT, message).into_response()
         }
+        Err(WorkflowError::RunNotFound(_)) => ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
@@ -6399,6 +6413,7 @@ async fn unarchive_run(
         Err(WorkflowError::Precondition(message)) => {
             ApiError::new(StatusCode::CONFLICT, message).into_response()
         }
+        Err(WorkflowError::RunNotFound(_)) => ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }

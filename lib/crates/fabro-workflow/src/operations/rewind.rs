@@ -7,9 +7,10 @@ use fabro_checkpoint::branch::{BranchStore, CommitInfo};
 use fabro_checkpoint::git::Store;
 use fabro_graphviz::graph::Graph;
 use fabro_graphviz::parser;
-use fabro_types::RunId;
+use fabro_types::{RunId, RunStatus};
 use git2::{Oid, Repository, Signature};
 
+use super::archive::ensure_not_archived;
 use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
 use crate::records::{Checkpoint, RunRecord};
 
@@ -114,9 +115,14 @@ impl RunTimeline {
 
 #[derive(Debug, Clone)]
 pub struct RewindInput {
-    pub run_id: RunId,
-    pub target: RewindTarget,
-    pub push:   bool,
+    pub run_id:         RunId,
+    pub target:         RewindTarget,
+    pub push:           bool,
+    /// Current run status, if known. Callers that know the projection status
+    /// should thread it through so `rewind` can reject on archived runs. When
+    /// `None`, the archive precondition is skipped and callers are expected
+    /// to enforce it upstream.
+    pub current_status: Option<RunStatus>,
 }
 
 pub fn build_timeline(store: &Store, run_id: &str) -> Result<RunTimeline> {
@@ -249,6 +255,8 @@ fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {
 }
 
 pub fn rewind(store: &Store, input: &RewindInput) -> Result<()> {
+    ensure_not_archived(input.current_status, &input.run_id)
+        .map_err(|err| anyhow::anyhow!("{err}"))?;
     let timeline = build_timeline(store, &input.run_id.to_string())?;
     let entry = timeline.resolve(&input.target)?;
     rewind_to_entry(store, &input.run_id, entry, input.push)
@@ -509,14 +517,33 @@ mod tests {
             .unwrap();
 
         rewind(&store, &RewindInput {
-            run_id: fixtures::RUN_1,
-            target: RewindTarget::Ordinal(1),
-            push:   false,
+            run_id:         fixtures::RUN_1,
+            target:         RewindTarget::Ordinal(1),
+            push:           false,
+            current_status: None,
         })
         .unwrap();
 
         let resolved = store.resolve_ref(&branch).unwrap().unwrap();
         assert_eq!(resolved, oid1);
+    }
+
+    #[test]
+    fn rewind_rejects_archived_runs() {
+        let (_dir, store) = temp_repo();
+
+        let err = rewind(&store, &RewindInput {
+            run_id:         fixtures::RUN_1,
+            target:         RewindTarget::Ordinal(1),
+            push:           false,
+            current_status: Some(RunStatus::Archived),
+        })
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("is archived") && message.contains("fabro unarchive"),
+            "expected archived-rejection message, got: {message}"
+        );
     }
 
     #[test]
