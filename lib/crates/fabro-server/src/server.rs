@@ -2685,7 +2685,7 @@ async fn board_run_metadata(
     metadata
 }
 
-fn paginate_items<T>(items: Vec<T>, pagination: PaginationParams) -> (Vec<T>, bool) {
+fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {
     let limit = pagination.limit.clamp(1, 100) as usize;
     let offset = pagination.offset as usize;
     let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
@@ -2718,7 +2718,7 @@ async fn list_board_runs(
             Some((summary, column))
         })
         .collect();
-    let (page_summaries, has_more) = paginate_items(board_summaries, pagination);
+    let (page_summaries, has_more) = paginate_items(board_summaries, &pagination);
 
     let mut data = Vec::with_capacity(page_summaries.len());
     for (summary, column) in page_summaries {
@@ -2756,7 +2756,7 @@ async fn list_runs(
                 .into_iter()
                 .map(summary_to_api_run_summary)
                 .collect::<Vec<_>>();
-            let (data, has_more) = paginate_items(items, pagination);
+            let (data, has_more) = paginate_items(items, &pagination);
             (
                 StatusCode::OK,
                 Json(serde_json::json!({

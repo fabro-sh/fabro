@@ -644,6 +644,7 @@ fn ts(s: &str) -> DateTime<Utc> {
 mod runs {
     use std::collections::HashMap;
     use std::str::FromStr;
+    use std::time::Duration;
 
     use fabro_api::types::*;
 
@@ -675,7 +676,7 @@ mod runs {
 
         StoreRunSummary {
             created_at: ts(created_at),
-            duration_ms: elapsed_secs.map(|secs| (secs * 1000.0).round() as i64),
+            duration_ms: elapsed_secs.and_then(duration_ms_from_secs),
             elapsed_secs,
             goal: goal.into(),
             host_repo_path: Some(format!("/demo/{repo_name}")),
@@ -697,6 +698,11 @@ mod runs {
 
     fn parse_status_reason(reason: &str) -> Option<StatusReason> {
         StatusReason::from_str(reason).ok()
+    }
+
+    fn duration_ms_from_secs(secs: f64) -> Option<i64> {
+        let duration = Duration::try_from_secs_f64(secs).ok()?;
+        duration.as_millis().try_into().ok()
     }
 
     fn take_summary(
@@ -950,72 +956,6 @@ mod runs {
                 None,
             ),
         ]
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn summary_parses_known_status_reason_values() {
-            let summary = summary(
-                "run-test",
-                "demo-repo",
-                "implement",
-                "Implement",
-                "Goal",
-                Some("failed"),
-                "2026-03-06T14:30:00Z",
-                Some(1.0),
-                Some("cancelled"),
-                None,
-                None,
-                &[],
-            );
-
-            assert_eq!(summary.status_reason, Some(StatusReason::Cancelled));
-        }
-
-        #[test]
-        fn summary_ignores_unknown_status_reason() {
-            let summary = summary(
-                "run-test",
-                "demo-repo",
-                "implement",
-                "Implement",
-                "Goal",
-                Some("failed"),
-                "2026-03-06T14:30:00Z",
-                Some(1.0),
-                Some("unexpected_reason"),
-                None,
-                None,
-                &[],
-            );
-
-            assert_eq!(summary.status_reason, None);
-        }
-
-        #[test]
-        fn summary_derives_title_like_server() {
-            let goal = format!("## Plan: {}", "a".repeat(120));
-            let summary = summary(
-                "run-test",
-                "demo-repo",
-                "implement",
-                "Implement",
-                &goal,
-                Some("running"),
-                "2026-03-06T14:30:00Z",
-                Some(1.0),
-                None,
-                None,
-                None,
-                &[],
-            );
-
-            assert_eq!(summary.title, format!("{}...", "a".repeat(97)));
-        }
     }
 
     pub(super) fn stages() -> Vec<RunStage> {
@@ -1283,6 +1223,72 @@ mod runs {
                 }
             }
         })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn summary_parses_known_status_reason_values() {
+            let summary = summary(
+                "run-test",
+                "demo-repo",
+                "implement",
+                "Implement",
+                "Goal",
+                Some("failed"),
+                "2026-03-06T14:30:00Z",
+                Some(1.0),
+                Some("cancelled"),
+                None,
+                None,
+                &[],
+            );
+
+            assert_eq!(summary.status_reason, Some(StatusReason::Cancelled));
+        }
+
+        #[test]
+        fn summary_ignores_unknown_status_reason() {
+            let summary = summary(
+                "run-test",
+                "demo-repo",
+                "implement",
+                "Implement",
+                "Goal",
+                Some("failed"),
+                "2026-03-06T14:30:00Z",
+                Some(1.0),
+                Some("unexpected_reason"),
+                None,
+                None,
+                &[],
+            );
+
+            assert_eq!(summary.status_reason, None);
+        }
+
+        #[test]
+        fn summary_derives_title_like_server() {
+            let goal = format!("## Plan: {}", "a".repeat(120));
+            let summary = summary(
+                "run-test",
+                "demo-repo",
+                "implement",
+                "Implement",
+                &goal,
+                Some("running"),
+                "2026-03-06T14:30:00Z",
+                Some(1.0),
+                None,
+                None,
+                None,
+                &[],
+            );
+
+            assert_eq!(summary.title, format!("{}...", "a".repeat(97)));
+        }
     }
 }
 
