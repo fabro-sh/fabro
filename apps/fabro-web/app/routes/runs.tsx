@@ -18,7 +18,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ciConfig, statusColors, deriveCiStatus, mapRunListItem } from "../data/runs";
+import { ciConfig, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
 import { apiJson } from "../api";
 import type { PaginatedRunList } from "@qltysh/fabro-api-client";
@@ -50,28 +50,60 @@ interface BoardRunsResponse {
   meta: PaginatedRunList["meta"];
 }
 
-export async function loader({ request }: any) {
-  const response = await apiJson<BoardRunsResponse>("/boards/runs", { request });
-  const apiRuns = response.data;
+type Column = {
+  id: ColumnStatus;
+  name: string;
+  accent: string;
+  iconColor: string;
+  iconType: "branch" | "pr";
+  actions: string[];
+  items: RunItem[];
+};
 
+const BOARD_STATUS_EVENTS = new Set([
+  "run.submitted",
+  "run.queued",
+  "run.starting",
+  "run.running",
+  "run.removing",
+  "run.paused",
+  "run.unpaused",
+  "run.blocked",
+  "run.unblocked",
+  "run.completed",
+  "run.failed",
+  "interview.started",
+  "interview.completed",
+  "interview.timeout",
+  "interview.interrupted",
+]);
+
+export function shouldRefreshBoardForEvent(event: string) {
+  return BOARD_STATUS_EVENTS.has(event);
+}
+
+export function buildBoardColumns(response: BoardRunsResponse): Column[] {
   const grouped = new Map<string, RunItem[]>();
   for (const col of response.columns) {
     grouped.set(col.id, []);
   }
-  for (const apiRun of apiRuns) {
+  for (const apiRun of response.data) {
     if (grouped.has(apiRun.status)) {
       grouped.get(apiRun.status)?.push(mapRunListItem(apiRun));
     }
   }
 
-  const columns = response.columns.map((col) => ({
+  return response.columns.map((col) => ({
     id: col.id as ColumnStatus,
     name: col.name,
     ...(columnStyles[col.id] ?? defaultColumnStyle),
     items: grouped.get(col.id) ?? [],
   }));
+}
 
-  return { columns };
+export async function loader({ request }: any) {
+  const response = await apiJson<BoardRunsResponse>("/boards/runs", { request });
+  return { columns: buildBoardColumns(response) };
 }
 
 
@@ -393,16 +425,6 @@ function SortablePrCard({
   );
 }
 
-type Column = {
-  id: ColumnStatus;
-  name: string;
-  accent: string;
-  iconColor: string;
-  iconType: "branch" | "pr";
-  actions: string[];
-  items: RunItem[];
-};
-
 function BoardColumn({ column }: { column: Column }) {
   const Icon = iconMap[column.iconType];
   return (
@@ -623,24 +645,6 @@ export default function Runs({ loaderData }: any) {
   const lowerQuery = query.toLowerCase();
   const revalidator = useRevalidator();
 
-  const STATUS_EVENTS = new Set([
-    "run.submitted",
-    "run.queued",
-    "run.starting",
-    "run.running",
-    "run.removing",
-    "run.paused",
-    "run.unpaused",
-    "run.blocked",
-    "run.unblocked",
-    "run.completed",
-    "run.failed",
-    "interview.started",
-    "interview.completed",
-    "interview.timeout",
-    "interview.interrupted",
-  ]);
-
   useEffect(() => {
     const source = new EventSource("/api/v1/attach");
     let debounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -648,7 +652,7 @@ export default function Runs({ loaderData }: any) {
     source.onmessage = (msg) => {
       try {
         const payload = JSON.parse(msg.data);
-        if (STATUS_EVENTS.has(payload.event)) {
+        if (shouldRefreshBoardForEvent(payload.event)) {
           clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => revalidator.revalidate(), 500);
         }

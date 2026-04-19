@@ -16,7 +16,7 @@ use serde_json::json;
 
 use crate::error::ApiError;
 use crate::jwt_auth::AuthenticatedService;
-use crate::server::{AppState, PaginationParams};
+use crate::server::{AppState, PaginationParams, board_columns};
 use crate::settings_view;
 
 fn paginated_response<T: serde::Serialize>(
@@ -56,16 +56,9 @@ pub(crate) async fn list_board_runs(
     let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
     let has_more = data.len() > limit;
     data.truncate(limit);
-    let columns = json!([
-        {"id": "initializing", "name": "Initializing"},
-        {"id": "running", "name": "Running"},
-        {"id": "blocked", "name": "Blocked"},
-        {"id": "succeeded", "name": "Succeeded"},
-        {"id": "failed", "name": "Failed"},
-    ]);
     (
         StatusCode::OK,
-        Json(json!({ "columns": columns, "data": data, "meta": { "has_more": has_more } })),
+        Json(json!({ "columns": board_columns(), "data": data, "meta": { "has_more": has_more } })),
     )
         .into_response()
 }

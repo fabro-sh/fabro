@@ -1020,8 +1020,8 @@ async fn persist_detached_failure(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use chrono::Utc;
@@ -1033,7 +1033,7 @@ mod tests {
 
     use super::*;
     use crate::context::Context;
-    use crate::event::Emitter;
+    use crate::event::{Emitter, EventBody};
     use crate::handler::HandlerRegistry;
     use crate::handler::exit::ExitHandler;
     use crate::handler::manager_loop::SubWorkflowHandler;
@@ -1178,6 +1178,50 @@ mod tests {
         );
         assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
         assert!(started.retro.is_none());
+    }
+
+    #[test]
+    fn blocked_state_tracker_emits_once_across_parallel_interview_races() {
+        let tracker = BlockedStateTracker::new();
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
+        let event_names = Arc::new(Mutex::new(Vec::new()));
+
+        emitter.on_event({
+            let event_names = Arc::clone(&event_names);
+            move |event| {
+                let name = match &event.body {
+                    EventBody::RunBlocked(_) => Some("run.blocked"),
+                    EventBody::RunUnblocked(_) => Some("run.unblocked"),
+                    _ => None,
+                };
+                if let Some(name) = name {
+                    event_names.lock().unwrap().push(name.to_string());
+                }
+            }
+        });
+
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let tracker = Arc::clone(&tracker);
+                let emitter = Arc::clone(&emitter);
+                scope.spawn(move || tracker.interview_started(emitter.as_ref()));
+            }
+        });
+
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let tracker = Arc::clone(&tracker);
+                let emitter = Arc::clone(&emitter);
+                scope.spawn(move || tracker.interview_resolved(emitter.as_ref()));
+            }
+        });
+
+        tracker.interview_resolved(emitter.as_ref());
+
+        assert_eq!(event_names.lock().unwrap().as_slice(), [
+            "run.blocked",
+            "run.unblocked"
+        ],);
     }
 
     #[tokio::test]

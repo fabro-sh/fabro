@@ -2571,7 +2571,7 @@ fn board_column(status: WorkflowRunStatus) -> Option<&'static str> {
     }
 }
 
-fn board_columns() -> serde_json::Value {
+pub(crate) fn board_columns() -> serde_json::Value {
     serde_json::json!([
         {"id": "initializing", "name": "Initializing"},
         {"id": "running", "name": "Running"},
@@ -7614,6 +7614,60 @@ slug = "fabro"
     }
 
     #[tokio::test]
+    async fn get_run_state_exposes_pending_interviews() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = fixtures::RUN_1;
+
+        create_durable_run_with_events(&state, run_id, &[
+            workflow_event::Event::RunSubmitted {
+                reason:          None,
+                definition_blob: None,
+            },
+            workflow_event::Event::RunStarting { reason: None },
+            workflow_event::Event::RunRunning { reason: None },
+        ])
+        .await;
+        append_raw_run_event(
+            &state,
+            run_id,
+            "pending-question",
+            "2026-04-19T12:00:00Z",
+            "interview.started",
+            json!({
+                "question_id": "q-1",
+                "question": "Approve deploy?",
+                "stage": "gate",
+                "question_type": "multiple_choice",
+                "options": [],
+                "allow_freeform": false,
+                "context_display": null,
+                "timeout_seconds": null,
+            }),
+            Some("gate"),
+        )
+        .await;
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/state")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(
+            body["pending_interviews"]["q-1"]["question"]["text"].as_str(),
+            Some("Approve deploy?")
+        );
+        assert_eq!(
+            body["pending_interviews"]["q-1"]["question"]["stage"].as_str(),
+            Some("gate")
+        );
+    }
+
+    #[tokio::test]
     async fn get_run_state_includes_provenance_from_user_agent() {
         let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
@@ -8863,6 +8917,55 @@ level = "debug"
     }
 
     #[tokio::test]
+    async fn pause_run_immediately_pauses_blocked_run() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let run_id = run_id_str.parse::<RunId>().unwrap();
+
+        append_raw_run_event(
+            &state,
+            run_id,
+            "pause-blocked",
+            "2026-04-19T12:00:00Z",
+            "run.blocked",
+            json!({ "blocked_reason": "human_input_required" }),
+            None,
+        )
+        .await;
+
+        {
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            let managed_run = runs.get_mut(&run_id).expect("run should exist");
+            managed_run.status = RunStatus::Blocked;
+            managed_run.worker_pid = Some(u32::MAX);
+        }
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/pause")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["status"].as_str(), Some("paused"));
+        assert_eq!(
+            body["blocked_reason"].as_str(),
+            Some("human_input_required")
+        );
+        assert_eq!(body["pending_control"], serde_json::Value::Null);
+
+        let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
+        assert_eq!(summary.status, WorkflowRunStatus::Paused);
+        assert_eq!(
+            summary.blocked_reason,
+            Some(BlockedReason::HumanInputRequired)
+        );
+        assert_eq!(summary.pending_control, None);
+    }
+
+    #[tokio::test]
     async fn unpause_run_sets_pending_control() {
         let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
@@ -8889,6 +8992,65 @@ level = "debug"
 
         let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
         assert_eq!(summary.pending_control, Some(RunControlAction::Unpause));
+    }
+
+    #[tokio::test]
+    async fn unpause_run_returns_blocked_when_human_gate_is_still_unresolved() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let run_id = run_id_str.parse::<RunId>().unwrap();
+
+        append_raw_run_event(
+            &state,
+            run_id,
+            "paused-blocked-paused",
+            "2026-04-19T12:00:00Z",
+            "run.paused",
+            json!({}),
+            None,
+        )
+        .await;
+        append_raw_run_event(
+            &state,
+            run_id,
+            "paused-blocked-status",
+            "2026-04-19T12:00:01Z",
+            "run.blocked",
+            json!({ "blocked_reason": "human_input_required" }),
+            None,
+        )
+        .await;
+
+        {
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            let managed_run = runs.get_mut(&run_id).expect("run should exist");
+            managed_run.status = RunStatus::Paused;
+            managed_run.worker_pid = Some(u32::MAX);
+        }
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/unpause")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["status"].as_str(), Some("blocked"));
+        assert_eq!(
+            body["blocked_reason"].as_str(),
+            Some("human_input_required")
+        );
+        assert_eq!(body["pending_control"], serde_json::Value::Null);
+
+        let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
+        assert_eq!(summary.status, WorkflowRunStatus::Blocked);
+        assert_eq!(
+            summary.blocked_reason,
+            Some(BlockedReason::HumanInputRequired)
+        );
+        assert_eq!(summary.pending_control, None);
     }
 
     #[tokio::test]

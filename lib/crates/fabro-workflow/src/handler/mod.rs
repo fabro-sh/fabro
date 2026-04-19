@@ -96,6 +96,22 @@ impl EngineServices {
         runner.run(hook_context, self.sandbox.clone(), None).await
     }
 
+    /// Notify the blocked-state tracker that an interview has started, if one
+    /// is configured.
+    pub fn notify_interview_started(&self) {
+        if let Some(tracker) = &self.blocked_state_tracker {
+            tracker.interview_started(self.emitter.as_ref());
+        }
+    }
+
+    /// Notify the blocked-state tracker that an interview has resolved, if one
+    /// is configured.
+    pub fn notify_interview_resolved(&self) {
+        if let Some(tracker) = &self.blocked_state_tracker {
+            tracker.interview_resolved(self.emitter.as_ref());
+        }
+    }
+
     /// Test-only default: empty registry, no hooks, local sandbox at cwd.
     #[cfg(test)]
     #[expect(

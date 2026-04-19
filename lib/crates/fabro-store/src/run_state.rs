@@ -942,6 +942,74 @@ mod tests {
     }
 
     #[test]
+    fn run_unblocked_while_paused_clears_blocked_reason_without_changing_paused_status() {
+        let mut state = RunProjection::default();
+
+        state
+            .apply_event(&test_raw_event(
+                1,
+                "run.blocked",
+                json!({ "blocked_reason": "human_input_required" }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::RunPaused(Default::default()),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event(3, "run.unblocked", json!({}), None))
+            .unwrap();
+
+        let status_json = serde_json::to_value(state.status.as_ref().unwrap()).unwrap();
+        assert_eq!(status_json["status"], "paused");
+        assert_eq!(status_json["blocked_reason"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn unpause_to_still_blocked_yields_visible_blocked_after_event_sequence() {
+        let mut state = RunProjection::default();
+
+        state
+            .apply_event(&test_raw_event(
+                1,
+                "run.blocked",
+                json!({ "blocked_reason": "human_input_required" }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::RunPaused(Default::default()),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                3,
+                EventBody::RunUnpaused(Default::default()),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event(
+                4,
+                "run.blocked",
+                json!({ "blocked_reason": "human_input_required" }),
+                None,
+            ))
+            .unwrap();
+
+        let status_json = serde_json::to_value(state.status.as_ref().unwrap()).unwrap();
+        assert_eq!(status_json["status"], "blocked");
+        assert_eq!(status_json["blocked_reason"], "human_input_required");
+    }
+
+    #[test]
     fn summary_synthesizes_submitted_when_run_exists_without_status() {
         let mut state = RunProjection::default();
         state.run = Some(fabro_types::RunRecord {

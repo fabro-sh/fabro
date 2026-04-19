@@ -2847,9 +2847,6 @@ components:
           items:
             $ref: "#/components/schemas/RunArtifactEntry"
 
-    InternalRunStatus:
-      $ref: "#/components/schemas/RunStatus"
-
     StatusReason:
       description: Optional reason attached to a run status transition.
       type: string
