@@ -9,6 +9,7 @@
 # Usage:
 #   bin/dev/docker-build.sh                    # host arch, build image at end
 #   bin/dev/docker-build.sh --arch amd64       # force amd64 (uses QEMU on non-amd64 hosts — slow)
+#   bin/dev/docker-build.sh --tag fabro:smoke  # tag image as fabro:smoke (default: fabro)
 #   bin/dev/docker-build.sh --arch arm64 --compile-only
 #                                              # stage binary only; skip `docker build`
 #                                              # (useful for multi-arch buildx verification)
@@ -19,10 +20,15 @@ cd "$(dirname "$0")/../.."
 
 arch=""
 compile_only=0
+tag="fabro"
 while [ $# -gt 0 ]; do
   case "$1" in
     --arch)
       arch="$2"
+      shift 2
+      ;;
+    --tag)
+      tag="$2"
       shift 2
       ;;
     --compile-only)
@@ -90,5 +96,5 @@ if [ "$compile_only" -eq 1 ]; then
   exit 0
 fi
 
-echo "Building Docker image..."
-docker build --platform "linux/$arch" -t fabro .
+echo "Building Docker image as $tag..."
+docker build --platform "linux/$arch" -t "$tag" .

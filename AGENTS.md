@@ -23,6 +23,10 @@ macOS note: if `cargo nextest run` fails with `Too many open files (os error 24)
 - `cd apps/fabro-web && bun run typecheck` — type check
 - `cd apps/fabro-web && bun run build` — production build
 
+### Docker image
+- `bin/dev/docker-build.sh` — builds the local Docker image from the current tree using the release pipeline's cargo-zigbuild approach. Honors `--arch amd64|arm64`, `--tag <name>` (default `fabro`), and `--compile-only` (stages `docker-context/<arch>/fabro` without `docker build`). Prefer this over writing a throwaway Dockerfile; the release pipeline, `Dockerfile`, and this script share the same binary layout.
+- Refresh the embedded SPA before rebuilding the image after any `apps/fabro-web` change: `scripts/refresh-fabro-spa.sh` runs the bun build and copies `dist/` into `lib/crates/fabro-spa/assets/`. Skipping this step produces a Docker image whose Rust binary embeds a stale SPA bundle.
+
 ### Marketing site (apps/marketing)
 - `cd apps/marketing && bun run dev` — start Astro dev server
 - `cd apps/marketing && bun run build` — production build
