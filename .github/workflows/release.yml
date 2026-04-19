@@ -66,6 +66,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libssl-dev
 
+      - name: Install musl toolchain for x86_64-musl tests
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get install -y musl-tools
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
@@ -85,11 +89,20 @@ jobs:
 
       - uses: taiki-e/install-action@773334c0e05d7e699e4d78234494308223f3a2cf # nextest
 
+      - name: Test (x86_64-musl)
+        # nextest still shells through cargo test for this target, so
+        # build.rs C code needs an explicit musl compiler/linker.
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: cargo nextest run --workspace --target ${{ matrix.target }} --release --status-level slow --profile ci
+
       - name: Test
         # aarch64-musl test runs have not been validated on the compile
         # runner yet; shipping binary is exercised via Docker smoke tests.
         # Re-enable after verifying the workspace passes on this target.
-        if: matrix.target != 'aarch64-unknown-linux-musl'
+        if: matrix.target != 'aarch64-unknown-linux-musl' && matrix.target != 'x86_64-unknown-linux-musl'
         run: cargo nextest run --workspace --target ${{ matrix.target }} --release --status-level slow --profile ci
 
       - name: Build (musl via cargo-zigbuild)

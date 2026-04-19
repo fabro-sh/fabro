@@ -1,14 +1,19 @@
-use axum::Router;
+use std::net::SocketAddr;
+use std::sync::Arc;
+
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
+use axum::{Router, middleware};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use tokio::net::TcpListener;
 use tokio::process::Command;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, warn};
+
+use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -119,24 +124,34 @@ impl WebhookListener {
 }
 
 /// Spawn the webhook HTTP listener on a random port (127.0.0.1 only).
-pub async fn spawn_webhook_listener(secret: Vec<u8>) -> anyhow::Result<WebhookListener> {
+pub async fn spawn_webhook_listener(
+    secret: Vec<u8>,
+    ip_allowlist: Arc<IpAllowlistConfig>,
+) -> anyhow::Result<WebhookListener> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
 
     let state = WebhookState { secret };
     let router = Router::new()
         .route("/webhooks/github", post(webhook_handler))
-        .with_state(state);
+        .with_state(state)
+        .layer(middleware::from_fn_with_state(
+            ip_allowlist,
+            ip_allowlist_middleware,
+        ));
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     tokio::spawn(async move {
-        axum::serve(listener, router)
-            .with_graceful_shutdown(async {
-                let _ = shutdown_rx.await;
-            })
-            .await
-            .ok();
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .ok();
     });
 
     info!(port = port, "Webhook listener started");
@@ -156,8 +171,9 @@ impl WebhookManager {
         secret: Vec<u8>,
         app_id: &str,
         private_key_pem: &str,
+        ip_allowlist: Arc<IpAllowlistConfig>,
     ) -> anyhow::Result<Self> {
-        let listener = spawn_webhook_listener(secret).await?;
+        let listener = spawn_webhook_listener(secret, ip_allowlist).await?;
         let port = listener.port();
 
         // Enable Tailscale funnel
@@ -286,9 +302,17 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
 
     fn test_http_client() -> fabro_http::HttpClient {
         fabro_http::test_http_client().unwrap()
+    }
+
+    fn empty_allowlist_config() -> Arc<IpAllowlistConfig> {
+        Arc::new(IpAllowlistConfig {
+            allowlist:           IpAllowlist::default(),
+            trusted_proxy_count: 0,
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -346,6 +370,10 @@ mod tests {
         Router::new()
             .route("/webhooks/github", post(webhook_handler))
             .with_state(state)
+            .layer(middleware::from_fn_with_state(
+                empty_allowlist_config(),
+                ip_allowlist_middleware,
+            ))
     }
 
     #[tokio::test]
@@ -405,7 +433,9 @@ mod tests {
     #[tokio::test]
     async fn spawn_listener_serves_route() {
         let secret = b"integration-secret";
-        let listener = spawn_webhook_listener(secret.to_vec()).await.unwrap();
+        let listener = spawn_webhook_listener(secret.to_vec(), empty_allowlist_config())
+            .await
+            .unwrap();
         let port = listener.port();
 
         // Valid request should return 200
@@ -430,6 +460,36 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), 401);
+
+        listener.shutdown();
+    }
+
+    #[tokio::test]
+    async fn spawn_listener_blocks_non_allowlisted_ip() {
+        let secret = b"integration-secret";
+        let listener = spawn_webhook_listener(
+            secret.to_vec(),
+            Arc::new(IpAllowlistConfig {
+                allowlist:           IpAllowlist::new(vec!["10.0.0.0/8".parse().unwrap()]),
+                trusted_proxy_count: 0,
+            }),
+        )
+        .await
+        .unwrap();
+        let port = listener.port();
+
+        let body = b"{}";
+        let sig = compute_signature(secret, body);
+
+        let client = test_http_client();
+        let resp = client
+            .post(format!("http://127.0.0.1:{port}/webhooks/github"))
+            .header("x-hub-signature-256", sig)
+            .body(body.to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 403);
 
         listener.shutdown();
     }

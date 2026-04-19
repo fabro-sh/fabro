@@ -1,7 +1,11 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use fabro_server::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
 use fabro_server::jwt_auth::{AuthMode, ConfiguredAuth};
-use fabro_server::server::{build_router, create_app_state};
+use fabro_server::server::{
+    RouterOptions, build_router, build_router_with_options, create_app_state,
+};
 use fabro_server::tls::build_rustls_config;
 use fabro_types::settings::{InterpString, ServerAuthMethod, TlsConfig};
 use tokio::net::TcpListener;
@@ -37,6 +41,28 @@ async fn start_tls_server(tls_settings: &TlsConfig, auth_mode: AuthMode) -> std:
 
     let state = create_app_state();
     let router = build_router(state, auth_mode);
+
+    tokio::spawn(async move {
+        let _ = fabro_server::tls::serve_tls(listener, tls_acceptor, router).await;
+    });
+
+    addr
+}
+
+async fn start_tls_server_with_allowlist(
+    tls_settings: &TlsConfig,
+    auth_mode: AuthMode,
+    ip_allowlist: Arc<IpAllowlistConfig>,
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let rustls_config = build_rustls_config(tls_settings).unwrap();
+    let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
+
+    let state = create_app_state();
+    let router =
+        build_router_with_options(state, auth_mode, ip_allowlist, RouterOptions::default());
 
     tokio::spawn(async move {
         let _ = fabro_server::tls::serve_tls(listener, tls_acceptor, router).await;
@@ -102,4 +128,28 @@ async fn tls_dev_token_auth_does_not_require_client_cert() {
 
     let authorized = client.get(url).bearer_auth(dev_token).send().await.unwrap();
     assert_eq!(authorized.status(), 200);
+}
+
+#[tokio::test]
+async fn tls_ip_allowlist_uses_connect_info() {
+    install_crypto_provider();
+    let pki = fixture_pki();
+    let addr = start_tls_server_with_allowlist(
+        &tls_settings(&pki),
+        AuthMode::Disabled,
+        Arc::new(IpAllowlistConfig {
+            allowlist:           IpAllowlist::new(vec!["10.0.0.0/8".parse().unwrap()]),
+            trusted_proxy_count: 0,
+        }),
+    )
+    .await;
+    let client = build_client(&pki.ca_cert);
+
+    let response = client
+        .get(format!("https://127.0.0.1:{}{}", addr.port(), api("/runs")))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 403);
 }

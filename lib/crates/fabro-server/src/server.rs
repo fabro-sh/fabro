@@ -110,6 +110,7 @@ use ulid::Ulid;
 
 use crate::bind::Bind;
 use crate::error::ApiError;
+use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{
     AuthMode, AuthenticatedService, AuthenticatedSubject, authenticate_service_parts,
 };
@@ -866,7 +867,12 @@ fn start_optional_slack_service(state: &Arc<AppState>) {
 
 /// Build the axum Router with all run endpoints and embedded static assets.
 pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
-    build_router_with_options(state, auth_mode, RouterOptions::default())
+    build_router_with_options(
+        state,
+        auth_mode,
+        Arc::new(IpAllowlistConfig::default()),
+        RouterOptions::default(),
+    )
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -888,6 +894,7 @@ fn removed_web_route(path: &str) -> bool {
 pub fn build_router_with_options(
     state: Arc<AppState>,
     auth_mode: AuthMode,
+    ip_allowlist_config: Arc<IpAllowlistConfig>,
     options: RouterOptions,
 ) -> Router {
     start_optional_slack_service(&state);
@@ -976,6 +983,11 @@ pub fn build_router_with_options(
             cookie_and_demo_middleware,
         ));
     }
+
+    router = router.layer(middleware::from_fn_with_state(
+        ip_allowlist_config,
+        ip_allowlist_middleware,
+    ));
 
     router
         .layer(middleware::from_fn(security_headers::layer))

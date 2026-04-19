@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration as StdDuration;
 
+use ipnet::IpNet;
 use serde::{Deserialize, Serialize, Serializer};
 
 use super::duration::Duration as DurationLayer;
@@ -21,6 +22,7 @@ pub struct ServerSettings {
     pub api:          ServerApiSettings,
     pub web:          ServerWebSettings,
     pub auth:         ServerAuthSettings,
+    pub ip_allowlist: ServerIpAllowlistSettings,
     pub storage:      ServerStorageSettings,
     pub artifacts:    ServerArtifactsSettings,
     pub slatedb:      ServerSlateDbSettings,
@@ -110,6 +112,36 @@ pub enum ServerAuthMethod {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ServerAuthGithubSettings {
     pub allowed_usernames: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ServerIpAllowlistSettings {
+    pub entries:             Vec<IpAllowEntry>,
+    pub trusted_proxy_count: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ServerIpAllowlistOverrideSettings {
+    pub entries:             Option<Vec<IpAllowEntry>>,
+    pub trusted_proxy_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum IpAllowEntry {
+    Literal(IpNet),
+    GitHubMetaHooks,
+}
+
+impl IpAllowEntry {
+    pub const GITHUB_META_HOOKS_KEYWORD: &str = "github_meta_hooks";
+
+    pub fn parse_literal(value: &str) -> Result<Self, String> {
+        value
+            .parse::<IpNet>()
+            .or_else(|_| value.parse::<std::net::IpAddr>().map(IpNet::from))
+            .map_err(|error| error.to_string())
+            .map(Self::Literal)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -229,7 +261,8 @@ pub struct TeamsIntegrationSettings {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct IntegrationWebhooksSettings {
-    pub strategy: Option<WebhookStrategy>,
+    pub strategy:     Option<WebhookStrategy>,
+    pub ip_allowlist: Option<ServerIpAllowlistOverrideSettings>,
 }
 
 fn serialize_socket_addr<S>(value: &SocketAddr, serializer: S) -> Result<S::Ok, S::Error>
@@ -258,6 +291,8 @@ pub struct ServerLayer {
     pub web:          Option<ServerWebLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth:         Option<ServerAuthLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip_allowlist: Option<ServerIpAllowlistLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage:      Option<ServerStorageLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -337,6 +372,24 @@ pub struct ServerAuthLayer {
 pub struct ServerAuthGithubLayer {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_usernames: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerIpAllowlistLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entries:             Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_proxy_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerIpAllowlistOverrideLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entries:             Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_proxy_count: Option<u32>,
 }
 
 /// `[server.storage]` — single managed local disk root.
@@ -494,7 +547,9 @@ pub struct TeamsIntegrationLayer {
 #[serde(deny_unknown_fields)]
 pub struct IntegrationWebhooksLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub strategy: Option<WebhookStrategy>,
+    pub strategy:     Option<WebhookStrategy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip_allowlist: Option<ServerIpAllowlistOverrideLayer>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
