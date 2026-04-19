@@ -1,3 +1,4 @@
+mod archive;
 mod create;
 mod fork;
 mod rebuild_meta;
@@ -9,6 +10,7 @@ mod start;
 mod test_support;
 mod validate;
 
+pub use archive::{ArchiveOutcome, UnarchiveOutcome, archive, unarchive};
 pub use create::{CreateRunInput, CreatedRun, create, make_run_dir};
 pub use fork::{ForkRunInput, fork};
 pub use rebuild_meta::{
