@@ -31,14 +31,14 @@ export interface RunItem {
   sandboxId?: string;
 }
 
-export type ColumnStatus = "initializing" | "running" | "waiting" | "succeeded" | "failed";
+export type ColumnStatus = "initializing" | "running" | "blocked" | "succeeded" | "failed";
 
-export const columnNames: Record<ColumnStatus, string> = {
-  initializing: "Initializing",
-  running: "Running",
-  waiting: "Waiting",
-  succeeded: "Succeeded",
-  failed: "Failed",
+export const columnStatusDisplay: Record<ColumnStatus, { label: string; dot: string; text: string }> = {
+  initializing: { label: "Initializing", dot: "bg-amber",     text: "text-amber" },
+  running:      { label: "Running",      dot: "bg-teal-500",  text: "text-teal-500" },
+  blocked:      { label: "Blocked",      dot: "bg-amber",     text: "text-amber" },
+  succeeded:    { label: "Succeeded",    dot: "bg-teal-300",  text: "text-teal-300" },
+  failed:       { label: "Failed",       dot: "bg-coral",     text: "text-coral" },
 };
 
 export interface RunWithStatus extends RunItem {
@@ -97,12 +97,14 @@ export function mapRunSummaryToRunItem(summary: RunSummaryResponse): RunItem {
 export function columnForStatus(status: string | null | undefined): ColumnStatus | null {
   switch (status) {
     case "submitted":
+    case "queued":
     case "starting":
       return "initializing";
     case "running":
-      return "running";
     case "paused":
-      return "waiting";
+      return "running";
+    case "blocked":
+      return "blocked";
     case "succeeded":
       return "succeeded";
     case "failed":
@@ -120,18 +122,12 @@ export function deriveCiStatus(checks: CheckRun[]): CiStatus {
   return "passing";
 }
 
-export const statusColors: Record<ColumnStatus, { dot: string; text: string }> = {
-  initializing: { dot: "bg-amber", text: "text-amber" },
-  running: { dot: "bg-teal-500", text: "text-teal-500" },
-  waiting: { dot: "bg-amber", text: "text-amber" },
-  succeeded: { dot: "bg-teal-300", text: "text-teal-300" },
-  failed: { dot: "bg-coral", text: "text-coral" },
-};
-
 export type RunStatus =
   | "submitted"
+  | "queued"
   | "starting"
   | "running"
+  | "blocked"
   | "paused"
   | "removing"
   | "succeeded"
@@ -140,8 +136,10 @@ export type RunStatus =
 
 export const runStatusDisplay: Record<RunStatus, { label: string; dot: string; text: string }> = {
   submitted: { label: "Submitted", dot: "bg-fg-muted", text: "text-fg-muted" },
+  queued: { label: "Queued", dot: "bg-fg-muted", text: "text-fg-muted" },
   starting: { label: "Starting", dot: "bg-amber", text: "text-amber" },
   running: { label: "Running", dot: "bg-teal-500", text: "text-teal-500" },
+  blocked: { label: "Blocked", dot: "bg-amber", text: "text-amber" },
   paused: { label: "Paused", dot: "bg-amber", text: "text-amber" },
   removing: { label: "Removing", dot: "bg-fg-muted", text: "text-fg-muted" },
   succeeded: { label: "Succeeded", dot: "bg-mint", text: "text-mint" },

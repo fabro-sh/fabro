@@ -31,6 +31,7 @@ models/assistant-stage-turn.ts
 models/billed-token-counts.ts
 models/billing-by-model.ts
 models/billing-stage-ref.ts
+models/blocked-reason.ts
 models/board-column-definition.ts
 models/board-column.ts
 models/check-run-status.ts
@@ -66,7 +67,6 @@ models/file-diff.ts
 models/health-response.ts
 models/history-entry.ts
 models/index.ts
-models/internal-run-status.ts
 models/internal-stage-status.ts
 models/manifest-args.ts
 models/manifest-config.ts
@@ -97,6 +97,7 @@ models/paginated-run-stage-list.ts
 models/paginated-saved-query-list.ts
 models/paginated-stage-turn-list.ts
 models/pagination-meta.ts
+models/pending-interview-record.ts
 models/preflight-check-detail.ts
 models/preflight-check-report.ts
 models/preflight-check-result.ts

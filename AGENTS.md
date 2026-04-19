@@ -21,7 +21,8 @@ macOS note: if `cargo nextest run` fails with `Too many open files (os error 24)
 - `cd apps/fabro-web && bun run dev` — rebuild web assets on change for the Rust server; refresh the browser manually
 - `cd apps/fabro-web && bun test` — run tests
 - `cd apps/fabro-web && bun run typecheck` — type check
-- `cd apps/fabro-web && bun run build` — production build
+- `cd apps/fabro-web && bun run build` — production build (writes to `apps/fabro-web/dist/` only; does NOT update the bundled SPA that ships in the Rust binary)
+- `scripts/refresh-fabro-spa.sh` — **run this before committing any TypeScript change in `apps/fabro-web/` or `lib/packages/fabro-api-client/`**. It runs the production build and then copies `dist/` into `lib/crates/fabro-spa/assets/` (which is tracked in git). CI's TypeScript `Build` job reruns this script and then `git diff --exit-code -- lib/crates/fabro-spa/assets` — if the committed bundle drifts from source (e.g. content-hashed filenames like `entry-<hash>.js` change), the check fails. `bun run build` on its own is not enough.
 
 ### Marketing site (apps/marketing)
 - `cd apps/marketing && bun run dev` — start Astro dev server

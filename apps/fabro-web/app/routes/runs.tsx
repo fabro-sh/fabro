@@ -18,7 +18,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ciConfig, columnNames, statusColors, deriveCiStatus, mapRunListItem } from "../data/runs";
+import { ciConfig, columnStatusDisplay, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
 import { apiPaginatedJson } from "../api";
 import type { PaginatedBoardRunList } from "@qltysh/fabro-api-client";
@@ -28,21 +28,20 @@ export function meta({}: any) {
 }
 
 interface ColumnStyle {
-  accent: string;
-  iconColor: string;
   iconType: "branch" | "pr";
   actions: string[];
 }
 
-const columnStyles: Record<string, ColumnStyle> = {
-  initializing: { accent: "bg-amber", iconColor: "text-amber", iconType: "branch", actions: [] },
-  running:   { accent: "bg-teal-500", iconColor: "text-teal-500", iconType: "branch", actions: ["Watch", "Steer"] },
-  waiting:   { accent: "bg-amber",    iconColor: "text-amber",    iconType: "branch", actions: ["Answer Question"] },
-  succeeded: { accent: "bg-teal-300", iconColor: "text-teal-300", iconType: "pr",     actions: [] },
-  failed:    { accent: "bg-coral",    iconColor: "text-coral",    iconType: "branch", actions: [] },
+const columnStyles: Record<ColumnStatus, ColumnStyle> = {
+  initializing: { iconType: "branch", actions: [] },
+  running:      { iconType: "branch", actions: ["Watch", "Steer"] },
+  blocked:      { iconType: "branch", actions: ["Answer Question"] },
+  succeeded:    { iconType: "pr",     actions: [] },
+  failed:       { iconType: "branch", actions: [] },
 };
 
-const defaultColumnStyle: ColumnStyle = { accent: "bg-fg-muted", iconColor: "text-fg-muted", iconType: "branch", actions: [] };
+const defaultColumnStyle: ColumnStyle = { iconType: "branch", actions: [] };
+const defaultColumnColors = { dot: "bg-fg-muted", text: "text-fg-muted" };
 
 interface BoardRunsResponse {
   columns: { id: string; name: string }[];
@@ -50,36 +49,74 @@ interface BoardRunsResponse {
   meta: PaginatedBoardRunList["meta"];
 }
 
-export async function loader({ request }: any) {
-  const response = await apiPaginatedJson<
-    PaginatedBoardRunList["data"][number],
-    { columns: BoardRunsResponse["columns"] }
-  >("/boards/runs", { request });
-  const apiRuns = response.data;
+type Column = {
+  id: ColumnStatus;
+  name: string;
+  dot: string;
+  text: string;
+  iconType: "branch" | "pr";
+  actions: string[];
+  items: RunItem[];
+};
 
+const BOARD_STATUS_EVENTS = new Set([
+  "run.submitted",
+  "run.queued",
+  "run.starting",
+  "run.running",
+  "run.removing",
+  "run.paused",
+  "run.unpaused",
+  "run.blocked",
+  "run.unblocked",
+  "run.completed",
+  "run.failed",
+  "interview.started",
+  "interview.completed",
+  "interview.timeout",
+  "interview.interrupted",
+]);
+
+export function shouldRefreshBoardForEvent(event: string) {
+  return BOARD_STATUS_EVENTS.has(event);
+}
+
+export function buildBoardColumns(response: BoardRunsResponse): Column[] {
   const grouped = new Map<string, RunItem[]>();
   for (const col of response.columns) {
     grouped.set(col.id, []);
   }
-  for (const apiRun of apiRuns) {
+  for (const apiRun of response.data) {
     if (grouped.has(apiRun.column)) {
       grouped.get(apiRun.column)?.push(mapRunListItem(apiRun));
     }
   }
 
-  const columns = response.columns.map((col) => ({
-    id: col.id as ColumnStatus,
-    name: col.name,
-    ...(columnStyles[col.id] ?? defaultColumnStyle),
-    items: grouped.get(col.id) ?? [],
-  }));
+  return response.columns.map((col) => {
+    const id = col.id as ColumnStatus;
+    const colors = columnStatusDisplay[id] ?? defaultColumnColors;
+    return {
+      id,
+      name: col.name,
+      dot: colors.dot,
+      text: colors.text,
+      ...(columnStyles[id] ?? defaultColumnStyle),
+      items: grouped.get(col.id) ?? [],
+    };
+  });
+}
 
-  return { columns };
+export async function loader({ request }: any) {
+  const response = await apiPaginatedJson<
+    PaginatedBoardRunList["data"][number],
+    { columns: BoardRunsResponse["columns"] }
+  >("/boards/runs", { request });
+  return { columns: buildBoardColumns(response) };
 }
 
 function boardLifecycleStatusLabel(run: Pick<RunItem, "column" | "lifecycleStatusLabel">): string | null {
   if (run.lifecycleStatusLabel == null) return null;
-  if (run.column != null && columnNames[run.column] === run.lifecycleStatusLabel) {
+  if (run.column != null && columnStatusDisplay[run.column]?.label === run.lifecycleStatusLabel) {
     return null;
   }
   return run.lifecycleStatusLabel;
@@ -418,22 +455,12 @@ function SortablePrCard({
   );
 }
 
-type Column = {
-  id: ColumnStatus;
-  name: string;
-  accent: string;
-  iconColor: string;
-  iconType: "branch" | "pr";
-  actions: string[];
-  items: RunItem[];
-};
-
 function BoardColumn({ column }: { column: Column }) {
   const Icon = iconMap[column.iconType];
   return (
     <div className="flex min-w-0 flex-col">
       <div className="mb-4 flex items-center gap-3">
-        <div className={`h-2.5 w-2.5 rounded-full ${column.accent}`} />
+        <div className={`h-2.5 w-2.5 rounded-full ${column.dot}`} />
         <h3 className="text-sm font-semibold tracking-wide text-fg-2">
           {column.name}
         </h3>
@@ -449,7 +476,7 @@ function BoardColumn({ column }: { column: Column }) {
               key={pr.id}
               pr={pr}
               icon={Icon}
-              iconColor={column.iconColor}
+              iconColor={column.text}
               actions={column.actions}
             />
           ))}
@@ -655,11 +682,6 @@ export default function Runs({ loaderData }: any) {
   const lowerQuery = query.toLowerCase();
   const revalidator = useRevalidator();
 
-  const STATUS_EVENTS = new Set([
-    "run.submitted", "run.starting", "run.running",
-    "run.paused", "run.completed", "run.failed",
-  ]);
-
   useEffect(() => {
     const source = new EventSource("/api/v1/attach");
     let debounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -667,7 +689,7 @@ export default function Runs({ loaderData }: any) {
     source.onmessage = (msg) => {
       try {
         const payload = JSON.parse(msg.data);
-        if (STATUS_EVENTS.has(payload.event)) {
+        if (shouldRefreshBoardForEvent(payload.event)) {
           clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => revalidator.revalidate(), 500);
         }
@@ -804,7 +826,7 @@ export default function Runs({ loaderData }: any) {
                       {isCollapsed
                         ? <ChevronRightIcon className="size-3.5 text-fg-muted" />
                         : <ChevronDownIcon className="size-3.5 text-fg-muted" />}
-                      <div className={`h-2.5 w-2.5 rounded-full ${col.accent}`} />
+                      <div className={`h-2.5 w-2.5 rounded-full ${col.dot}`} />
                       <h3 className="text-sm font-semibold tracking-wide text-fg-2">{col.name}</h3>
                       <span className="rounded-full bg-overlay px-2 py-0.5 font-mono text-xs text-fg-muted">
                         {col.items.length}

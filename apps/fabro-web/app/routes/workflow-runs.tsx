@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDownIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { Link, useParams } from "react-router";
-import { ciConfig, columnNames, columnForStatus, deriveCiStatus, mapRunSummaryToRunItem, statusColors } from "../data/runs";
+import { ciConfig, columnForStatus, columnStatusDisplay, deriveCiStatus, mapRunSummaryToRunItem } from "../data/runs";
 import type { ColumnStatus, RunWithStatus } from "../data/runs";
 import { apiJsonOrNull } from "../api";
 import type { PaginatedRunList } from "@qltysh/fabro-api-client";
@@ -16,7 +16,7 @@ export async function loader({ request, params }: any) {
       return {
         ...mapRunSummaryToRunItem(r),
         status: column,
-        statusLabel: columnNames[column],
+        statusLabel: columnStatusDisplay[column].label,
       };
     })
     .filter((run): run is RunWithStatus => run != null);
@@ -32,7 +32,7 @@ function GitPullRequestIcon({ className }: { className?: string }) {
 }
 
 function RunRow({ run }: { run: RunWithStatus }) {
-  const colors = statusColors[run.status];
+  const colors = columnStatusDisplay[run.status];
   return (
     <Link to={`/runs/${run.id}`} className="grid items-center rounded-md border border-line bg-panel/80 px-4 py-3 transition-all duration-200 hover:border-line-strong hover:bg-panel" style={{ gridColumn: "1 / -1", gridTemplateColumns: "subgrid" }}>
       <span className="flex items-center gap-2 pr-2">
@@ -106,8 +106,8 @@ export default function WorkflowRuns({ loaderData }: any) {
             className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"
           >
             <option value="all">All statuses</option>
-            {(Object.entries(columnNames) as [ColumnStatus, string][]).map(([id, name]) => (
-              <option key={id} value={id}>{name}</option>
+            {(Object.entries(columnStatusDisplay) as [ColumnStatus, { label: string }][]).map(([id, { label }]) => (
+              <option key={id} value={id}>{label}</option>
             ))}
           </select>
           <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />

@@ -90,10 +90,16 @@ pub enum EventBody {
     RunStarted(RunStartedProps),
     #[serde(rename = "run.submitted")]
     RunSubmitted(RunSubmittedProps),
+    #[serde(rename = "run.queued")]
+    RunQueued(RunStatusEffectProps),
     #[serde(rename = "run.starting")]
     RunStarting(RunStatusTransitionProps),
     #[serde(rename = "run.running")]
     RunRunning(RunStatusTransitionProps),
+    #[serde(rename = "run.blocked")]
+    RunBlocked(RunBlockedProps),
+    #[serde(rename = "run.unblocked")]
+    RunUnblocked(RunStatusEffectProps),
     #[serde(rename = "run.removing")]
     RunRemoving(RunStatusTransitionProps),
     #[serde(rename = "run.cancel.requested")]
@@ -357,8 +363,11 @@ impl EventBody {
             Self::RunCreated(_) => "run.created",
             Self::RunStarted(_) => "run.started",
             Self::RunSubmitted(_) => "run.submitted",
+            Self::RunQueued(_) => "run.queued",
             Self::RunStarting(_) => "run.starting",
             Self::RunRunning(_) => "run.running",
+            Self::RunBlocked(_) => "run.blocked",
+            Self::RunUnblocked(_) => "run.unblocked",
             Self::RunRemoving(_) => "run.removing",
             Self::RunCancelRequested(_) => "run.cancel.requested",
             Self::RunPauseRequested(_) => "run.pause.requested",
@@ -488,8 +497,11 @@ fn is_known_event_name(event: &str) -> bool {
         "run.created"
             | "run.started"
             | "run.submitted"
+            | "run.queued"
             | "run.starting"
             | "run.running"
+            | "run.blocked"
+            | "run.unblocked"
             | "run.removing"
             | "run.rewound"
             | "run.completed"
@@ -1056,5 +1068,69 @@ mod tests {
         assert!(!obj.contains_key("parallel_branch_id"));
         assert!(!obj.contains_key("tool_call_id"));
         assert!(!obj.contains_key("actor"));
+    }
+
+    #[test]
+    fn canonical_run_lifecycle_events_are_known() {
+        for event in ["run.queued", "run.blocked", "run.unblocked"] {
+            assert!(
+                is_known_event_name(event),
+                "{event} should be a known event"
+            );
+        }
+    }
+
+    #[test]
+    fn run_blocked_round_trips_as_typed_event() {
+        let value = json!({
+            "id": "evt_run_blocked",
+            "ts": "2026-04-19T12:00:00.000Z",
+            "run_id": fixtures::RUN_1,
+            "event": "run.blocked",
+            "properties": {
+                "blocked_reason": "human_input_required"
+            }
+        });
+
+        let parsed = RunEvent::from_value(value.clone()).unwrap();
+        assert!(
+            !matches!(parsed.body, EventBody::Unknown { .. }),
+            "run.blocked should deserialize into a typed event body"
+        );
+
+        let serialized = parsed.to_value().unwrap();
+        assert_eq!(serialized["event"], "run.blocked");
+        assert_eq!(
+            serialized["properties"]["blocked_reason"],
+            value["properties"]["blocked_reason"]
+        );
+    }
+
+    #[test]
+    fn run_queued_and_unblocked_round_trip_as_typed_events() {
+        for value in [
+            json!({
+                "id": "evt_run_queued",
+                "ts": "2026-04-19T12:00:00.000Z",
+                "run_id": fixtures::RUN_1,
+                "event": "run.queued",
+                "properties": {}
+            }),
+            json!({
+                "id": "evt_run_unblocked",
+                "ts": "2026-04-19T12:00:00.000Z",
+                "run_id": fixtures::RUN_1,
+                "event": "run.unblocked",
+                "properties": {}
+            }),
+        ] {
+            let parsed = RunEvent::from_value(value.clone()).unwrap();
+            assert!(
+                !matches!(parsed.body, EventBody::Unknown { .. }),
+                "{} should deserialize into a typed event body",
+                value["event"].as_str().unwrap()
+            );
+            assert_eq!(parsed.to_value().unwrap()["event"], value["event"]);
+        }
     }
 }

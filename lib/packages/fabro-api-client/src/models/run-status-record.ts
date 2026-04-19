@@ -15,7 +15,10 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { InternalRunStatus } from './internal-run-status';
+import type { BlockedReason } from './blocked-reason';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatus } from './run-status';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { StatusReason } from './status-reason';
@@ -24,8 +27,9 @@ import type { StatusReason } from './status-reason';
  * Internal run status record from the event projection.
  */
 export interface RunStatusRecord {
-    'status': InternalRunStatus;
-    'reason'?: StatusReason | null;
+    'status': RunStatus;
+    'status_reason'?: StatusReason | null;
+    'blocked_reason'?: BlockedReason | null;
     'updated_at': string;
 }
 

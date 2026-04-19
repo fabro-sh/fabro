@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
     Submitted,
+    Queued,
     Starting,
     Running,
+    Blocked,
     Paused,
     Removing,
     Succeeded,
@@ -25,7 +27,13 @@ impl RunStatus {
     pub fn is_active(self) -> bool {
         matches!(
             self,
-            Self::Submitted | Self::Starting | Self::Running | Self::Paused | Self::Removing
+            Self::Submitted
+                | Self::Queued
+                | Self::Starting
+                | Self::Running
+                | Self::Blocked
+                | Self::Paused
+                | Self::Removing
         )
     }
 
@@ -38,16 +46,18 @@ impl RunStatus {
         }
         matches!(
             (self, to),
-            (Self::Submitted, Self::Starting)
-                | (Self::Starting | Self::Paused, Self::Running)
+            (Self::Submitted, Self::Queued)
+                | (Self::Queued, Self::Starting)
+                | (Self::Starting | Self::Paused | Self::Blocked, Self::Running)
                 | (
-                    Self::Starting | Self::Running | Self::Paused | Self::Removing,
+                    Self::Starting | Self::Running | Self::Blocked | Self::Paused | Self::Removing,
                     Self::Failed
                 )
                 | (
                     Self::Running,
-                    Self::Succeeded | Self::Paused | Self::Removing
+                    Self::Succeeded | Self::Blocked | Self::Paused | Self::Removing
                 )
+                | (Self::Blocked, Self::Paused)
                 | (Self::Paused, Self::Removing)
         )
     }
@@ -65,8 +75,10 @@ impl fmt::Display for RunStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             Self::Submitted => "submitted",
+            Self::Queued => "queued",
             Self::Starting => "starting",
             Self::Running => "running",
+            Self::Blocked => "blocked",
             Self::Paused => "paused",
             Self::Removing => "removing",
             Self::Succeeded => "succeeded",
@@ -83,8 +95,10 @@ impl FromStr for RunStatus {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "submitted" => Ok(Self::Submitted),
+            "queued" => Ok(Self::Queued),
             "starting" => Ok(Self::Starting),
             "running" => Ok(Self::Running),
+            "blocked" => Ok(Self::Blocked),
             "paused" => Ok(Self::Paused),
             "removing" => Ok(Self::Removing),
             "succeeded" => Ok(Self::Succeeded),
@@ -138,6 +152,12 @@ pub enum StatusReason {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum BlockedReason {
+    HumanInputRequired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RunControlAction {
     Cancel,
     Pause,
@@ -146,18 +166,57 @@ pub enum RunControlAction {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunStatusRecord {
-    pub status:     RunStatus,
+    pub status:         RunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason:     Option<StatusReason>,
-    pub updated_at: DateTime<Utc>,
+    pub status_reason:  Option<StatusReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<BlockedReason>,
+    pub updated_at:     DateTime<Utc>,
 }
 
 impl RunStatusRecord {
-    pub fn new(status: RunStatus, reason: Option<StatusReason>) -> Self {
+    pub fn new(status: RunStatus, status_reason: Option<StatusReason>) -> Self {
         Self {
             status,
-            reason,
+            status_reason,
+            blocked_reason: None,
             updated_at: Utc::now(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::RunStatus;
+
+    #[test]
+    fn queued_and_blocked_parse_and_format() {
+        for status in ["queued", "blocked"] {
+            let parsed = RunStatus::from_str(status)
+                .unwrap_or_else(|_| panic!("expected {status} to parse"));
+            assert_eq!(parsed.to_string(), status);
+            assert!(parsed.is_active(), "{status} should be active");
+            assert!(!parsed.is_terminal(), "{status} should not be terminal");
+        }
+    }
+
+    #[test]
+    fn canonical_blocked_transitions_are_allowed() {
+        let submitted = RunStatus::from_str("submitted").unwrap();
+        let queued =
+            RunStatus::from_str("queued").unwrap_or_else(|_| panic!("expected queued to parse"));
+        let running = RunStatus::from_str("running").unwrap();
+        let blocked =
+            RunStatus::from_str("blocked").unwrap_or_else(|_| panic!("expected blocked to parse"));
+        let paused = RunStatus::from_str("paused").unwrap();
+
+        assert!(submitted.can_transition_to(queued));
+        assert!(queued.can_transition_to(RunStatus::from_str("starting").unwrap()));
+        assert!(running.can_transition_to(blocked));
+        assert!(blocked.can_transition_to(running));
+        assert!(blocked.can_transition_to(paused));
+        assert!(blocked.can_transition_to(RunStatus::from_str("failed").unwrap()));
     }
 }

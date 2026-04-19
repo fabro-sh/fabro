@@ -25,7 +25,7 @@ export async function loader({ request, params }: any) {
   if (!response.ok) return { run: null };
   const summary: RunSummaryResponse = await response.json();
   const item = mapRunSummaryToRunItem(summary);
-  const rawStatus = summary.status ?? "submitted";
+  const rawStatus = summary.status;
   const display = isRunStatus(rawStatus)
     ? runStatusDisplay[rawStatus]
     : { label: rawStatus, dot: "bg-fg-muted", text: "text-fg-muted" };

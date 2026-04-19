@@ -1,6 +1,29 @@
 use fabro_test::{fabro_snapshot, test_context};
+use httpmock::MockServer;
+use serde_json::json;
 
 use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
+use crate::support::unique_run_id;
+
+fn remote_run_summary(run_id: &str, status: &str) -> serde_json::Value {
+    json!({
+        "run_id": run_id,
+        "workflow_name": "Blocked Remote Workflow",
+        "workflow_slug": "blocked-remote-workflow",
+        "goal": "Wait for approval",
+        "title": "Wait for approval",
+        "labels": {},
+        "host_repo_path": "/srv/repo",
+        "repository": { "name": "repo" },
+        "start_time": "2026-04-19T12:00:00Z",
+        "created_at": "2026-04-19T12:00:00Z",
+        "status": status,
+        "status_reason": null,
+        "blocked_reason": null,
+        "duration_ms": null,
+        "total_usd_micros": null
+    })
+}
 
 #[test]
 fn help() {
@@ -113,4 +136,63 @@ fn wait_submitted_run_times_out() {
     ----- stderr -----
     error: Timed out after 1s waiting for run '[ULID]'
     ");
+}
+
+#[test]
+fn wait_blocked_run_times_out_without_treating_it_as_terminal() {
+    let context = test_context!();
+    let run_id = unique_run_id();
+    let server = MockServer::start();
+    let summary = remote_run_summary(run_id.as_str(), "blocked");
+
+    let list_runs = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/runs");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(json!({ "data": [summary.clone()], "meta": { "has_more": false } }).to_string());
+    });
+    let retrieve_run = server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{}", run_id.as_str()));
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(summary.to_string());
+    });
+    let run_state = server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{}/state", run_id.as_str()));
+        then.status(200)
+            .header("content-type", "application/json")
+            .body("{}");
+    });
+
+    let mut cmd = context.command();
+    cmd.args([
+        "wait",
+        "--server",
+        &format!("{}/api/v1", server.base_url()),
+        "--timeout",
+        "1",
+        "--interval",
+        "10",
+        run_id.as_str(),
+    ]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Timed out after 1s waiting for run '[ULID]'
+    ");
+    list_runs.assert();
+    assert!(
+        retrieve_run.calls() > 0,
+        "wait should keep polling the blocked run summary until timeout"
+    );
+    assert_eq!(
+        run_state.calls(),
+        0,
+        "wait should not fetch run state when the run never becomes terminal"
+    );
 }

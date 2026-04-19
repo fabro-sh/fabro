@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{BilledTokenCounts, RunNoticeLevel};
 use crate::settings::SettingsLayer;
+use crate::status::BlockedReason;
 use crate::{Graph, RunBlobId, RunControlAction, RunProvenance, StatusReason};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -55,6 +56,10 @@ pub struct RunStatusTransitionProps {
     pub reason: Option<StatusReason>,
 }
 
+#[allow(clippy::empty_structs_with_brackets)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RunStatusEffectProps {}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSubmittedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -66,6 +71,11 @@ pub struct RunSubmittedProps {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunControlRequestedProps {
     pub action: RunControlAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunBlockedProps {
+    pub blocked_reason: BlockedReason,
 }
 
 #[allow(clippy::empty_structs_with_brackets)]
