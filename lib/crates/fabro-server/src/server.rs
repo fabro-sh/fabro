@@ -2711,9 +2711,11 @@ async fn board_run_metadata(
     metadata
 }
 
+const MAX_PAGE_OFFSET: u32 = 1_000_000;
+
 fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {
     let limit = pagination.limit.clamp(1, 100) as usize;
-    let offset = pagination.offset as usize;
+    let offset = pagination.offset.min(MAX_PAGE_OFFSET) as usize;
     let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
     let has_more = data.len() > limit;
     data.truncate(limit);
@@ -6326,7 +6328,7 @@ async fn list_models(
 
     let query = params.query.as_ref().map(|value| value.to_lowercase());
     let limit = params.limit.clamp(1, 100) as usize;
-    let offset = params.offset as usize;
+    let offset = params.offset.min(MAX_PAGE_OFFSET) as usize;
 
     let mut models = fabro_model::Catalog::builtin()
         .list(provider)
