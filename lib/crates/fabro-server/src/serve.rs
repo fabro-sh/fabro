@@ -354,7 +354,7 @@ where
     let (object_store, slatedb_prefix, flush_interval, disk_cache) =
         build_slatedb_store(&resolved_server_settings)?;
     let cache_path = if disk_cache {
-        Some(data_dir.join("cache").join("slatedb"))
+        Some(storage.slatedb_cache_dir())
     } else {
         None
     };

@@ -40,6 +40,11 @@ impl Storage {
     }
 
     #[must_use]
+    pub fn slatedb_cache_dir(&self) -> PathBuf {
+        self.cache_dir().join("slatedb")
+    }
+
+    #[must_use]
     pub fn secrets_path(&self) -> PathBuf {
         self.root
             .join("vaults")
@@ -172,6 +177,10 @@ mod tests {
         assert_eq!(
             storage.cache_dir(),
             std::path::Path::new("/tmp/fabro-data/cache")
+        );
+        assert_eq!(
+            storage.slatedb_cache_dir(),
+            std::path::Path::new("/tmp/fabro-data/cache/slatedb")
         );
         assert_eq!(
             storage.secrets_path(),

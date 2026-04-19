@@ -17,11 +17,16 @@ use tokio::time;
 
 use super::record;
 
+pub(crate) struct ForegroundServerLogBootstrap {
+    _lock_file: std::fs::File,
+}
+
 pub(crate) async fn execute(
     bind: BindRequest,
     foreground: bool,
     mut serve_args: ServeArgs,
     storage_dir: PathBuf,
+    foreground_log_bootstrap: Option<ForegroundServerLogBootstrap>,
     styles: &'static Styles,
     printer: Printer,
 ) -> Result<()> {
@@ -32,6 +37,8 @@ pub(crate) async fn execute(
             bind,
             serve_args,
             storage_dir,
+            foreground_log_bootstrap
+                .context("internal error: missing foreground server log bootstrap")?,
             styles,
             printer,
         ))
@@ -47,6 +54,31 @@ pub(crate) async fn execute(
         )
         .await
     }
+}
+
+pub(crate) async fn prepare_foreground_server_log(
+    storage_dir: &Path,
+) -> Result<ForegroundServerLogBootstrap> {
+    let lock_file = acquire_lock(storage_dir).await?;
+    if let Some(existing) = record::active_server_record(storage_dir)? {
+        bail!(
+            "Server already running (pid {}) on {}",
+            existing.pid,
+            existing.bind
+        );
+    }
+
+    let log_path = Storage::new(storage_dir).server_state().log_path();
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating log directory {}", parent.display()))?;
+    }
+    std::fs::File::create(&log_path)
+        .with_context(|| format!("creating server log file {}", log_path.display()))?;
+
+    Ok(ForegroundServerLogBootstrap {
+        _lock_file: lock_file,
+    })
 }
 
 pub(crate) async fn ensure_server_running_for_storage(
@@ -80,7 +112,7 @@ async fn ensure_server_running_with_bind(
     config_path: &Path,
     storage_dir: &Path,
 ) -> Result<Bind> {
-    if let Some(existing) = record::active_server_record(storage_dir) {
+    if let Some(existing) = record::active_server_record(storage_dir)? {
         if bind_request
             .as_ref()
             .is_none_or(|requested| bind_matches_request(&existing.bind, requested))
@@ -124,7 +156,7 @@ async fn ensure_server_running_with_bind(
     )
     .await
     {
-        Ok(()) => record::active_server_record(storage_dir)
+        Ok(()) => record::active_server_record(storage_dir)?
             .map(|server| server.bind)
             .ok_or_else(|| {
                 anyhow!(
@@ -133,7 +165,7 @@ async fn ensure_server_running_with_bind(
                 )
             }),
         Err(err) => {
-            if let Some(existing) = record::active_server_record(storage_dir) {
+            if let Some(existing) = record::active_server_record(storage_dir)? {
                 Ok(existing.bind)
             } else {
                 Err(err)
@@ -258,6 +290,7 @@ async fn execute_foreground(
     bind: BindRequest,
     serve_args: ServeArgs,
     storage_dir: PathBuf,
+    _log_bootstrap: ForegroundServerLogBootstrap,
     styles: &'static Styles,
     printer: Printer,
 ) -> Result<()> {
@@ -281,17 +314,6 @@ async fn execute_foreground(
             }
         },
     );
-
-    let lock_file = acquire_lock(&storage_dir).await?;
-    let _lock_file = lock_file; // keep alive for the duration
-
-    if let Some(existing) = record::active_server_record(&storage_dir) {
-        bail!(
-            "Server already running (pid {}) on {}",
-            existing.pid,
-            existing.bind
-        );
-    }
 
     let server_state = Storage::new(&storage_dir).server_state();
     let record_path = server_state.record_path();
@@ -344,7 +366,7 @@ async fn execute_daemon(
     let lock_file = acquire_lock(storage_dir).await?;
     let _lock_file = lock_file; // keep alive until function returns
 
-    if let Some(existing) = record::active_server_record(storage_dir) {
+    if let Some(existing) = record::active_server_record(storage_dir)? {
         if announce {
             bail!(
                 "Server already running (pid {}) on {}",

@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use fabro_config::Storage;
-use fabro_config::user::legacy_default_storage_root;
 use fabro_server::bind::Bind;
+use fabro_util::Home;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,9 +50,8 @@ fn server_record_path(storage_dir: &Path) -> PathBuf {
 }
 
 fn legacy_record_path(storage_dir: &Path) -> Option<PathBuf> {
-    let default_storage_dir = legacy_default_storage_root().join("storage");
-    if storage_dir == default_storage_dir {
-        Some(server_record_path(&legacy_default_storage_root()))
+    if storage_dir == fabro_config::user::default_storage_dir() {
+        Some(Home::from_env().root().join("server.json"))
     } else {
         None
     }
@@ -71,14 +70,29 @@ fn active_server_record_at_path(path: PathBuf) -> Option<ActiveServerRecord> {
     }
 }
 
-pub(crate) fn active_server_record_details(storage_dir: &Path) -> Option<ActiveServerRecord> {
+pub(crate) fn active_server_record_details(
+    storage_dir: &Path,
+) -> Result<Option<ActiveServerRecord>> {
     let primary_path = server_record_path(storage_dir);
-    active_server_record_at_path(primary_path)
-        .or_else(|| legacy_record_path(storage_dir).and_then(active_server_record_at_path))
+    if let Some(active) = active_server_record_at_path(primary_path.clone()) {
+        return Ok(Some(active));
+    }
+
+    if let Some(legacy_path) = legacy_record_path(storage_dir) {
+        if active_server_record_at_path(legacy_path.clone()).is_some() {
+            bail!(
+                "Legacy server record {} is still active while current storage record {} is missing.\nStop the old daemon with a legacy Fabro CLI or manually clear the stale daemon before retrying.",
+                legacy_path.display(),
+                primary_path.display()
+            );
+        }
+    }
+
+    Ok(None)
 }
 
-pub(crate) fn active_server_record(storage_dir: &Path) -> Option<ServerRecord> {
-    active_server_record_details(storage_dir).map(|active| active.record)
+pub(crate) fn active_server_record(storage_dir: &Path) -> Result<Option<ServerRecord>> {
+    Ok(active_server_record_details(storage_dir)?.map(|active| active.record))
 }
 
 #[cfg(unix)]
@@ -111,7 +125,7 @@ mod tests {
         ServerRecord {
             pid: std::process::id(),
             bind,
-            log_path: PathBuf::from("/tmp/server.log"),
+            log_path: PathBuf::from("/tmp/storage/logs/server.log"),
             dev_token_path: None,
             started_at: Utc::now(),
         }
@@ -132,7 +146,7 @@ mod tests {
     #[test]
     fn active_server_record_returns_none_when_no_file() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(active_server_record(dir.path()).is_none());
+        assert!(active_server_record(dir.path()).unwrap().is_none());
     }
 
     #[test]
@@ -143,7 +157,7 @@ mod tests {
         record.pid = u32::MAX; // definitely not alive
         write_server_record(&path, &record).unwrap();
 
-        assert!(active_server_record(dir.path()).is_none());
+        assert!(active_server_record(dir.path()).unwrap().is_none());
         assert!(!path.exists()); // lazy cleanup removed file
     }
 }

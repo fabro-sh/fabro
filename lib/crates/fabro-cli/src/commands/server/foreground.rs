@@ -15,7 +15,7 @@ pub(crate) async fn execute(
     record_path: PathBuf,
     mut serve_args: ServeArgs,
     bind: BindRequest,
-    storage_dir: Option<PathBuf>,
+    storage_dir: PathBuf,
     styles: &'static Styles,
     printer: Printer,
 ) -> Result<()> {
@@ -35,22 +35,14 @@ pub(crate) async fn execute(
         None
     };
 
-    let log_path = storage_dir.as_ref().map_or_else(
-        || {
-            record_path.parent().map_or_else(
-                || PathBuf::from("server.log"),
-                |parent| parent.join("server.log"),
-            )
-        },
-        |dir| Storage::new(dir).server_state().log_path(),
-    );
+    let log_path = Storage::new(&storage_dir).server_state().log_path();
     let dev_token_path = std::env::var_os("FABRO_DEV_TOKEN_PATH").map(PathBuf::from);
     let pid = std::process::id();
 
     Box::pin(serve::serve_command(
         serve_args,
         styles,
-        storage_dir,
+        Some(storage_dir),
         move |resolved_bind| {
             record::write_server_record(&record_path, &record::ServerRecord {
                 pid,

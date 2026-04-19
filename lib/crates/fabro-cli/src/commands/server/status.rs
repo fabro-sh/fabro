@@ -7,7 +7,7 @@ use fabro_util::printer::Printer;
 use super::record;
 
 pub(crate) fn execute(storage_dir: &Path, json: bool, printer: Printer) -> Result<()> {
-    let Some(record) = record::active_server_record(storage_dir) else {
+    let Some(record) = record::active_server_record(storage_dir)? else {
         if json {
             fabro_util::printout!(printer, r#"{{"status":"stopped"}}"#);
         } else {

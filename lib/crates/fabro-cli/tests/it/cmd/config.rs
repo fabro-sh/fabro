@@ -641,7 +641,7 @@ fn settings_missing_run_config_errors() {
 }
 
 #[test]
-fn settings_legacy_cli_config_warns_and_ignores_it() {
+fn settings_legacy_cli_config_is_silently_ignored() {
     let context = test_context!();
     let project = tempfile::tempdir().unwrap();
 
@@ -663,9 +663,91 @@ name = "legacy-model"
         .arg("--local")
         .current_dir(project.path())
         .assert()
-        .success()
-        .stderr(predicate::str::contains("ignoring legacy config file"))
-        .stderr(predicate::str::contains("Rename it to"));
+        .success();
+
+    assert!(
+        assert.get_output().stderr.is_empty(),
+        "settings should not warn about legacy config files: {}",
+        String::from_utf8_lossy(&assert.get_output().stderr)
+    );
+
+    let cfg = parse_settings(&assert.get_output().stdout);
+    assert_eq!(cfg["cli"]["output"]["verbosity"].as_str(), Some("normal"));
+    assert!(
+        cfg["run"]["model"].get("name").is_none(),
+        "resolved dense settings should omit an unset run.model.name"
+    );
+}
+
+#[test]
+fn settings_legacy_user_config_is_silently_ignored() {
+    let context = test_context!();
+    let project = tempfile::tempdir().unwrap();
+
+    context.write_home(
+        ".fabro/user.toml",
+        r#"
+_version = 1
+
+[cli.output]
+verbosity = "verbose"
+
+[run.model]
+name = "legacy-model"
+"#,
+    );
+
+    let assert = context
+        .settings()
+        .arg("--local")
+        .current_dir(project.path())
+        .assert()
+        .success();
+
+    assert!(
+        assert.get_output().stderr.is_empty(),
+        "settings should not warn about legacy config files: {}",
+        String::from_utf8_lossy(&assert.get_output().stderr)
+    );
+
+    let cfg = parse_settings(&assert.get_output().stdout);
+    assert_eq!(cfg["cli"]["output"]["verbosity"].as_str(), Some("normal"));
+    assert!(
+        cfg["run"]["model"].get("name").is_none(),
+        "resolved dense settings should omit an unset run.model.name"
+    );
+}
+
+#[test]
+fn settings_legacy_server_config_is_silently_ignored() {
+    let context = test_context!();
+    let project = tempfile::tempdir().unwrap();
+
+    context.write_home(
+        ".fabro/server.toml",
+        r#"
+_version = 1
+
+[cli.output]
+verbosity = "verbose"
+
+[run.model]
+name = "legacy-model"
+"#,
+    );
+
+    let assert = context
+        .settings()
+        .arg("--local")
+        .current_dir(project.path())
+        .assert()
+        .success();
+
+    assert!(
+        assert.get_output().stderr.is_empty(),
+        "settings should not warn about legacy config files: {}",
+        String::from_utf8_lossy(&assert.get_output().stderr)
+    );
 
     let cfg = parse_settings(&assert.get_output().stdout);
     assert_eq!(cfg["cli"]["output"]["verbosity"].as_str(), Some("normal"));
@@ -697,8 +779,13 @@ shared = "legacy"
         .arg("--local")
         .current_dir(project.path())
         .assert()
-        .success()
-        .stderr(predicate::str::contains("ignoring legacy config file"));
+        .success();
+
+    assert!(
+        assert.get_output().stderr.is_empty(),
+        "settings should not warn about legacy config files: {}",
+        String::from_utf8_lossy(&assert.get_output().stderr)
+    );
 
     let cfg = parse_settings(&assert.get_output().stdout);
     assert_eq!(run_model_name(&cfg), Some("project-model"));

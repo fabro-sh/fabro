@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::Result;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use fabro_config::user::{FABRO_CONFIG_ENV, active_settings_path, legacy_default_storage_root};
+use fabro_config::user::{FABRO_CONFIG_ENV, active_settings_path, default_storage_dir};
 use fabro_server::bind::{self, Bind, BindRequest};
 use fabro_server::install::{self, InstallAppState};
 use fabro_server::serve::{self, ServeArgs};
@@ -27,6 +27,7 @@ use crate::user_config;
 pub(crate) async fn dispatch(
     command: ServerCommand,
     _globals: &GlobalArgs,
+    foreground_log_bootstrap: Option<start::ForegroundServerLogBootstrap>,
     printer: Printer,
 ) -> Result<()> {
     match command {
@@ -62,6 +63,7 @@ pub(crate) async fn dispatch(
                 foreground,
                 serve_args,
                 storage_dir,
+                foreground_log_bootstrap,
                 styles,
                 printer,
             ))
@@ -73,8 +75,7 @@ pub(crate) async fn dispatch(
         }) => {
             let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
             let storage_dir = user_config::storage_dir(&settings)?;
-            stop::execute(&storage_dir, Duration::from_secs(timeout), printer).await;
-            Ok(())
+            stop::execute(&storage_dir, Duration::from_secs(timeout), printer).await
         }
         ServerCommand::Restart(ServerRestartArgs {
             storage_dir,
@@ -87,7 +88,7 @@ pub(crate) async fn dispatch(
                 storage_dir.as_deref(),
                 &serve_args,
             )? {
-                stop::stop_server(&bootstrap.storage_dir, Duration::from_secs(timeout)).await;
+                stop::stop_server(&bootstrap.storage_dir, Duration::from_secs(timeout)).await?;
                 if serve_args.no_web {
                     fabro_util::printerr!(
                         printer,
@@ -102,7 +103,7 @@ pub(crate) async fn dispatch(
                 storage_dir.as_deref(),
             )?;
             let storage_dir = user_config::storage_dir(&settings)?;
-            stop::stop_server(&storage_dir, Duration::from_secs(timeout)).await;
+            stop::stop_server(&storage_dir, Duration::from_secs(timeout)).await?;
             let bind_addr =
                 serve::resolve_bind_request_from_settings(&settings, serve_args.bind.as_deref())?;
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
@@ -111,6 +112,7 @@ pub(crate) async fn dispatch(
                 foreground,
                 serve_args,
                 storage_dir,
+                foreground_log_bootstrap,
                 styles,
                 printer,
             ))
@@ -136,6 +138,7 @@ pub(crate) async fn dispatch(
                     .clone()
                     .unwrap_or_else(|| user_config::active_settings_path(None)),
             );
+            let storage_dir = user_config::storage_dir(&settings)?;
             let bind_addr =
                 serve::resolve_bind_request_from_settings(&settings, serve_args.bind.as_deref())?;
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
@@ -146,7 +149,7 @@ pub(crate) async fn dispatch(
                     ..serve_args
                 },
                 bind_addr,
-                storage_dir.clone_path(),
+                storage_dir,
                 styles,
                 printer,
             ))
@@ -181,10 +184,7 @@ fn maybe_install_bootstrap(
         None => default_install_bind_request(),
     };
 
-    let storage_dir = storage_dir.map_or_else(
-        || legacy_default_storage_root().join("storage"),
-        std::path::Path::to_path_buf,
-    );
+    let storage_dir = storage_dir.map_or_else(default_storage_dir, std::path::Path::to_path_buf);
 
     Ok(Some(InstallBootstrap {
         bind_request,

@@ -14,6 +14,7 @@ use fabro_types::settings::server::{
 use fabro_util::Home;
 
 use super::{ResolveError, default_interp, parse_socket_addr, require_interp};
+use crate::user::default_storage_dir;
 
 pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> ServerSettings {
     let storage = resolve_storage(layer.storage.as_ref());
@@ -57,7 +58,7 @@ fn resolve_storage(layer: Option<&ServerStorageLayer>) -> ServerStorageSettings 
     ServerStorageSettings {
         root: layer
             .and_then(|storage| storage.root.clone())
-            .unwrap_or_else(|| default_interp(Home::from_env().storage_dir())),
+            .unwrap_or_else(|| default_interp(default_storage_dir())),
     }
 }
 

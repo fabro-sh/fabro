@@ -1,7 +1,6 @@
 use anyhow::Result;
 use fabro_api::types;
 use fabro_auth::credential_id_for;
-use fabro_config::legacy_env;
 use fabro_types::settings::CliSettings;
 use fabro_types::settings::cli::CliLayer;
 use fabro_util::printer::Printer;
@@ -35,17 +34,6 @@ pub(super) async fn login_command(
     };
     let credential_id = credential_id_for(&credential).map_err(anyhow::Error::msg)?;
     let value = serde_json::to_string(&credential)?;
-
-    {
-        let path = legacy_env::legacy_env_file_path();
-        if path.exists() {
-            fabro_util::printerr!(
-                printer,
-                "  Warning: {} is no longer read by fabro server. Re-enter credentials with `fabro provider login`.",
-                path.display()
-            );
-        }
-    }
 
     server
         .api()

@@ -45,23 +45,8 @@ impl Home {
     }
 
     #[must_use]
-    pub fn server_config(&self) -> PathBuf {
-        self.root.join("settings.toml")
-    }
-
-    #[must_use]
-    pub fn certs_dir(&self) -> PathBuf {
-        self.root.join("certs")
-    }
-
-    #[must_use]
     pub fn skills_dir(&self) -> PathBuf {
         self.root.join("skills")
-    }
-
-    #[must_use]
-    pub fn storage_dir(&self) -> PathBuf {
-        self.root.join("storage")
     }
 
     #[must_use]
@@ -104,20 +89,8 @@ mod tests {
             std::path::Path::new("/tmp/fabro-home/settings.toml")
         );
         assert_eq!(
-            home.server_config(),
-            std::path::Path::new("/tmp/fabro-home/settings.toml")
-        );
-        assert_eq!(
-            home.certs_dir(),
-            std::path::Path::new("/tmp/fabro-home/certs")
-        );
-        assert_eq!(
             home.skills_dir(),
             std::path::Path::new("/tmp/fabro-home/skills")
-        );
-        assert_eq!(
-            home.storage_dir(),
-            std::path::Path::new("/tmp/fabro-home/storage")
         );
         assert_eq!(
             home.socket_path(),

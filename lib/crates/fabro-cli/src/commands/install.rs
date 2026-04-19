@@ -16,8 +16,8 @@ use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::{CreateSecretRequest, SecretType as ApiSecretType};
 use fabro_auth::{AuthCredential, AuthMethod, codex_oauth_config, credential_id_for};
-use fabro_config::user::{SETTINGS_CONFIG_FILENAME, legacy_default_storage_root};
-use fabro_config::{ResolveError, Storage, envfile, legacy_env};
+use fabro_config::user::{SETTINGS_CONFIG_FILENAME, default_storage_dir};
+use fabro_config::{ResolveError, Storage, envfile};
 use fabro_install::{
     InstallListenConfig, generate_jwt_keypair, merge_server_settings as merge_server_settings_impl,
     write_github_app_settings, write_token_settings,
@@ -1166,7 +1166,9 @@ async fn persist_install_outputs(
         settings_write,
         server_was_running,
         |path| Box::pin(server_client::connect_api_client(path)),
-        |path, timeout| Box::pin(stop::stop_server(path, timeout)),
+        |path, timeout| {
+            Box::pin(async move { stop::stop_server(path, timeout).await.unwrap_or(false) })
+        },
     )
     .await
 }
@@ -1355,7 +1357,9 @@ async fn restart_server_after_install(
     restart_server_after_install_with(
         storage_dir,
         config_path,
-        |path, timeout| Box::pin(stop::stop_server(path, timeout)),
+        |path, timeout| {
+            Box::pin(async move { stop::stop_server(path, timeout).await.unwrap_or(false) })
+        },
         |storage_dir, config_path| {
             Box::pin(start::ensure_server_running_for_storage(
                 storage_dir,
@@ -1478,9 +1482,9 @@ async fn run_install_github_inner(
     let storage_dir = user_config::storage_dir(&parsed_settings).unwrap_or_else(|_| {
         args.storage_dir
             .clone_path()
-            .unwrap_or_else(|| legacy_default_storage_root().join("storage"))
+            .unwrap_or_else(default_storage_dir)
     });
-    let server_was_running = record::active_server_record(&storage_dir).is_some();
+    let server_was_running = record::active_server_record(&storage_dir)?.is_some();
     let mut doc: toml::Value = toml::from_str(&existing_config_contents)
         .context("failed to parse existing settings.toml")?;
 
@@ -1623,7 +1627,7 @@ async fn run_install_inner(
     let emoji = console::Emoji("⚒️  ", "");
     let cli_settings = user_config::load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let storage_dir = user_config::storage_dir(&cli_settings)?;
-    let server_was_running = record::active_server_record(&storage_dir).is_some();
+    let server_was_running = record::active_server_record(&storage_dir)?.is_some();
     let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
     let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
     let existing_config_contents = std::fs::read_to_string(&config_path).ok();
@@ -1655,18 +1659,6 @@ async fn run_install_inner(
 
     std::fs::create_dir_all(&fabro_dir)
         .with_context(|| format!("creating fabro home directory {}", fabro_dir.display()))?;
-
-    {
-        let env_path = legacy_env::legacy_env_file_path();
-        if env_path.exists() {
-            fabro_util::printerr!(
-                printer,
-                "  Warning: {} is no longer read by fabro server. This install will persist runtime secrets in server.env and workflow-visible credentials in the vault instead.",
-                env_path.display()
-            );
-            fabro_util::printerr!(printer, "");
-        }
-    }
 
     let facts = InstallFacts {
         codex_detected: detect_binary_on_path("codex").await,

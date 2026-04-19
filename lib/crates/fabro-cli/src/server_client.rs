@@ -231,7 +231,7 @@ fn remote_dev_token_auth_for_target<'a>(
 }
 
 fn remote_url_matches_active_local_tcp_server(api_url: &str, storage_dir: &Path) -> bool {
-    let Some(record) = record::active_server_record(storage_dir) else {
+    let Ok(Some(record)) = record::active_server_record(storage_dir) else {
         return false;
     };
     let Bind::Tcp(bind_addr) = record.bind else {
@@ -1190,7 +1190,9 @@ mod tests {
         record::write_server_record(&record_path, &record::ServerRecord {
             pid:            std::process::id(),
             bind:           Bind::Unix(temp_home.path().join("fabro.sock")),
-            log_path:       storage.path().join("server.log"),
+            log_path:       fabro_config::Storage::new(storage.path())
+                .server_state()
+                .log_path(),
             dev_token_path: Some(token_path),
             started_at:     chrono::Utc::now(),
         })

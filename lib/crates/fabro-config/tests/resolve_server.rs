@@ -1,4 +1,5 @@
 use fabro_config::parse_settings_layer;
+use fabro_config::user::default_storage_dir;
 use fabro_types::settings::server::{
     GithubIntegrationStrategy, IpAllowEntry, ObjectStoreSettings, ServerListenSettings,
 };
@@ -16,7 +17,7 @@ fn resolves_server_defaults_from_empty_settings() {
 
     assert_eq!(
         settings.storage.root.as_source(),
-        Home::from_env().storage_dir().to_string_lossy()
+        default_storage_dir().to_string_lossy()
     );
     assert!(settings.web.enabled);
     assert_eq!(settings.web.url.as_source(), "http://localhost:3000");
@@ -36,8 +37,7 @@ fn resolves_server_defaults_from_empty_settings() {
         ObjectStoreSettings::Local { root } => {
             assert_eq!(
                 root.as_source(),
-                Home::from_env()
-                    .storage_dir()
+                default_storage_dir()
                     .join("objects")
                     .join("artifacts")
                     .to_string_lossy()
@@ -51,8 +51,7 @@ fn resolves_server_defaults_from_empty_settings() {
         ObjectStoreSettings::Local { root } => {
             assert_eq!(
                 root.as_source(),
-                Home::from_env()
-                    .storage_dir()
+                default_storage_dir()
                     .join("objects")
                     .join("slatedb")
                     .to_string_lossy()

@@ -1,15 +1,16 @@
 use std::path::Path;
 use std::time::Duration;
 
+use anyhow::Result;
 use fabro_server::bind::Bind;
 use fabro_util::printer::Printer;
 use tokio::time;
 
 use super::record;
 
-pub(crate) async fn stop_server(storage_dir: &Path, timeout: Duration) -> bool {
-    let Some(active) = record::active_server_record_details(storage_dir) else {
-        return false;
+pub(crate) async fn stop_server(storage_dir: &Path, timeout: Duration) -> Result<bool> {
+    let Some(active) = record::active_server_record_details(storage_dir)? else {
+        return Ok(false);
     };
     let record = active.record;
 
@@ -36,14 +37,15 @@ pub(crate) async fn stop_server(storage_dir: &Path, timeout: Duration) -> bool {
         let _ = std::fs::remove_file(path);
     }
 
-    true
+    Ok(true)
 }
 
-pub(crate) async fn execute(storage_dir: &Path, timeout: Duration, printer: Printer) {
-    if !stop_server(storage_dir, timeout).await {
+pub(crate) async fn execute(storage_dir: &Path, timeout: Duration, printer: Printer) -> Result<()> {
+    if !stop_server(storage_dir, timeout).await? {
         fabro_util::printerr!(printer, "Server is not running");
         std::process::exit(1);
     }
 
     fabro_util::printerr!(printer, "Server stopped");
+    Ok(())
 }

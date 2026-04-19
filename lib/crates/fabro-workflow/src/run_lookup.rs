@@ -140,7 +140,7 @@ pub fn scratch_base(storage_dir: &Path) -> PathBuf {
 }
 
 pub fn default_scratch_base() -> PathBuf {
-    scratch_base(&fabro_util::Home::from_env().storage_dir())
+    scratch_base(&fabro_config::user::default_storage_dir())
 }
 
 fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {

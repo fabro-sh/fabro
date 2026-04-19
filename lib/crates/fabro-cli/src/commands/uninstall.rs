@@ -48,11 +48,14 @@ pub(crate) async fn run_uninstall(
     }
 
     let storage_dir = user_config::load_settings().map_or_else(
-        |_| home.storage_dir(),
-        |settings| user_config::storage_dir(&settings).unwrap_or_else(|_| home.storage_dir()),
+        |_| user_config::default_storage_dir(),
+        |settings| {
+            user_config::storage_dir(&settings)
+                .unwrap_or_else(|_| user_config::default_storage_dir())
+        },
     );
 
-    let inventory = build_inventory(&home_root, &storage_dir);
+    let inventory = build_inventory(&home_root, &storage_dir)?;
 
     if !args.yes {
         if json {
@@ -73,13 +76,13 @@ pub(crate) async fn run_uninstall(
     execute_uninstall(&inventory, json, printer).await
 }
 
-fn build_inventory(home_root: &Path, storage_dir: &Path) -> Inventory {
+fn build_inventory(home_root: &Path, storage_dir: &Path) -> Result<Inventory> {
     let home_size = dir_size(home_root);
-    let server_running = server::record::active_server_record_details(storage_dir).is_some();
+    let server_running = server::record::active_server_record_details(storage_dir)?.is_some();
     let shell_configs = find_shell_configs_with_sentinel();
     let (binary_path, binary_is_managed) = resolve_binary(home_root);
 
-    Inventory {
+    Ok(Inventory {
         home_root: home_root.to_path_buf(),
         storage_dir: storage_dir.to_path_buf(),
         home_exists: true,
@@ -88,7 +91,7 @@ fn build_inventory(home_root: &Path, storage_dir: &Path) -> Inventory {
         shell_configs,
         binary_path,
         binary_is_managed,
-    }
+    })
 }
 
 fn dir_size(path: &Path) -> u64 {
@@ -252,7 +255,7 @@ async fn execute_uninstall(inventory: &Inventory, json: bool, printer: Printer) 
 
     // Unit 3a: Server stop
     if inventory.server_running {
-        server::stop::execute(&inventory.storage_dir, Duration::from_secs(5), printer).await;
+        server::stop::execute(&inventory.storage_dir, Duration::from_secs(5), printer).await?;
         result.server_stopped = true;
     }
 
@@ -730,7 +733,7 @@ mod tests {
         create_fabro_home(&home_root);
 
         let storage_dir = home_root.join("storage");
-        let inv = build_inventory(&home_root, &storage_dir);
+        let inv = build_inventory(&home_root, &storage_dir).unwrap();
 
         assert!(inv.home_exists);
         assert!(inv.home_size > 0);
@@ -745,7 +748,7 @@ mod tests {
         let home_root = tmp.path().join("fake-fabro-home");
         create_fabro_home(&home_root);
 
-        let inv = build_inventory(&home_root, &home_root.join("storage"));
+        let inv = build_inventory(&home_root, &home_root.join("storage")).unwrap();
         // shell_configs depends on the actual user's shell config files,
         // but we verify the field is populated (even if empty in CI/test)
         assert!(inv.shell_configs.is_empty() || !inv.shell_configs.is_empty());

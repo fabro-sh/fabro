@@ -10,7 +10,7 @@ description: "Server-owned settings.toml sections, CLI overrides, and environmen
 On a same-machine setup, the CLI and server share one `settings.toml`. On a remote deployment, the server machine has its own `settings.toml`, and the client machine keeps a separate local `settings.toml` for CLI-only values such as `[cli.target]`.
 
 <Note>
-Legacy `server.toml`, `user.toml`, and `cli.toml` are ignored with a warning. Rename them to `settings.toml`.
+Fabro only reads `settings.toml`. Older `server.toml`, `user.toml`, and `cli.toml` filenames are no longer part of the supported config surface.
 </Note>
 
 ### Which sections are server-owned

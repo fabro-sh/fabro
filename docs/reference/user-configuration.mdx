@@ -8,7 +8,7 @@ Fabro loads machine defaults from `~/.fabro/settings.toml`. The file is optional
 On a same-machine setup, the CLI and server both read this file. On a remote setup, each machine has its own `settings.toml` and reads the sections relevant to that process.
 
 <Note>
-Legacy `cli.toml`, `user.toml`, and `server.toml` are ignored with a warning. Rename them to `settings.toml`.
+Fabro only reads `settings.toml`. Older `cli.toml`, `user.toml`, and `server.toml` filenames are no longer part of the supported config surface.
 </Note>
 
 ## File location

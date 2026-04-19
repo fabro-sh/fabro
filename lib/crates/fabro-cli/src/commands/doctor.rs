@@ -2,11 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use fabro_api::types as api_types;
-use fabro_config::legacy_env;
-use fabro_config::user::{
-    active_settings_path, legacy_old_user_config_path, legacy_server_config_path,
-    legacy_user_config_path,
-};
+use fabro_config::user::active_settings_path;
 use fabro_types::settings::CliSettings;
 use fabro_types::settings::cli::{CliLayer, OutputFormat};
 pub(crate) use fabro_util::check_report::{
@@ -22,12 +18,9 @@ use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 use crate::user_config;
 
-pub(crate) fn check_config(
-    settings_path: Option<PathBuf>,
-    legacy_paths: &[PathBuf],
-) -> CheckResult {
-    match (settings_path, legacy_paths.is_empty()) {
-        (Some(path), true) => {
+pub(crate) fn check_config(settings_path: Option<PathBuf>) -> CheckResult {
+    match settings_path {
+        Some(path) => {
             let display = contract_tilde(&path);
             CheckResult {
                 name:        "Configuration".to_string(),
@@ -40,44 +33,7 @@ pub(crate) fn check_config(
                 remediation: None,
             }
         }
-        (Some(path), false) => {
-            let display = contract_tilde(&path);
-            CheckResult {
-                name:        "Configuration".to_string(),
-                status:      CheckStatus::Warning,
-                summary:     display.display().to_string(),
-                details:     std::iter::once(CheckDetail::new(format!(
-                    "Loaded from {}",
-                    display.display()
-                )))
-                .chain(legacy_paths.iter().map(|legacy| {
-                    let legacy_display = contract_tilde(legacy);
-                    CheckDetail::new(format!(
-                        "Ignoring legacy config file {}",
-                        legacy_display.display()
-                    ))
-                }))
-                .collect(),
-                remediation: Some("Delete or rename legacy config files".to_string()),
-            }
-        }
-        (None, false) => CheckResult {
-            name:        "Configuration".to_string(),
-            status:      CheckStatus::Warning,
-            summary:     "legacy config files ignored".to_string(),
-            details:     legacy_paths
-                .iter()
-                .map(|legacy| {
-                    CheckDetail::new(format!("Found legacy config file {}", legacy.display()))
-                })
-                .chain(std::iter::once(CheckDetail::new(
-                    "Rename one to ~/.fabro/settings.toml or create a new settings.toml"
-                        .to_string(),
-                )))
-                .collect(),
-            remediation: Some("Create ~/.fabro/settings.toml".to_string()),
-        },
-        (None, true) => CheckResult {
+        None => CheckResult {
             name:        "Configuration".to_string(),
             status:      CheckStatus::Warning,
             summary:     "no settings config file found".to_string(),
@@ -87,22 +43,6 @@ pub(crate) fn check_config(
             remediation: Some("Create ~/.fabro/settings.toml".to_string()),
         },
     }
-}
-
-fn check_legacy_env(path: Option<PathBuf>) -> Option<CheckResult> {
-    path.map(|path| {
-        let display = contract_tilde(&path);
-        CheckResult {
-            name:        "Legacy .env".to_string(),
-            status:      CheckStatus::Warning,
-            summary:     "legacy secrets file detected".to_string(),
-            details:     vec![CheckDetail::new(format!(
-                "{} is no longer read by fabro",
-                display.display()
-            ))],
-            remediation: Some("Re-enter credentials with `fabro provider login`.".to_string()),
-        }
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -284,37 +224,20 @@ pub(crate) async fn run_doctor(
     };
 
     let settings_config_path = active_settings_path(None);
-    let legacy_config_paths = [
-        legacy_user_config_path(),
-        legacy_old_user_config_path(),
-        legacy_server_config_path(),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|path| path.exists())
-    .collect::<Vec<_>>();
-    let legacy_env_path = {
-        let p = legacy_env::legacy_env_file_path();
-        p.exists().then_some(p)
-    };
 
     let settings = user_config::load_settings().unwrap_or_default();
-    let storage_dir_path = user_config::storage_dir(&settings)
-        .unwrap_or_else(|_| fabro_util::Home::from_env().storage_dir());
+    let storage_dir_path =
+        user_config::storage_dir(&settings).unwrap_or_else(|_| user_config::default_storage_dir());
     let storage_dir = probe_storage_dir(&storage_dir_path);
 
-    let mut local_checks = vec![
+    let local_checks = vec![
         check_config(
             settings_config_path
                 .exists()
                 .then_some(settings_config_path),
-            &legacy_config_paths,
         ),
         check_storage_dir(&storage_dir),
     ];
-    if let Some(legacy_env_check) = check_legacy_env(legacy_env_path) {
-        local_checks.push(legacy_env_check);
-    }
 
     let mut report = CheckReport {
         title:    "Fabro Doctor".to_string(),
@@ -470,43 +393,16 @@ mod tests {
 
     #[test]
     fn check_config_pass_with_path() {
-        let result = check_config(Some(PathBuf::from("/home/user/.fabro/settings.toml")), &[]);
+        let result = check_config(Some(PathBuf::from("/home/user/.fabro/settings.toml")));
         assert_eq!(result.status, CheckStatus::Pass);
         assert!(result.summary.contains(".fabro/settings.toml"));
     }
 
     #[test]
     fn check_config_warning_without_path() {
-        let result = check_config(None, &[]);
+        let result = check_config(None);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.remediation.is_some());
-    }
-
-    #[test]
-    fn check_config_warning_for_legacy_only_path() {
-        let result = check_config(None, &[PathBuf::from("/home/user/.fabro/cli.toml")]);
-        assert_eq!(result.status, CheckStatus::Warning);
-        assert!(result.summary.contains("legacy"));
-    }
-
-    #[test]
-    fn check_legacy_env_warning_when_present() {
-        let result = check_legacy_env(Some(PathBuf::from("/home/user/.fabro/.env")));
-        assert_eq!(
-            result.as_ref().map(|check| check.status),
-            Some(CheckStatus::Warning)
-        );
-        assert!(
-            result
-                .as_ref()
-                .is_some_and(|check| check.summary.contains("legacy secrets file"))
-        );
-    }
-
-    #[test]
-    fn check_legacy_env_is_omitted_when_absent() {
-        let result = check_legacy_env(None);
-        assert!(result.is_none());
     }
 
     // -- check_storage_dir --
