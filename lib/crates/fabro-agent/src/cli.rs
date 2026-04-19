@@ -16,6 +16,7 @@ use fabro_llm::types::{Request, Response};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::{Catalog, ModelHandle, Provider};
 use fabro_util::terminal::Styles;
+use tokio::io::{AsyncWriteExt, stdout};
 use tokio::signal;
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -552,18 +553,12 @@ pub async fn run_with_args_and_client(
     tokio::spawn(async move {
         match output_format {
             OutputFormat::Json => {
+                let mut stdout = stdout();
                 while let Ok(event) = rx.recv().await {
                     if let Ok(json) = serde_json::to_string(&event) {
-                        #[expect(
-                            clippy::disallowed_methods,
-                            reason = "FOLLOW-UP: blocking stdout inside tokio::spawn. Acceptable \
-                                      today (low-volume event stream, CLI output), but should \
-                                      migrate to tokio::io::stdout to avoid worker stalls under \
-                                      pipe backpressure."
-                        )]
-                        let mut stdout = std::io::stdout().lock();
-                        let _ = writeln!(stdout, "{json}");
-                        let _ = stdout.flush();
+                        let _ = stdout.write_all(json.as_bytes()).await;
+                        let _ = stdout.write_all(b"\n").await;
+                        let _ = stdout.flush().await;
                     }
                 }
             }

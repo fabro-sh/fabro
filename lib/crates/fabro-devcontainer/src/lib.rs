@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use fabro_util::env::SystemEnv;
+use tokio::fs;
 pub use types::DevcontainerJson;
 
 /// Lifecycle command — string, array, or object (parallel) form.
@@ -161,14 +162,8 @@ pub struct DevcontainerResolver;
 
 impl DevcontainerResolver {
     /// path: repo root (or explicit .devcontainer/ path)
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "FOLLOW-UP: DevcontainerResolver::resolve does sync std::fs::read_to_string / \
-                  read_dir across several devcontainer.json lookups. One-shot per workflow run \
-                  (not per-request); acceptable today but should migrate to tokio::fs."
-    )]
     pub async fn resolve(path: &Path) -> Result<DevcontainerSpec> {
-        let (json_path, devcontainer) = Self::find_and_parse(path)?;
+        let (json_path, devcontainer) = Self::find_and_parse(path).await?;
         let repo_root = Self::repo_root_from_json_path(&json_path, path);
         let base_dir = json_path.parent().unwrap_or(path);
 
@@ -219,6 +214,7 @@ impl DevcontainerResolver {
                 .clone();
 
             let compose_config = compose::parse_compose_multi(&compose_paths, &service_name)
+                .await
                 .map_err(DevcontainerError::Compose)?;
 
             let mut environment = HashMap::new();
@@ -241,9 +237,11 @@ impl DevcontainerResolver {
                 let df_path = compose_base_dir
                     .join(&build.context)
                     .join(build.dockerfile.as_deref().unwrap_or("Dockerfile"));
-                std::fs::read_to_string(&df_path).map_err(|source| DevcontainerError::ReadFile {
-                    path: df_path,
-                    source,
+                fs::read_to_string(&df_path).await.map_err(|source| {
+                    DevcontainerError::ReadFile {
+                        path: df_path,
+                        source,
+                    }
                 })?
             } else {
                 format!(
@@ -307,7 +305,7 @@ impl DevcontainerResolver {
                     build.dockerfile.as_deref().unwrap_or("Dockerfile"),
                     &vars,
                 ));
-                let content = std::fs::read_to_string(&df_path).map_err(|source| {
+                let content = fs::read_to_string(&df_path).await.map_err(|source| {
                     DevcontainerError::ReadFile {
                         path: df_path,
                         source,
@@ -415,12 +413,7 @@ impl DevcontainerResolver {
         })
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "FOLLOW-UP: sync std::fs helpers for devcontainer.json lookup; called once at \
-                  workflow startup via resolve(). Should migrate to tokio::fs with resolve()."
-    )]
-    fn find_and_parse(path: &Path) -> Result<(PathBuf, DevcontainerJson)> {
+    async fn find_and_parse(path: &Path) -> Result<(PathBuf, DevcontainerJson)> {
         // Check standard locations
         let candidates = [
             path.join(".devcontainer/devcontainer.json"),
@@ -429,7 +422,7 @@ impl DevcontainerResolver {
 
         for candidate in &candidates {
             if candidate.exists() {
-                let raw = std::fs::read_to_string(candidate).map_err(|source| {
+                let raw = fs::read_to_string(candidate).await.map_err(|source| {
                     DevcontainerError::ReadFile {
                         path: candidate.clone(),
                         source,
@@ -444,10 +437,12 @@ impl DevcontainerResolver {
         // Check if path itself is a devcontainer.json
         if path.is_file() && path.file_name().is_some_and(|n| n == "devcontainer.json") {
             let raw =
-                std::fs::read_to_string(path).map_err(|source| DevcontainerError::ReadFile {
-                    path: path.to_path_buf(),
-                    source,
-                })?;
+                fs::read_to_string(path)
+                    .await
+                    .map_err(|source| DevcontainerError::ReadFile {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
             let stripped = jsonc::strip_jsonc(&raw);
             let parsed: DevcontainerJson = serde_json::from_str(&stripped)?;
             return Ok((path.to_path_buf(), parsed));
@@ -457,23 +452,43 @@ impl DevcontainerResolver {
         // devcontainer.json
         let devcontainer_dir = path.join(".devcontainer");
         if devcontainer_dir.is_dir() {
-            let mut subdirs: Vec<PathBuf> = std::fs::read_dir(&devcontainer_dir)
-                .map_err(|source| DevcontainerError::ReadFile {
+            let mut entries = fs::read_dir(&devcontainer_dir).await.map_err(|source| {
+                DevcontainerError::ReadFile {
                     path: devcontainer_dir.clone(),
                     source,
-                })?
-                .filter_map(std::result::Result::ok)
-                .filter(|entry| entry.path().is_dir())
-                .map(|entry| entry.path())
-                .filter(|dir| dir.join("devcontainer.json").exists())
-                .collect();
+                }
+            })?;
+            let mut subdirs = Vec::new();
+
+            while let Some(entry) =
+                entries
+                    .next_entry()
+                    .await
+                    .map_err(|source| DevcontainerError::ReadFile {
+                        path: devcontainer_dir.clone(),
+                        source,
+                    })?
+            {
+                let entry_path = entry.path();
+                let file_type =
+                    entry
+                        .file_type()
+                        .await
+                        .map_err(|source| DevcontainerError::ReadFile {
+                            path: entry_path.clone(),
+                            source,
+                        })?;
+                if file_type.is_dir() && entry_path.join("devcontainer.json").exists() {
+                    subdirs.push(entry_path);
+                }
+            }
 
             // Sort alphabetically to get deterministic first pick
             subdirs.sort();
 
             if let Some(subdir) = subdirs.first() {
                 let candidate = subdir.join("devcontainer.json");
-                let raw = std::fs::read_to_string(&candidate).map_err(|source| {
+                let raw = fs::read_to_string(&candidate).await.map_err(|source| {
                     DevcontainerError::ReadFile {
                         path: candidate.clone(),
                         source,

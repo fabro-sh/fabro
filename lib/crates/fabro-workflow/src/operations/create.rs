@@ -1,6 +1,7 @@
 #![expect(
     clippy::disallowed_methods,
-    reason = "FOLLOW-UP: per-run `workflow create` operation; writes .fabro/ scaffolding to disk via sync std::fs"
+    reason = "sync workflow creation path: reads workflow.toml during workflow load and persists \
+              .fabro scaffolding outside the Tokio execution hot path"
 )]
 
 use std::collections::{BTreeMap, HashMap};
@@ -18,6 +19,7 @@ use fabro_types::settings::run::RunMode;
 use fabro_types::settings::{Settings, SettingsLayer};
 use fabro_types::{RunId, RunProvenance};
 use fabro_util::json::normalize_json_value;
+use tokio::task::spawn_blocking;
 
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 use crate::error::Error;
@@ -135,6 +137,8 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
     let goal_override = resolved.goal_override.clone();
     let current_dir = resolved.current_dir.clone();
     let file_resolver = resolved.file_resolver.clone();
+    let resolved_workflow_slug = resolved.workflow_slug.clone();
+    let persisted_run_dir = run_dir.clone();
     let accepted_definition = match (&workflow_path, &workflow_bundle) {
         (Some(workflow_path), Some(workflow_bundle)) => Some(RunDefinition::new(
             workflow_path.clone(),
@@ -143,25 +147,30 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
         _ => None,
     };
 
-    let persisted = create_from_source(
-        &resolved.raw_source,
-        PersistCreateOptions {
-            settings,
-            run_id: Some(run_id),
-            run_dir: Some(run_dir.clone()),
-            workflow_slug: workflow_slug.or(resolved.workflow_slug.clone()),
-            labels: combined_labels(&resolved_settings),
-            base_branch,
-            working_directory,
-            host_repo_path,
-            repo_origin_url,
-            provenance,
-            configured_providers,
-        },
-        current_dir,
-        file_resolver,
-        goal_override.as_deref(),
-    )?;
+    let raw_source = resolved.raw_source.clone();
+    let persisted = spawn_blocking(move || {
+        create_from_source(
+            &raw_source,
+            PersistCreateOptions {
+                settings,
+                run_id: Some(run_id),
+                run_dir: Some(persisted_run_dir),
+                workflow_slug: workflow_slug.or(resolved_workflow_slug),
+                labels: combined_labels(&resolved_settings),
+                base_branch,
+                working_directory,
+                host_repo_path,
+                repo_origin_url,
+                provenance,
+                configured_providers,
+            },
+            current_dir,
+            file_resolver,
+            goal_override.as_deref(),
+        )
+    })
+    .await
+    .map_err(|err| Error::engine(format!("workflow create task failed: {err}")))??;
 
     let workflow_config = resolved
         .workflow_toml_path

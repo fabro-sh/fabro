@@ -328,7 +328,7 @@ pub async fn collect_artifacts(
                         error = e.as_str(),
                         "Asset hash failed"
                     );
-                    let _ = std::fs::remove_file(&dest);
+                    let _ = fs::remove_file(&dest).await;
                     hash_errors += 1;
                 }
             },

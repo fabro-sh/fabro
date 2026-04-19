@@ -1,6 +1,7 @@
 #![expect(
     clippy::disallowed_methods,
-    reason = "FOLLOW-UP: run lookup walks the runs directory; invoked from sync CLI and async server paths"
+    reason = "directory walk for CLI run listing; async server paths call the heavier filesystem \
+              scans from spawn_blocking boundaries"
 )]
 
 use std::collections::HashMap;

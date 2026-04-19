@@ -1,8 +1,3 @@
-#![expect(
-    clippy::disallowed_methods,
-    reason = "FOLLOW-UP: mixed async/sync workflow artifact lifecycle. Sync std::fs::write remains at per-stage persistence points; the Tokio-path hot reads were migrated to tokio::fs in commit 9d1c0d98c. Remaining writes should follow."
-)]
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -288,14 +283,14 @@ async fn materialize_blob_ref(
         let path = local_materialized_blob_path(run_dir, blob_id);
         if !path.exists() {
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|err| {
+                fs::create_dir_all(parent).await.map_err(|err| {
                     Error::Io(format!(
                         "creating artifact blob directory {}: {err}",
                         parent.display()
                     ))
                 })?;
             }
-            std::fs::write(&path, &bytes).map_err(|err| {
+            fs::write(&path, &bytes).await.map_err(|err| {
                 Error::Io(format!("writing artifact blob {}: {err}", path.display()))
             })?;
         }
@@ -367,6 +362,10 @@ fn local_materialized_blob_path(run_dir: &Path, blob_id: &RunBlobId) -> PathBuf 
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests write artifact fixtures to disk"
+)]
 mod tests {
     use std::hash::{Hash, Hasher};
     use std::sync::Arc;

@@ -232,7 +232,7 @@ fn parse_content_block(block: &serde_json::Value) -> Option<ContentPart> {
 }
 
 /// Translate a unified `ContentPart` to an Anthropic content block JSON value.
-fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
+async fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
     match part {
         ContentPart::Text(text) => Some(serde_json::json!({"type": "text", "text": text})),
         ContentPart::ToolCall(tc) => Some(serde_json::json!({
@@ -270,7 +270,7 @@ fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
         ContentPart::Image(img) => {
             if let Some(url) = &img.url {
                 if common::is_file_path(url) {
-                    return match common::load_file_as_base64(url) {
+                    return match common::load_file_as_base64(url).await {
                         Ok((b64, mime)) => Some(serde_json::json!({
                             "type": "image",
                             "source": {"type": "base64", "media_type": mime, "data": b64}
@@ -290,7 +290,7 @@ fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
         ContentPart::Document(doc) => {
             if let Some(url) = &doc.url {
                 if common::is_file_path(url) {
-                    return match common::load_file_as_base64(url) {
+                    return match common::load_file_as_base64(url).await {
                         Ok((b64, mime)) => Some(serde_json::json!({
                             "type": "document",
                             "source": {"type": "base64", "media_type": mime, "data": b64}
@@ -318,7 +318,7 @@ fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
 ///
 /// Handles: role mapping, content block translation, strict alternation
 /// (merging consecutive same-role messages), and tool results in user messages.
-fn translate_messages(messages: &[&Message]) -> Vec<ApiMessage> {
+async fn translate_messages(messages: &[&Message]) -> Vec<ApiMessage> {
     let mut api_messages: Vec<ApiMessage> = Vec::new();
 
     for msg in messages {
@@ -330,8 +330,12 @@ fn translate_messages(messages: &[&Message]) -> Vec<ApiMessage> {
             Role::System | Role::Developer => continue,
         };
 
-        let content: Vec<serde_json::Value> =
-            msg.content.iter().filter_map(content_part_to_api).collect();
+        let mut content = Vec::new();
+        for part in &msg.content {
+            if let Some(block) = content_part_to_api(part).await {
+                content.push(block);
+            }
+        }
 
         if content.is_empty() {
             continue;
@@ -1076,13 +1080,13 @@ fn merge_provider_options(
 
 /// Build an Anthropic API request and HTTP request builder for the given
 /// unified request.
-fn build_api_request(
+async fn build_api_request(
     adapter: &Adapter,
     request: &Request,
     stream: bool,
 ) -> (ApiRequest, fabro_http::RequestBuilder) {
     let (system, other_messages) = extract_system_prompt(&request.messages);
-    let mut api_messages = translate_messages(&other_messages);
+    let mut api_messages = translate_messages(&other_messages).await;
 
     let mut omit_tools = false;
     let tool_choice_json = request.tool_choice.as_ref().and_then(|tc| {
@@ -1243,7 +1247,7 @@ impl ProviderAdapter for Adapter {
             return self.complete_via_stream(request).await;
         }
 
-        let (_api_request, req_builder) = build_api_request(self, request, false);
+        let (_api_request, req_builder) = build_api_request(self, request, false).await;
 
         let mut req = req_builder;
         if let Some(t) = self.http.request_timeout {
@@ -1311,7 +1315,7 @@ impl ProviderAdapter for Adapter {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
-        let (_api_request, req_builder) = build_api_request(self, request, true);
+        let (_api_request, req_builder) = build_api_request(self, request, true).await;
 
         let http_resp = req_builder
             .send()
@@ -1706,15 +1710,15 @@ mod tests {
         assert_eq!(arr[0]["cache_control"]["type"], "ephemeral");
     }
 
-    #[test]
-    fn build_api_request_omits_whitespace_only_system_prompt() {
+    #[tokio::test]
+    async fn build_api_request_omits_whitespace_only_system_prompt() {
         let adapter = Adapter::new("test-key");
         let request = Request {
             messages: vec![Message::system("   \n\t"), Message::user("Hello")],
             ..make_base_request()
         };
 
-        let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false).await;
         assert!(
             api_request.system.is_none(),
             "whitespace-only system prompts should be omitted"
@@ -2000,44 +2004,50 @@ mod tests {
         }
     }
 
-    #[test]
-    fn document_url_translates_to_url_source() {
+    #[tokio::test]
+    async fn document_url_translates_to_url_source() {
         let part = ContentPart::Document(DocumentData {
             url:        Some("https://example.com/doc.pdf".to_string()),
             data:       None,
             media_type: None,
             file_name:  None,
         });
-        let result = content_part_to_api(&part).expect("should produce JSON");
+        let result = content_part_to_api(&part)
+            .await
+            .expect("should produce JSON");
         assert_eq!(result["type"], "document");
         assert_eq!(result["source"]["type"], "url");
         assert_eq!(result["source"]["url"], "https://example.com/doc.pdf");
     }
 
-    #[test]
-    fn document_base64_data_translates_to_base64_source() {
+    #[tokio::test]
+    async fn document_base64_data_translates_to_base64_source() {
         let part = ContentPart::Document(DocumentData {
             url:        None,
             data:       Some(vec![0x25, 0x50, 0x44, 0x46]),
             media_type: Some("application/pdf".to_string()),
             file_name:  Some("test.pdf".to_string()),
         });
-        let result = content_part_to_api(&part).expect("should produce JSON");
+        let result = content_part_to_api(&part)
+            .await
+            .expect("should produce JSON");
         assert_eq!(result["type"], "document");
         assert_eq!(result["source"]["type"], "base64");
         assert_eq!(result["source"]["media_type"], "application/pdf");
         assert!(result["source"]["data"].as_str().is_some());
     }
 
-    #[test]
-    fn document_base64_defaults_to_pdf_mime() {
+    #[tokio::test]
+    async fn document_base64_defaults_to_pdf_mime() {
         let part = ContentPart::Document(DocumentData {
             url:        None,
             data:       Some(vec![1, 2, 3]),
             media_type: None,
             file_name:  None,
         });
-        let result = content_part_to_api(&part).expect("should produce JSON");
+        let result = content_part_to_api(&part)
+            .await
+            .expect("should produce JSON");
         assert_eq!(result["source"]["media_type"], "application/pdf");
     }
 
@@ -2148,14 +2158,16 @@ mod tests {
         assert_eq!(body["top_k"], 40);
     }
 
-    #[test]
-    fn audio_produces_text_fallback() {
+    #[tokio::test]
+    async fn audio_produces_text_fallback() {
         let part = ContentPart::Audio(AudioData {
             url:        Some("https://example.com/audio.wav".to_string()),
             data:       None,
             media_type: None,
         });
-        let result = content_part_to_api(&part).expect("should produce JSON");
+        let result = content_part_to_api(&part)
+            .await
+            .expect("should produce JSON");
         assert_eq!(result["type"], "text");
         assert_eq!(
             result["text"],
@@ -2163,51 +2175,51 @@ mod tests {
         );
     }
 
-    #[test]
-    fn build_api_request_maps_reasoning_effort_to_output_config() {
+    #[tokio::test]
+    async fn build_api_request_maps_reasoning_effort_to_output_config() {
         let adapter = Adapter::new("test-key");
         let request = Request {
             reasoning_effort: Some(ReasoningEffort::Medium),
             ..make_base_request()
         };
 
-        let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false).await;
         assert_eq!(
             api_request.output_config,
             Some(serde_json::json!({"effort": "medium"}))
         );
     }
 
-    #[test]
-    fn build_api_request_omits_output_config_when_no_reasoning_effort() {
+    #[tokio::test]
+    async fn build_api_request_omits_output_config_when_no_reasoning_effort() {
         let adapter = Adapter::new("test-key");
         let request = make_base_request();
 
-        let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false).await;
         assert!(api_request.output_config.is_none());
     }
 
-    #[test]
-    fn build_api_request_sets_speed() {
+    #[tokio::test]
+    async fn build_api_request_sets_speed() {
         let adapter = Adapter::new("test-key");
         let request = Request {
             speed: Some("fast".to_string()),
             ..make_base_request()
         };
 
-        let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false).await;
         assert_eq!(api_request.speed, Some("fast".to_string()));
     }
 
-    #[test]
-    fn build_api_request_injects_fast_mode_beta_header() {
+    #[tokio::test]
+    async fn build_api_request_injects_fast_mode_beta_header() {
         let adapter = Adapter::new("test-key");
         let request = Request {
             speed: Some("fast".to_string()),
             ..make_base_request()
         };
 
-        let (_api_request, req_builder) = build_api_request(&adapter, &request, false);
+        let (_api_request, req_builder) = build_api_request(&adapter, &request, false).await;
         let built = req_builder.build().expect("should build request");
         let beta = built
             .headers()
@@ -2244,8 +2256,8 @@ mod tests {
         assert_eq!(effort_to_budget_tokens("max", 16_000), 16_000);
     }
 
-    #[test]
-    fn build_api_request_falls_back_to_thinking_budget_for_non_effort_model() {
+    #[tokio::test]
+    async fn build_api_request_falls_back_to_thinking_budget_for_non_effort_model() {
         let adapter = Adapter::new("test-key");
         let request = Request {
             model: "claude-sonnet-4-5".to_string(),
@@ -2254,7 +2266,7 @@ mod tests {
             ..make_base_request()
         };
 
-        let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false).await;
         assert!(
             api_request.output_config.is_none(),
             "non-effort models must not receive output_config"

@@ -1,8 +1,3 @@
-#![expect(
-    clippy::disallowed_methods,
-    reason = "FOLLOW-UP: rebuild metadata uses sync std::fs::canonicalize during async checkpoint rebuild; per-run, not per-request"
-)]
-
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::PathBuf;
@@ -13,6 +8,7 @@ use fabro_checkpoint::git::Store as GitStore;
 use fabro_store::{Database as DurableStore, RunDatabase as DurableRunStore};
 use fabro_types::{RunId, StageId};
 use git2::{Repository, Signature};
+use tokio::task::spawn_blocking;
 use ulid::Ulid;
 
 use super::rewind::{self, RunTimeline, build_timeline};
@@ -185,7 +181,12 @@ pub async fn find_run_id_by_prefix_or_store(
         return Ok(run_id);
     }
 
-    let current_repo_root = canonical_repo_root(repo)?;
+    let current_repo_root = {
+        let repo_root = repo_root_path(repo);
+        spawn_blocking(move || canonical_repo_root(&repo_root))
+            .await
+            .map_err(|err| anyhow::anyhow!("repo root canonicalize task failed: {err}"))??
+    };
     let mut matches = Vec::new();
     for summary in fabro_store
         .list_runs(&fabro_store::ListRunsQuery::default())
@@ -199,12 +200,15 @@ pub async fn find_run_id_by_prefix_or_store(
             let Some(host_repo_path) = summary.host_repo_path.as_deref() else {
                 continue;
             };
-            let Ok(host_repo) = Repository::discover(host_repo_path) else {
-                continue;
-            };
-            let Ok(host_repo_root) = canonical_repo_root(&host_repo) else {
-                continue;
-            };
+            let host_repo_path = host_repo_path.to_string();
+            let host_repo_root =
+                match spawn_blocking(move || canonical_repo_root_for_path(&host_repo_path)).await {
+                    Ok(Ok(root)) => root,
+                    Ok(Err(_)) => continue,
+                    Err(err) => {
+                        return Err(anyhow::anyhow!("host repo canonicalize task failed: {err}"));
+                    }
+                };
             if host_repo_root == current_repo_root {
                 return Ok(summary.run_id);
             }
@@ -214,12 +218,15 @@ pub async fn find_run_id_by_prefix_or_store(
         let Some(host_repo_path) = summary.host_repo_path.as_deref() else {
             continue;
         };
-        let Ok(host_repo) = Repository::discover(host_repo_path) else {
-            continue;
-        };
-        let Ok(host_repo_root) = canonical_repo_root(&host_repo) else {
-            continue;
-        };
+        let host_repo_path = host_repo_path.to_string();
+        let host_repo_root =
+            match spawn_blocking(move || canonical_repo_root_for_path(&host_repo_path)).await {
+                Ok(Ok(root)) => root,
+                Ok(Err(_)) => continue,
+                Err(err) => {
+                    return Err(anyhow::anyhow!("host repo canonicalize task failed: {err}"));
+                }
+            };
         if host_repo_root == current_repo_root && summary.run_id.to_string().starts_with(prefix) {
             matches.push(summary.run_id);
         }
@@ -312,13 +319,26 @@ fn find_run_id_by_prefix_in_refs(repo: &Repository, prefix: &str) -> Result<Opti
     resolve_prefix_matches(prefix, matches).map(Some)
 }
 
-fn canonical_repo_root(repo: &Repository) -> Result<PathBuf> {
-    let root = repo
-        .workdir()
+fn repo_root_path(repo: &Repository) -> PathBuf {
+    repo.workdir()
         .or_else(|| repo.path().parent())
-        .unwrap_or(repo.path());
+        .unwrap_or(repo.path())
+        .to_path_buf()
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "sync repo-root canonicalize helper; async callers wrap it in spawn_blocking"
+)]
+fn canonical_repo_root(root: &std::path::Path) -> Result<PathBuf> {
     std::fs::canonicalize(root)
         .with_context(|| format!("failed to canonicalize repo root {}", root.display()))
+}
+
+fn canonical_repo_root_for_path(path: &str) -> Result<PathBuf> {
+    let repo = Repository::discover(path)?;
+    let root = repo_root_path(&repo);
+    canonical_repo_root(&root)
 }
 
 fn resolve_prefix_matches(prefix: &str, matches: Vec<RunId>) -> Result<RunId> {

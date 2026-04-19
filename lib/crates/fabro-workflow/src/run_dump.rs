@@ -1,6 +1,6 @@
 #![expect(
     clippy::disallowed_methods,
-    reason = "FOLLOW-UP: run dump writes serialized run contents to disk; invoked from sync CLI command handlers"
+    reason = "sync run dump writer used by CLI export paths; async callers wrap it in spawn_blocking"
 )]
 
 use std::collections::HashMap;

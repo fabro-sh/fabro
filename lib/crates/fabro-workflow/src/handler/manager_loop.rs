@@ -9,6 +9,7 @@ use fabro_graphviz::graph::{AttrValue, Graph, Node};
 use fabro_store::{ArtifactStore, Database};
 use fabro_types::settings::SettingsLayer;
 use object_store::memory::InMemory;
+use tokio::fs;
 use tokio::time::{sleep, timeout};
 
 use super::{EngineServices, Handler};
@@ -195,7 +196,7 @@ impl Handler for SubWorkflowHandler {
         // Build child RunOptions
         let visit = visit_from_context(context) as u64;
         let child_logs = run_dir.join(format!("stages/{}@{visit}/child", node.id));
-        let _ = std::fs::create_dir_all(&child_logs);
+        let _ = fs::create_dir_all(&child_logs).await;
 
         let cancel_token = Arc::new(AtomicBool::new(false));
         let child_cancel = Arc::clone(&cancel_token);

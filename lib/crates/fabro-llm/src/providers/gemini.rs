@@ -213,7 +213,7 @@ fn build_tool_call_id_to_name(messages: &[&Message]) -> std::collections::HashMa
 }
 
 /// Translate unified messages to Gemini content format.
-fn translate_messages(messages: &[&Message]) -> Vec<Content> {
+async fn translate_messages(messages: &[&Message]) -> Vec<Content> {
     let id_to_name = build_tool_call_id_to_name(messages);
     let mut contents: Vec<Content> = Vec::new();
 
@@ -224,10 +224,9 @@ fn translate_messages(messages: &[&Message]) -> Vec<Content> {
             Role::System | Role::Developer => continue,
         };
 
-        let parts: Vec<serde_json::Value> = msg
-            .content
-            .iter()
-            .filter_map(|part| match part {
+        let mut parts = Vec::new();
+        for part in &msg.content {
+            let maybe_part = match part {
                 ContentPart::Text(text) => Some(serde_json::json!({"text": text})),
                 ContentPart::ToolCall(tc) => {
                     let mut part_json = serde_json::json!({
@@ -246,72 +245,72 @@ fn translate_messages(messages: &[&Message]) -> Vec<Content> {
                     }
                     Some(part_json)
                 }
-                ContentPart::Image(img) => {
-                    img.url.as_ref().map_or_else(
-                        || {
-                            img.data.as_ref().map(|data| {
-                                let mime = img.media_type.as_deref().unwrap_or("image/png");
-                                let b64 = BASE64_STANDARD.encode(data);
-                                serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
-                            })
-                        },
-                        |url| {
-                            if common::is_file_path(url) {
-                                match common::load_file_as_base64(url) {
-                                    Ok((b64, mime)) => Some(serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})),
-                                    Err(_) => None,
-                                }
-                            } else {
-                                let mime = img.media_type.as_deref().unwrap_or("image/png");
-                                Some(serde_json::json!({"fileData": {"mimeType": mime, "fileUri": url}}))
+                ContentPart::Image(img) => match &img.url {
+                    Some(url) => {
+                        if common::is_file_path(url) {
+                            match common::load_file_as_base64(url).await {
+                                Ok((b64, mime)) => Some(serde_json::json!({
+                                    "inlineData": {"mimeType": mime, "data": b64}
+                                })),
+                                Err(_) => None,
                             }
-                        },
-                    )
-                }
-                ContentPart::Audio(audio) => {
-                    audio.url.as_ref().map_or_else(
-                        || {
-                            audio.data.as_ref().map(|data| {
-                                let mime = audio.media_type.as_deref().unwrap_or("audio/wav");
-                                let b64 = BASE64_STANDARD.encode(data);
-                                serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
-                            })
-                        },
-                        |url| {
-                            if common::is_file_path(url) {
-                                match common::load_file_as_base64(url) {
-                                    Ok((b64, mime)) => Some(serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})),
-                                    Err(_) => None,
-                                }
-                            } else {
-                                let mime = audio.media_type.as_deref().unwrap_or("audio/wav");
-                                Some(serde_json::json!({"fileData": {"mimeType": mime, "fileUri": url}}))
+                        } else {
+                            let mime = img.media_type.as_deref().unwrap_or("image/png");
+                            Some(serde_json::json!({
+                                "fileData": {"mimeType": mime, "fileUri": url}
+                            }))
+                        }
+                    }
+                    None => img.data.as_ref().map(|data| {
+                        let mime = img.media_type.as_deref().unwrap_or("image/png");
+                        let b64 = BASE64_STANDARD.encode(data);
+                        serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
+                    }),
+                },
+                ContentPart::Audio(audio) => match &audio.url {
+                    Some(url) => {
+                        if common::is_file_path(url) {
+                            match common::load_file_as_base64(url).await {
+                                Ok((b64, mime)) => Some(serde_json::json!({
+                                    "inlineData": {"mimeType": mime, "data": b64}
+                                })),
+                                Err(_) => None,
                             }
-                        },
-                    )
-                }
-                ContentPart::Document(doc) => {
-                    doc.url.as_ref().map_or_else(
-                        || {
-                            doc.data.as_ref().map(|data| {
-                                let mime = doc.media_type.as_deref().unwrap_or("application/pdf");
-                                let b64 = BASE64_STANDARD.encode(data);
-                                serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
-                            })
-                        },
-                        |url| {
-                            if common::is_file_path(url) {
-                                match common::load_file_as_base64(url) {
-                                    Ok((b64, mime)) => Some(serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})),
-                                    Err(_) => None,
-                                }
-                            } else {
-                                let mime = doc.media_type.as_deref().unwrap_or("application/pdf");
-                                Some(serde_json::json!({"fileData": {"mimeType": mime, "fileUri": url}}))
+                        } else {
+                            let mime = audio.media_type.as_deref().unwrap_or("audio/wav");
+                            Some(serde_json::json!({
+                                "fileData": {"mimeType": mime, "fileUri": url}
+                            }))
+                        }
+                    }
+                    None => audio.data.as_ref().map(|data| {
+                        let mime = audio.media_type.as_deref().unwrap_or("audio/wav");
+                        let b64 = BASE64_STANDARD.encode(data);
+                        serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
+                    }),
+                },
+                ContentPart::Document(doc) => match &doc.url {
+                    Some(url) => {
+                        if common::is_file_path(url) {
+                            match common::load_file_as_base64(url).await {
+                                Ok((b64, mime)) => Some(serde_json::json!({
+                                    "inlineData": {"mimeType": mime, "data": b64}
+                                })),
+                                Err(_) => None,
                             }
-                        },
-                    )
-                }
+                        } else {
+                            let mime = doc.media_type.as_deref().unwrap_or("application/pdf");
+                            Some(serde_json::json!({
+                                "fileData": {"mimeType": mime, "fileUri": url}
+                            }))
+                        }
+                    }
+                    None => doc.data.as_ref().map(|data| {
+                        let mime = doc.media_type.as_deref().unwrap_or("application/pdf");
+                        let b64 = BASE64_STANDARD.encode(data);
+                        serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
+                    }),
+                },
                 ContentPart::ToolResult(tr) => {
                     // Gemini's functionResponse uses the function *name*, not the call ID.
                     // Look up the original function name from the tool call mapping.
@@ -337,8 +336,11 @@ fn translate_messages(messages: &[&Message]) -> Vec<Content> {
                     }))
                 }
                 _ => None,
-            })
-            .collect();
+            };
+            if let Some(part_json) = maybe_part {
+                parts.push(part_json);
+            }
+        }
 
         if parts.is_empty() {
             continue;
@@ -408,14 +410,14 @@ fn translate_response_format(
 ///
 /// Returns a `serde_json::Value` so that `provider_options.gemini` fields can
 /// be merged into the request before sending.
-fn build_api_request(request: &Request) -> serde_json::Value {
+async fn build_api_request(request: &Request) -> serde_json::Value {
     let (system_text, other_messages) = extract_system_prompt(&request.messages);
 
     let system_instruction = system_text.map(|text| SystemInstruction {
         parts: vec![serde_json::json!({"text": text})],
     });
 
-    let contents = translate_messages(&other_messages);
+    let contents = translate_messages(&other_messages).await;
 
     let (response_mime_type, response_schema) = request
         .response_format
@@ -895,7 +897,7 @@ impl ProviderAdapter for Adapter {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
-        let api_body = build_api_request(request);
+        let api_body = build_api_request(request).await;
 
         let url = format!(
             "{}/models/{}:generateContent",
@@ -965,7 +967,7 @@ impl ProviderAdapter for Adapter {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
-        let api_body = build_api_request(request);
+        let api_body = build_api_request(request).await;
 
         let url = format!(
             "{}/models/{}:streamGenerateContent?alt=sse",
@@ -1016,16 +1018,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn provider_options_none_produces_standard_body() {
+    #[tokio::test]
+    async fn provider_options_none_produces_standard_body() {
         let request = minimal_request();
-        let body = build_api_request(&request);
+        let body = build_api_request(&request).await;
         assert!(body.get("safetySettings").is_none());
         assert!(body.get("cachedContent").is_none());
     }
 
-    #[test]
-    fn provider_options_gemini_safety_settings_merged() {
+    #[tokio::test]
+    async fn provider_options_gemini_safety_settings_merged() {
         let mut request = minimal_request();
         request.provider_options = Some(serde_json::json!({
             "gemini": {
@@ -1035,7 +1037,7 @@ mod tests {
             }
         }));
 
-        let body = build_api_request(&request);
+        let body = build_api_request(&request).await;
         let safety = body
             .get("safetySettings")
             .expect("safetySettings should be present");
@@ -1044,8 +1046,8 @@ mod tests {
         assert_eq!(arr[0]["category"], "HARM_CATEGORY_HARASSMENT");
     }
 
-    #[test]
-    fn provider_options_gemini_cached_content_merged() {
+    #[tokio::test]
+    async fn provider_options_gemini_cached_content_merged() {
         let mut request = minimal_request();
         request.provider_options = Some(serde_json::json!({
             "gemini": {
@@ -1053,7 +1055,7 @@ mod tests {
             }
         }));
 
-        let body = build_api_request(&request);
+        let body = build_api_request(&request).await;
         assert_eq!(
             body.get("cachedContent")
                 .and_then(serde_json::Value::as_str),
@@ -1061,8 +1063,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn provider_options_gemini_multiple_fields_merged() {
+    #[tokio::test]
+    async fn provider_options_gemini_multiple_fields_merged() {
         let mut request = minimal_request();
         request.provider_options = Some(serde_json::json!({
             "gemini": {
@@ -1072,7 +1074,7 @@ mod tests {
             }
         }));
 
-        let body = build_api_request(&request);
+        let body = build_api_request(&request).await;
         assert!(body.get("safetySettings").is_some());
         assert_eq!(
             body.get("cachedContent")
@@ -1085,8 +1087,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn provider_options_other_provider_ignored() {
+    #[tokio::test]
+    async fn provider_options_other_provider_ignored() {
         let mut request = minimal_request();
         request.provider_options = Some(serde_json::json!({
             "anthropic": {
@@ -1094,12 +1096,12 @@ mod tests {
             }
         }));
 
-        let body = build_api_request(&request);
+        let body = build_api_request(&request).await;
         assert!(body.get("auto_cache").is_none());
     }
 
-    #[test]
-    fn provider_options_gemini_preserves_standard_fields() {
+    #[tokio::test]
+    async fn provider_options_gemini_preserves_standard_fields() {
         let mut request = minimal_request();
         request.temperature = Some(0.5);
         request.max_tokens = Some(100);
@@ -1109,7 +1111,7 @@ mod tests {
             }
         }));
 
-        let body = build_api_request(&request);
+        let body = build_api_request(&request).await;
         let gen_config = body
             .get("generationConfig")
             .expect("generationConfig should exist");
@@ -1141,8 +1143,8 @@ mod tests {
         assert!(body.get("contents").is_some());
     }
 
-    #[test]
-    fn audio_url_translates_to_file_data() {
+    #[tokio::test]
+    async fn audio_url_translates_to_file_data() {
         let msg = Message {
             role:         Role::User,
             content:      vec![ContentPart::Audio(AudioData {
@@ -1153,15 +1155,15 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let contents = translate_messages(&[&msg]);
+        let contents = translate_messages(&[&msg]).await;
         assert_eq!(contents.len(), 1);
         let part = &contents[0].parts[0];
         assert_eq!(part["fileData"]["mimeType"], "audio/wav");
         assert_eq!(part["fileData"]["fileUri"], "https://example.com/audio.wav");
     }
 
-    #[test]
-    fn audio_base64_translates_to_inline_data() {
+    #[tokio::test]
+    async fn audio_base64_translates_to_inline_data() {
         let msg = Message {
             role:         Role::User,
             content:      vec![ContentPart::Audio(AudioData {
@@ -1172,14 +1174,14 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let contents = translate_messages(&[&msg]);
+        let contents = translate_messages(&[&msg]).await;
         let part = &contents[0].parts[0];
         assert_eq!(part["inlineData"]["mimeType"], "audio/wav");
         assert!(part["inlineData"]["data"].as_str().is_some());
     }
 
-    #[test]
-    fn document_url_translates_to_file_data() {
+    #[tokio::test]
+    async fn document_url_translates_to_file_data() {
         let msg = Message {
             role:         Role::User,
             content:      vec![ContentPart::Document(DocumentData {
@@ -1191,14 +1193,14 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let contents = translate_messages(&[&msg]);
+        let contents = translate_messages(&[&msg]).await;
         let part = &contents[0].parts[0];
         assert_eq!(part["fileData"]["mimeType"], "application/pdf");
         assert_eq!(part["fileData"]["fileUri"], "https://example.com/doc.pdf");
     }
 
-    #[test]
-    fn document_base64_translates_to_inline_data() {
+    #[tokio::test]
+    async fn document_base64_translates_to_inline_data() {
         let msg = Message {
             role:         Role::User,
             content:      vec![ContentPart::Document(DocumentData {
@@ -1210,7 +1212,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let contents = translate_messages(&[&msg]);
+        let contents = translate_messages(&[&msg]).await;
         let part = &contents[0].parts[0];
         assert_eq!(part["inlineData"]["mimeType"], "application/pdf");
         assert!(part["inlineData"]["data"].as_str().is_some());
@@ -1372,8 +1374,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn translate_messages_function_call_includes_thought_signature() {
+    #[tokio::test]
+    async fn translate_messages_function_call_includes_thought_signature() {
         let mut tc = ToolCall::new(
             "call-1",
             "get_weather",
@@ -1387,7 +1389,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let contents = translate_messages(&[&msg]);
+        let contents = translate_messages(&[&msg]).await;
         assert_eq!(contents.len(), 1);
 
         let part = &contents[0].parts[0];
@@ -1395,8 +1397,8 @@ mod tests {
         assert_eq!(part["thoughtSignature"], "sig456");
     }
 
-    #[test]
-    fn translate_messages_function_call_without_thought_signature() {
+    #[tokio::test]
+    async fn translate_messages_function_call_without_thought_signature() {
         let tc = ToolCall::new(
             "call-1",
             "get_weather",
@@ -1409,7 +1411,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let contents = translate_messages(&[&msg]);
+        let contents = translate_messages(&[&msg]).await;
         assert_eq!(contents.len(), 1);
 
         let part = &contents[0].parts[0];
