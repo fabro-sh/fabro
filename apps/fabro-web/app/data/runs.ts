@@ -16,12 +16,14 @@ export interface RunItem {
   repo: string;
   title: string;
   workflow: string;
+  column?: ColumnStatus;
+  lifecycleStatus?: string | null;
+  lifecycleStatusLabel?: string;
   number?: number;
   additions?: number;
   deletions?: number;
   checks?: CheckRun[];
   elapsed?: string;
-  elapsedWarning?: boolean;
   resources?: string;
   actionDisabled?: boolean;
   comments?: number;
@@ -44,12 +46,19 @@ export interface RunWithStatus extends RunItem {
   statusLabel: string;
 }
 
+function displayRunTitle(title: string | null | undefined): string {
+  return title?.trim() ? title : "Untitled run";
+}
+
 export function mapRunListItem(item: RunListItem): RunItem {
   return {
     id: item.run_id,
     repo: item.repository.name,
-    title: item.title,
+    title: displayRunTitle(item.title),
     workflow: item.workflow_slug ?? item.workflow_name ?? "unknown",
+    column: item.column,
+    lifecycleStatus: item.status,
+    lifecycleStatusLabel: lifecycleStatusLabel(item.status),
     number: item.pull_request?.number,
     additions: item.pull_request?.additions,
     deletions: item.pull_request?.deletions,
@@ -72,8 +81,10 @@ export function mapRunSummaryToRunItem(summary: RunSummaryResponse): RunItem {
   return {
     id: summary.run_id,
     repo: summary.repository.name,
-    title: summary.title,
+    title: displayRunTitle(summary.title),
     workflow: summary.workflow_slug ?? summary.workflow_name ?? "unknown",
+    lifecycleStatus: summary.status,
+    lifecycleStatusLabel: lifecycleStatusLabel(summary.status),
     elapsed:
       summary.elapsed_secs != null
         ? formatElapsedSecs(summary.elapsed_secs)
@@ -83,7 +94,7 @@ export function mapRunSummaryToRunItem(summary: RunSummaryResponse): RunItem {
   };
 }
 
-export function columnForStatus(status: string | null | undefined): ColumnStatus {
+export function columnForStatus(status: string | null | undefined): ColumnStatus | null {
   switch (status) {
     case "submitted":
     case "starting":
@@ -96,9 +107,10 @@ export function columnForStatus(status: string | null | undefined): ColumnStatus
       return "succeeded";
     case "failed":
     case "dead":
+      return "failed";
     case "removing":
     default:
-      return "failed";
+      return null;
   }
 }
 
@@ -141,6 +153,11 @@ const knownRunStatuses = new Set<string>(Object.keys(runStatusDisplay));
 
 export function isRunStatus(s: string): s is RunStatus {
   return knownRunStatuses.has(s);
+}
+
+function lifecycleStatusLabel(status: string | null | undefined): string | undefined {
+  if (!status) return undefined;
+  return isRunStatus(status) ? runStatusDisplay[status].label : status;
 }
 
 /** Graph control nodes hidden from stage lists in the UI. */

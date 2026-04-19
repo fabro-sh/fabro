@@ -2629,6 +2629,50 @@ fn summary_to_api_run_summary(summary: fabro_store::RunSummary) -> serde_json::V
     })
 }
 
+async fn board_run_metadata(
+    state: &AppState,
+    run_id: RunId,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut metadata = serde_json::Map::new();
+    let Ok(run_store) = state.store.open_run_reader(&run_id).await else {
+        return metadata;
+    };
+    let Ok(run_state) = run_store.state().await else {
+        return metadata;
+    };
+
+    if let Some(pull_request) = run_state.pull_request {
+        metadata.insert(
+            "pull_request".to_string(),
+            serde_json::json!({
+                "number": pull_request.number,
+            }),
+        );
+    }
+
+    if let Some(sandbox) = run_state.sandbox {
+        if let Some(identifier) = sandbox.identifier {
+            metadata.insert(
+                "sandbox".to_string(),
+                serde_json::json!({
+                    "id": identifier,
+                }),
+            );
+        }
+    }
+
+    if let Some(question) = run_state.pending_interviews.values().next() {
+        metadata.insert(
+            "question".to_string(),
+            serde_json::json!({
+                "text": question.question.text,
+            }),
+        );
+    }
+
+    metadata
+}
+
 fn paginate_items<T>(items: Vec<T>, pagination: PaginationParams) -> (Vec<T>, bool) {
     let limit = pagination.limit.clamp(1, 100) as usize;
     let offset = pagination.offset as usize;
@@ -2654,16 +2698,22 @@ async fn list_board_runs(
                 .into_response();
         }
     };
-    let all_items: Vec<serde_json::Value> = summaries
-        .into_iter()
-        .filter_map(|summary| {
-            let status = summary.status?;
-            let column = board_column(status)?;
-            let mut item = summary_to_api_run_summary(summary);
-            item["column"] = serde_json::json!(column);
-            Some(item)
-        })
-        .collect();
+    let mut all_items = Vec::new();
+    for summary in summaries {
+        let Some(status) = summary.status else {
+            continue;
+        };
+        let Some(column) = board_column(status) else {
+            continue;
+        };
+        let run_id = summary.run_id;
+        let mut item = summary_to_api_run_summary(summary);
+        item["column"] = serde_json::json!(column);
+        if let Some(object) = item.as_object_mut() {
+            object.extend(board_run_metadata(state.as_ref(), run_id).await);
+        }
+        all_items.push(item);
+    }
     let (data, has_more) = paginate_items(all_items, pagination);
     (
         StatusCode::OK,
@@ -4619,7 +4669,7 @@ async fn get_run_status(
         .await
     {
         Ok(runs) => match runs.into_iter().find(|run| run.run_id == id) {
-            Some(run) => (StatusCode::OK, Json(run)).into_response(),
+            Some(run) => (StatusCode::OK, Json(summary_to_api_run_summary(run))).into_response(),
             None => ApiError::not_found("Run not found.").into_response(),
         },
         Err(err) => {
@@ -7375,6 +7425,11 @@ slug = "fabro"
 
         let body = body_json(response.into_body()).await;
         assert_eq!(body["run_id"].as_str().unwrap(), run_id);
+        assert_eq!(body["goal"].as_str().unwrap(), "Test");
+        assert_eq!(body["title"].as_str().unwrap(), "Test");
+        assert!(body["repository"].is_object());
+        assert!(!body["repository"]["name"].as_str().unwrap().is_empty());
+        assert!(body["created_at"].is_string());
         assert!(body["labels"].is_object());
     }
 
@@ -9348,6 +9403,69 @@ timeout = "30s"
                 .iter()
                 .any(|c| c["id"].as_str() == Some("succeeded"))
         );
+    }
+
+    #[tokio::test]
+    async fn boards_runs_includes_live_board_metadata_from_run_state() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = create_and_start_run(&app, MINIMAL_DOT)
+            .await
+            .parse::<RunId>()
+            .unwrap();
+        let run_store = state.store.open_run(&run_id).await.unwrap();
+        for event in [
+            workflow_event::Event::RunRunning { reason: None },
+            workflow_event::Event::SandboxInitialized {
+                provider:               "local".to_string(),
+                working_directory:      "/sandbox/workdir".to_string(),
+                identifier:             Some("sb-test".to_string()),
+                host_working_directory: Some("/tmp/repo".to_string()),
+                container_mount_point:  None,
+            },
+            workflow_event::Event::PullRequestCreated {
+                pr_url:      "https://github.com/acme/repo/pull/42".to_string(),
+                pr_number:   42,
+                owner:       "acme".to_string(),
+                repo:        "repo".to_string(),
+                base_branch: "main".to_string(),
+                head_branch: "fabro/run".to_string(),
+                title:       "Fix board metadata".to_string(),
+                draft:       false,
+            },
+            workflow_event::Event::InterviewStarted {
+                question_id:     "q-1".to_string(),
+                question:        "Ship it?".to_string(),
+                stage:           "review".to_string(),
+                question_type:   "yes_no".to_string(),
+                options:         vec![],
+                allow_freeform:  false,
+                timeout_seconds: None,
+                context_display: None,
+            },
+        ] {
+            workflow_event::append_event(&run_store, &run_id, &event)
+                .await
+                .unwrap();
+        }
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/boards/runs"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        let data = body["data"].as_array().expect("data should be array");
+        let item = data
+            .iter()
+            .find(|i| i["run_id"].as_str() == Some(&run_id.to_string()))
+            .expect("run should be in board");
+
+        assert_eq!(item["pull_request"]["number"].as_u64(), Some(42));
+        assert_eq!(item["sandbox"]["id"].as_str(), Some("sb-test"));
+        assert_eq!(item["question"]["text"].as_str(), Some("Ship it?"));
     }
 
     #[test]

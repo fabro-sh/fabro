@@ -3060,7 +3060,9 @@ components:
         status:
           type: ["string", "null"]
         status_reason:
-          type: ["string", "null"]
+          oneOf:
+            - $ref: "#/components/schemas/StatusReason"
+            - type: "null"
         pending_control:
           oneOf:
             - $ref: "#/components/schemas/RunControlAction"

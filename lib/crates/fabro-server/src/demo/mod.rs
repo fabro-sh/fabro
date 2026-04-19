@@ -669,6 +669,13 @@ mod runs {
         total_usd_micros: Option<i64>,
         entries: &[(&str, &str)],
     ) -> StoreRunSummary {
+        let status_reason = match status_reason {
+            Some("completed") => Some(StatusReason::Completed),
+            Some("workflow_error") => Some(StatusReason::WorkflowError),
+            Some(other) => panic!("unsupported demo status_reason: {other}"),
+            None => None,
+        };
+
         StoreRunSummary {
             created_at: ts(created_at),
             duration_ms: elapsed_secs.map(|secs| (secs * 1000.0).round() as i64),
@@ -683,7 +690,7 @@ mod runs {
             run_id: run_id.into(),
             start_time: Some(ts(created_at)),
             status: status.map(str::to_string),
-            status_reason: status_reason.map(str::to_string),
+            status_reason,
             title: goal.into(),
             total_usd_micros,
             workflow_name: Some(workflow_name.into()),
@@ -707,11 +714,6 @@ mod runs {
         sandbox: Option<RunSandbox>,
         question: Option<RunQuestion>,
     ) -> RunListItem {
-        let status_reason = summary
-            .status_reason
-            .as_deref()
-            .and_then(|reason| StatusReason::try_from(reason).ok());
-
         RunListItem {
             column,
             created_at: summary.created_at,
@@ -728,7 +730,7 @@ mod runs {
             sandbox,
             start_time: summary.start_time,
             status: summary.status.unwrap_or_default(),
-            status_reason,
+            status_reason: summary.status_reason,
             title: summary.title,
             total_usd_micros: summary.total_usd_micros,
             workflow_name: summary.workflow_name,

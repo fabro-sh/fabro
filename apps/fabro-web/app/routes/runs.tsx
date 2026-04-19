@@ -18,9 +18,9 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ciConfig, statusColors, deriveCiStatus, mapRunListItem } from "../data/runs";
+import { ciConfig, columnNames, statusColors, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
-import { apiJson } from "../api";
+import { apiPaginatedJson } from "../api";
 import type { PaginatedBoardRunList } from "@qltysh/fabro-api-client";
 
 export function meta({}: any) {
@@ -51,7 +51,10 @@ interface BoardRunsResponse {
 }
 
 export async function loader({ request }: any) {
-  const response = await apiJson<BoardRunsResponse>("/boards/runs", { request });
+  const response = await apiPaginatedJson<
+    PaginatedBoardRunList["data"][number],
+    { columns: BoardRunsResponse["columns"] }
+  >("/boards/runs", { request });
   const apiRuns = response.data;
 
   const grouped = new Map<string, RunItem[]>();
@@ -72,6 +75,21 @@ export async function loader({ request }: any) {
   }));
 
   return { columns };
+}
+
+function boardLifecycleStatusLabel(run: Pick<RunItem, "column" | "lifecycleStatusLabel">): string | null {
+  if (run.lifecycleStatusLabel == null) return null;
+  if (run.column != null && columnNames[run.column] === run.lifecycleStatusLabel) {
+    return null;
+  }
+  return run.lifecycleStatusLabel;
+}
+
+function listLifecycleStatusLabel(run: Pick<RunWithStatus, "statusLabel" | "lifecycleStatusLabel">): string | null {
+  if (run.lifecycleStatusLabel == null || run.lifecycleStatusLabel === run.statusLabel) {
+    return null;
+  }
+  return run.lifecycleStatusLabel;
 }
 
 
@@ -251,6 +269,8 @@ function PrCard({
   iconColor: string;
   actions?: string[];
 }) {
+  const lifecycleLabel = boardLifecycleStatusLabel(pr);
+
   return (
     <Link to={`/runs/${pr.id}`} className="group block rounded-md border border-line bg-panel/80 p-4 transition-all duration-200 hover:border-line-strong hover:bg-panel hover:shadow-lg hover:shadow-black/20">
       <div className="mb-2 flex items-center gap-1.5">
@@ -261,6 +281,11 @@ function PrCard({
         {pr.number != null && (
           <span className="font-mono text-xs text-fg-muted">
             #{pr.number}
+          </span>
+        )}
+        {lifecycleLabel != null && (
+          <span className="rounded-full border border-line px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-fg-muted">
+            {lifecycleLabel}
           </span>
         )}
       </div>
@@ -291,7 +316,7 @@ function PrCard({
             </span>
           )}
           {pr.elapsed != null && (
-            <span className={`ml-auto font-mono ${pr.elapsedWarning ? "text-amber" : "text-fg-muted"}`}>{pr.elapsed}</span>
+            <span className="ml-auto font-mono text-fg-muted">{pr.elapsed}</span>
           )}
         </div>
       )}
@@ -437,15 +462,22 @@ function BoardColumn({ column }: { column: Column }) {
 type ViewMode = "columns" | "list";
 
 function RunRow({ run }: { run: RunWithStatus }) {
+  const lifecycleLabel = listLifecycleStatusLabel(run);
+
   return (
     <Link to={`/runs/${run.id}`} className="grid items-center rounded-md border border-line bg-panel/80 px-4 py-3 transition-all duration-200 hover:border-line-strong hover:bg-panel" style={{ gridColumn: "1 / -1", gridTemplateColumns: "subgrid" }}>
-      <span className={`font-mono text-xs pr-2 ${run.elapsedWarning ? "text-amber" : "text-fg-muted"}`}>
+      <span className="font-mono text-xs pr-2 text-fg-muted">
         {run.elapsed}
       </span>
 
       <span className="flex items-center gap-2 min-w-0">
         <span className="font-mono text-xs font-medium text-teal-500">{run.repo}</span>
         <span className="truncate text-sm text-fg-2">{run.title}</span>
+        {lifecycleLabel != null && (
+          <span className="rounded-full border border-line px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-fg-muted">
+            {lifecycleLabel}
+          </span>
+        )}
         {run.comments != null && run.comments > 0 && (
           <span className="inline-flex shrink-0 items-center gap-1 font-mono text-xs text-fg-muted">
             <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
@@ -683,6 +715,7 @@ export default function Runs({ loaderData }: any) {
         (!query ||
           item.title.toLowerCase().includes(lowerQuery) ||
           item.repo.toLowerCase().includes(lowerQuery) ||
+          item.lifecycleStatusLabel?.toLowerCase().includes(lowerQuery) ||
           (item.number != null && `#${item.number}`.includes(lowerQuery))),
     ),
   }));

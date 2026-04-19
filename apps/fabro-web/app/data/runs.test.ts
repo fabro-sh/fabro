@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mapRunListItem, mapRunSummaryToRunItem } from "./runs";
+import { columnForStatus, mapRunListItem, mapRunSummaryToRunItem } from "./runs";
 
 describe("mapRunListItem", () => {
   test("trusts shared server fields for board items", () => {
@@ -11,7 +11,7 @@ describe("mapRunListItem", () => {
       workflow_name: "Fix Build",
       host_repo_path: "/home/user/myrepo",
       repository: { name: "myrepo" },
-      status: "running",
+      status: "paused",
       labels: {},
       column: "running",
       elapsed_secs: 65,
@@ -28,6 +28,32 @@ describe("mapRunListItem", () => {
     expect(item.workflow).toBe("fix_build");
     expect(item.repo).toBe("myrepo");
     expect(item.elapsed).toBeDefined();
+    expect(item.column).toBe("running");
+    expect(item.lifecycleStatus).toBe("paused");
+  });
+
+  test("uses a fallback title when the server title is blank", () => {
+    const summary = {
+      run_id: "01EMPTY",
+      goal: "",
+      title: "",
+      workflow_slug: "fix_build",
+      workflow_name: "Fix Build",
+      host_repo_path: "/home/user/myrepo",
+      repository: { name: "myrepo" },
+      status: "running",
+      labels: {},
+      column: "running",
+      elapsed_secs: null,
+      duration_ms: null,
+      total_usd_micros: null,
+      created_at: "2026-04-08T12:00:00Z",
+      start_time: null,
+      status_reason: null,
+      pending_control: null,
+    } as const;
+
+    expect(mapRunListItem(summary).title).toBe("Untitled run");
   });
 });
 
@@ -57,6 +83,7 @@ describe("mapRunSummaryToRunItem", () => {
     expect(item.workflow).toBe("fix_build");
     expect(item.repo).toBe("myrepo");
     expect(item.elapsed).toBeDefined();
+    expect(item.lifecycleStatus).toBe("running");
   });
 
   test("handles missing optional fields", () => {
@@ -80,8 +107,14 @@ describe("mapRunSummaryToRunItem", () => {
     };
     const item = mapRunSummaryToRunItem(summary);
     expect(item.id).toBe("01DEF");
-    expect(item.title).toBe("");
+    expect(item.title).toBe("Untitled run");
     expect(item.workflow).toBe("unknown");
     expect(item.repo).toBe("unknown");
+  });
+});
+
+describe("columnForStatus", () => {
+  test("returns null for lifecycle states that do not map to a board column", () => {
+    expect(columnForStatus("removing")).toBeNull();
   });
 });
