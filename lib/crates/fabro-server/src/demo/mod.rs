@@ -862,7 +862,7 @@ mod runs {
                 "implement",
                 "Implement",
                 "Add pipeline event types",
-                "paused",
+                "blocked",
                 "2026-03-04T10:00:00Z",
                 Some(1680.0),
                 None,
