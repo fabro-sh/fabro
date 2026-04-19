@@ -1026,6 +1026,18 @@ pub(crate) fn compact_git_inspect(output: &Output) -> Value {
 }
 
 fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> GitRunSetup {
+    let t0 = std::time::Instant::now();
+    let mut last = t0;
+    let mut phase = |label: &str| {
+        let now = std::time::Instant::now();
+        eprintln!(
+            "[setup_git_backed_run] {label}: +{:.0}ms (total {:.0}ms)",
+            (now - last).as_secs_f64() * 1000.0,
+            (now - t0).as_secs_f64() * 1000.0,
+        );
+        last = now;
+    };
+
     let repo_dir = context.temp_dir.join(match workflow {
         GitWorkflowKind::Changed => "git-changed",
         GitWorkflowKind::Noop => "git-noop",
@@ -1036,6 +1048,7 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
     git_success(&repo_dir, &["init", "-q"]);
     git_success(&repo_dir, &["config", "user.name", "Fabro Test"]);
     git_success(&repo_dir, &["config", "user.email", "test@example.com"]);
+    phase("git init + config");
 
     write_text_file(&repo_dir.join("story.txt"), "line 1\n");
     write_text_file(&repo_dir.join("flow.fabro"), match workflow {
@@ -1067,6 +1080,7 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
     let base_sha = git_stdout(&repo_dir, &["rev-parse", "HEAD"])
         .trim()
         .to_string();
+    phase("seed repo + initial commit");
     let run_id = unique_run_id();
 
     let mut cmd = context.run_cmd();
@@ -1083,6 +1097,7 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
         "flow.fabro",
     ]);
     let output = cmd.output().expect("command should execute");
+    phase("fabro run (full workflow execution)");
     if !output.status.success() {
         panic!(
             "command failed: fabro run --sandbox local --no-retro --provider openai flow.fabro\nstdout:\n{}\nstderr:\n{}",
@@ -1131,6 +1146,7 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
             );
         }
     }
+    phase("post-run state assertions");
 
     GitRunSetup {
         run,
