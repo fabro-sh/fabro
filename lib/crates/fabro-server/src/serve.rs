@@ -351,7 +351,7 @@ where
         (auth_mode, max_concurrent_runs)
     };
     let web_enabled = router_web_enabled(&resolved_server_settings);
-    let github_meta_resolver = GitHubMetaResolver::from_home()?;
+    let github_meta_resolver = GitHubMetaResolver::from_cache_dir(&storage.cache_dir())?;
 
     let (object_store, slatedb_prefix, flush_interval, disk_cache) =
         build_slatedb_store(&resolved_server_settings)?;

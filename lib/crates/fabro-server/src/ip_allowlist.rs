@@ -10,7 +10,6 @@ use axum::response::{IntoResponse, Response};
 use fabro_types::settings::server::{
     IpAllowEntry, ServerIpAllowlistOverrideSettings, ServerIpAllowlistSettings,
 };
-use fabro_util::Home;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -61,11 +60,11 @@ impl GitHubMetaResolver {
         }
     }
 
-    pub fn from_home() -> Result<Self> {
+    pub fn from_cache_dir(cache_dir: &Path) -> Result<Self> {
         Ok(Self::new(
             fabro_http::http_client().context("building GitHub meta HTTP client")?,
             GITHUB_META_URL.to_string(),
-            github_meta_cache_path(Home::from_env().root()),
+            github_meta_cache_path(cache_dir),
         ))
     }
 
@@ -315,8 +314,8 @@ fn normalize_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
-pub fn github_meta_cache_path(home: &Path) -> PathBuf {
-    home.join("cache/github-meta-hooks.json")
+pub fn github_meta_cache_path(cache_dir: &Path) -> PathBuf {
+    cache_dir.join("github-meta-hooks.json")
 }
 
 #[cfg(test)]
@@ -406,6 +405,17 @@ mod tests {
         let allowlist = IpAllowlist::new(vec!["10.0.0.0/8".parse().unwrap()]);
 
         assert!(allowlist.contains(&"::ffff:10.1.2.3".parse().unwrap()));
+    }
+
+    #[test]
+    fn github_meta_resolver_uses_storage_cache_dir() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let resolver = GitHubMetaResolver::from_cache_dir(cache_dir.path()).unwrap();
+
+        assert_eq!(
+            resolver.cache_path,
+            cache_dir.path().join("github-meta-hooks.json")
+        );
     }
 
     #[tokio::test]
