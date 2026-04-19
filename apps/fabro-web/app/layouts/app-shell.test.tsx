@@ -8,6 +8,7 @@ describe("getVisibleNavigation", () => {
     expect(names).toContain("Workflows");
     expect(names).toContain("Runs");
     expect(names).toContain("Insights");
+    expect(names).toContain("Settings");
   });
 
   test("hides Workflows and Insights in production mode", () => {
@@ -16,5 +17,6 @@ describe("getVisibleNavigation", () => {
     expect(names).not.toContain("Workflows");
     expect(names).not.toContain("Insights");
     expect(names).toContain("Runs");
+    expect(names).toContain("Settings");
   });
 });

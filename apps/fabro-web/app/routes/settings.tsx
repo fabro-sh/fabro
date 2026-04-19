@@ -12,8 +12,6 @@ export function meta({}: any) {
   return [{ title: "Settings — Fabro" }];
 }
 
-export const handle = { hideHeader: true };
-
 export async function loader({ request }: any) {
   const settings = await apiJson<ServerSettings>("/settings", { request });
   return { settings };
@@ -24,15 +22,10 @@ export default function Settings({ loaderData }: any) {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-fg">
-          Settings
-        </h1>
-        <p className="mt-2 max-w-[60ch] text-sm/6 text-fg-3 text-pretty">
-          Redacted snapshot of the server configuration. Edit values with the
-          Fabro CLI; changes take effect on the next server restart.
-        </p>
-      </header>
+      <p className="mb-6 max-w-[60ch] text-sm/6 text-fg-3 text-pretty">
+        Redacted snapshot of the server configuration. Edit values with the
+        Fabro CLI; changes take effect on the next server restart.
+      </p>
       <CollapsibleFile
         file={{ name: "server.json", contents: JSON.stringify(settings, null, 2), lang: "json" }}
       />

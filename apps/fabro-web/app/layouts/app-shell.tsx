@@ -11,6 +11,7 @@ import {
   Bars3Icon,
   BeakerIcon,
   ChartBarIcon,
+  Cog6ToothIcon,
   MoonIcon,
   PlayIcon,
   RectangleStackIcon,
@@ -30,6 +31,7 @@ const allNavigation = [
   { name: "Workflows", href: "/workflows", icon: RectangleStackIcon, demoOnly: true },
   { name: "Runs", href: "/runs", icon: PlayIcon, demoOnly: false },
   { name: "Insights", href: "/insights", icon: ChartBarIcon, demoOnly: true },
+  { name: "Settings", href: "/settings", icon: Cog6ToothIcon, demoOnly: false },
 ];
 
 export function getVisibleNavigation(demoMode: boolean) {
