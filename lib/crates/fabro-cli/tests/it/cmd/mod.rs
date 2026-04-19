@@ -1,3 +1,4 @@
+mod archive;
 mod artifact_cp;
 mod artifact_list;
 mod attach;
@@ -62,6 +63,7 @@ mod system_prune;
 #[cfg(debug_assertions)]
 mod test_panic;
 mod top_level;
+mod unarchive;
 mod uninstall;
 mod upgrade;
 mod validate;
