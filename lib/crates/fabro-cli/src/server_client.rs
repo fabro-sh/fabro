@@ -589,17 +589,35 @@ impl ServerStoreClient {
     }
 
     pub(crate) async fn list_store_runs(&self) -> Result<Vec<RunSummary>> {
-        let response = self
-            .client
-            .list_runs()
-            .send()
-            .await
-            .map_err(map_api_error)?;
-        response
-            .into_inner()
-            .into_iter()
-            .map(convert_type)
-            .collect::<Result<Vec<_>>>()
+        let mut all_runs = Vec::new();
+        let mut offset = 0_u64;
+        let limit = 100_u64;
+
+        loop {
+            let response = self
+                .client
+                .list_runs()
+                .page_limit(limit)
+                .page_offset(offset)
+                .send()
+                .await
+                .map_err(map_api_error)?;
+            let parsed = response.into_inner();
+            let batch = parsed
+                .data
+                .into_iter()
+                .map(convert_type)
+                .collect::<Result<Vec<_>>>()?;
+            let batch_len = batch.len() as u64;
+            all_runs.extend(batch);
+
+            if !parsed.meta.has_more || batch_len == 0 {
+                break;
+            }
+            offset += batch_len;
+        }
+
+        Ok(all_runs)
     }
 
     pub(crate) async fn retrieve_run(&self, run_id: &RunId) -> Result<RunSummary> {

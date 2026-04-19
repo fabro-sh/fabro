@@ -61,7 +61,7 @@ _version = 1
 
 [cli.target]
 type = "http"
-url = "https://fabro.example.com:3000/api/v1"
+url = "https://fabro.example.com/api/v1"
 
 [cli.target.tls]
 cert = "~/.fabro/tls/client.crt"
@@ -245,7 +245,7 @@ Connection info for commands that target a remote Fabro server.
 ```toml title="settings.toml"
 [cli.target]
 type = "http"
-url = "https://fabro.example.com:3000/api/v1"
+url = "https://fabro.example.com/api/v1"
 ```
 
 | Key | Description |
@@ -257,14 +257,14 @@ url = "https://fabro.example.com:3000/api/v1"
 `fabro model` uses `[cli.target]` by default when no explicit `--storage-dir` is passed. An explicit `--server` flag overrides the configured target:
 
 ```bash
-fabro model list --server https://fabro.example.com:3000/api/v1
+fabro model list --server https://fabro.example.com/api/v1
 ```
 
 `fabro exec` does not automatically use `[cli.target]`. It only routes model traffic through a Fabro server when you pass `--server` for that invocation.
 
 ### `[cli.target.tls]` section
 
-Optional mTLS configuration for authenticating with an HTTP target. When present, the CLI presents a client certificate during the TLS handshake.
+Optional client-certificate configuration for authenticating with an HTTP target. When present, the CLI presents a client certificate during the TLS handshake with your external HTTPS endpoint or reverse proxy.
 
 ```toml title="settings.toml"
 [cli.target.tls]

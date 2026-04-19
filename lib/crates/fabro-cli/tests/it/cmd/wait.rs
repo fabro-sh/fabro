@@ -11,11 +11,15 @@ fn remote_run_summary(run_id: &str, status: &str) -> serde_json::Value {
         "workflow_name": "Blocked Remote Workflow",
         "workflow_slug": "blocked-remote-workflow",
         "goal": "Wait for approval",
+        "title": "Wait for approval",
         "labels": {},
         "host_repo_path": "/srv/repo",
+        "repository": { "name": "repo" },
         "start_time": "2026-04-19T12:00:00Z",
+        "created_at": "2026-04-19T12:00:00Z",
         "status": status,
         "status_reason": null,
+        "blocked_reason": null,
         "duration_ms": null,
         "total_usd_micros": null
     })
@@ -145,7 +149,7 @@ fn wait_blocked_run_times_out_without_treating_it_as_terminal() {
         when.method("GET").path("/api/v1/runs");
         then.status(200)
             .header("content-type", "application/json")
-            .body(json!([summary.clone()]).to_string());
+            .body(json!({ "data": [summary.clone()], "meta": { "has_more": false } }).to_string());
     });
     let retrieve_run = server.mock(|when, then| {
         when.method("GET")

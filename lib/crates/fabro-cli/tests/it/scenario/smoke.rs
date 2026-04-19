@@ -238,21 +238,25 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
         then.status(200)
             .header("Content-Type", "application/json")
             .body(
-                serde_json::json!([
-                    {
+                serde_json::json!({
+                    "data": [{
                         "run_id": success_run_id,
                         "workflow_name": "Remote Workflow",
                         "workflow_slug": "remote-workflow",
                         "goal": "Remote output",
+                        "title": "Remote output",
                         "labels": {},
                         "host_repo_path": null,
+                        "repository": { "name": "unknown" },
                         "start_time": "2026-04-05T12:00:00Z",
+                        "created_at": "2026-04-05T12:00:00Z",
                         "status": "running",
                         "status_reason": null,
                         "duration_ms": 12,
                         "total_usd_micros": null
-                    }
-                ])
+                    }],
+                    "meta": { "has_more": false }
+                })
                 .to_string(),
             );
     });
@@ -336,21 +340,25 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
         then.status(200)
             .header("Content-Type", "application/json")
             .body(
-                serde_json::json!([
-                    {
+                serde_json::json!({
+                    "data": [{
                         "run_id": eof_run_id,
                         "workflow_name": "Remote Workflow",
                         "workflow_slug": "remote-workflow",
                         "goal": "Remote output",
+                        "title": "Remote output",
                         "labels": {},
                         "host_repo_path": null,
+                        "repository": { "name": "unknown" },
                         "start_time": "2026-04-05T12:00:00Z",
+                        "created_at": "2026-04-05T12:00:00Z",
                         "status": "running",
                         "status_reason": null,
                         "duration_ms": 12,
-                        "total_cost": null
-                    }
-                ])
+                        "total_usd_micros": null
+                    }],
+                    "meta": { "has_more": false }
+                })
                 .to_string(),
             );
     });

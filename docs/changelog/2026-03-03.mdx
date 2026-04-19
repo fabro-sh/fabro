@@ -7,6 +7,8 @@ date: "2026-03-03"
 
 Two new authentication methods for the API server. Mutual TLS provides strong identity verification for production deployments — both client and server present certificates. For teams on a Tailscale network, API requests can authenticate using Tailscale identity with no tokens or certificates required.
 
+Historical note: later releases removed inbound mutual TLS listener support from `fabro-server`; current deployments terminate TLS or mTLS upstream at a reverse proxy or platform ingress.
+
 ## Setup wizard
 
 Previously, getting Fabro running meant manually editing config files and setting environment variables. Now run `fabro install` for an interactive walkthrough that configures API keys, server settings, and authentication.

@@ -73,6 +73,7 @@ use fabro_types::{
     RunSubjectProvenance,
 };
 use fabro_util::redact::redact_jsonl_line;
+use fabro_util::text::strip_goal_decoration;
 use fabro_util::version::FABRO_VERSION;
 use fabro_vault::{Error as VaultError, SecretType, Vault};
 use fabro_workflow::Error as WorkflowError;
@@ -2593,18 +2594,117 @@ pub(crate) fn board_columns() -> serde_json::Value {
     ])
 }
 
-async fn load_oldest_pending_interview_question(state: &AppState, run_id: RunId) -> Option<String> {
-    let run_store = state.store.open_run_reader(&run_id).await.ok()?;
-    let run_state = run_store.state().await.ok()?;
-    run_state
-        .pending_interviews
-        .iter()
-        .min_by(|(left_id, left), (right_id, right)| {
-            left.started_at
-                .cmp(&right.started_at)
-                .then_with(|| left_id.cmp(right_id))
-        })
-        .map(|(_, record)| record.question.text.clone())
+pub(crate) fn truncate_goal(goal: &str) -> String {
+    const MAX_LEN: usize = 100;
+
+    let stripped = strip_goal_decoration(goal);
+    let char_count = stripped.chars().count();
+    if char_count <= MAX_LEN {
+        return stripped.to_string();
+    }
+
+    let truncated: String = stripped.chars().take(MAX_LEN - 3).collect();
+    format!("{truncated}...")
+}
+
+fn repository_name(host_repo_path: Option<&str>) -> String {
+    host_repo_path
+        .and_then(|path| path.rsplit(['/', '\\']).find(|segment| !segment.is_empty()))
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn elapsed_secs(duration_ms: Option<u64>) -> Option<f64> {
+    duration_ms.map(|ms| ms as f64 / 1000.0)
+}
+
+fn summary_to_api_run_summary(summary: fabro_store::RunSummary) -> serde_json::Value {
+    let goal = summary.goal.unwrap_or_default();
+    let title = truncate_goal(&goal);
+    let repository = repository_name(summary.host_repo_path.as_deref());
+    let created_at = summary.run_id.created_at().to_rfc3339();
+
+    serde_json::json!({
+        "run_id": summary.run_id.to_string(),
+        "workflow_name": summary.workflow_name,
+        "workflow_slug": summary.workflow_slug,
+        "goal": goal,
+        "title": title,
+        "labels": summary.labels,
+        "host_repo_path": summary.host_repo_path,
+        "repository": { "name": repository },
+        "start_time": summary.start_time.map(|time| time.to_rfc3339()),
+        "status": summary.status,
+        "status_reason": summary.status_reason.map(api_status_reason),
+        "blocked_reason": summary.blocked_reason.map(api_blocked_reason),
+        "pending_control": summary.pending_control.map(api_pending_control),
+        "duration_ms": summary.duration_ms,
+        "elapsed_secs": elapsed_secs(summary.duration_ms),
+        "total_usd_micros": summary.total_usd_micros,
+        "created_at": created_at,
+    })
+}
+
+async fn board_run_metadata(
+    state: &AppState,
+    run_id: RunId,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut metadata = serde_json::Map::new();
+    let Ok(run_store) = state.store.open_run_reader(&run_id).await else {
+        return metadata;
+    };
+    let Ok(run_state) = run_store.state().await else {
+        return metadata;
+    };
+
+    if let Some(pull_request) = run_state.pull_request {
+        metadata.insert(
+            "pull_request".to_string(),
+            serde_json::json!({
+                "number": pull_request.number,
+            }),
+        );
+    }
+
+    if let Some(sandbox) = run_state.sandbox {
+        if let Some(identifier) = sandbox.identifier {
+            metadata.insert(
+                "sandbox".to_string(),
+                serde_json::json!({
+                    "id": identifier,
+                }),
+            );
+        }
+    }
+
+    if let Some((_, record)) =
+        run_state
+            .pending_interviews
+            .iter()
+            .min_by(|(left_id, left), (right_id, right)| {
+                left.started_at
+                    .cmp(&right.started_at)
+                    .then_with(|| left_id.cmp(right_id))
+            })
+    {
+        metadata.insert(
+            "question".to_string(),
+            serde_json::json!({
+                "text": record.question.text,
+            }),
+        );
+    }
+
+    metadata
+}
+
+fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {
+    let limit = pagination.limit.clamp(1, 100) as usize;
+    let offset = pagination.offset as usize;
+    let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
+    let has_more = data.len() > limit;
+    data.truncate(limit);
+    (data, has_more)
 }
 
 async fn list_board_runs(
@@ -2623,44 +2723,25 @@ async fn list_board_runs(
                 .into_response();
         }
     };
-    let mut all_items = Vec::new();
-    for summary in summaries {
-        let Some(column) = board_column(summary.status) else {
-            continue;
-        };
-        let title = summary.goal.as_deref().unwrap_or("Untitled run");
-        let workflow_slug = summary.workflow_slug.as_deref().unwrap_or("unknown");
-        let workflow_name = summary.workflow_name.as_deref().unwrap_or(workflow_slug);
-        let repo_name = summary
-            .host_repo_path
-            .as_deref()
-            .and_then(|p| p.rsplit('/').next())
-            .unwrap_or("unknown");
-        let elapsed_secs = summary.duration_ms.map(|ms| ms as f64 / 1000.0);
-        let created_at = summary.run_id.created_at();
-        let question = if column == "blocked" {
-            load_oldest_pending_interview_question(state.as_ref(), summary.run_id)
-                .await
-                .map(|text| serde_json::json!({ "text": text }))
-        } else {
-            None
-        };
-        all_items.push(serde_json::json!({
-            "id": summary.run_id.to_string(),
-            "title": title,
-            "repository": { "name": repo_name },
-            "workflow": { "slug": workflow_slug, "name": workflow_name },
-            "status": column,
-            "created_at": created_at.to_rfc3339(),
-            "timings": elapsed_secs.map(|s| serde_json::json!({ "elapsed_secs": s })),
-            "question": question,
-        }));
+    let board_summaries: Vec<_> = summaries
+        .into_iter()
+        .filter_map(|summary| {
+            let column = board_column(summary.status)?;
+            Some((summary, column))
+        })
+        .collect();
+    let (page_summaries, has_more) = paginate_items(board_summaries, &pagination);
+
+    let mut data = Vec::with_capacity(page_summaries.len());
+    for (summary, column) in page_summaries {
+        let run_id = summary.run_id;
+        let mut item = summary_to_api_run_summary(summary);
+        item["column"] = serde_json::json!(column);
+        if let Some(object) = item.as_object_mut() {
+            object.extend(board_run_metadata(state.as_ref(), run_id).await);
+        }
+        data.push(item);
     }
-    let limit = pagination.limit.clamp(1, 100) as usize;
-    let offset = pagination.offset as usize;
-    let page: Vec<_> = all_items.into_iter().skip(offset).take(limit + 1).collect();
-    let has_more = page.len() > limit;
-    let data: Vec<_> = page.into_iter().take(limit).collect();
     (
         StatusCode::OK,
         Json(serde_json::json!({
@@ -2672,13 +2753,31 @@ async fn list_board_runs(
         .into_response()
 }
 
-async fn list_runs(_auth: AuthenticatedService, State(state): State<Arc<AppState>>) -> Response {
+async fn list_runs(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Query(pagination): Query<PaginationParams>,
+) -> Response {
     match state
         .store
         .list_runs(&fabro_store::ListRunsQuery::default())
         .await
     {
-        Ok(runs) => (StatusCode::OK, Json(runs)).into_response(),
+        Ok(runs) => {
+            let items = runs
+                .into_iter()
+                .map(summary_to_api_run_summary)
+                .collect::<Vec<_>>();
+            let (data, has_more) = paginate_items(items, &pagination);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "meta": { "has_more": has_more }
+                })),
+            )
+                .into_response()
+        }
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
@@ -4627,7 +4726,7 @@ async fn get_run_status(
         .await
     {
         Ok(runs) => match runs.into_iter().find(|run| run.run_id == id) {
-            Some(run) => (StatusCode::OK, Json(run)).into_response(),
+            Some(run) => (StatusCode::OK, Json(summary_to_api_run_summary(run))).into_response(),
             None => ApiError::not_found("Run not found.").into_response(),
         },
         Err(err) => {
@@ -7524,6 +7623,11 @@ slug = "fabro"
 
         let body = body_json(response.into_body()).await;
         assert_eq!(body["run_id"].as_str().unwrap(), run_id);
+        assert_eq!(body["goal"].as_str().unwrap(), "Test");
+        assert_eq!(body["title"].as_str().unwrap(), "Test");
+        assert!(body["repository"].is_object());
+        assert!(!body["repository"]["name"].as_str().unwrap().is_empty());
+        assert!(body["created_at"].is_string());
         assert!(body["labels"].is_object());
     }
 
@@ -8561,7 +8665,8 @@ slug = "fabro"
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response.into_body()).await;
-        assert_eq!(body.as_array().unwrap().len(), 0);
+        assert_eq!(body["data"].as_array().unwrap().len(), 0);
+        assert_eq!(body["meta"]["has_more"].as_bool(), Some(false));
 
         // Start a run
         let req = Request::builder()
@@ -8585,10 +8690,18 @@ slug = "fabro"
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response.into_body()).await;
-        let items = body.as_array().unwrap();
+        let items = body["data"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["run_id"].as_str().unwrap(), run_id.to_string());
+        assert!(items[0]["goal"].is_string());
+        assert!(items[0]["title"].is_string());
+        assert!(items[0]["repository"]["name"].is_string());
+        assert!(items[0]["created_at"].is_string());
         assert!(items[0]["status"].as_str().is_some());
+        assert!(items[0]["labels"].is_object());
+        assert!(items[0]["status_reason"].is_null());
+        assert!(items[0]["pending_control"].is_null());
+        assert!(items[0]["total_usd_micros"].is_null());
     }
 
     #[tokio::test]
@@ -8840,7 +8953,7 @@ level = "debug"
             .as_array()
             .unwrap()
             .iter()
-            .find(|item| item["id"].as_str() == Some(run_id_str.as_str()));
+            .find(|item| item["run_id"].as_str() == Some(run_id_str.as_str()));
         assert!(
             board_item.is_some(),
             "cancelled run should appear on the board"
@@ -8848,8 +8961,9 @@ level = "debug"
         assert_eq!(
             board_item.unwrap()["status"].as_str(),
             Some("failed"),
-            "cancelled run should be in the failed column"
+            "cancelled run should preserve the failed lifecycle status"
         );
+        assert_eq!(board_item.unwrap()["column"].as_str(), Some("failed"));
 
         let run_store = state.store.open_run_reader(&run_id).await.unwrap();
         let status = run_store.state().await.unwrap().status.unwrap();
@@ -8965,9 +9079,11 @@ level = "debug"
             .as_array()
             .unwrap()
             .iter()
-            .find(|item| item["id"].as_str() == Some(run_id_str.as_str()))
+            .find(|item| item["run_id"].as_str() == Some(run_id_str.as_str()))
             .expect("board item should exist");
-        assert_eq!(item["status"].as_str(), Some("initializing"));
+        assert!(item["status"].as_str().is_some());
+        assert_eq!(item["column"].as_str(), Some("initializing"));
+        assert_eq!(item["pending_control"].as_str(), Some("pause"));
     }
 
     #[tokio::test]
@@ -9512,11 +9628,14 @@ timeout = "30s"
         let data = body["data"].as_array().expect("data should be array");
         assert!(!data.is_empty(), "demo should return runs");
         let first = &data[0];
-        assert!(first["id"].is_string());
+        assert!(first["run_id"].is_string());
+        assert!(first["goal"].is_string());
         assert!(first["repository"].is_object());
         assert!(first["title"].is_string());
-        assert!(first["workflow"].is_object());
         assert!(first["status"].is_string());
+        assert!(first["column"].is_string());
+        assert!(first["workflow_slug"].is_string() || first["workflow_slug"].is_null());
+        assert!(first["labels"].is_object());
         assert!(first["created_at"].is_string());
     }
 
@@ -9586,19 +9705,21 @@ timeout = "30s"
         let data = body["data"].as_array().expect("data should be array");
         let item = data
             .iter()
-            .find(|i| i["id"].as_str() == Some(&run_id))
+            .find(|i| i["run_id"].as_str() == Some(&run_id))
             .expect("run should be in board");
-        // Should have RunListItem fields
+        // Should have canonical run summary fields plus board-specific column
+        assert!(item["goal"].is_string());
         assert!(item["title"].is_string());
         assert!(item["repository"].is_object());
-        assert!(item["workflow"].is_object());
-        // Status should be a board column, not a lifecycle status
-        let status = item["status"].as_str().unwrap();
-        assert!(
-            ["working", "initializing", "review", "merge"].contains(&status),
-            "status should be a board column, got: {status}"
-        );
+        assert!(item["workflow_slug"].is_string() || item["workflow_slug"].is_null());
+        assert!(item["workflow_name"].is_string() || item["workflow_name"].is_null());
+        assert!(item["labels"].is_object());
+        assert!(item["status"].is_string());
+        assert!(item["column"].is_string());
         assert!(item["created_at"].is_string());
+        assert!(item["pending_control"].is_null());
+        assert!(item["status_reason"].is_null());
+        assert!(item["total_usd_micros"].is_null());
     }
 
     #[tokio::test]
@@ -9630,7 +9751,7 @@ timeout = "30s"
         let data = body["data"].as_array().expect("data should be array");
         let found = data
             .iter()
-            .any(|i| i["id"].as_str() == Some(&run_id.to_string()));
+            .any(|i| i["run_id"].as_str() == Some(&run_id.to_string()));
         assert!(!found, "removing run should not appear on the board");
     }
 
@@ -9817,21 +9938,24 @@ timeout = "30s"
 
         let paused_item = data
             .iter()
-            .find(|i| i["id"].as_str() == Some(&paused_id.to_string()))
+            .find(|i| i["run_id"].as_str() == Some(&paused_id.to_string()))
             .expect("paused run should be on board");
-        assert_eq!(paused_item["status"].as_str().unwrap(), "running");
+        assert_eq!(paused_item["status"].as_str().unwrap(), "paused");
+        assert_eq!(paused_item["column"].as_str().unwrap(), "running");
 
         let succeeded_item = data
             .iter()
-            .find(|i| i["id"].as_str() == Some(&succeeded_id.to_string()))
+            .find(|i| i["run_id"].as_str() == Some(&succeeded_id.to_string()))
             .expect("succeeded run should be on board");
         assert_eq!(succeeded_item["status"].as_str().unwrap(), "succeeded");
+        assert_eq!(succeeded_item["column"].as_str().unwrap(), "succeeded");
 
         let blocked_item = data
             .iter()
-            .find(|i| i["id"].as_str() == Some(&blocked_id.to_string()))
+            .find(|i| i["run_id"].as_str() == Some(&blocked_id.to_string()))
             .expect("blocked run should be on board");
         assert_eq!(blocked_item["status"].as_str().unwrap(), "blocked");
+        assert_eq!(blocked_item["column"].as_str().unwrap(), "blocked");
         assert_eq!(
             blocked_item["question"]["text"].as_str(),
             Some("Older unresolved question?")
@@ -9847,6 +9971,121 @@ timeout = "30s"
                 .iter()
                 .any(|c| c["id"].as_str() == Some("succeeded"))
         );
+    }
+
+    #[tokio::test]
+    async fn boards_runs_includes_live_board_metadata_from_run_state() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = create_and_start_run(&app, MINIMAL_DOT)
+            .await
+            .parse::<RunId>()
+            .unwrap();
+        let run_store = state.store.open_run(&run_id).await.unwrap();
+        for event in [
+            workflow_event::Event::RunRunning { reason: None },
+            workflow_event::Event::SandboxInitialized {
+                provider:               "local".to_string(),
+                working_directory:      "/sandbox/workdir".to_string(),
+                identifier:             Some("sb-test".to_string()),
+                host_working_directory: Some("/tmp/repo".to_string()),
+                container_mount_point:  None,
+            },
+            workflow_event::Event::PullRequestCreated {
+                pr_url:      "https://github.com/acme/repo/pull/42".to_string(),
+                pr_number:   42,
+                owner:       "acme".to_string(),
+                repo:        "repo".to_string(),
+                base_branch: "main".to_string(),
+                head_branch: "fabro/run".to_string(),
+                title:       "Fix board metadata".to_string(),
+                draft:       false,
+            },
+            workflow_event::Event::InterviewStarted {
+                question_id:     "q-1".to_string(),
+                question:        "Ship it?".to_string(),
+                stage:           "review".to_string(),
+                question_type:   "yes_no".to_string(),
+                options:         vec![],
+                allow_freeform:  false,
+                timeout_seconds: None,
+                context_display: None,
+            },
+        ] {
+            workflow_event::append_event(&run_store, &run_id, &event)
+                .await
+                .unwrap();
+        }
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/boards/runs"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        let data = body["data"].as_array().expect("data should be array");
+        let item = data
+            .iter()
+            .find(|i| i["run_id"].as_str() == Some(&run_id.to_string()))
+            .expect("run should be in board");
+
+        assert_eq!(item["pull_request"]["number"].as_u64(), Some(42));
+        assert_eq!(item["sandbox"]["id"].as_str(), Some("sb-test"));
+        assert_eq!(item["question"]["text"].as_str(), Some("Ship it?"));
+    }
+
+    #[tokio::test]
+    async fn boards_runs_page_limit_preserves_metadata_for_paged_items() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let first_run_id = create_and_start_run(&app, MINIMAL_DOT)
+            .await
+            .parse::<RunId>()
+            .unwrap();
+        let second_run_id = create_and_start_run(&app, MINIMAL_DOT)
+            .await
+            .parse::<RunId>()
+            .unwrap();
+
+        for (run_id, sandbox_id) in [(first_run_id, "sb-first"), (second_run_id, "sb-second")] {
+            let run_store = state.store.open_run(&run_id).await.unwrap();
+            for event in [
+                workflow_event::Event::RunRunning { reason: None },
+                workflow_event::Event::SandboxInitialized {
+                    provider:               "local".to_string(),
+                    working_directory:      "/sandbox/workdir".to_string(),
+                    identifier:             Some(sandbox_id.to_string()),
+                    host_working_directory: Some("/tmp/repo".to_string()),
+                    container_mount_point:  None,
+                },
+            ] {
+                workflow_event::append_event(&run_store, &run_id, &event)
+                    .await
+                    .unwrap();
+            }
+        }
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/boards/runs?page[limit]=1"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["meta"]["has_more"].as_bool(), Some(true));
+
+        let data = body["data"].as_array().expect("data should be array");
+        assert_eq!(data.len(), 1);
+
+        let item = &data[0];
+        let sandbox_id = item["sandbox"]["id"]
+            .as_str()
+            .expect("paged item should still include sandbox metadata");
+        assert!(matches!(sandbox_id, "sb-first" | "sb-second"));
     }
 
     #[test]

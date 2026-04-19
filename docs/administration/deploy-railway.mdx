@@ -52,8 +52,9 @@ Once the deploy is healthy, Railway exposes a `*.up.railway.app` URL (or your cu
 2. **Point your local CLI at the server** — add the Railway URL to `~/.fabro/settings.toml`:
 
    ```toml title="~/.fabro/settings.toml"
-   [server]
-   target = "https://<your-service>.up.railway.app/api/v1"
+   [cli.target]
+   type = "http"
+   url = "https://<your-service>.up.railway.app/api/v1"
    ```
 
    Then commands like `fabro model list --server <url>` will hit your Railway instance.
@@ -77,6 +78,6 @@ Railway re-pulls the GHCR image on every deploy. `Dockerfile.deploy` references 
     Auth, dev tokens, submitting runs, and pointing the CLI at your deployment.
   </Card>
   <Card title="Server Configuration" icon="gear" href="/administration/server-configuration">
-    Full `settings.toml` reference — TLS, auth methods, concurrency, and more.
+    Full `settings.toml` reference — reverse-proxy TLS, auth methods, concurrency, and more.
   </Card>
 </Columns>

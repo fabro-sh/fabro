@@ -103,7 +103,7 @@ export default function RunDetail({ loaderData, params }: any) {
             </span>
             <span className="font-mono text-xs text-fg-muted">{run.repo}</span>
             {run.elapsed && (
-              <span className={`font-mono text-xs ${run.elapsedWarning ? "text-amber" : "text-fg-muted"}`}>{run.elapsed}</span>
+              <span className="font-mono text-xs text-fg-muted">{run.elapsed}</span>
             )}
           </div>
         </div>

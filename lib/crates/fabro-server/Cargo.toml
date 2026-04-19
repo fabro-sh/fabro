@@ -47,14 +47,6 @@ tokio-stream = { workspace = true, features = ["sync"] }
 base64.workspace = true
 jsonwebtoken.workspace = true
 tokio.workspace = true
-tokio-rustls = "0.26"
-rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
-rustls-pemfile = "2"
-rustls-pki-types = "1"
-hyper = "1"
-hyper-util = { version = "0.1", features = ["tokio", "server-auto", "http1", "http2"] }
-tower-service = "0.3"
-x509-parser = "0.16"
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"

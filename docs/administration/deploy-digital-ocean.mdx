@@ -93,8 +93,9 @@ Once `https://<FABRO_DOMAIN>/health` returns `ok`, two things to grab:
 2. **Point your local CLI at the server** — add the URL to `~/.fabro/settings.toml`:
 
    ```toml title="~/.fabro/settings.toml"
-   [server]
-   target = "https://fabro.example.com/api/v1"
+   [cli.target]
+   type = "http"
+   url = "https://fabro.example.com/api/v1"
    ```
 
    Then commands like `fabro model list --server <url>` will hit your Droplet.
@@ -131,6 +132,6 @@ To pin a specific version instead of `:nightly`, edit `docker-compose.yaml` and 
     Auth, dev tokens, submitting runs, and pointing the CLI at your deployment.
   </Card>
   <Card title="Server Configuration" icon="gear" href="/administration/server-configuration">
-    Full `settings.toml` reference — TLS, auth methods, concurrency, and more.
+    Full `settings.toml` reference — reverse-proxy TLS, auth methods, concurrency, and more.
   </Card>
 </Columns>

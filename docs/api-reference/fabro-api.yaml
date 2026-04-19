@@ -124,15 +124,16 @@ paths:
       tags: [Runs]
       summary: List Runs
       description: Returns durable run summaries from the backing store, including runs persisted before the current server boot.
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageOffset"
       responses:
         "200":
-          description: Durable run summaries
+          description: Paginated durable run summaries
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/StoreRunSummary"
+                $ref: "#/components/schemas/PaginatedRunList"
     post:
       operationId: createRun
       tags: [Runs]
@@ -428,7 +429,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaginatedRunList"
+                $ref: "#/components/schemas/PaginatedBoardRunList"
 
   /api/v1/runs/{id}/state:
     get:
@@ -1702,6 +1703,25 @@ components:
         - data
         - meta
       properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoreRunSummary"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    PaginatedBoardRunList:
+      description: Paginated list of board runs with shared canonical fields plus board metadata.
+      type: object
+      required:
+        - columns
+        - data
+        - meta
+      properties:
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/BoardColumnDefinition"
         data:
           type: array
           items:
@@ -3024,8 +3044,12 @@ components:
       type: object
       required:
         - run_id
+        - goal
+        - title
         - labels
         - status
+        - repository
+        - created_at
       properties:
         run_id:
           type: string
@@ -3034,15 +3058,22 @@ components:
         workflow_slug:
           type: ["string", "null"]
         goal:
-          type: ["string", "null"]
+          type: string
+        title:
+          type: string
         labels:
           type: object
           additionalProperties:
             type: string
         host_repo_path:
           type: ["string", "null"]
+        repository:
+          $ref: "#/components/schemas/RepositoryReference"
         start_time:
           type: ["string", "null"]
+          format: date-time
+        created_at:
+          type: string
           format: date-time
         status:
           $ref: "#/components/schemas/RunStatus"
@@ -3062,6 +3093,8 @@ components:
           type: ["integer", "null"]
           format: int64
           minimum: 0
+        elapsed_secs:
+          type: ["number", "null"]
         total_usd_micros:
           type: ["integer", "null"]
           format: int64
@@ -3077,6 +3110,17 @@ components:
         - blocked
         - succeeded
         - failed
+
+    BoardColumnDefinition:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
 
     CheckRunStatus:
       description: Status of a CI check run.
@@ -3371,34 +3415,66 @@ components:
     # ── Run Board Schemas (updated) ─────────────────────────────────────
 
     RunListItem:
-      description: Summary of a run shown in the board view.
+      description: Canonical run summary shown in the board view, extended with board-specific metadata.
       type: object
       required:
-        - id
-        - repository
+        - run_id
+        - goal
         - title
-        - workflow
         - status
+        - labels
+        - repository
         - created_at
+        - column
       properties:
-        id:
+        run_id:
           type: string
           description: Unique run identifier (ULID).
           example: 01JNQVR7M0EJ5GKAT2SC4ERS1Z
+        workflow_name:
+          type: ["string", "null"]
+        workflow_slug:
+          type: ["string", "null"]
+        goal:
+          type: string
         repository:
           $ref: "#/components/schemas/RepositoryReference"
         title:
           type: string
           description: Human-readable title describing the run's goal.
           example: Add rate limiting to auth endpoints
-        workflow:
-          $ref: "#/components/schemas/WorkflowReference"
         status:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        host_repo_path:
+          type: ["string", "null"]
+        start_time:
+          type: ["string", "null"]
+          format: date-time
+        status_reason:
+          oneOf:
+            - $ref: "#/components/schemas/StatusReason"
+            - type: "null"
+        pending_control:
+          oneOf:
+            - $ref: "#/components/schemas/RunControlAction"
+            - type: "null"
+        duration_ms:
+          type: ["integer", "null"]
+          format: int64
+          minimum: 0
+        elapsed_secs:
+          type: ["number", "null"]
+        total_usd_micros:
+          type: ["integer", "null"]
+          format: int64
+        column:
           $ref: "#/components/schemas/BoardColumn"
         pull_request:
           $ref: "#/components/schemas/RunPullRequest"
-        timings:
-          $ref: "#/components/schemas/RunTimings"
         sandbox:
           $ref: "#/components/schemas/RunSandbox"
         question:

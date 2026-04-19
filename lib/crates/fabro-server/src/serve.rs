@@ -33,7 +33,6 @@ use crate::server::{
     reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
 };
 use crate::server_secrets::ServerSecrets;
-use crate::tls::{build_rustls_config, serve_tls_with_shutdown};
 
 const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
 pub const DEFAULT_TCP_PORT: u16 = 32276;
@@ -246,7 +245,6 @@ fn bind_override_layer(bind: BindRequest) -> SettingsLayer {
         },
         BindRequest::Tcp(address) => ServerListenLayer::Tcp {
             address: Some(InterpString::parse(&address.to_string())),
-            tls:     None,
         },
         BindRequest::TcpHost(_) => {
             unreachable!("host-only bind requests are handled before building a settings override")
@@ -515,12 +513,6 @@ where
         }
     });
 
-    // Branch: TLS, plain TCP, or Unix socket
-    let tls_settings = match &resolved_server_settings.listen {
-        ServerListenSettings::Tcp { tls, .. } => tls.clone(),
-        ServerListenSettings::Unix { .. } => None,
-    };
-
     let bound_listener = bind_listener(&bind_request).await?;
     let bind_addr = bound_listener.bind.clone();
     if bound_listener.used_random_port_fallback {
@@ -563,38 +555,19 @@ where
 
     match bound_listener.listener {
         BoundListener::Unix(listener) => {
-            if tls_settings.is_some() {
-                warn!("TLS is configured but not supported on Unix sockets; ignoring TLS settings");
-            }
             announce_server_ready(&bind_addr, styles);
             axum::serve(listener, router)
                 .with_graceful_shutdown(wait_for_shutdown(shutdown_rx.clone()))
                 .await?;
         }
         BoundListener::Tcp(listener) => {
-            if let Some(ref tls_settings) = tls_settings {
-                let rustls_config = build_rustls_config(tls_settings)?;
-                let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
-
-                info!("TLS enabled");
-                announce_server_ready(&bind_addr, styles);
-
-                serve_tls_with_shutdown(
-                    listener,
-                    tls_acceptor,
-                    router,
-                    wait_for_shutdown(shutdown_rx.clone()),
-                )
-                .await?;
-            } else {
-                announce_server_ready(&bind_addr, styles);
-                axum::serve(
-                    listener,
-                    router.into_make_service_with_connect_info::<SocketAddr>(),
-                )
-                .with_graceful_shutdown(wait_for_shutdown(shutdown_rx.clone()))
-                .await?;
-            }
+            announce_server_ready(&bind_addr, styles);
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(wait_for_shutdown(shutdown_rx.clone()))
+            .await?;
         }
     }
 

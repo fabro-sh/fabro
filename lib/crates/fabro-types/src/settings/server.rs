@@ -37,7 +37,6 @@ pub enum ServerListenSettings {
     Tcp {
         #[serde(serialize_with = "serialize_socket_addr")]
         address: SocketAddr,
-        tls:     Option<TlsConfig>,
     },
     Unix {
         path: InterpString,
@@ -48,21 +47,6 @@ impl Default for ServerListenSettings {
     fn default() -> Self {
         Self::Unix {
             path: InterpString::parse(""),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct TlsConfig {
-    pub cert: InterpString,
-    pub key:  InterpString,
-}
-
-impl Default for TlsConfig {
-    fn default() -> Self {
-        Self {
-            cert: InterpString::parse(""),
-            key:  InterpString::parse(""),
         }
     }
 }
@@ -307,30 +291,18 @@ pub struct ServerLayer {
     pub integrations: Option<ServerIntegrationsLayer>,
 }
 
-/// `[server.listen]` — shared bind transport. TLS lives under
-/// `[server.listen.tls]`.
+/// `[server.listen]` — shared bind transport.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, tag = "type", rename_all = "lowercase")]
 pub enum ServerListenLayer {
     Tcp {
         #[serde(default)]
         address: Option<InterpString>,
-        #[serde(default)]
-        tls:     Option<ServerListenTlsLayer>,
     },
     Unix {
         #[serde(default)]
         path: Option<InterpString>,
     },
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ServerListenTlsLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cert: Option<InterpString>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key:  Option<InterpString>,
 }
 
 /// `[server.api]` — API surface settings.

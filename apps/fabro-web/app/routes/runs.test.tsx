@@ -3,14 +3,16 @@ import type { BoardColumn, RunListItem } from "@qltysh/fabro-api-client";
 
 import { buildBoardColumns, shouldRefreshBoardForEvent } from "./runs";
 
-function boardRun(id: string, status: BoardColumn, questionText?: string): RunListItem {
+function boardRun(id: string, column: BoardColumn, questionText?: string): RunListItem {
   return {
-    id,
+    run_id: id,
+    goal: `Run ${id}`,
     title: `Run ${id}`,
     created_at: "2026-04-19T12:00:00Z",
-    status,
+    status: column,
+    labels: {},
     repository: { name: "repo" },
-    workflow: { slug: "workflow", name: "Workflow" },
+    column,
     ...(questionText ? { question: { text: questionText } } : {}),
   };
 }

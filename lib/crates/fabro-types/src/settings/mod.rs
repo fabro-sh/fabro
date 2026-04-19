@@ -52,7 +52,7 @@ pub use server::{
     ServerIpAllowlistLayer, ServerIpAllowlistOverrideLayer, ServerIpAllowlistOverrideSettings,
     ServerIpAllowlistSettings, ServerLayer, ServerListenSettings, ServerLoggingSettings,
     ServerSchedulerSettings, ServerSettings, ServerSlateDbSettings, ServerStorageSettings,
-    ServerWebSettings, SlackIntegrationSettings, TeamsIntegrationSettings, TlsConfig,
+    ServerWebSettings, SlackIntegrationSettings, TeamsIntegrationSettings,
 };
 pub use size::{ParseSizeError, Size};
 pub use splice_array::{SPLICE_MARKER, SpliceArray, SpliceArrayError};

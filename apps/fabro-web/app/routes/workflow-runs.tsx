@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDownIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { Link, useParams } from "react-router";
-import { ciConfig, columnStatusDisplay, deriveCiStatus, mapRunListItem } from "../data/runs";
+import { ciConfig, columnForStatus, columnStatusDisplay, deriveCiStatus, mapRunSummaryToRunItem } from "../data/runs";
 import type { ColumnStatus, RunWithStatus } from "../data/runs";
 import { apiJsonOrNull } from "../api";
 import type { PaginatedRunList } from "@qltysh/fabro-api-client";
@@ -9,11 +9,17 @@ import type { PaginatedRunList } from "@qltysh/fabro-api-client";
 export async function loader({ request, params }: any) {
   const result = await apiJsonOrNull<PaginatedRunList>(`/workflows/${params.name}/runs`, { request });
   const apiRuns = result?.data ?? [];
-  const runs: RunWithStatus[] = apiRuns.map((r) => ({
-    ...mapRunListItem(r),
-    status: r.status as ColumnStatus,
-    statusLabel: columnStatusDisplay[r.status as ColumnStatus]?.label ?? r.status,
-  }));
+  const runs: RunWithStatus[] = apiRuns
+    .map((r) => {
+      const column = columnForStatus(r.status);
+      if (column == null) return null;
+      return {
+        ...mapRunSummaryToRunItem(r),
+        status: column,
+        statusLabel: columnStatusDisplay[column].label,
+      };
+    })
+    .filter((run): run is RunWithStatus => run != null);
   return { runs };
 }
 
@@ -34,7 +40,7 @@ function RunRow({ run }: { run: RunWithStatus }) {
         <span className={`text-xs font-medium ${colors.text}`}>{run.statusLabel}</span>
       </span>
 
-      <span className={`font-mono text-xs pr-2 ${run.elapsedWarning ? "text-amber" : "text-fg-muted"}`}>
+      <span className="font-mono text-xs pr-2 text-fg-muted">
         {run.elapsed}
       </span>
 

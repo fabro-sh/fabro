@@ -41,7 +41,7 @@ name = "claude-sonnet-4-5"
 
 [cli.target]
 type = "http"
-url = "https://fabro.example.com:3000/api/v1"
+url = "https://fabro.example.com/api/v1"
 ```
 
 `[cli.exec]` config applies to `fabro exec`. `[run.model]` sets the default workflow model/provider for commands like `fabro run` and `fabro preflight`. `[cli.target]` stores connection info for commands that can target a remote Fabro server.
@@ -767,7 +767,7 @@ Check environment and integration health. `fabro doctor` always performs live se
 ```bash
 fabro doctor
 fabro doctor -v
-fabro doctor --server https://fabro.example.com:3000/api/v1
+fabro doctor --server https://fabro.example.com/api/v1
 ```
 
 | Flag | Description |

@@ -4,7 +4,6 @@
 #![allow(clippy::default_trait_access, clippy::unreadable_literal)]
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -16,7 +15,7 @@ use serde_json::json;
 
 use crate::error::ApiError;
 use crate::jwt_auth::AuthenticatedService;
-use crate::server::{AppState, PaginationParams, board_columns};
+use crate::server::{AppState, PaginationParams};
 use crate::settings_view;
 
 fn paginated_response<T: serde::Serialize>(
@@ -42,7 +41,7 @@ pub(crate) async fn list_runs(
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
-    paginated_response(runs::list_items(), &pagination)
+    paginated_response(runs::summaries(), &pagination)
 }
 
 pub(crate) async fn list_board_runs(
@@ -50,7 +49,7 @@ pub(crate) async fn list_board_runs(
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
-    let items = runs::list_items();
+    let items = runs::board_items();
     let limit = pagination.limit.clamp(1, 100) as usize;
     let offset = pagination.offset as usize;
     let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
@@ -58,7 +57,11 @@ pub(crate) async fn list_board_runs(
     data.truncate(limit);
     (
         StatusCode::OK,
-        Json(json!({ "columns": board_columns(), "data": data, "meta": { "has_more": has_more } })),
+        Json(json!({
+            "columns": runs::columns(),
+            "data": data,
+            "meta": { "has_more": has_more }
+        })),
     )
         .into_response()
 }
@@ -196,40 +199,8 @@ pub(crate) async fn get_run_status(
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    match runs::list_items().into_iter().find(|r| r.id == id) {
-        Some(item) => {
-            let elapsed_ms = item
-                .timings
-                .as_ref()
-                .and_then(|t| Duration::try_from_secs_f64(t.elapsed_secs).ok())
-                .and_then(|duration| u64::try_from(duration.as_millis()).ok());
-            let status = match item.status {
-                fabro_api::types::BoardColumn::Initializing => "queued",
-                fabro_api::types::BoardColumn::Running => "running",
-                fabro_api::types::BoardColumn::Blocked => "blocked",
-                fabro_api::types::BoardColumn::Succeeded => "succeeded",
-                fabro_api::types::BoardColumn::Failed => "failed",
-            };
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "run_id": item.id,
-                    "goal": item.title,
-                    "workflow_slug": item.workflow.slug,
-                    "workflow_name": item.workflow.slug,
-                    "host_repo_path": format!("/demo/{}", item.repository.name),
-                    "labels": {},
-                    "start_time": item.created_at.to_rfc3339(),
-                    "status": status,
-                    "blocked_reason": if status == "blocked" { json!("human_input_required") } else { serde_json::Value::Null },
-                    "status_reason": null,
-                    "pending_control": null,
-                    "duration_ms": elapsed_ms,
-                    "total_usd_micros": null,
-                })),
-            )
-                .into_response()
-        }
+    match runs::summaries().into_iter().find(|run| run.run_id == id) {
+        Some(run) => (StatusCode::OK, Json(run)).into_response(),
         None => ApiError::not_found("Run not found.").into_response(),
     }
 }
@@ -680,462 +651,321 @@ fn ts(s: &str) -> DateTime<Utc> {
 }
 
 mod runs {
+    use std::collections::HashMap;
+    use std::str::FromStr;
+    use std::time::Duration;
+
     use fabro_api::types::*;
 
     use super::ts;
+    use crate::server::truncate_goal;
 
-    pub(super) fn list_items() -> Vec<RunListItem> {
+    fn labels(entries: &[(&str, &str)]) -> HashMap<String, String> {
+        entries
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .collect()
+    }
+
+    fn summary(
+        run_id: &str,
+        repo_name: &str,
+        workflow_slug: &str,
+        workflow_name: &str,
+        goal: &str,
+        status: &str,
+        created_at: &str,
+        elapsed_secs: Option<f64>,
+        status_reason: Option<&str>,
+        pending_control: Option<RunControlAction>,
+        total_usd_micros: Option<i64>,
+        entries: &[(&str, &str)],
+    ) -> StoreRunSummary {
+        let status_reason = status_reason.and_then(parse_status_reason);
+
+        StoreRunSummary {
+            created_at: ts(created_at),
+            duration_ms: elapsed_secs.and_then(duration_ms_from_secs),
+            elapsed_secs,
+            goal: goal.into(),
+            host_repo_path: Some(format!("/demo/{repo_name}")),
+            labels: labels(entries),
+            pending_control,
+            repository: RepositoryReference {
+                name: repo_name.into(),
+            },
+            run_id: run_id.into(),
+            start_time: Some(ts(created_at)),
+            status: RunStatus::from_str(status)
+                .unwrap_or_else(|_| panic!("invalid demo run status: {status}")),
+            status_reason,
+            blocked_reason: None,
+            title: truncate_goal(goal),
+            total_usd_micros,
+            workflow_name: Some(workflow_name.into()),
+            workflow_slug: Some(workflow_slug.into()),
+        }
+    }
+
+    fn parse_status_reason(reason: &str) -> Option<StatusReason> {
+        StatusReason::from_str(reason).ok()
+    }
+
+    fn duration_ms_from_secs(secs: f64) -> Option<i64> {
+        let duration = Duration::try_from_secs_f64(secs).ok()?;
+        duration.as_millis().try_into().ok()
+    }
+
+    fn take_summary(
+        summaries: &mut HashMap<String, StoreRunSummary>,
+        run_id: &str,
+    ) -> StoreRunSummary {
+        summaries
+            .remove(run_id)
+            .unwrap_or_else(|| panic!("missing demo summary: {run_id}"))
+    }
+
+    fn board_item(
+        summary: StoreRunSummary,
+        column: BoardColumn,
+        pull_request: Option<RunPullRequest>,
+        sandbox: Option<RunSandbox>,
+        question: Option<RunQuestion>,
+    ) -> RunListItem {
+        RunListItem {
+            column,
+            created_at: summary.created_at,
+            duration_ms: summary.duration_ms,
+            elapsed_secs: summary.elapsed_secs,
+            goal: summary.goal,
+            host_repo_path: summary.host_repo_path,
+            labels: summary.labels,
+            pending_control: summary.pending_control,
+            pull_request,
+            question,
+            repository: summary.repository,
+            run_id: summary.run_id,
+            sandbox,
+            start_time: summary.start_time,
+            status: summary.status.to_string(),
+            status_reason: summary.status_reason,
+            title: summary.title,
+            total_usd_micros: summary.total_usd_micros,
+            workflow_name: summary.workflow_name,
+            workflow_slug: summary.workflow_slug,
+        }
+    }
+
+    fn check(name: &str, status: CheckRunStatus, duration_secs: Option<f64>) -> CheckRun {
+        CheckRun {
+            name: name.into(),
+            status,
+            duration_secs,
+        }
+    }
+
+    fn sandbox(id: &str, cpu: i64, memory: i64) -> RunSandbox {
+        RunSandbox {
+            id:        id.into(),
+            resources: Some(SandboxResources { cpu, memory }),
+        }
+    }
+
+    fn pull_request(
+        number: i64,
+        additions: i64,
+        deletions: i64,
+        comments: i64,
+        checks: Vec<CheckRun>,
+    ) -> RunPullRequest {
+        RunPullRequest {
+            number,
+            additions: Some(additions),
+            deletions: Some(deletions),
+            comments: Some(comments),
+            checks,
+        }
+    }
+
+    pub(super) fn columns() -> Vec<BoardColumnDefinition> {
         vec![
-            RunListItem {
-                id:           "run-1".into(),
-                repository:   RepositoryReference {
-                    name: "api-server".into(),
-                },
-                title:        "Add rate limiting to auth endpoints".into(),
-                workflow:     WorkflowReference {
-                    slug: "implement".into(),
-                },
-                status:       BoardColumn::Running,
-                pull_request: None,
-                timings:      Some(RunTimings {
-                    elapsed_secs:    420.0,
-                    elapsed_warning: Some(false),
-                }),
-                sandbox:      Some(RunSandbox {
-                    id:        "sb-a1b2c3d4".into(),
-                    resources: Some(SandboxResources {
-                        cpu:    4,
-                        memory: 8,
-                    }),
-                }),
-                question:     None,
-                created_at:   ts("2026-03-06T14:30:00Z"),
+            BoardColumnDefinition {
+                id:   "initializing".into(),
+                name: "Initializing".into(),
             },
-            RunListItem {
-                id:           "run-2".into(),
-                repository:   RepositoryReference {
-                    name: "web-dashboard".into(),
-                },
-                title:        "Migrate to React Router v7".into(),
-                workflow:     WorkflowReference {
-                    slug: "implement".into(),
-                },
-                status:       BoardColumn::Running,
-                pull_request: None,
-                timings:      Some(RunTimings {
-                    elapsed_secs:    8100.0,
-                    elapsed_warning: Some(false),
-                }),
-                sandbox:      Some(RunSandbox {
-                    id:        "sb-e5f6g7h8".into(),
-                    resources: Some(SandboxResources {
-                        cpu:    8,
-                        memory: 16,
-                    }),
-                }),
-                question:     None,
-                created_at:   ts("2026-03-06T12:00:00Z"),
+            BoardColumnDefinition {
+                id:   "running".into(),
+                name: "Running".into(),
             },
-            RunListItem {
-                id:           "run-3".into(),
-                repository:   RepositoryReference {
-                    name: "cli-tools".into(),
-                },
-                title:        "Fix config parsing for nested values".into(),
-                workflow:     WorkflowReference {
-                    slug: "fix_build".into(),
-                },
-                status:       BoardColumn::Running,
-                pull_request: None,
-                timings:      Some(RunTimings {
-                    elapsed_secs:    2700.0,
-                    elapsed_warning: Some(false),
-                }),
-                sandbox:      Some(RunSandbox {
-                    id:        "sb-i9j0k1l2".into(),
-                    resources: Some(SandboxResources {
-                        cpu:    2,
-                        memory: 4,
-                    }),
-                }),
-                question:     None,
-                created_at:   ts("2026-03-05T09:20:00Z"),
+            BoardColumnDefinition {
+                id:   "blocked".into(),
+                name: "Blocked".into(),
             },
-            RunListItem {
-                id:           "run-4".into(),
-                repository:   RepositoryReference {
-                    name: "api-server".into(),
-                },
-                title:        "Update OpenAPI spec for v3".into(),
-                workflow:     WorkflowReference {
-                    slug: "expand".into(),
-                },
-                status:       BoardColumn::Blocked,
-                pull_request: Some(RunPullRequest {
-                    number:    0,
-                    additions: Some(567),
-                    deletions: Some(234),
-                    comments:  Some(0),
-                    checks:    vec![],
-                }),
-                timings:      Some(RunTimings {
-                    elapsed_secs:    4320.0,
-                    elapsed_warning: Some(false),
-                }),
-                sandbox:      Some(RunSandbox {
-                    id:        "sb-q7r8s9t0".into(),
-                    resources: None,
-                }),
-                question:     Some(RunQuestion {
+            BoardColumnDefinition {
+                id:   "succeeded".into(),
+                name: "Succeeded".into(),
+            },
+            BoardColumnDefinition {
+                id:   "failed".into(),
+                name: "Failed".into(),
+            },
+        ]
+    }
+
+    pub(super) fn summaries() -> Vec<StoreRunSummary> {
+        vec![
+            summary(
+                "run-1",
+                "api-server",
+                "implement",
+                "Implement",
+                "Add rate limiting to auth endpoints",
+                "running",
+                "2026-03-06T14:30:00Z",
+                Some(420.0),
+                None,
+                None,
+                None,
+                &[("branch", "rate-limit"), ("team", "platform")],
+            ),
+            summary(
+                "run-2",
+                "web-dashboard",
+                "implement",
+                "Implement",
+                "Migrate to React Router v7",
+                "running",
+                "2026-03-06T12:00:00Z",
+                Some(8100.0),
+                None,
+                Some(RunControlAction::Pause),
+                None,
+                &[("owner", "frontend")],
+            ),
+            summary(
+                "run-3",
+                "shared-types",
+                "expand",
+                "Expand",
+                "Update OpenAPI spec for v3",
+                "starting",
+                "2026-03-04T15:00:00Z",
+                Some(4320.0),
+                None,
+                None,
+                None,
+                &[("priority", "high")],
+            ),
+            summary(
+                "run-4",
+                "shared-types",
+                "implement",
+                "Implement",
+                "Add pipeline event types",
+                "paused",
+                "2026-03-04T10:00:00Z",
+                Some(1680.0),
+                None,
+                None,
+                None,
+                &[("owner", "runtime")],
+            ),
+            summary(
+                "run-5",
+                "web-dashboard",
+                "implement",
+                "Implement",
+                "Add dark mode toggle",
+                "failed",
+                "2026-03-03T16:45:00Z",
+                Some(2100.0),
+                Some("workflow_error"),
+                None,
+                None,
+                &[("environment", "staging")],
+            ),
+            summary(
+                "run-6",
+                "api-server",
+                "implement",
+                "Implement",
+                "Implement webhook retry logic",
+                "succeeded",
+                "2026-02-28T14:00:00Z",
+                Some(259200.0),
+                Some("completed"),
+                None,
+                Some(720000),
+                &[("release", "preview")],
+            ),
+        ]
+    }
+
+    pub(super) fn board_items() -> Vec<RunListItem> {
+        let mut summaries = summaries()
+            .into_iter()
+            .map(|summary| (summary.run_id.clone(), summary))
+            .collect::<HashMap<_, _>>();
+
+        vec![
+            board_item(
+                take_summary(&mut summaries, "run-1"),
+                BoardColumn::Running,
+                None,
+                Some(sandbox("sb-a1b2c3d4", 4, 8)),
+                None,
+            ),
+            board_item(
+                take_summary(&mut summaries, "run-2"),
+                BoardColumn::Running,
+                None,
+                Some(sandbox("sb-e5f6g7h8", 8, 16)),
+                None,
+            ),
+            board_item(
+                take_summary(&mut summaries, "run-3"),
+                BoardColumn::Initializing,
+                Some(pull_request(0, 567, 234, 0, vec![])),
+                Some(sandbox("sb-q7r8s9t0", 4, 8)),
+                Some(RunQuestion {
                     text: "Accept or push for another round?".into(),
                 }),
-                created_at:   ts("2026-03-04T15:00:00Z"),
-            },
-            RunListItem {
-                id:           "run-5".into(),
-                repository:   RepositoryReference {
-                    name: "shared-types".into(),
-                },
-                title:        "Add pipeline event types".into(),
-                workflow:     WorkflowReference {
-                    slug: "implement".into(),
-                },
-                status:       BoardColumn::Blocked,
-                pull_request: Some(RunPullRequest {
-                    number:    0,
-                    additions: Some(145),
-                    deletions: Some(23),
-                    comments:  Some(0),
-                    checks:    vec![],
-                }),
-                timings:      Some(RunTimings {
-                    elapsed_secs:    1680.0,
-                    elapsed_warning: Some(false),
-                }),
-                sandbox:      Some(RunSandbox {
-                    id:        "sb-u1v2w3x4".into(),
-                    resources: None,
-                }),
-                question:     Some(RunQuestion {
+            ),
+            board_item(
+                take_summary(&mut summaries, "run-4"),
+                BoardColumn::Blocked,
+                Some(pull_request(0, 145, 23, 0, vec![])),
+                Some(sandbox("sb-u1v2w3x4", 4, 8)),
+                Some(RunQuestion {
                     text: "Proceed from investigation to fix?".into(),
                 }),
-                created_at:   ts("2026-03-04T10:00:00Z"),
-            },
-            RunListItem {
-                id:           "run-6".into(),
-                repository:   RepositoryReference {
-                    name: "web-dashboard".into(),
-                },
-                title:        "Add dark mode toggle".into(),
-                workflow:     WorkflowReference {
-                    slug: "implement".into(),
-                },
-                status:       BoardColumn::Failed,
-                pull_request: Some(RunPullRequest {
-                    number:    889,
-                    additions: Some(234),
-                    deletions: Some(67),
-                    comments:  Some(4),
-                    checks:    vec![
-                        CheckRun {
-                            name:          "lint".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(23.0),
-                        },
-                        CheckRun {
-                            name:          "typecheck".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(72.0),
-                        },
-                        CheckRun {
-                            name:          "unit-tests".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(154.0),
-                        },
-                        CheckRun {
-                            name:          "integration-tests".into(),
-                            status:        CheckRunStatus::Failure,
-                            duration_secs: Some(296.0),
-                        },
-                        CheckRun {
-                            name:          "e2e / chrome".into(),
-                            status:        CheckRunStatus::Failure,
-                            duration_secs: Some(182.0),
-                        },
-                        CheckRun {
-                            name:          "build".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(105.0),
-                        },
-                        CheckRun {
-                            name:          "coverage".into(),
-                            status:        CheckRunStatus::Skipped,
-                            duration_secs: None,
-                        },
-                    ],
-                }),
-                timings:      Some(RunTimings {
-                    elapsed_secs:    2100.0,
-                    elapsed_warning: Some(false),
-                }),
-                sandbox:      Some(RunSandbox {
-                    id:        "sb-m3n4o5p6".into(),
-                    resources: None,
-                }),
-                question:     None,
-                created_at:   ts("2026-03-03T16:45:00Z"),
-            },
-            RunListItem {
-                id:           "run-7".into(),
-                repository:   RepositoryReference {
-                    name: "infrastructure".into(),
-                },
-                title:        "Terraform module for Redis cluster".into(),
-                workflow:     WorkflowReference {
-                    slug: "implement".into(),
-                },
-                status:       BoardColumn::Running,
-                pull_request: Some(RunPullRequest {
-                    number:    156,
-                    additions: Some(412),
-                    deletions: Some(0),
-                    comments:  Some(1),
-                    checks:    vec![
-                        CheckRun {
-                            name:          "lint".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(18.0),
-                        },
-                        CheckRun {
-                            name:          "typecheck".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(56.0),
-                        },
-                        CheckRun {
-                            name:          "unit-tests".into(),
-                            status:        CheckRunStatus::Pending,
-                            duration_secs: None,
-                        },
-                        CheckRun {
-                            name:          "integration-tests".into(),
-                            status:        CheckRunStatus::Queued,
-                            duration_secs: None,
-                        },
-                        CheckRun {
-                            name:          "build".into(),
-                            status:        CheckRunStatus::Pending,
-                            duration_secs: None,
-                        },
-                    ],
-                }),
-                timings:      Some(RunTimings {
-                    elapsed_secs:    720.0,
-                    elapsed_warning: Some(false),
-                }),
-                sandbox:      Some(RunSandbox {
-                    id:        "sb-y5z6a7b8".into(),
-                    resources: None,
-                }),
-                question:     None,
-                created_at:   ts("2026-03-03T11:00:00Z"),
-            },
-            RunListItem {
-                id:           "run-8".into(),
-                repository:   RepositoryReference {
-                    name: "api-server".into(),
-                },
-                title:        "Implement webhook retry logic".into(),
-                workflow:     WorkflowReference {
-                    slug: "implement".into(),
-                },
-                status:       BoardColumn::Succeeded,
-                pull_request: Some(RunPullRequest {
-                    number:    1249,
-                    additions: Some(189),
-                    deletions: Some(45),
-                    comments:  Some(7),
-                    checks:    vec![
-                        CheckRun {
-                            name:          "lint".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(21.0),
-                        },
-                        CheckRun {
-                            name:          "typecheck".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(68.0),
-                        },
-                        CheckRun {
-                            name:          "unit-tests".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(192.0),
-                        },
-                        CheckRun {
-                            name:          "integration-tests".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(334.0),
-                        },
-                        CheckRun {
-                            name:          "e2e / chrome".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(262.0),
-                        },
-                        CheckRun {
-                            name:          "e2e / firefox".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(285.0),
-                        },
-                        CheckRun {
-                            name:          "build".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(121.0),
-                        },
-                        CheckRun {
-                            name:          "deploy-preview".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(93.0),
-                        },
-                        CheckRun {
-                            name:          "security-scan".into(),
-                            status:        CheckRunStatus::Skipped,
-                            duration_secs: None,
-                        },
-                        CheckRun {
-                            name:          "performance".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(138.0),
-                        },
-                        CheckRun {
-                            name:          "bundle-size".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(34.0),
-                        },
-                        CheckRun {
-                            name:          "accessibility".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(72.0),
-                        },
-                    ],
-                }),
-                timings:      Some(RunTimings {
-                    elapsed_secs:    259200.0,
-                    elapsed_warning: Some(true),
-                }),
-                sandbox:      Some(RunSandbox {
-                    id:        "sb-c9d0e1f2".into(),
-                    resources: None,
-                }),
-                question:     None,
-                created_at:   ts("2026-02-28T14:00:00Z"),
-            },
-            RunListItem {
-                id:           "run-9".into(),
-                repository:   RepositoryReference {
-                    name: "cli-tools".into(),
-                },
-                title:        "Add --verbose flag to run command".into(),
-                workflow:     WorkflowReference {
-                    slug: "expand".into(),
-                },
-                status:       BoardColumn::Succeeded,
-                pull_request: Some(RunPullRequest {
-                    number:    430,
-                    additions: Some(56),
-                    deletions: Some(12),
-                    comments:  Some(2),
-                    checks:    vec![
-                        CheckRun {
-                            name:          "lint".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(15.0),
-                        },
-                        CheckRun {
-                            name:          "typecheck".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(48.0),
-                        },
-                        CheckRun {
-                            name:          "unit-tests".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(116.0),
-                        },
-                        CheckRun {
-                            name:          "build".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(82.0),
-                        },
-                        CheckRun {
-                            name:          "coverage".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(124.0),
-                        },
-                        CheckRun {
-                            name:          "bundle-size".into(),
-                            status:        CheckRunStatus::Skipped,
-                            duration_secs: None,
-                        },
-                    ],
-                }),
-                timings:      Some(RunTimings {
-                    elapsed_secs:    3900.0,
-                    elapsed_warning: Some(false),
-                }),
-                sandbox:      Some(RunSandbox {
-                    id:        "sb-g3h4i5j6".into(),
-                    resources: None,
-                }),
-                question:     None,
-                created_at:   ts("2026-02-27T09:00:00Z"),
-            },
-            RunListItem {
-                id:           "run-10".into(),
-                repository:   RepositoryReference {
-                    name: "shared-types".into(),
-                },
-                title:        "Export utility type helpers".into(),
-                workflow:     WorkflowReference {
-                    slug: "sync_drift".into(),
-                },
-                status:       BoardColumn::Succeeded,
-                pull_request: Some(RunPullRequest {
-                    number:    76,
-                    additions: Some(34),
-                    deletions: Some(8),
-                    comments:  Some(0),
-                    checks:    vec![
-                        CheckRun {
-                            name:          "lint".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(12.0),
-                        },
-                        CheckRun {
-                            name:          "typecheck".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(34.0),
-                        },
-                        CheckRun {
-                            name:          "unit-tests".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(75.0),
-                        },
-                        CheckRun {
-                            name:          "build".into(),
-                            status:        CheckRunStatus::Success,
-                            duration_secs: Some(58.0),
-                        },
-                    ],
-                }),
-                timings:      Some(RunTimings {
-                    elapsed_secs:    2880.0,
-                    elapsed_warning: Some(false),
-                }),
-                sandbox:      Some(RunSandbox {
-                    id:        "sb-k7l8m9n0".into(),
-                    resources: None,
-                }),
-                question:     None,
-                created_at:   ts("2026-02-26T08:00:00Z"),
-            },
+            ),
+            board_item(
+                take_summary(&mut summaries, "run-5"),
+                BoardColumn::Failed,
+                Some(pull_request(889, 234, 67, 4, vec![
+                    check("lint", CheckRunStatus::Success, Some(23.0)),
+                    check("typecheck", CheckRunStatus::Success, Some(72.0)),
+                    check("unit-tests", CheckRunStatus::Success, Some(154.0)),
+                    check("integration-tests", CheckRunStatus::Failure, Some(296.0)),
+                    check("build", CheckRunStatus::Success, Some(105.0)),
+                ])),
+                None,
+                None,
+            ),
+            board_item(
+                take_summary(&mut summaries, "run-6"),
+                BoardColumn::Succeeded,
+                Some(pull_request(1249, 189, 45, 7, vec![
+                    check("lint", CheckRunStatus::Success, Some(21.0)),
+                    check("typecheck", CheckRunStatus::Success, Some(68.0)),
+                    check("unit-tests", CheckRunStatus::Success, Some(192.0)),
+                    check("integration-tests", CheckRunStatus::Success, Some(334.0)),
+                    check("deploy-preview", CheckRunStatus::Success, Some(93.0)),
+                ])),
+                None,
+                None,
+            ),
         ]
     }
 
@@ -1404,6 +1234,72 @@ mod runs {
                 }
             }
         })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn summary_parses_known_status_reason_values() {
+            let summary = summary(
+                "run-test",
+                "demo-repo",
+                "implement",
+                "Implement",
+                "Goal",
+                "failed",
+                "2026-03-06T14:30:00Z",
+                Some(1.0),
+                Some("cancelled"),
+                None,
+                None,
+                &[],
+            );
+
+            assert_eq!(summary.status_reason, Some(StatusReason::Cancelled));
+        }
+
+        #[test]
+        fn summary_ignores_unknown_status_reason() {
+            let summary = summary(
+                "run-test",
+                "demo-repo",
+                "implement",
+                "Implement",
+                "Goal",
+                "failed",
+                "2026-03-06T14:30:00Z",
+                Some(1.0),
+                Some("unexpected_reason"),
+                None,
+                None,
+                &[],
+            );
+
+            assert_eq!(summary.status_reason, None);
+        }
+
+        #[test]
+        fn summary_derives_title_like_server() {
+            let goal = format!("## Plan: {}", "a".repeat(120));
+            let summary = summary(
+                "run-test",
+                "demo-repo",
+                "implement",
+                "Implement",
+                &goal,
+                "running",
+                "2026-03-06T14:30:00Z",
+                Some(1.0),
+                None,
+                None,
+                None,
+                &[],
+            );
+
+            assert_eq!(summary.title, format!("{}...", "a".repeat(97)));
+        }
     }
 }
 

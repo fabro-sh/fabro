@@ -15,16 +15,20 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { BoardColumnDefinition } from './board-column-definition';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { PaginationMeta } from './pagination-meta';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { StoreRunSummary } from './store-run-summary';
+import type { RunListItem } from './run-list-item';
 
 /**
- * Paginated list of runs.
+ * Paginated list of board runs with shared canonical fields plus board metadata.
  */
-export interface PaginatedRunList {
-    'data': Array<StoreRunSummary>;
+export interface PaginatedBoardRunList {
+    'columns': Array<BoardColumnDefinition>;
+    'data': Array<RunListItem>;
     'meta': PaginationMeta;
 }
 

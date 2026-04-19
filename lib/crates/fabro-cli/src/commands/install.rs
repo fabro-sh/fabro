@@ -2268,14 +2268,13 @@ mod tests {
             .and_then(|s| s.listen.as_ref())
             .expect("server.listen should be set");
         match listen {
-            ServerListenLayer::Tcp { address, tls } => {
+            ServerListenLayer::Tcp { address } => {
                 assert_eq!(
                     address
                         .as_ref()
                         .map(fabro_types::settings::InterpString::as_source),
                     Some("127.0.0.1:32276".to_string())
                 );
-                assert!(tls.is_none());
             }
             ServerListenLayer::Unix { .. } => panic!("expected tcp listen"),
         }

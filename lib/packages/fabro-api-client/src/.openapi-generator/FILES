@@ -32,6 +32,7 @@ models/billed-token-counts.ts
 models/billing-by-model.ts
 models/billing-stage-ref.ts
 models/blocked-reason.ts
+models/board-column-definition.ts
 models/board-column.ts
 models/check-run-status.ts
 models/check-run.ts
@@ -86,6 +87,7 @@ models/model.ts
 models/node-state.ts
 models/node-status-record.ts
 models/paginated-api-question-list.ts
+models/paginated-board-run-list.ts
 models/paginated-event-list.ts
 models/paginated-history-entry-list.ts
 models/paginated-model-list.ts

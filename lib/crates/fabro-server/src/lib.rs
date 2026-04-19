@@ -19,7 +19,6 @@ pub mod server;
 mod server_secrets;
 mod settings_view;
 pub mod static_files;
-pub mod tls;
 pub mod web_auth;
 
 pub use error::{ApiError, Error, Result};

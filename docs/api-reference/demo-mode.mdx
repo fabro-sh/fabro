@@ -13,7 +13,7 @@ Demo mode is activated **per-request** by sending a header:
 X-Fabro-Demo: 1
 ```
 
-When the server receives this header, it routes the request to a parallel set of demo handlers that return static JSON instead of hitting the real backend. Authentication is bypassed — no JWT or mTLS credentials are needed.
+When the server receives this header, it routes the request to a parallel set of demo handlers that return static JSON instead of hitting the real backend. Authentication is bypassed — no credentials are needed.
 
 Requests **without** the header are routed to the real API as usual, so demo and production traffic coexist on the same server.
 

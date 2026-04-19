@@ -157,21 +157,25 @@ fn rm_force_removes_active_run() {
         then.status(200)
             .header("Content-Type", "application/json")
             .body(
-                serde_json::json!([
-                    {
+                serde_json::json!({
+                    "data": [{
                         "run_id": run_id,
                         "workflow_name": "Active Workflow",
                         "workflow_slug": "active-workflow",
                         "goal": "Active goal",
+                        "title": "Active goal",
                         "labels": {},
                         "host_repo_path": null,
+                        "repository": { "name": "unknown" },
                         "start_time": "2026-04-05T12:00:00Z",
+                        "created_at": "2026-04-05T12:00:00Z",
                         "status": "running",
                         "status_reason": null,
                         "duration_ms": 123,
                         "total_usd_micros": null
-                    }
-                ])
+                    }],
+                    "meta": { "has_more": false }
+                })
                 .to_string(),
             );
     });
@@ -270,21 +274,25 @@ fn rm_uses_configured_server_target_without_local_run_dir() {
         then.status(200)
             .header("Content-Type", "application/json")
             .body(
-                serde_json::json!([
-                    {
+                serde_json::json!({
+                    "data": [{
                         "run_id": run_id,
                         "workflow_name": "Remote Workflow",
                         "workflow_slug": "remote-workflow",
                         "goal": "Remote goal",
+                        "title": "Remote goal",
                         "labels": {},
                         "host_repo_path": null,
+                        "repository": { "name": "unknown" },
                         "start_time": "2026-04-05T12:00:00Z",
+                        "created_at": "2026-04-05T12:00:00Z",
                         "status": "succeeded",
                         "status_reason": null,
                         "duration_ms": 123,
                         "total_usd_micros": null
-                    }
-                ])
+                    }],
+                    "meta": { "has_more": false }
+                })
                 .to_string(),
             );
     });

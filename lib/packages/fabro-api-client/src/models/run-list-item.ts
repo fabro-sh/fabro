@@ -21,6 +21,9 @@ import type { BoardColumn } from './board-column';
 import type { RepositoryReference } from './repository-reference';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunControlAction } from './run-control-action';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunPullRequest } from './run-pull-request';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -30,28 +33,35 @@ import type { RunQuestion } from './run-question';
 import type { RunSandbox } from './run-sandbox';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { RunTimings } from './run-timings';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { WorkflowReference } from './workflow-reference';
+import type { StatusReason } from './status-reason';
 
 /**
- * Summary of a run shown in the board view.
+ * Canonical run summary shown in the board view, extended with board-specific metadata.
  */
 export interface RunListItem {
     /**
      * Unique run identifier (ULID).
      */
-    'id': string;
+    'run_id': string;
+    'workflow_name'?: string | null;
+    'workflow_slug'?: string | null;
+    'goal': string;
     'repository': RepositoryReference;
     /**
      * Human-readable title describing the run\'s goal.
      */
     'title': string;
-    'workflow': WorkflowReference;
-    'status': BoardColumn;
+    'status': string;
+    'labels': { [key: string]: string; };
+    'host_repo_path'?: string | null;
+    'start_time'?: string | null;
+    'status_reason'?: StatusReason | null;
+    'pending_control'?: RunControlAction | null;
+    'duration_ms'?: number | null;
+    'elapsed_secs'?: number | null;
+    'total_usd_micros'?: number | null;
+    'column': BoardColumn;
     'pull_request'?: RunPullRequest;
-    'timings'?: RunTimings;
     'sandbox'?: RunSandbox;
     'question'?: RunQuestion;
     /**
