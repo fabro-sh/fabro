@@ -79,6 +79,56 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
         "expected 409 for POST /runs/{{id}}/events on archived run"
     );
 
+    // Additional write surfaces that the Unit 4 audit guards but the scenario
+    // loop doesn't cover. The `reject_if_archived` check runs before each
+    // endpoint's state-specific lookups, so synthetic stage/question/filename
+    // values are fine — the archive guard fires first.
+    for (method, path, body, content_type) in [
+        (
+            "POST",
+            format!("/runs/{run_id}/questions/q-fake/answer"),
+            r#"{"value":"x"}"#,
+            "application/json",
+        ),
+        (
+            "POST",
+            format!("/runs/{run_id}/stages/fake@1/artifacts?filename=smoke.txt"),
+            "payload",
+            "application/octet-stream",
+        ),
+        (
+            "PUT",
+            format!("/runs/{run_id}/sandbox/file?path=smoke.txt"),
+            "payload",
+            "application/octet-stream",
+        ),
+        (
+            "POST",
+            format!("/runs/{run_id}/blobs"),
+            "payload",
+            "application/octet-stream",
+        ),
+    ] {
+        let req = Request::builder()
+            .method(method)
+            .uri(api(&path))
+            .header("content-type", content_type)
+            .body(Body::from(body))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::CONFLICT,
+            "expected 409 for {method} {path} on archived run"
+        );
+        let body = body_json(response.into_body()).await;
+        let detail = body["errors"][0]["detail"].as_str().unwrap_or_default();
+        assert!(
+            detail.contains("is archived") && detail.contains("fabro unarchive"),
+            "expected archived-rejection body on {method} {path}, got: {body}"
+        );
+    }
+
     // Unarchive restores the prior terminal status.
     let req = Request::builder()
         .method("POST")
