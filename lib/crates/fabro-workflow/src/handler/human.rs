@@ -1,6 +1,6 @@
 use std::path::Path;
-use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -72,23 +72,18 @@ fn parse_accelerator_key(label: &str) -> String {
 /// once when it transitions back to 0. Internal to `HumanHandler`; shared
 /// across concurrent `execute` calls fanned out by `ParallelHandler`.
 struct BlockedStateTracker {
-    unresolved_interviews: Mutex<usize>,
+    unresolved_interviews: AtomicUsize,
 }
 
 impl BlockedStateTracker {
     fn new() -> Self {
         Self {
-            unresolved_interviews: Mutex::new(0),
+            unresolved_interviews: AtomicUsize::new(0),
         }
     }
 
     fn interview_started(&self, emitter: &Emitter) {
-        let mut unresolved = self.unresolved_interviews.lock().unwrap();
-        let was_zero = *unresolved == 0;
-        *unresolved += 1;
-        drop(unresolved);
-
-        if was_zero {
+        if self.unresolved_interviews.fetch_add(1, Ordering::AcqRel) == 0 {
             emitter.emit(&Event::RunBlocked {
                 blocked_reason: BlockedReason::HumanInputRequired,
             });
@@ -96,17 +91,28 @@ impl BlockedStateTracker {
     }
 
     fn interview_resolved(&self, emitter: &Emitter) {
-        let mut unresolved = self.unresolved_interviews.lock().unwrap();
-        if *unresolved == 0 {
-            return;
-        }
-
-        *unresolved -= 1;
-        let is_zero = *unresolved == 0;
-        drop(unresolved);
-
-        if is_zero {
-            emitter.emit(&Event::RunUnblocked);
+        // Guard against unmatched resolves (e.g., tests that over-resolve) so
+        // the counter cannot underflow. `compare_exchange_weak` loops until we
+        // either observe zero (and bail) or successfully decrement.
+        let mut current = self.unresolved_interviews.load(Ordering::Acquire);
+        loop {
+            if current == 0 {
+                return;
+            }
+            match self.unresolved_interviews.compare_exchange_weak(
+                current,
+                current - 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    if current == 1 {
+                        emitter.emit(&Event::RunUnblocked);
+                    }
+                    return;
+                }
+                Err(observed) => current = observed,
+            }
         }
     }
 }
