@@ -200,7 +200,13 @@ pub(crate) async fn git_diff_with_timeout(
     base: &str,
     timeout_ms: u64,
 ) -> std::result::Result<String, String> {
-    let cmd = format!("{GIT_REMOTE} diff {base} HEAD");
+    // `-c core.quotePath=false` forces paths with non-ASCII, tabs, quotes,
+    // or backslashes to emit unquoted. The Run Files Changed endpoint's
+    // `strip_denylisted_sections` parser only recognizes unquoted
+    // `diff --git a/<old> b/<new>` headers; without this flag git would
+    // wrap such paths in `"a/…"` / `"b/…"` and evade the denylist (see
+    // docs/agent/reviews/2026-04-19-run-files-security-review.md).
+    let cmd = format!("{GIT_REMOTE} -c core.quotePath=false diff {base} HEAD");
     match sandbox
         .exec_command(&cmd, timeout_ms, None, None, None)
         .await
@@ -264,7 +270,7 @@ pub async fn git_replace_worktree(sandbox: &dyn Sandbox, path: &str, branch: &st
 ///
 /// These invocations use [`sandbox_git_hardening_env`] via `exec_command` to
 /// disable terminal prompts and external diff drivers.
-const GIT_HARDENED: &str = "git -c maintenance.auto=0 -c gc.auto=0 -c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.file.allow=never";
+const GIT_HARDENED: &str = "git -c maintenance.auto=0 -c gc.auto=0 -c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.file.allow=never -c core.quotePath=false";
 
 /// Environment additions applied to every hardened sandbox-side git invocation.
 ///

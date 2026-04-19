@@ -102,15 +102,21 @@ pub fn is_sensitive(path: &str) -> bool {
 
 fn normalize_for_match(path: &str) -> String {
     // Replace backslashes with forward slashes so Windows-style paths (if
-    // they ever leak through git output) match the same way; lowercase so
-    // the patterns are effectively case-insensitive. `to_lowercase()` can
-    // expand certain Unicode codepoints to multiple chars — the strip loop
-    // below runs against the fully-lowercased string so prefix matching is
-    // consistent regardless of the input's case.
+    // they ever leak through git output) match the same way. Case-folding
+    // is ASCII-only on purpose: all denylist globs are ASCII, and full
+    // Unicode `to_lowercase()` can expand a single codepoint into multiple
+    // chars (e.g. `İ` -> `i\u{307}`), which then silently can't match an
+    // ASCII glob. ASCII-only fold makes the failure mode explicit (a
+    // homoglyphic path just doesn't match) rather than disguised.
     let mut out = String::with_capacity(path.len());
     for ch in path.chars() {
         let c = if ch == '\\' { '/' } else { ch };
-        out.extend(c.to_lowercase());
+        let lowered = if c.is_ascii() {
+            c.to_ascii_lowercase()
+        } else {
+            c
+        };
+        out.push(lowered);
     }
     // Drop leading `./`, `../`, and bare-leading `/` prefixes until the
     // path has a meaningful first segment. Inner `..` components are left
