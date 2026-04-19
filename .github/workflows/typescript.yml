@@ -34,7 +34,7 @@ permissions: {}
 jobs:
   typecheck:
     name: Typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-x86-32-cores
     permissions:
       contents: read
     steps:
@@ -47,7 +47,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-x86-32-cores
     permissions:
       contents: read
     steps:
@@ -60,7 +60,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-x86-32-cores
     permissions:
       contents: read
     steps:
