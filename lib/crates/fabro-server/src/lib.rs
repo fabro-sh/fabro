@@ -14,6 +14,7 @@ pub mod install;
 pub mod ip_allowlist;
 pub mod jwt_auth;
 mod run_files;
+mod run_files_security;
 mod run_manifest;
 pub mod security_headers;
 pub mod serve;

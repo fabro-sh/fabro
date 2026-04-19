@@ -1963,6 +1963,7 @@ dependencies = [
  "fabro-vault",
  "fabro-workflow",
  "futures-util",
+ "globset",
  "hex",
  "hmac",
  "http-body-util",

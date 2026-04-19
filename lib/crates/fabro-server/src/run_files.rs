@@ -38,10 +38,10 @@ use fabro_workflow::sandbox_git::{
 use futures_util::FutureExt;
 use serde::Deserialize;
 use tokio::sync::{Mutex, watch};
-use tracing::info;
 
 use crate::error::ApiError;
 use crate::jwt_auth::AuthenticatedService;
+use crate::run_files_security::{RunFilesMetrics, is_sensitive};
 use crate::server::{AppState, parse_run_id_path_pub};
 
 /// Per-file cap: 256 KiB OR 20k lines (whichever comes first).
@@ -327,18 +327,17 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
         count_flags(&response_data);
 
     let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-    info!(
-        run_id = %run_id,
-        file_count = response_data.len(),
-        bytes_total = aggregate_bytes,
+    RunFilesMetrics {
+        file_count: response_data.len(),
+        bytes_total: aggregate_bytes,
         duration_ms,
         truncated,
         binary_count,
         sensitive_count,
         symlink_count,
         submodule_count,
-        "Run files response produced"
-    );
+    }
+    .emit(run_id);
 
     Ok(PaginatedRunFileList {
         data: response_data,
@@ -980,32 +979,6 @@ fn count_flags(data: &[FileDiff]) -> (u64, u64, u64, u64) {
         }
     }
     (binary, sensitive, symlink, submodule)
-}
-
-/// Path-based sensitive-file denylist (Unit 8 extracts this into a shared
-/// module; an inline set keeps the handler self-contained for Unit 5).
-///
-/// `basename_lower` is already ASCII-lowercased, so the suffix checks below
-/// are effectively case-insensitive despite clippy's heuristic lint.
-#[allow(clippy::case_sensitive_file_extension_comparisons)]
-fn is_sensitive(path: &str) -> bool {
-    let basename = path.rsplit_once('/').map_or(path, |(_, name)| name);
-    let basename_lower = basename.to_ascii_lowercase();
-    let basename_match = basename_lower == ".env"
-        || basename_lower.starts_with(".env.")
-        || basename_lower.ends_with(".pem")
-        || basename_lower.starts_with("id_rsa")
-        || basename_lower.ends_with(".p12")
-        || basename_lower.ends_with(".keystore")
-        || basename_lower.ends_with(".key");
-    if basename_match {
-        return true;
-    }
-    // Path-suffix patterns.
-    path.ends_with(".aws/credentials")
-        || path.ends_with(".git/config")
-        || path.contains("/.ssh/")
-        || path.starts_with(".ssh/")
 }
 
 #[cfg(test)]
