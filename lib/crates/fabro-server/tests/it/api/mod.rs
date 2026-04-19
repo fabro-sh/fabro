@@ -2,6 +2,7 @@ mod docs;
 mod install;
 mod install_openai_compatible;
 mod routing;
+mod run_files;
 mod runs;
 mod settings;
 mod system;
