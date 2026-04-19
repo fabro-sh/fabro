@@ -33,6 +33,12 @@ export default function RunSettingsPage({ loaderData }: any) {
       <StageSidebar stages={stages} runId={id!} activeLink="settings" />
 
       <div className="min-w-0 flex-1">
+        <header className="mb-4">
+          <h2 className="text-base font-semibold text-fg">Run settings</h2>
+          <p className="mt-1 text-sm/6 text-fg-3">
+            Frozen settings snapshot used by this run.
+          </p>
+        </header>
         <CollapsibleFile
           file={{ name: "settings.json", contents: JSON.stringify(settings, null, 2), lang: "json" }}
         />
