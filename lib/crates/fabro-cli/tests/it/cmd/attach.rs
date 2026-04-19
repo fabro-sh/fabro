@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "integration tests: read child-process stdout line-by-line via std::io::BufReader"
+)]
+
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Output, Stdio};
 use std::sync::mpsc;

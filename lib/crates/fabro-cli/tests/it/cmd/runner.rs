@@ -2,6 +2,10 @@
     clippy::disallowed_methods,
     reason = "These CLI integration tests spawn real fabro worker subprocesses and observe their lifecycle."
 )]
+#![expect(
+    clippy::disallowed_types,
+    reason = "integration tests read the spawned child's stdout via std::io::Read"
+)]
 
 use std::io::Read;
 use std::process::{Child, ExitStatus, Output, Stdio};

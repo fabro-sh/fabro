@@ -26,6 +26,12 @@ pub fn spawn_detached(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) 
 
 #[cfg(unix)]
 #[allow(clippy::exit)]
+#[expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "pre-fork cleanup: flush the blocking stdout/stderr buffers before double-forking \
+              so the child does not inherit buffered data; sync std::io is required here"
+)]
 fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) {
     // Flush stdout/stderr before forking so the child process doesn't inherit
     // buffered data that would be flushed again on child exit, causing

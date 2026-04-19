@@ -1,3 +1,9 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "file-backed tracing sink: sync BufWriter<File> is intentional; writes happen on a \
+              dedicated per-event guard and are not in an async hot path"
+)]
+
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};

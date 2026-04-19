@@ -1,3 +1,13 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "sync CLI `upgrade` command: blocking std::io::Write and std::io::BufReader for \
+              release download + prompt output"
+)]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync CLI `upgrade` command: interactive confirm prompt reads from std::io::stdin"
+)]
+
 use std::fs;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};

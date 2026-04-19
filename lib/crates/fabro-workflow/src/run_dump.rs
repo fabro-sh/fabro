@@ -1,4 +1,8 @@
 use std::collections::HashMap;
+#[expect(
+    clippy::disallowed_types,
+    reason = "in-memory Vec<u8>::write_all for jsonl serialization; no filesystem or network I/O"
+)]
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 

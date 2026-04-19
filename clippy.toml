@@ -5,9 +5,22 @@ disallowed-methods = [
   { path = "std::thread::spawn", reason = "Prefer Tokio task APIs on async paths; document intentional dedicated OS threads with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
   { path = "std::thread::Builder::spawn", reason = "Prefer Tokio task APIs on async paths; document intentional dedicated OS threads with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
   { path = "std::process::Command::new", reason = "Prefer tokio::process::Command on Tokio paths; document intentional synchronous subprocesses with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
+  { path = "std::io::stdin", reason = "Returns a blocking handle; prefer tokio::io::stdin on Tokio paths. Document intentional sync stdin with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
+  { path = "std::io::stdout", reason = "Returns a blocking handle; prefer tokio::io::stdout on Tokio paths. Document intentional sync stdout with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
+  { path = "std::io::stderr", reason = "Returns a blocking handle; prefer tokio::io::stderr on Tokio paths. Document intentional sync stderr with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
   { path = "reqwest::Client::new", reason = "Use fabro_http::http_client() or fabro_http::test_http_client()", allow-invalid = true },
   { path = "reqwest::Client::builder", reason = "Use fabro_http::HttpClientBuilder::new()", allow-invalid = true },
   { path = "reqwest::blocking::Client::new", reason = "Use fabro_http::blocking_http_client() or fabro_http::blocking_test_http_client()", allow-invalid = true },
   { path = "reqwest::blocking::Client::builder", reason = "Use fabro_http::BlockingHttpClientBuilder::new()", allow-invalid = true },
   { path = "reqwest::get", reason = "Build a fabro_http client and send the request explicitly", allow-invalid = true },
+]
+disallowed-types = [
+  { path = "std::io::Read", reason = "Blocking trait; prefer tokio::io::AsyncReadExt on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },
+  { path = "std::io::Write", reason = "Blocking trait; prefer tokio::io::AsyncWriteExt on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },
+  { path = "std::io::BufRead", reason = "Blocking trait; prefer tokio::io::AsyncBufReadExt on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },
+  { path = "std::io::BufReader", reason = "Blocking buffered reader; prefer tokio::io::BufReader on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },
+  { path = "std::io::BufWriter", reason = "Blocking buffered writer; prefer tokio::io::BufWriter on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },
+  { path = "std::net::TcpStream", reason = "Blocking socket; prefer tokio::net::TcpStream on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },
+  { path = "std::net::TcpListener", reason = "Blocking accept; prefer tokio::net::TcpListener on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },
+  { path = "std::net::UdpSocket", reason = "Blocking recv/send; prefer tokio::net::UdpSocket on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },
 ]

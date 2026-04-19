@@ -1,3 +1,12 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "sync CLI `graph` command: blocking std::io::Write is the intended output mechanism"
+)]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync CLI `graph` command: blocking std::io::stdout is the intended output mechanism"
+)]
+
 use std::io::Write;
 
 use anyhow::{Context, bail};

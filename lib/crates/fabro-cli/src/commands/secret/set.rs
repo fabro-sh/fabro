@@ -1,3 +1,12 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "sync CLI `secret set` command: reads secret from stdin via blocking std::io::Read"
+)]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync CLI `secret set` command: reads secret from std::io::stdin"
+)]
+
 use std::io::{IsTerminal, Read as _};
 
 use anyhow::{Context as _, Result, bail};

@@ -211,6 +211,10 @@ pub(crate) fn parse_compose_multi(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_types,
+    reason = "test helpers write compose fixtures to temp files via sync std::io"
+)]
 mod tests {
     use std::io::Write;
 

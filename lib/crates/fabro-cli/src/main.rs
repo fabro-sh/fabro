@@ -367,8 +367,15 @@ async fn main_inner() -> (String, Result<()>) {
                 }));
                 match result {
                     Ok(buf) => {
-                        use std::io::Write;
-                        std::io::stdout().write_all(&buf)?;
+                        #[expect(
+                            clippy::disallowed_types,
+                            clippy::disallowed_methods,
+                            reason = "sync CLI: stream shell completions to stdout"
+                        )]
+                        {
+                            use std::io::Write;
+                            std::io::stdout().write_all(&buf)?;
+                        }
                     }
                     Err(_) => {
                         anyhow::bail!(

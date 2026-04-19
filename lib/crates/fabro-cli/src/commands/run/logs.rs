@@ -1,3 +1,12 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "sync CLI `run logs` command: blocking std::io::Write is the intended output mechanism"
+)]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync CLI `run logs` command: streams log lines to std::io::stdout directly"
+)]
+
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal, Write};
 use std::time::Duration;

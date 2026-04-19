@@ -1,3 +1,9 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "sync CLI `run` subprocess wrapper: reads server subprocess stdout line-by-line via \
+              std::io::BufReader; not on a Tokio path"
+)]
+
 use std::io::{BufRead as StdBufRead, BufReader as StdBufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

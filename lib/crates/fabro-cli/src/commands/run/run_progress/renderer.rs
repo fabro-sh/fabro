@@ -1,3 +1,9 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "sync CLI run-progress renderer: generic over blocking std::io::Write to render \
+              terminal progress lines"
+)]
+
 use std::io::Write;
 use std::sync::Mutex;
 

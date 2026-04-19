@@ -1,3 +1,8 @@
+#[expect(
+    clippy::disallowed_types,
+    reason = "CLI entry point writes to stdout/stderr; blocking std::io::Write is intentional and \
+              scoped to the CLI binary, not to any library code used by Tokio services"
+)]
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -137,6 +142,12 @@ fn is_auto_approved(level: PermissionLevel, category: &str) -> bool {
 }
 
 #[allow(clippy::print_stderr)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Interactive tool-approval prompt: blocking on stderr flush and stdin read_line is \
+              the entire point. Invoked from an async tool hook, but the callback is a \
+              user-gated pause point; concurrent tasks on the same worker are acceptable."
+)]
 fn build_tool_approval(
     permissions: PermissionLevel,
     is_interactive: bool,
@@ -442,6 +453,10 @@ pub async fn run_with_args_and_client(
 
     // Build tool approval callback
     let permissions = args.permissions.unwrap_or(PermissionLevel::ReadWrite);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "is_terminal() on stdin is a non-blocking fstat; no actual I/O performed"
+    )]
     let is_interactive = std::io::stdin().is_terminal() && !args.auto_approve;
     let tool_approval = build_tool_approval(permissions, is_interactive, styles);
     let tool_hooks: Arc<dyn ToolHookCallback> = Arc::new(ToolApprovalAdapter(tool_approval));
@@ -539,6 +554,13 @@ pub async fn run_with_args_and_client(
             OutputFormat::Json => {
                 while let Ok(event) = rx.recv().await {
                     if let Ok(json) = serde_json::to_string(&event) {
+                        #[expect(
+                            clippy::disallowed_methods,
+                            reason = "FOLLOW-UP: blocking stdout inside tokio::spawn. Acceptable \
+                                      today (low-volume event stream, CLI output), but should \
+                                      migrate to tokio::io::stdout to avoid worker stalls under \
+                                      pipe backpressure."
+                        )]
                         let mut stdout = std::io::stdout().lock();
                         let _ = writeln!(stdout, "{json}");
                         let _ = stdout.flush();

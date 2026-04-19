@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "sync CLI `uninstall` command: blocking std::io::Write is the intended output mechanism"
+)]
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};

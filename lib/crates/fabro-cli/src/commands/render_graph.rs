@@ -1,3 +1,13 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "sync CLI `render-graph` command: reads DOT from stdin and writes rendered output \
+              to stdout via blocking std::io"
+)]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync CLI `render-graph` command: uses blocking std::io::stdin/stdout"
+)]
+
 use std::io::{Read, Write};
 
 const RENDER_ERROR_PREFIX: &str = "RENDER_ERROR:";
