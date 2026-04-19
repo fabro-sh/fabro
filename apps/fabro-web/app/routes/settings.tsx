@@ -23,8 +23,9 @@ export default function Settings({ loaderData }: any) {
   return (
     <div className="mx-auto max-w-4xl">
       <p className="mb-6 max-w-[60ch] text-sm/6 text-fg-3 text-pretty">
-        Redacted snapshot of the server configuration. Edit values with the
-        Fabro CLI; changes take effect on the next server restart.
+        Snapshot of the server configuration. Edit via{" "}
+        <code className="font-mono text-fg-2">settings.toml</code>; changes
+        take effect on the next server restart.
       </p>
       <CollapsibleFile
         file={{ name: "server.json", contents: JSON.stringify(settings, null, 2), lang: "json" }}
