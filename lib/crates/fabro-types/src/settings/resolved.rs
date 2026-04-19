@@ -29,7 +29,7 @@ mod tests {
         DockerfileSource, McpServerSettings, McpTransport, RunAgentSettings, RunGoal, RunSettings,
     };
     use crate::settings::server::{
-        ObjectStoreSettings, ServerListenSettings, ServerSettings, ServerSlateDbSettings, TlsConfig,
+        ObjectStoreSettings, ServerListenSettings, ServerSettings, ServerSlateDbSettings,
     };
 
     #[test]
@@ -119,19 +119,11 @@ mod tests {
         assert_eq!(
             serde_json::to_value(ServerListenSettings::Tcp {
                 address: "127.0.0.1:8080".parse().unwrap(),
-                tls:     Some(TlsConfig {
-                    cert: InterpString::parse("/tmp/server.crt"),
-                    key:  InterpString::parse("/tmp/server.key"),
-                }),
             })
             .unwrap(),
             json!({
                 "type": "tcp",
-                "address": "127.0.0.1:8080",
-                "tls": {
-                    "cert": "/tmp/server.crt",
-                    "key": "/tmp/server.key"
-                }
+                "address": "127.0.0.1:8080"
             })
         );
 

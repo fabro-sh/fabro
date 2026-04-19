@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -45,37 +44,6 @@ fn decode_pem_value(name: &str, value: &str) -> Result<String, String> {
         .decode(value)
         .map_err(|e| format!("{name} is not valid PEM or base64: {e}"))?;
     String::from_utf8(bytes).map_err(|e| format!("{name} base64 decoded to invalid UTF-8: {e}"))
-}
-
-fn validate_tls_cert(pem: &str, now_epoch: i64) -> Result<String, String> {
-    let mut reader = std::io::Cursor::new(pem.as_bytes());
-    let certs: Vec<_> = rustls_pemfile::certs(&mut reader)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("failed to parse certificate PEM: {e}"))?;
-    if certs.is_empty() {
-        return Err("no certificates found in PEM".to_string());
-    }
-    let (_, parsed) = x509_parser::parse_x509_certificate(&certs[0])
-        .map_err(|e| format!("failed to parse X.509 certificate: {e}"))?;
-    let not_after = parsed.validity().not_after.timestamp();
-    if not_after <= now_epoch {
-        return Err("certificate has expired".to_string());
-    }
-    let cn = parsed
-        .subject()
-        .iter_common_name()
-        .next()
-        .and_then(|cn| cn.as_str().ok())
-        .unwrap_or("(no CN)");
-    Ok(format!("CN={cn}, valid"))
-}
-
-fn validate_tls_private_key(pem: &str) -> Result<(), String> {
-    let mut reader = std::io::Cursor::new(pem.as_bytes());
-    rustls_pemfile::private_key(&mut reader)
-        .map_err(|e| format!("failed to parse private key PEM: {e}"))?
-        .ok_or_else(|| "no private key found in PEM".to_string())?;
-    Ok(())
 }
 
 fn validate_session_secret(value: &str) -> Result<(), String> {
@@ -492,11 +460,6 @@ async fn check_brave_search(state: &AppState) -> CheckResult {
 }
 
 fn check_crypto(state: &AppState) -> CheckResult {
-    let settings_file = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
     let resolved_server_settings = state.server_settings();
 
     let mut details = Vec::new();
@@ -556,40 +519,6 @@ fn check_crypto(state: &AppState) -> CheckResult {
             errors.push(err);
         } else {
             details.push(CheckDetail::new("FABRO_JWT_PRIVATE_KEY valid".to_string()));
-        }
-    }
-
-    if let Some(listen) = settings_file
-        .server
-        .as_ref()
-        .and_then(|s| s.listen.as_ref())
-    {
-        use fabro_types::settings::server::ServerListenLayer;
-
-        if let ServerListenLayer::Tcp { tls: Some(tls), .. } = listen {
-            let read = |raw: Option<String>, label: &str| -> Result<String, String> {
-                let Some(path_str) = raw else {
-                    return Err(format!("server.listen.tls.{label} is not configured"));
-                };
-                let path = PathBuf::from(&path_str);
-                let expanded = fabro_config::expand_tilde(&path);
-                std::fs::read_to_string(&expanded)
-                    .map_err(|e| format!("{}: {e}", expanded.display()))
-            };
-            match (
-                read(tls.cert.as_ref().map(InterpString::as_source), "cert"),
-                read(tls.key.as_ref().map(InterpString::as_source), "key"),
-            ) {
-                (Ok(cert_pem), Ok(key_pem)) => {
-                    if let Err(err) = validate_tls_cert(&cert_pem, chrono::Utc::now().timestamp()) {
-                        errors.push(err);
-                    }
-                    if let Err(err) = validate_tls_private_key(&key_pem) {
-                        errors.push(err);
-                    }
-                }
-                _ => errors.push("failed to read TLS files".to_string()),
-            }
         }
     }
 

@@ -7,10 +7,9 @@ use fabro_types::settings::server::{
     ServerAuthMethod, ServerAuthSettings, ServerIntegrationsLayer, ServerIntegrationsSettings,
     ServerIpAllowlistLayer, ServerIpAllowlistOverrideLayer, ServerIpAllowlistOverrideSettings,
     ServerIpAllowlistSettings, ServerLayer, ServerListenLayer, ServerListenSettings,
-    ServerListenTlsLayer, ServerLoggingSettings, ServerSchedulerSettings, ServerSettings,
-    ServerSlateDbLayer, ServerSlateDbSettings, ServerStorageLayer, ServerStorageSettings,
-    ServerWebLayer, ServerWebSettings, SlackIntegrationSettings, TeamsIntegrationSettings,
-    TlsConfig,
+    ServerLoggingSettings, ServerSchedulerSettings, ServerSettings, ServerSlateDbLayer,
+    ServerSlateDbSettings, ServerStorageLayer, ServerStorageSettings, ServerWebLayer,
+    ServerWebSettings, SlackIntegrationSettings, TeamsIntegrationSettings,
 };
 use fabro_util::Home;
 
@@ -18,7 +17,7 @@ use super::{ResolveError, default_interp, parse_socket_addr, require_interp};
 
 pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> ServerSettings {
     let storage = resolve_storage(layer.storage.as_ref());
-    let (listen, _valid_tls) = resolve_listen(layer.listen.as_ref(), errors);
+    let listen = resolve_listen(layer.listen.as_ref(), errors);
     let web = resolve_web(layer.api.as_ref(), layer.web.as_ref());
     let auth = resolve_auth(layer.auth.as_ref(), errors);
     let ip_allowlist = resolve_ip_allowlist(layer.ip_allowlist.as_ref(), errors);
@@ -65,47 +64,25 @@ fn resolve_storage(layer: Option<&ServerStorageLayer>) -> ServerStorageSettings 
 fn resolve_listen(
     layer: Option<&ServerListenLayer>,
     errors: &mut Vec<ResolveError>,
-) -> (ServerListenSettings, bool) {
+) -> ServerListenSettings {
     match layer {
-        None => (
-            ServerListenSettings::Unix {
-                path: default_interp(Home::from_env().socket_path()),
-            },
-            false,
-        ),
-        Some(ServerListenLayer::Unix { path }) => (
-            ServerListenSettings::Unix {
-                path: path
-                    .clone()
-                    .unwrap_or_else(|| default_interp(Home::from_env().socket_path())),
-            },
-            false,
-        ),
-        Some(ServerListenLayer::Tcp { address, tls }) => {
+        None => ServerListenSettings::Unix {
+            path: default_interp(Home::from_env().socket_path()),
+        },
+        Some(ServerListenLayer::Unix { path }) => ServerListenSettings::Unix {
+            path: path
+                .clone()
+                .unwrap_or_else(|| default_interp(Home::from_env().socket_path())),
+        },
+        Some(ServerListenLayer::Tcp { address }) => {
             let address = parse_socket_addr(
                 &require_interp(address.as_ref(), "server.listen.address", errors),
                 "server.listen.address",
                 errors,
             );
-            let (tls, valid_tls) = resolve_tls(tls.as_ref(), errors);
-            (ServerListenSettings::Tcp { address, tls }, valid_tls)
+            ServerListenSettings::Tcp { address }
         }
     }
-}
-
-fn resolve_tls(
-    layer: Option<&ServerListenTlsLayer>,
-    errors: &mut Vec<ResolveError>,
-) -> (Option<TlsConfig>, bool) {
-    let Some(layer) = layer else {
-        return (None, false);
-    };
-
-    let cert = require_interp(layer.cert.as_ref(), "server.listen.tls.cert", errors);
-    let key = require_interp(layer.key.as_ref(), "server.listen.tls.key", errors);
-    let valid = layer.cert.is_some() && layer.key.is_some();
-
-    (Some(TlsConfig { cert, key }), valid)
 }
 
 fn resolve_web(_api: Option<&ServerApiLayer>, layer: Option<&ServerWebLayer>) -> ServerWebSettings {

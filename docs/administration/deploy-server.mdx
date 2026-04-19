@@ -22,7 +22,7 @@ Both interfaces use the same workflow engine, the same Graphviz files, and the s
 | **Events** | Printed to stderr | Streamed via SSE |
 | **Persistence** | Checkpoint files only | Persistent run store + checkpoint files |
 | **Web UI** | Not available | Full React interface |
-| **Authentication** | None | JWT and/or mTLS |
+| **Authentication** | None | Dev token and/or GitHub OAuth |
 
 ## Starting the server
 
@@ -118,25 +118,26 @@ Send the `X-Fabro-Demo: 1` header on any API request to get static mock data wit
 The CLI can target a running Fabro server for commands that support a remote API. Configure `~/.fabro/settings.toml`:
 
 ```toml title="settings.toml"
-[server]
-target = "https://fabro.example.com:3000/api/v1"
+[cli.target]
+type = "http"
+url = "https://fabro.example.com/api/v1"
 ```
 
 Or use the `--server` flag:
 
 ```bash
-fabro model list --server https://fabro.example.com:3000/api/v1
+fabro model list --server https://fabro.example.com/api/v1
 ```
 
-`fabro model list` and `fabro model test` honor `[server].target` by default unless you explicitly pass `--storage-dir`. `fabro exec` remains a local agent session and only uses the server when you pass `--server`.
+`fabro model list` and `fabro model test` honor `[cli.target]` by default unless you explicitly pass `--storage-dir`. `fabro exec` remains a local agent session and only uses the server when you pass `--server`.
 
-See [User Configuration](/reference/user-configuration#server-section) for the full connection options, including mTLS setup.
+See [User Configuration](/reference/user-configuration#cli.target-section) for the full connection options, including client certificates for proxy-terminated HTTPS endpoints.
 
 ## Next steps
 
 <Columns cols={2}>
   <Card title="Server Configuration" icon="gear" href="/administration/server-configuration">
-    Full settings.toml reference — authentication, TLS, run defaults, and more.
+    Full settings.toml reference — authentication, reverse-proxy TLS, run defaults, and more.
   </Card>
   <Card title="Deploy to Railway" icon="train" href="/administration/deploy-railway">
     Step-by-step guide for deploying Fabro on Railway.

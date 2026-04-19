@@ -75,8 +75,9 @@ Once the deploy is healthy, Fly exposes a `<app>.fly.dev` URL (or your custom do
 2. **Point your local CLI at the server** — add the Fly URL to `~/.fabro/settings.toml`:
 
    ```toml title="~/.fabro/settings.toml"
-   [server]
-   target = "https://<your-app>.fly.dev/api/v1"
+   [cli.target]
+   type = "http"
+   url = "https://<your-app>.fly.dev/api/v1"
    ```
 
    Then commands like `fabro model list --server <url>` will hit your Fly instance.

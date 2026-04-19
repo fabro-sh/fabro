@@ -22,6 +22,8 @@ Legacy `server.toml`, `user.toml`, and `cli.toml` are ignored with a warning. Re
 
 The CLI-only `[cli.*]` sections (including `[cli.target]`) belong in the client machine's `settings.toml`. They tell CLI commands how to reach a server. The server process does not read `[cli.*]` for its own binding or routing.
 
+Fabro does not terminate inbound TLS directly. Bind `[server.listen]` to a Unix socket or plain TCP port, and terminate HTTPS or mTLS at a reverse proxy, load balancer, or platform ingress in front of Fabro. Use `[server.api].url` and `[server.web].url` for those external HTTPS URLs.
+
 ### Full reference
 
 ```toml title="settings.toml"
@@ -30,10 +32,6 @@ _version = 1
 [server.listen]
 type = "tcp"
 address = "0.0.0.0:3000"
-
-[server.listen.tls]
-cert = "/etc/fabro/tls/cert.pem"
-key = "/etc/fabro/tls/key.pem"
 
 [server.api]
 url = "https://fabro.example.com/api/v1"

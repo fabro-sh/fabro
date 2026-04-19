@@ -27,10 +27,7 @@ _version = 1
 
 [server.listen]
 type = "tcp"
-address = "127.0.0.1:3000"
-
-[server.listen.tls]
-cert = "/tmp/server.pem"
+address = "not-a-socket-addr"
 
 [server.auth]
 methods = ["github"]
@@ -50,7 +47,7 @@ provider = "not-a-provider"
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(rendered.contains("server.listen.tls.key"));
+    assert!(rendered.contains("server.listen.address"));
     assert!(rendered.contains("server.auth.github.allowed_usernames"));
     assert!(rendered.contains("run.sandbox.provider"));
 }

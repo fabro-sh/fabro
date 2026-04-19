@@ -28,7 +28,7 @@ CLI mode is ideal for:
 fabro server start
 ```
 
-`fabro server start` starts an HTTP server (default `127.0.0.1:3000`) with persistent run storage. Runs are submitted via the REST API and executed asynchronously.
+`fabro server start` starts an HTTP server, binding to `~/.fabro/fabro.sock` by default (or plain TCP when configured), with persistent run storage. Runs are submitted via the REST API and executed asynchronously. Public HTTPS, when needed, is terminated upstream by a reverse proxy or platform ingress.
 
 ### Configuration
 
@@ -38,11 +38,11 @@ Key server config options:
 
 | Setting | Description |
 |---|---|
-| `api.host` / `api.port` | Bind address (default `127.0.0.1:3000`) |
-| `api.authentication_strategies` | Auth methods: `jwt`, `mtls`, or both |
-| `api.tls` | Optional HTTPS with cert/key/CA paths |
-| `max_concurrent_runs` | Scheduler concurrency limit (default 5) |
-| `[llm]`, `[sandbox]`, `[vars]` | Defaults applied to every run (overridable per-run) |
+| `server.listen` | Bind transport: Unix socket or plain TCP listener |
+| `server.api.url` / `server.web.url` | External HTTPS URLs advertised to clients |
+| `server.auth.methods` | Bootstrap auth methods: `dev-token`, `github`, or both |
+| `server.scheduler.max_concurrent_runs` | Scheduler concurrency limit (default 5) |
+| `[run.*]` | Defaults applied to every run (overridable per-run) |
 
 ### Run lifecycle
 
@@ -61,10 +61,10 @@ In API mode, human-in-the-loop questions are served over HTTP instead of termina
 
 ### Authentication
 
-API mode supports two authentication strategies, configurable in `settings.toml`:
+API mode supports two bootstrap auth methods, configurable in `settings.toml`:
 
-- **JWT** — EdDSA-signed tokens (used by the web UI)
-- **mTLS** — Mutual TLS with client certificates (used for service-to-service communication)
+- **`dev-token`** — Bearer token access for operators and automation
+- **`github`** — GitHub OAuth for browser users, resulting in a session cookie
 
 ### Demo mode
 
@@ -75,7 +75,7 @@ Demo mode is per-request: send the `X-Fabro-Demo: 1` HTTP header to get static m
 The web UI is a React app (`apps/fabro-web`) that connects to the API server. Start it alongside `fabro server start`:
 
 ```bash
-fabro server start                 # API on port 3000
+fabro server start                 # API on ~/.fabro/fabro.sock by default
 cd apps/fabro-web && bun run dev   # rebuilds web assets on change; refresh the browser
 ```
 

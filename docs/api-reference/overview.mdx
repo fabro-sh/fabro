@@ -11,13 +11,13 @@ The Fabro API is a REST API for managing workflow runs, interactive sessions, an
 
 ## Base URL
 
-The versioned API is served by `fabro server start`, which defaults to:
+By default, `fabro server start` listens on the Unix socket `~/.fabro/fabro.sock`. If you bind Fabro to TCP instead, the versioned API is served at a URL like:
 
 ```
 http://localhost:3000/api/v1
 ```
 
-The base URL is configurable via `settings.toml`:
+The advertised public API URL is configurable via `settings.toml`:
 
 ```toml title="settings.toml"
 [server.api]
@@ -63,19 +63,9 @@ When `"github"` is enabled, browser users can sign in through GitHub OAuth. Succ
 
 When `[server.web].enabled = true`, the server requires `SESSION_SECRET` and issues a private `__fabro_session` cookie after successful login. The cookie is session transport only; the underlying bootstrap method remains `dev-token` or `github`, and that provenance is preserved in run metadata.
 
-### HTTPS
+### HTTPS and Reverse Proxies
 
-If you want HTTPS on the listener, configure shared TLS on `[server.listen.tls]`:
-
-```toml title="settings.toml"
-[server.listen]
-type = "tcp"
-address = "0.0.0.0:3000"
-
-[server.listen.tls]
-cert = "/etc/fabro/tls/cert.pem"
-key = "/etc/fabro/tls/key.pem"
-```
+Fabro's listener is plain HTTP (or a Unix socket) only. If you want a public HTTPS endpoint, terminate TLS at a reverse proxy, load balancer, or platform ingress and point it at Fabro's internal listener.
 
 ## Errors
 

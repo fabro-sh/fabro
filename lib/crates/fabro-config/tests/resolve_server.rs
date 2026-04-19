@@ -65,8 +65,8 @@ fn resolves_server_defaults_from_empty_settings() {
 }
 
 #[test]
-fn reports_tls_shape_errors() {
-    let file = parse(
+fn parsing_rejects_inbound_listener_tls_configuration() {
+    let err = fabro_config::parse_settings_layer(
         r#"
 _version = 1
 
@@ -76,19 +76,11 @@ address = "127.0.0.1:32276"
 
 [server.listen.tls]
 cert = "/etc/fabro/server.pem"
-
 "#,
-    );
+    )
+    .expect_err("listener TLS should be rejected at parse time");
 
-    let errors = fabro_config::resolve_server_from_file(&file)
-        .expect_err("incomplete tls config should fail");
-    let rendered = errors
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    assert!(rendered.contains("server.listen.tls.key"));
+    assert!(err.to_string().contains("unknown field `tls`"));
 }
 
 #[test]

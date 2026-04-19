@@ -21,10 +21,6 @@ _version = 1
 type = "tcp"
 address = "127.0.0.1:32276"
 
-[server.listen.tls]
-cert = "/etc/fabro/tls/cert.pem"
-key = "/etc/fabro/tls/key.pem"
-
 [server.auth]
 methods = ["dev-token", "github"]
 

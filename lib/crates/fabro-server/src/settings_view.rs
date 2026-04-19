@@ -10,9 +10,8 @@
 //!
 //! Per the requirements doc, only the transport bind needs redaction now:
 //!
-//! - `server.listen` — the whole subtree. Bind address reveals network
-//!   topology; `[server.listen.tls]` cert/key paths reveal the host filesystem
-//!   layout.
+//! - `server.listen` — the whole subtree. Bind addresses and socket paths
+//!   reveal network topology and host filesystem layout.
 //!
 //! ## Why that's all
 //!
@@ -132,10 +131,6 @@ _version = 1
 [server.listen]
 type = "tcp"
 address = "127.0.0.1:32276"
-
-[server.listen.tls]
-cert = "/etc/fabro/tls/cert.pem"
-key = "/etc/fabro/tls/key.pem"
 "#,
         );
         let redacted = redact_for_api(&settings);
@@ -248,10 +243,6 @@ _version = 1
 [server.listen]
 type = "tcp"
 address = "127.0.0.1:32276"
-
-[server.listen.tls]
-cert = "/etc/fabro/tls/cert.pem"
-key = "/etc/fabro/tls/key.pem"
 
 [server.auth]
 methods = ["github", "dev-token"]

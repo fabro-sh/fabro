@@ -28,10 +28,10 @@ Fabro is single-tenant software designed for small, trusted teams. The following
 
 ### Authentication
 
-- **Enable authentication.** Fabro supports GitHub OAuth and Tailscale header-based auth for the web app. Do not use `insecure_disabled` outside of local development.
-- **Configure a username allowlist.** Both GitHub and Tailscale auth support `allowed_usernames` in `settings.toml`. An empty allowlist rejects all requests.
-- **Use JWT to connect the web app to the API.** Configure `FABRO_JWT_PRIVATE_KEY` on the web app and `FABRO_JWT_PUBLIC_KEY` on the API server. JWT tokens are Ed25519-signed and short-lived (30 seconds).
-- **Use mTLS for machine-to-machine API access.** Configure `[api.tls]` in `settings.toml` with server cert, key, and CA. Set client auth to `Required` for programmatic clients (CI, scripts).
+- **Enable authentication.** Fabro supports `dev-token` and GitHub OAuth. Do not disable auth outside of local development or controlled demos.
+- **Configure a username allowlist for GitHub OAuth.** `[server.auth.github].allowed_usernames` should contain the exact GitHub users allowed to log in. An empty list rejects everyone.
+- **Configure the session secret used by the web flow.** `SESSION_SECRET` should be provisioned with a strong value on long-lived deployments. If you also provision `FABRO_JWT_PRIVATE_KEY` and `FABRO_JWT_PUBLIC_KEY`, treat them as server runtime secrets, but they are not what currently gates browser auth.
+- **Terminate HTTPS or mTLS upstream when needed.** Fabro's listener is plain HTTP/Unix only. If CI, scripts, or a browser must connect over HTTPS, terminate TLS at a reverse proxy or load balancer and keep the Fabro listener on a private network.
 
 ### Secrets
 

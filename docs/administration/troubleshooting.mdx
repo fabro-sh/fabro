@@ -10,7 +10,7 @@ The `fabro doctor` command validates your installation:
 ```bash
 fabro doctor            # Local config checks + live server diagnostics
 fabro doctor --verbose  # Show detailed output for each check
-fabro doctor --server https://fabro.example.com:3000/api/v1
+fabro doctor --server https://fabro.example.com/api/v1
 ```
 
 It checks:
@@ -29,7 +29,7 @@ It checks:
 
 **Port already in use** — Change the port with `fabro server start --port 3001` or stop the conflicting process.
 
-**SSE streams disconnecting** — If using a reverse proxy, ensure buffering is disabled and the connection timeout is long enough for workflow runs. See the [reverse proxy example](/administration/deployment#binding-and-tls).
+**SSE streams disconnecting** — If using a reverse proxy, ensure buffering is disabled and the connection timeout is long enough for workflow runs. See the [DigitalOcean reverse-proxy example](/administration/deploy-digital-ocean).
 
 **Run config validation errors** — Use `fabro preflight` to validate without executing:
 
