@@ -3945,7 +3945,7 @@ async fn start_run(
     } else if let Some(record) = run_state.status.as_ref() {
         if !matches!(
             record.status,
-            WorkflowRunStatus::Submitted | WorkflowRunStatus::Starting
+            WorkflowRunStatus::Submitted | WorkflowRunStatus::Queued | WorkflowRunStatus::Starting
         ) {
             return ApiError::new(
                 StatusCode::CONFLICT,

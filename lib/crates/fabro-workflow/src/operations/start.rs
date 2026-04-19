@@ -168,7 +168,10 @@ pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, E
     }
 
     if let Some(record) = state.status {
-        if !matches!(record.status, RunStatus::Submitted | RunStatus::Starting) {
+        if !matches!(
+            record.status,
+            RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting
+        ) {
             return Err(Error::Precondition(format!(
                 "cannot start run: status is {:?}, expected submitted",
                 record.status
