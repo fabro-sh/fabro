@@ -1013,6 +1013,61 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/files:
+    get:
+      operationId: listRunFiles
+      tags: [Run Outputs]
+      summary: List Run Files Changed
+      description: |
+        Returns the set of file changes produced by a run as a list of before/after diffs.
+
+        While the run's sandbox is reachable, diffs are resolved live against the sandbox working tree at the current HEAD. Once the sandbox is gone, the response may degrade to the unified-patch string captured at run end (see `meta.degraded` and `meta.patch`).
+
+        Responses are bounded by per-file (256 KiB / 20k lines), per-run aggregate (5 MiB), and per-request (200 files) caps. Files exceeding a cap are returned with `truncated: true` and empty `contents`. Sensitive paths (credentials, keys) are elided with `sensitive: true` and empty `contents`.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageOffset"
+        - name: from_sha
+          in: query
+          required: false
+          description: Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{7,40}$"
+        - name: to_sha
+          in: query
+          required: false
+          description: Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{7,40}$"
+      responses:
+        "200":
+          description: File diffs for the run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedRunFileList"
+        "400":
+          description: Malformed query parameter (invalid SHA format, or non-default value for `from_sha`/`to_sha`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found (or caller lacks access; returned as 404 to prevent enumeration).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Transient sandbox subprocess failure (timeout, process kill). Safe to retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/stages/{stageId}/artifacts:
     get:
       operationId: listStageArtifacts
@@ -4204,7 +4259,14 @@ components:
           example: 'import { parseArgs } from "node:util";'
 
     FileDiff:
-      description: A before/after pair showing changes to a single file.
+      description: |
+        A before/after pair showing changes to a single file.
+
+        Contents conventions for non-modify cases:
+        - Added: `old_file.contents` is empty string; `new_file` holds the added contents.
+        - Deleted: `new_file.contents` is empty string; `old_file` holds the removed contents.
+        - Renamed (no content change): both sides hold identical contents; `old_file.name != new_file.name`.
+        - Symlink / submodule / binary / sensitive / truncated: contents are empty strings; consumers must render a placeholder based on the flag set.
       type: object
       required:
         - old_file
@@ -4214,6 +4276,35 @@ components:
           $ref: "#/components/schemas/DiffFile"
         new_file:
           $ref: "#/components/schemas/DiffFile"
+        change_kind:
+          type: string
+          description: Optional classification of the change. Clients that don't recognize a value should fall back to inspecting the old/new contents.
+          enum:
+            - added
+            - modified
+            - deleted
+            - renamed
+            - symlink
+            - submodule
+          example: modified
+        truncated:
+          type: boolean
+          description: When `true`, `new_file.contents` and `old_file.contents` are empty strings because the file exceeded a cap (see `truncation_reason`).
+          example: false
+        truncation_reason:
+          type: string
+          description: Reason this file's contents were omitted. Absent when `truncated` is `false` or omitted.
+          enum:
+            - file_too_large
+            - budget_exhausted
+        binary:
+          type: boolean
+          description: When `true`, the file is non-textual; `contents` on both sides are empty strings.
+          example: false
+        sensitive:
+          type: boolean
+          description: When `true`, the file path matched the server's sensitive-path denylist; `contents` on both sides are empty strings regardless of truncation or binary flags.
+          example: false
 
     DiffStats:
       description: Aggregate line-change statistics for a diff.
@@ -4231,8 +4322,57 @@ components:
           description: Total lines deleted.
           example: 234
 
+    RunFilesMeta:
+      description: |
+        Metadata for a `PaginatedRunFileList` response.
+
+        Replaces `PaginationMeta` on the files endpoint — the naturally-bounded list does not use cursor pagination but exposes caps and a degraded-response path instead.
+      type: object
+      required:
+        - truncated
+        - total_changed
+      properties:
+        truncated:
+          type: boolean
+          description: True when any cap (file count, per-file size, or aggregate size) was hit for this response.
+          example: false
+        files_omitted_by_budget:
+          type: integer
+          description: Number of files dropped because the aggregate 5 MiB budget was exhausted. Zero or absent when no files were dropped for budget reasons.
+          example: 0
+        total_changed:
+          type: integer
+          description: Total files changed in the run (before caps were applied). May exceed `data.length` when truncation occurred.
+          example: 3
+        to_sha:
+          type: string
+          description: Head SHA the diff (or patch) was resolved against.
+          pattern: "^[0-9a-f]{7,40}$"
+          example: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"
+        to_sha_committed_at:
+          type: string
+          format: date-time
+          description: Commit time of `to_sha`, used by the UI for the "Checkpoint Xm ago" freshness label on Running runs.
+        degraded:
+          type: boolean
+          description: When `true`, this response carries only a unified patch string in `patch` (no per-file contents in `data`). The UI should render via a unified-patch component.
+          example: false
+        degraded_reason:
+          type: string
+          description: Why the response degraded to patch-only form. Absent when `degraded` is `false` or omitted.
+          enum:
+            - sandbox_unreachable
+            - sandbox_gone
+            - provider_unsupported
+        patch:
+          type: string
+          description: Unified-patch text captured at run end. Present only when `degraded` is `true`. Capped at 5 MiB; denylisted file sections are stripped and replaced with a placeholder line.
+
     PaginatedRunFileList:
-      description: Paginated list of file diffs produced by a run.
+      description: |
+        List of file diffs produced by a run, with metadata describing truncation and degraded-response state.
+
+        Naturally bounded: at most 200 files per response. Consumers should inspect `meta.truncated` rather than assuming `data.length` equals the run's total change count.
       type: object
       required:
         - data
@@ -4243,7 +4383,7 @@ components:
           items:
             $ref: "#/components/schemas/FileDiff"
         meta:
-          $ref: "#/components/schemas/PaginationMeta"
+          $ref: "#/components/schemas/RunFilesMeta"
 
     # ── Billing Schemas ──────────────────────────────────────────────────
 

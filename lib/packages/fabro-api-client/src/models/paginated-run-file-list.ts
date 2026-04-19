@@ -18,13 +18,13 @@
 import type { FileDiff } from './file-diff';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PaginationMeta } from './pagination-meta';
+import type { RunFilesMeta } from './run-files-meta';
 
 /**
- * Paginated list of file diffs produced by a run.
+ * List of file diffs produced by a run, with metadata describing truncation and degraded-response state.  Naturally bounded: at most 200 files per response. Consumers should inspect `meta.truncated` rather than assuming `data.length` equals the run\'s total change count. 
  */
 export interface PaginatedRunFileList {
     'data': Array<FileDiff>;
-    'meta': PaginationMeta;
+    'meta': RunFilesMeta;
 }
 

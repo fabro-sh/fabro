@@ -1030,6 +1030,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/graph", get(demo::get_run_graph))
         .route("/runs/{id}/stages", get(demo::get_run_stages))
         .route("/runs/{id}/artifacts", get(demo::list_run_artifacts_stub))
+        .route("/runs/{id}/files", get(not_implemented))
         .route(
             "/runs/{id}/stages/{stageId}/turns",
             get(demo::get_stage_turns),
@@ -1110,6 +1111,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/graph", get(get_graph))
         .route("/runs/{id}/stages", get(list_run_stages))
         .route("/runs/{id}/artifacts", get(list_run_artifacts))
+        .route("/runs/{id}/files", get(not_implemented))
         .route("/runs/{id}/stages/{stageId}/turns", get(not_implemented))
         .route(
             "/runs/{id}/stages/{stageId}/artifacts",

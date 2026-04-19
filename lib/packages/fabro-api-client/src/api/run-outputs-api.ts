@@ -24,12 +24,74 @@ import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError
 // @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
+import type { PaginatedRunFileList } from '../models';
+// @ts-ignore
 import type { RunBilling } from '../models';
 /**
  * RunOutputsApi - axios parameter creator
  */
 export const RunOutputsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
+        /**
+         * Returns the set of file changes produced by a run as a list of before/after diffs.  While the run\'s sandbox is reachable, diffs are resolved live against the sandbox working tree at the current HEAD. Once the sandbox is gone, the response may degrade to the unified-patch string captured at run end (see `meta.degraded` and `meta.patch`).  Responses are bounded by per-file (256 KiB / 20k lines), per-run aggregate (5 MiB), and per-request (200 files) caps. Files exceeding a cap are returned with `truncated: true` and empty `contents`. Sensitive paths (credentials, keys) are elided with `sensitive: true` and empty `contents`. 
+         * @summary List Run Files Changed
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [pageLimit] Maximum number of items to return per page.
+         * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {string} [fromSha] Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+         * @param {string} [toSha] Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listRunFiles: async (id: string, pageLimit?: number, pageOffset?: number, fromSha?: string, toSha?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('listRunFiles', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/files`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (pageLimit !== undefined) {
+                localVarQueryParameter['page[limit]'] = pageLimit;
+            }
+
+            if (pageOffset !== undefined) {
+                localVarQueryParameter['page[offset]'] = pageOffset;
+            }
+
+            if (fromSha !== undefined) {
+                localVarQueryParameter['from_sha'] = fromSha;
+            }
+
+            if (toSha !== undefined) {
+                localVarQueryParameter['to_sha'] = toSha;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
         /**
          * Returns token counts and billed totals broken down by stage and model for a specific run.
          * @summary Retrieve Run Billing
@@ -80,6 +142,23 @@ export const RunOutputsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = RunOutputsApiAxiosParamCreator(configuration)
     return {
         /**
+         * Returns the set of file changes produced by a run as a list of before/after diffs.  While the run\'s sandbox is reachable, diffs are resolved live against the sandbox working tree at the current HEAD. Once the sandbox is gone, the response may degrade to the unified-patch string captured at run end (see `meta.degraded` and `meta.patch`).  Responses are bounded by per-file (256 KiB / 20k lines), per-run aggregate (5 MiB), and per-request (200 files) caps. Files exceeding a cap are returned with `truncated: true` and empty `contents`. Sensitive paths (credentials, keys) are elided with `sensitive: true` and empty `contents`. 
+         * @summary List Run Files Changed
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [pageLimit] Maximum number of items to return per page.
+         * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {string} [fromSha] Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+         * @param {string} [toSha] Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listRunFiles(id: string, pageLimit?: number, pageOffset?: number, fromSha?: string, toSha?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedRunFileList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listRunFiles(id, pageLimit, pageOffset, fromSha, toSha, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunOutputsApi.listRunFiles']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns token counts and billed totals broken down by stage and model for a specific run.
          * @summary Retrieve Run Billing
          * @param {string} id Unique run identifier (ULID).
@@ -102,6 +181,20 @@ export const RunOutputsApiFactory = function (configuration?: Configuration, bas
     const localVarFp = RunOutputsApiFp(configuration)
     return {
         /**
+         * Returns the set of file changes produced by a run as a list of before/after diffs.  While the run\'s sandbox is reachable, diffs are resolved live against the sandbox working tree at the current HEAD. Once the sandbox is gone, the response may degrade to the unified-patch string captured at run end (see `meta.degraded` and `meta.patch`).  Responses are bounded by per-file (256 KiB / 20k lines), per-run aggregate (5 MiB), and per-request (200 files) caps. Files exceeding a cap are returned with `truncated: true` and empty `contents`. Sensitive paths (credentials, keys) are elided with `sensitive: true` and empty `contents`. 
+         * @summary List Run Files Changed
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [pageLimit] Maximum number of items to return per page.
+         * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {string} [fromSha] Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+         * @param {string} [toSha] Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listRunFiles(id: string, pageLimit?: number, pageOffset?: number, fromSha?: string, toSha?: string, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedRunFileList> {
+            return localVarFp.listRunFiles(id, pageLimit, pageOffset, fromSha, toSha, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns token counts and billed totals broken down by stage and model for a specific run.
          * @summary Retrieve Run Billing
          * @param {string} id Unique run identifier (ULID).
@@ -118,6 +211,21 @@ export const RunOutputsApiFactory = function (configuration?: Configuration, bas
  * RunOutputsApi - object-oriented interface
  */
 export class RunOutputsApi extends BaseAPI {
+    /**
+     * Returns the set of file changes produced by a run as a list of before/after diffs.  While the run\'s sandbox is reachable, diffs are resolved live against the sandbox working tree at the current HEAD. Once the sandbox is gone, the response may degrade to the unified-patch string captured at run end (see `meta.degraded` and `meta.patch`).  Responses are bounded by per-file (256 KiB / 20k lines), per-run aggregate (5 MiB), and per-request (200 files) caps. Files exceeding a cap are returned with `truncated: true` and empty `contents`. Sensitive paths (credentials, keys) are elided with `sensitive: true` and empty `contents`. 
+     * @summary List Run Files Changed
+     * @param {string} id Unique run identifier (ULID).
+     * @param {number} [pageLimit] Maximum number of items to return per page.
+     * @param {number} [pageOffset] Number of items to skip before returning results.
+     * @param {string} [fromSha] Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+     * @param {string} [toSha] Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listRunFiles(id: string, pageLimit?: number, pageOffset?: number, fromSha?: string, toSha?: string, options?: RawAxiosRequestConfig) {
+        return RunOutputsApiFp(this.configuration).listRunFiles(id, pageLimit, pageOffset, fromSha, toSha, options).then((request) => request(this.axios, this.basePath));
+    }
+
     /**
      * Returns token counts and billed totals broken down by stage and model for a specific run.
      * @summary Retrieve Run Billing

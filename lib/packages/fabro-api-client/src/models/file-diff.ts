@@ -18,10 +18,48 @@
 import type { DiffFile } from './diff-file';
 
 /**
- * A before/after pair showing changes to a single file.
+ * A before/after pair showing changes to a single file.  Contents conventions for non-modify cases: - Added: `old_file.contents` is empty string; `new_file` holds the added contents. - Deleted: `new_file.contents` is empty string; `old_file` holds the removed contents. - Renamed (no content change): both sides hold identical contents; `old_file.name != new_file.name`. - Symlink / submodule / binary / sensitive / truncated: contents are empty strings; consumers must render a placeholder based on the flag set. 
  */
 export interface FileDiff {
     'old_file': DiffFile;
     'new_file': DiffFile;
+    /**
+     * Optional classification of the change. Clients that don\'t recognize a value should fall back to inspecting the old/new contents.
+     */
+    'change_kind'?: FileDiffChangeKindEnum;
+    /**
+     * When `true`, `new_file.contents` and `old_file.contents` are empty strings because the file exceeded a cap (see `truncation_reason`).
+     */
+    'truncated'?: boolean;
+    /**
+     * Reason this file\'s contents were omitted. Absent when `truncated` is `false` or omitted.
+     */
+    'truncation_reason'?: FileDiffTruncationReasonEnum;
+    /**
+     * When `true`, the file is non-textual; `contents` on both sides are empty strings.
+     */
+    'binary'?: boolean;
+    /**
+     * When `true`, the file path matched the server\'s sensitive-path denylist; `contents` on both sides are empty strings regardless of truncation or binary flags.
+     */
+    'sensitive'?: boolean;
 }
+
+export const FileDiffChangeKindEnum = {
+    ADDED: 'added',
+    MODIFIED: 'modified',
+    DELETED: 'deleted',
+    RENAMED: 'renamed',
+    SYMLINK: 'symlink',
+    SUBMODULE: 'submodule'
+} as const;
+
+export type FileDiffChangeKindEnum = typeof FileDiffChangeKindEnum[keyof typeof FileDiffChangeKindEnum];
+export const FileDiffTruncationReasonEnum = {
+    FILE_TOO_LARGE: 'file_too_large',
+    BUDGET_EXHAUSTED: 'budget_exhausted'
+} as const;
+
+export type FileDiffTruncationReasonEnum = typeof FileDiffTruncationReasonEnum[keyof typeof FileDiffTruncationReasonEnum];
+
 

@@ -125,6 +125,7 @@ export * from './run-checkpoint';
 export * from './run-control-action';
 export * from './run-error';
 export * from './run-event';
+export * from './run-files-meta';
 export * from './run-list-item';
 export * from './run-manifest';
 export * from './run-projection';

@@ -145,6 +145,7 @@ models/run-checkpoint.ts
 models/run-control-action.ts
 models/run-error.ts
 models/run-event.ts
+models/run-files-meta.ts
 models/run-list-item.ts
 models/run-manifest.ts
 models/run-projection-checkpoints-inner-inner.ts
