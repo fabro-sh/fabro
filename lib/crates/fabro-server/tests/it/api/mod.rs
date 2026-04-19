@@ -1,3 +1,4 @@
+mod install;
 mod routing;
 mod runs;
 mod settings;

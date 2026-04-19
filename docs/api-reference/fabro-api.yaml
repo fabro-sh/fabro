@@ -7,6 +7,8 @@ info:
 tags:
   - name: Discovery
     description: API discovery and health
+  - name: Install
+    description: First-run browser install workflow
   - name: Runs
     description: Run management operations
   - name: Human-in-the-Loop
@@ -66,6 +68,282 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+
+  /install/session:
+    get:
+      operationId: getInstallSession
+      tags: [Install]
+      summary: Get install session
+      description: >
+        Returns the current browser-install session snapshot. Requires the one-time
+        install token in `Authorization: Bearer`, `?token=`, or `X-Install-Token`.
+      security: []
+      responses:
+        "200":
+          description: Current install session state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallSessionResponse"
+        "401":
+          description: Invalid or missing install token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/llm/test:
+    post:
+      operationId: testInstallLlmCredentials
+      tags: [Install]
+      summary: Validate install LLM credentials
+      description: Validates an LLM API key without persisting it. Requires the one-time install token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallLlmTestInput"
+      responses:
+        "200":
+          description: Credentials validated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallLlmValidationResponse"
+        "401":
+          description: Invalid or missing install token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Credential validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/llm:
+    put:
+      operationId: putInstallLlm
+      tags: [Install]
+      summary: Save install LLM settings
+      description: Records the LLM providers and API keys chosen during the browser install. Requires the one-time install token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallLlmProvidersInput"
+      responses:
+        "204":
+          description: LLM settings recorded
+        "401":
+          description: Invalid or missing install token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid install input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/server:
+    put:
+      operationId: putInstallServer
+      tags: [Install]
+      summary: Save install server configuration
+      description: Records the canonical server URL confirmed by the operator. Requires the one-time install token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallServerConfigInput"
+      responses:
+        "204":
+          description: Server configuration recorded
+        "401":
+          description: Invalid or missing install token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid canonical URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/github/token/test:
+    post:
+      operationId: testInstallGithubToken
+      tags: [Install]
+      summary: Validate install GitHub token
+      description: Validates a GitHub personal access token without persisting it. Requires the one-time install token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallGithubTokenTestInput"
+      responses:
+        "200":
+          description: GitHub token validated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallGithubTokenTestResponse"
+        "401":
+          description: Invalid or missing install token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: GitHub token validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/github/token:
+    put:
+      operationId: putInstallGithubToken
+      tags: [Install]
+      summary: Save install GitHub token
+      description: Records the GitHub personal access token chosen during the browser install. Requires the one-time install token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallGithubTokenInput"
+      responses:
+        "204":
+          description: GitHub token recorded
+        "401":
+          description: Invalid or missing install token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid install input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/github/app/manifest:
+    post:
+      operationId: createInstallGithubAppManifest
+      tags: [Install]
+      summary: Build install GitHub App manifest
+      description: Builds the GitHub App manifest and stores the temporary callback state for the browser install. Requires the one-time install token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallGithubAppManifestInput"
+      responses:
+        "200":
+          description: GitHub App manifest ready for browser handoff
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallGithubAppManifestResponse"
+        "401":
+          description: Invalid or missing install token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid install input or missing prior steps
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/github/app/redirect:
+    get:
+      operationId: completeInstallGithubAppRedirect
+      tags: [Install]
+      summary: Complete install GitHub App redirect
+      description: Manifest-conversion callback target used by GitHub during browser install. Authorized by the callback `state` query parameter rather than the install token.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Browser redirected back into the install SPA
+        "400":
+          description: Invalid or expired GitHub App callback state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: GitHub manifest conversion failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/finish:
+    post:
+      operationId: finishInstall
+      tags: [Install]
+      summary: Finalize browser install
+      description: Persists settings, runtime secrets, and install outputs, then schedules the install-mode process to exit cleanly. Requires the one-time install token.
+      security: []
+      responses:
+        "202":
+          description: Install persisted successfully; restart handoff in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallFinishResponse"
+        "401":
+          description: Invalid or missing install token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Install session is incomplete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Install persistence failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/health/diagnostics:
     post:
@@ -1682,6 +1960,225 @@ components:
       example: basic
 
   schemas:
+    InstallSessionResponse:
+      description: Current browser-install session snapshot with secrets redacted.
+      type: object
+      required:
+        - completed_steps
+        - prefill
+      properties:
+        completed_steps:
+          type: array
+          items:
+            type: string
+        llm:
+          oneOf:
+            - $ref: "#/components/schemas/InstallLlmSummary"
+            - type: "null"
+        server:
+          oneOf:
+            - $ref: "#/components/schemas/InstallServerConfigInput"
+            - type: "null"
+        github:
+          oneOf:
+            - $ref: "#/components/schemas/InstallGithubSummary"
+            - type: "null"
+        prefill:
+          $ref: "#/components/schemas/InstallPrefill"
+
+    InstallPrefill:
+      description: Server-detected defaults used to prefill the browser install wizard.
+      type: object
+      required:
+        - canonical_url
+      properties:
+        canonical_url:
+          type: string
+          format: uri
+
+    InstallLlmValidationResponse:
+      description: Successful response from install-time LLM credential validation.
+      type: object
+      required:
+        - ok
+      properties:
+        ok:
+          type: boolean
+          example: true
+
+    InstallLlmTestInput:
+      description: Input for install-time LLM credential validation.
+      type: object
+      required:
+        - provider
+        - api_key
+      properties:
+        provider:
+          type: string
+          example: anthropic
+        api_key:
+          type: string
+        openai_base_url:
+          type: string
+          format: uri
+          description: Optional override base URL used for OpenAI-style providers during install.
+
+    InstallLlmProvidersInput:
+      description: LLM providers selected during browser install.
+      type: object
+      required:
+        - providers
+      properties:
+        providers:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/InstallLlmProviderInput"
+
+    InstallLlmProviderInput:
+      description: One persisted LLM provider configuration collected during browser install.
+      type: object
+      required:
+        - provider
+        - api_key
+      properties:
+        provider:
+          type: string
+          example: anthropic
+        api_key:
+          type: string
+        openai_base_url:
+          type: string
+          format: uri
+
+    InstallLlmSummary:
+      description: Redacted summary of persisted LLM install choices.
+      type: object
+      properties:
+        providers:
+          type: array
+          items:
+            type: object
+            required:
+              - provider
+              - configured
+            properties:
+              provider:
+                type: string
+              configured:
+                type: boolean
+              openai_base_url:
+                type: string
+                format: uri
+
+    InstallServerConfigInput:
+      description: Canonical server URL confirmed during browser install.
+      type: object
+      required:
+        - canonical_url
+      properties:
+        canonical_url:
+          type: string
+          format: uri
+
+    InstallGithubTokenTestInput:
+      description: Input for install-time GitHub token validation.
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+
+    InstallGithubTokenTestResponse:
+      description: Successful response from install-time GitHub token validation.
+      type: object
+      required:
+        - username
+      properties:
+        username:
+          type: string
+
+    InstallGithubTokenInput:
+      description: GitHub personal access token chosen during browser install.
+      type: object
+      required:
+        - token
+        - username
+      properties:
+        token:
+          type: string
+        username:
+          type: string
+
+    InstallGithubAppManifestInput:
+      description: Input required to build the browser-install GitHub App manifest.
+      type: object
+      required:
+        - owner
+        - app_name
+        - allowed_username
+      properties:
+        owner:
+          type: string
+          description: >
+            Either `personal` or `org:<slug>`.
+        app_name:
+          type: string
+        allowed_username:
+          type: string
+
+    InstallGithubAppManifestResponse:
+      description: Browser handoff payload for the GitHub App creation flow.
+      type: object
+      required:
+        - manifest
+        - github_form_action
+      properties:
+        manifest:
+          type: object
+          additionalProperties: true
+        github_form_action:
+          type: string
+          format: uri
+
+    InstallGithubSummary:
+      description: Redacted summary of the GitHub install strategy selected during browser install.
+      type: object
+      required:
+        - strategy
+      properties:
+        strategy:
+          type: string
+          enum: [token, app]
+        username:
+          type: string
+        owner:
+          type: string
+        app_name:
+          type: string
+        slug:
+          type: string
+        allowed_username:
+          type: string
+
+    InstallFinishResponse:
+      description: Response returned after install outputs are persisted successfully.
+      type: object
+      required:
+        - status
+        - restart_url
+        - dev_token
+      properties:
+        status:
+          type: string
+          enum: [completing]
+        restart_url:
+          type: string
+          format: uri
+        dev_token:
+          type: string
+
     # ── Pagination ───────────────────────────────────────────────────────
 
     PaginationMeta:

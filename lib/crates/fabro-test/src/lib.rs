@@ -126,9 +126,19 @@ pub fn require_env(name: &str) -> Option<String> {
 /// `GITHUB_TOKEN`. Tests that deliberately need a credential set it with a
 /// subsequent `.env(...)` call, which survives the clear.
 pub fn apply_test_isolation(cmd: &mut std::process::Command, home_dir: &Path) {
+    apply_test_isolation_with_lookup(cmd, home_dir, |name| std::env::var_os(name));
+}
+
+fn apply_test_isolation_with_lookup(
+    cmd: &mut std::process::Command,
+    home_dir: &Path,
+    lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
+) {
     cmd.env_clear();
-    preserve_coverage_env!(cmd);
-    if let Some(path) = std::env::var_os("PATH") {
+    if let Some(coverage) = lookup("LLVM_PROFILE_FILE") {
+        cmd.env("LLVM_PROFILE_FILE", coverage);
+    }
+    if let Some(path) = lookup("PATH") {
         cmd.env("PATH", path);
     }
     cmd.env("NO_COLOR", "1");
@@ -227,12 +237,17 @@ fn current_pid() -> u32 {
 }
 
 fn session_paths() -> (SessionMode, String, SessionPaths) {
+    let run_id = std::env::var("NEXTEST_RUN_ID").ok();
+    session_paths_for_run_id(run_id.as_deref())
+}
+
+fn session_paths_for_run_id(run_id: Option<&str>) -> (SessionMode, String, SessionPaths) {
     let base_dir = short_session_base_dir();
-    if let Ok(run_id) = std::env::var("NEXTEST_RUN_ID") {
+    if let Some(run_id) = run_id {
         if !run_id.trim().is_empty() {
-            let short_id = shorten_session_id(&run_id);
+            let short_id = shorten_session_id(run_id);
             let root = base_dir.join(format!("n-{short_id}"));
-            return (SessionMode::Nextest, run_id, SessionPaths {
+            return (SessionMode::Nextest, run_id.to_string(), SessionPaths {
                 server: ServerPaths {
                     root:        root.clone(),
                     storage_dir: root.join("storage"),
@@ -1797,15 +1812,7 @@ macro_rules! e2e_openai {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Mutex, OnceLock};
-
     use super::*;
-
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn env_lock() -> &'static Mutex<()> {
-        ENV_LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     #[test]
     fn twin_admin_url_removes_v1_suffix() {
@@ -1841,13 +1848,15 @@ mod tests {
         reason = "Regression test: spawn /usr/bin/env synchronously and inspect stdout to assert the harness's env isolation."
     )]
     fn apply_test_isolation_strips_ambient_credentials() {
-        let _lock = env_lock().lock().expect("env lock poisoned");
-        let _token = EnvGuard::set("GITHUB_TOKEN", Some("sentinel-should-not-leak"));
-        let _anthropic = EnvGuard::set("ANTHROPIC_API_KEY", Some("sentinel-also-should-not-leak"));
-
         let home = tempfile::tempdir().expect("temp home should be created");
         let mut cmd = std::process::Command::new("/usr/bin/env");
-        apply_test_isolation(&mut cmd, home.path());
+        apply_test_isolation_with_lookup(&mut cmd, home.path(), |name| match name {
+            "PATH" => Some(std::ffi::OsString::from("/usr/bin:/bin")),
+            "LLVM_PROFILE_FILE" => Some(std::ffi::OsString::from("/tmp/coverage.profraw")),
+            "GITHUB_TOKEN" => Some(std::ffi::OsString::from("sentinel-should-not-leak")),
+            "ANTHROPIC_API_KEY" => Some(std::ffi::OsString::from("sentinel-also-should-not-leak")),
+            _ => None,
+        });
         let output = cmd.output().expect("/usr/bin/env should execute");
         assert!(output.status.success(), "env exited non-zero");
         let env_output = String::from_utf8(output.stdout).expect("env stdout should be UTF-8");
@@ -1909,9 +1918,7 @@ mod tests {
 
     #[test]
     fn session_paths_share_nextest_storage_dir() {
-        let _lock = env_lock().lock().expect("env lock poisoned");
-        let _guard = EnvGuard::set("NEXTEST_RUN_ID", Some("nextest-run-123"));
-        let (_, run_id, paths) = session_paths();
+        let (_, run_id, paths) = session_paths_for_run_id(Some("nextest-run-123"));
         assert_eq!(run_id, "nextest-run-123");
         assert!(paths.root.ends_with(Path::new("fx").join("n-nextestrun12")));
         assert_eq!(paths.server.storage_dir, paths.root.join("storage"));
@@ -1920,9 +1927,7 @@ mod tests {
 
     #[test]
     fn session_paths_fall_back_to_process_storage_dir() {
-        let _lock = env_lock().lock().expect("env lock poisoned");
-        let _guard = EnvGuard::set("NEXTEST_RUN_ID", None);
-        let (_, run_id, paths) = session_paths();
+        let (_, run_id, paths) = session_paths_for_run_id(None);
         assert_eq!(run_id, format!("process-{}", current_pid()));
         assert!(
             paths
@@ -1989,30 +1994,5 @@ mod tests {
             test_server_stop_timeout() <= std::time::Duration::from_secs(1),
             "test harness should SIGKILL quickly — no real work to preserve"
         );
-    }
-
-    struct EnvGuard {
-        key:      &'static str,
-        original: Option<String>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: Option<&str>) -> Self {
-            let original = std::env::var(key).ok();
-            match value {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
-            }
-            Self { key, original }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match &self.original {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
     }
 }

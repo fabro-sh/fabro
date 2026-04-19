@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
-use fabro_config::user::load_settings_config;
+use fabro_config::user::{FABRO_CONFIG_ENV, default_settings_path, load_settings_config};
 use fabro_config::{Storage, envfile, resolve_server_from_file};
 use fabro_server::bind::{Bind, BindRequest};
 use fabro_server::jwt_auth::auth_method_name;
@@ -53,6 +53,11 @@ pub(crate) async fn ensure_server_running_for_storage(
     storage_dir: &Path,
     config_path: &Path,
 ) -> Result<Bind> {
+    ensure_storage_server_autostart_allowed(
+        std::env::var_os(FABRO_CONFIG_ENV),
+        config_path,
+        &default_settings_path(),
+    )?;
     ensure_server_running_with_bind(None, config_path, storage_dir).await
 }
 
@@ -135,6 +140,19 @@ async fn ensure_server_running_with_bind(
             }
         }
     }
+}
+
+fn ensure_storage_server_autostart_allowed(
+    config_env: Option<std::ffi::OsString>,
+    config_path: &Path,
+    default_settings_path: &Path,
+) -> Result<()> {
+    if config_env.is_none() && config_path == default_settings_path && !config_path.exists() {
+        bail!(
+            "Cannot reach Fabro server: no settings.toml configured.\n\nRun one of:\n  fabro server start    # browser-based wizard\n  fabro install         # terminal wizard"
+        );
+    }
+    Ok(())
 }
 
 fn bind_matches_request(existing: &Bind, requested: &BindRequest) -> bool {
@@ -547,5 +565,39 @@ fn read_log_tail(log_path: &Path, lines: usize) -> String {
             tail.into_iter().rev().collect::<Vec<_>>().join("\n")
         }
         Err(_) => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fabro_util::Home;
+
+    use super::ensure_storage_server_autostart_allowed;
+
+    #[test]
+    fn ensure_server_running_for_storage_errors_when_install_mode_is_required() {
+        let temp_home = tempfile::tempdir().unwrap();
+        let default_settings_path = Home::new(temp_home.path()).user_config();
+        let result = ensure_storage_server_autostart_allowed(
+            None,
+            &default_settings_path,
+            &default_settings_path,
+        );
+
+        let err =
+            result.expect_err("missing default settings.toml should not auto-start install mode");
+        let message = err.to_string();
+        assert!(
+            message.contains("Cannot reach Fabro server: no settings.toml configured."),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("fabro server start"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("fabro install"),
+            "unexpected error: {message}"
+        );
     }
 }

@@ -380,6 +380,7 @@ where
         server_env_path,
         local_daemon_mode: true,
         env_lookup,
+        http_client: None,
     })?;
     let reconciled = reconcile_incomplete_runs_on_startup(&state).await?;
     if reconciled > 0 {

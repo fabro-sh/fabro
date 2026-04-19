@@ -189,11 +189,10 @@ impl CredentialResolver {
             Provider::Anthropic => self.lookup_env_or_vault(vault, "ANTHROPIC_BASE_URL"),
             Provider::OpenAi => self.lookup_env_or_vault(vault, "OPENAI_BASE_URL"),
             Provider::Gemini => self.lookup_env_or_vault(vault, "GEMINI_BASE_URL"),
-            Provider::Kimi
-            | Provider::Zai
-            | Provider::Minimax
-            | Provider::Inception
-            | Provider::OpenAiCompatible => None,
+            Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => None,
+            Provider::OpenAiCompatible => {
+                self.lookup_env_or_vault(vault, "OPENAI_COMPATIBLE_BASE_URL")
+            }
         };
         match &credential.details {
             AuthDetails::ApiKey { key } => ApiCredential {
@@ -320,7 +319,7 @@ fn credential_ids_for(provider: Provider, usage: CredentialUsage) -> &'static [&
         (Provider::Zai, _) => &["zai"],
         (Provider::Minimax, _) => &["minimax"],
         (Provider::Inception, _) => &["inception"],
-        (Provider::OpenAiCompatible, _) => &[],
+        (Provider::OpenAiCompatible, _) => &["openai_compatible"],
     }
 }
 
@@ -473,6 +472,44 @@ mod tests {
             name:  "x-api-key".to_string(),
             value: "anthropic-key".to_string(),
         });
+    }
+
+    #[tokio::test]
+    async fn openai_compatible_resolves_with_openai_base_url_from_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        vault_set_credential(
+            &mut vault,
+            "openai_compatible",
+            &api_key_credential(Provider::OpenAiCompatible, "compat-key"),
+        )
+        .unwrap();
+        vault
+            .set(
+                "OPENAI_COMPATIBLE_BASE_URL",
+                "https://compat.example.com/v1",
+                fabro_vault::SecretType::Environment,
+                None,
+            )
+            .unwrap();
+        let resolver = test_resolver(vault, Arc::new(|_| None));
+
+        let resolved = resolver
+            .resolve(Provider::OpenAiCompatible, CredentialUsage::ApiRequest)
+            .await
+            .unwrap();
+
+        let ResolvedCredential::Api(api) = resolved else {
+            panic!("expected api credential");
+        };
+        assert_eq!(
+            api.auth_header,
+            ApiKeyHeader::Bearer("compat-key".to_string())
+        );
+        assert_eq!(
+            api.base_url.as_deref(),
+            Some("https://compat.example.com/v1")
+        );
     }
 
     #[tokio::test]

@@ -548,6 +548,7 @@ pub struct AppState {
     pub(crate) settings:             Arc<RwLock<SettingsLayer>>,
     pub(crate) server_settings:      RwLock<Arc<ResolvedServerSettings>>,
     pub(crate) local_daemon_mode:    bool,
+    http_client:                     Option<fabro_http::HttpClient>,
     shutting_down:                   AtomicBool,
     registry_factory_override:       Option<Box<RegistryFactoryOverride>>,
     slack_service:                   Option<Arc<SlackService>>,
@@ -564,6 +565,7 @@ pub(crate) struct AppStateConfig {
     pub(crate) server_env_path:           PathBuf,
     pub(crate) local_daemon_mode:         bool,
     pub(crate) env_lookup:                EnvLookup,
+    pub(crate) http_client:               Option<fabro_http::HttpClient>,
 }
 
 fn nonzero_i64(value: i64) -> Option<i64> {
@@ -617,6 +619,13 @@ impl AppState {
                 .read()
                 .expect("server settings lock poisoned"),
         )
+    }
+
+    fn http_client(&self) -> Result<fabro_http::HttpClient, fabro_http::HttpClientBuildError> {
+        match &self.http_client {
+            Some(client) => Ok(client.clone()),
+            None => fabro_http::http_client(),
+        }
     }
 
     pub(crate) fn server_storage_dir(&self) -> PathBuf {
@@ -887,7 +896,7 @@ impl Default for RouterOptions {
 }
 
 fn removed_web_route(path: &str) -> bool {
-    matches!(path, "/setup/complete")
+    matches!(path, "/setup/complete") || path.starts_with("/install")
 }
 
 /// Build the axum Router with configurable web surface routing.
@@ -1860,7 +1869,7 @@ async fn get_github_repo(
             };
 
             if client.is_none() {
-                client = Some(match fabro_http::http_client() {
+                client = Some(match state.http_client() {
                     Ok(http) => http,
                     Err(err) => {
                         return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
@@ -1927,7 +1936,7 @@ async fn get_github_repo(
 
     let client = match client {
         Some(client) => client,
-        None => match fabro_http::http_client() {
+        None => match state.http_client() {
             Ok(http) => http,
             Err(err) => {
                 return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
@@ -2410,6 +2419,7 @@ pub(crate) fn create_test_app_state_with_session_key(
         server_env_path,
         local_daemon_mode,
         env_lookup,
+        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
     })
     .expect("test app state should build")
 }
@@ -2444,6 +2454,7 @@ fn default_test_app_state_config(
         server_env_path,
         local_daemon_mode: false,
         env_lookup,
+        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
     }
 }
 
@@ -2492,6 +2503,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         server_env_path,
         local_daemon_mode,
         env_lookup,
+        http_client,
     } = config;
 
     let vault = Arc::new(AsyncRwLock::new(Vault::load(vault_path)?));
@@ -2556,6 +2568,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         settings,
         server_settings: RwLock::new(resolved_server_settings),
         local_daemon_mode,
+        http_client,
         shutting_down: AtomicBool::new(false),
         registry_factory_override,
         slack_service,

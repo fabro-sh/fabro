@@ -1759,6 +1759,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-install"
+version = "0.208.0-nightly.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "fabro-config",
+ "fabro-types",
+ "fabro-vault",
+ "ring",
+ "tempfile",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "fabro-interview"
 version = "0.208.0-nightly.0"
 dependencies = [
@@ -1932,6 +1946,7 @@ dependencies = [
  "fabro-graphviz",
  "fabro-hooks",
  "fabro-http",
+ "fabro-install",
  "fabro-interview",
  "fabro-llm",
  "fabro-model",

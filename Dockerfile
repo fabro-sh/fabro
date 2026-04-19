@@ -24,16 +24,14 @@ RUN apk add --no-cache \
       tini \
  && addgroup -S -g 1000 fabro \
  && adduser -S -u 1000 -G fabro -h /var/fabro -s /sbin/nologin fabro \
- && install -d -o fabro -g fabro -m 0755 /var/fabro /storage \
- && install -d -m 0755 /etc/fabro
+ && install -d -o fabro -g fabro -m 0755 /var/fabro /storage
 
 COPY --chmod=0755 docker-context/${TARGETARCH}/fabro /usr/local/bin/fabro
 
-COPY docker/settings.toml /etc/fabro/settings.toml
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/fabro-entrypoint
 
-ENV FABRO_HOME=/var/fabro \
-    FABRO_CONFIG=/etc/fabro/settings.toml
+ENV FABRO_HOME=/storage/.home \
+    FABRO_STORAGE_DIR=/storage
 
 VOLUME ["/storage"]
 EXPOSE 32276

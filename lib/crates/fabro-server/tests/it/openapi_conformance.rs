@@ -9,6 +9,7 @@
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
+use fabro_server::install::{InstallAppState, build_install_router};
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::build_router;
 use serde_yaml::Value;
@@ -55,11 +56,34 @@ fn methods_for_path_item(item: &Value) -> Vec<Method> {
         .collect()
 }
 
+fn path_item_has_tag(item: &Value, expected: &str) -> bool {
+    let Some(map) = item.as_mapping() else {
+        return false;
+    };
+    map.values().any(|operation| {
+        operation
+            .get("tags")
+            .and_then(Value::as_sequence)
+            .is_some_and(|tags| tags.iter().any(|tag| tag.as_str() == Some(expected)))
+    })
+}
+
+fn request_for(method: &Method, uri: &str) -> Request<Body> {
+    let mut builder = Request::builder().method(method).uri(uri);
+    let body = if method == Method::POST || method == Method::PUT || method == Method::PATCH {
+        builder = builder.header("content-type", "application/json");
+        Body::from("{}")
+    } else {
+        Body::empty()
+    };
+    builder.body(body).unwrap()
+}
+
 #[tokio::test]
 async fn all_spec_routes_are_routable() {
     let spec = load_spec();
-    let state = test_app_state();
-    let app = build_router(state, AuthMode::Disabled);
+    let normal_app = build_router(test_app_state(), AuthMode::Disabled);
+    let install_app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let paths = spec
         .get("paths")
@@ -70,18 +94,17 @@ async fn all_spec_routes_are_routable() {
     for (path_key, item) in paths {
         let path = path_key.as_str().expect("path key must be a string");
         let uri = resolve_path(path);
+        let app = if path_item_has_tag(item, "Install") {
+            install_app.clone()
+        } else {
+            normal_app.clone()
+        };
         for method in methods_for_path_item(item) {
-            let mut builder = Request::builder().method(&method).uri(&uri);
-
-            let body = if method == Method::POST {
-                builder = builder.header("content-type", "application/json");
-                Body::from("{}")
-            } else {
-                Body::empty()
-            };
-
-            let req = builder.body(body).unwrap();
-            let response = app.clone().oneshot(req).await.unwrap();
+            let response = app
+                .clone()
+                .oneshot(request_for(&method, &uri))
+                .await
+                .unwrap();
 
             assert_ne!(
                 response.status(),
@@ -93,6 +116,51 @@ async fn all_spec_routes_are_routable() {
     }
 
     assert!(checked > 0, "No routes were checked — is the spec empty?");
+}
+
+#[tokio::test]
+async fn install_and_normal_routes_stay_isolated() {
+    let spec = load_spec();
+    let normal_app = build_router(test_app_state(), AuthMode::Disabled);
+    let install_app = build_install_router(InstallAppState::for_test("test-install-token"));
+
+    let paths = spec
+        .get("paths")
+        .and_then(Value::as_mapping)
+        .expect("spec is missing `paths`");
+
+    for (path_key, item) in paths {
+        let path = path_key.as_str().expect("path key must be a string");
+        let uri = resolve_path(path);
+        let install_only = path_item_has_tag(item, "Install");
+        let api_path = path.starts_with("/api/");
+
+        for method in methods_for_path_item(item) {
+            if install_only {
+                let response = normal_app
+                    .clone()
+                    .oneshot(request_for(&method, &uri))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.status(),
+                    StatusCode::NOT_FOUND,
+                    "Install route {method} {path} should be absent from the normal router"
+                );
+            } else if api_path {
+                let response = install_app
+                    .clone()
+                    .oneshot(request_for(&method, &uri))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.status(),
+                    StatusCode::NOT_FOUND,
+                    "Normal API route {method} {path} should be absent from the install router"
+                );
+            }
+        }
+    }
 }
 
 // Note: the earlier `server_settings_keys_match_openapi_spec` drift check

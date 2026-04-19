@@ -23,7 +23,6 @@ async function buildOnce() {
     minify: true,
     splitting: true,
     target: "browser",
-    sourcemap: "external",
   });
 
   if (!result.success) {

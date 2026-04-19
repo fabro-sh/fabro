@@ -13,16 +13,24 @@ impl Home {
 
     #[must_use]
     pub fn from_env() -> Self {
-        if let Some(root) = std::env::var_os("FABRO_HOME") {
+        Self::from_env_with_lookup(|name| std::env::var_os(name), dirs::home_dir())
+    }
+
+    #[must_use]
+    fn from_env_with_lookup(
+        lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
+        fallback_home: Option<PathBuf>,
+    ) -> Self {
+        if let Some(root) = lookup("FABRO_HOME") {
             return Self::new(root);
         }
 
-        if let Some(home) = std::env::var_os("HOME") {
+        if let Some(home) = lookup("HOME") {
             return Self::new(PathBuf::from(home).join(".fabro"));
         }
 
         let root =
-            dirs::home_dir().map_or_else(|| PathBuf::from(".fabro"), |home| home.join(".fabro"));
+            fallback_home.map_or_else(|| PathBuf::from(".fabro"), |home| home.join(".fabro"));
         Self::new(root)
     }
 
@@ -84,11 +92,7 @@ impl Home {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{LazyLock, Mutex};
-
     use super::Home;
-
-    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn accessors_are_relative_to_root() {
@@ -136,13 +140,13 @@ mod tests {
 
     #[test]
     fn from_env_prefers_home_env_when_fabro_home_is_absent() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("FABRO_HOME");
-        std::env::set_var("HOME", "/tmp/fabro-home-env");
-
-        let home = Home::from_env();
-
-        std::env::remove_var("HOME");
+        let home = Home::from_env_with_lookup(
+            |name| match name {
+                "HOME" => Some(std::ffi::OsString::from("/tmp/fabro-home-env")),
+                _ => None,
+            },
+            None,
+        );
 
         assert_eq!(
             home.root(),

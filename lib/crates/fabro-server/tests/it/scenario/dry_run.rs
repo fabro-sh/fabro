@@ -1,6 +1,3 @@
-use std::ffi::OsString;
-use std::sync::{LazyLock, Mutex, MutexGuard};
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use httpmock::MockServer;
@@ -11,34 +8,6 @@ use crate::helpers::{
     minimal_manifest_json_with_dry_run, test_app_state_with_options, test_app_with_mock_anthropic,
     test_app_with_no_providers, test_app_with_scheduler, test_settings, wait_for_run_status,
 };
-
-static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-
-struct ProxyPolicyGuard {
-    _lock:    MutexGuard<'static, ()>,
-    previous: Option<OsString>,
-}
-
-impl ProxyPolicyGuard {
-    fn disabled() -> Self {
-        let lock = ENV_LOCK.lock().unwrap();
-        let previous = std::env::var_os(fabro_http::HTTP_PROXY_POLICY_ENV);
-        std::env::set_var(fabro_http::HTTP_PROXY_POLICY_ENV, "disabled");
-        Self {
-            _lock: lock,
-            previous,
-        }
-    }
-}
-
-impl Drop for ProxyPolicyGuard {
-    fn drop(&mut self) {
-        match self.previous.as_ref() {
-            Some(value) => std::env::set_var(fabro_http::HTTP_PROXY_POLICY_ENV, value),
-            None => std::env::remove_var(fabro_http::HTTP_PROXY_POLICY_ENV),
-        }
-    }
-}
 
 fn completion_request(stream: bool) -> Request<Body> {
     Request::builder()
@@ -153,7 +122,6 @@ async fn completion_no_provider_streaming_returns_502() {
 
 #[tokio::test]
 async fn completion_non_streaming_returns_valid_json() {
-    let _proxy_guard = ProxyPolicyGuard::disabled();
     let mock_server = MockServer::start_async().await;
     mock_server
         .mock_async(|when, then| {
@@ -194,7 +162,6 @@ async fn completion_non_streaming_returns_valid_json() {
 
 #[tokio::test]
 async fn completion_streaming_returns_sse() {
-    let _proxy_guard = ProxyPolicyGuard::disabled();
     let mock_server = MockServer::start_async().await;
     mock_server
         .mock_async(|when, then| {

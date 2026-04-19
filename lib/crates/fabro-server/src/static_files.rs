@@ -5,13 +5,27 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 pub fn serve(path: &str, headers: &HeaderMap) -> Response {
+    serve_with_mode(path, headers, SpaMode::Normal)
+}
+
+pub fn serve_install(path: &str, headers: &HeaderMap) -> Response {
+    serve_with_mode(path, headers, SpaMode::Install)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SpaMode {
+    Normal,
+    Install,
+}
+
+fn serve_with_mode(path: &str, headers: &HeaderMap, mode: SpaMode) -> Response {
     let normalized = normalize(path);
 
     if is_source_map(&normalized) {
         return (StatusCode::NOT_FOUND, "Static asset not found").into_response();
     }
 
-    if let Some(asset) = load_asset(&normalized) {
+    if let Some(asset) = load_asset_for_mode(&normalized, mode) {
         return asset_response(&normalized, asset);
     }
 
@@ -20,7 +34,7 @@ pub fn serve(path: &str, headers: &HeaderMap) -> Response {
     // `Accept: */*`, and similar non-HTML clients get a 404 so typos
     // don't silently return 25KB of UI shell.
     if accepts_html(headers) {
-        if let Some(index) = load_asset("index.html") {
+        if let Some(index) = load_asset_for_mode("index.html", mode) {
             return asset_response("index.html", index);
         }
     }
@@ -59,6 +73,29 @@ fn load_asset(path: &str) -> Option<Vec<u8>> {
     }
 
     fabro_spa::get(path).map(fabro_spa::AssetBytes::into_vec)
+}
+
+fn load_asset_for_mode(path: &str, mode: SpaMode) -> Option<Vec<u8>> {
+    let asset = load_asset(path)?;
+    if mode == SpaMode::Install && path == "index.html" {
+        return Some(inject_install_mode(asset));
+    }
+    Some(asset)
+}
+
+fn inject_install_mode(bytes: Vec<u8>) -> Vec<u8> {
+    let Ok(html) = String::from_utf8(bytes.clone()) else {
+        return bytes;
+    };
+    if html.contains("__FABRO_MODE__ = \"install\"") {
+        return html.into_bytes();
+    }
+
+    let injected = html.replace(
+        "</head>",
+        "    <script>window.__FABRO_MODE__ = \"install\";</script>\n  </head>",
+    );
+    injected.into_bytes()
 }
 
 fn read_disk_asset(path: &str) -> Option<Vec<u8>> {

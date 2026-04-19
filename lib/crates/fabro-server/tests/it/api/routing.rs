@@ -66,6 +66,24 @@ async fn root_and_health_stay_at_root() {
 }
 
 #[tokio::test]
+async fn install_routes_are_absent_in_normal_mode() {
+    let app = build_router(create_app_state(), AuthMode::Disabled);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/install")
+                .header("accept", "text/html,application/xhtml+xml")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn moved_routes_not_at_root_of_api_prefix() {
     let app = build_router(create_app_state(), AuthMode::Disabled);
 

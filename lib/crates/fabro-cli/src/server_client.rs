@@ -285,11 +285,17 @@ fn host_is_local(host: &str) -> bool {
 }
 
 fn load_dev_token_if_available(storage_dir: Option<&Path>) -> Option<String> {
-    if let Some(token) = std::env::var("FABRO_DEV_TOKEN")
-        .ok()
-        .filter(|token| validate_dev_token_format(token))
-    {
-        return Some(token);
+    let env_token = std::env::var("FABRO_DEV_TOKEN").ok();
+    load_dev_token_if_available_from_sources(storage_dir, env_token.as_deref(), &Home::from_env())
+}
+
+fn load_dev_token_if_available_from_sources(
+    storage_dir: Option<&Path>,
+    env_token: Option<&str>,
+    home: &Home,
+) -> Option<String> {
+    if let Some(token) = env_token.filter(|token| validate_dev_token_format(token)) {
+        return Some(token.to_owned());
     }
 
     if let Some(storage_dir) = storage_dir {
@@ -308,7 +314,7 @@ fn load_dev_token_if_available(storage_dir: Option<&Path>) -> Option<String> {
         }
     }
 
-    dev_token::read_dev_token_file(&Home::from_env().dev_token_path())
+    dev_token::read_dev_token_file(&home.dev_token_path())
 }
 
 async fn wait_for_local_dev_token(storage_dir: &Path) -> Result<String> {
@@ -1104,15 +1110,10 @@ fn non_zero_u64_from_usize(value: usize) -> Option<NonZeroU64> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{LazyLock, Mutex};
-
     use super::*;
-
-    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn load_dev_token_if_available_prefers_env() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let temp_home = tempfile::tempdir().unwrap();
         let token_path = temp_home.path().join("dev-token");
         std::fs::write(
@@ -1121,16 +1122,11 @@ mod tests {
         )
         .unwrap();
 
-        std::env::set_var("FABRO_HOME", temp_home.path());
-        std::env::set_var(
-            "FABRO_DEV_TOKEN",
-            "fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        let token = load_dev_token_if_available_from_sources(
+            None,
+            Some("fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"),
+            &Home::new(temp_home.path()),
         );
-
-        let token = load_dev_token_if_available(None);
-
-        std::env::remove_var("FABRO_DEV_TOKEN");
-        std::env::remove_var("FABRO_HOME");
 
         assert_eq!(
             token.as_deref(),
@@ -1140,24 +1136,18 @@ mod tests {
 
     #[test]
     fn load_dev_token_if_available_reads_file() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let temp_home = tempfile::tempdir().unwrap();
         let token = "fabro_dev_abababababababababababababababababababababababababababababababab";
         std::fs::write(temp_home.path().join("dev-token"), token).unwrap();
 
-        std::env::remove_var("FABRO_DEV_TOKEN");
-        std::env::set_var("FABRO_HOME", temp_home.path());
-
-        let loaded = load_dev_token_if_available(None);
-
-        std::env::remove_var("FABRO_HOME");
+        let loaded =
+            load_dev_token_if_available_from_sources(None, None, &Home::new(temp_home.path()));
 
         assert_eq!(loaded.as_deref(), Some(token));
     }
 
     #[test]
     fn load_dev_token_if_available_reads_path_from_active_server_record() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let temp_home = tempfile::tempdir().unwrap();
         let storage = tempfile::tempdir().unwrap();
         let token_dir = tempfile::tempdir().unwrap();
@@ -1177,12 +1167,11 @@ mod tests {
         })
         .unwrap();
 
-        std::env::remove_var("FABRO_DEV_TOKEN");
-        std::env::set_var("FABRO_HOME", temp_home.path());
-
-        let loaded = load_dev_token_if_available(Some(storage.path()));
-
-        std::env::remove_var("FABRO_HOME");
+        let loaded = load_dev_token_if_available_from_sources(
+            Some(storage.path()),
+            None,
+            &Home::new(temp_home.path()),
+        );
 
         assert_eq!(loaded.as_deref(), Some(token));
     }

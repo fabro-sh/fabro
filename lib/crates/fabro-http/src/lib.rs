@@ -36,14 +36,24 @@ impl ProxyPolicy {
         }
     }
 
-    fn resolve(explicit: Option<Self>) -> Result<Self, HttpClientBuildError> {
+    fn resolve_with_env_value(
+        explicit: Option<Self>,
+        env_value: Option<&str>,
+    ) -> Result<Self, HttpClientBuildError> {
         if let Some(policy) = explicit {
             return Ok(policy);
         }
 
+        match env_value {
+            Some(value) => Self::parse(value),
+            None => Ok(Self::System),
+        }
+    }
+
+    fn resolve(explicit: Option<Self>) -> Result<Self, HttpClientBuildError> {
         match std::env::var(HTTP_PROXY_POLICY_ENV) {
-            Ok(value) => Self::parse(&value),
-            Err(std::env::VarError::NotPresent) => Ok(Self::System),
+            Ok(value) => Self::resolve_with_env_value(explicit, Some(&value)),
+            Err(std::env::VarError::NotPresent) => Self::resolve_with_env_value(explicit, None),
             Err(std::env::VarError::NotUnicode(value)) => Err(
                 HttpClientBuildError::InvalidProxyPolicy(value.to_string_lossy().into_owned()),
             ),
@@ -213,47 +223,25 @@ pub fn blocking_test_http_client() -> Result<BlockingHttpClient, HttpClientBuild
 mod tests {
     use super::*;
 
-    struct EnvGuard {
-        key:      &'static str,
-        original: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: Option<&str>) -> Self {
-            let original = std::env::var_os(key);
-            match value {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
-            }
-            Self { key, original }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match self.original.as_ref() {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
-
     #[test]
     fn proxy_policy_defaults_to_system() {
-        let _guard = EnvGuard::set(HTTP_PROXY_POLICY_ENV, None);
-        assert_eq!(ProxyPolicy::resolve(None).unwrap(), ProxyPolicy::System);
+        assert_eq!(
+            ProxyPolicy::resolve_with_env_value(None, None).unwrap(),
+            ProxyPolicy::System
+        );
     }
 
     #[test]
     fn proxy_policy_reads_disabled_from_env() {
-        let _guard = EnvGuard::set(HTTP_PROXY_POLICY_ENV, Some("disabled"));
-        assert_eq!(ProxyPolicy::resolve(None).unwrap(), ProxyPolicy::Disabled);
+        assert_eq!(
+            ProxyPolicy::resolve_with_env_value(None, Some("disabled")).unwrap(),
+            ProxyPolicy::Disabled
+        );
     }
 
     #[test]
     fn proxy_policy_rejects_invalid_env_values() {
-        let _guard = EnvGuard::set(HTTP_PROXY_POLICY_ENV, Some("bogus"));
-        let error = ProxyPolicy::resolve(None).unwrap_err();
+        let error = ProxyPolicy::resolve_with_env_value(None, Some("bogus")).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -263,9 +251,9 @@ mod tests {
 
     #[test]
     fn explicit_proxy_policy_overrides_env() {
-        let _guard = EnvGuard::set(HTTP_PROXY_POLICY_ENV, Some("system"));
         assert_eq!(
-            ProxyPolicy::resolve(Some(ProxyPolicy::Disabled)).unwrap(),
+            ProxyPolicy::resolve_with_env_value(Some(ProxyPolicy::Disabled), Some("system"))
+                .unwrap(),
             ProxyPolicy::Disabled
         );
     }
