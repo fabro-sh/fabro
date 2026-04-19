@@ -1,13 +1,72 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_config::{Storage, parse_settings_layer, resolve_server_from_file};
 use fabro_model::Provider;
 use fabro_server::install::{InstallAppState, build_install_router};
+use fabro_util::{Home, dev_token};
 use fabro_vault::Vault;
 use httpmock::MockServer;
+use tokio::time::sleep;
 use tower::ServiceExt;
 
 use crate::helpers::body_json;
+
+async fn configure_token_install(app: &axum::Router, token: &str) {
+    let llm_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/install/llm")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"providers":[{"provider":"anthropic","api_key":"anthropic-test-key"}]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(llm_response.status(), StatusCode::NO_CONTENT);
+
+    let server_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/install/server")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"canonical_url":"https://fabro.example.com"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(server_response.status(), StatusCode::NO_CONTENT);
+
+    let github_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/install/github/token")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"token":"ghp_test_token","username":"brynary"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(github_response.status(), StatusCode::NO_CONTENT);
+}
 
 #[tokio::test]
 async fn install_router_isolated_from_normal_api_surface() {
@@ -318,6 +377,41 @@ async fn token_install_finish_persists_settings_env_and_vault() {
     let vault = Vault::load(fabro_config::Storage::new(temp_dir.path()).secrets_path()).unwrap();
     assert!(vault.get("anthropic").is_some());
     assert_eq!(vault.get("GITHUB_TOKEN"), Some("ghp_test_token"));
+}
+
+#[tokio::test]
+async fn token_install_finish_invokes_shutdown_callback_after_accepting() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let home_root = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join("settings.toml");
+    let callback_invoked = Arc::new(AtomicBool::new(false));
+    let callback_flag = Arc::clone(&callback_invoked);
+    let app = build_install_router(
+        InstallAppState::for_test_with_paths("test-install-token", temp_dir.path(), &config_path)
+            .with_home(Home::new(home_root.path().join(".fabro")))
+            .with_finish_callback(Arc::new(move || {
+                callback_flag.store(true, Ordering::Release);
+            })),
+    );
+
+    configure_token_install(&app, "test-install-token").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(finish_response.status(), StatusCode::ACCEPTED);
+    assert!(!callback_invoked.load(Ordering::Acquire));
+
+    sleep(Duration::from_millis(650)).await;
+    assert!(callback_invoked.load(Ordering::Acquire));
 }
 
 #[tokio::test]
@@ -902,6 +996,7 @@ async fn install_server_rejects_trailing_slash_canonical_urls() {
 #[tokio::test]
 async fn install_finish_failure_restores_settings_and_vault_but_leaves_env_keys() {
     let temp_dir = tempfile::tempdir().unwrap();
+    let home_root = tempfile::tempdir().unwrap();
     let config_path = temp_dir.path().join("settings.toml");
     std::fs::write(&config_path, "_version = 1\n[project]\nname = \"keep\"\n").unwrap();
 
@@ -909,63 +1004,18 @@ async fn install_finish_failure_restores_settings_and_vault_but_leaves_env_keys(
     let vault_path = storage.secrets_path();
     std::fs::create_dir_all(vault_path.parent().unwrap()).unwrap();
     std::fs::write(&vault_path, "{ not valid json").unwrap();
+    let callback_invoked = Arc::new(AtomicBool::new(false));
+    let callback_flag = Arc::clone(&callback_invoked);
 
-    let app = build_install_router(InstallAppState::for_test_with_paths(
-        "test-install-token",
-        temp_dir.path(),
-        &config_path,
-    ));
+    let app = build_install_router(
+        InstallAppState::for_test_with_paths("test-install-token", temp_dir.path(), &config_path)
+            .with_home(Home::new(home_root.path().join(".fabro")))
+            .with_finish_callback(Arc::new(move || {
+                callback_flag.store(true, Ordering::Release);
+            })),
+    );
 
-    let llm_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/install/llm")
-                .header("authorization", "Bearer test-install-token")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"providers":[{"provider":"anthropic","api_key":"anthropic-test-key"}]}"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(llm_response.status(), StatusCode::NO_CONTENT);
-
-    let server_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/install/server")
-                .header("authorization", "Bearer test-install-token")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"canonical_url":"https://fabro.example.com"}"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(server_response.status(), StatusCode::NO_CONTENT);
-
-    let github_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/install/github/token")
-                .header("authorization", "Bearer test-install-token")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"token":"ghp_test_token","username":"brynary"}"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(github_response.status(), StatusCode::NO_CONTENT);
+    configure_token_install(&app, "test-install-token").await;
 
     let finish_response = app
         .clone()
@@ -1012,6 +1062,7 @@ async fn install_finish_failure_restores_settings_and_vault_but_leaves_env_keys(
     let server_env = std::fs::read_to_string(storage.server_state().env_path()).unwrap();
     assert!(server_env.contains("SESSION_SECRET="));
     assert!(server_env.contains("FABRO_DEV_TOKEN="));
+    assert!(!callback_invoked.load(Ordering::Acquire));
 
     let session_response = app
         .oneshot(
@@ -1033,4 +1084,48 @@ async fn install_finish_failure_restores_settings_and_vault_but_leaves_env_keys(
             .iter()
             .any(|value| value == "github")
     );
+}
+
+#[tokio::test]
+async fn install_finish_failure_leaves_home_dev_token_mirror_written() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let home_root = tempfile::tempdir().unwrap();
+    let home = Home::new(home_root.path().join(".fabro"));
+    let config_path = temp_dir.path().join("settings.toml");
+    std::fs::write(&config_path, "_version = 1\n[project]\nname = \"keep\"\n").unwrap();
+
+    let storage = Storage::new(temp_dir.path());
+    let vault_path = storage.secrets_path();
+    std::fs::create_dir_all(vault_path.parent().unwrap()).unwrap();
+    std::fs::write(&vault_path, "{ not valid json").unwrap();
+
+    let app = build_install_router(
+        InstallAppState::for_test_with_paths("test-install-token", temp_dir.path(), &config_path)
+            .with_home(home.clone()),
+    );
+
+    configure_token_install(&app, "test-install-token").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(finish_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let home_dev_token = dev_token::read_dev_token_file(&home.dev_token_path())
+        .expect("home dev token should exist");
+    let storage_dev_token =
+        dev_token::read_dev_token_file(&storage.server_state().dev_token_path())
+            .expect("storage dev token should exist");
+    assert_eq!(home_dev_token, storage_dev_token);
+
+    let server_env = std::fs::read_to_string(storage.server_state().env_path()).unwrap();
+    assert!(server_env.contains(&format!("FABRO_DEV_TOKEN={home_dev_token}")));
 }

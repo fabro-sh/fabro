@@ -112,7 +112,7 @@ fn start_already_running_exits_with_error() {
     clippy::disallowed_methods,
     reason = "This integration test needs the real foreground process to verify install-mode startup behavior."
 )]
-fn start_without_settings_enters_install_mode_in_foreground() {
+fn start_without_default_settings_enters_install_mode_in_foreground() {
     let home_dir = tempfile::tempdir_in("/tmp").unwrap();
     let storage_root = isolated_storage_dir();
     let storage_dir = storage_root.path().join("storage");
@@ -195,6 +195,101 @@ fn start_without_settings_ignores_no_web_during_install() {
         stderr.contains("install mode active"),
         "expected install mode banner, got: {stderr}"
     );
+}
+
+#[test]
+fn start_with_missing_explicit_flag_config_errors_without_entering_install_mode() {
+    let context = test_context!();
+    let missing_config = tempfile::tempdir_in("/tmp")
+        .unwrap()
+        .path()
+        .join("missing-settings.toml");
+
+    let mut filters = context.filters();
+    filters.push((
+        regex::escape(missing_config.to_str().unwrap()),
+        "[MISSING_CONFIG]".to_string(),
+    ));
+
+    let mut explicit_cmd = context.command();
+    explicit_cmd.args([
+        "server",
+        "start",
+        "--config",
+        missing_config.to_str().unwrap(),
+    ]);
+    fabro_snapshot!(filters.clone(), explicit_cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: reading config file [MISSING_CONFIG]: No such file or directory (os error 2)
+      > No such file or directory (os error 2)
+    ");
+}
+
+#[test]
+fn start_with_missing_env_config_errors_without_entering_install_mode() {
+    let context = test_context!();
+    let missing_config = tempfile::tempdir_in("/tmp")
+        .unwrap()
+        .path()
+        .join("missing-settings.toml");
+
+    let mut filters = context.filters();
+    filters.push((
+        regex::escape(missing_config.to_str().unwrap()),
+        "[MISSING_CONFIG]".to_string(),
+    ));
+
+    let mut env_cmd = context.command();
+    env_cmd
+        .env("FABRO_CONFIG", &missing_config)
+        .args(["server", "start"]);
+    fabro_snapshot!(filters, env_cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: reading config file [MISSING_CONFIG]: No such file or directory (os error 2)
+      > No such file or directory (os error 2)
+    ");
+}
+
+#[test]
+fn start_with_malformed_default_settings_errors_without_entering_install_mode() {
+    let context = test_context!();
+    let settings_dir = context.home_dir.join(".fabro");
+    std::fs::create_dir_all(&settings_dir).unwrap();
+    let settings_path = settings_dir.join("settings.toml");
+    std::fs::write(&settings_path, "[server.listen\n").unwrap();
+
+    let mut filters = context.filters();
+    filters.push((
+        regex::escape(settings_path.to_str().unwrap()),
+        "[SETTINGS_PATH]".to_string(),
+    ));
+
+    let mut cmd = context.command();
+    cmd.args(["server", "start"]);
+    fabro_snapshot!(filters, cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Failed to parse settings file at [HOME_DIR]/.fabro/settings.toml: settings file is not valid TOML: TOML parse error at line 1, column 15
+        |
+      1 | [server.listen
+        |               ^
+      invalid table header
+      expected `.`, `]`
+      > settings file is not valid TOML: TOML parse error at line 1, column 15
+      >   |
+      > 1 | [server.listen
+      >   |               ^
+      > invalid table header
+      > expected `.`, `]`
+    ");
 }
 
 #[test]

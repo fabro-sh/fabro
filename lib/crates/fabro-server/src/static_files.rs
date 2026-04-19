@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -15,13 +16,27 @@ pub fn serve_install(path: &str, headers: &HeaderMap) -> Response {
 }
 
 pub(crate) fn assert_install_mode_shell_ready() {
-    let index = load_asset("index.html").expect("install-mode SPA shell asset missing");
-    let injected = inject_install_mode(index);
-    let html = String::from_utf8(injected).expect("install-mode SPA shell must be valid UTF-8");
+    let shell = cached_install_mode_shell().clone().unwrap_or_else(|| {
+        load_injected_install_shell().expect("install-mode SPA shell asset missing")
+    });
+    let html = String::from_utf8(shell).expect("install-mode SPA shell must be valid UTF-8");
     assert!(
         html.contains(INSTALL_MODE_MARKER),
         "install-mode SPA shell marker missing after injection"
     );
+}
+
+fn cached_install_mode_shell() -> Option<Vec<u8>> {
+    if cfg!(debug_assertions) {
+        // In debug builds the SPA is reloaded from disk on every request.
+        return load_injected_install_shell();
+    }
+    static SHELL: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+    SHELL.get_or_init(load_injected_install_shell).clone()
+}
+
+fn load_injected_install_shell() -> Option<Vec<u8>> {
+    Some(inject_install_mode(load_asset("index.html")?))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -88,16 +103,16 @@ fn load_asset(path: &str) -> Option<Vec<u8>> {
 }
 
 fn load_asset_for_mode(path: &str, mode: SpaMode) -> Option<Vec<u8>> {
-    let asset = load_asset(path)?;
     if mode == SpaMode::Install && path == "index.html" {
-        return Some(inject_install_mode(asset));
+        return cached_install_mode_shell();
     }
-    Some(asset)
+    load_asset(path)
 }
 
 fn inject_install_mode(bytes: Vec<u8>) -> Vec<u8> {
-    let Ok(html) = String::from_utf8(bytes.clone()) else {
-        return bytes;
+    let html = match String::from_utf8(bytes) {
+        Ok(html) => html,
+        Err(err) => return err.into_bytes(),
     };
     if html.contains(INSTALL_MODE_MARKER) {
         return html.into_bytes();

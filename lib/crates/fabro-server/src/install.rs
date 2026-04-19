@@ -40,6 +40,7 @@ pub struct InstallAppState {
     pending_install:    Arc<Mutex<PendingInstall>>,
     storage_dir:        Arc<PathBuf>,
     config_path:        Arc<PathBuf>,
+    home:               Option<Home>,
     install_listen:     Arc<Mutex<InstallListenConfig>>,
     first_operator:     Arc<Mutex<Option<InstallOperatorFingerprint>>>,
     finish_in_progress: Arc<AtomicBool>,
@@ -73,6 +74,7 @@ impl InstallAppState {
             pending_install:    Arc::new(Mutex::new(PendingInstall::default())),
             storage_dir:        Arc::new(storage_dir.to_path_buf()),
             config_path:        Arc::new(config_path.to_path_buf()),
+            home:               None,
             install_listen:     Arc::new(Mutex::new(InstallListenConfig::Tcp(
                 DEFAULT_INSTALL_TCP_LISTEN_ADDRESS.to_string(),
             ))),
@@ -96,6 +98,7 @@ impl InstallAppState {
             pending_install:    Arc::new(Mutex::new(PendingInstall::default())),
             storage_dir:        Arc::new(storage_dir.to_path_buf()),
             config_path:        Arc::new(config_path.to_path_buf()),
+            home:               None,
             install_listen:     Arc::new(Mutex::new(InstallListenConfig::Tcp(
                 DEFAULT_INSTALL_TCP_LISTEN_ADDRESS.to_string(),
             ))),
@@ -106,11 +109,18 @@ impl InstallAppState {
         }
     }
 
-    fn with_finish_callback(self, on_finish: Arc<dyn Fn() + Send + Sync>) -> Self {
+    #[must_use]
+    pub fn with_finish_callback(self, on_finish: Arc<dyn Fn() + Send + Sync>) -> Self {
         Self {
             on_finish: Some(on_finish),
             ..self
         }
+    }
+
+    #[must_use]
+    pub fn with_home(mut self, home: Home) -> Self {
+        self.home = Some(home);
+        self
     }
 
     #[must_use]
@@ -353,10 +363,10 @@ impl Drop for InstallFinishGuard {
 pub async fn serve_install_command<F>(
     bind_request: BindRequest,
     state: InstallAppState,
-    mut on_ready: F,
+    on_ready: F,
 ) -> anyhow::Result<()>
 where
-    F: FnMut(&Bind) -> anyhow::Result<()>,
+    F: FnOnce(&Bind) -> anyhow::Result<()>,
 {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let finish_callback: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
@@ -838,7 +848,7 @@ async fn post_install_finish(
             return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
         }
     };
-    let home = Home::from_env();
+    let home = state.home.clone().unwrap_or_else(Home::from_env);
     let dev_token = match dev_token::load_or_create_dev_token(&home.dev_token_path()) {
         Ok(value) => value,
         Err(err) => {
@@ -1150,22 +1160,10 @@ async fn validate_llm_provider(
     state: &InstallAppState,
     input: &InstallLlmTestInput,
 ) -> Result<(), String> {
-    let base_url = provider_base_url(state, input.provider);
-    let client = install_http_client_for_url(&base_url)?;
-    let request = match input.provider {
-        Provider::Anthropic => client
-            .get(format!("{base_url}/models"))
-            .header("x-api-key", &input.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("User-Agent", "fabro-server"),
-        Provider::OpenAi => client
-            .get(format!("{base_url}/models"))
-            .header("Authorization", format!("Bearer {}", input.api_key))
-            .header("User-Agent", "fabro-server"),
-        Provider::Gemini => client
-            .get(format!("{base_url}/models"))
-            .header("x-goog-api-key", &input.api_key)
-            .header("User-Agent", "fabro-server"),
+    let (auth_header, auth_value) = match input.provider {
+        Provider::Anthropic => ("x-api-key", input.api_key.clone()),
+        Provider::OpenAi => ("Authorization", format!("Bearer {}", input.api_key)),
+        Provider::Gemini => ("x-goog-api-key", input.api_key.clone()),
         Provider::Kimi
         | Provider::Zai
         | Provider::Minimax
@@ -1177,6 +1175,16 @@ async fn validate_llm_provider(
             ));
         }
     };
+
+    let base_url = provider_base_url(state, input.provider);
+    let client = install_http_client_for_url(&base_url)?;
+    let mut request = client
+        .get(format!("{base_url}/models"))
+        .header(auth_header, auth_value)
+        .header("User-Agent", "fabro-server");
+    if matches!(input.provider, Provider::Anthropic) {
+        request = request.header("anthropic-version", "2023-06-01");
+    }
 
     let response = request
         .timeout(Duration::from_secs(10))

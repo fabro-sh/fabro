@@ -92,7 +92,7 @@ export default function InstallApp() {
         return;
       }
     }
-    setSaveError(null);
+    setSaveError((current) => (current === null ? current : null));
   }, [location.pathname]);
 
   useEffect(() => {
@@ -162,9 +162,13 @@ export default function InstallApp() {
       setTimedOut(true);
     }, 30_000);
 
-    const interval = window.setInterval(async () => {
+    const controller = new AbortController();
+    let inFlight = false;
+    const poll = async () => {
+      if (inFlight || controller.signal.aborted) return;
+      inFlight = true;
       try {
-        const response = await fetch("/health");
+        const response = await fetch("/health", { signal: controller.signal });
         const body = response.ok
           ? ((await response.json()) as { mode?: string })
           : undefined;
@@ -178,13 +182,18 @@ export default function InstallApp() {
           window.location.href = finishState.restart_url;
         }
       } catch {
+        if (controller.signal.aborted) return;
         if (shouldRedirectAfterHealthPoll({ kind: "error" })) {
           window.location.href = finishState.restart_url;
         }
+      } finally {
+        inFlight = false;
       }
-    }, 1_000);
+    };
+    const interval = window.setInterval(poll, 2_000);
 
     return () => {
+      controller.abort();
       window.clearTimeout(deadline);
       window.clearInterval(interval);
     };
@@ -277,9 +286,9 @@ export default function InstallApp() {
             setSubmitting(true);
             setSaveError(null);
             try {
-              for (const provider of providers) {
-                await testInstallLlm(installToken, provider);
-              }
+              await Promise.all(
+                providers.map((provider) => testInstallLlm(installToken, provider)),
+              );
               await putInstallLlm(installToken, providers);
               const nextSession = await getInstallSession(installToken);
               setSession(nextSession);
@@ -829,7 +838,7 @@ function ProviderFields({
   onChange: (nextValue: ProviderSelection) => void;
 }) {
   return (
-      <div className="space-y-4">
+    <div className="space-y-4">
       {INSTALL_PROVIDERS.map((provider) => {
         const current = value[provider.id] ?? { apiKey: "" };
         return (
