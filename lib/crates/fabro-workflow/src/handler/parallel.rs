@@ -367,7 +367,6 @@ impl Handler for ParallelHandler {
                     provider,
                     workflow_path,
                     workflow_bundle,
-                    blocked_state_tracker: None,
                 };
                 let handler = registry.resolve(target_node);
                 let outcome = super::dispatch_handler(

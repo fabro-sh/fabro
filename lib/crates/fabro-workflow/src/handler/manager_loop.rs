@@ -265,7 +265,6 @@ impl Handler for SubWorkflowHandler {
                 on_node: None,
                 artifact_sink: Some(ArtifactSink::Store(artifact_store)),
                 run_control: None,
-                blocked_state_tracker: None,
                 hook_runner,
                 env,
                 dry_run,

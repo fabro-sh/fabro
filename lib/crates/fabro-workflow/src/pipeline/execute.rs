@@ -50,7 +50,6 @@ pub async fn execute(init: Initialized) -> Executed {
         on_node,
         artifact_sink,
         run_control,
-        blocked_state_tracker,
         hook_runner,
         env,
         dry_run,
@@ -96,7 +95,6 @@ pub async fn execute(init: Initialized) -> Executed {
         provider,
         workflow_path,
         workflow_bundle,
-        blocked_state_tracker,
     });
 
     let handler = Arc::new(WorkflowNodeHandler {

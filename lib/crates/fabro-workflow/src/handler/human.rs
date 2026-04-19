@@ -1,11 +1,12 @@
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_interview::{Answer, AnswerValue, Interviewer, Question, QuestionOption, QuestionType};
+use fabro_types::BlockedReason;
 use fabro_types::run_event::InterviewOption;
 use ulid::Ulid;
 
@@ -66,10 +67,55 @@ fn parse_accelerator_key(label: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Refcount of open interviews for this handler's run. Emits `run.blocked`
+/// exactly once when the count transitions 0→1, and `run.unblocked` exactly
+/// once when it transitions back to 0. Internal to `HumanHandler`; shared
+/// across concurrent `execute` calls fanned out by `ParallelHandler`.
+struct BlockedStateTracker {
+    unresolved_interviews: Mutex<usize>,
+}
+
+impl BlockedStateTracker {
+    fn new() -> Self {
+        Self {
+            unresolved_interviews: Mutex::new(0),
+        }
+    }
+
+    fn interview_started(&self, emitter: &Emitter) {
+        let mut unresolved = self.unresolved_interviews.lock().unwrap();
+        let was_zero = *unresolved == 0;
+        *unresolved += 1;
+        drop(unresolved);
+
+        if was_zero {
+            emitter.emit(&Event::RunBlocked {
+                blocked_reason: BlockedReason::HumanInputRequired,
+            });
+        }
+    }
+
+    fn interview_resolved(&self, emitter: &Emitter) {
+        let mut unresolved = self.unresolved_interviews.lock().unwrap();
+        if *unresolved == 0 {
+            return;
+        }
+
+        *unresolved -= 1;
+        let is_zero = *unresolved == 0;
+        drop(unresolved);
+
+        if is_zero {
+            emitter.emit(&Event::RunUnblocked);
+        }
+    }
+}
+
 /// Blocks until a human selects an option derived from outgoing edges.
 pub struct HumanHandler {
     interviewer: Arc<dyn Interviewer>,
     emitter:     Option<Arc<Emitter>>,
+    tracker:     BlockedStateTracker,
 }
 
 impl HumanHandler {
@@ -77,6 +123,7 @@ impl HumanHandler {
         Self {
             interviewer,
             emitter: None,
+            tracker: BlockedStateTracker::new(),
         }
     }
 
@@ -229,7 +276,7 @@ impl Handler for HumanHandler {
             },
             &stage_scope,
         );
-        services.notify_interview_started();
+        self.tracker.interview_started(services.emitter.as_ref());
         let interview_start = Instant::now();
         let answer = self.interviewer.ask(question).await;
 
@@ -245,7 +292,7 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
-            services.notify_interview_resolved();
+            self.tracker.interview_resolved(services.emitter.as_ref());
             let default_choice = node
                 .attrs
                 .get("human.default_choice")
@@ -284,7 +331,7 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
-            services.notify_interview_resolved();
+            self.tracker.interview_resolved(services.emitter.as_ref());
             return Ok(unanswered_human_gate(
                 "human interaction interrupted before an answer was provided",
             ));
@@ -300,7 +347,7 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
-            services.notify_interview_resolved();
+            self.tracker.interview_resolved(services.emitter.as_ref());
             return Ok(unanswered_human_gate("human skipped interaction"));
         }
 
@@ -315,7 +362,7 @@ impl Handler for HumanHandler {
             },
             &stage_scope,
         );
-        services.notify_interview_resolved();
+        self.tracker.interview_resolved(services.emitter.as_ref());
 
         // 6. Try fixed-choice match
         if let Some(selected) = find_choice_match(&answer, &choices) {
@@ -425,7 +472,6 @@ mod tests {
                 .push(event.clone());
         });
         services.emitter = emitter;
-        services.blocked_state_tracker = Some(crate::operations::BlockedStateTracker::new());
         services
     }
 
@@ -793,5 +839,49 @@ mod tests {
             Some(&serde_json::json!("A"))
         );
         assert_eq!(outcome.suggested_next_ids, vec!["approve"]);
+    }
+
+    #[test]
+    fn blocked_state_tracker_emits_once_across_parallel_interview_races() {
+        let tracker = BlockedStateTracker::new();
+        let emitter = Arc::new(Emitter::new(fabro_types::fixtures::RUN_1));
+        let event_names = Arc::new(Mutex::new(Vec::new()));
+
+        emitter.on_event({
+            let event_names = Arc::clone(&event_names);
+            move |event| {
+                let name = match &event.body {
+                    EventBody::RunBlocked(_) => Some("run.blocked"),
+                    EventBody::RunUnblocked(_) => Some("run.unblocked"),
+                    _ => None,
+                };
+                if let Some(name) = name {
+                    event_names.lock().unwrap().push(name.to_string());
+                }
+            }
+        });
+
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let tracker = &tracker;
+                let emitter = Arc::clone(&emitter);
+                scope.spawn(move || tracker.interview_started(emitter.as_ref()));
+            }
+        });
+
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let tracker = &tracker;
+                let emitter = Arc::clone(&emitter);
+                scope.spawn(move || tracker.interview_resolved(emitter.as_ref()));
+            }
+        });
+
+        tracker.interview_resolved(emitter.as_ref());
+
+        assert_eq!(event_names.lock().unwrap().as_slice(), [
+            "run.blocked",
+            "run.unblocked"
+        ],);
     }
 }

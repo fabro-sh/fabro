@@ -16,6 +16,7 @@ use fabro_sandbox::config::{
 };
 use fabro_sandbox::daytona::{DaytonaConfig, detect_repo_info};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
+use fabro_types::RunId;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     ApprovalMode, DaytonaNetworkLayer, DaytonaSettings,
@@ -25,7 +26,6 @@ use fabro_types::settings::run::{
     PullRequestSettings, RunMode, RunModelSettings as ResolvedRunModelSettings,
     RunSettings as ResolvedRunSettings, TlsMode as ResolvedTlsMode,
 };
-use fabro_types::{BlockedReason, RunId};
 use fabro_vault::Vault;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -52,92 +52,49 @@ use crate::runtime_store::RunStoreHandle;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 
 struct RunSession {
-    cancel_token:          Option<Arc<AtomicBool>>,
-    emitter:               Arc<Emitter>,
-    sandbox:               SandboxSpec,
-    llm:                   LlmSpec,
-    interviewer:           Arc<dyn Interviewer>,
-    on_node:               crate::OnNodeCallback,
-    lifecycle:             LifecycleOptions,
-    hooks:                 fabro_hooks::HookSettings,
-    sandbox_env:           SandboxEnvSpec,
-    devcontainer:          Option<DevcontainerSpec>,
-    seed_context:          Option<Context>,
-    run_store:             RunStoreHandle,
-    event_sink:            RunEventSink,
-    artifact_sink:         Option<ArtifactSink>,
-    git:                   Option<GitCheckpointOptions>,
-    github_app:            Option<fabro_github::GitHubCredentials>,
-    worktree_mode:         Option<WorktreeMode>,
-    registry_override:     Option<Arc<HandlerRegistry>>,
-    retro_enabled:         bool,
-    preserve_sandbox:      bool,
-    pr_config:             Option<PullRequestSettings>,
-    pr_github_app:         Option<fabro_github::GitHubCredentials>,
-    pr_origin_url:         Option<String>,
-    pr_model:              String,
-    workflow_path:         Option<PathBuf>,
-    workflow_bundle:       Option<Arc<WorkflowBundle>>,
-    run_control:           Option<Arc<RunControlState>>,
-    blocked_state_tracker: Option<Arc<BlockedStateTracker>>,
-    vault:                 Option<Arc<AsyncRwLock<Vault>>>,
-}
-
-pub struct BlockedStateTracker {
-    unresolved_interviews: Mutex<usize>,
-}
-
-impl BlockedStateTracker {
-    #[must_use]
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            unresolved_interviews: Mutex::new(0),
-        })
-    }
-
-    pub fn interview_started(&self, emitter: &Emitter) {
-        let mut unresolved = self.unresolved_interviews.lock().unwrap();
-        let was_zero = *unresolved == 0;
-        *unresolved += 1;
-        drop(unresolved);
-
-        if was_zero {
-            emitter.emit(&Event::RunBlocked {
-                blocked_reason: BlockedReason::HumanInputRequired,
-            });
-        }
-    }
-
-    pub fn interview_resolved(&self, emitter: &Emitter) {
-        let mut unresolved = self.unresolved_interviews.lock().unwrap();
-        if *unresolved == 0 {
-            return;
-        }
-
-        *unresolved -= 1;
-        let is_zero = *unresolved == 0;
-        drop(unresolved);
-
-        if is_zero {
-            emitter.emit(&Event::RunUnblocked);
-        }
-    }
+    cancel_token:      Option<Arc<AtomicBool>>,
+    emitter:           Arc<Emitter>,
+    sandbox:           SandboxSpec,
+    llm:               LlmSpec,
+    interviewer:       Arc<dyn Interviewer>,
+    on_node:           crate::OnNodeCallback,
+    lifecycle:         LifecycleOptions,
+    hooks:             fabro_hooks::HookSettings,
+    sandbox_env:       SandboxEnvSpec,
+    devcontainer:      Option<DevcontainerSpec>,
+    seed_context:      Option<Context>,
+    run_store:         RunStoreHandle,
+    event_sink:        RunEventSink,
+    artifact_sink:     Option<ArtifactSink>,
+    git:               Option<GitCheckpointOptions>,
+    github_app:        Option<fabro_github::GitHubCredentials>,
+    worktree_mode:     Option<WorktreeMode>,
+    registry_override: Option<Arc<HandlerRegistry>>,
+    retro_enabled:     bool,
+    preserve_sandbox:  bool,
+    pr_config:         Option<PullRequestSettings>,
+    pr_github_app:     Option<fabro_github::GitHubCredentials>,
+    pr_origin_url:     Option<String>,
+    pr_model:          String,
+    workflow_path:     Option<PathBuf>,
+    workflow_bundle:   Option<Arc<WorkflowBundle>>,
+    run_control:       Option<Arc<RunControlState>>,
+    vault:             Option<Arc<AsyncRwLock<Vault>>>,
 }
 
 pub struct StartServices {
-    pub run_id:                RunId,
-    pub cancel_token:          Option<Arc<AtomicBool>>,
-    pub emitter:               Arc<Emitter>,
-    pub interviewer:           Arc<dyn Interviewer>,
-    pub run_store:             RunStoreHandle,
-    pub event_sink:            RunEventSink,
-    pub artifact_sink:         Option<ArtifactSink>,
-    pub run_control:           Option<Arc<RunControlState>>,
-    pub blocked_state_tracker: Option<Arc<BlockedStateTracker>>,
-    pub github_app:            Option<fabro_github::GitHubCredentials>,
-    pub vault:                 Option<Arc<AsyncRwLock<Vault>>>,
-    pub on_node:               crate::OnNodeCallback,
-    pub registry_override:     Option<Arc<HandlerRegistry>>,
+    pub run_id:            RunId,
+    pub cancel_token:      Option<Arc<AtomicBool>>,
+    pub emitter:           Arc<Emitter>,
+    pub interviewer:       Arc<dyn Interviewer>,
+    pub run_store:         RunStoreHandle,
+    pub event_sink:        RunEventSink,
+    pub artifact_sink:     Option<ArtifactSink>,
+    pub run_control:       Option<Arc<RunControlState>>,
+    pub github_app:        Option<fabro_github::GitHubCredentials>,
+    pub vault:             Option<Arc<AsyncRwLock<Vault>>>,
+    pub on_node:           crate::OnNodeCallback,
+    pub registry_override: Option<Arc<HandlerRegistry>>,
 }
 
 pub struct Started {
@@ -496,7 +453,6 @@ impl RunSession {
             pr_model: model,
             workflow_path,
             workflow_bundle,
-            blocked_state_tracker: services.blocked_state_tracker,
             vault: services.vault,
         })
     }
@@ -778,7 +734,6 @@ impl RunSession {
             registry_override: self.registry_override,
             artifact_sink: self.artifact_sink,
             run_control: self.run_control,
-            blocked_state_tracker: self.blocked_state_tracker,
             checkpoint,
             seed_context: self.seed_context,
         };
@@ -1121,7 +1076,6 @@ mod tests {
             event_sink: RunEventSink::store(store.open_run(&fixtures::RUN_1).await.unwrap()),
             artifact_sink: None,
             run_control: None,
-            blocked_state_tracker: Some(BlockedStateTracker::new()),
             github_app: None,
             vault: None,
             on_node: None,
@@ -1181,50 +1135,6 @@ mod tests {
         );
         assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
         assert!(started.retro.is_none());
-    }
-
-    #[test]
-    fn blocked_state_tracker_emits_once_across_parallel_interview_races() {
-        let tracker = BlockedStateTracker::new();
-        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
-        let event_names = Arc::new(Mutex::new(Vec::new()));
-
-        emitter.on_event({
-            let event_names = Arc::clone(&event_names);
-            move |event| {
-                let name = match &event.body {
-                    EventBody::RunBlocked(_) => Some("run.blocked"),
-                    EventBody::RunUnblocked(_) => Some("run.unblocked"),
-                    _ => None,
-                };
-                if let Some(name) = name {
-                    event_names.lock().unwrap().push(name.to_string());
-                }
-            }
-        });
-
-        std::thread::scope(|scope| {
-            for _ in 0..8 {
-                let tracker = Arc::clone(&tracker);
-                let emitter = Arc::clone(&emitter);
-                scope.spawn(move || tracker.interview_started(emitter.as_ref()));
-            }
-        });
-
-        std::thread::scope(|scope| {
-            for _ in 0..8 {
-                let tracker = Arc::clone(&tracker);
-                let emitter = Arc::clone(&emitter);
-                scope.spawn(move || tracker.interview_resolved(emitter.as_ref()));
-            }
-        });
-
-        tracker.interview_resolved(emitter.as_ref());
-
-        assert_eq!(event_names.lock().unwrap().as_slice(), [
-            "run.blocked",
-            "run.unblocked"
-        ],);
     }
 
     #[tokio::test]

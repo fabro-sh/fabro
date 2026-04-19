@@ -4207,7 +4207,6 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         event_sink: workflow_event::RunEventSink::store(run_store.clone()),
         artifact_sink: Some(ArtifactSink::Store(state.artifact_store.clone())),
         run_control: None,
-        blocked_state_tracker: Some(operations::BlockedStateTracker::new()),
         github_app,
         vault: Some(Arc::clone(&state.vault)),
         on_node: None,
