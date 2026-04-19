@@ -227,9 +227,22 @@ struct GithubTokenTestInput {
 
 #[derive(Clone, Debug, Deserialize)]
 struct GithubAppManifestInput {
-    owner:            String,
+    owner:            GithubAppOwnerInput,
     app_name:         String,
     allowed_username: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct GithubAppOwnerInput {
+    kind: GithubAppOwnerKind,
+    slug: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum GithubAppOwnerKind {
+    Personal,
+    Org,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -260,18 +273,6 @@ enum GitHubAppOwner {
 }
 
 impl GitHubAppOwner {
-    fn parse(raw: &str) -> anyhow::Result<Self> {
-        let value = raw.trim();
-        if value.eq_ignore_ascii_case("personal") {
-            return Ok(Self::Personal);
-        }
-        if let Some(org) = value.strip_prefix("org:") {
-            anyhow::ensure!(!org.trim().is_empty(), "organization owner cannot be empty");
-            return Ok(Self::Organization(org.trim().to_string()));
-        }
-        anyhow::bail!("owner must be 'personal' or 'org:<slug>'");
-    }
-
     fn manifest_form_action(&self) -> String {
         match self {
             Self::Personal => "https://github.com/settings/apps/new".to_string(),
@@ -281,10 +282,28 @@ impl GitHubAppOwner {
         }
     }
 
-    fn as_session_value(&self) -> String {
+    fn as_session_value(&self) -> serde_json::Value {
         match self {
-            Self::Personal => "personal".to_string(),
-            Self::Organization(org) => format!("org:{org}"),
+            Self::Personal => serde_json::json!({ "kind": "personal" }),
+            Self::Organization(org) => serde_json::json!({ "kind": "org", "slug": org }),
+        }
+    }
+}
+
+impl TryFrom<GithubAppOwnerInput> for GitHubAppOwner {
+    type Error = String;
+
+    fn try_from(value: GithubAppOwnerInput) -> Result<Self, Self::Error> {
+        match value.kind {
+            GithubAppOwnerKind::Personal => Ok(Self::Personal),
+            GithubAppOwnerKind::Org => {
+                let slug = value.slug.unwrap_or_default();
+                let trimmed = slug.trim();
+                if trimmed.is_empty() {
+                    return Err("organization owner requires a non-empty slug".to_string());
+                }
+                Ok(Self::Organization(trimmed.to_string()))
+            }
         }
     }
 }
@@ -605,10 +624,10 @@ async fn post_install_github_app_manifest(
     }
     observe_operator(&state, &headers);
 
-    let owner = match GitHubAppOwner::parse(&input.owner) {
+    let owner = match GitHubAppOwner::try_from(input.owner) {
         Ok(owner) => owner,
         Err(err) => {
-            return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err.to_string());
+            return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err);
         }
     };
     if input.app_name.trim().is_empty() {

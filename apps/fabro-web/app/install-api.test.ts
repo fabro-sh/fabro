@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildGithubOwnerValue, readInstallError } from "./install-api";
+import { buildInstallGithubAppOwner, readInstallError } from "./install-api";
 
 describe("readInstallError", () => {
   test("prefers the structured install error payload", async () => {
@@ -31,12 +31,15 @@ describe("readInstallError", () => {
   });
 });
 
-describe("buildGithubOwnerValue", () => {
-  test("uses personal for personal app installs", () => {
-    expect(buildGithubOwnerValue("personal", "")).toBe("personal");
+describe("buildInstallGithubAppOwner", () => {
+  test("uses the personal tag for personal app installs", () => {
+    expect(buildInstallGithubAppOwner("personal", "")).toEqual({ kind: "personal" });
   });
 
-  test("formats organization owners with the expected prefix", () => {
-    expect(buildGithubOwnerValue("org", "  acme  ")).toBe("org:acme");
+  test("trims organization slugs and tags them with `org`", () => {
+    expect(buildInstallGithubAppOwner("org", "  acme  ")).toEqual({
+      kind: "org",
+      slug: "acme",
+    });
   });
 });

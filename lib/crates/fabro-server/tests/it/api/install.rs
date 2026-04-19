@@ -197,7 +197,9 @@ async fn install_endpoints_reject_missing_and_wrong_tokens() {
         (
             "POST",
             "/install/github/app/manifest",
-            Some(r#"{"owner":"personal","app_name":"Fabro","allowed_username":"octocat"}"#),
+            Some(
+                r#"{"owner":{"kind":"personal"},"app_name":"Fabro","allowed_username":"octocat"}"#,
+            ),
         ),
         ("POST", "/install/finish", None),
     ];
@@ -539,7 +541,7 @@ async fn github_app_manifest_round_trip_updates_install_session() {
                 .header("authorization", "Bearer test-install-token")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"owner":"personal","app_name":"Fabro Test","allowed_username":"octocat"}"#,
+                    r#"{"owner":{"kind":"personal"},"app_name":"Fabro Test","allowed_username":"octocat"}"#,
                 ))
                 .unwrap(),
         )
@@ -661,7 +663,7 @@ async fn github_app_manifest_rejects_retry_while_pending_and_preserves_prior_tok
                 .header("authorization", "Bearer test-install-token")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"owner":"personal","app_name":"Fabro Test","allowed_username":"octocat"}"#,
+                    r#"{"owner":{"kind":"personal"},"app_name":"Fabro Test","allowed_username":"octocat"}"#,
                 ))
                 .unwrap(),
         )
@@ -701,7 +703,7 @@ async fn github_app_manifest_rejects_retry_while_pending_and_preserves_prior_tok
                 .header("authorization", "Bearer test-install-token")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"owner":"personal","app_name":"Fabro Retry","allowed_username":"octocat"}"#,
+                    r#"{"owner":{"kind":"personal"},"app_name":"Fabro Retry","allowed_username":"octocat"}"#,
                 ))
                 .unwrap(),
         )
@@ -767,7 +769,7 @@ async fn github_app_redirect_rejects_invalid_or_missing_state_without_mutating_s
                 .header("authorization", "Bearer test-install-token")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"owner":"personal","app_name":"Fabro Test","allowed_username":"octocat"}"#,
+                    r#"{"owner":{"kind":"personal"},"app_name":"Fabro Test","allowed_username":"octocat"}"#,
                 ))
                 .unwrap(),
         )
@@ -907,7 +909,7 @@ async fn github_app_redirect_exchange_failure_returns_to_wizard_and_keeps_pendin
                 .header("authorization", "Bearer test-install-token")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"owner":"personal","app_name":"Fabro Test","allowed_username":"octocat"}"#,
+                    r#"{"owner":{"kind":"personal"},"app_name":"Fabro Test","allowed_username":"octocat"}"#,
                 ))
                 .unwrap(),
         )

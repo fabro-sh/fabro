@@ -2111,13 +2111,24 @@ components:
         - allowed_username
       properties:
         owner:
-          type: string
-          description: >
-            Either `personal` or `org:<slug>`.
+          $ref: "#/components/schemas/InstallGithubAppOwner"
         app_name:
           type: string
         allowed_username:
           type: string
+
+    InstallGithubAppOwner:
+      description: Owner of the GitHub App being created during browser install.
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum: [personal, org]
+        slug:
+          type: string
+          description: Required when `kind` is `org`; the organization slug.
 
     InstallGithubAppManifestResponse:
       description: Browser handoff payload for the GitHub App creation flow.
@@ -2145,7 +2156,7 @@ components:
         username:
           type: string
         owner:
-          type: string
+          $ref: "#/components/schemas/InstallGithubAppOwner"
         app_name:
           type: string
         slug:

@@ -4,9 +4,10 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router";
 
 import {
   type InstallFinishResponse,
+  type InstallGithubAppOwner,
   type InstallLlmProviderInput,
   type InstallSessionResponse,
-  buildGithubOwnerValue,
+  buildInstallGithubAppOwner,
   createInstallGithubAppManifest,
   finishInstall,
   getInstallSession,
@@ -116,10 +117,10 @@ export default function InstallApp() {
         );
         if (nextSession.github?.strategy === "app") {
           setGithubStrategy("app");
-          const owner = nextSession.github.owner ?? "personal";
-          if (owner.startsWith("org:")) {
+          const owner = nextSession.github.owner ?? { kind: "personal" };
+          if (owner.kind === "org") {
             setGithubOwnerKind("org");
-            setGithubOrganization(owner.slice(4));
+            setGithubOrganization(owner.slug);
           } else {
             setGithubOwnerKind("personal");
             setGithubOrganization("");
@@ -389,7 +390,7 @@ export default function InstallApp() {
               }
 
               const manifest = await createInstallGithubAppManifest(installToken, {
-                owner: buildGithubOwnerValue(githubOwnerKind, githubOrganization),
+                owner: buildInstallGithubAppOwner(githubOwnerKind, githubOrganization),
                 app_name: githubAppName.trim(),
                 allowed_username: githubAllowedUsername.trim(),
               });
@@ -970,7 +971,7 @@ function GithubAppDoneScreen({
         </p>
       </header>
       <div className="grid gap-4 md:grid-cols-3">
-        <SummaryCard title="Owner" body={github.owner || "personal"} />
+        <SummaryCard title="Owner" body={describeGithubAppOwner(github.owner)} />
         <SummaryCard title="App" body={github.slug || github.app_name || "GitHub App"} />
         <SummaryCard
           title="Allowed user"
@@ -1069,6 +1070,13 @@ function describeGithubSummary(github: InstallSessionResponse["github"]): string
     return `${appLabel} · ${userLabel}`;
   }
   return github.username ? `Token for ${github.username}` : "Token configured";
+}
+
+function describeGithubAppOwner(
+  owner: InstallGithubAppOwner | undefined,
+): string {
+  if (!owner || owner.kind === "personal") return "personal";
+  return owner.slug ? `org:${owner.slug}` : "org";
 }
 
 function submitGithubManifest(

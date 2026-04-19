@@ -1,3 +1,7 @@
+export type InstallGithubAppOwner =
+  | { kind: "personal" }
+  | { kind: "org"; slug: string };
+
 export interface InstallSessionResponse {
   completed_steps: string[];
   llm:
@@ -13,7 +17,7 @@ export interface InstallSessionResponse {
     | {
         strategy: string;
         username?: string;
-        owner?: string;
+        owner?: InstallGithubAppOwner;
         app_name?: string;
         slug?: string;
         allowed_username?: string;
@@ -34,7 +38,7 @@ export interface InstallLlmProviderInput {
 }
 
 export interface InstallGithubAppManifestInput {
-  owner: string;
+  owner: InstallGithubAppOwner;
   app_name: string;
   allowed_username: string;
 }
@@ -92,13 +96,13 @@ export async function readInstallError(
   return `${fallback} (${response.status})`;
 }
 
-export function buildGithubOwnerValue(
+export function buildInstallGithubAppOwner(
   ownerKind: "personal" | "org",
   organizationSlug: string,
-): string {
+): InstallGithubAppOwner {
   return ownerKind === "org"
-    ? `org:${organizationSlug.trim()}`
-    : "personal";
+    ? { kind: "org", slug: organizationSlug.trim() }
+    : { kind: "personal" };
 }
 
 export async function getInstallSession(token: string): Promise<InstallSessionResponse> {
