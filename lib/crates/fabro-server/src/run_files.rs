@@ -33,7 +33,7 @@ use fabro_sandbox::reconnect::reconnect;
 use fabro_types::RunId;
 use fabro_workflow::sandbox_git::{
     DiffError, RawDiffEntry, SubmoduleChange, SymlinkChange, list_binary_paths,
-    list_changed_files_raw, stream_blobs,
+    list_changed_files_raw, stream_blob_metadata, stream_blobs,
 };
 use futures_util::FutureExt;
 use serde::Deserialize;
@@ -926,11 +926,26 @@ fn collect_blob_shas(classified: &[ClassifiedEntry]) -> Vec<String> {
     out
 }
 
-/// Fetch all requested blobs in one batched `cat-file --batch` call. Returns
-/// a SHA → contents map where `None` means the blob exceeded the per-file
-/// byte cap (caller flags that entry truncated). Permanent errors in the
-/// sandbox yield an empty table (the handler falls through to the degraded
-/// branch upstream).
+/// Fetch blob contents for the `NeedsFetch` entries in two phases: first
+/// `cat-file --batch-check` to learn sizes, then `cat-file --batch` on only
+/// the blobs that fit under the per-file cap.
+///
+/// Phase 1 (metadata): cheap, returns sizes reliably; used to pre-filter
+/// oversized blobs so phase 2 never pulls them. If a later phase-2 parse
+/// error poisons the whole stream, the oversized-by-metadata entries
+/// stay correctly classified rather than collapsing to undifferentiated
+/// truncated placeholders.
+///
+/// Phase 2 (contents): bulk `cat-file --batch` on the remaining SHAs.
+///
+/// Failure modes:
+/// - Phase 1 permanent error: fall through with an empty size map; phase 2
+///   runs against the full SHA list (current behavior before this split).
+/// - Phase 1 transient error: 503 to the client.
+/// - Phase 2 permanent error (malformed blob in stream): only the
+///   phase-2 SHAs get `None`; phase-1-classified oversized SHAs keep their
+///   `None` entries but with a semantically-accurate cause.
+/// - Phase 2 transient error: 503 to the client.
 async fn fetch_blob_table(
     sandbox: &dyn Sandbox,
     shas: &[String],
@@ -938,13 +953,60 @@ async fn fetch_blob_table(
     if shas.is_empty() {
         return Ok(HashMap::new());
     }
-    let contents = match stream_blobs(sandbox, shas, PER_FILE_BYTES_CAP).await {
-        Ok(v) => v,
+
+    let mut table: HashMap<String, Option<String>> = HashMap::with_capacity(shas.len());
+
+    // Phase 1: --batch-check for sizes.
+    let oversized: HashSet<String> = match stream_blob_metadata(sandbox, shas).await {
+        Ok(metas) => {
+            let mut set = HashSet::new();
+            for meta in metas {
+                if let Some(size) = meta.size {
+                    if size > PER_FILE_BYTES_CAP {
+                        set.insert(meta.sha);
+                    }
+                }
+            }
+            set
+        }
+        Err(DiffError::Permanent { .. }) => HashSet::new(),
+        Err(DiffError::Transient { message }) => {
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("Sandbox git cat-file --batch-check failed: {message}"),
+            ));
+        }
+    };
+
+    // Record oversized blobs in the table as `None` so the caller emits
+    // `file_too_large` regardless of what phase 2 does.
+    for sha in &oversized {
+        table.insert(sha.clone(), None);
+    }
+
+    // Phase 2: --batch for the rest.
+    let shas_to_fetch: Vec<String> = shas
+        .iter()
+        .filter(|sha| !oversized.contains(*sha))
+        .cloned()
+        .collect();
+    if shas_to_fetch.is_empty() {
+        return Ok(table);
+    }
+
+    match stream_blobs(sandbox, &shas_to_fetch, PER_FILE_BYTES_CAP).await {
+        Ok(contents) => {
+            for (sha, content) in shas_to_fetch.iter().zip(contents) {
+                table.insert(sha.clone(), content);
+            }
+        }
         Err(DiffError::Permanent { .. }) => {
-            // Surface nothing; every NeedsFetch entry will resolve to empty
-            // contents, triggering `file_too_large` on modified/renamed and
-            // empty sides on added/deleted.
-            return Ok(HashMap::new());
+            // Malformed output (e.g. non-UTF-8 blob bytes) — record the
+            // phase-2 SHAs as unavailable. Oversized-by-metadata entries
+            // stay correctly marked from the earlier loop.
+            for sha in shas_to_fetch {
+                table.entry(sha).or_insert(None);
+            }
         }
         Err(DiffError::Transient { message }) => {
             return Err(ApiError::new(
@@ -952,11 +1014,8 @@ async fn fetch_blob_table(
                 format!("Sandbox git cat-file --batch failed: {message}"),
             ));
         }
-    };
-    let mut table = HashMap::with_capacity(shas.len());
-    for (sha, content) in shas.iter().zip(contents) {
-        table.insert(sha.clone(), content);
     }
+
     Ok(table)
 }
 

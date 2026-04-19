@@ -35,12 +35,41 @@ import { Toolbar, type DiffStyle } from "./run-files/toolbar";
 
 export const handle = { wide: true };
 
-export async function loader({ request, params }: any) {
-  const data = await apiJsonOrNull<PaginatedRunFileList>(
-    `/runs/${params.id}/files`,
-    { request },
-  );
-  return data;
+/**
+ * Loader return type. Both initial loads and revalidations flow through the
+ * same discriminated union so a revalidation failure does NOT unmount to
+ * the route ErrorBoundary — it stays in-band as `{ data: null, error }`
+ * and the component keeps showing the last-good data with an inline banner.
+ * This is the plan's "prior content stays mounted; inline banner with
+ * Retry" behavior for mid-session refresh failures (§ Unit 11).
+ */
+export type RunFilesLoaderResult = {
+  data: PaginatedRunFileList | null;
+  error: { status: number; message: string } | null;
+};
+
+export async function loader({ request, params }: any): Promise<RunFilesLoaderResult> {
+  try {
+    const data = await apiJsonOrNull<PaginatedRunFileList>(
+      `/runs/${params.id}/files`,
+      { request },
+    );
+    return { data, error: null };
+  } catch (e) {
+    if (e instanceof Response) {
+      return {
+        data:  null,
+        error: {
+          status:  e.status,
+          message: e.statusText || `HTTP ${e.status}`,
+        },
+      };
+    }
+    return {
+      data:  null,
+      error: { status: 0, message: String(e) },
+    };
+  }
 }
 
 // Events that should trigger a revalidation. CheckpointCompleted is the
@@ -168,13 +197,25 @@ function decodeDeepLinkFile(hash: string): string | null {
   }
 }
 
-/** Normalize run status from the parent loader into a lowercase string. */
+/**
+ * Extract the lifecycle status from whichever ancestor match carries it.
+ * The Run Detail loader (apps/fabro-web/app/routes/run-detail.tsx) returns
+ * `{ run: { lifecycleStatus: string | null, ... } }` where
+ * `lifecycleStatus` is the raw workflow status — "submitted", "running",
+ * "succeeded", "failed", etc. `run.status` on the same object is the
+ * ColumnStatus derived from checks and is NOT the right field to drive the
+ * empty-state taxonomy from.
+ */
 function resolveRunStatus(matches: ReturnType<typeof useMatches>): string | undefined {
   for (const match of matches) {
     const data = match.data as any;
     if (!data) continue;
-    if (typeof data?.run?.status === "string") return data.run.status as string;
-    if (typeof data?.status === "string") return data.status as string;
+    if (typeof data?.run?.lifecycleStatus === "string") {
+      return data.run.lifecycleStatus as string;
+    }
+    if (typeof data?.lifecycleStatus === "string") {
+      return data.lifecycleStatus as string;
+    }
   }
   return undefined;
 }
@@ -185,50 +226,59 @@ export default function RunFiles({ loaderData }: any) {
   const navigation = useNavigation();
   const revalidator = useRevalidator();
   const matches = useMatches();
-  const data = loaderData as PaginatedRunFileList | null;
+  const result = loaderData as RunFilesLoaderResult | null;
   const narrow = useNarrowViewport();
   const runStatus = resolveRunStatus(matches);
+
+  // Preserve the last successful payload so a failed revalidation can keep
+  // rendering the previous files while surfacing an inline banner. On the
+  // very first failure (no prior good data), we render the error state
+  // equivalent of the ErrorBoundary inline.
+  const lastGoodDataRef = useRef<PaginatedRunFileList | null>(null);
+  if (result?.data) {
+    lastGoodDataRef.current = result.data;
+  }
+  const data: PaginatedRunFileList | null =
+    result?.data ?? lastGoodDataRef.current;
 
   const lastFetchedAtRef = useRef<number | null>(null);
   const lastToShaRef = useRef<string | null>(null);
   const previousDataLengthRef = useRef<number | null>(null);
-  const [revalidationError, setRevalidationError] = useState<string | null>(
-    null,
-  );
   const [emptyToast, setEmptyToast] = useState<string | null>(null);
   const [deepLinkToast, setDeepLinkToast] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!result?.data) return;
     lastFetchedAtRef.current = Date.now();
-    const currentToSha = (data?.meta?.to_sha ?? null) as string | null;
+    const currentToSha = (result.data.meta?.to_sha ?? null) as string | null;
     const prevLen = previousDataLengthRef.current;
-    if (prevLen !== null && prevLen > 0 && (data?.data?.length ?? 0) === 0) {
+    if (prevLen !== null && prevLen > 0 && result.data.data.length === 0) {
       // Revalidation-now-empty toast: the user was looking at files, the
       // latest fetch shows none.
       setEmptyToast("No changes in this run.");
       const id = setTimeout(() => setEmptyToast(null), 3500);
       return () => clearTimeout(id);
     }
-    previousDataLengthRef.current = data?.data?.length ?? 0;
+    previousDataLengthRef.current = result.data.data.length;
     lastToShaRef.current = currentToSha;
     return undefined;
-  }, [data]);
+  }, [result?.data]);
 
   useSseRevalidation(params.id);
 
   const isInitialLoading = navigation.state === "loading" && !loaderData;
   const isRevalidating = revalidator.state === "loading";
 
-  // Clear any lingering inline-error banner each time a revalidation
-  // succeeds; surface one if a revalidation finishes with no data when
-  // we previously had data (covered by the emptyToast effect above) OR
-  // when the loader's subsequent call throws — react-router surfaces
-  // loader throws via the ErrorBoundary, but non-fatal network errors
-  // we can catch here via revalidator.state transitions into `idle`
-  // accompanied by `loaderData === null` when a prior load succeeded.
-  useEffect(() => {
-    if (isRevalidating) setRevalidationError(null);
-  }, [isRevalidating]);
+  // Revalidation error is whatever the most recent loader call returned;
+  // the inline banner renders when we still have prior data to show. When
+  // there's no prior data AND this is the initial load, we render a
+  // full-panel error state instead (the Toolbar would have nothing to act
+  // on with no data).
+  const revalidationError =
+    result?.error && lastGoodDataRef.current
+      ? `Couldn't refresh (${result.error.status}).`
+      : null;
+  const initialError = result?.error && !lastGoodDataRef.current ? result.error : null;
 
   const freshness = useFreshness(data?.meta ?? null, lastFetchedAtRef.current);
 
@@ -361,6 +411,27 @@ export default function RunFiles({ loaderData }: any) {
     return <LoadingSkeleton />;
   }
 
+  // Initial load failed and we have no prior data to fall back on —
+  // render the status-specific error state inline (mirrors what the
+  // ErrorBoundary would show, but without unmounting the route).
+  if (initialError) {
+    if (initialError.status === 401 || initialError.status === 403) {
+      return (
+        <EmptyState kind="unknown" />
+      );
+    }
+    return (
+      <InlineErrorBanner
+        message={
+          initialError.status >= 500
+            ? `Something went wrong (${initialError.status}).`
+            : `Couldn't load files (${initialError.status}).`
+        }
+        onRetry={() => revalidator.revalidate()}
+      />
+    );
+  }
+
   if (!data) {
     return (
       <EmptyState
@@ -403,10 +474,7 @@ export default function RunFiles({ loaderData }: any) {
         {revalidationError ? (
           <InlineErrorBanner
             message={revalidationError}
-            onRetry={() => {
-              setRevalidationError(null);
-              revalidator.revalidate();
-            }}
+            onRetry={() => revalidator.revalidate()}
           />
         ) : null}
         <DegradedBanner reason={meta.degraded_reason} />
@@ -455,10 +523,7 @@ export default function RunFiles({ loaderData }: any) {
       {revalidationError ? (
         <InlineErrorBanner
           message={revalidationError}
-          onRetry={() => {
-            setRevalidationError(null);
-            revalidator.revalidate();
-          }}
+          onRetry={() => revalidator.revalidate()}
         />
       ) : null}
       {body}
