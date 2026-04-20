@@ -72,6 +72,8 @@ const BOARD_STATUS_EVENTS = new Set([
   "run.unblocked",
   "run.completed",
   "run.failed",
+  "run.archived",
+  "run.unarchived",
   "interview.started",
   "interview.completed",
   "interview.timeout",

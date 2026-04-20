@@ -20,6 +20,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { Link, Outlet, useLocation, useMatches, useRevalidator } from "react-router";
 import { getAuthMe } from "../api";
+import { ToastProvider } from "../components/toast";
 import { DemoModeProvider } from "../lib/demo-mode";
 import { useTheme } from "../lib/theme";
 
@@ -72,6 +73,7 @@ export default function AppShell({ loaderData }: any) {
 
   return (
     <DemoModeProvider value={demoMode}>
+    <ToastProvider>
     <div className="isolate min-h-full">
       <Disclosure as="nav" className="bg-panel">
         <div className="px-4 sm:px-6 lg:px-8">
@@ -274,6 +276,7 @@ export default function AppShell({ loaderData }: any) {
         </div>
       </main>
     </div>
+    </ToastProvider>
     </DemoModeProvider>
   );
 }

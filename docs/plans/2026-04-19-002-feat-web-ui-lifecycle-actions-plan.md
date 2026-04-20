@@ -1,7 +1,7 @@
 ---
 title: "feat: Expose CLI lifecycle actions (cancel, archive, unarchive) in the web UI"
 type: feat
-status: active
+status: completed
 date: 2026-04-19
 updated: 2026-04-20
 origin: docs/brainstorms/2026-04-19-web-ui-lifecycle-actions-requirements.md
@@ -224,7 +224,7 @@ graph TB
 
 ---
 
-- [ ] **Unit 1: Extend `BOARD_STATUS_EVENTS` with `run.archived` and `run.unarchived`**
+- [x] **Unit 1: Extend `BOARD_STATUS_EVENTS` with `run.archived` and `run.unarchived`**
 
 **Goal:** Ensure the board revalidates when a run is archived or unarchived from any source.
 
@@ -255,7 +255,7 @@ graph TB
 
 ---
 
-- [ ] **Unit 2: Shared toast infrastructure (`ToastProvider`, `useToast`)**
+- [x] **Unit 2: Shared toast infrastructure (`ToastProvider`, `useToast`)**
 
 **Goal:** Introduce a stackable app-level toast system for passive toasts, error toasts, and inverse-action toasts.
 
@@ -296,7 +296,7 @@ graph TB
 
 ---
 
-- [ ] **Unit 3: Shared SSE hook (`useRunEventSource`) and migration of existing call sites**
+- [x] **Unit 3: Shared SSE hook (`useRunEventSource`) and migration of existing call sites**
 
 **Goal:** Standardize run-scoped SSE parsing and revalidation behavior across the app.
 
@@ -339,7 +339,7 @@ graph TB
 
 ---
 
-- [ ] **Unit 4: Lifecycle action helpers and route action dispatch**
+- [x] **Unit 4: Lifecycle action helpers and route action dispatch**
 
 **Goal:** Centralize request handling, error parsing, and status predicates for cancel/archive/unarchive.
 
@@ -383,7 +383,7 @@ graph TB
 
 ---
 
-- [ ] **Unit 5: Immediate cancel UI**
+- [x] **Unit 5: Immediate cancel UI**
 
 **Goal:** Add the cancel button to the run detail header using the same route-action/fetcher pattern as the other lifecycle actions.
 
@@ -423,7 +423,7 @@ graph TB
 
 ---
 
-- [ ] **Unit 6: Archive / unarchive UI**
+- [x] **Unit 6: Archive / unarchive UI**
 
 **Goal:** Add archive and unarchive controls plus the inverse-action toast flow.
 
@@ -463,7 +463,7 @@ graph TB
 
 ---
 
-- [ ] **Unit 7: Blocked-run notice + secondary cancel affordance**
+- [x] **Unit 7: Blocked-run notice + secondary cancel affordance**
 
 **Goal:** Show non-CLI users why the run is blocked without presenting cancel as the main action.
 
