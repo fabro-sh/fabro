@@ -9,7 +9,6 @@ use fabro_util::printer::Printer;
 
 use crate::args::DfArgs;
 use crate::command_context::CommandContext;
-use crate::server_client;
 use crate::shared::{format_size, print_json_pretty};
 
 pub(super) async fn df_command(
@@ -21,12 +20,14 @@ pub(super) async fn df_command(
     let ctx = CommandContext::for_connection(&args.connection, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
     let output = server
-        .api()
-        .get_system_disk_usage()
-        .verbose(args.verbose)
-        .send()
-        .await
-        .map_err(server_client::map_api_error)?
+        .send_api(|client| async move {
+            client
+                .get_system_disk_usage()
+                .verbose(args.verbose)
+                .send()
+                .await
+        })
+        .await?
         .into_inner();
 
     let json = cli.output.format == OutputFormat::Json;
@@ -34,11 +35,8 @@ pub(super) async fn df_command(
         None
     } else {
         server
-            .api()
-            .get_system_info()
-            .send()
-            .await
-            .map_err(server_client::map_api_error)?
+            .send_api(|client| async move { client.get_system_info().send().await })
+            .await?
             .into_inner()
             .storage_dir
     };

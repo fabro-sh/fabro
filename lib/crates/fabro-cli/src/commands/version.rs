@@ -13,7 +13,6 @@ use serde_json::{Map, Value, json};
 
 use crate::args::VersionArgs;
 use crate::command_context::CommandContext;
-use crate::server_client;
 use crate::shared::print_json_pretty;
 use crate::user_config::{self, ServerTarget};
 
@@ -29,11 +28,8 @@ pub(crate) async fn version_command(
     let server_address = format_server_target(&server_target);
     let server_info = match ctx.server().await {
         Ok(server) => match server
-            .api()
-            .get_system_info()
-            .send()
+            .send_api(|client| async move { client.get_system_info().send().await })
             .await
-            .map_err(server_client::map_api_error)
         {
             Ok(response) => {
                 let response = response.into_inner();

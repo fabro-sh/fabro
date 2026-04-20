@@ -34,17 +34,22 @@ pub(super) async fn login_command(
     };
     let credential_id = credential_id_for(&credential).map_err(anyhow::Error::msg)?;
     let value = serde_json::to_string(&credential)?;
+    let request_credential_id = credential_id.clone();
+    let request_value = value.clone();
 
     server
-        .api()
-        .create_secret()
-        .body(types::CreateSecretRequest {
-            name: credential_id.clone(),
-            value,
-            type_: types::SecretType::Credential,
-            description: None,
+        .send_api(|client| async move {
+            client
+                .create_secret()
+                .body(types::CreateSecretRequest {
+                    name:        request_credential_id.clone(),
+                    value:       request_value.clone(),
+                    type_:       types::SecretType::Credential,
+                    description: None,
+                })
+                .send()
+                .await
         })
-        .send()
         .await?;
     fabro_util::printerr!(
         printer,

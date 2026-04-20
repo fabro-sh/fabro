@@ -19,8 +19,8 @@ pub(crate) async fn dispatch(
     let ctx = CommandContext::for_target(&ns.target, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
     match ns.command {
-        SecretCommand::List(args) => list::list_command(server.api(), &args, cli, printer).await,
-        SecretCommand::Rm(args) => rm::rm_command(server.api(), &args, cli, printer).await,
-        SecretCommand::Set(args) => set::set_command(server.api(), &args, cli, printer).await,
+        SecretCommand::List(args) => list::list_command(&server, &args, cli, printer).await,
+        SecretCommand::Rm(args) => rm::rm_command(&server, &args, cli, printer).await,
+        SecretCommand::Set(args) => set::set_command(&server, &args, cli, printer).await,
     }
 }

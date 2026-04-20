@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 
 use crate::args::{ModelListArgs, ModelTestArgs, ModelsCommand};
 use crate::command_context::CommandContext;
-use crate::server_client;
+use crate::server_client::ServerStoreClient;
 
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -55,12 +55,7 @@ pub(crate) async fn execute(
     let ctx = CommandContext::for_target(target_args, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
 
-    run_models(
-        command,
-        server.api(),
-        cli.output.format == OutputFormat::Json,
-    )
-    .await
+    run_models(command, &server, cli.output.format == OutputFormat::Json).await
 }
 
 fn format_context_window(tokens: i64) -> String {
@@ -207,7 +202,7 @@ where
 }
 
 async fn fetch_models_from_server(
-    client: &fabro_api::Client,
+    client: &ServerStoreClient,
     provider: Option<&str>,
     query: Option<&str>,
 ) -> Result<Vec<Model>> {
@@ -215,15 +210,18 @@ async fn fetch_models_from_server(
     let mut models = Vec::new();
 
     loop {
-        let mut request = client.list_models().page_limit(100u64).page_offset(offset);
-        if let Some(provider) = provider {
-            request = request.provider(provider.to_string());
-        }
-        if let Some(query) = query {
-            request = request.query(query.to_string());
-        }
-
-        let response = request.send().await.map_err(server_client::map_api_error)?;
+        let response = client
+            .send_api(|api| async move {
+                let mut request = api.list_models().page_limit(100u64).page_offset(offset);
+                if let Some(provider) = provider {
+                    request = request.provider(provider.to_string());
+                }
+                if let Some(query) = query {
+                    request = request.query(query.to_string());
+                }
+                request.send().await
+            })
+            .await?;
         let parsed = response.into_inner();
         let count = parsed.data.len() as u64;
         models.extend(convert_type::<_, Vec<Model>>(parsed.data)?);
@@ -237,15 +235,19 @@ async fn fetch_models_from_server(
 }
 
 async fn test_model_via_server(
-    client: &fabro_api::Client,
+    client: &ServerStoreClient,
     model_id: &str,
     mode: Option<api_types::ModelTestMode>,
 ) -> Result<api_types::ModelTestResult> {
-    let mut request = client.test_model().id(model_id.to_string());
-    if let Some(mode) = mode {
-        request = request.mode(mode);
-    }
-    let response = request.send().await.map_err(server_client::map_api_error)?;
+    let response = client
+        .send_api(|api| async move {
+            let mut request = api.test_model().id(model_id.to_string());
+            if let Some(mode) = mode {
+                request = request.mode(mode);
+            }
+            request.send().await
+        })
+        .await?;
     Ok(response.into_inner())
 }
 
@@ -255,7 +257,7 @@ async fn test_model_via_server(
     reason = "Progress goes to stderr while tables or JSON results go to stdout."
 )]
 async fn test_models_via_server(
-    client: &fabro_api::Client,
+    client: &ServerStoreClient,
     provider: Option<&str>,
     model: Option<&str>,
     deep: bool,
@@ -432,7 +434,7 @@ async fn test_models_via_server(
 )]
 async fn run_models(
     command: ModelsCommand,
-    client: &fabro_api::Client,
+    client: &ServerStoreClient,
     json_output: bool,
 ) -> Result<()> {
     let styles = Styles::detect_stdout();
@@ -483,8 +485,8 @@ mod tests {
 
     use super::*;
 
-    fn test_api_client(api_url: &str) -> fabro_api::Client {
-        fabro_api::Client::new_with_client(api_url, fabro_test::test_http_client())
+    fn test_api_client(api_url: &str) -> ServerStoreClient {
+        ServerStoreClient::new_no_proxy(api_url).expect("test API client should build")
     }
 
     fn test_model_json(id: &str, provider: Provider) -> serde_json::Value {

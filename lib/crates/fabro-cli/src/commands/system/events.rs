@@ -6,7 +6,7 @@ use futures::StreamExt;
 
 use crate::args::SystemEventsArgs;
 use crate::command_context::CommandContext;
-use crate::{server_client, sse};
+use crate::sse;
 
 pub(super) async fn events_command(
     args: &SystemEventsArgs,
@@ -17,12 +17,16 @@ pub(super) async fn events_command(
     let ctx = CommandContext::for_connection(&args.connection, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
 
-    let mut request = server.api().attach_events();
-    if !args.run_ids.is_empty() {
-        request = request.run_id(args.run_ids.join(","));
-    }
-
-    let response = request.send().await.map_err(server_client::map_api_error)?;
+    let run_ids = args.run_ids.join(",");
+    let response = server
+        .send_api(|client| async move {
+            let mut request = client.attach_events();
+            if !run_ids.is_empty() {
+                request = request.run_id(run_ids.clone());
+            }
+            request.send().await
+        })
+        .await?;
     let mut stream = response.into_inner();
     let mut pending = Vec::new();
 

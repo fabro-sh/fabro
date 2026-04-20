@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::net::IpAddr;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -18,29 +19,96 @@ use fabro_util::dev_token::validate_dev_token_format;
 use fabro_util::{Home, dev_token};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use futures::StreamExt;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use tokio::fs::File;
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 use tokio_util::io::ReaderStream;
 
 use crate::args::ServerTargetArgs;
-use crate::auth_store::{AuthStore, ServerTargetKey};
+use crate::auth_store::{AuthEntry, AuthStore, ServerTargetKey, Subject};
 use crate::commands::server::{record, start};
 use crate::user_config::cli_http_client_builder;
 use crate::{sse, user_config};
 
 #[derive(Clone)]
 pub(crate) struct ServerStoreClient {
-    client:      fabro_api::Client,
-    http_client: fabro_http::HttpClient,
-    base_url:    String,
+    state:             Arc<RwLock<ClientBundle>>,
+    base_url:          String,
+    refreshable_oauth: Option<RefreshableOAuth>,
+    refresh_lock:      Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Clone)]
 struct LocalServerRuntime {
     active_config_path: PathBuf,
     storage_dir:        PathBuf,
+}
+
+#[derive(Clone)]
+struct ClientBundle {
+    client:       fabro_api::Client,
+    http_client:  fabro_http::HttpClient,
+    bearer_token: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+enum ResolvedBearer {
+    DevToken(String),
+    OAuth(AuthEntry),
+}
+
+impl ResolvedBearer {
+    fn bearer_token(&self) -> &str {
+        match self {
+            Self::DevToken(token) => token,
+            Self::OAuth(entry) => &entry.access_token,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RefreshableOAuth {
+    target:     user_config::ServerTarget,
+    key:        ServerTargetKey,
+    auth_store: AuthStore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ApiFailure {
+    status: fabro_http::StatusCode,
+    code:   Option<String>,
+}
+
+struct StructuredApiError {
+    error:   anyhow::Error,
+    failure: Option<ApiFailure>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CliTokenResponse {
+    access_token:             String,
+    access_token_expires_at:  chrono::DateTime<chrono::Utc>,
+    refresh_token:            String,
+    refresh_token_expires_at: chrono::DateTime<chrono::Utc>,
+    subject:                  CliTokenSubject,
+}
+
+#[derive(Debug, Deserialize)]
+struct CliTokenSubject {
+    idp_issuer:  String,
+    idp_subject: String,
+    login:       String,
+    name:        String,
+    email:       String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OAuthErrorBody {
+    error:             String,
+    #[serde(default)]
+    error_description: Option<String>,
 }
 
 pub(crate) struct RunAttachEventStream {
@@ -86,6 +154,33 @@ impl RunAttachEventStream {
 
 pub(crate) use fabro_store::RunProjection;
 
+fn client_bundle(
+    base_url: &str,
+    http_client: fabro_http::HttpClient,
+    bearer_token: Option<String>,
+) -> ClientBundle {
+    let client = fabro_api::Client::new_with_client(base_url, http_client.clone());
+    ClientBundle {
+        client,
+        http_client,
+        bearer_token,
+    }
+}
+
+fn refreshable_oauth(
+    target: &user_config::ServerTarget,
+    bearer: &Option<ResolvedBearer>,
+) -> Result<Option<RefreshableOAuth>> {
+    if matches!(bearer, Some(ResolvedBearer::OAuth(_))) {
+        return Ok(Some(RefreshableOAuth {
+            target:     target.clone(),
+            key:        ServerTargetKey::new(target)?,
+            auth_store: AuthStore::default(),
+        }));
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClient> {
     connect_api_client_bundle(storage_dir).await
@@ -98,7 +193,17 @@ pub(crate) async fn connect_server_target_direct(target: &str) -> Result<ServerS
             tls:     None,
         };
         let bearer = resolve_target_bearer(&parsed_target, None)?;
-        connect_remote_api_client_bundle(target, None, bearer.as_deref())
+        let refreshable_oauth = refreshable_oauth(&parsed_target, &bearer)?;
+        let bundle = connect_remote_api_client_bundle(
+            target,
+            None,
+            bearer.as_ref().map(ResolvedBearer::bearer_token),
+        )?;
+        Ok(ServerStoreClient::from_bundle(
+            bundle,
+            normalize_remote_server_target(target),
+            refreshable_oauth,
+        ))
     } else {
         let path = Path::new(target);
         if !path.is_absolute() {
@@ -106,7 +211,18 @@ pub(crate) async fn connect_server_target_direct(target: &str) -> Result<ServerS
         }
         let parsed_target = user_config::ServerTarget::UnixSocket(path.to_path_buf());
         let bearer = resolve_target_bearer(&parsed_target, None)?;
-        connect_unix_socket_api_client_bundle(path, None, bearer.as_deref()).await
+        let refreshable_oauth = refreshable_oauth(&parsed_target, &bearer)?;
+        let bundle = connect_unix_socket_api_client_bundle(
+            path,
+            None,
+            bearer.as_ref().map(ResolvedBearer::bearer_token),
+        )
+        .await?;
+        Ok(ServerStoreClient::from_bundle(
+            bundle,
+            "http://fabro".to_string(),
+            refreshable_oauth,
+        ))
     }
 }
 
@@ -130,19 +246,24 @@ async fn connect_api_client_bundle(storage_dir: &Path) -> Result<ServerStoreClie
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
     match bind {
         Bind::Unix(path) => {
-            connect_unix_socket_api_client_bundle(&path, Some(storage_dir), None).await
+            let bundle =
+                connect_unix_socket_api_client_bundle(&path, Some(storage_dir), None).await?;
+            Ok(ServerStoreClient::from_bundle(
+                bundle,
+                "http://fabro".to_string(),
+                None,
+            ))
         }
         Bind::Tcp(addr) => {
             let token = wait_for_local_dev_token(storage_dir).await?;
             let builder = cli_http_client_builder().no_proxy();
             let http_client = apply_bearer_token_auth(builder, &token)?.build()?;
             let base_url = format!("http://{addr}");
-            let client = fabro_api::Client::new_with_client(&base_url, http_client.clone());
-            Ok(ServerStoreClient {
-                client,
-                http_client,
+            Ok(ServerStoreClient::from_bundle(
+                client_bundle(&base_url, http_client, Some(token)),
                 base_url,
-            })
+                None,
+            ))
         }
     }
 }
@@ -150,7 +271,7 @@ async fn connect_api_client_bundle(storage_dir: &Path) -> Result<ServerStoreClie
 pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::Client> {
     connect_api_client_bundle(storage_dir)
         .await
-        .map(|client| client.client)
+        .map(|client| client.client_bundle().client)
 }
 
 async fn connect_target_api_client_bundle(
@@ -160,18 +281,33 @@ async fn connect_target_api_client_bundle(
     match target {
         user_config::ServerTarget::HttpUrl { api_url, tls } => {
             let bearer = resolve_target_bearer(target, Some(&runtime.storage_dir))?;
-            connect_remote_api_client_bundle(api_url, tls.as_ref(), bearer.as_deref())
+            let refreshable_oauth = refreshable_oauth(target, &bearer)?;
+            let bundle = connect_remote_api_client_bundle(
+                api_url,
+                tls.as_ref(),
+                bearer.as_ref().map(ResolvedBearer::bearer_token),
+            )?;
+            Ok(ServerStoreClient::from_bundle(
+                bundle,
+                normalize_remote_server_target(api_url),
+                refreshable_oauth,
+            ))
         }
         user_config::ServerTarget::UnixSocket(path) => {
             let bearer = resolve_target_bearer(target, Some(&runtime.storage_dir))?;
+            let refreshable_oauth = refreshable_oauth(target, &bearer)?;
             if let Ok(client) = try_connect_unix_socket_api_client_bundle(
                 path,
                 Some(&runtime.storage_dir),
-                bearer.as_deref(),
+                bearer.as_ref().map(ResolvedBearer::bearer_token),
             )
             .await
             {
-                Ok(client)
+                Ok(ServerStoreClient::from_bundle(
+                    client,
+                    "http://fabro".to_string(),
+                    refreshable_oauth,
+                ))
             } else {
                 start::ensure_server_running_on_socket(
                     path,
@@ -180,12 +316,17 @@ async fn connect_target_api_client_bundle(
                 )
                 .await
                 .with_context(|| format!("Failed to start fabro server for {}", path.display()))?;
-                connect_unix_socket_api_client_bundle(
+                let bundle = connect_unix_socket_api_client_bundle(
                     path,
                     Some(&runtime.storage_dir),
-                    bearer.as_deref(),
+                    bearer.as_ref().map(ResolvedBearer::bearer_token),
                 )
-                .await
+                .await?;
+                Ok(ServerStoreClient::from_bundle(
+                    bundle,
+                    "http://fabro".to_string(),
+                    refreshable_oauth,
+                ))
             }
         }
     }
@@ -195,7 +336,7 @@ fn connect_remote_api_client_bundle(
     api_url: &str,
     tls: Option<&user_config::ClientTlsSettings>,
     bearer_token: Option<&str>,
-) -> Result<ServerStoreClient> {
+) -> Result<ClientBundle> {
     let normalized = normalize_remote_server_target(api_url);
     let mut builder = user_config::build_server_client_builder(tls)?;
     if remote_url_targets_local_host(&normalized) {
@@ -206,12 +347,11 @@ fn connect_remote_api_client_bundle(
         None => builder,
     };
     let http_client = builder.build()?;
-    let client = fabro_api::Client::new_with_client(&normalized, http_client.clone());
-    Ok(ServerStoreClient {
-        client,
+    Ok(client_bundle(
+        &normalized,
         http_client,
-        base_url: normalized,
-    })
+        bearer_token.map(ToOwned::to_owned),
+    ))
 }
 
 fn normalize_remote_server_target(api_url: &str) -> String {
@@ -346,21 +486,18 @@ fn apply_dev_token_auth(
     apply_bearer_token_auth(builder, &token)
 }
 
-fn unix_socket_api_client_bundle(http_client: fabro_http::HttpClient) -> ServerStoreClient {
-    let base_url = "http://fabro".to_string();
-    let client = fabro_api::Client::new_with_client(&base_url, http_client.clone());
-    ServerStoreClient {
-        client,
-        http_client,
-        base_url,
-    }
+fn unix_socket_api_client_bundle(
+    http_client: fabro_http::HttpClient,
+    bearer_token: Option<String>,
+) -> ClientBundle {
+    client_bundle("http://fabro", http_client, bearer_token)
 }
 
 async fn build_authed_unix_socket_client(
     path: &Path,
     storage_dir: Option<&Path>,
     bearer_token: Option<&str>,
-) -> Result<ServerStoreClient> {
+) -> Result<ClientBundle> {
     let http_client = if let Some(token) = bearer_token {
         apply_bearer_token_auth(
             cli_http_client_builder().unix_socket(path).no_proxy(),
@@ -381,7 +518,10 @@ async fn build_authed_unix_socket_client(
             .build()
             .context("Failed to build Unix-socket HTTP client for fabro server")?
     };
-    Ok(unix_socket_api_client_bundle(http_client))
+    Ok(unix_socket_api_client_bundle(
+        http_client,
+        bearer_token.map(ToOwned::to_owned),
+    ))
 }
 
 fn build_unix_socket_probe_client(path: &Path) -> Result<fabro_http::HttpClient> {
@@ -396,7 +536,7 @@ async fn try_connect_unix_socket_api_client_bundle(
     path: &Path,
     storage_dir: Option<&Path>,
     bearer_token: Option<&str>,
-) -> Result<ServerStoreClient> {
+) -> Result<ClientBundle> {
     check_server_ready(&build_unix_socket_probe_client(path)?).await?;
     build_authed_unix_socket_client(path, storage_dir, bearer_token).await
 }
@@ -405,7 +545,7 @@ async fn connect_unix_socket_api_client_bundle(
     path: &Path,
     storage_dir: Option<&Path>,
     bearer_token: Option<&str>,
-) -> Result<ServerStoreClient> {
+) -> Result<ClientBundle> {
     wait_for_server_ready(&build_unix_socket_probe_client(path)?).await?;
     build_authed_unix_socket_client(path, storage_dir, bearer_token).await
 }
@@ -413,23 +553,24 @@ async fn connect_unix_socket_api_client_bundle(
 fn resolve_target_bearer(
     target: &user_config::ServerTarget,
     storage_dir: Option<&Path>,
-) -> Result<Option<String>> {
+) -> Result<Option<ResolvedBearer>> {
     if let Some(token) = std::env::var("FABRO_DEV_TOKEN")
         .ok()
         .filter(|token| validate_dev_token_format(token))
     {
-        return Ok(Some(token));
+        return Ok(Some(ResolvedBearer::DevToken(token)));
     }
 
     let store = AuthStore::default();
     let key = ServerTargetKey::new(target)?;
     if let Some(entry) = store.get(&key)? {
-        if entry.access_token_expires_at > chrono::Utc::now() {
-            return Ok(Some(entry.access_token));
+        let now = chrono::Utc::now();
+        if entry.access_token_expires_at > now || entry.refresh_token_expires_at > now {
+            return Ok(Some(ResolvedBearer::OAuth(entry)));
         }
     }
 
-    Ok(load_dev_token_if_available(storage_dir))
+    Ok(load_dev_token_if_available(storage_dir).map(ResolvedBearer::DevToken))
 }
 
 async fn check_server_ready(http_client: &fabro_http::HttpClient) -> Result<()> {
@@ -475,32 +616,235 @@ struct ArtifactBatchUploadEntry {
 }
 
 impl ServerStoreClient {
+    fn from_bundle(
+        bundle: ClientBundle,
+        base_url: String,
+        refreshable_oauth: Option<RefreshableOAuth>,
+    ) -> Self {
+        Self {
+            state: Arc::new(RwLock::new(bundle)),
+            base_url,
+            refreshable_oauth,
+            refresh_lock: Arc::new(Mutex::new(())),
+        }
+    }
+
+    fn client_bundle(&self) -> ClientBundle {
+        self.state
+            .read()
+            .expect("server client state lock should not be poisoned")
+            .clone()
+    }
+
+    fn replace_client_bundle(&self, bundle: ClientBundle) {
+        *self
+            .state
+            .write()
+            .expect("server client state lock should not be poisoned") = bundle;
+    }
+
     /// Build a client for tests that bypasses proxy discovery.
     #[cfg(test)]
     pub(crate) fn new_no_proxy(base_url: &str) -> Result<Self> {
         let http_client = cli_http_client_builder().no_proxy().build()?;
-        let client = fabro_api::Client::new_with_client(base_url, http_client.clone());
-        Ok(Self {
-            client,
-            http_client,
-            base_url: base_url.to_string(),
-        })
+        Ok(Self::from_bundle(
+            client_bundle(base_url, http_client, None),
+            base_url.to_string(),
+            None,
+        ))
     }
 
     pub(crate) fn clone_for_reuse(&self) -> Self {
         self.clone()
     }
 
-    pub(crate) fn api(&self) -> &fabro_api::Client {
-        &self.client
+    pub(crate) async fn send_api<T, E, F, Fut>(
+        &self,
+        request: F,
+    ) -> Result<progenitor_client::ResponseValue<T>>
+    where
+        F: FnOnce(fabro_api::Client) -> Fut + Clone,
+        Fut: std::future::Future<
+                Output = std::result::Result<
+                    progenitor_client::ResponseValue<T>,
+                    progenitor_client::Error<E>,
+                >,
+            >,
+        E: serde::Serialize + std::fmt::Debug,
+    {
+        let bundle = self.client_bundle();
+        match request.clone()(bundle.client.clone()).await {
+            Ok(response) => Ok(response),
+            Err(err) => {
+                let mapped = classify_api_error(err).await;
+                if self.should_refresh(mapped.failure.as_ref()) {
+                    if let Some(failed_token) = bundle.bearer_token.as_deref() {
+                        self.refresh_access_token(failed_token).await?;
+                        let bundle = self.client_bundle();
+                        return request(bundle.client.clone()).await.map_err(map_api_error);
+                    }
+                }
+                Err(mapped.error)
+            }
+        }
+    }
+
+    fn should_refresh(&self, failure: Option<&ApiFailure>) -> bool {
+        self.refreshable_oauth.is_some()
+            && failure.is_some_and(|failure| {
+                failure.status == fabro_http::StatusCode::UNAUTHORIZED
+                    && failure.code.as_deref() == Some("access_token_expired")
+            })
+    }
+
+    async fn refresh_access_token(&self, failed_access_token: &str) -> Result<()> {
+        let Some(refreshable) = &self.refreshable_oauth else {
+            bail!("CLI session has expired. Run `fabro auth login` again.");
+        };
+        let _guard = self.refresh_lock.lock().await;
+        let current_bundle = self.client_bundle();
+        if current_bundle.bearer_token.as_deref() != Some(failed_access_token) {
+            return Ok(());
+        }
+
+        let Some(entry) = refreshable.auth_store.get(&refreshable.key)? else {
+            self.rebuild_client_for_target(&refreshable.target, None)
+                .await?;
+            bail!("CLI session has expired. Run `fabro auth login` again.");
+        };
+        if entry.refresh_token_expires_at <= chrono::Utc::now() {
+            refreshable.auth_store.remove(&refreshable.key)?;
+            let fallback = resolve_target_bearer(&refreshable.target, None)?;
+            self.rebuild_client_for_target(
+                &refreshable.target,
+                fallback.as_ref().map(ResolvedBearer::bearer_token),
+            )
+            .await?;
+            bail!("CLI session has expired. Run `fabro auth login` again.");
+        }
+
+        let (http_client, base_url) = build_public_http_client(&refreshable.target)?;
+        let response = http_client
+            .post(format!("{base_url}/auth/cli/refresh"))
+            .header(
+                fabro_http::header::AUTHORIZATION,
+                format!("Bearer {}", entry.refresh_token),
+            )
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let tokens = response
+                .json::<CliTokenResponse>()
+                .await
+                .context("failed to parse CLI auth refresh response")?;
+            let entry = AuthEntry {
+                access_token:             tokens.access_token.clone(),
+                access_token_expires_at:  tokens.access_token_expires_at,
+                refresh_token:            tokens.refresh_token.clone(),
+                refresh_token_expires_at: tokens.refresh_token_expires_at,
+                subject:                  Subject {
+                    idp_issuer:  tokens.subject.idp_issuer,
+                    idp_subject: tokens.subject.idp_subject,
+                    login:       tokens.subject.login,
+                    name:        tokens.subject.name,
+                    email:       tokens.subject.email,
+                },
+                logged_in_at:             entry.logged_in_at,
+            };
+            refreshable
+                .auth_store
+                .put(&refreshable.key, entry.clone())
+                .context("failed to persist refreshed CLI auth tokens")?;
+            self.rebuild_client_for_target(&refreshable.target, Some(&entry.access_token))
+                .await?;
+            return Ok(());
+        }
+
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let parsed_error = serde_json::from_str::<OAuthErrorBody>(&body).ok();
+        if parsed_error.as_ref().is_some_and(|error| {
+            matches!(
+                error.error.as_str(),
+                "refresh_token_expired" | "refresh_token_revoked"
+            )
+        }) {
+            refreshable.auth_store.remove(&refreshable.key)?;
+            let fallback = resolve_target_bearer(&refreshable.target, None)?;
+            self.rebuild_client_for_target(
+                &refreshable.target,
+                fallback.as_ref().map(ResolvedBearer::bearer_token),
+            )
+            .await?;
+        }
+
+        if let Some(parsed_error) = parsed_error {
+            let message = parsed_error
+                .error_description
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| format!("request failed with status {status}"));
+            bail!("{message}");
+        }
+        if body.is_empty() {
+            bail!("request failed with status {status}");
+        }
+        bail!("request failed with status {status}: {body}");
+    }
+
+    async fn rebuild_client_for_target(
+        &self,
+        target: &user_config::ServerTarget,
+        bearer_token: Option<&str>,
+    ) -> Result<()> {
+        let bundle = match target {
+            user_config::ServerTarget::HttpUrl { api_url, tls } => {
+                connect_remote_api_client_bundle(api_url, tls.as_ref(), bearer_token)?
+            }
+            user_config::ServerTarget::UnixSocket(path) => {
+                connect_unix_socket_api_client_bundle(path, None, bearer_token).await?
+            }
+        };
+        self.replace_client_bundle(bundle);
+        Ok(())
+    }
+
+    async fn send_http<T, F, Fut>(&self, request: F) -> Result<fabro_http::Response>
+    where
+        F: FnOnce(fabro_http::HttpClient) -> Fut + Clone,
+        Fut: std::future::Future<Output = std::result::Result<fabro_http::Response, T>>,
+        T: Into<anyhow::Error>,
+    {
+        let bundle = self.client_bundle();
+        let response = request.clone()(bundle.http_client.clone())
+            .await
+            .map_err(Into::into)?;
+        match classify_raw_response(response).await? {
+            Ok(response) => Ok(response),
+            Err(failure) => {
+                if self.should_refresh(Some(&failure.failure)) {
+                    if let Some(failed_token) = bundle.bearer_token.as_deref() {
+                        self.refresh_access_token(failed_token).await?;
+                        let bundle = self.client_bundle();
+                        let response = request(bundle.http_client.clone())
+                            .await
+                            .map_err(Into::into)?;
+                        return classify_raw_response(response)
+                            .await?
+                            .map_err(|failure| failure.error);
+                    }
+                }
+                Err(failure.error)
+            }
+        }
     }
 
     #[allow(
         dead_code,
         reason = "This accessor is kept for tests and pending callers."
     )]
-    pub(crate) fn http_client(&self) -> &fabro_http::HttpClient {
-        &self.http_client
+    pub(crate) fn http_client(&self) -> fabro_http::HttpClient {
+        self.client_bundle().http_client
     }
 
     #[allow(
@@ -513,26 +857,9 @@ impl ServerStoreClient {
 
     pub(crate) async fn retrieve_resolved_server_settings(&self) -> Result<serde_json::Value> {
         let url = format!("{}/api/v1/settings?view=resolved", self.base_url);
-        let response = self.http_client.get(&url).send().await?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
-                if let Some(detail) = value
-                    .get("errors")
-                    .and_then(serde_json::Value::as_array)
-                    .and_then(|errors| errors.first())
-                    .and_then(|entry| entry.get("detail"))
-                    .and_then(serde_json::Value::as_str)
-                {
-                    bail!("{detail}");
-                }
-            }
-            if body.is_empty() {
-                bail!("request failed with status {status}");
-            }
-            bail!("request failed with status {status}: {body}");
-        }
+        let response = self
+            .send_http(|http_client| async move { http_client.get(&url).send().await })
+            .await?;
 
         let marker = response
             .headers()
@@ -555,12 +882,10 @@ impl ServerStoreClient {
         manifest: types::RunManifest,
     ) -> Result<RunId> {
         let response = self
-            .client
-            .create_run()
-            .body(manifest)
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(
+                |client| async move { client.create_run().body(manifest.clone()).send().await },
+            )
+            .await?;
         let status = response.into_inner();
         status
             .id
@@ -572,13 +897,11 @@ impl ServerStoreClient {
         &self,
         manifest: types::RunManifest,
     ) -> Result<types::PreflightResponse> {
-        self.client
-            .run_preflight()
-            .body(manifest)
-            .send()
-            .await
-            .map(progenitor_client::ResponseValue::into_inner)
-            .map_err(map_api_error)
+        self.send_api(
+            |client| async move { client.run_preflight().body(manifest.clone()).send().await },
+        )
+        .await
+        .map(progenitor_client::ResponseValue::into_inner)
     }
 
     pub(crate) async fn render_workflow_graph(
@@ -586,12 +909,14 @@ impl ServerStoreClient {
         request: types::RenderWorkflowGraphRequest,
     ) -> Result<Vec<u8>> {
         let response = self
-            .client
-            .render_workflow_graph()
-            .body(request)
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(|client| async move {
+                client
+                    .render_workflow_graph()
+                    .body(request.clone())
+                    .send()
+                    .await
+            })
+            .await?;
         let mut stream = response.into_inner();
         let mut bytes = Vec::new();
         while let Some(chunk) = stream.next().await {
@@ -602,43 +927,39 @@ impl ServerStoreClient {
     }
 
     pub(crate) async fn start_run(&self, run_id: &RunId, resume: bool) -> Result<()> {
-        self.client
-            .start_run()
-            .id(run_id.to_string())
-            .body(types::StartRunRequest { resume })
-            .send()
-            .await
-            .map_err(map_api_error)?;
+        self.send_api(|client| async move {
+            client
+                .start_run()
+                .id(run_id.to_string())
+                .body(types::StartRunRequest { resume })
+                .send()
+                .await
+        })
+        .await?;
         Ok(())
     }
 
     pub(crate) async fn cancel_run(&self, run_id: &RunId) -> Result<()> {
-        self.client
-            .cancel_run()
-            .id(run_id.to_string())
-            .send()
-            .await
-            .map_err(map_api_error)?;
+        self.send_api(
+            |client| async move { client.cancel_run().id(run_id.to_string()).send().await },
+        )
+        .await?;
         Ok(())
     }
 
     pub(crate) async fn archive_run(&self, run_id: &RunId) -> Result<()> {
-        self.client
-            .archive_run()
-            .id(run_id.to_string())
-            .send()
-            .await
-            .map_err(map_api_error)?;
+        self.send_api(
+            |client| async move { client.archive_run().id(run_id.to_string()).send().await },
+        )
+        .await?;
         Ok(())
     }
 
     pub(crate) async fn unarchive_run(&self, run_id: &RunId) -> Result<()> {
-        self.client
-            .unarchive_run()
-            .id(run_id.to_string())
-            .send()
-            .await
-            .map_err(map_api_error)?;
+        self.send_api(|client| async move {
+            client.unarchive_run().id(run_id.to_string()).send().await
+        })
+        .await?;
         Ok(())
     }
 
@@ -649,14 +970,16 @@ impl ServerStoreClient {
 
         loop {
             let response = self
-                .client
-                .list_runs()
-                .page_limit(limit)
-                .page_offset(offset)
-                .include_archived(true)
-                .send()
-                .await
-                .map_err(map_api_error)?;
+                .send_api(|client| async move {
+                    client
+                        .list_runs()
+                        .page_limit(limit)
+                        .page_offset(offset)
+                        .include_archived(true)
+                        .send()
+                        .await
+                })
+                .await?;
             let parsed = response.into_inner();
             let batch = parsed
                 .data
@@ -677,34 +1000,32 @@ impl ServerStoreClient {
 
     pub(crate) async fn retrieve_run(&self, run_id: &RunId) -> Result<RunSummary> {
         let response = self
-            .client
-            .retrieve_run()
-            .id(run_id.to_string())
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(
+                |client| async move { client.retrieve_run().id(run_id.to_string()).send().await },
+            )
+            .await?;
         convert_type(response.into_inner())
     }
 
     pub(crate) async fn resolve_run(&self, selector: &str) -> Result<RunSummary> {
         let response = self
-            .client
-            .resolve_run()
-            .selector(selector.to_string())
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(|client| async move {
+                client
+                    .resolve_run()
+                    .selector(selector.to_string())
+                    .send()
+                    .await
+            })
+            .await?;
         convert_type(response.into_inner())
     }
 
     pub(crate) async fn get_run_state(&self, run_id: &RunId) -> Result<RunProjection> {
         let response = self
-            .client
-            .get_run_state()
-            .id(run_id.to_string())
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(
+                |client| async move { client.get_run_state().id(run_id.to_string()).send().await },
+            )
+            .await?;
         convert_type(response.into_inner())
     }
 
@@ -718,15 +1039,18 @@ impl ServerStoreClient {
         let mut all_events = Vec::new();
 
         loop {
-            let mut request = self.client.list_run_events().id(run_id.to_string());
-            if let Some(seq) = next_since_seq.and_then(non_zero_u64_from_u32) {
-                request = request.since_seq(seq);
-            }
-            if let Some(limit) = limit.and_then(non_zero_u64_from_usize) {
-                request = request.limit(limit);
-            }
-
-            let response = request.send().await.map_err(map_api_error)?;
+            let response = self
+                .send_api(|client| async move {
+                    let mut request = client.list_run_events().id(run_id.to_string());
+                    if let Some(seq) = next_since_seq.and_then(non_zero_u64_from_u32) {
+                        request = request.since_seq(seq);
+                    }
+                    if let Some(limit) = limit.and_then(non_zero_u64_from_usize) {
+                        request = request.limit(limit);
+                    }
+                    request.send().await
+                })
+                .await?;
             let parsed = response.into_inner();
             let page_events = parsed
                 .data
@@ -750,11 +1074,15 @@ impl ServerStoreClient {
         run_id: &RunId,
         since_seq: Option<u32>,
     ) -> Result<RunAttachEventStream> {
-        let mut request = self.client.attach_run_events().id(run_id.to_string());
-        if let Some(seq) = since_seq.and_then(non_zero_u64_from_u32) {
-            request = request.since_seq(seq);
-        }
-        let response = request.send().await.map_err(map_api_error)?;
+        let response = self
+            .send_api(|client| async move {
+                let mut request = client.attach_run_events().id(run_id.to_string());
+                if let Some(seq) = since_seq.and_then(non_zero_u64_from_u32) {
+                    request = request.since_seq(seq);
+                }
+                request.send().await
+            })
+            .await?;
         Ok(RunAttachEventStream::new(response.into_inner()))
     }
 
@@ -763,14 +1091,16 @@ impl ServerStoreClient {
         run_id: &RunId,
     ) -> Result<Vec<types::ApiQuestion>> {
         let response = self
-            .client
-            .list_run_questions()
-            .id(run_id.to_string())
-            .page_limit(100)
-            .page_offset(0)
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(|client| async move {
+                client
+                    .list_run_questions()
+                    .id(run_id.to_string())
+                    .page_limit(100)
+                    .page_offset(0)
+                    .send()
+                    .await
+            })
+            .await?;
         Ok(response.into_inner().data)
     }
 
@@ -782,43 +1112,49 @@ impl ServerStoreClient {
         selected_option_key: Option<String>,
         selected_option_keys: Vec<String>,
     ) -> Result<()> {
-        self.client
-            .submit_run_answer()
-            .id(run_id.to_string())
-            .qid(qid)
-            .body(types::SubmitAnswerRequest {
-                value,
-                selected_option_key,
-                selected_option_keys,
-            })
-            .send()
-            .await
-            .map_err(map_api_error)?;
+        self.send_api(|client| async move {
+            client
+                .submit_run_answer()
+                .id(run_id.to_string())
+                .qid(qid)
+                .body(types::SubmitAnswerRequest {
+                    value:                value.clone(),
+                    selected_option_key:  selected_option_key.clone(),
+                    selected_option_keys: selected_option_keys.clone(),
+                })
+                .send()
+                .await
+        })
+        .await?;
         Ok(())
     }
 
     pub(crate) async fn append_run_event(&self, run_id: &RunId, event: &RunEvent) -> Result<u32> {
         let body: types::RunEvent = convert_type(event)?;
         let response = self
-            .client
-            .append_run_event()
-            .id(run_id.to_string())
-            .body(body)
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(|client| async move {
+                client
+                    .append_run_event()
+                    .id(run_id.to_string())
+                    .body(body.clone())
+                    .send()
+                    .await
+            })
+            .await?;
         u32::try_from(response.into_inner().seq).context("append_run_event returned invalid seq")
     }
 
     pub(crate) async fn write_run_blob(&self, run_id: &RunId, data: &[u8]) -> Result<RunBlobId> {
         let response = self
-            .client
-            .write_run_blob()
-            .id(run_id.to_string())
-            .body(data.to_vec())
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(|client| async move {
+                client
+                    .write_run_blob()
+                    .id(run_id.to_string())
+                    .body(data.to_vec())
+                    .send()
+                    .await
+            })
+            .await?;
         response
             .into_inner()
             .id
@@ -832,6 +1168,7 @@ impl ServerStoreClient {
         blob_id: &RunBlobId,
     ) -> Result<Option<Bytes>> {
         let response = self
+            .client_bundle()
             .client
             .read_run_blob()
             .id(run_id.to_string())
@@ -868,8 +1205,9 @@ impl ServerStoreClient {
             url.query_pairs_mut().append_pair("force", "true");
         }
 
-        let response = self.http_client.delete(url).send().await?;
-        ensure_raw_response_success(response).await
+        self.send_http(|http_client| async move { http_client.delete(url.clone()).send().await })
+            .await?;
+        Ok(())
     }
 
     pub(crate) async fn list_run_artifacts(
@@ -877,12 +1215,14 @@ impl ServerStoreClient {
         run_id: &RunId,
     ) -> Result<Vec<types::RunArtifactEntry>> {
         let response = self
-            .client
-            .list_run_artifacts()
-            .id(run_id.to_string())
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(|client| async move {
+                client
+                    .list_run_artifacts()
+                    .id(run_id.to_string())
+                    .send()
+                    .await
+            })
+            .await?;
         Ok(response.into_inner().data)
     }
 
@@ -893,14 +1233,16 @@ impl ServerStoreClient {
         filename: &str,
     ) -> Result<Vec<u8>> {
         let response = self
-            .client
-            .get_stage_artifact()
-            .id(run_id.to_string())
-            .stage_id(stage_id.to_string())
-            .filename(filename)
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(|client| async move {
+                client
+                    .get_stage_artifact()
+                    .id(run_id.to_string())
+                    .stage_id(stage_id.to_string())
+                    .filename(filename)
+                    .send()
+                    .await
+            })
+            .await?;
         let mut stream = response.into_inner();
         let mut bytes = Vec::new();
         while let Some(chunk) = stream.next().await {
@@ -949,6 +1291,7 @@ impl ServerStoreClient {
         let body = fabro_http::Body::wrap_stream(ReaderStream::new(file));
 
         let response = self
+            .client_bundle()
             .http_client
             .post(url)
             .bearer_auth(bearer_token)
@@ -958,7 +1301,10 @@ impl ServerStoreClient {
             .send()
             .await
             .with_context(|| format!("failed to upload artifact {}", path.display()))?;
-        ensure_raw_response_success(response).await
+        classify_raw_response(response)
+            .await?
+            .map(|_| ())
+            .map_err(|failure| failure.error)
     }
 
     pub(crate) async fn upload_stage_artifact_batch(
@@ -1014,6 +1360,7 @@ impl ServerStoreClient {
         }
 
         let response = self
+            .client_bundle()
             .http_client
             .post(url)
             .bearer_auth(bearer_token)
@@ -1021,7 +1368,10 @@ impl ServerStoreClient {
             .send()
             .await
             .context("failed to upload artifact batch")?;
-        ensure_raw_response_success(response).await
+        classify_raw_response(response)
+            .await?
+            .map(|_| ())
+            .map_err(|failure| failure.error)
     }
 
     pub(crate) async fn generate_preview_url(
@@ -1034,17 +1384,19 @@ impl ServerStoreClient {
         let expires_in_secs = NonZeroU64::new(expires_in_secs)
             .ok_or_else(|| anyhow!("preview expiry must be greater than zero"))?;
         let response = self
-            .client
-            .generate_preview_url()
-            .id(run_id.to_string())
-            .body(types::PreviewUrlRequest {
-                expires_in_secs,
-                port: i64::from(port),
-                signed,
+            .send_api(|client| async move {
+                client
+                    .generate_preview_url()
+                    .id(run_id.to_string())
+                    .body(types::PreviewUrlRequest {
+                        expires_in_secs,
+                        port: i64::from(port),
+                        signed,
+                    })
+                    .send()
+                    .await
             })
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .await?;
         Ok(response.into_inner())
     }
 
@@ -1054,13 +1406,15 @@ impl ServerStoreClient {
         ttl_minutes: f64,
     ) -> Result<types::SshAccessResponse> {
         let response = self
-            .client
-            .create_run_ssh_access()
-            .id(run_id.to_string())
-            .body(types::SshAccessRequest { ttl_minutes })
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(|client| async move {
+                client
+                    .create_run_ssh_access()
+                    .id(run_id.to_string())
+                    .body(types::SshAccessRequest { ttl_minutes })
+                    .send()
+                    .await
+            })
+            .await?;
         Ok(response.into_inner())
     }
 
@@ -1070,27 +1424,32 @@ impl ServerStoreClient {
         path: &str,
         depth: Option<u32>,
     ) -> Result<Vec<types::SandboxFileEntry>> {
-        let mut request = self
-            .client
-            .list_sandbox_files()
-            .id(run_id.to_string())
-            .path(path);
-        if let Some(depth) = depth.and_then(non_zero_u64_from_u32) {
-            request = request.depth(depth);
-        }
-        let response = request.send().await.map_err(map_api_error)?;
+        let response = self
+            .send_api(|client| async move {
+                let mut request = client
+                    .list_sandbox_files()
+                    .id(run_id.to_string())
+                    .path(path);
+                if let Some(depth) = depth.and_then(non_zero_u64_from_u32) {
+                    request = request.depth(depth);
+                }
+                request.send().await
+            })
+            .await?;
         Ok(response.into_inner().data)
     }
 
     pub(crate) async fn get_sandbox_file(&self, run_id: &RunId, path: &str) -> Result<Vec<u8>> {
         let response = self
-            .client
-            .get_sandbox_file()
-            .id(run_id.to_string())
-            .path(path)
-            .send()
-            .await
-            .map_err(map_api_error)?;
+            .send_api(|client| async move {
+                client
+                    .get_sandbox_file()
+                    .id(run_id.to_string())
+                    .path(path)
+                    .send()
+                    .await
+            })
+            .await?;
         let mut stream = response.into_inner();
         let mut bytes = Vec::new();
         while let Some(chunk) = stream.next().await {
@@ -1106,15 +1465,103 @@ impl ServerStoreClient {
         path: &str,
         bytes: Vec<u8>,
     ) -> Result<()> {
-        self.client
-            .put_sandbox_file()
-            .id(run_id.to_string())
-            .path(path)
-            .body(bytes)
-            .send()
-            .await
-            .map_err(map_api_error)?;
+        self.send_api(|client| async move {
+            client
+                .put_sandbox_file()
+                .id(run_id.to_string())
+                .path(path)
+                .body(bytes.clone())
+                .send()
+                .await
+        })
+        .await?;
         Ok(())
+    }
+}
+
+fn parse_error_response_value(value: &serde_json::Value) -> (Option<String>, Option<String>) {
+    let first = value
+        .get("errors")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|errors| errors.first());
+    let detail = first
+        .and_then(|entry| entry.get("detail"))
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned);
+    let code = first
+        .and_then(|entry| entry.get("code"))
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned);
+    (detail, code)
+}
+
+async fn classify_api_error<E>(err: progenitor_client::Error<E>) -> StructuredApiError
+where
+    E: serde::Serialize + std::fmt::Debug,
+{
+    match err {
+        progenitor_client::Error::UnexpectedResponse(response) => {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            let mut code = None;
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+                let (detail, parsed_code) = parse_error_response_value(&value);
+                code = parsed_code;
+                if let Some(detail) = detail {
+                    return StructuredApiError {
+                        error:   anyhow!("{detail}"),
+                        failure: Some(ApiFailure { status, code }),
+                    };
+                }
+            }
+            let error = if body.is_empty() {
+                anyhow!("request failed with status {status}")
+            } else {
+                anyhow!("request failed with status {status}: {body}")
+            };
+            StructuredApiError {
+                error,
+                failure: Some(ApiFailure { status, code }),
+            }
+        }
+        other => map_api_error_structured(other),
+    }
+}
+
+fn map_api_error_structured<E>(err: progenitor_client::Error<E>) -> StructuredApiError
+where
+    E: serde::Serialize + std::fmt::Debug,
+{
+    match err {
+        progenitor_client::Error::ErrorResponse(response) => {
+            let status = response.status();
+            let mut code = None;
+            if let Ok(value) = serde_json::to_value(response.into_inner()) {
+                let (detail, parsed_code) = parse_error_response_value(&value);
+                code = parsed_code;
+                if let Some(detail) = detail {
+                    return StructuredApiError {
+                        error:   anyhow!("{detail}"),
+                        failure: Some(ApiFailure { status, code }),
+                    };
+                }
+            }
+            StructuredApiError {
+                error:   anyhow!("request failed with status {status}"),
+                failure: Some(ApiFailure { status, code }),
+            }
+        }
+        progenitor_client::Error::UnexpectedResponse(response) => StructuredApiError {
+            error:   anyhow!("request failed with status {}", response.status()),
+            failure: Some(ApiFailure {
+                status: response.status(),
+                code:   None,
+            }),
+        },
+        other => StructuredApiError {
+            error:   anyhow!("{other}"),
+            failure: None,
+        },
     }
 }
 
@@ -1122,53 +1569,63 @@ pub(crate) fn map_api_error<E>(err: progenitor_client::Error<E>) -> anyhow::Erro
 where
     E: serde::Serialize + std::fmt::Debug,
 {
-    match err {
-        progenitor_client::Error::ErrorResponse(response) => {
-            let status = response.status();
-            if let Ok(value) = serde_json::to_value(response.into_inner()) {
-                if let Some(detail) = value
-                    .get("errors")
-                    .and_then(serde_json::Value::as_array)
-                    .and_then(|errors| errors.first())
-                    .and_then(|entry| entry.get("detail"))
-                    .and_then(serde_json::Value::as_str)
-                {
-                    return anyhow!("{detail}");
-                }
-            }
-            anyhow!("request failed with status {status}")
-        }
-        progenitor_client::Error::UnexpectedResponse(response) => {
-            anyhow!("request failed with status {}", response.status())
-        }
-        other => anyhow!("{other}"),
-    }
+    map_api_error_structured(err).error
 }
 
-async fn ensure_raw_response_success(response: fabro_http::Response) -> Result<()> {
-    if response.status().is_success() {
-        return Ok(());
-    }
+struct RawResponseFailure {
+    error:   anyhow::Error,
+    failure: ApiFailure,
+}
 
+async fn classify_raw_response(
+    response: fabro_http::Response,
+) -> Result<std::result::Result<fabro_http::Response, RawResponseFailure>> {
+    if response.status().is_success() {
+        return Ok(Ok(response));
+    }
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
-        if let Some(detail) = value
-            .get("errors")
-            .and_then(serde_json::Value::as_array)
-            .and_then(|errors| errors.first())
-            .and_then(|entry| entry.get("detail"))
-            .and_then(serde_json::Value::as_str)
-        {
-            bail!("{detail}");
+        let (detail, code) = parse_error_response_value(&value);
+        if let Some(detail) = detail {
+            return Ok(Err(RawResponseFailure {
+                error:   anyhow!("{detail}"),
+                failure: ApiFailure { status, code },
+            }));
         }
     }
 
     if body.is_empty() {
-        bail!("request failed with status {status}");
+        return Ok(Err(RawResponseFailure {
+            error:   anyhow!("request failed with status {status}"),
+            failure: ApiFailure { status, code: None },
+        }));
     }
 
-    bail!("request failed with status {status}: {body}");
+    Ok(Err(RawResponseFailure {
+        error:   anyhow!("request failed with status {status}: {body}"),
+        failure: ApiFailure { status, code: None },
+    }))
+}
+
+fn build_public_http_client(
+    target: &user_config::ServerTarget,
+) -> Result<(fabro_http::HttpClient, String)> {
+    match target {
+        user_config::ServerTarget::HttpUrl { api_url, tls } => {
+            let http_client = user_config::build_server_client_builder(tls.as_ref())?
+                .no_proxy()
+                .build()?;
+            Ok((http_client, normalize_remote_server_target(api_url)))
+        }
+        user_config::ServerTarget::UnixSocket(path) => {
+            let http_client = cli_http_client_builder()
+                .unix_socket(path)
+                .no_proxy()
+                .build()?;
+            Ok((http_client, "http://fabro".to_string()))
+        }
+    }
 }
 
 fn is_not_found_error<E>(err: &progenitor_client::Error<E>) -> bool

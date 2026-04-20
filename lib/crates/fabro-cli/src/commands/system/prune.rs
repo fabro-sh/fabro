@@ -9,7 +9,6 @@ use tracing::{debug, info};
 
 use crate::args::RunsPruneArgs;
 use crate::command_context::CommandContext;
-use crate::server_client;
 use crate::shared::{format_size, print_json_pretty};
 
 pub(super) async fn prune_command(
@@ -21,19 +20,21 @@ pub(super) async fn prune_command(
     let ctx = CommandContext::for_connection(&args.connection, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
     let response = server
-        .api()
-        .prune_runs()
-        .body(types::PruneRunsRequest {
-            before:     args.filter.before.clone(),
-            dry_run:    !args.yes,
-            labels:     parse_label_filters(&args.filter.label),
-            older_than: args.older_than.map(format_duration),
-            orphans:    args.filter.orphans,
-            workflow:   args.filter.workflow.clone(),
+        .send_api(|client| async move {
+            client
+                .prune_runs()
+                .body(types::PruneRunsRequest {
+                    before:     args.filter.before.clone(),
+                    dry_run:    !args.yes,
+                    labels:     parse_label_filters(&args.filter.label),
+                    older_than: args.older_than.map(format_duration),
+                    orphans:    args.filter.orphans,
+                    workflow:   args.filter.workflow.clone(),
+                })
+                .send()
+                .await
         })
-        .send()
-        .await
-        .map_err(server_client::map_api_error)?
+        .await?
         .into_inner();
     prune_from(&response, cli.output.format == OutputFormat::Json, printer)
 }

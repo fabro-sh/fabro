@@ -222,12 +222,17 @@ async fn check_github_app_installation(
         }
     };
 
+    let check_owner = owner.clone();
+    let check_repo = repo.clone();
     let check = match server
-        .api()
-        .get_github_repo()
-        .owner(owner.clone())
-        .name(repo.clone())
-        .send()
+        .send_api(|client| async move {
+            client
+                .get_github_repo()
+                .owner(check_owner.clone())
+                .name(check_repo.clone())
+                .send()
+                .await
+        })
         .await
     {
         Ok(response) => response.into_inner(),
@@ -270,12 +275,17 @@ async fn check_github_app_installation(
         })
         .await;
 
+        let recheck_owner = owner.clone();
+        let recheck_repo = repo.clone();
         match server
-            .api()
-            .get_github_repo()
-            .owner(owner.clone())
-            .name(repo.clone())
-            .send()
+            .send_api(|client| async move {
+                client
+                    .get_github_repo()
+                    .owner(recheck_owner.clone())
+                    .name(recheck_repo.clone())
+                    .send()
+                    .await
+            })
             .await
         {
             Ok(response) => {

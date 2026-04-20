@@ -5,6 +5,7 @@
 
 mod archive;
 mod artifacts;
+mod auth;
 mod exec;
 mod lifecycle;
 mod recovery;
