@@ -5,7 +5,6 @@ import { graphTheme } from "../lib/graph-theme";
 type Direction = "LR" | "TB";
 
 function buildDot(direction: Direction) {
-  const theme = graphTheme;
   return `digraph fix_build {
     graph [
         label="Fix Build"
@@ -17,29 +16,29 @@ function buildDot(direction: Direction) {
     node [
         fontname="ui-monospace, monospace"
         fontsize=11
-        fontcolor="${theme.nodeText}"
-        color="${theme.edgeColor}"
-        fillcolor="${theme.nodeFill}"
+        fontcolor="${graphTheme.nodeText}"
+        color="${graphTheme.edgeColor}"
+        fillcolor="${graphTheme.nodeFill}"
         style=filled
         penwidth=1.2
     ]
     edge [
         fontname="ui-monospace, monospace"
         fontsize=9
-        fontcolor="${theme.fontcolor}"
-        color="${theme.edgeColor}"
+        fontcolor="${graphTheme.fontcolor}"
+        color="${graphTheme.edgeColor}"
         arrowsize=0.7
         penwidth=1.2
     ]
 
-    start [shape=Mdiamond, label="Start", fillcolor="${theme.startFill}", color="${theme.startBorder}", fontcolor="${theme.startText}"]
-    exit  [shape=Msquare,  label="Exit",  fillcolor="${theme.startFill}", color="${theme.startBorder}", fontcolor="${theme.startText}"]
+    start [shape=Mdiamond, label="Start", fillcolor="${graphTheme.startFill}", color="${graphTheme.startBorder}", fontcolor="${graphTheme.startText}"]
+    exit  [shape=Msquare,  label="Exit",  fillcolor="${graphTheme.startFill}", color="${graphTheme.startBorder}", fontcolor="${graphTheme.startText}"]
 
     analyze  [label="Analyze\\nBuild Errors"]
     diagnose [label="Diagnose\\nRoot Cause"]
     fix      [label="Apply\\nFix"]
     validate [label="Validate\\nBuild"]
-    approve  [shape=hexagon, label="Review\\nChanges", fillcolor="${theme.gateFill}", color="${theme.gateBorder}", fontcolor="${theme.gateText}"]
+    approve  [shape=hexagon, label="Review\\nChanges", fillcolor="${graphTheme.gateFill}", color="${graphTheme.gateBorder}", fontcolor="${graphTheme.gateText}"]
 
     start -> analyze
     analyze -> diagnose
@@ -47,7 +46,7 @@ function buildDot(direction: Direction) {
     fix -> validate
     validate -> exit      [label="Pass"]
     validate -> diagnose  [label="Fail", style=dashed, color="#f87171"]
-    validate -> approve   [label="Needs review", color="${theme.gateBorder}"]
+    validate -> approve   [label="Needs review", color="${graphTheme.gateBorder}"]
     approve -> exit       [label="Accept"]
     approve -> fix        [label="Revise", style=dashed]
 }`;
