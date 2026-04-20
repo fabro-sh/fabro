@@ -19,13 +19,16 @@ pub(super) async fn df_command(
 ) -> Result<()> {
     let ctx = CommandContext::for_connection(&args.connection, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
-    let output = server.get_system_disk_usage(args.verbose).await?;
-
     let json = cli.output.format == OutputFormat::Json;
-    let storage_dir = if json {
-        None
+
+    let (output, storage_dir) = if json {
+        (server.get_system_disk_usage(args.verbose).await?, None)
     } else {
-        server.get_system_info().await?.storage_dir
+        let (output, info) = tokio::try_join!(
+            server.get_system_disk_usage(args.verbose),
+            server.get_system_info(),
+        )?;
+        (output, info.storage_dir)
     };
 
     df_from(&output, storage_dir.as_deref(), json)

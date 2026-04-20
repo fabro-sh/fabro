@@ -427,7 +427,7 @@ mod tests {
 
     use super::*;
 
-    fn test_api_client(api_url: &str) -> server_client::Client {
+    fn test_client(api_url: &str) -> server_client::Client {
         server_client::Client::new_no_proxy(api_url).unwrap()
     }
 
@@ -534,7 +534,7 @@ mod tests {
             })
             .await;
 
-        let client = test_api_client(&server.url(""));
+        let client = test_client(&server.url(""));
         let response = client.test_model("test-model", None).await.unwrap();
 
         assert_eq!(response.status, api_types::ModelTestResultStatus::Ok);
@@ -562,7 +562,7 @@ mod tests {
             })
             .await;
 
-        let client = test_api_client(&server.url(""));
+        let client = test_client(&server.url(""));
         let response = client
             .test_model("test-model", Some(api_types::ModelTestMode::Deep))
             .await
@@ -590,7 +590,7 @@ mod tests {
             })
             .await;
 
-        let client = test_api_client(&server.url(""));
+        let client = test_client(&server.url(""));
         let response = client.test_model("kimi-k2.5", None).await.unwrap();
 
         assert_eq!(response.status, api_types::ModelTestResultStatus::Skip);
@@ -614,7 +614,7 @@ mod tests {
             })
             .await;
 
-        let client = test_api_client(&server.url(""));
+        let client = test_client(&server.url(""));
         let result = client.test_model("bad-model", None).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Model not found"));
@@ -641,7 +641,7 @@ mod tests {
             })
             .await;
 
-        let client = test_api_client(&server.url(""));
+        let client = test_client(&server.url(""));
         let models = client.list_models(None, None).await.unwrap();
 
         mock.assert_async().await;
@@ -672,7 +672,7 @@ mod tests {
             })
             .await;
 
-        let client = test_api_client(&server.url(""));
+        let client = test_client(&server.url(""));
         let models = client.list_models(Some("anthropic"), None).await.unwrap();
 
         assert_eq!(models.len(), 1);
@@ -701,7 +701,7 @@ mod tests {
             })
             .await;
 
-        let client = test_api_client(&server.url(""));
+        let client = test_client(&server.url(""));
         let models = client.list_models(None, Some("sonnet")).await.unwrap();
 
         mock.assert_async().await;
@@ -747,7 +747,7 @@ mod tests {
             })
             .await;
 
-        let client = test_api_client(&server.url(""));
+        let client = test_client(&server.url(""));
         let models = client.list_models(None, None).await.unwrap();
 
         first_page.assert_async().await;
@@ -770,7 +770,7 @@ mod tests {
             })
             .await;
 
-        let client = test_api_client(&server.url(""));
+        let client = test_client(&server.url(""));
         let result = client.list_models(None, None).await;
         assert!(result.is_err());
     }

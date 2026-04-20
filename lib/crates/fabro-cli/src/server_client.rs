@@ -468,18 +468,6 @@ impl Client {
         self.clone()
     }
 
-    #[allow(
-        dead_code,
-        reason = "This accessor is kept for tests and pending callers."
-    )]
-    pub(crate) fn http_client(&self) -> &fabro_http::HttpClient {
-        &self.http_client
-    }
-
-    #[allow(
-        dead_code,
-        reason = "This accessor is kept for tests and pending callers."
-    )]
     pub(crate) fn base_url(&self) -> &str {
         &self.base_url
     }
@@ -1259,7 +1247,7 @@ impl Client {
     }
 }
 
-pub(crate) fn map_api_error<E>(err: progenitor_client::Error<E>) -> anyhow::Error
+fn map_api_error<E>(err: progenitor_client::Error<E>) -> anyhow::Error
 where
     E: serde::Serialize + std::fmt::Debug,
 {
