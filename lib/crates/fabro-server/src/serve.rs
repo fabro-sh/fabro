@@ -649,7 +649,6 @@ where
         let _ = child.wait();
     }
 
-    // Clean up webhook listener on shutdown
     if let Some(manager) = webhook_manager {
         manager.shutdown().await;
     }

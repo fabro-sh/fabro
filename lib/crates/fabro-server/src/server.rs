@@ -1250,12 +1250,12 @@ async fn github_webhook(
         .get("x-hub-signature-256")
         .and_then(|value| value.to_str().ok())
     else {
-        warn!(delivery = %delivery_id, "Webhook signature verification failed");
+        warn!(delivery = %delivery_id, "Webhook missing X-Hub-Signature-256 header");
         return StatusCode::UNAUTHORIZED;
     };
 
     if !verify_signature(&secret, &body, signature) {
-        warn!(delivery = %delivery_id, "Webhook signature verification failed");
+        warn!(delivery = %delivery_id, "Webhook HMAC signature mismatch");
         return StatusCode::UNAUTHORIZED;
     }
 
@@ -7416,25 +7416,25 @@ mod tests {
     }
 
     async fn assert_status(response: axum::response::Response, expected: StatusCode) {
-        assert_axum_status(response, expected, concat!(file!(), ":", line!())).await;
+        assert_axum_status(response, expected, "assert_status").await;
     }
 
     async fn checked_response(
         response: axum::response::Response,
         expected: StatusCode,
     ) -> axum::response::Response {
-        expect_axum_status(response, expected, concat!(file!(), ":", line!())).await
+        expect_axum_status(response, expected, "checked_response").await
     }
 
     async fn response_json(
         response: axum::response::Response,
         expected: StatusCode,
     ) -> serde_json::Value {
-        expect_axum_json(response, expected, concat!(file!(), ":", line!())).await
+        expect_axum_json(response, expected, "response_json").await
     }
 
     async fn response_bytes(response: axum::response::Response, expected: StatusCode) -> Vec<u8> {
-        expect_axum_bytes(response, expected, concat!(file!(), ":", line!())).await
+        expect_axum_bytes(response, expected, "response_bytes").await
     }
 
     fn api(path: &str) -> String {

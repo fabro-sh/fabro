@@ -345,7 +345,7 @@ mod tests {
     }
 
     async fn assert_status(response: axum::response::Response, expected: StatusCode) {
-        assert_axum_status(response, expected, concat!(file!(), ":", line!())).await;
+        assert_axum_status(response, expected, "assert_status").await;
     }
 
     #[test]

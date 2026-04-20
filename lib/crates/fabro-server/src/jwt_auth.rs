@@ -299,11 +299,11 @@ mod tests {
     }
 
     async fn response_json(response: axum::response::Response) -> serde_json::Value {
-        expect_axum_json(response, StatusCode::OK, concat!(file!(), ":", line!())).await
+        expect_axum_json(response, StatusCode::OK, "response_json").await
     }
 
     async fn assert_status(response: axum::response::Response, expected: StatusCode) {
-        assert_axum_status(response, expected, concat!(file!(), ":", line!())).await;
+        assert_axum_status(response, expected, "assert_status").await;
     }
 
     fn dev_token_mode() -> AuthMode {

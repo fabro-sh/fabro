@@ -151,8 +151,9 @@ pub(crate) async fn update_github_app_webhook(
         "content_type": "json",
     });
 
+    let url = format!("{}/app/hook/config", fabro_github::github_api_base_url());
     let resp = client
-        .patch("https://api.github.com/app/hook/config")
+        .patch(&url)
         .header("Authorization", format!("Bearer {jwt}"))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "fabro")
