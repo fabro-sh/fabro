@@ -25,7 +25,10 @@ pub(crate) enum ServerMode {
 }
 
 pub(crate) struct CommandContext {
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "This item is kept for command plumbing that is still being wired through."
+    )]
     printer:          Printer,
     cwd:              PathBuf,
     base_config_path: PathBuf,
@@ -108,7 +111,10 @@ impl CommandContext {
         })
     }
 
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "This item is kept for command plumbing that is still being wired through."
+    )]
     pub(crate) fn printer(&self) -> Printer {
         self.printer
     }

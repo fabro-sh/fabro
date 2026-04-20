@@ -1,4 +1,7 @@
-#![allow(unreachable_pub)]
+#![allow(
+    unreachable_pub,
+    reason = "Sibling server modules share these helpers internally."
+)]
 
 //! Security helpers for the Run Files Changed endpoint: a globset-based
 //! sensitive-path denylist and a structured metrics emitter that enforces

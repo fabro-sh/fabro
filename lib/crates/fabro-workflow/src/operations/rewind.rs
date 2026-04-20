@@ -261,7 +261,10 @@ pub fn rewind(store: &Store, input: &RewindInput) -> Result<()> {
     rewind_to_entry(store, &input.run_id, entry, input.push)
 }
 
-#[allow(clippy::print_stderr)]
+#[allow(
+    clippy::print_stderr,
+    reason = "Git rewind status is operator feedback and should stay off stdout."
+)]
 fn rewind_to_entry(store: &Store, run_id: &RunId, entry: &TimelineEntry, push: bool) -> Result<()> {
     let meta_branch = MetadataStore::branch_name(&run_id.to_string());
     store

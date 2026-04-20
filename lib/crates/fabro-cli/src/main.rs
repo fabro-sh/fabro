@@ -1,4 +1,7 @@
-#![allow(clippy::exit)]
+#![allow(
+    clippy::exit,
+    reason = "The CLI exits explicitly with the computed process status."
+)]
 
 mod args;
 mod command_context;

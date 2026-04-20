@@ -46,7 +46,10 @@ pub(crate) struct ArtifactLifecycle {
 }
 
 impl ArtifactLifecycle {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Artifact capture setup needs the run-scoped collaborators up front."
+    )]
     pub(crate) fn new(
         sandbox: Arc<dyn fabro_sandbox::Sandbox>,
         run_store: RunStoreHandle,

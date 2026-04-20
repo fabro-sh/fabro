@@ -8,7 +8,8 @@
     clippy::print_stderr,
     clippy::unnecessary_box_returns,
     clippy::unnecessary_literal_bound,
-    clippy::unreadable_literal
+    clippy::unreadable_literal,
+    reason = "These workflow integration tests value explicit scenarios over pedantic style lints."
 )]
 #![expect(
     clippy::disallowed_methods,

@@ -1,11 +1,20 @@
 #![cfg_attr(
     test,
-    allow(clippy::absolute_paths, clippy::await_holding_lock, clippy::float_cmp)
+    allow(
+        clippy::absolute_paths,
+        clippy::await_holding_lock,
+        clippy::float_cmp,
+        reason = "Test-only server modules favor explicit assertions and fixture code."
+    )
 )]
 
 pub mod bind;
 pub mod csp;
-#[allow(clippy::wildcard_imports, clippy::absolute_paths)]
+#[allow(
+    clippy::wildcard_imports,
+    clippy::absolute_paths,
+    reason = "The demo module is isolated fixture-style code."
+)]
 mod demo;
 pub mod diagnostics;
 pub mod error;

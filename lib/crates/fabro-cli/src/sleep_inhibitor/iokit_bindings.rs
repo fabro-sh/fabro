@@ -1,4 +1,8 @@
-#![allow(non_upper_case_globals, dead_code)]
+#![allow(
+    non_upper_case_globals,
+    dead_code,
+    reason = "FFI bindings preserve IOKit naming and include symbols referenced only on macOS."
+)]
 
 use core_foundation::string::CFString;
 

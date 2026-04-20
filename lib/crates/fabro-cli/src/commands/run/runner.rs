@@ -573,7 +573,10 @@ fn install_signal_handlers(
 }
 
 #[cfg(test)]
-#[allow(clippy::absolute_paths)]
+#[allow(
+    clippy::absolute_paths,
+    reason = "This test module prefers explicit type paths over extra imports."
+)]
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};

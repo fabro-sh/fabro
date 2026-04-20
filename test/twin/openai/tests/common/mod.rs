@@ -1,4 +1,8 @@
-#![allow(dead_code, unreachable_pub)]
+#![allow(
+    dead_code,
+    unreachable_pub,
+    reason = "Shared test helpers stay public within the test crate and not every helper is used everywhere."
+)]
 
 use std::collections::HashMap;
 use std::net::SocketAddr;

@@ -80,7 +80,10 @@ pub enum Stdout {
 }
 
 impl std::fmt::Write for Stdout {
-    #[allow(clippy::print_stdout)]
+    #[allow(
+        clippy::print_stdout,
+        reason = "This wrapper forwards formatted user output to stdout."
+    )]
     fn write_str(&mut self, s: &str) -> std::fmt::Result {
         match self {
             Self::Enabled => print!("{s}"),
@@ -97,7 +100,10 @@ pub enum Stderr {
 }
 
 impl std::fmt::Write for Stderr {
-    #[allow(clippy::print_stderr)]
+    #[allow(
+        clippy::print_stderr,
+        reason = "This wrapper forwards formatted diagnostic output to stderr."
+    )]
     fn write_str(&mut self, s: &str) -> std::fmt::Result {
         match self {
             Self::Enabled => eprint!("{s}"),

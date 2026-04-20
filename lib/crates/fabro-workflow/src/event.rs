@@ -31,7 +31,10 @@ use crate::runtime_store::RunStoreHandle;
 
 /// Events emitted during workflow run execution for observability.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(clippy::large_enum_variant)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Workflow events stay inline to match the serialized event stream."
+)]
 pub enum Event {
     RunCreated {
         run_id:            RunId,
@@ -2734,7 +2737,10 @@ impl RunEventSink {
     }
 }
 
-#[allow(clippy::large_enum_variant)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Logger queue messages stay inline to avoid boxing hot-path payloads."
+)]
 enum RunEventCommand {
     Event(RunEvent),
     Flush(oneshot::Sender<()>),

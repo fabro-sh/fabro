@@ -1,4 +1,8 @@
-#![allow(clippy::absolute_paths, clippy::single_char_pattern)]
+#![allow(
+    clippy::absolute_paths,
+    clippy::single_char_pattern,
+    reason = "These secret-command tests use terse fixture patterns and explicit paths."
+)]
 
 use fabro_test::{fabro_snapshot, test_context};
 use predicates::prelude::*;

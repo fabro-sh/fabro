@@ -21,7 +21,10 @@ pub struct SleepInhibitorGuard {
 }
 
 // Fields are held for their Drop implementations, not read directly.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "Enum variants are kept for Drop side effects rather than direct reads."
+)]
 enum InnerGuard {
     #[cfg(target_os = "macos")]
     MacOS(macos::MacOSSleepInhibitor),

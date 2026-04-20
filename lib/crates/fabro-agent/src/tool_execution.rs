@@ -15,7 +15,10 @@ use crate::types::AgentEvent;
 
 /// Execute tool calls, choosing parallel or sequential based on `parallel`
 /// flag.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Tool dispatch needs the shared runtime handles and call list together."
+)]
 pub async fn execute_tool_calls(
     tool_calls: &[ToolCall],
     parallel: bool,
@@ -57,7 +60,10 @@ pub async fn execute_tool_calls(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Sequential execution threads the runtime handles through each tool call."
+)]
 async fn execute_tool_calls_sequential(
     tool_calls: &[ToolCall],
     registry: &ToolRegistry,
@@ -93,7 +99,10 @@ async fn execute_tool_calls_sequential(
     results
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Parallel execution threads the runtime handles into each spawned tool task."
+)]
 async fn execute_tool_calls_parallel(
     tool_calls: &[ToolCall],
     registry: &ToolRegistry,
@@ -140,7 +149,10 @@ async fn execute_tool_calls_parallel(
 }
 
 /// Execute a single tool call with event emission and output truncation.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Single-tool execution needs the tool, runtime handles, and emission context."
+)]
 pub async fn execute_and_emit_one_tool(
     tc: &ToolCall,
     registry: &ToolRegistry,
@@ -168,7 +180,10 @@ pub async fn execute_and_emit_one_tool(
 
 /// Execute a single tool call with event emission, using a pre-looked-up tool
 /// reference.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "The looked-up execution path still needs the tool, runtime handles, and emission context."
+)]
 async fn execute_and_emit_one_tool_with_lookup(
     tc: &ToolCall,
     registered_tool: Option<&RegisteredTool>,

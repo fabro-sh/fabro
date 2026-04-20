@@ -380,7 +380,11 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
             tracked_file_count:   props.tracked_file_count as u64,
         }),
         EventBody::AgentLlmRetry(props) => {
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "Retry delays are represented as small non-negative millisecond values."
+            )]
             let delay_ms = (props.delay_secs * 1000.0) as u64;
             Some(ProgressEvent::LlmRetry {
                 stage_node_id: node_id,

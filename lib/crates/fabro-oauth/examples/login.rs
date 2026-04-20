@@ -1,4 +1,8 @@
-#![allow(clippy::print_stdout, clippy::print_stderr)]
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "This example intentionally writes normal output and diagnostics to stdio."
+)]
 
 use std::env;
 

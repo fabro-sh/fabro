@@ -100,7 +100,10 @@ impl TestMode {
 /// Read an env var required by an E2E test, with mode-aware skip/strict
 /// behavior.
 #[must_use]
-#[allow(clippy::print_stderr)]
+#[allow(
+    clippy::print_stderr,
+    reason = "Missing test-env notices go to stderr so stdout stays assertable."
+)]
 pub fn require_env(name: &str) -> Option<String> {
     if let Ok(value) = std::env::var(name) {
         Some(value)
@@ -1466,7 +1469,10 @@ pub fn run_and_format(cmd: &mut Command, filters: &[(String, String)]) -> (Strin
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
     // Print unfiltered output for debugging
-    #[allow(clippy::print_stderr)]
+    #[allow(
+        clippy::print_stderr,
+        reason = "Raw child output is mirrored to stderr for debugging failed tests."
+    )]
     {
         eprint!("{stdout}");
         eprint!("{stderr}");
@@ -1835,7 +1841,10 @@ impl TwinToolCall {
 static TWIN_OPENAI: OnceCell<TwinOpenAi> = OnceCell::const_new();
 
 /// Returns a shared twin-openai server, starting it on first call.
-#[allow(clippy::missing_panics_doc)]
+#[allow(
+    clippy::missing_panics_doc,
+    reason = "Test bootstrap panics on startup failure by design."
+)]
 pub async fn twin_openai() -> &'static TwinOpenAi {
     TWIN_OPENAI
         .get_or_init(|| async {

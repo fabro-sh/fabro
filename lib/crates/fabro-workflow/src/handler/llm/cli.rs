@@ -756,7 +756,10 @@ impl BackendRouter {
         }
     }
 
-    #[allow(clippy::unused_self)]
+    #[allow(
+        clippy::unused_self,
+        reason = "CLI backend selection lives on the router even though it only inspects the node."
+    )]
     fn should_use_cli(&self, node: &Node) -> bool {
         // Explicit backend="cli" attribute on the node
         if node.backend() == Some("cli") {

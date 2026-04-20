@@ -48,7 +48,10 @@ pub fn check_context_usage(
 
 /// Compact the conversation history by summarizing older turns via a
 /// non-streaming LLM call.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Context compaction needs explicit history, model, tracking, and emission inputs."
+)]
 pub async fn compact_context(
     history: &mut History,
     llm_client: &Client,

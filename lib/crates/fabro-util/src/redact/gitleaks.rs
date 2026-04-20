@@ -10,11 +10,17 @@ mod generated {
 }
 
 struct LazyRule {
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "Generated rule metadata is kept for parity and future diagnostics."
+    )]
     id: &'static str,
     pattern: &'static str,
     regex: OnceLock<Option<Regex>>,
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "Generated rule metadata is kept for parity and future diagnostics."
+    )]
     keywords: &'static [&'static str],
     allowlist_regex_patterns: &'static [&'static str],
     allowlist_regexes: Vec<OnceLock<Option<Regex>>>,

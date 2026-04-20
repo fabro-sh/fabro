@@ -1,6 +1,9 @@
 //! Tests that paginated list endpoints return `{ data, meta: { has_more } }`.
 
-#![allow(clippy::absolute_paths)]
+#![allow(
+    clippy::absolute_paths,
+    reason = "This test module prefers explicit type paths over extra imports."
+)]
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};

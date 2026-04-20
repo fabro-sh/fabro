@@ -68,7 +68,10 @@ fn required_permission(repo_is_private: bool, service: &str) -> Option<Permissio
 }
 
 /// Shared handler logic for all git HTTP endpoints.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "The git CGI test handler needs request, repo, auth, and process inputs separately."
+)]
 async fn handle_git_cgi(
     state: SharedState,
     headers: HeaderMap,

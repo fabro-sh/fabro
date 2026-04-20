@@ -80,7 +80,10 @@ pub struct RunEvent {
     pub body:               EventBody,
 }
 
-#[allow(clippy::large_enum_variant)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Run event bodies stay inline to match the tagged wire format."
+)]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "event", content = "properties")]
 pub enum EventBody {

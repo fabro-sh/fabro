@@ -29,7 +29,10 @@ pub(super) async fn info_command(
         return Ok(());
     }
 
-    #[allow(clippy::print_stdout)]
+    #[allow(
+        clippy::print_stdout,
+        reason = "The system info report belongs on stdout for piping."
+    )]
     {
         println!(
             "Version: {}",

@@ -1,4 +1,7 @@
-#![allow(clippy::result_large_err)]
+#![allow(
+    clippy::result_large_err,
+    reason = "Twin HTTP handlers return full axum::Response errors directly."
+)]
 
 pub mod admin;
 pub mod app;

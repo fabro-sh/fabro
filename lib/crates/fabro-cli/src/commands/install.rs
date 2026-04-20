@@ -281,7 +281,10 @@ fn install_json_event_line(value: &serde_json::Value) -> Result<String> {
 
 fn emit_install_json_event(value: &serde_json::Value) -> Result<()> {
     let line = install_json_event_line(value)?;
-    #[allow(clippy::print_stdout)]
+    #[allow(
+        clippy::print_stdout,
+        reason = "Install event lines stream on stdout for machine consumers."
+    )]
     {
         println!("{line}");
     }
@@ -1949,7 +1952,10 @@ async fn run_install_inner(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::absolute_paths)]
+    #![allow(
+        clippy::absolute_paths,
+        reason = "This test module prefers explicit type paths over extra imports."
+    )]
 
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};

@@ -1,7 +1,8 @@
 #![allow(
     clippy::absolute_paths,
     clippy::disallowed_methods,
-    clippy::disallowed_types
+    clippy::disallowed_types,
+    reason = "This crate intentionally re-exports reqwest types behind the approved facade."
 )]
 
 use std::path::Path;

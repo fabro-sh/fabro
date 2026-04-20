@@ -26,7 +26,10 @@ struct Rule {
     entropy:     Option<f64>,
     #[serde(default)]
     allowlist:   Option<RuleAllowlist>,
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "The source TOML carries descriptions even though codegen ignores them."
+    )]
     description: Option<String>,
 }
 
@@ -66,7 +69,7 @@ fn main() {
     let mut code = String::new();
 
     // Global allowlist regexes
-    code.push_str("#[allow(unreachable_pub)]\npub const GLOBAL_ALLOWLIST_REGEXES: &[&str] = &[\n");
+    code.push_str("#[allow(unreachable_pub, reason = \"Generated constants are included through a private module boundary.\")]\npub const GLOBAL_ALLOWLIST_REGEXES: &[&str] = &[\n");
     if let Some(ref al) = config.allowlist {
         if let Some(ref regexes) = al.regexes {
             for r in regexes {
@@ -78,7 +81,7 @@ fn main() {
 
     // Global allowlist stopwords
     code.push_str(
-        "#[allow(unreachable_pub)]\npub const GLOBAL_ALLOWLIST_STOPWORDS: &[&str] = &[\n",
+        "#[allow(unreachable_pub, reason = \"Generated constants are included through a private module boundary.\")]\npub const GLOBAL_ALLOWLIST_STOPWORDS: &[&str] = &[\n",
     );
     if let Some(ref al) = config.allowlist {
         if let Some(ref stopwords) = al.stopwords {
@@ -90,7 +93,7 @@ fn main() {
     code.push_str("];\n\n");
 
     // Rule definitions
-    code.push_str("#[allow(dead_code, unreachable_pub)]\n");
+    code.push_str("#[allow(dead_code, unreachable_pub, reason = \"Generated metadata is included through a private module boundary and not every field is read directly.\")]\n");
     code.push_str("pub struct RuleDef {\n");
     code.push_str("    pub id: &'static str,\n");
     code.push_str("    pub regex_pattern: &'static str,\n");
@@ -101,7 +104,7 @@ fn main() {
     code.push_str("    pub allowlist_regex_target: Option<&'static str>,\n");
     code.push_str("}\n\n");
 
-    code.push_str("#[allow(unreachable_pub)]\npub const RULES: &[RuleDef] = &[\n");
+    code.push_str("#[allow(unreachable_pub, reason = \"Generated constants are included through a private module boundary.\")]\npub const RULES: &[RuleDef] = &[\n");
 
     for rule in &config.rules {
         code.push_str("    RuleDef {\n");

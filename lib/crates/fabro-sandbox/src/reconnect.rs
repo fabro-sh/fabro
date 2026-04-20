@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "Feature-gated branches consume these imports when optional backends are enabled."
+)]
 use anyhow::{Context, Result, bail};
 
 #[cfg(feature = "daytona")]

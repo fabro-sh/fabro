@@ -166,7 +166,10 @@ impl DaytonaSandbox {
         }
     }
 
-    #[allow(clippy::unused_self)]
+    #[allow(
+        clippy::unused_self,
+        reason = "Path resolution stays on the sandbox type even though it only uses constants."
+    )]
     fn resolve_path(&self, path: &str) -> String {
         resolve_path(path, WORKING_DIRECTORY)
     }

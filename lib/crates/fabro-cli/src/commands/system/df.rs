@@ -46,7 +46,10 @@ pub(super) async fn df_command(
     df_from(&output, storage_dir.as_deref(), json)
 }
 
-#[allow(clippy::print_stdout)]
+#[allow(
+    clippy::print_stdout,
+    reason = "The disk-usage report belongs on stdout for piping."
+)]
 fn df_from(
     output: &types::DiskUsageResponse,
     storage_dir: Option<&str>,
@@ -76,7 +79,11 @@ fn df_from(
         .map_or(0, as_u64);
 
     let run_reclaim_pct = if total_run_size > 0 {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "The computed percentage is explicitly bounded to the 0..=100 range."
+        )]
         // f64-to-integer: percentage is 0-100
         {
             (reclaimable_run_size as f64 / total_run_size as f64 * 100.0) as u64

@@ -1,4 +1,7 @@
-#![allow(clippy::absolute_paths)]
+#![allow(
+    clippy::absolute_paths,
+    reason = "This test module prefers explicit type paths over extra imports."
+)]
 
 use std::process::Output;
 

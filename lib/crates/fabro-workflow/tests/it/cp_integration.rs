@@ -5,7 +5,10 @@
 //! Run Docker tests with: `cargo test --package arc-workflows --test
 //! cp_integration -- --ignored`
 
-#![allow(clippy::ignore_without_reason)]
+#![allow(
+    clippy::ignore_without_reason,
+    reason = "This integration module intentionally uses concise ignored-test markers."
+)]
 
 use fabro_sandbox::SandboxRecord;
 use fabro_sandbox::reconnect::reconnect;

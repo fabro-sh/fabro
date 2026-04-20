@@ -1,4 +1,7 @@
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "This crate wraps low-level OS or FFI APIs that require unsafe code."
+)]
 
 #[cfg(unix)]
 mod flock;

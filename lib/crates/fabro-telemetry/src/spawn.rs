@@ -25,7 +25,10 @@ pub fn spawn_detached(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) 
 }
 
 #[cfg(unix)]
-#[allow(clippy::exit)]
+#[allow(
+    clippy::exit,
+    reason = "The intermediate forked child must exit immediately after detaching."
+)]
 fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) {
     // Flush stdout/stderr before forking so the child process doesn't inherit
     // buffered data that would be flushed again on child exit, causing

@@ -1,4 +1,8 @@
-#![allow(clippy::result_large_err, unreachable_pub)]
+#![allow(
+    clippy::result_large_err,
+    unreachable_pub,
+    reason = "This module intentionally returns full axum::Response errors and shares helpers internally."
+)]
 
 //! `GET /api/v1/runs/{id}/files` — handler, coalescing primitive, and
 //! per-run materialization pipeline.
@@ -67,10 +71,16 @@ fn transient_503(op: &str, message: &str) -> ApiError {
 #[derive(Debug, Deserialize, Default)]
 pub struct ListRunFilesParams {
     #[serde(rename = "page[limit]")]
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "These pagination fields are parsed for API compatibility before server-side support lands."
+    )]
     page_limit:   Option<u32>,
     #[serde(rename = "page[offset]")]
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "These pagination fields are parsed for API compatibility before server-side support lands."
+    )]
     page_offset:  Option<u32>,
     #[serde(default)]
     pub from_sha: Option<String>,

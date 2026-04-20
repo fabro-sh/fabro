@@ -461,7 +461,10 @@ pub struct CreatedPullRequest {
 ///
 /// Signs a JWT, obtains a PR-scoped installation token, and POSTs to the
 /// GitHub pulls API.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Creating a pull request needs explicit repo, branch, and body fields."
+)]
 pub async fn create_pull_request(
     creds: &GitHubCredentials,
     owner: &str,
@@ -970,7 +973,10 @@ pub async fn merge_pull_request(
     merge_pull_request_with_client(&client, creds, owner, repo, number, method, base_url).await
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Merging a pull request needs explicit repo, method, auth, and client inputs."
+)]
 async fn merge_pull_request_with_client(
     client: &impl HttpClient,
     creds: &GitHubCredentials,

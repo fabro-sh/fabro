@@ -66,7 +66,10 @@ pub(super) fn terminal_hyperlink(url: &str, text: &str) -> String {
 
 pub(super) fn format_number(n: f64) -> String {
     if (n - n.round()).abs() < f64::EPSILON {
-        #[allow(clippy::cast_possible_truncation)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "Whole-number display intentionally narrows to i64 for formatting."
+        )]
         let i = n as i64;
         format!("{i}")
     } else {

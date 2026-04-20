@@ -74,7 +74,10 @@ pub(crate) struct WorkflowLifecycle {
 }
 
 impl WorkflowLifecycle {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Workflow startup wires many run-scoped collaborators at once."
+    )]
     pub(crate) fn new(
         emitter: &Arc<Emitter>,
         hook_runner: Option<Arc<HookRunner>>,

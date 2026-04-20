@@ -473,12 +473,18 @@ impl ServerStoreClient {
         &self.client
     }
 
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "This accessor is kept for tests and pending callers."
+    )]
     pub(crate) fn http_client(&self) -> &fabro_http::HttpClient {
         &self.http_client
     }
 
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "This accessor is kept for tests and pending callers."
+    )]
     pub(crate) fn base_url(&self) -> &str {
         &self.base_url
     }

@@ -31,7 +31,10 @@ fn shell_quote(s: &str) -> String {
 }
 
 /// Run a git checkpoint commit via the sandbox.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Checkpointing needs explicit run metadata, excludes, and author inputs."
+)]
 pub async fn git_checkpoint(
     sandbox: &dyn Sandbox,
     run_id: &str,

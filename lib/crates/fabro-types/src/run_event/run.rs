@@ -56,7 +56,10 @@ pub struct RunStatusTransitionProps {
     pub reason: Option<StatusReason>,
 }
 
-#[allow(clippy::empty_structs_with_brackets)]
+#[allow(
+    clippy::empty_structs_with_brackets,
+    reason = "This type must serialize as {} rather than null."
+)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RunStatusEffectProps {}
 
@@ -78,7 +81,10 @@ pub struct RunBlockedProps {
     pub blocked_reason: BlockedReason,
 }
 
-#[allow(clippy::empty_structs_with_brackets)]
+#[allow(
+    clippy::empty_structs_with_brackets,
+    reason = "This type must serialize as {} rather than null."
+)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RunControlEffectProps {}
 

@@ -1,4 +1,7 @@
-#![allow(clippy::print_stderr)]
+#![allow(
+    clippy::print_stderr,
+    reason = "These live contract tests print stderr diagnostics on mismatch."
+)]
 
 mod common;
 
@@ -1818,7 +1821,10 @@ fn truncate_for_display(input: &str, max_chars: usize) -> String {
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "This helper mirrors the owned values compared by the tests."
+)]
 fn ensure_eq<T>(left: Option<T>, right: Option<T>, label: &str) -> Result<()>
 where
     T: PartialEq + std::fmt::Debug,

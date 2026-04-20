@@ -173,7 +173,10 @@ pub fn push_branch(repo: &Path, remote: &str, branch: &str) -> Result<()> {
 /// Push run and metadata branches to origin if a remote tracking branch exists.
 ///
 /// Callers supply pre-built refspecs so they control force-push (`+` prefix).
-#[allow(clippy::print_stderr)]
+#[allow(
+    clippy::print_stderr,
+    reason = "Git push status is operator feedback and should stay off stdout."
+)]
 pub fn push_run_branches(
     store: &Store,
     probe_branch: &str,

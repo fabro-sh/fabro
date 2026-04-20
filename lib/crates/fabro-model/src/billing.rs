@@ -23,7 +23,11 @@ fn saturating_i128_to_i64(value: i128) -> i64 {
     })
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "Billing rounds bounded finite floats into i64 counters by design."
+)]
 fn saturating_rounded_f64_to_i64(value: f64) -> i64 {
     if !value.is_finite() {
         return if value.is_sign_negative() {
@@ -247,7 +251,10 @@ pub struct ModelPricing {
     pub policy: ModelPricingPolicy,
 }
 
-#[allow(clippy::empty_structs_with_brackets)] // Serialize as `{}` rather than unit-struct `null`.
+#[allow(
+    clippy::empty_structs_with_brackets,
+    reason = "This type must serialize as {} rather than null."
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct OpenAiBillingFacts {}
 

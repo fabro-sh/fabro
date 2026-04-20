@@ -154,7 +154,10 @@ struct ApiFunction {
 }
 
 #[derive(serde::Deserialize)]
-#[allow(clippy::struct_field_names)]
+#[allow(
+    clippy::struct_field_names,
+    reason = "Field names mirror the provider API payload."
+)]
 struct ApiUsage {
     prompt_tokens:     i64,
     completion_tokens: i64,

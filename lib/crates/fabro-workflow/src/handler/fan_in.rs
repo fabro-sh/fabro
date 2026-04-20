@@ -211,7 +211,10 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
 }
 
 /// Use an LLM backend to evaluate and rank parallel branch results.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Fan-in evaluation passes prompt, results, context, and runtime handles separately."
+)]
 async fn llm_evaluate(
     backend: &dyn CodergenBackend,
     prompt: &str,

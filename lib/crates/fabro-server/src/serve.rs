@@ -306,7 +306,10 @@ fn build_slatedb_store(
 /// # Errors
 ///
 /// Returns an error if the server fails to bind or encounters a fatal error.
-#[allow(clippy::print_stderr)]
+#[allow(
+    clippy::print_stderr,
+    reason = "Startup warnings are operator-facing and should stay off stdout."
+)]
 pub async fn serve_command<F>(
     args: ServeArgs,
     styles: &'static Styles,
@@ -688,7 +691,10 @@ async fn wait_for_shutdown(mut shutdown_rx: watch::Receiver<bool>) {
     let _ = shutdown_rx.changed().await;
 }
 
-#[allow(clippy::print_stderr)] // Startup status belongs on stderr for operator-facing CLI output.
+#[allow(
+    clippy::print_stderr,
+    reason = "Readiness is operator-facing startup output."
+)] // Startup status belongs on stderr for operator-facing CLI output.
 fn announce_server_ready(bind_addr: &Bind, styles: &'static Styles) {
     set_server_title(ServerTitlePhase::Listening, Some(bind_addr));
     info!(bind = %bind_addr, "API server started");

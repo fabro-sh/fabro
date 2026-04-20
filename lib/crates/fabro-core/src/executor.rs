@@ -427,7 +427,10 @@ impl<G: Graph + 'static> Executor<G> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::items_after_statements)]
+    #![allow(
+        clippy::items_after_statements,
+        reason = "Local helper items keep the test setup readable."
+    )]
 
     use std::sync::atomic::AtomicU32;
     use std::sync::{Arc, Mutex};

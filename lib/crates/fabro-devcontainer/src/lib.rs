@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "This crate keeps parsing helpers available while integration points are still landing."
+)]
 
 mod compose;
 mod dockerfile;

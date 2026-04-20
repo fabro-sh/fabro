@@ -60,7 +60,10 @@ impl SandboxSpec {
             Self::Local { working_directory } => Some(working_directory.clone()),
             #[cfg(feature = "docker")]
             Self::Docker { config } => Some(PathBuf::from(&config.host_working_directory)),
-            #[allow(unreachable_patterns)]
+            #[allow(
+                unreachable_patterns,
+                reason = "Feature-gated variants make this fallback arm reachable on some builds."
+            )]
             _ => None,
         }
     }
@@ -111,7 +114,10 @@ impl SandboxSpec {
                 Self::Local { .. } => WorkdirStrategy::LocalDirectory,
                 #[cfg(feature = "docker")]
                 Self::Docker { .. } => WorkdirStrategy::LocalDirectory,
-                #[allow(unreachable_patterns)]
+                #[allow(
+                    unreachable_patterns,
+                    reason = "Feature-gated variants make this fallback arm reachable on some builds."
+                )]
                 _ => WorkdirStrategy::Cloud,
             };
         }
@@ -137,7 +143,10 @@ impl SandboxSpec {
             },
             #[cfg(feature = "docker")]
             Self::Docker { .. } => WorkdirStrategy::LocalDirectory,
-            #[allow(unreachable_patterns)]
+            #[allow(
+                unreachable_patterns,
+                reason = "Feature-gated variants make this fallback arm reachable on some builds."
+            )]
             _ => WorkdirStrategy::Cloud,
         }
     }

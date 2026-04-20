@@ -1,7 +1,8 @@
 #![allow(
     clippy::absolute_paths,
     clippy::needless_borrow,
-    clippy::needless_borrows_for_generic_args
+    clippy::needless_borrows_for_generic_args,
+    reason = "These workflow-hook tests value explicit fixtures over pedantic style lints."
 )]
 
 use std::process::Output;

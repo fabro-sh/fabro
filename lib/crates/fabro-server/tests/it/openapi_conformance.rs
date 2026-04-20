@@ -4,7 +4,8 @@
     clippy::absolute_paths,
     clippy::default_trait_access,
     clippy::manual_assert,
-    clippy::manual_let_else
+    clippy::manual_let_else,
+    reason = "These spec/router conformance tests prefer direct assertions over pedantic style lints."
 )]
 
 use axum::body::Body;

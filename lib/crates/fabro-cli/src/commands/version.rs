@@ -200,7 +200,10 @@ fn json_output(client: &ClientVersionInfo, server: &ServerVersionInfo) -> Value 
     })
 }
 
-#[allow(clippy::print_stdout)]
+#[allow(
+    clippy::print_stdout,
+    reason = "The version report is the command's primary stdout output."
+)]
 fn print_text_output(client: &ClientVersionInfo, server: &ServerVersionInfo) {
     println!("Client:");
     println!(" Version:      {}", client.version);

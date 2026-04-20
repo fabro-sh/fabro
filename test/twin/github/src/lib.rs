@@ -2,7 +2,8 @@
     clippy::absolute_paths,
     clippy::manual_let_else,
     clippy::redundant_closure_for_method_calls,
-    clippy::redundant_else
+    clippy::redundant_else,
+    reason = "This twin GitHub harness prefers explicit fixture modules over pedantic style lints."
 )]
 
 pub mod auth;

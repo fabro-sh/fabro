@@ -28,7 +28,10 @@ struct Inventory {
     binary_is_managed: bool,
 }
 
-#[allow(clippy::unused_async)] // call site requires async
+#[allow(
+    clippy::unused_async,
+    reason = "The shared command dispatch path expects an async handler."
+)]
 pub(crate) async fn run_uninstall(
     args: &UninstallArgs,
     cli: &CliSettings,

@@ -476,7 +476,10 @@ fn event_starts_interview(event: &EventEnvelope) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::absolute_paths)]
+    #![allow(
+        clippy::absolute_paths,
+        reason = "This test module prefers explicit type paths over extra imports."
+    )]
 
     use fabro_interview::{Answer, AnswerValue};
     use fabro_util::terminal::Styles;

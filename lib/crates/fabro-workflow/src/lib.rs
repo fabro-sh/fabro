@@ -10,7 +10,8 @@
         clippy::ref_as_ptr,
         clippy::cast_ptr_alignment,
         clippy::uninlined_format_args,
-        clippy::unnecessary_literal_bound
+        clippy::unnecessary_literal_bound,
+        reason = "Test-only workflow helpers favor explicit fixtures over pedantic style lints."
     )
 )]
 
@@ -126,7 +127,10 @@ pub mod git;
 pub(crate) mod graph;
 pub mod handler;
 mod hook_context;
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "The lifecycle module remains crate-visible for tests and pending integrations."
+)]
 pub(crate) mod lifecycle;
 pub(crate) mod node_handler;
 pub mod operations;

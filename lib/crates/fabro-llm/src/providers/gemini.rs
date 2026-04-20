@@ -134,7 +134,10 @@ struct CandidateContent {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(clippy::struct_field_names)]
+#[allow(
+    clippy::struct_field_names,
+    reason = "Field names mirror the provider API payload."
+)]
 struct UsageMetadata {
     prompt_token_count:         Option<i64>,
     candidates_token_count:     Option<i64>,

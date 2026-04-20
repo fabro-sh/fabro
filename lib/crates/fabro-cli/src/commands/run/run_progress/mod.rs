@@ -65,7 +65,13 @@ impl ProgressUI {
         self.renderer.finish();
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "Production code drives this via JSON lines; tests call it directly."
+        )
+    )]
     pub(crate) fn handle_event(&mut self, event: &RunEvent) {
         if let Some(progress_event) = from_run_event(event) {
             self.dispatch(progress_event);
@@ -411,7 +417,11 @@ impl ProgressUI {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::absolute_paths, clippy::needless_pass_by_value)]
+    #![allow(
+        clippy::absolute_paths,
+        clippy::needless_pass_by_value,
+        reason = "These run-progress tests prefer explicit fixtures over pedantic style lints."
+    )]
 
     use std::io::{self, Write};
     use std::sync::{Arc, Mutex};

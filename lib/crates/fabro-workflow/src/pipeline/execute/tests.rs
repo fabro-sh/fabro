@@ -1,4 +1,8 @@
-#![allow(clippy::absolute_paths, clippy::large_futures)]
+#![allow(
+    clippy::absolute_paths,
+    clippy::large_futures,
+    reason = "These execution tests favor explicit fixtures over pedantic style lints."
+)]
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

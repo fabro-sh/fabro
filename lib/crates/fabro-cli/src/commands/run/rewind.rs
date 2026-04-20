@@ -279,7 +279,10 @@ pub(crate) fn print_timeline(timeline: &RunTimeline, styles: &Styles, printer: P
         .color_choice(color_choice)
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    #[allow(clippy::print_stderr)]
+    #[allow(
+        clippy::print_stderr,
+        reason = "The rewind preview table is operator feedback, not command output."
+    )]
     if let Ok(display) = table.display() {
         eprintln!("{display}");
     }

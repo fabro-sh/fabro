@@ -84,6 +84,7 @@ unreachable_pub = "warn"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -2 }
+allow_attributes_without_reason = "warn"
 # Allowed pedantic lints
 implicit_hasher = "allow"
 missing_errors_doc = "allow"

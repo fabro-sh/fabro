@@ -398,7 +398,10 @@ pub struct AutoMergeOptions {
 ///
 /// Returns `Ok(Some(PullRequestRecord))` if a PR was created, `Ok(None)` if
 /// the diff was empty, or `Err` on failure.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Pull request creation combines git refs, rendered content, and run metadata."
+)]
 pub async fn maybe_open_pull_request(
     creds: &GitHubCredentials,
     origin_url: &str,

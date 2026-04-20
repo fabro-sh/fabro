@@ -621,7 +621,10 @@ mod tests {
             panic!("expected cli credential");
         };
 
-        #[allow(clippy::disallowed_methods)] // Test needs a real shell to verify login_command
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "This test shells through /bin/sh to verify the configured login command."
+        )]
         let status = std::process::Command::new("/bin/sh")
             .arg("-lc")
             .arg(cli.login_command.unwrap())

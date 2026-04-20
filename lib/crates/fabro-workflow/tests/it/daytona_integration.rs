@@ -8,7 +8,8 @@
     clippy::format_push_string,
     clippy::ignore_without_reason,
     clippy::items_after_statements,
-    clippy::print_stderr
+    clippy::print_stderr,
+    reason = "These Daytona integration tests value explicit scenarios over pedantic style lints."
 )]
 #![expect(
     clippy::disallowed_methods,

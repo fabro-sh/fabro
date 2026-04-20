@@ -165,7 +165,10 @@ struct ApiResponse {
 }
 
 #[derive(serde::Deserialize)]
-#[allow(clippy::struct_field_names)] // Match Anthropic's API usage payload field names.
+#[allow(
+    clippy::struct_field_names,
+    reason = "Field names mirror the provider API payload."
+)]
 struct ApiUsage {
     input_tokens:                i64,
     output_tokens:               i64,

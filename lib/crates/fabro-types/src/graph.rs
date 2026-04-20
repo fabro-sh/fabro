@@ -433,7 +433,11 @@ impl Graph {
     /// When the same failure signature repeats this many times, the pipeline
     /// aborts.
     pub fn loop_restart_signature_limit(&self) -> usize {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // filtered >= 1 above
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "Values below 1 are filtered out before this usize conversion."
+        )]
         self.attrs
             .get("loop_restart_signature_limit")
             .and_then(AttrValue::as_i64)

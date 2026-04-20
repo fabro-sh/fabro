@@ -6,7 +6,8 @@
     clippy::disallowed_types,
     clippy::needless_lifetimes,
     unreachable_pub,
-    unused_imports
+    unused_imports,
+    reason = "Generated OpenAPI client code intentionally preserves codegen output."
 )]
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/codegen.rs"));

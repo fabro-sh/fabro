@@ -136,7 +136,10 @@ fn is_auto_approved(level: PermissionLevel, category: &str) -> bool {
     )
 }
 
-#[allow(clippy::print_stderr)]
+#[allow(
+    clippy::print_stderr,
+    reason = "Interactive approval prompts belong on stderr, not assistant output."
+)]
 fn build_tool_approval(
     permissions: PermissionLevel,
     is_interactive: bool,
@@ -256,7 +259,10 @@ fn format_tool_args(args: &serde_json::Value, cwd: &str) -> String {
         .join(", ")
 }
 
-#[allow(clippy::print_stdout)]
+#[allow(
+    clippy::print_stdout,
+    reason = "Assistant responses are the CLI's primary stdout output."
+)]
 fn print_output(session: &Session, styles: &Styles) {
     for turn in session.history().turns() {
         if let Turn::Assistant { content, .. } = turn {
@@ -267,7 +273,10 @@ fn print_output(session: &Session, styles: &Styles) {
     }
 }
 
-#[allow(clippy::print_stderr)]
+#[allow(
+    clippy::print_stderr,
+    reason = "Session summaries are diagnostic metadata, not assistant output."
+)]
 fn print_summary(session: &Session, styles: &Styles) {
     let (mut turn_count, mut tool_call_count, mut total_tokens) = (0usize, 0usize, 0i64);
     for turn in session.history().turns() {
@@ -302,7 +311,10 @@ struct DebugMiddleware {
 
 #[async_trait::async_trait]
 impl Middleware for DebugMiddleware {
-    #[allow(clippy::print_stderr)]
+    #[allow(
+        clippy::print_stderr,
+        reason = "Debug middleware logs request and response summaries to stderr."
+    )]
     async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, LlmError> {
         let s = self.styles;
         eprintln!(
@@ -345,7 +357,10 @@ struct VerboseMiddleware {
 
 #[async_trait::async_trait]
 impl Middleware for VerboseMiddleware {
-    #[allow(clippy::print_stderr)]
+    #[allow(
+        clippy::print_stderr,
+        reason = "Verbose middleware dumps full request and response JSON to stderr."
+    )]
     async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, LlmError> {
         let s = self.styles;
         eprintln!(
@@ -380,7 +395,11 @@ pub async fn run_with_args(
     run_with_args_and_client(args, None, mcp_servers).await
 }
 
-#[allow(clippy::print_stdout, clippy::print_stderr)]
+#[allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "Assistant output stays on stdout while prompts and diagnostics use stderr."
+)]
 pub async fn run_with_args_and_client(
     args: AgentArgs,
     llm_client: Option<Client>,

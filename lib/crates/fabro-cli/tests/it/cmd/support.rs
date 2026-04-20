@@ -1,7 +1,8 @@
 #![allow(
     clippy::absolute_paths,
     clippy::manual_assert,
-    clippy::redundant_closure_for_method_calls
+    clippy::redundant_closure_for_method_calls,
+    reason = "These CLI harness helpers value explicit fixtures over pedantic style lints."
 )]
 #![expect(
     clippy::disallowed_methods,

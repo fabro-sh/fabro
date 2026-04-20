@@ -1836,7 +1836,10 @@ struct GitHubRepoResponse {
 /// Reject owner/repo path segments that could rewrite the GitHub API endpoint
 /// via `..` traversal after URL normalization. Conservative compared to
 /// GitHub's real rules, which is fine for server-side input validation.
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "GitHub slug validation returns HTTP 400 responses directly."
+)]
 fn validate_github_slug(kind: &str, value: &str, max_len: usize) -> Result<(), Response> {
     if value.is_empty() || value.len() > max_len || matches!(value, "." | "..") {
         return Err(ApiError::bad_request(format!("invalid github {kind}")).into_response());
@@ -2990,7 +2993,10 @@ fn compute_queue_positions(runs: &HashMap<RunId, ManagedRun>) -> HashMap<RunId, 
         .collect()
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "Run ID parsing returns HTTP 400 responses directly."
+)]
 fn parse_run_id_path(id: &str) -> Result<RunId, Response> {
     id.parse::<RunId>()
         .map_err(|_| ApiError::bad_request("Invalid run ID.").into_response())
@@ -2998,24 +3004,36 @@ fn parse_run_id_path(id: &str) -> Result<RunId, Response> {
 
 /// Public re-export so sibling modules (e.g. `run_files`) can share the same
 /// 400-on-invalid-ULID parse behavior without duplicating the helper.
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "This shared run ID parser returns HTTP 400 responses directly."
+)]
 pub(crate) fn parse_run_id_path_pub(id: &str) -> Result<RunId, Response> {
     parse_run_id_path(id)
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "Stage ID parsing returns HTTP 400 responses directly."
+)]
 fn parse_stage_id_path(stage_id: &str) -> Result<StageId, Response> {
     StageId::from_str(stage_id)
         .map_err(|_| ApiError::bad_request("Invalid stage ID.").into_response())
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "Blob ID parsing returns HTTP 400 responses directly."
+)]
 fn parse_blob_id_path(blob_id: &str) -> Result<RunBlobId, Response> {
     RunBlobId::from_str(blob_id)
         .map_err(|_| ApiError::bad_request("Invalid blob ID.").into_response())
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "Missing filename validation returns HTTP 400 responses directly."
+)]
 fn required_filename(params: ArtifactFilenameParams) -> Result<String, Response> {
     match params.filename {
         Some(filename) if !filename.is_empty() => Ok(filename),
@@ -3023,7 +3041,10 @@ fn required_filename(params: ArtifactFilenameParams) -> Result<String, Response>
     }
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "Artifact path validation returns HTTP 400 responses directly."
+)]
 fn validate_relative_artifact_path(kind: &str, value: &str) -> Result<String, Response> {
     if value.is_empty() {
         return Err(ApiError::bad_request(format!("{kind} must not be empty")).into_response());
@@ -3072,7 +3093,10 @@ fn octet_stream_response(bytes: Bytes) -> Response {
         .into_response()
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "Stored event conversion surfaces HTTP errors directly."
+)]
 fn api_event_envelope_from_store(event: &EventEnvelope) -> Result<ApiEventEnvelope, Response> {
     // The payload is already a serde_json::Value; merge `seq` into it
     // instead of serializing the whole envelope and re-parsing.
@@ -3713,7 +3737,10 @@ fn api_question_from_pending_interview(record: &PendingInterviewRecord) -> ApiQu
     api_question_from_interview_record(&record.question)
 }
 
-#[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
+#[allow(
+    clippy::result_large_err,
+    reason = "Pending-interview lookup maps storage failures to HTTP responses."
+)]
 async fn load_pending_interview(
     state: &AppState,
     run_id: RunId,
@@ -3753,7 +3780,10 @@ async fn load_pending_interview(
     })
 }
 
-#[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
+#[allow(
+    clippy::result_large_err,
+    reason = "Interview answer validation returns HTTP 400 responses directly."
+)]
 fn validate_answer_for_question(
     question: &InterviewQuestionRecord,
     answer: &Answer,
@@ -3800,7 +3830,10 @@ fn validate_answer_for_question(
     }
 }
 
-#[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
+#[allow(
+    clippy::result_large_err,
+    reason = "Interview submission maps validation failures to HTTP responses."
+)]
 async fn submit_pending_interview_answer(
     state: &AppState,
     pending: &LoadedPendingInterview,
@@ -3810,7 +3843,10 @@ async fn submit_pending_interview_answer(
     deliver_answer_to_run(state, pending.run_id, &pending.qid, answer).await
 }
 
-#[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
+#[allow(
+    clippy::result_large_err,
+    reason = "Interview delivery maps run-state failures to HTTP responses."
+)]
 async fn deliver_answer_to_run(
     state: &AppState,
     run_id: RunId,
@@ -3848,7 +3884,10 @@ async fn deliver_answer_to_run(
     }
 }
 
-#[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
+#[allow(
+    clippy::result_large_err,
+    reason = "Answer request parsing returns HTTP 400 responses directly."
+)]
 fn answer_from_request(
     req: SubmitAnswerRequest,
     question: &InterviewQuestionRecord,
@@ -5337,7 +5376,10 @@ struct ValidatedArtifactBatchEntry {
     expected_bytes: Option<u64>,
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "Upload content-type parsing returns HTTP client errors directly."
+)]
 fn artifact_upload_content_type(
     headers: &HeaderMap,
 ) -> Result<ArtifactUploadContentType, Response> {
@@ -5366,7 +5408,10 @@ fn artifact_upload_content_type(
     }
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "Content-Length parsing returns HTTP client errors directly."
+)]
 fn content_length_from_headers(headers: &HeaderMap) -> Result<Option<u64>, Response> {
     headers
         .get(header::CONTENT_LENGTH)
@@ -5385,7 +5430,10 @@ fn content_length_from_headers(headers: &HeaderMap) -> Result<Option<u64>, Respo
         .transpose()
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "Multipart manifest parsing returns HTTP client errors directly."
+)]
 async fn read_multipart_manifest(
     field: &mut multer::Field<'_>,
 ) -> Result<ArtifactBatchUploadManifest, Response> {
@@ -5407,7 +5455,10 @@ async fn read_multipart_manifest(
         .map_err(|err| bad_request_response(format!("invalid multipart manifest: {err}")))
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(
+    clippy::result_large_err,
+    reason = "Artifact batch validation returns HTTP client errors directly."
+)]
 fn validate_artifact_batch_manifest(
     manifest: ArtifactBatchUploadManifest,
 ) -> Result<HashMap<String, ValidatedArtifactBatchEntry>, Response> {

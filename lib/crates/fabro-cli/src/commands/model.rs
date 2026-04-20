@@ -84,7 +84,10 @@ fn format_cost(cost: Option<f64>) -> String {
 fn format_speed(tps: Option<f64>) -> String {
     match tps {
         None => "-".to_string(),
-        #[allow(clippy::cast_possible_truncation)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "Token-per-second display intentionally renders an integer count."
+        )]
         Some(t) => format!("{} tok/s", t as i64),
     }
 }
@@ -139,7 +142,10 @@ fn models_title(use_color: bool) -> Vec<CellStruct> {
     ]
 }
 
-#[allow(clippy::print_stdout)]
+#[allow(
+    clippy::print_stdout,
+    reason = "The models table is the command's primary stdout output."
+)]
 fn print_models_table(models: &[Model], styles: &Styles) {
     let use_color = styles.use_color;
     let rows: Vec<Vec<CellStruct>> = models
@@ -238,7 +244,11 @@ async fn test_model_via_server(
     Ok(response.into_inner())
 }
 
-#[allow(clippy::print_stdout, clippy::print_stderr)]
+#[allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "Progress goes to stderr while tables or JSON results go to stdout."
+)]
 async fn test_models_via_server(
     client: &fabro_api::Client,
     provider: Option<&str>,
@@ -411,7 +421,10 @@ async fn test_models_via_server(
     Ok(())
 }
 
-#[allow(clippy::print_stdout)]
+#[allow(
+    clippy::print_stdout,
+    reason = "The models command emits its final listing or JSON payload on stdout."
+)]
 async fn run_models(
     command: ModelsCommand,
     client: &fabro_api::Client,

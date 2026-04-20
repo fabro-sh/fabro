@@ -459,7 +459,10 @@ impl HookExecutorImpl {
 
     /// Execute an HTTP hook: POST context JSON and parse the response.
     /// Fail-open: non-2xx and connection errors return `Proceed`.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "HTTP hook execution needs separate client, TLS, env, and payload inputs."
+    )]
     async fn execute_http<E>(
         client: &fabro_http::HttpClient,
         url: &str,

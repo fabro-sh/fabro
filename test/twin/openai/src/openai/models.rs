@@ -22,7 +22,10 @@ pub struct ResponsesRequest {
     pub tools:                Option<Vec<Value>>,
     pub tool_choice:          Option<Value>,
     /// Catch-all for fields the twin doesn't use (temperature, top_p, etc.)
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "Serde captures unknown request fields for forward compatibility."
+    )]
     #[serde(flatten)]
     extra:                    Map<String, Value>,
 }

@@ -44,7 +44,10 @@ pub(super) async fn events_command(
 
 fn render_sse_payload(data: &str, json_output: bool) -> Result<()> {
     if json_output {
-        #[allow(clippy::print_stdout)]
+        #[allow(
+            clippy::print_stdout,
+            reason = "Raw event JSON belongs on stdout for piping."
+        )]
         {
             println!("{data}");
         }
@@ -70,7 +73,10 @@ fn render_sse_payload(data: &str, json_output: bool) -> Result<()> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("-");
 
-    #[allow(clippy::print_stdout)]
+    #[allow(
+        clippy::print_stdout,
+        reason = "Rendered event lines belong on stdout for piping."
+    )]
     {
         println!("{ts} {} {event}", short_run_id(run_id));
     }

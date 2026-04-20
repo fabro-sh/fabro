@@ -59,5 +59,8 @@ pub use truncation::{
 pub use types::{AgentEvent, SessionEvent, SessionState, Turn};
 
 #[cfg(test)]
-#[allow(unreachable_pub)]
+#[allow(
+    unreachable_pub,
+    reason = "Test support stays crate-visible for cross-module unit tests."
+)]
 pub(crate) mod test_support;
