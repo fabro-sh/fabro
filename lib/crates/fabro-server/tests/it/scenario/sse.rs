@@ -7,9 +7,10 @@ use tokio::time::{sleep, timeout};
 use tower::ServiceExt;
 
 use crate::helpers::{
-    POLL_ATTEMPTS, POLL_INTERVAL, api, body_json, create_and_start_run_from_manifest,
-    minimal_manifest_json_with_dry_run, test_app_state_with_options, test_app_with_scheduler,
-    test_settings, wait_for_run_status_not_in,
+    POLL_ATTEMPTS, POLL_INTERVAL, api, checked_response, checked_response_in,
+    create_and_start_run_from_manifest, minimal_manifest_json_with_dry_run, response_json,
+    test_app_state_with_options, test_app_with_scheduler, test_settings,
+    wait_for_run_status_not_in,
 };
 
 const SIMPLE_DOT: &str = r#"digraph SSETest {
@@ -28,9 +29,21 @@ async fn wait_for_checkpoint(app: &axum::Router, run_id: &str) -> serde_json::Va
             .body(Body::empty())
             .expect("checkpoint request should build");
         let response = app.clone().oneshot(req).await.unwrap();
-        if response.status() == StatusCode::OK {
-            return body_json(response.into_body()).await;
+        let status = response.status();
+        if status == StatusCode::OK {
+            return response_json(
+                response,
+                StatusCode::OK,
+                format!("GET /api/v1/runs/{run_id}/checkpoint"),
+            )
+            .await;
         }
+        checked_response_in(
+            response,
+            &[StatusCode::OK, StatusCode::NOT_FOUND],
+            format!("GET /api/v1/runs/{run_id}/checkpoint"),
+        )
+        .await;
         sleep(POLL_INTERVAL).await;
     }
     panic!("checkpoint did not become available for {run_id}");
@@ -53,13 +66,12 @@ async fn sse_stream_contains_expected_event_types() {
         .uri(api(&format!("/runs/{run_id}/attach")))
         .body(Body::empty())
         .unwrap();
-    let response = app.clone().oneshot(req).await.unwrap();
-    let sse_status = response.status();
-    assert_eq!(
-        sse_status,
+    let response = checked_response(
+        app.clone().oneshot(req).await.unwrap(),
         StatusCode::OK,
-        "expected 200, got: {sse_status}"
-    );
+        format!("GET /api/v1/runs/{run_id}/attach"),
+    )
+    .await;
 
     let content_type = response
         .headers()

@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use fabro_store::EventEnvelope;
-use fabro_test::TestContext;
+use fabro_test::{TestContext, expect_reqwest_status};
 use serde_json::Value;
 
 use crate::cmd::support::{RunProjection, server_endpoint};
@@ -118,11 +118,8 @@ async fn get_server_json_for_storage<T: serde::de::DeserializeOwned>(
         .send()
         .await
         .expect("server request should succeed");
-    assert!(
-        response.status().is_success(),
-        "server request failed for {path}: {}",
-        response.status()
-    );
+    let response =
+        expect_reqwest_status(response, fabro_http::StatusCode::OK, format!("GET {path}")).await;
     response
         .json::<T>()
         .await

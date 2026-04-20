@@ -87,3 +87,4 @@ tracing-subscriber.workspace = true
 async-trait.workspace = true
 tokio-util.workspace = true
 fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }
+fabro-test = { workspace = true }

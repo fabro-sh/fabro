@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use fabro_config::Storage;
 use fabro_server::bind::Bind;
 use fabro_store::EventEnvelope;
-use fabro_test::TestContext;
+use fabro_test::{TestContext, expect_reqwest_status};
 use fabro_types::RunId;
 use serde_json::Value;
 use shlex::try_quote;
@@ -737,7 +737,8 @@ async fn try_get_server_json_for_storage<T: serde::de::DeserializeOwned>(
 ) -> Option<T> {
     let (client, base_url) = server_endpoint(storage_dir)?;
     let response = client.get(format!("{base_url}{path}")).send().await.ok()?;
-    if !response.status().is_success() {
+    let status = response.status();
+    if status != fabro_http::StatusCode::OK {
         return None;
     }
     response.json::<T>().await.ok()
@@ -753,11 +754,8 @@ async fn get_server_json_for_storage<T: serde::de::DeserializeOwned>(
         .send()
         .await
         .expect("server request should succeed");
-    assert!(
-        response.status().is_success(),
-        "server request failed for {path}: {}",
-        response.status()
-    );
+    let response =
+        expect_reqwest_status(response, fabro_http::StatusCode::OK, format!("GET {path}")).await;
     response
         .json::<T>()
         .await

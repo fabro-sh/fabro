@@ -422,6 +422,8 @@ pub async fn run_browser_flow(
 
 #[cfg(test)]
 mod tests {
+    use fabro_test::assert_reqwest_status;
+
     use super::*;
 
     fn test_http_client() -> fabro_http::HttpClient {
@@ -843,7 +845,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(resp.status(), 200);
+        assert_reqwest_status(resp, StatusCode::OK, "GET /oauth/done").await;
     }
 
     #[tokio::test]
@@ -862,7 +864,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(resp.status(), 400);
+        assert_reqwest_status(resp, StatusCode::BAD_REQUEST, "GET /oauth/done").await;
     }
 
     #[tokio::test]

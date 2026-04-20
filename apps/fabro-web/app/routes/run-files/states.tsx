@@ -128,18 +128,6 @@ export function InlineErrorBanner({
   );
 }
 
-export function Toast({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="pointer-events-none fixed bottom-6 right-6 z-50 rounded-md border border-line bg-panel/95 px-3 py-2 text-xs text-fg-2 shadow-lg"
-    >
-      {children}
-    </div>
-  );
-}
-
 /**
  * Shared helper for rendering the documented status-code taxonomy. Consumed
  * by both the inline `initialError` branch in run-files.tsx and the

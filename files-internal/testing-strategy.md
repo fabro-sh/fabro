@@ -190,6 +190,24 @@ Examples:
 - exact SHA lineage across rewind/fork
 - exact file existence semantics
 
+### Use shared helpers for HTTP status assertions
+
+When a Rust test asserts on an HTTP response status, use the shared helpers in
+`fabro-test` instead of `assert_eq!(response.status(), ...)`.
+
+- Use the helper that matches the transport:
+  - `expect_axum_*` / `assert_axum_*` for Axum `oneshot` responses
+  - `expect_reqwest_*` / `assert_reqwest_*` for `fabro_http` / reqwest responses
+- Use the helper that matches what the test needs next:
+  - `*_status` when you only care about the status
+  - `*_json` when a successful response should parse as JSON
+  - `*_text` / `*_bytes` when the test inspects the raw body
+- Pass a context string that names the request shape, for example
+  `GET /api/v1/runs/{id}/graph`.
+
+These helpers preserve successful responses but, on failure, include the
+status, relevant headers, URL when available, and a readable body preview.
+
 ## Snapshot rules
 
 - Prefer inline snapshots unless the payload is too large to read comfortably.

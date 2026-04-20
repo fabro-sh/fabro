@@ -48,7 +48,7 @@ pub(crate) fn remove_server_record(path: &Path) {
 }
 
 pub(crate) fn server_record_is_running(record: &ServerRecord) -> bool {
-    fabro_proc::process_alive(record.pid) && server_process_matches(record)
+    fabro_proc::process_running(record.pid) && server_process_matches(record)
 }
 
 fn server_record_path(storage_dir: &Path) -> PathBuf {

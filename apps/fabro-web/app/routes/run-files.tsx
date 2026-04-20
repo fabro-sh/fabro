@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type ReactElement,
+  type ReactNode,
 } from "react";
 import {
   useMatches,
@@ -11,7 +12,8 @@ import {
   useParams,
   useRevalidator,
 } from "react-router";
-import { MultiFileDiff, PatchDiff, Virtualizer } from "@pierre/diffs/react";
+import * as PierreDiffs from "@pierre/diffs/react";
+import { useToast } from "../components/toast";
 import type {
   FileDiff as ApiFileDiff,
   PaginatedRunFileList,
@@ -27,10 +29,18 @@ import {
   LoadingSkeleton,
   renderStatusError,
   RunFilesErrorBoundary,
-  Toast,
 } from "./run-files/states";
 import { useFileKeyboardNav } from "./run-files/keyboard";
 import { Toolbar, type DiffStyle } from "./run-files/toolbar";
+import { useRunEventSource } from "../lib/sse";
+
+const { MultiFileDiff, PatchDiff } = PierreDiffs;
+const maybeVirtualizer = (PierreDiffs as Record<string, unknown>).Virtualizer;
+const Virtualizer = typeof maybeVirtualizer === "function"
+  ? maybeVirtualizer as ({ children }: { children: ReactNode }) => ReactElement
+  : function VirtualizerFallback({ children }: { children: ReactNode }) {
+      return <>{children}</>;
+    };
 
 export const handle = { wide: true };
 
@@ -156,28 +166,10 @@ function useNarrowViewport(): boolean {
 }
 
 function useSseRevalidation(runId: string | undefined) {
-  const revalidator = useRevalidator();
-  useEffect(() => {
-    if (!runId) return;
-    const source = new EventSource(`/api/v1/runs/${runId}/attach?since_seq=1`);
-    let debounce: ReturnType<typeof setTimeout> | undefined;
-    source.onmessage = (msg) => {
-      try {
-        const payload = JSON.parse(msg.data);
-        if (REFRESH_EVENTS.has(payload.event)) {
-          clearTimeout(debounce);
-          debounce = setTimeout(() => revalidator.revalidate(), 500);
-        }
-      } catch {
-        // ignore malformed payloads
-      }
-    };
-    return () => {
-      clearTimeout(debounce);
-      source.close();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId]);
+  useRunEventSource(runId, {
+    allowlist: REFRESH_EVENTS,
+    debounceMs: 500,
+  });
 }
 
 function useFreshness(
@@ -260,6 +252,47 @@ function decodeDeepLinkFile(hash: string): string | null {
   }
 }
 
+export function emptyTransitionToastMessage(
+  previousFileCount: number | null,
+  nextFileCount: number,
+): string | null {
+  return previousFileCount !== null && previousFileCount > 0 && nextFileCount === 0
+    ? "No changes in this run."
+    : null;
+}
+
+function resolveDeepLinkToast(
+  hashFile: string | null,
+  data: PaginatedRunFileList | null,
+): { key: string; message: string } | null {
+  if (!hashFile || !data) return null;
+  if (data.meta.degraded && data.meta.patch) {
+    return {
+      key: `patch-only:${hashFile}`,
+      message: "File-level navigation isn't available in the patch-only view.",
+    };
+  }
+
+  const exists = data.data.some(
+    (file) => file.new_file.name === hashFile || file.old_file.name === hashFile,
+  );
+  if (!exists) {
+    return {
+      key: `missing:${hashFile}`,
+      message: `File ${hashFile} is not in this run.`,
+    };
+  }
+
+  return null;
+}
+
+export function deepLinkToastMessage(
+  hashFile: string | null,
+  data: PaginatedRunFileList | null,
+): string | null {
+  return resolveDeepLinkToast(hashFile, data)?.message ?? null;
+}
+
 /**
  * Extract the lifecycle status from whichever ancestor match carries it.
  * The Run Detail loader (apps/fabro-web/app/routes/run-detail.tsx) returns
@@ -288,6 +321,7 @@ export default function RunFiles({ loaderData }: any) {
   const navigation = useNavigation();
   const revalidator = useRevalidator();
   const matches = useMatches();
+  const { push } = useToast();
   const result = loaderData as RunFilesLoaderResult | null;
   const narrow = useNarrowViewport();
   const runStatus = resolveRunStatus(matches);
@@ -296,23 +330,19 @@ export default function RunFiles({ loaderData }: any) {
   // rendering the previous files while surfacing an inline banner.
   const lastGoodDataRef = useRef<PaginatedRunFileList | null>(null);
   const lastFetchedAtRef = useRef<number | null>(null);
-  const [emptyToast, setEmptyToast] = useState<string | null>(null);
-  const [deepLinkToast, setDeepLinkToast] = useState<string | null>(null);
 
   useEffect(() => {
     if (!result?.data) return;
-    const prev = lastGoodDataRef.current;
-    if (prev && prev.data.length > 0 && result.data.data.length === 0) {
-      setEmptyToast("No changes in this run.");
-      const id = setTimeout(() => setEmptyToast(null), 3500);
-      lastGoodDataRef.current = result.data;
-      lastFetchedAtRef.current = Date.now();
-      return () => clearTimeout(id);
+    const message = emptyTransitionToastMessage(
+      lastGoodDataRef.current?.data.length ?? null,
+      result.data.data.length,
+    );
+    if (message) {
+      push({ message });
     }
     lastGoodDataRef.current = result.data;
     lastFetchedAtRef.current = Date.now();
-    return undefined;
-  }, [result?.data]);
+  }, [push, result?.data]);
 
   const data: PaginatedRunFileList | null =
     result?.data ?? lastGoodDataRef.current;
@@ -352,6 +382,7 @@ export default function RunFiles({ loaderData }: any) {
 
   const refreshButtonRef = useRef<HTMLButtonElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const lastDeepLinkToastRef = useRef<string | null>(null);
 
   // Return focus to the Refresh button after a revalidation completes so
   // keyboard-first users stay oriented.
@@ -384,28 +415,22 @@ export default function RunFiles({ loaderData }: any) {
   }, []);
 
   useEffect(() => {
+    const toast = resolveDeepLinkToast(hashFile, data);
+    if (toast) {
+      if (lastDeepLinkToastRef.current !== toast.key) {
+        push({ message: toast.message, autoDismissMs: 5000 });
+        lastDeepLinkToastRef.current = toast.key;
+      }
+      return;
+    }
+    lastDeepLinkToastRef.current = null;
     if (!hashFile || !data) return;
-    if (data.meta.degraded && data.meta.patch) {
-      setDeepLinkToast(
-        "File-level navigation isn't available in the patch-only view.",
-      );
-      const id = setTimeout(() => setDeepLinkToast(null), 5000);
-      return () => clearTimeout(id);
-    }
-    const exists = data.data.some(
-      (f) => f.new_file.name === hashFile || f.old_file.name === hashFile,
-    );
-    if (!exists) {
-      setDeepLinkToast(`File ${hashFile} is not in this run.`);
-      const id = setTimeout(() => setDeepLinkToast(null), 5000);
-      return () => clearTimeout(id);
-    }
     const el = document.getElementById(fileRowId(hashFile));
     if (el) {
       el.scrollIntoView({ block: "start", behavior: "smooth" });
       el.focus({ preventScroll: true });
     }
-  }, [hashFile, data]);
+  }, [data, hashFile, push]);
 
   const renderFiles = useCallback(
     (files: ApiFileDiff[]): ReactElement[] =>
@@ -526,8 +551,6 @@ export default function RunFiles({ loaderData }: any) {
             theme: "pierre-dark",
           }}
         />
-        {emptyToast && <Toast>{emptyToast}</Toast>}
-        {deepLinkToast && <Toast>{deepLinkToast}</Toast>}
       </div>
     );
   }
@@ -543,8 +566,6 @@ export default function RunFiles({ loaderData }: any) {
             degraded: meta.degraded ?? false,
           })}
         />
-        {emptyToast && <Toast>{emptyToast}</Toast>}
-        {deepLinkToast && <Toast>{deepLinkToast}</Toast>}
       </div>
     );
   }
@@ -568,8 +589,6 @@ export default function RunFiles({ loaderData }: any) {
         />
       ) : null}
       {body}
-      {emptyToast && <Toast>{emptyToast}</Toast>}
-      {deepLinkToast && <Toast>{deepLinkToast}</Toast>}
     </div>
   );
 }

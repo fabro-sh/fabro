@@ -49,7 +49,7 @@ jobs:
 
       - name: Install bun deps (for SPA verify)
         if: steps.skip.outputs.skip != 'true'
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Set up Rust
         if: steps.skip.outputs.skip != 'true'

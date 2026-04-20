@@ -4,7 +4,7 @@ use tokio::time::sleep;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    MINIMAL_DOT, POLL_ATTEMPTS, POLL_INTERVAL, api, body_json, create_and_start_run_from_manifest,
+    MINIMAL_DOT, POLL_ATTEMPTS, POLL_INTERVAL, api, create_and_start_run_from_manifest,
     minimal_manifest_json_with_dry_run, test_app_state_with_options, test_app_with_scheduler,
     test_settings, wait_for_run_status,
 };
@@ -31,9 +31,12 @@ async fn aggregate_billing_increments_after_run_completes() {
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = body_json(response.into_body()).await;
+        let body = crate::helpers::response_json(
+            response,
+            StatusCode::OK,
+            format!("{}:{}", file!(), line!()),
+        )
+        .await;
         total_runs = body["totals"]["runs"].as_i64().unwrap();
         if total_runs == 1 {
             break;

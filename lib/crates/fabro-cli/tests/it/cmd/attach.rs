@@ -8,7 +8,9 @@ use std::process::{Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use fabro_test::{apply_filters, fabro_snapshot, test_context};
+use fabro_test::{
+    apply_filters, assert_reqwest_status, expect_reqwest_json, fabro_snapshot, test_context,
+};
 use serde_json::Value;
 
 use super::support::{
@@ -31,15 +33,12 @@ async fn wait_for_server_question(
             .send()
             .await
             .expect("question request should succeed");
-        assert!(
-            response.status().is_success(),
-            "question request failed: {}",
-            response.status()
-        );
-        let body: Value = response
-            .json()
-            .await
-            .expect("question response should parse");
+        let body: Value = expect_reqwest_json(
+            response,
+            fabro_http::StatusCode::OK,
+            format!("GET /api/v1/runs/{run_id}/questions?page[limit]=100&page[offset]=0"),
+        )
+        .await;
         if let Some(question) = body["data"].as_array().and_then(|items| items.first()) {
             return question.clone();
         }
@@ -860,7 +859,12 @@ fn attach_json_errors_without_prompting_for_human_input() {
                 .send()
                 .await
                 .expect("answer submission should succeed");
-            assert_eq!(response.status(), fabro_http::StatusCode::NO_CONTENT);
+            assert_reqwest_status(
+                response,
+                fabro_http::StatusCode::NO_CONTENT,
+                format!("POST /api/v1/runs/{run_id}/questions/{question_id}/answer"),
+            )
+            .await;
         });
     wait_for_status(&run.run_dir, &["succeeded"]);
 }

@@ -14,6 +14,8 @@ mod smoke;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use fabro_test::expect_reqwest_status;
+
 use crate::cmd::support::{RunProjection, server_endpoint};
 pub(super) fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -47,11 +49,8 @@ async fn get_server_json_for_storage<T: serde::de::DeserializeOwned>(
         .send()
         .await
         .expect("server request should succeed");
-    assert!(
-        response.status().is_success(),
-        "server request failed for {path}: {}",
-        response.status()
-    );
+    let response =
+        expect_reqwest_status(response, fabro_http::StatusCode::OK, format!("GET {path}")).await;
     response
         .json::<T>()
         .await

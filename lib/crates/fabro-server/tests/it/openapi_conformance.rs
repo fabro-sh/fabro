@@ -7,28 +7,19 @@
     clippy::manual_let_else,
     reason = "These spec/router conformance tests prefer direct assertions over pedantic style lints."
 )]
-#![expect(
-    clippy::disallowed_methods,
-    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
-)]
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use fabro_server::install::{InstallAppState, build_install_router};
 use fabro_server::jwt_auth::AuthMode;
-use fabro_server::server::build_router;
+use fabro_server::server::{build_router, create_app_state_with_env_lookup};
 use serde_yaml::Value;
 use tower::ServiceExt;
 
-use super::helpers::test_app_state;
+use super::helpers::{read_repo_file, test_app_state, test_settings};
 
 fn load_spec() -> Value {
-    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("fabro-server crate should be nested under lib/crates/fabro-server");
-    let spec_path = repo_root.join("docs/api-reference/fabro-api.yaml");
-    let text = std::fs::read_to_string(&spec_path).expect("failed to read spec");
+    let text = read_repo_file("docs/api-reference/fabro-api.yaml");
     serde_yaml::from_str(&text).expect("failed to parse spec")
 }
 
@@ -120,6 +111,57 @@ async fn all_spec_routes_are_routable() {
     }
 
     assert!(checked > 0, "No routes were checked — is the spec empty?");
+}
+
+#[test]
+fn github_webhook_spec_and_sdk_describe_a_json_body() {
+    let spec = load_spec();
+    let webhook_schema = spec["paths"]["/api/v1/webhooks/github"]["post"]["requestBody"]["content"]
+        ["application/json"]["schema"]
+        .clone();
+
+    assert_eq!(
+        webhook_schema.get("type").and_then(Value::as_str),
+        Some("object"),
+        "GitHub webhook request body should be modeled as JSON, not a binary file upload"
+    );
+    assert!(
+        webhook_schema.get("format").is_none(),
+        "GitHub webhook JSON schema should not declare a binary format"
+    );
+
+    let generated_client =
+        read_repo_file("lib/packages/fabro-api-client/src/api/integrations-api.ts");
+    assert!(
+        !generated_client.contains("@param {File} body"),
+        "generated TypeScript client should not expose the webhook body as File"
+    );
+    assert!(
+        !generated_client.contains("receiveGithubWebhook: async (body: File"),
+        "generated TypeScript client should not require File for a JSON webhook payload"
+    );
+}
+
+#[tokio::test]
+async fn github_webhook_spec_route_is_routable_when_webhook_secret_is_present() {
+    let secret = "test-webhook-secret".to_string();
+    let app = build_router(
+        create_app_state_with_env_lookup(test_settings(), 5, move |name| {
+            (name == "GITHUB_APP_WEBHOOK_SECRET").then(|| secret.clone())
+        }),
+        AuthMode::Disabled,
+    );
+
+    let response = app
+        .oneshot(request_for(&Method::POST, "/api/v1/webhooks/github"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "Webhook spec route should be mounted when GITHUB_APP_WEBHOOK_SECRET is present"
+    );
 }
 
 #[tokio::test]

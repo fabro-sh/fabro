@@ -19,9 +19,9 @@ use tokio::time::timeout;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    MINIMAL_DOT, POLL_ATTEMPTS, POLL_INTERVAL, api, body_json, minimal_manifest_json,
-    minimal_manifest_json_with_dry_run, test_app_state_with_options, test_app_with_scheduler,
-    test_settings, wait_for_run_status,
+    MINIMAL_DOT, POLL_ATTEMPTS, POLL_INTERVAL, api, checked_response, minimal_manifest_json,
+    minimal_manifest_json_with_dry_run, response_json, response_status,
+    test_app_state_with_options, test_app_with_scheduler, test_settings, wait_for_run_status,
 };
 
 const HUMAN_GATE_DOT: &str = r#"digraph GateTest {
@@ -61,7 +61,7 @@ async fn create_run(app: &axum::Router, manifest: serde_json::Value) -> String {
         ))
         .expect("create-run request should build");
     let response = app.clone().oneshot(request).await.unwrap();
-    let body = body_json(response.into_body()).await;
+    let body = response_json(response, StatusCode::CREATED, "POST /api/v1/runs").await;
     body["id"]
         .as_str()
         .expect("create-run response should include an id")
@@ -75,7 +75,12 @@ async fn start_run(app: &axum::Router, run_id: &str) {
         .body(Body::empty())
         .expect("start-run request should build");
     let response = app.clone().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    response_status(
+        response,
+        StatusCode::OK,
+        format!("POST /api/v1/runs/{run_id}/start"),
+    )
+    .await;
 }
 
 async fn wait_for_question(app: &axum::Router, run_id: &str) -> serde_json::Value {
@@ -86,7 +91,12 @@ async fn wait_for_question(app: &axum::Router, run_id: &str) -> serde_json::Valu
             .body(Body::empty())
             .expect("questions request should build");
         let response = app.clone().oneshot(request).await.unwrap();
-        let body = body_json(response.into_body()).await;
+        let body = response_json(
+            response,
+            StatusCode::OK,
+            format!("GET /api/v1/runs/{run_id}/questions"),
+        )
+        .await;
         if let Some(question) = body["data"].as_array().and_then(|items| items.first()) {
             return question.clone();
         }
@@ -102,8 +112,12 @@ async fn load_questions(app: &axum::Router, run_id: &str) -> serde_json::Value {
         .body(Body::empty())
         .expect("questions request should build");
     let response = app.clone().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    body_json(response.into_body()).await
+    response_json(
+        response,
+        StatusCode::OK,
+        format!("GET /api/v1/runs/{run_id}/questions"),
+    )
+    .await
 }
 
 #[tokio::test]
@@ -121,8 +135,7 @@ async fn get_system_info_returns_runtime_fields() {
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response.into_body()).await;
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/system/info").await;
     assert!(body["version"].as_str().is_some());
     assert_eq!(body["storage_engine"], "slatedb");
     assert_eq!(
@@ -181,8 +194,12 @@ async fn get_system_disk_usage_returns_summary_and_verbose_rows() {
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response.into_body()).await;
+    let body = response_json(
+        response,
+        StatusCode::OK,
+        "GET /api/v1/system/df?verbose=true",
+    )
+    .await;
     assert!(body["summary"].is_array());
     assert!(body["total_size_bytes"].as_i64().unwrap_or_default() > 0);
     assert!(
@@ -216,8 +233,12 @@ async fn prune_runs_supports_dry_run_and_deletion() {
         .body(Body::from(r#"{"before":"9999"}"#))
         .unwrap();
     let dry_run_response = app.clone().oneshot(dry_run_request).await.unwrap();
-    assert_eq!(dry_run_response.status(), StatusCode::OK);
-    let dry_run_body = body_json(dry_run_response.into_body()).await;
+    let dry_run_body = response_json(
+        dry_run_response,
+        StatusCode::OK,
+        "POST /api/v1/system/prune/runs",
+    )
+    .await;
     assert_eq!(dry_run_body["dry_run"], true);
     assert_eq!(dry_run_body["total_count"], 1);
     assert_eq!(dry_run_body["runs"][0]["run_id"], run_id);
@@ -230,8 +251,12 @@ async fn prune_runs_supports_dry_run_and_deletion() {
         .body(Body::from(r#"{"dry_run":false,"before":"9999"}"#))
         .unwrap();
     let delete_response = app.clone().oneshot(delete_request).await.unwrap();
-    assert_eq!(delete_response.status(), StatusCode::OK);
-    let delete_body = body_json(delete_response.into_body()).await;
+    let delete_body = response_json(
+        delete_response,
+        StatusCode::OK,
+        "POST /api/v1/system/prune/runs",
+    )
+    .await;
     assert_eq!(delete_body["dry_run"], false);
     assert_eq!(delete_body["deleted_count"], 1);
     assert!(!run_dir.exists());
@@ -250,8 +275,12 @@ async fn attach_events_streams_only_matching_run_ids() {
         .uri(api(&format!("/attach?run_id={run_one}")))
         .body(Body::empty())
         .unwrap();
-    let response = app.clone().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    let response = checked_response(
+        app.clone().oneshot(request).await.unwrap(),
+        StatusCode::OK,
+        format!("GET /api/v1/attach?run_id={run_one}"),
+    )
+    .await;
     let content_type = response
         .headers()
         .get("content-type")

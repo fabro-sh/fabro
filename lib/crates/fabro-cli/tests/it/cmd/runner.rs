@@ -12,7 +12,7 @@ use std::process::{Child, ExitStatus, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use fabro_store::EventEnvelope;
-use fabro_test::{fabro_snapshot, test_context};
+use fabro_test::{assert_reqwest_status, expect_reqwest_json, fabro_snapshot, test_context};
 use fabro_types::{EventBody, RunEvent, StatusReason};
 use httpmock::MockServer;
 
@@ -133,15 +133,12 @@ async fn wait_for_server_question(
             .send()
             .await
             .expect("question request should succeed");
-        assert!(
-            response.status().is_success(),
-            "question request failed: {}",
-            response.status()
-        );
-        let body: serde_json::Value = response
-            .json()
-            .await
-            .expect("question response should parse");
+        let body: serde_json::Value = expect_reqwest_json(
+            response,
+            fabro_http::StatusCode::OK,
+            format!("GET /api/v1/runs/{run_id}/questions?page[limit]=100&page[offset]=0"),
+        )
+        .await;
         if let Some(question) = body["data"].as_array().and_then(|items| items.first()) {
             return question.clone();
         }
@@ -607,7 +604,12 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
             .send()
             .await
             .expect("answer submission should succeed");
-        assert_eq!(response.status(), fabro_http::StatusCode::NO_CONTENT);
+        assert_reqwest_status(
+            response,
+            fabro_http::StatusCode::NO_CONTENT,
+            format!("POST /api/v1/runs/{run_id}/questions/{question_id}/answer"),
+        )
+        .await;
 
         question_id
     });

@@ -7,7 +7,7 @@ use serde_json::json;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    MINIMAL_DOT, api, body_json, minimal_manifest_json, test_app_state_with_options,
+    MINIMAL_DOT, api, body_json, minimal_manifest_json, response_json, test_app_state_with_options,
 };
 
 #[tokio::test]
@@ -82,8 +82,12 @@ session_sandboxes = true
         .unwrap();
     let response = app.oneshot(get_request).await.unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response.into_body()).await;
+    let body = response_json(
+        response,
+        StatusCode::OK,
+        format!("GET /api/v1/runs/{run_id}/settings"),
+    )
+    .await;
     assert_eq!(body["_version"], 1);
     assert_eq!(body["run"]["goal"], "Ship it");
     assert_eq!(body["cli"]["output"]["verbosity"], "verbose");

@@ -211,7 +211,7 @@ Customize the git author identity used for checkpoint commits. When not set, def
 
 ### `[server.integrations.github]` section
 
-Configure GitHub integration auth. `strategy = "token"` is the default and uses a stored `GITHUB_TOKEN` from the vault (with `GH_TOKEN` as a fallback). `strategy = "app"` enables the GitHub App flow, browser OAuth, and webhooks.
+Configure GitHub integration auth. `strategy = "token"` is the default and uses a stored `GITHUB_TOKEN` from the vault (with `GH_TOKEN` as a fallback). `strategy = "app"` enables the GitHub App flow and browser OAuth; webhook delivery is configured separately under `[server.integrations.github.webhooks]`.
 
 ```toml title="settings.toml"
 [server.integrations.github]
@@ -227,11 +227,20 @@ app_id = "123456"
 client_id = "Iv1.abc123"
 slug = "fabro-app"
 
+[server.api]
+url = "https://fabro-api.example.com"
+
 [server.integrations.github.webhooks]
-strategy = "tailscale_funnel"
+strategy = "server_url"
 ```
 
-When `webhooks.strategy = "tailscale_funnel"` is configured, `fabro server start` binds a local HTTP listener, exposes it through `tailscale funnel`, and updates the GitHub App's webhook URL on startup. Incoming webhooks are verified with HMAC-SHA256. Requires the `GITHUB_APP_WEBHOOK_SECRET` environment variable.
+Fabro always serves the GitHub webhook handler at `POST /api/v1/webhooks/github` when `GITHUB_APP_WEBHOOK_SECRET` is configured. The `strategy` field controls how Fabro exposes that route and whether it mutates the GitHub App webhook URL on startup:
+
+- `strategy = "server_url"`: recommended for production or any deployment with a stable public API URL. Fabro sets the GitHub App webhook URL to `<server.api.url>/api/v1/webhooks/github` on startup. Requires `server.api.url` and `GITHUB_APP_WEBHOOK_SECRET`.
+- `strategy = "tailscale_funnel"`: opt-in for Tailscale-hosted machines without a stable public URL. Fabro runs `tailscale funnel <server-port>`, exposes the main server on that Funnel URL, and best-effort updates the GitHub App webhook URL to `<funnel-url>/api/v1/webhooks/github`. Requires a TCP listener and `GITHUB_APP_WEBHOOK_SECRET`.
+- `strategy` unset: Fabro still accepts signed webhook deliveries on `/api/v1/webhooks/github` when the secret is present, but it does not run `tailscale funnel` and does not update the GitHub App webhook URL.
+
+Incoming webhooks are authenticated only by GitHub's `X-Hub-Signature-256` HMAC signature, not by Fabro's bearer/session auth.
 
 ### `[run.checkpoint]` section
 

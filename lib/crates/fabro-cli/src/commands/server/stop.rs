@@ -19,14 +19,14 @@ pub(crate) async fn stop_server(storage_dir: &Path, timeout: Duration) -> Result
     let poll_interval = Duration::from_millis(100);
     let mut elapsed = Duration::ZERO;
     while elapsed < timeout {
-        if !fabro_proc::process_alive(record.pid) {
+        if !fabro_proc::process_running(record.pid) {
             break;
         }
         time::sleep(poll_interval).await;
         elapsed += poll_interval;
     }
 
-    if fabro_proc::process_alive(record.pid) {
+    if fabro_proc::process_running(record.pid) {
         fabro_proc::sigkill(record.pid);
         time::sleep(Duration::from_millis(100)).await;
     }

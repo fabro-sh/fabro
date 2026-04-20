@@ -3,7 +3,7 @@ use axum::http::{Request, StatusCode};
 use fabro_server::install::{InstallAppState, build_install_router};
 use tower::ServiceExt;
 
-use crate::helpers::body_json;
+use crate::helpers::response_json;
 
 #[tokio::test]
 async fn install_llm_endpoints_reject_openai_compatible_in_v1() {
@@ -24,8 +24,12 @@ async fn install_llm_endpoints_reject_openai_compatible_in_v1() {
         )
         .await
         .unwrap();
-    assert_eq!(test_response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let test_body = body_json(test_response.into_body()).await;
+    let test_body = response_json(
+        test_response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "POST /install/llm/test",
+    )
+    .await;
     assert_eq!(
         test_body["errors"][0]["detail"],
         "openai_compatible is not supported by install in v1"
@@ -45,8 +49,12 @@ async fn install_llm_endpoints_reject_openai_compatible_in_v1() {
         )
         .await
         .unwrap();
-    assert_eq!(put_response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let put_body = body_json(put_response.into_body()).await;
+    let put_body = response_json(
+        put_response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "PUT /install/llm",
+    )
+    .await;
     assert_eq!(
         put_body["errors"][0]["detail"],
         "openai_compatible is not supported by install in v1"

@@ -28,3 +28,4 @@ open = "5"
 [dev-dependencies]
 httpmock = "0.8"
 tokio = { workspace = true, features = ["test-util", "macros"] }
+fabro-test = { workspace = true }

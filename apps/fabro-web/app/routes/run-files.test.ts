@@ -1,12 +1,41 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { extractRequestId, loader } from "./run-files";
+import {
+  deepLinkToastMessage,
+  emptyTransitionToastMessage,
+  extractRequestId,
+  loader,
+} from "./run-files";
 
 type StubResponseInit = {
   status:  number;
   body?:   string;
   headers?: Record<string, string>;
 };
+
+function buildRunFilesPayload({
+  files = [],
+  degraded = false,
+  patch = null,
+}: {
+  files?: string[];
+  degraded?: boolean;
+  patch?: string | null;
+}) {
+  return {
+    data: files.map((name) => ({
+      change_kind: "modified",
+      old_file: { name },
+      new_file: { name },
+    })),
+    meta: {
+      degraded,
+      patch,
+      total_changed: files.length,
+      truncated: false,
+    },
+  } as any;
+}
 
 function stubFetchOnce(init: StubResponseInit) {
   const original = globalThis.fetch;
@@ -73,6 +102,50 @@ describe("extractRequestId", () => {
         ],
       }),
     ).toBe("RX-1A_2B-3C4D");
+  });
+});
+
+describe("emptyTransitionToastMessage", () => {
+  test("returns the no-changes toast when a populated diff becomes empty", () => {
+    expect(emptyTransitionToastMessage(3, 0)).toBe("No changes in this run.");
+  });
+
+  test("returns null when the diff was already empty", () => {
+    expect(emptyTransitionToastMessage(0, 0)).toBeNull();
+    expect(emptyTransitionToastMessage(null, 0)).toBeNull();
+    expect(emptyTransitionToastMessage(2, 1)).toBeNull();
+  });
+});
+
+describe("deepLinkToastMessage", () => {
+  test("returns the patch-only message when file navigation is unavailable", () => {
+    expect(
+      deepLinkToastMessage(
+        "src/app.tsx",
+        buildRunFilesPayload({
+          degraded: true,
+          patch: "@@ -1 +1 @@",
+        }),
+      ),
+    ).toBe("File-level navigation isn't available in the patch-only view.");
+  });
+
+  test("returns the missing-file message when the requested file is absent", () => {
+    expect(
+      deepLinkToastMessage(
+        "src/missing.ts",
+        buildRunFilesPayload({ files: ["src/present.ts"] }),
+      ),
+    ).toBe("File src/missing.ts is not in this run.");
+  });
+
+  test("returns null when the deep-linked file exists", () => {
+    expect(
+      deepLinkToastMessage(
+        "src/present.ts",
+        buildRunFilesPayload({ files: ["src/present.ts"] }),
+      ),
+    ).toBeNull();
   });
 });
 

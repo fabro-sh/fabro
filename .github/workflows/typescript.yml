@@ -12,6 +12,7 @@ on:
       - ".gitattributes"
       - "scripts/**"
       - ".github/workflows/typescript.yml"
+      - ".github/workflows/nightly.yml"
   pull_request:
     branches: [main]
     paths:
@@ -23,6 +24,7 @@ on:
       - ".gitattributes"
       - "scripts/**"
       - ".github/workflows/typescript.yml"
+      - ".github/workflows/nightly.yml"
   workflow_dispatch:
 
 concurrency:
@@ -42,7 +44,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - run: bun install
+      - run: bun install --frozen-lockfile
       - run: cd apps/fabro-web && bun run typecheck
 
   test:
@@ -55,7 +57,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - run: bun install
+      - run: bun install --frozen-lockfile
       - run: cd apps/fabro-web && bun test
 
   build:
@@ -68,7 +70,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - run: bun install
+      - run: bun install --frozen-lockfile
       - run: scripts/refresh-fabro-spa.sh
       - run: git diff --exit-code -- lib/crates/fabro-spa/assets
       - run: scripts/check-fabro-spa-budgets.sh

@@ -1,7 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-use axum::body::{Body, to_bytes};
+use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{Method, Request, StatusCode};
 use fabro_config::parse_settings_layer;
@@ -14,7 +14,7 @@ use fabro_server::server::{
 use fabro_types::settings::SettingsLayer;
 use tower::ServiceExt;
 
-use crate::helpers::body_json;
+use crate::helpers::{checked_response, response_json, response_status, response_text};
 
 #[tokio::test]
 async fn old_unversioned_routes_return_404() {
@@ -29,7 +29,7 @@ async fn old_unversioned_routes_return_404() {
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
+        response_status(response, StatusCode::NOT_FOUND, format!("{method} {path}")).await;
     }
 }
 
@@ -43,11 +43,7 @@ async fn root_and_health_stay_at_root() {
         .body(Body::empty())
         .unwrap();
     let root_response = app.clone().oneshot(root_req).await.unwrap();
-    assert_eq!(root_response.status(), StatusCode::OK);
-    let root_body = to_bytes(root_response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let root_html = String::from_utf8(root_body.to_vec()).unwrap();
+    let root_html = response_text(root_response, StatusCode::OK, "GET /").await;
     assert!(root_html.contains("<div id=\"root\"></div>"));
 
     let health_req = Request::builder()
@@ -56,8 +52,7 @@ async fn root_and_health_stay_at_root() {
         .body(Body::empty())
         .unwrap();
     let health_response = app.oneshot(health_req).await.unwrap();
-    assert_eq!(health_response.status(), StatusCode::OK);
-    let health_body = body_json(health_response.into_body()).await;
+    let health_body = response_json(health_response, StatusCode::OK, "GET /health").await;
     assert_eq!(health_body["status"], "ok");
     assert!(
         health_body.get("version").is_none(),
@@ -80,7 +75,7 @@ async fn install_routes_are_absent_in_normal_mode() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    response_status(response, StatusCode::NOT_FOUND, "GET /install").await;
 }
 
 #[tokio::test]
@@ -94,7 +89,7 @@ async fn moved_routes_not_at_root_of_api_prefix() {
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND, "GET {path}");
+        response_status(response, StatusCode::NOT_FOUND, format!("GET {path}")).await;
     }
 }
 
@@ -109,7 +104,12 @@ async fn source_maps_are_not_served() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    response_status(
+        response,
+        StatusCode::NOT_FOUND,
+        "GET /assets/entry-abc123.js.map",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -122,7 +122,12 @@ async fn web_enabled_serves_web_only_routes() {
         .body(Body::empty())
         .unwrap();
     let auth_me_response = app.clone().oneshot(auth_me_request).await.unwrap();
-    assert_eq!(auth_me_response.status(), StatusCode::UNAUTHORIZED);
+    response_status(
+        auth_me_response,
+        StatusCode::UNAUTHORIZED,
+        "GET /api/v1/auth/me",
+    )
+    .await;
 
     // Browser-style navigation to an SPA route falls back to index.html.
     let setup_request = Request::builder()
@@ -132,7 +137,7 @@ async fn web_enabled_serves_web_only_routes() {
         .body(Body::empty())
         .unwrap();
     let setup_response = app.clone().oneshot(setup_request).await.unwrap();
-    assert_eq!(setup_response.status(), StatusCode::OK);
+    response_status(setup_response, StatusCode::OK, "GET /setup").await;
 
     // Same path without `Accept: text/html` (e.g. curl, fetch default) is
     // not a browser navigation and must not get the SPA HTML fallback.
@@ -142,7 +147,12 @@ async fn web_enabled_serves_web_only_routes() {
         .body(Body::empty())
         .unwrap();
     let setup_no_accept_response = app.clone().oneshot(setup_no_accept).await.unwrap();
-    assert_eq!(setup_no_accept_response.status(), StatusCode::NOT_FOUND);
+    response_status(
+        setup_no_accept_response,
+        StatusCode::NOT_FOUND,
+        "GET /setup",
+    )
+    .await;
 
     let setup_status_request = Request::builder()
         .method("GET")
@@ -150,7 +160,12 @@ async fn web_enabled_serves_web_only_routes() {
         .body(Body::empty())
         .unwrap();
     let setup_status_response = app.clone().oneshot(setup_status_request).await.unwrap();
-    assert_eq!(setup_status_response.status(), StatusCode::NOT_FOUND);
+    response_status(
+        setup_status_response,
+        StatusCode::NOT_FOUND,
+        "GET /api/v1/setup/status",
+    )
+    .await;
 
     let setup_complete_request = Request::builder()
         .method("GET")
@@ -158,7 +173,12 @@ async fn web_enabled_serves_web_only_routes() {
         .body(Body::empty())
         .unwrap();
     let setup_complete_response = app.clone().oneshot(setup_complete_request).await.unwrap();
-    assert_eq!(setup_complete_response.status(), StatusCode::NOT_FOUND);
+    response_status(
+        setup_complete_response,
+        StatusCode::NOT_FOUND,
+        "GET /setup/complete",
+    )
+    .await;
 
     let demo_toggle_request = Request::builder()
         .method("POST")
@@ -166,8 +186,12 @@ async fn web_enabled_serves_web_only_routes() {
         .header("content-type", "application/json")
         .body(Body::from(r#"{"enabled":true}"#))
         .unwrap();
-    let demo_toggle_response = app.clone().oneshot(demo_toggle_request).await.unwrap();
-    assert_eq!(demo_toggle_response.status(), StatusCode::OK);
+    let demo_toggle_response = checked_response(
+        app.clone().oneshot(demo_toggle_request).await.unwrap(),
+        StatusCode::OK,
+        "POST /api/v1/demo/toggle",
+    )
+    .await;
     assert!(
         demo_toggle_response.headers().contains_key("set-cookie"),
         "demo toggle should set a cookie"
@@ -183,7 +207,12 @@ async fn web_enabled_serves_web_only_routes() {
         .body(Body::empty())
         .unwrap();
     let api_miss_response = app.oneshot(api_miss).await.unwrap();
-    assert_eq!(api_miss_response.status(), StatusCode::NOT_FOUND);
+    response_status(
+        api_miss_response,
+        StatusCode::NOT_FOUND,
+        "GET /api/v2/nonexistent",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -191,17 +220,21 @@ async fn security_headers_are_applied_to_all_responses() {
     let app = build_router(create_app_state(), AuthMode::Disabled);
 
     // Plain HTTP: HSTS must NOT be present.
-    let api_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/health")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let api_response = checked_response(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        StatusCode::OK,
+        "GET /health",
+    )
+    .await;
     let headers = api_response.headers();
     assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
     assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
@@ -222,18 +255,22 @@ async fn security_headers_are_applied_to_all_responses() {
     );
 
     // X-Forwarded-Proto: https signals the request reached an HTTPS edge.
-    let https_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/health")
-                .header("x-forwarded-proto", "https")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let https_response = checked_response(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/health")
+                    .header("x-forwarded-proto", "https")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        StatusCode::OK,
+        "GET /health with x-forwarded-proto=https",
+    )
+    .await;
     assert_eq!(
         https_response
             .headers()
@@ -243,8 +280,8 @@ async fn security_headers_are_applied_to_all_responses() {
     );
 
     // SPA fallback path must also get the headers.
-    let spa_response = app
-        .oneshot(
+    let spa_response = checked_response(
+        app.oneshot(
             Request::builder()
                 .method("GET")
                 .uri("/runs/abc123")
@@ -253,8 +290,11 @@ async fn security_headers_are_applied_to_all_responses() {
                 .unwrap(),
         )
         .await
-        .unwrap();
-    assert_eq!(spa_response.status(), StatusCode::OK);
+        .unwrap(),
+        StatusCode::OK,
+        "GET /runs/abc123",
+    )
+    .await;
     assert_eq!(
         spa_response.headers().get("x-frame-options").unwrap(),
         "DENY"
@@ -310,7 +350,10 @@ enabled = false
         create_app_state_with_options(settings, 5),
         AuthMode::Disabled,
         Arc::new(IpAllowlistConfig::default()),
-        RouterOptions { web_enabled: false },
+        RouterOptions {
+            web_enabled: false,
+            ..RouterOptions::default()
+        },
     );
 
     for (method, path, body) in [
@@ -334,7 +377,7 @@ enabled = false
             .unwrap();
 
         let response = app.clone().oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
+        response_status(response, StatusCode::NOT_FOUND, format!("{method} {path}")).await;
     }
 
     let settings_request = Request::builder()
@@ -343,7 +386,7 @@ enabled = false
         .body(Body::empty())
         .unwrap();
     let settings_response = app.clone().oneshot(settings_request).await.unwrap();
-    assert_eq!(settings_response.status(), StatusCode::OK);
+    response_status(settings_response, StatusCode::OK, "GET /api/v1/settings").await;
 
     let health_request = Request::builder()
         .method("GET")
@@ -351,7 +394,7 @@ enabled = false
         .body(Body::empty())
         .unwrap();
     let health_response = app.oneshot(health_request).await.unwrap();
-    assert_eq!(health_response.status(), StatusCode::OK);
+    response_status(health_response, StatusCode::OK, "GET /health").await;
 }
 
 #[tokio::test]
@@ -369,7 +412,10 @@ enabled = false
         create_app_state_with_options(settings, 5),
         AuthMode::Disabled,
         Arc::new(IpAllowlistConfig::default()),
-        RouterOptions { web_enabled: false },
+        RouterOptions {
+            web_enabled: false,
+            ..RouterOptions::default()
+        },
     );
     let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
@@ -381,7 +427,7 @@ enabled = false
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    response_status(response, StatusCode::NOT_FOUND, "GET /api/v1/runs/{id}").await;
 }
 
 #[tokio::test]
@@ -404,7 +450,7 @@ async fn allowlist_blocks_non_allowlisted_api_requests() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    response_status(response, StatusCode::FORBIDDEN, "GET /api/v1/runs").await;
 }
 
 #[tokio::test]
@@ -427,7 +473,7 @@ async fn allowlist_exempts_health_checks() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    response_status(response, StatusCode::OK, "GET /health").await;
 }
 
 fn request_with_connect_info(path: &str, ip: IpAddr) -> Request<Body> {

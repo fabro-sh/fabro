@@ -1,15 +1,16 @@
 use fabro_types::settings::InterpString;
 use fabro_types::settings::server::{
-    DiscordIntegrationSettings, GithubIntegrationSettings, IntegrationWebhooksLayer,
-    IntegrationWebhooksSettings, IpAllowEntry, ObjectStoreLocalLayer, ObjectStoreProvider,
-    ObjectStoreS3Layer, ObjectStoreSettings, ServerApiLayer, ServerApiSettings,
-    ServerArtifactsLayer, ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthLayer,
-    ServerAuthMethod, ServerAuthSettings, ServerIntegrationsLayer, ServerIntegrationsSettings,
-    ServerIpAllowlistLayer, ServerIpAllowlistOverrideLayer, ServerIpAllowlistOverrideSettings,
-    ServerIpAllowlistSettings, ServerLayer, ServerListenLayer, ServerListenSettings,
-    ServerLoggingSettings, ServerSchedulerSettings, ServerSettings, ServerSlateDbLayer,
-    ServerSlateDbSettings, ServerStorageLayer, ServerStorageSettings, ServerWebLayer,
-    ServerWebSettings, SlackIntegrationSettings, TeamsIntegrationSettings,
+    DiscordIntegrationSettings, GithubIntegrationSettings, GithubIntegrationStrategy,
+    IntegrationWebhooksLayer, IntegrationWebhooksSettings, IpAllowEntry, ObjectStoreLocalLayer,
+    ObjectStoreProvider, ObjectStoreS3Layer, ObjectStoreSettings, ServerApiLayer,
+    ServerApiSettings, ServerArtifactsLayer, ServerArtifactsSettings, ServerAuthGithubSettings,
+    ServerAuthLayer, ServerAuthMethod, ServerAuthSettings, ServerIntegrationsLayer,
+    ServerIntegrationsSettings, ServerIpAllowlistLayer, ServerIpAllowlistOverrideLayer,
+    ServerIpAllowlistOverrideSettings, ServerIpAllowlistSettings, ServerLayer, ServerListenLayer,
+    ServerListenSettings, ServerLoggingSettings, ServerSchedulerSettings, ServerSettings,
+    ServerSlateDbLayer, ServerSlateDbSettings, ServerStorageLayer, ServerStorageSettings,
+    ServerWebLayer, ServerWebSettings, SlackIntegrationSettings, TeamsIntegrationSettings,
+    WebhookStrategy,
 };
 use fabro_util::Home;
 
@@ -25,6 +26,7 @@ pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> Se
     let integrations = resolve_integrations(layer.integrations.as_ref(), errors);
     validate_ip_allowlist_for_listen(&listen, &ip_allowlist, errors);
     validate_github_webhook_ip_allowlist_for_listen(&listen, &ip_allowlist, &integrations, errors);
+    validate_github_webhook_strategy(&integrations, layer.api.as_ref(), errors);
 
     ServerSettings {
         listen,
@@ -289,6 +291,40 @@ fn validate_github_webhook_ip_allowlist_for_listen(
                 .to_string(),
             reason:
                 "must be greater than 0 when using a Unix socket listener with a non-empty GitHub webhook IP allowlist"
+                    .to_string(),
+        });
+    }
+}
+
+fn validate_github_webhook_strategy(
+    integrations: &ServerIntegrationsSettings,
+    api_layer: Option<&ServerApiLayer>,
+    errors: &mut Vec<ResolveError>,
+) {
+    let github = &integrations.github;
+    let strategy = github
+        .webhooks
+        .as_ref()
+        .and_then(|webhooks| webhooks.strategy);
+
+    if strategy.is_some()
+        && github.strategy == GithubIntegrationStrategy::App
+        && github.app_id.is_none()
+    {
+        errors.push(ResolveError::Invalid {
+            path:   "server.integrations.github.app_id".to_string(),
+            reason: "must be set when server.integrations.github.webhooks.strategy is configured"
+                .to_string(),
+        });
+    }
+
+    if matches!(strategy, Some(WebhookStrategy::ServerUrl))
+        && api_layer.and_then(|api| api.url.as_ref()).is_none()
+    {
+        errors.push(ResolveError::Invalid {
+            path:   "server.api.url".to_string(),
+            reason:
+                "must be set when server.integrations.github.webhooks.strategy = \"server_url\""
                     .to_string(),
         });
     }

@@ -6,7 +6,7 @@ description: "Integrate Fabro with GitHub for repository access and OAuth login"
 Fabro supports two GitHub integration strategies:
 
 - `token` — the default for local and individual use. Fabro captures `gh auth token` during `fabro install`, stores it as `GITHUB_TOKEN`, and uses that token directly for repo access, pull requests, and sandbox `GITHUB_TOKEN` injection.
-- `app` — the team-oriented option. Fabro registers a [GitHub App](https://docs.github.com/en/apps/overview), uses installation tokens for repo access, and enables browser OAuth and webhooks.
+- `app` — the team-oriented option. Fabro registers a [GitHub App](https://docs.github.com/en/apps/overview), uses installation tokens for repo access, enables browser OAuth, and supports webhook delivery when you configure a [webhook strategy](#webhook-delivery-strategies).
 
 `token` changes GitHub integration auth only. It does not provide browser sign-in, so the embedded web UI is disabled when `strategy = "token"`.
 
@@ -19,11 +19,11 @@ Fabro supports two GitHub integration strategies:
 | Sandbox `GITHUB_TOKEN` | Direct token | Scoped installation token |
 | Browser sign-in | No | Yes |
 | Web UI routes | Disabled | Enabled |
-| Webhooks | No | Yes |
+| Webhooks | No | Strategy-dependent |
 
 ## GitHub App mode
 
-The rest of this page describes the `app` strategy, which is required for browser auth and webhooks.
+The rest of this page describes the `app` strategy, which is required for browser auth and for any webhook delivery strategy.
 
 | Feature | How it's used |
 |---|---|
@@ -124,6 +124,30 @@ Fabro stores the GitHub App secrets in `<data_dir>/server.env` under these keys:
 - `GITHUB_APP_PRIVATE_KEY`
 
 The private key is stored as base64-encoded PEM. Fabro also accepts raw PEM format (starting with `-----BEGIN`).
+
+### Webhook delivery strategies
+
+Fabro receives GitHub webhooks on `POST /api/v1/webhooks/github` whenever `GITHUB_APP_WEBHOOK_SECRET` is configured. The webhook `strategy` controls how that route becomes reachable from GitHub:
+
+```toml title="settings.toml"
+[server.integrations.github]
+strategy = "app"
+app_id = "123456"
+client_id = "Iv1.abc123def"
+slug = "fabro-a3f2"
+
+[server.api]
+url = "https://fabro-api.example.com"
+
+[server.integrations.github.webhooks]
+strategy = "server_url"
+```
+
+- `server_url`: recommended for production. Fabro assumes `server.api.url` is already publicly reachable and best-effort updates the GitHub App webhook URL to `<server.api.url>/api/v1/webhooks/github` each time `fabro server start` runs.
+- `tailscale_funnel`: opt-in for machines reachable through Tailscale but not through a stable public URL. Fabro runs `tailscale funnel` against the main server port and best-effort updates the GitHub App webhook URL to the resulting Funnel origin.
+- Unset `strategy`: Fabro still serves the webhook route if the secret is present, but it does not expose the route for you and does not mutate the GitHub App webhook URL.
+
+`tailscale_funnel` has host-wide side effects: it changes Tailscale Funnel state on the server and rewrites the GitHub App webhook URL on startup. Use `server_url` when you already have HTTPS and a stable hostname.
 
 ### Reconfigure GitHub after install
 

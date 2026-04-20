@@ -16,8 +16,8 @@ use tokio::time::sleep;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    POLL_ATTEMPTS, POLL_INTERVAL, api, body_json, minimal_manifest_json, run_json, test_settings,
-    wait_for_run_status,
+    POLL_ATTEMPTS, POLL_INTERVAL, api, minimal_manifest_json, response_json, response_status,
+    run_json, test_settings, wait_for_run_status,
 };
 
 fn gate_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
@@ -37,7 +37,12 @@ async fn wait_for_question_id(app: &axum::Router, run_id: &str) -> String {
             .body(Body::empty())
             .expect("questions request should build");
         let response = app.clone().oneshot(req).await.unwrap();
-        let body = body_json(response.into_body()).await;
+        let body = response_json(
+            response,
+            StatusCode::OK,
+            format!("GET /api/v1/runs/{run_id}/questions"),
+        )
+        .await;
         let arr = body["data"]
             .as_array()
             .expect("questions response should include a data array");
@@ -61,7 +66,12 @@ async fn wait_for_question(app: &axum::Router, run_id: &str) -> serde_json::Valu
             .body(Body::empty())
             .expect("questions request should build");
         let response = app.clone().oneshot(req).await.unwrap();
-        let body = body_json(response.into_body()).await;
+        let body = response_json(
+            response,
+            StatusCode::OK,
+            format!("GET /api/v1/runs/{run_id}/questions"),
+        )
+        .await;
         let arr = body["data"]
             .as_array()
             .expect("questions response should include a data array");
@@ -124,8 +134,7 @@ async fn full_http_lifecycle_approve_and_complete() {
         .unwrap();
 
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let body = body_json(response.into_body()).await;
+    let body = response_json(response, StatusCode::CREATED, "POST /api/v1/runs").await;
     let run_id = body["id"].as_str().unwrap().to_string();
 
     // 1b. Start the run
@@ -135,7 +144,12 @@ async fn full_http_lifecycle_approve_and_complete() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    response_status(
+        response,
+        StatusCode::OK,
+        format!("POST /api/v1/runs/{run_id}/start"),
+    )
+    .await;
 
     // 2. Poll for question to appear (run goes start -> work -> gate, then blocks)
     let question = wait_for_question(&app, &run_id).await;
@@ -156,7 +170,12 @@ async fn full_http_lifecycle_approve_and_complete() {
         ))
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    response_status(
+        response,
+        StatusCode::NO_CONTENT,
+        format!("POST /api/v1/runs/{run_id}/questions/{question_id}/answer"),
+    )
+    .await;
 
     // 4. Poll until the run reaches a terminal success or failure state.
     let final_status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
@@ -169,7 +188,12 @@ async fn full_http_lifecycle_approve_and_complete() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    let body = body_json(response.into_body()).await;
+    let body = response_json(
+        response,
+        StatusCode::OK,
+        format!("GET /api/v1/runs/{run_id}/questions"),
+    )
+    .await;
     assert!(
         body["data"].as_array().unwrap().is_empty(),
         "no pending questions after completion"
@@ -192,7 +216,7 @@ async fn full_http_lifecycle_cancel() {
         ))
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    let body = body_json(response.into_body()).await;
+    let body = response_json(response, StatusCode::CREATED, "POST /api/v1/runs").await;
     let run_id = body["id"].as_str().unwrap().to_string();
 
     let req = Request::builder()
@@ -200,7 +224,12 @@ async fn full_http_lifecycle_cancel() {
         .uri(api(&format!("/runs/{run_id}/start")))
         .body(Body::empty())
         .unwrap();
-    app.clone().oneshot(req).await.unwrap();
+    response_status(
+        app.clone().oneshot(req).await.unwrap(),
+        StatusCode::OK,
+        format!("POST /api/v1/runs/{run_id}/start"),
+    )
+    .await;
 
     // Wait until the worker has reached the human gate so cancel exercises the
     // live-running path rather than racing the in-memory queue transition.
@@ -213,8 +242,12 @@ async fn full_http_lifecycle_cancel() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response.into_body()).await;
+    let body = response_json(
+        response,
+        StatusCode::OK,
+        format!("POST /api/v1/runs/{run_id}/cancel"),
+    )
+    .await;
     assert_eq!(body["status"], "running");
     assert_eq!(body["pending_control"], "cancel");
 
@@ -238,7 +271,7 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
         ))
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    let body = body_json(response.into_body()).await;
+    let body = response_json(response, StatusCode::CREATED, "POST /api/v1/runs").await;
     let run_id = body["id"].as_str().unwrap().to_string();
 
     let req = Request::builder()
@@ -246,7 +279,12 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
         .uri(api(&format!("/runs/{run_id}/start")))
         .body(Body::empty())
         .unwrap();
-    app.clone().oneshot(req).await.unwrap();
+    response_status(
+        app.clone().oneshot(req).await.unwrap(),
+        StatusCode::OK,
+        format!("POST /api/v1/runs/{run_id}/start"),
+    )
+    .await;
 
     let _question_id = wait_for_question_id(&app, &run_id).await;
 
@@ -256,7 +294,12 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    response_status(
+        response,
+        StatusCode::OK,
+        format!("POST /api/v1/runs/{run_id}/cancel"),
+    )
+    .await;
 
     let status = wait_for_run_status(&app, &run_id, &["failed"]).await;
     assert_eq!(status, "failed");
@@ -267,8 +310,12 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response.into_body()).await;
+    let body = response_json(
+        response,
+        StatusCode::OK,
+        format!("GET /api/v1/runs/{run_id}/events"),
+    )
+    .await;
     let failed_reasons = body["data"]
         .as_array()
         .unwrap()

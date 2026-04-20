@@ -237,7 +237,7 @@ pub fn auth_method_name(method: ServerAuthMethod) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use axum::body::{Body, to_bytes};
+    use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use axum::response::IntoResponse;
     use axum::routing::get;
@@ -297,9 +297,16 @@ mod tests {
             .layer(axum::Extension(mode))
     }
 
-    async fn response_json(response: axum::response::Response) -> serde_json::Value {
-        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        serde_json::from_slice(&bytes).unwrap()
+    macro_rules! response_json {
+        ($response:expr) => {
+            fabro_test::expect_axum_json($response, StatusCode::OK, concat!(file!(), ":", line!()))
+        };
+    }
+
+    macro_rules! assert_status {
+        ($response:expr, $expected:expr) => {
+            fabro_test::assert_axum_status($response, $expected, concat!(file!(), ":", line!()))
+        };
     }
 
     fn dev_token_mode() -> AuthMode {
@@ -392,7 +399,7 @@ client_id = "Iv1.test"
             .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_status!(response, StatusCode::OK).await;
     }
 
     #[tokio::test]
@@ -402,7 +409,7 @@ client_id = "Iv1.test"
             .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_status!(response, StatusCode::UNAUTHORIZED).await;
     }
 
     #[tokio::test]
@@ -421,8 +428,7 @@ client_id = "Iv1.test"
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let json = response_json(response).await;
+        let json = response_json!(response).await;
         assert_eq!(json["login"], "dev");
         assert_eq!(json["auth_method"], "dev_token");
     }
@@ -457,7 +463,7 @@ client_id = "Iv1.test"
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_status!(response, StatusCode::UNAUTHORIZED).await;
     }
 
     #[tokio::test]
@@ -476,8 +482,7 @@ client_id = "Iv1.test"
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let json = response_json(response).await;
+        let json = response_json!(response).await;
         assert_eq!(json["login"], "alice");
         assert_eq!(json["auth_method"], "github");
     }
