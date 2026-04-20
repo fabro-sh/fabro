@@ -222,15 +222,8 @@ async fn check_github_app_installation(
         }
     };
 
-    let check = match server
-        .api()
-        .get_github_repo()
-        .owner(owner.clone())
-        .name(repo.clone())
-        .send()
-        .await
-    {
-        Ok(response) => response.into_inner(),
+    let check = match server.get_github_repo(&owner, &repo).await {
+        Ok(response) => response,
         Err(err) => {
             fabro_util::printerr!(printer, "\n  Warning: could not check GitHub access: {err}");
             return;
@@ -270,16 +263,8 @@ async fn check_github_app_installation(
         })
         .await;
 
-        match server
-            .api()
-            .get_github_repo()
-            .owner(owner.clone())
-            .name(repo.clone())
-            .send()
-            .await
-        {
+        match server.get_github_repo(&owner, &repo).await {
             Ok(response) => {
-                let response = response.into_inner();
                 if response.accessible {
                     let green = console::Style::new().green();
                     fabro_util::printerr!(

@@ -1094,19 +1094,17 @@ async fn setup_github_app(
 }
 
 async fn persist_vault_secrets_via_server(
-    client: &fabro_api::ApiClient,
+    client: &server_client::Client,
     secrets: &[CreateSecretRequest],
 ) -> Result<()> {
     for secret in secrets {
         client
-            .create_secret()
-            .body(CreateSecretRequest {
+            .create_secret(CreateSecretRequest {
                 name:        secret.name.clone(),
                 value:       secret.value.clone(),
                 type_:       secret.type_,
                 description: secret.description.clone(),
             })
-            .send()
             .await?;
     }
 
@@ -1117,14 +1115,14 @@ async fn persist_vault_secrets_with(
     storage_dir: &Path,
     secrets: &[CreateSecretRequest],
     server_was_running: bool,
-    connect_api_client: impl for<'a> Fn(&'a Path) -> BoxFuture<'a, Result<fabro_api::ApiClient>>,
+    connect_server: impl for<'a> Fn(&'a Path) -> BoxFuture<'a, Result<server_client::Client>>,
     stop_server: impl for<'a> Fn(&'a Path, Duration) -> BoxFuture<'a, bool>,
 ) -> Result<()> {
     if secrets.is_empty() {
         return Ok(());
     }
 
-    let client = match connect_api_client(storage_dir).await {
+    let client = match connect_server(storage_dir).await {
         Ok(client) => client,
         Err(err) => {
             if !server_was_running {
@@ -1173,7 +1171,7 @@ async fn persist_install_outputs(
         vault_secrets,
         settings_write,
         server_was_running,
-        |path| Box::pin(server_client::connect_api_client(path)),
+        |path| Box::pin(server_client::connect_server(path)),
         |path, timeout| {
             Box::pin(async move { stop::stop_server(path, timeout).await.unwrap_or(false) })
         },
@@ -1303,7 +1301,7 @@ async fn persist_install_outputs_with_settings(
     vault_secrets: &[CreateSecretRequest],
     settings_write: Option<PendingSettingsWrite<'_>>,
     server_was_running: bool,
-    connect_api_client: impl for<'a> Fn(&'a Path) -> BoxFuture<'a, Result<fabro_api::ApiClient>>,
+    connect_server: impl for<'a> Fn(&'a Path) -> BoxFuture<'a, Result<server_client::Client>>,
     stop_server: impl for<'a> Fn(&'a Path, Duration) -> BoxFuture<'a, bool>,
 ) -> Result<()> {
     persist_server_env_secrets(storage_dir, server_env_secrets)?;
@@ -1317,7 +1315,7 @@ async fn persist_install_outputs_with_settings(
         storage_dir,
         vault_secrets,
         server_was_running,
-        connect_api_client,
+        connect_server,
         stop_server,
     )
     .await;
@@ -2486,10 +2484,7 @@ client_id = "client-id"
             &vault_secrets,
             false,
             |_| {
-                let client = fabro_api::ApiClient::new_with_client(
-                    &server.base_url(),
-                    fabro_test::test_http_client(),
-                );
+                let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
                 Box::pin(async move { Ok(client) })
             },
             {
@@ -2548,10 +2543,7 @@ client_id = "client-id"
             &vault_secrets,
             true,
             |_| {
-                let client = fabro_api::ApiClient::new_with_client(
-                    &server.base_url(),
-                    fabro_test::test_http_client(),
-                );
+                let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
                 Box::pin(async move { Ok(client) })
             },
             {

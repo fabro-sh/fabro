@@ -312,7 +312,7 @@ pub(crate) async fn run_doctor(
         }
     };
 
-    if let Err(err) = server.api().get_health().send().await {
+    if let Err(err) = server.get_health().await {
         report.sections.push(CheckSection {
             title:  "Server".to_string(),
             checks: vec![CheckResult {
@@ -349,9 +349,8 @@ pub(crate) async fn run_doctor(
         }],
     });
 
-    match server.api().run_diagnostics().send().await {
-        Ok(response) => {
-            let diagnostics = response.into_inner();
+    match server.run_diagnostics().await {
+        Ok(diagnostics) => {
             report.sections[0]
                 .checks
                 .push(check_version_parity(&diagnostics.version));

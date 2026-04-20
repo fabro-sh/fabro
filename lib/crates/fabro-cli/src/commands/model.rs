@@ -1,14 +1,13 @@
 use anyhow::{Context, Result, bail};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
-use fabro_api::{self, types as api_types};
+use fabro_api::types as api_types;
 use fabro_model::{Catalog, Model, Provider};
 use fabro_types::settings::CliSettings;
 use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 
 use crate::args::{ModelListArgs, ModelTestArgs, ModelsCommand};
 use crate::command_context::CommandContext;
@@ -55,12 +54,7 @@ pub(crate) async fn execute(
     let ctx = CommandContext::for_target(target_args, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
 
-    run_models(
-        command,
-        server.api(),
-        cli.output.format == OutputFormat::Json,
-    )
-    .await
+    run_models(command, &server, cli.output.format == OutputFormat::Json).await
 }
 
 fn format_context_window(tokens: i64) -> String {
@@ -198,64 +192,13 @@ fn model_test_row_from_status(model: &Model, status: &str, result_color: Color) 
     }
 }
 
-fn convert_type<TInput, TOutput>(value: TInput) -> Result<TOutput>
-where
-    TInput: serde::Serialize,
-    TOutput: DeserializeOwned,
-{
-    serde_json::from_value(serde_json::to_value(value)?).map_err(Into::into)
-}
-
-async fn fetch_models_from_server(
-    client: &fabro_api::ApiClient,
-    provider: Option<&str>,
-    query: Option<&str>,
-) -> Result<Vec<Model>> {
-    let mut offset = 0u64;
-    let mut models = Vec::new();
-
-    loop {
-        let mut request = client.list_models().page_limit(100u64).page_offset(offset);
-        if let Some(provider) = provider {
-            request = request.provider(provider.to_string());
-        }
-        if let Some(query) = query {
-            request = request.query(query.to_string());
-        }
-
-        let response = request.send().await.map_err(server_client::map_api_error)?;
-        let parsed = response.into_inner();
-        let count = parsed.data.len() as u64;
-        models.extend(convert_type::<_, Vec<Model>>(parsed.data)?);
-        if !parsed.meta.has_more {
-            break;
-        }
-        offset += count;
-    }
-
-    Ok(models)
-}
-
-async fn test_model_via_server(
-    client: &fabro_api::ApiClient,
-    model_id: &str,
-    mode: Option<api_types::ModelTestMode>,
-) -> Result<api_types::ModelTestResult> {
-    let mut request = client.test_model().id(model_id.to_string());
-    if let Some(mode) = mode {
-        request = request.mode(mode);
-    }
-    let response = request.send().await.map_err(server_client::map_api_error)?;
-    Ok(response.into_inner())
-}
-
 #[allow(
     clippy::print_stdout,
     clippy::print_stderr,
     reason = "Progress goes to stderr while tables or JSON results go to stdout."
 )]
 async fn test_models_via_server(
-    client: &fabro_api::ApiClient,
+    client: &server_client::Client,
     provider: Option<&str>,
     model: Option<&str>,
     deep: bool,
@@ -277,7 +220,7 @@ async fn test_models_via_server(
         if !json_output {
             eprint!("Testing {model_id}...");
         }
-        let result = test_model_via_server(client, model_id, request_mode).await;
+        let result = client.test_model(model_id, request_mode).await;
         if !json_output {
             eprintln!(" done");
         }
@@ -327,7 +270,7 @@ async fn test_models_via_server(
         rows.push(row);
         json_rows.push(model_test_row_from_status(&info, &status, result_color));
     } else {
-        let models_to_test = fetch_models_from_server(client, provider, None).await?;
+        let models_to_test = client.list_models(provider, None).await?;
         if models_to_test.is_empty() {
             bail!("No models found");
         }
@@ -336,7 +279,7 @@ async fn test_models_via_server(
             if !json_output {
                 eprint!("Testing {}...", info.id);
             }
-            let result = test_model_via_server(client, &info.id, request_mode).await;
+            let result = client.test_model(&info.id, request_mode).await;
             if !json_output {
                 eprintln!(" done");
             }
@@ -432,7 +375,7 @@ async fn test_models_via_server(
 )]
 async fn run_models(
     command: ModelsCommand,
-    client: &fabro_api::ApiClient,
+    client: &server_client::Client,
     json_output: bool,
 ) -> Result<()> {
     let styles = Styles::detect_stdout();
@@ -441,8 +384,9 @@ async fn run_models(
         ModelsCommand::List(ModelListArgs {
             provider, query, ..
         }) => {
-            let models =
-                fetch_models_from_server(client, provider.as_deref(), query.as_deref()).await?;
+            let models = client
+                .list_models(provider.as_deref(), query.as_deref())
+                .await?;
 
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&models)?);
@@ -483,8 +427,8 @@ mod tests {
 
     use super::*;
 
-    fn test_api_client(api_url: &str) -> fabro_api::ApiClient {
-        fabro_api::ApiClient::new_with_client(api_url, fabro_test::test_http_client())
+    fn test_api_client(api_url: &str) -> server_client::Client {
+        server_client::Client::new_no_proxy(api_url).unwrap()
     }
 
     fn test_model_json(id: &str, provider: Provider) -> serde_json::Value {
@@ -591,9 +535,7 @@ mod tests {
             .await;
 
         let client = test_api_client(&server.url(""));
-        let response = test_model_via_server(&client, "test-model", None)
-            .await
-            .unwrap();
+        let response = client.test_model("test-model", None).await.unwrap();
 
         assert_eq!(response.status, api_types::ModelTestResultStatus::Ok);
         assert!(response.error_message.is_none());
@@ -621,10 +563,10 @@ mod tests {
             .await;
 
         let client = test_api_client(&server.url(""));
-        let response =
-            test_model_via_server(&client, "test-model", Some(api_types::ModelTestMode::Deep))
-                .await
-                .unwrap();
+        let response = client
+            .test_model("test-model", Some(api_types::ModelTestMode::Deep))
+            .await
+            .unwrap();
 
         assert_eq!(response.status, api_types::ModelTestResultStatus::Error);
         assert_eq!(response.error_message.as_deref(), Some("timeout"));
@@ -649,9 +591,7 @@ mod tests {
             .await;
 
         let client = test_api_client(&server.url(""));
-        let response = test_model_via_server(&client, "kimi-k2.5", None)
-            .await
-            .unwrap();
+        let response = client.test_model("kimi-k2.5", None).await.unwrap();
 
         assert_eq!(response.status, api_types::ModelTestResultStatus::Skip);
         assert!(response.error_message.is_none());
@@ -675,7 +615,7 @@ mod tests {
             .await;
 
         let client = test_api_client(&server.url(""));
-        let result = test_model_via_server(&client, "bad-model", None).await;
+        let result = client.test_model("bad-model", None).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Model not found"));
     }
@@ -702,7 +642,7 @@ mod tests {
             .await;
 
         let client = test_api_client(&server.url(""));
-        let models = fetch_models_from_server(&client, None, None).await.unwrap();
+        let models = client.list_models(None, None).await.unwrap();
 
         mock.assert_async().await;
         assert_eq!(models.len(), 1);
@@ -733,9 +673,7 @@ mod tests {
             .await;
 
         let client = test_api_client(&server.url(""));
-        let models = fetch_models_from_server(&client, Some("anthropic"), None)
-            .await
-            .unwrap();
+        let models = client.list_models(Some("anthropic"), None).await.unwrap();
 
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "model-a");
@@ -764,9 +702,7 @@ mod tests {
             .await;
 
         let client = test_api_client(&server.url(""));
-        let models = fetch_models_from_server(&client, None, Some("sonnet"))
-            .await
-            .unwrap();
+        let models = client.list_models(None, Some("sonnet")).await.unwrap();
 
         mock.assert_async().await;
         assert_eq!(models.len(), 1);
@@ -812,7 +748,7 @@ mod tests {
             .await;
 
         let client = test_api_client(&server.url(""));
-        let models = fetch_models_from_server(&client, None, None).await.unwrap();
+        let models = client.list_models(None, None).await.unwrap();
 
         first_page.assert_async().await;
         second_page.assert_async().await;
@@ -835,7 +771,7 @@ mod tests {
             .await;
 
         let client = test_api_client(&server.url(""));
-        let result = fetch_models_from_server(&client, None, None).await;
+        let result = client.list_models(None, None).await;
         assert!(result.is_err());
     }
 }

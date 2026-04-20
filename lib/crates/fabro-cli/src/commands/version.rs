@@ -13,7 +13,6 @@ use serde_json::{Map, Value, json};
 
 use crate::args::VersionArgs;
 use crate::command_context::CommandContext;
-use crate::server_client;
 use crate::shared::print_json_pretty;
 use crate::user_config::{self, ServerTarget};
 
@@ -28,26 +27,17 @@ pub(crate) async fn version_command(
     let server_target = user_config::resolve_server_target(&args.target, ctx.machine_settings())?;
     let server_address = format_server_target(&server_target);
     let server_info = match ctx.server().await {
-        Ok(server) => match server
-            .api()
-            .get_system_info()
-            .send()
-            .await
-            .map_err(server_client::map_api_error)
-        {
-            Ok(response) => {
-                let response = response.into_inner();
-                ServerVersionInfo::Success {
-                    address:     server_address,
-                    version:     response.version,
-                    git_sha:     response.git_sha,
-                    build_date:  response.build_date,
-                    profile:     response.profile,
-                    os:          response.os,
-                    arch:        response.arch,
-                    uptime_secs: response.uptime_secs,
-                }
-            }
+        Ok(server) => match server.get_system_info().await {
+            Ok(response) => ServerVersionInfo::Success {
+                address:     server_address,
+                version:     response.version,
+                git_sha:     response.git_sha,
+                build_date:  response.build_date,
+                profile:     response.profile,
+                os:          response.os,
+                arch:        response.arch,
+                uptime_secs: response.uptime_secs,
+            },
             Err(err) => ServerVersionInfo::Error {
                 address: server_address,
                 error:   err.to_string(),

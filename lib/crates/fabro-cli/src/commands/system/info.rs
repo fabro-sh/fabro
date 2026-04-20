@@ -5,7 +5,6 @@ use fabro_util::printer::Printer;
 
 use crate::args::SystemInfoArgs;
 use crate::command_context::CommandContext;
-use crate::server_client;
 use crate::shared::print_json_pretty;
 
 pub(super) async fn info_command(
@@ -16,13 +15,7 @@ pub(super) async fn info_command(
 ) -> Result<()> {
     let ctx = CommandContext::for_connection(&args.connection, printer, cli.clone(), cli_layer)?;
     let server = ctx.server().await?;
-    let response = server
-        .api()
-        .get_system_info()
-        .send()
-        .await
-        .map_err(server_client::map_api_error)?
-        .into_inner();
+    let response = server.get_system_info().await?;
 
     if cli.output.format == OutputFormat::Json {
         print_json_pretty(&response)?;

@@ -10,14 +10,14 @@
 use std::io::{IsTerminal, Read as _};
 
 use anyhow::{Context as _, Result, bail};
-use fabro_api::{ApiClient, types};
+use fabro_api::types;
 use fabro_types::settings::CliSettings;
 use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 use tokio::task::spawn_blocking;
 
 use crate::args::{SecretSetArgs, SecretTypeArg};
-use crate::server_client;
+use crate::server_client::Client;
 use crate::shared::print_json_pretty;
 use crate::shared::provider_auth::prompt_password;
 
@@ -58,24 +58,20 @@ async fn resolve_value(args: &SecretSetArgs) -> Result<String> {
 }
 
 pub(super) async fn set_command(
-    client: &ApiClient,
+    client: &Client,
     args: &SecretSetArgs,
     cli: &CliSettings,
     printer: Printer,
 ) -> Result<()> {
     let value = resolve_value(args).await?;
     let meta = client
-        .create_secret()
-        .body(types::CreateSecretRequest {
+        .create_secret(types::CreateSecretRequest {
             name: args.key.clone(),
             value,
             type_: api_secret_type(args.r#type),
             description: args.description.clone(),
         })
-        .send()
-        .await
-        .map_err(server_client::map_api_error)?
-        .into_inner();
+        .await?;
     if cli.output.format == OutputFormat::Json {
         print_json_pretty(&meta)?;
     } else {

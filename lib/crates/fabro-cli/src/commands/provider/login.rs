@@ -36,15 +36,12 @@ pub(super) async fn login_command(
     let value = serde_json::to_string(&credential)?;
 
     server
-        .api()
-        .create_secret()
-        .body(types::CreateSecretRequest {
+        .create_secret(types::CreateSecretRequest {
             name: credential_id.clone(),
             value,
             type_: types::SecretType::Credential,
             description: None,
         })
-        .send()
         .await?;
     fabro_util::printerr!(
         printer,

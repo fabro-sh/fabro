@@ -10,6 +10,7 @@ use fabro_api::types;
 use fabro_config::Storage;
 use fabro_http::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
 use fabro_http::multipart::{Form, Part};
+use fabro_model::Model;
 use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
 use fabro_types::settings::SettingsLayer;
@@ -89,7 +90,6 @@ impl RunAttachEventStream {
 
 pub(crate) use fabro_store::RunProjection;
 
-#[cfg(test)]
 pub(crate) async fn connect_server(storage_dir: &Path) -> Result<Client> {
     connect_api_client_bundle(storage_dir).await
 }
@@ -139,12 +139,6 @@ async fn connect_api_client_bundle(storage_dir: &Path) -> Result<Client> {
             })
         }
     }
-}
-
-pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::ApiClient> {
-    connect_api_client_bundle(storage_dir)
-        .await
-        .map(|client| client.client)
 }
 
 async fn connect_target_api_client_bundle(
@@ -474,10 +468,6 @@ impl Client {
         self.clone()
     }
 
-    pub(crate) fn api(&self) -> &fabro_api::ApiClient {
-        &self.client
-    }
-
     #[allow(
         dead_code,
         reason = "This accessor is kept for tests and pending callers."
@@ -549,6 +539,174 @@ impl Client {
             .id
             .parse()
             .map_err(|err| anyhow!("invalid run ID from server: {err}"))
+    }
+
+    pub(crate) async fn list_secrets(&self) -> Result<Vec<types::SecretMetadata>> {
+        let response = self
+            .client
+            .list_secrets()
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(response.into_inner().data)
+    }
+
+    pub(crate) async fn create_secret(
+        &self,
+        body: types::CreateSecretRequest,
+    ) -> Result<types::SecretMetadata> {
+        let response = self
+            .client
+            .create_secret()
+            .body(body)
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(response.into_inner())
+    }
+
+    pub(crate) async fn delete_secret_by_name(&self, name: &str) -> Result<()> {
+        self.client
+            .delete_secret_by_name()
+            .body(types::DeleteSecretRequest {
+                name: name.to_string(),
+            })
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(())
+    }
+
+    pub(crate) async fn list_models(
+        &self,
+        provider: Option<&str>,
+        query: Option<&str>,
+    ) -> Result<Vec<Model>> {
+        let mut offset = 0u64;
+        let mut models = Vec::new();
+
+        loop {
+            let mut request = self
+                .client
+                .list_models()
+                .page_limit(100u64)
+                .page_offset(offset);
+            if let Some(provider) = provider {
+                request = request.provider(provider.to_string());
+            }
+            if let Some(query) = query {
+                request = request.query(query.to_string());
+            }
+
+            let response = request.send().await.map_err(map_api_error)?;
+            let parsed = response.into_inner();
+            let count = parsed.data.len() as u64;
+            models.extend(convert_type::<_, Vec<Model>>(parsed.data)?);
+            if !parsed.meta.has_more {
+                break;
+            }
+            offset += count;
+        }
+
+        Ok(models)
+    }
+
+    pub(crate) async fn test_model(
+        &self,
+        id: &str,
+        mode: Option<types::ModelTestMode>,
+    ) -> Result<types::ModelTestResult> {
+        let mut request = self.client.test_model().id(id.to_string());
+        if let Some(mode) = mode {
+            request = request.mode(mode);
+        }
+        let response = request.send().await.map_err(map_api_error)?;
+        Ok(response.into_inner())
+    }
+
+    pub(crate) async fn attach_events(
+        &self,
+        run_ids: &[String],
+    ) -> Result<progenitor_client::ByteStream> {
+        let mut request = self.client.attach_events();
+        if !run_ids.is_empty() {
+            request = request.run_id(run_ids.join(","));
+        }
+        let response = request.send().await.map_err(map_api_error)?;
+        Ok(response.into_inner())
+    }
+
+    pub(crate) async fn get_system_info(&self) -> Result<types::SystemInfoResponse> {
+        let response = self
+            .client
+            .get_system_info()
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(response.into_inner())
+    }
+
+    pub(crate) async fn get_system_disk_usage(
+        &self,
+        verbose: bool,
+    ) -> Result<types::DiskUsageResponse> {
+        let response = self
+            .client
+            .get_system_disk_usage()
+            .verbose(verbose)
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(response.into_inner())
+    }
+
+    pub(crate) async fn prune_runs(
+        &self,
+        body: types::PruneRunsRequest,
+    ) -> Result<types::PruneRunsResponse> {
+        let response = self
+            .client
+            .prune_runs()
+            .body(body)
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(response.into_inner())
+    }
+
+    pub(crate) async fn get_health(&self) -> Result<()> {
+        self.client
+            .get_health()
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(())
+    }
+
+    pub(crate) async fn run_diagnostics(&self) -> Result<types::DiagnosticsReport> {
+        let response = self
+            .client
+            .run_diagnostics()
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(response.into_inner())
+    }
+
+    pub(crate) async fn get_github_repo(
+        &self,
+        owner: &str,
+        name: &str,
+    ) -> Result<types::RepoCheckResponse> {
+        let response = self
+            .client
+            .get_github_repo()
+            .owner(owner.to_string())
+            .name(name.to_string())
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(response.into_inner())
     }
 
     pub(crate) async fn run_preflight(
@@ -1190,6 +1348,10 @@ fn non_zero_u64_from_usize(value: usize) -> Option<NonZeroU64> {
     reason = "server-client tests stage local dev-token fixtures with sync std::fs::write"
 )]
 mod tests {
+    use futures::StreamExt as _;
+    use httpmock::Method::GET;
+    use httpmock::MockServer;
+
     use super::*;
 
     #[test]
@@ -1298,5 +1460,36 @@ mod tests {
         ));
         assert!(remote_url_targets_local_host("http://0.0.0.0:32276"));
         assert!(!remote_url_targets_local_host("https://example.com"));
+    }
+
+    #[tokio::test]
+    async fn attach_events_returns_raw_sse_bytes() {
+        let server = MockServer::start_async().await;
+        let payload = serde_json::json!({
+            "seq": 1,
+            "payload": {
+                "event": "run.started",
+                "run_id": "run_123"
+            }
+        });
+        let body = format!("data: {payload}\n\n");
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/api/v1/attach");
+                then.status(200)
+                    .header("Content-Type", "text/event-stream")
+                    .body(body.clone());
+            })
+            .await;
+
+        let client = Client::new_no_proxy(&server.base_url()).unwrap();
+        let mut stream = client.attach_events(&[]).await.unwrap();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            bytes.extend_from_slice(&chunk.unwrap());
+        }
+
+        mock.assert_async().await;
+        assert_eq!(String::from_utf8(bytes).unwrap(), body);
     }
 }
