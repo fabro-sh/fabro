@@ -9,7 +9,9 @@ use fabro_config::merge::combine_files;
 use fabro_config::user::load_settings_config;
 use fabro_config::{Storage, resolve_server_from_file};
 use fabro_sandbox::SandboxProvider;
-use fabro_types::settings::server::{GithubIntegrationStrategy, ServerLayer, ServerListenLayer};
+use fabro_types::settings::server::{
+    GithubIntegrationStrategy, ServerLayer, ServerListenLayer, WebhookStrategy,
+};
 use fabro_types::settings::{
     InterpString, ObjectStoreSettings, ServerListenSettings,
     ServerSettings as ResolvedServerSettings, SettingsLayer,
@@ -25,7 +27,7 @@ use tokio::time::interval;
 use tracing::{error, info, warn};
 
 use crate::bind::{self, Bind, BindRequest};
-use crate::github_webhooks::WebhookManager;
+use crate::github_webhooks::{TailscaleFunnelManager, update_github_app_webhook};
 use crate::ip_allowlist::{GitHubMetaResolver, IpAllowlistConfig, resolve_ip_allowlist_config};
 use crate::jwt_auth::resolve_auth_mode_with_lookup;
 use crate::server::{
@@ -161,6 +163,20 @@ async fn resolve_github_webhook_ip_allowlist(
     .context("resolving GitHub webhook IP allowlist")?;
 
     Ok(Arc::new(config))
+}
+
+async fn resolve_startup_github_webhook_ip_allowlist(
+    resolved_server_settings: &ResolvedServerSettings,
+    github_meta_resolver: &GitHubMetaResolver,
+    webhook_secret_present: bool,
+) -> anyhow::Result<Option<Arc<IpAllowlistConfig>>> {
+    if !webhook_secret_present {
+        return Ok(None);
+    }
+
+    resolve_github_webhook_ip_allowlist(resolved_server_settings, github_meta_resolver)
+        .await
+        .map(Some)
 }
 
 fn use_in_memory_store() -> bool {
@@ -335,6 +351,7 @@ where
     let vault_path = storage.secrets_path();
     let server_env_path = storage.server_state().env_path();
     let server_secrets = ServerSecrets::load(server_env_path.clone())?;
+    let webhook_secret_present = server_secrets.get("GITHUB_APP_WEBHOOK_SECRET").is_some();
 
     // Shared config for live reloading
     let effective_settings = apply_runtime_settings(&disk_settings, &args, &data_dir);
@@ -400,67 +417,143 @@ where
         .await
         .context("resolving server IP allowlist")?,
     );
+    let github_webhook_ip_allowlist = resolve_startup_github_webhook_ip_allowlist(
+        &resolved_server_settings,
+        &github_meta_resolver,
+        webhook_secret_present,
+    )
+    .await?;
     let router = build_router_with_options(
         Arc::clone(&state),
         auth_mode,
         Arc::clone(&default_ip_allowlist),
-        RouterOptions { web_enabled },
+        RouterOptions {
+            web_enabled,
+            github_webhook_ip_allowlist,
+        },
     );
+    let bound_listener = bind_listener(&bind_request).await?;
+    let bind_addr = bound_listener.bind.clone();
 
-    // Optionally start webhook listener
-    let webhook_manager = match resolved_server_settings.integrations.github.strategy {
-        GithubIntegrationStrategy::Token => None,
-        GithubIntegrationStrategy::App => {
+    let webhook_manager = match resolved_server_settings
+        .integrations
+        .github
+        .webhooks
+        .as_ref()
+        .and_then(|webhooks| webhooks.strategy)
+    {
+        None => None,
+        Some(_)
+            if resolved_server_settings.integrations.github.strategy
+                != GithubIntegrationStrategy::App =>
+        {
+            warn!(
+                "GitHub webhook strategy is configured but GitHub integration auth is not set to app; skipping webhook startup"
+            );
+            None
+        }
+        Some(strategy) => {
             let webhook_app_id = resolved_server_settings
                 .integrations
                 .github
-                .webhooks
+                .app_id
                 .as_ref()
-                .and(resolved_server_settings.integrations.github.app_id.as_ref())
                 .map(resolve_interp)
                 .transpose()?;
             match webhook_app_id {
                 Some(app_id) => {
-                    let secret = server_secrets.get("GITHUB_APP_WEBHOOK_SECRET");
                     let github_app = state
                         .github_credentials(&resolved_server_settings.integrations.github)
                         .unwrap_or_else(|err| {
                             warn!(
                                 error = %err,
-                                "Webhook config present but GitHub credentials are invalid; skipping webhook listener"
+                                "Webhook strategy is configured but GitHub credentials are invalid; skipping webhook startup"
                             );
                             None
                         });
-                    if let (Some(secret), Some(fabro_github::GitHubCredentials::App(github_app))) =
-                        (secret, github_app)
-                    {
-                        let webhook_ip_allowlist = resolve_github_webhook_ip_allowlist(
-                            &resolved_server_settings,
-                            &github_meta_resolver,
-                        )
-                        .await?;
-                        match WebhookManager::start(
-                            secret.into_bytes(),
-                            &app_id,
-                            &github_app.private_key_pem,
-                            webhook_ip_allowlist,
-                        )
-                        .await
-                        {
-                            Ok(manager) => Some(manager),
-                            Err(err) => {
-                                error!(error = %err, "Failed to start webhook listener");
-                                None
+                    if webhook_secret_present {
+                        if let Some(fabro_github::GitHubCredentials::App(github_app)) = github_app {
+                            match strategy {
+                                WebhookStrategy::TailscaleFunnel => {
+                                    match bound_tcp_port(&bind_addr) {
+                                        Some(port) => match TailscaleFunnelManager::start(
+                                            port,
+                                            &app_id,
+                                            &github_app.private_key_pem,
+                                        )
+                                        .await
+                                        {
+                                            Ok(manager) => Some(manager),
+                                            Err(err) => {
+                                                error!(
+                                                    error = %err,
+                                                    "Failed to start Tailscale funnel for GitHub webhooks"
+                                                );
+                                                None
+                                            }
+                                        },
+                                        None => {
+                                            warn!(
+                                                "GitHub webhook strategy tailscale_funnel requires a TCP server listen address; skipping webhook startup"
+                                            );
+                                            None
+                                        }
+                                    }
+                                }
+                                WebhookStrategy::ServerUrl => {
+                                    let server_api_url = resolved_server_settings
+                                        .api
+                                        .url
+                                        .as_ref()
+                                        .map(resolve_interp)
+                                        .transpose()?
+                                        .expect(
+                                            "server.api.url should be validated when server_url strategy is configured",
+                                        );
+                                    let webhook_url = format!(
+                                        "{}/api/v1/webhooks/github",
+                                        server_api_url.trim_end_matches('/')
+                                    );
+                                    if let Err(err) = update_github_app_webhook(
+                                        &app_id,
+                                        &github_app.private_key_pem,
+                                        &webhook_url,
+                                    )
+                                    .await
+                                    {
+                                        warn!(
+                                            error = %err,
+                                            url = %webhook_url,
+                                            "Failed to update GitHub App webhook URL"
+                                        );
+                                    } else {
+                                        info!(
+                                            url = %webhook_url,
+                                            "GitHub App webhook URL updated"
+                                        );
+                                    }
+                                    None
+                                }
                             }
+                        } else {
+                            warn!(
+                                "Webhook strategy is configured but GITHUB_APP_PRIVATE_KEY is not available; skipping webhook startup"
+                            );
+                            None
                         }
                     } else {
                         warn!(
-                            "Webhook config present but GITHUB_APP_WEBHOOK_SECRET or GITHUB_APP_PRIVATE_KEY not set; skipping webhook listener"
+                            "Webhook strategy is configured but GITHUB_APP_WEBHOOK_SECRET is not set; skipping webhook startup"
                         );
                         None
                     }
                 }
-                None => None,
+                None => {
+                    warn!(
+                        "Webhook strategy is configured but server.integrations.github.app_id is not set; skipping webhook startup"
+                    );
+                    None
+                }
             }
         }
     };
@@ -517,8 +610,6 @@ where
         }
     });
 
-    let bound_listener = bind_listener(&bind_request).await?;
-    let bind_addr = bound_listener.bind.clone();
     if bound_listener.used_random_port_fallback {
         if let BindRequest::TcpHost(host) = bind_request {
             warn!(
@@ -598,6 +689,13 @@ struct BoundServerListener {
 enum BoundListener {
     Unix(UnixListener),
     Tcp(TcpListener),
+}
+
+fn bound_tcp_port(bind: &Bind) -> Option<u16> {
+    match bind {
+        Bind::Tcp(address) => Some(address.port()),
+        Bind::Unix(_) => None,
+    }
 }
 
 async fn bind_listener(requested: &BindRequest) -> anyhow::Result<BoundServerListener> {
@@ -748,7 +846,8 @@ mod tests {
         GitHubMetaResolver, ServeArgs, ServerTitlePhase, apply_runtime_settings,
         bind_tcp_host_with_fallback, build_local_object_store_with_preference, build_slatedb_store,
         resolve_bind_request_from_settings, resolve_github_webhook_ip_allowlist,
-        resolve_server_settings, router_web_enabled, server_bind_title, server_title,
+        resolve_server_settings, resolve_startup_github_webhook_ip_allowlist, router_web_enabled,
+        server_bind_title, server_title,
     };
     use crate::bind::{Bind, BindRequest};
 
@@ -1079,5 +1178,42 @@ entries = ["github_meta_hooks"]
             .expect_err("github webhook allowlist resolution should fail closed");
 
         assert!(error.to_string().contains("GitHub webhook IP allowlist"));
+    }
+
+    #[tokio::test]
+    async fn resolve_startup_github_webhook_ip_allowlist_skips_resolution_without_webhook_secret() {
+        let settings = resolve_server_settings(&parse_settings(
+            r#"
+_version = 1
+
+[server.listen]
+type = "tcp"
+address = "127.0.0.1:0"
+
+[server.integrations.github]
+strategy = "app"
+app_id = "123"
+
+[server.integrations.github.webhooks.ip_allowlist]
+entries = ["github_meta_hooks"]
+"#,
+        ))
+        .expect("settings should resolve");
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let resolver = GitHubMetaResolver::new(
+            fabro_http::test_http_client().unwrap(),
+            format!("http://127.0.0.1:{port}/meta"),
+            cache_dir.path().join("github-meta.json"),
+        );
+
+        let allowlist = resolve_startup_github_webhook_ip_allowlist(&settings, &resolver, false)
+            .await
+            .expect("inactive webhook route should skip GitHub meta resolution");
+
+        assert!(allowlist.is_none());
     }
 }

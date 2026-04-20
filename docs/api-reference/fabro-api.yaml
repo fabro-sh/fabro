@@ -9,6 +9,8 @@ tags:
     description: API discovery and health
   - name: Install
     description: First-run browser install workflow
+  - name: Integrations
+    description: External provider callbacks and integration endpoints
   - name: Runs
     description: Run management operations
   - name: Human-in-the-Loop
@@ -373,6 +375,26 @@ paths:
             application/json:
               schema:
                 type: object
+
+  /api/v1/webhooks/github:
+    post:
+      operationId: receiveGithubWebhook
+      tags: [Integrations]
+      summary: Receive GitHub Webhook
+      description: Receives GitHub App webhook deliveries. Requests are authenticated by `X-Hub-Signature-256`, not API bearer auth.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Webhook accepted
+        "401":
+          description: Missing or invalid webhook signature
 
   /api/v1/user:
     get:

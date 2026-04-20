@@ -111,6 +111,7 @@ use ulid::Ulid;
 
 use crate::bind::Bind;
 use crate::error::ApiError;
+use crate::github_webhooks::{parse_event_metadata, verify_signature};
 use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{
     AuthMode, AuthenticatedService, AuthenticatedSubject, authenticate_service_parts,
@@ -922,14 +923,18 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
     )
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct RouterOptions {
-    pub web_enabled: bool,
+    pub web_enabled:                 bool,
+    pub github_webhook_ip_allowlist: Option<Arc<IpAllowlistConfig>>,
 }
 
 impl Default for RouterOptions {
     fn default() -> Self {
-        Self { web_enabled: true }
+        Self {
+            web_enabled:                 true,
+            github_webhook_ip_allowlist: None,
+        }
     }
 }
 
@@ -945,8 +950,15 @@ pub fn build_router_with_options(
     options: RouterOptions,
 ) -> Router {
     start_optional_slack_service(&state);
+    let web_enabled = options.web_enabled;
+    let webhook_ip_allowlist = options.github_webhook_ip_allowlist;
     let middleware_state = Arc::clone(&state);
-    let api_common = if options.web_enabled {
+    let webhook_state = Arc::clone(&state);
+    let default_webhook_ip_allowlist = Arc::clone(&ip_allowlist_config);
+    let webhook_secret_present = webhook_state
+        .server_secret("GITHUB_APP_WEBHOOK_SECRET")
+        .is_some();
+    let api_common = if web_enabled {
         Router::new()
             .route("/openapi.json", get(openapi_spec))
             .merge(web_auth::api_routes())
@@ -960,7 +972,7 @@ pub fn build_router_with_options(
         .with_state(state.clone());
 
     let mut real_router = Router::new().nest("/api/v1", api_common.merge(real_routes()));
-    if options.web_enabled {
+    if web_enabled {
         real_router = real_router.nest("/auth", web_auth::routes());
     }
     let real_router = real_router
@@ -971,7 +983,7 @@ pub fn build_router_with_options(
         let demo = demo_router.clone();
         let real = real_router.clone();
         async move {
-            if options.web_enabled && req.headers().get("x-fabro-demo").is_some_and(|v| v == "1") {
+            if web_enabled && req.headers().get("x-fabro-demo").is_some_and(|v| v == "1") {
                 demo.oneshot(req).await
             } else {
                 real.oneshot(req).await
@@ -1000,7 +1012,7 @@ pub fn build_router_with_options(
             },
         );
 
-    let mut router = Router::new()
+    let mut app_router = Router::new()
         .route("/health", get(health))
         .fallback_service(service_fn(move |req: axum_extract::Request| {
             let dispatch = dispatch.clone();
@@ -1008,14 +1020,12 @@ pub fn build_router_with_options(
                 let path = req.uri().path().to_string();
                 let dispatch_path = path.starts_with("/api/")
                     || path == "/health"
-                    || (options.web_enabled && path.starts_with("/auth/"));
+                    || (web_enabled && path.starts_with("/auth/"));
                 if dispatch_path {
                     dispatch.oneshot(req).await
-                } else if options.web_enabled && removed_web_route(&path) {
+                } else if web_enabled && removed_web_route(&path) {
                     Ok::<_, std::convert::Infallible>(StatusCode::NOT_FOUND.into_response())
-                } else if options.web_enabled
-                    && matches!(req.method(), &Method::GET | &Method::HEAD)
-                {
+                } else if web_enabled && matches!(req.method(), &Method::GET | &Method::HEAD) {
                     let headers = req.headers().clone();
                     Ok::<_, std::convert::Infallible>(static_files::serve(&path, &headers).await)
                 } else {
@@ -1024,21 +1034,38 @@ pub fn build_router_with_options(
             }
         }));
 
-    if options.web_enabled {
-        router = router.layer(middleware::from_fn_with_state(
+    if web_enabled {
+        app_router = app_router.layer(middleware::from_fn_with_state(
             middleware_state,
             cookie_and_demo_middleware,
         ));
     }
 
-    router = router.layer(middleware::from_fn_with_state(
+    app_router = app_router.layer(middleware::from_fn_with_state(
         ip_allowlist_config,
         ip_allowlist_middleware,
     ));
 
+    let mut router = app_router;
+    if webhook_secret_present {
+        let webhook_ip_allowlist = webhook_ip_allowlist.unwrap_or(default_webhook_ip_allowlist);
+        router = github_webhook_routes(webhook_ip_allowlist)
+            .with_state(webhook_state)
+            .merge(router);
+    }
+
     router
         .layer(middleware::from_fn(security_headers::layer))
         .layer(trace_layer)
+}
+
+fn github_webhook_routes(ip_allowlist_config: Arc<IpAllowlistConfig>) -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/v1/webhooks/github", post(github_webhook))
+        .layer(middleware::from_fn_with_state(
+            ip_allowlist_config,
+            ip_allowlist_middleware,
+        ))
 }
 
 fn demo_routes() -> Router<Arc<AppState>> {
@@ -1209,6 +1236,62 @@ fn real_routes() -> Router<Arc<AppState>> {
 
 async fn not_implemented() -> Response {
     ApiError::new(StatusCode::NOT_IMPLEMENTED, "Not implemented.").into_response()
+}
+
+async fn github_webhook(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
+    let delivery_id = headers
+        .get("x-github-delivery")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown");
+
+    let Some(secret) = state.server_secret("GITHUB_APP_WEBHOOK_SECRET") else {
+        warn!(
+            delivery = %delivery_id,
+            "GitHub webhook route reached without a configured webhook secret"
+        );
+        return StatusCode::NOT_FOUND;
+    };
+
+    let Some(signature) = headers
+        .get("x-hub-signature-256")
+        .and_then(|value| value.to_str().ok())
+    else {
+        warn!(delivery = %delivery_id, "Webhook signature verification failed");
+        return StatusCode::UNAUTHORIZED;
+    };
+
+    if !verify_signature(secret.as_bytes(), &body, signature) {
+        warn!(delivery = %delivery_id, "Webhook signature verification failed");
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    let event_type = headers
+        .get("x-github-event")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown");
+
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        let (repo, action) = parse_event_metadata(&body);
+        debug!(
+            event = %event_type,
+            delivery = %delivery_id,
+            repo = %repo,
+            action = %action,
+            "Webhook received"
+        );
+    } else {
+        info!(
+            event = %event_type,
+            delivery = %delivery_id,
+            "Webhook received"
+        );
+    }
+
+    StatusCode::OK
 }
 
 async fn health() -> Response {
@@ -7307,7 +7390,9 @@ mod tests {
     use fabro_model::Provider;
     use fabro_types::settings::ServerAuthMethod;
     use fabro_types::{InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunId, fixtures};
+    use hmac::{Hmac, Mac};
     use serde_json::json;
+    use sha2::Sha256;
     use tower::ServiceExt;
 
     use super::*;
@@ -7319,6 +7404,13 @@ mod tests {
         exit  [shape=Msquare]
         start -> exit
     }"#;
+    const TEST_WEBHOOK_SECRET: &str = "webhook-secret";
+    const TEST_DEV_TOKEN: &str =
+        "fabro_dev_abababababababababababababababababababababababababababababababab";
+    const WRONG_DEV_TOKEN: &str =
+        "fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+
+    type TestHmacSha256 = Hmac<Sha256>;
 
     fn test_app_with() -> Router {
         let state = create_app_state();
@@ -7337,6 +7429,28 @@ mod tests {
 
     fn api(path: &str) -> String {
         format!("/api/v1{path}")
+    }
+
+    fn webhook_signature(secret: &str, body: &[u8]) -> String {
+        let mut mac = TestHmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(body);
+        format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+    }
+
+    fn webhook_test_app(auth_mode: AuthMode) -> Router {
+        let secret = TEST_WEBHOOK_SECRET.to_string();
+        let state = create_app_state_with_env_lookup(SettingsLayer::default(), 5, move |name| {
+            (name == "GITHUB_APP_WEBHOOK_SECRET").then(|| secret.clone())
+        });
+        build_router_with_options(
+            state,
+            auth_mode,
+            Arc::new(IpAllowlistConfig::default()),
+            RouterOptions {
+                web_enabled: false,
+                ..RouterOptions::default()
+            },
+        )
     }
 
     #[tokio::test]
@@ -7401,6 +7515,79 @@ type = "http"
             "/tmp/test.pem".to_string(),
             "pem-data".to_string()
         )]);
+    }
+
+    #[tokio::test]
+    async fn github_webhook_rejects_missing_or_invalid_signatures() {
+        let app = webhook_test_app(AuthMode::Disabled);
+        let body = br#"{"action":"opened"}"#;
+
+        let missing_signature = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(api("/webhooks/github"))
+                    .body(Body::from(body.to_vec()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_signature.status(), StatusCode::UNAUTHORIZED);
+
+        let invalid_signature = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(api("/webhooks/github"))
+                    .header(
+                        "x-hub-signature-256",
+                        webhook_signature("wrong-secret", body),
+                    )
+                    .body(Body::from(body.to_vec()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid_signature.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn github_webhook_accepts_valid_signatures_regardless_of_auth_mode() {
+        let body = br#"{"repository":{"full_name":"owner/repo"},"action":"opened"}"#;
+        let signature = webhook_signature(TEST_WEBHOOK_SECRET, body);
+
+        for auth_mode in [
+            AuthMode::Disabled,
+            AuthMode::Enabled(ConfiguredAuth {
+                methods:   vec![ServerAuthMethod::DevToken],
+                dev_token: Some(TEST_DEV_TOKEN.to_string()),
+            }),
+        ] {
+            let app = webhook_test_app(auth_mode);
+
+            for authorization in [
+                None,
+                Some(format!("Bearer {WRONG_DEV_TOKEN}")),
+                Some(format!("Bearer {TEST_DEV_TOKEN}")),
+            ] {
+                let mut request = Request::builder()
+                    .method("POST")
+                    .uri(api("/webhooks/github"))
+                    .header("x-hub-signature-256", signature.clone())
+                    .header("x-github-event", "pull_request")
+                    .body(Body::from(body.to_vec()))
+                    .unwrap();
+                if let Some(value) = authorization.as_deref() {
+                    request
+                        .headers_mut()
+                        .insert(header::AUTHORIZATION, value.parse().unwrap());
+                }
+
+                let response = app.clone().oneshot(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+            }
+        }
     }
 
     #[tokio::test]

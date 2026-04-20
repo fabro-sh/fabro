@@ -310,7 +310,10 @@ enabled = false
         create_app_state_with_options(settings, 5),
         AuthMode::Disabled,
         Arc::new(IpAllowlistConfig::default()),
-        RouterOptions { web_enabled: false },
+        RouterOptions {
+            web_enabled: false,
+            ..RouterOptions::default()
+        },
     );
 
     for (method, path, body) in [
@@ -369,7 +372,10 @@ enabled = false
         create_app_state_with_options(settings, 5),
         AuthMode::Disabled,
         Arc::new(IpAllowlistConfig::default()),
-        RouterOptions { web_enabled: false },
+        RouterOptions {
+            web_enabled: false,
+            ..RouterOptions::default()
+        },
     );
     let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 

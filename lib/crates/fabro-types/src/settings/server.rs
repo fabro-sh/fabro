@@ -536,4 +536,5 @@ pub enum GithubIntegrationStrategy {
 #[serde(rename_all = "snake_case")]
 pub enum WebhookStrategy {
     TailscaleFunnel,
+    ServerUrl,
 }

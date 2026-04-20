@@ -58,3 +58,22 @@ fn changelog_marks_removed_mutual_tls_as_historical() {
         "historical changelog should clarify that inbound mutual TLS is no longer supported"
     );
 }
+
+#[test]
+fn github_docs_describe_webhooks_as_strategy_dependent() {
+    let github = read_doc("docs/integrations/github.mdx");
+    assert!(
+        !github.contains("enables browser OAuth and webhooks"),
+        "GitHub integration docs should not imply app auth alone enables webhook delivery"
+    );
+    assert!(
+        !github.contains("| Webhooks | No | Yes |"),
+        "GitHub strategy matrix should describe webhook delivery as strategy-dependent"
+    );
+
+    let server_configuration = read_doc("docs/administration/server-configuration.mdx");
+    assert!(
+        !server_configuration.contains("enables the GitHub App flow, browser OAuth, and webhooks"),
+        "server configuration docs should not imply app auth alone enables webhook delivery"
+    );
+}
