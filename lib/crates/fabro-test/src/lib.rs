@@ -514,17 +514,17 @@ fn live_marker_count(root: &Path) -> usize {
             else {
                 return false;
             };
-            match fabro_proc::try_flock_exclusive(&file) {
-                Ok(true) => {
-                    // Lock acquired: previous owner is gone. Drop the
-                    // file handle (releasing our just-acquired lock)
-                    // and remove the marker.
-                    drop(file);
-                    let _ = std::fs::remove_file(path);
-                    false
-                }
-                Ok(false) => true,
-                Err(_) => true, // conservative: count unexpected errors as alive
+            // If the lock is acquired, the previous owner is gone; drop
+            // the file handle (releasing our just-acquired lock) and
+            // remove the marker. Anything else (`Ok(false)` meaning
+            // still held, `Err(_)` for unexpected IO errors) is treated
+            // conservatively as live.
+            if matches!(fabro_proc::try_flock_exclusive(&file), Ok(true)) {
+                drop(file);
+                let _ = std::fs::remove_file(path);
+                false
+            } else {
+                true
             }
         })
         .count()
