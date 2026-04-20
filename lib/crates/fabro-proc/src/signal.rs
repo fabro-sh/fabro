@@ -146,12 +146,17 @@ pub fn sigusr2(pid: u32) {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_types,
+    reason = "Tests use sync std::io::BufReader to read a short-lived helper's stdout synchronously."
+)]
 mod tests {
     use std::io::{BufRead, BufReader};
     use std::process::{Command, Stdio};
     use std::time::Duration;
 
     use super::{process_exists, process_group_alive, process_running};
+    use crate::pre_exec::pre_exec_setpgid;
 
     #[test]
     fn process_running_returns_true_for_current_process() {
@@ -199,7 +204,7 @@ mod tests {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        crate::pre_exec::pre_exec_setpgid(&mut child);
+        pre_exec_setpgid(&mut child);
         let mut child = child.spawn().expect("group leader should spawn");
         let pgid = child.id();
 
