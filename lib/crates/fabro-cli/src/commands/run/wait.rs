@@ -50,11 +50,10 @@ pub(crate) async fn run(
         if let Some(dl) = deadline {
             let now = std::time::Instant::now();
             if now >= dl {
-                bail!(
-                    "Timed out after {}s waiting for run '{}'",
-                    args.timeout.unwrap(),
-                    run_id
-                );
+                let timeout_secs = args
+                    .timeout
+                    .expect("deadline should only exist when timeout is set");
+                bail!("Timed out after {timeout_secs}s waiting for run '{run_id}'");
             }
             time::sleep(interval.min(dl - now)).await;
         } else {

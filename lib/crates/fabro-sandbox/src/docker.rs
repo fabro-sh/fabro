@@ -192,7 +192,10 @@ impl DockerSandbox {
             .await
             .map_err(|e| format!("Failed to inspect exec: {e}"))?;
 
-        let exit_code = i32::try_from(inspect.exit_code.unwrap_or(-1)).unwrap();
+        let exit_code = inspect
+            .exit_code
+            .and_then(|code| i32::try_from(code).ok())
+            .unwrap_or(-1);
         Ok((stdout, stderr, exit_code))
     }
 

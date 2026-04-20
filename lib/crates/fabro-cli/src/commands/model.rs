@@ -158,7 +158,12 @@ fn print_models_table(models: &[Model], styles: &Styles) {
         .color_choice(color_choice(use_color))
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    println!("{}", table.display().unwrap());
+    println!(
+        "{}",
+        table
+            .display()
+            .expect("rendering the models table should succeed")
+    );
 }
 
 fn model_test_row_from_status(model: &Model, status: &str, result_color: Color) -> ModelTestRow {

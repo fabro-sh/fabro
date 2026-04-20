@@ -10,8 +10,7 @@ use crate::event::{Event, StageScope};
 use crate::outcome::{Outcome, OutcomeExt};
 
 fn timeout_ms(node: &Node) -> Option<u64> {
-    node.timeout()
-        .map(|d| u64::try_from(d.as_millis()).unwrap())
+    node.timeout().map(crate::millis_u64)
 }
 
 /// Shell-escape a string using `shlex::try_quote` (POSIX-safe).
@@ -101,9 +100,7 @@ impl Handler for CommandHandler {
             &stage_scope,
         );
 
-        let timeout_ms = node
-            .timeout()
-            .map_or(600_000, |d| u64::try_from(d.as_millis()).unwrap());
+        let timeout_ms = node.timeout().map_or(600_000, crate::millis_u64);
         let env_vars = if services.env.is_empty() {
             None
         } else {

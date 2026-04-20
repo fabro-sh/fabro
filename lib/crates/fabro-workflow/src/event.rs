@@ -2823,7 +2823,7 @@ fn epoch_millis() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    i64::try_from(millis).unwrap()
+    i64::try_from(millis).unwrap_or(i64::MAX)
 }
 
 /// Listener callback type for workflow run events.

@@ -398,7 +398,13 @@ async fn print_assets_with_client(
         .separator(Separator::builder().build());
 
     fabro_util::printerr!(printer, "\n{}", styles.bold.apply_to("=== Artifacts ==="));
-    fabro_util::printerr!(printer, "{}", table.display().unwrap());
+    fabro_util::printerr!(
+        printer,
+        "{}",
+        table
+            .display()
+            .expect("rendering the artifacts table should succeed")
+    );
     fabro_util::printerr!(
         printer,
         "{}",

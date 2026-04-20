@@ -44,12 +44,12 @@ pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
         bail!("empty duration string");
     }
     let (num_str, unit) = s.split_at(s.len() - 1);
-    let num: u64 = num_str
+    let num: i64 = num_str
         .parse()
         .with_context(|| format!("invalid duration: {s}"))?;
     match unit {
-        "h" => Ok(chrono::Duration::hours(i64::try_from(num).unwrap())),
-        "d" => Ok(chrono::Duration::days(i64::try_from(num).unwrap())),
+        "h" => Ok(chrono::Duration::hours(num)),
+        "d" => Ok(chrono::Duration::days(num)),
         _ => bail!("invalid duration unit '{unit}' in '{s}' (expected 'h' or 'd')"),
     }
 }

@@ -206,7 +206,7 @@ async fn execute_and_emit_one_tool_with_lookup(
         debug!(tool = %tc.name, hook_event = "pre_tool_use", "Calling tool hook");
         let start = std::time::Instant::now();
         let decision = hooks.pre_tool_use(&tc.name, &tc.arguments).await;
-        let elapsed = u64::try_from(start.elapsed().as_millis()).unwrap();
+        let elapsed = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
         debug!(tool = %tc.name, hook_event = "pre_tool_use", ?decision, duration_ms = elapsed, "Tool hook complete");
 
         if let ToolHookDecision::Block { reason } = decision {

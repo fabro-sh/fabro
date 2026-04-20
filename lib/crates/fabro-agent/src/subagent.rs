@@ -195,7 +195,7 @@ impl SubAgentManager {
         let join_handle = self
             .agents
             .get_mut(agent_id)
-            .unwrap()
+            .expect("agent should still exist after status check")
             .task
             .take()
             .ok_or_else(|| Error::InvalidState(format!("Agent {agent_id} has no running task")))?;
@@ -226,7 +226,10 @@ impl SubAgentManager {
         }
 
         // Phase 5: Store result in status and return clone
-        let agent = self.agents.get_mut(agent_id).unwrap();
+        let agent = self
+            .agents
+            .get_mut(agent_id)
+            .expect("agent should still exist when storing task result");
         agent.status = SubAgentStatus::Finished(task_result);
 
         match &agent.status {
@@ -338,7 +341,7 @@ pub fn make_spawn_agent_tool(
                 let max_turns = args
                     .get("max_turns")
                     .and_then(serde_json::Value::as_u64)
-                    .map(|v| usize::try_from(v).unwrap());
+                    .map(|v| usize::try_from(v).unwrap_or(usize::MAX));
 
                 // Note: working_dir and model require session factory changes to wire through
                 let mut session = session_factory();

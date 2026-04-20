@@ -68,6 +68,15 @@ pub(crate) fn required_str<'a>(args: &'a serde_json::Value, key: &str) -> Result
         .ok_or_else(|| format!("Missing required parameter: {key}"))
 }
 
+fn optional_usize_arg(args: &serde_json::Value, key: &str) -> Result<Option<usize>, String> {
+    args.get(key)
+        .and_then(serde_json::Value::as_u64)
+        .map(|value| {
+            usize::try_from(value).map_err(|_| format!("Parameter {key} is too large: {value}"))
+        })
+        .transpose()
+}
+
 #[must_use]
 pub fn make_read_file_tool() -> RegisteredTool {
     RegisteredTool {
@@ -87,11 +96,8 @@ pub fn make_read_file_tool() -> RegisteredTool {
         executor:   Arc::new(|args, ctx| {
             Box::pin(async move {
                 let file_path = required_str(&args, "file_path")?;
-                let offset = args.get("offset").and_then(serde_json::Value::as_u64);
-                let limit = args.get("limit").and_then(serde_json::Value::as_u64);
-
-                let offset_usize = offset.map(|v| usize::try_from(v).unwrap());
-                let limit_usize = limit.map(|v| usize::try_from(v).unwrap());
+                let offset_usize = optional_usize_arg(&args, "offset")?;
+                let limit_usize = optional_usize_arg(&args, "limit")?;
 
                 let content = ctx
                     .env
@@ -281,10 +287,13 @@ pub fn make_grep_tool() -> RegisteredTool {
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or(".");
 
-                let max_results = args
-                    .get("max_results")
-                    .and_then(serde_json::Value::as_u64)
-                    .map(|v| usize::try_from(v).unwrap());
+                let max_results = args.get("max_results").and_then(serde_json::Value::as_u64);
+                let max_results = max_results
+                    .map(|value| {
+                        usize::try_from(value)
+                            .map_err(|_| format!("Parameter max_results is too large: {value}"))
+                    })
+                    .transpose()?;
                 let options = GrepOptions {
                     glob_filter: args
                         .get("glob_filter")
@@ -402,10 +411,7 @@ pub(crate) fn make_list_dir_tool() -> RegisteredTool {
         executor:   Arc::new(|args, ctx| {
             Box::pin(async move {
                 let path = required_str(&args, "path")?;
-                let depth = args
-                    .get("depth")
-                    .and_then(serde_json::Value::as_u64)
-                    .map(|v| usize::try_from(v).unwrap());
+                let depth = optional_usize_arg(&args, "depth")?;
 
                 let entries = ctx.env.list_directory(path, depth).await?;
                 let lines: Vec<String> = entries

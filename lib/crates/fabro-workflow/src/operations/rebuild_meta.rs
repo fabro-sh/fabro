@@ -344,7 +344,10 @@ fn canonical_repo_root_for_path(path: &str) -> Result<PathBuf> {
 fn resolve_prefix_matches(prefix: &str, matches: Vec<RunId>) -> Result<RunId> {
     match matches.len() {
         0 => bail!("no run found matching '{prefix}'"),
-        1 => Ok(matches.into_iter().next().unwrap()),
+        1 => Ok(matches
+            .into_iter()
+            .next()
+            .expect("exactly one run should match when len is 1")),
         _ => {
             let mut msg = format!("ambiguous run ID prefix '{prefix}', matches:\n");
             for run_id in &matches {

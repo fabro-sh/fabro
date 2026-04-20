@@ -68,7 +68,7 @@ fn main() {
     let toml_content = fs::read_to_string(toml_path).expect("failed to read gitleaks.toml");
     let config: Config = toml::from_str(&toml_content).expect("failed to parse gitleaks.toml");
 
-    let out_dir = env::var("OUT_DIR").unwrap();
+    let out_dir = env::var("OUT_DIR").expect("OUT_DIR should be set for build scripts");
     let out_path = Path::new(&out_dir).join("rules_generated.rs");
 
     let mut code = String::new();

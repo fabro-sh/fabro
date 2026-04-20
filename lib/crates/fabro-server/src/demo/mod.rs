@@ -762,7 +762,7 @@ pub(crate) async fn get_aggregate_billing(
 use chrono::{DateTime, Utc};
 
 fn ts(s: &str) -> DateTime<Utc> {
-    s.parse().unwrap()
+    s.parse().expect("hardcoded demo timestamp should parse")
 }
 
 mod runs {

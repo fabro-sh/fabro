@@ -33,7 +33,7 @@ impl NodeSpec for WorkflowNode {
     fn max_visits(&self) -> Option<usize> {
         self.0
             .max_visits()
-            .map(|v| usize::try_from(v.max(0)).unwrap())
+            .map(|v| usize::try_from(v.max(0)).unwrap_or(usize::MAX))
     }
 }
 

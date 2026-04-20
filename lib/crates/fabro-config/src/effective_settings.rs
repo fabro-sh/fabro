@@ -158,11 +158,9 @@ fn apply_local_daemon_overrides(
     }
     // Ensure a run.execution table exists so downstream consumers that check
     // for explicit dry-run defaults see a well-formed layer.
-    settings.run.get_or_insert_with(RunLayer::default);
     settings
         .run
-        .as_mut()
-        .unwrap()
+        .get_or_insert_with(RunLayer::default)
         .execution
         .get_or_insert_with(RunExecutionLayer::default);
     settings

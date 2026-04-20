@@ -339,7 +339,10 @@ pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<RunId> {
 
     match matches.len() {
         0 => bail!("no run found matching '{prefix}'"),
-        1 => Ok(matches.into_iter().next().unwrap()),
+        1 => Ok(matches
+            .into_iter()
+            .next()
+            .expect("exactly one run should match when len is 1")),
         _ => {
             let mut msg = format!("ambiguous run ID prefix '{prefix}', matches:\n");
             for m in &matches {

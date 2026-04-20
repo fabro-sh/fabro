@@ -551,8 +551,10 @@ fn to_sha_wrapper(sha: &str) -> RunFilesMetaToSha {
     // constraint. Values we produce (via `git rev-parse HEAD`) always match.
     // `try_from` is expected to succeed; fall back to an empty wrapper on
     // the impossible failure rather than panicking.
-    RunFilesMetaToSha::try_from(sha.to_string())
-        .unwrap_or_else(|_| RunFilesMetaToSha::try_from(String::from("0000000")).unwrap())
+    RunFilesMetaToSha::try_from(sha.to_string()).unwrap_or_else(|_| {
+        RunFilesMetaToSha::try_from(String::from("0000000"))
+            .expect("hardcoded fallback sha should satisfy schema")
+    })
 }
 
 /// Load the run projection from the store, returning a 404 for the IDOR-safe

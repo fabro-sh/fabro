@@ -20,13 +20,14 @@ const DOT_STYLE_DEFAULTS: &str = r##"
     edge [color="#666666", fontname="Helvetica", fontsize=10, fontcolor="#666666"]
 "##;
 
-static RANKDIR_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"rankdir\s*=\s*\w+").unwrap());
+static RANKDIR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"rankdir\s*=\s*\w+").expect("hardcoded regex should compile")
+});
 static WHITE_BG_POLYGON_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(
         r#"<polygon\b[^>]*fill="white"[^>]*stroke="none"[^>]*/>|<polygon\b[^>]*stroke="none"[^>]*fill="white"[^>]*/>"#,
     )
-    .unwrap()
+    .expect("hardcoded regex should compile")
 });
 
 /// Rewrite `rankdir=...` in DOT source.

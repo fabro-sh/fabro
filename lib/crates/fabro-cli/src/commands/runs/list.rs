@@ -99,9 +99,7 @@ pub(crate) async fn list_command(
                 None => match run.start_time_dt() {
                     Some(start) => {
                         let elapsed = now.signed_duration_since(start);
-                        format_duration_ms(
-                            u64::try_from(elapsed.num_milliseconds().max(0)).unwrap(),
-                        )
+                        format_duration_ms(elapsed.num_milliseconds().max(0).cast_unsigned())
                     }
                     None => "-".to_string(),
                 },

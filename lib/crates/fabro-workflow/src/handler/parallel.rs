@@ -501,8 +501,9 @@ impl Handler for ParallelHandler {
                 .collect();
             successful.sort_by(|a, b| a.id.cmp(&b.id));
             if let Some(winner) = successful.first() {
-                let sha = winner.head_sha.as_ref().unwrap();
-                git_merge_ff_only(&*services.sandbox, sha).await;
+                if let Some(sha) = winner.head_sha.as_ref() {
+                    git_merge_ff_only(&*services.sandbox, sha).await;
+                }
             }
         }
 

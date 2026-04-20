@@ -64,7 +64,11 @@ pub(crate) async fn run(
         return Ok(());
     }
 
-    let target = args.target.as_deref().unwrap().parse::<RewindTarget>()?;
+    let target_arg = args
+        .target
+        .as_deref()
+        .expect("rewind target should be present unless listing");
+    let target = target_arg.parse::<RewindTarget>()?;
 
     rewind(&store, &RewindInput {
         run_id,
@@ -80,7 +84,7 @@ pub(crate) async fn run(
     if cli.output.format == OutputFormat::Json {
         print_json_pretty(&serde_json::json!({
             "run_id": run_id_string,
-            "target": args.target.as_deref().unwrap(),
+            "target": target_arg,
         }))?;
     } else {
         fabro_util::printerr!(

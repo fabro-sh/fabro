@@ -129,7 +129,13 @@ fn print_section(
         .color_choice(color_choice)
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    fabro_util::printerr!(printer, "{}", table.display().unwrap());
+    fabro_util::printerr!(
+        printer,
+        "{}",
+        table
+            .display()
+            .expect("rendering the workflow table should succeed")
+    );
 }
 
 fn truncate_str(s: &str, max: usize) -> String {

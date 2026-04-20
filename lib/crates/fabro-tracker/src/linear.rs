@@ -57,7 +57,7 @@ fn normalize_issue(node: &Value) -> Result<Issue, String> {
         .map(std::string::ToString::to_string);
     let priority = match node["priority"].as_i64() {
         Some(0) | None => None,
-        Some(n) => Some(i32::try_from(n).unwrap()),
+        Some(n) => Some(i32::try_from(n).map_err(|_| format!("Priority out of range: {n}"))?),
     };
     let state = node["state"]["name"]
         .as_str()

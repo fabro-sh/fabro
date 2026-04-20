@@ -31,7 +31,7 @@ fn patch_nullable(value: &mut serde_json::Value) {
                             let mut inner = variants.remove(0);
                             inner
                                 .as_object_mut()
-                                .unwrap()
+                                .expect("oneOf collapse should leave an object schema")
                                 .insert("nullable".to_string(), serde_json::Value::Bool(true));
                             patch_nullable(&mut inner);
                             *value = inner;
@@ -129,12 +129,9 @@ fn patch_codegen_request_body_media_types(value: &mut serde_json::Value) {
 
 fn spec_path_from_manifest_dir(manifest_dir: &Path) -> PathBuf {
     manifest_dir
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
+        .ancestors()
+        .nth(3)
+        .expect("fabro-api manifest dir should be nested under <repo>/lib/crates/fabro-api")
         .join("docs/api-reference/fabro-api.yaml")
 }
 
@@ -171,7 +168,7 @@ fn main() {
     let syntax_tree = syn::parse2::<syn::File>(tokens).expect("failed to parse generated tokens");
     let formatted = prettyplease::unparse(&syntax_tree);
 
-    let out_dir = env::var("OUT_DIR").unwrap();
+    let out_dir = env::var("OUT_DIR").expect("OUT_DIR should be set for build scripts");
     let out_path = Path::new(&out_dir).join("codegen.rs");
     fs::write(&out_path, formatted).expect("failed to write generated code");
 }

@@ -109,7 +109,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
         Err(anyhow::anyhow!("No LLM client available"))
     };
 
-    let duration_ms = u64::try_from(retro_start.elapsed().as_millis()).unwrap();
+    let duration_ms = crate::millis_u64(retro_start.elapsed());
     match retro_result {
         Ok((narrative, response)) => {
             retro.apply_narrative(narrative);

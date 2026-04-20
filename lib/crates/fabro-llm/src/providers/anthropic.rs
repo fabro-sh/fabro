@@ -190,7 +190,7 @@ fn estimate_reasoning_tokens(content_parts: &[ContentPart]) -> Option<i64> {
         })
         .sum();
     if total_chars > 0 {
-        Some(i64::try_from((total_chars / 4).max(1)).unwrap())
+        Some(i64::try_from((total_chars / 4).max(1)).unwrap_or(i64::MAX))
     } else {
         None
     }

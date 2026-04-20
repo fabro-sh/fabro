@@ -35,6 +35,10 @@ static HOOK_RESPONSE_SCHEMA: LazyLock<serde_json::Value> = LazyLock::new(|| {
     })
 });
 
+fn duration_ms(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
 /// Trait for executing hooks via different transports.
 #[async_trait]
 pub trait HookExecutor: Send + Sync {
@@ -149,7 +153,7 @@ impl HookExecutorImpl {
             }
         };
         let context_json = serde_json::to_string(context).unwrap_or_default();
-        let timeout_ms = u64::try_from(definition.timeout().as_millis()).unwrap();
+        let timeout_ms = duration_ms(definition.timeout());
 
         let mut env_vars = HashMap::new();
         env_vars.insert("FABRO_EVENT".to_string(), context.event.to_string());
@@ -679,7 +683,7 @@ impl HookExecutor for HookExecutorImpl {
             },
         };
 
-        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap();
+        let duration_ms = duration_ms(start.elapsed());
         HookResult {
             hook_name: definition.name.clone(),
             decision,

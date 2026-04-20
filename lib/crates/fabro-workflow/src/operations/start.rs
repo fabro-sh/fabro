@@ -258,13 +258,13 @@ async fn persist_terminal_engine_failure(
         run_store,
         final_status,
         failure_reason,
-        u64::try_from(duration.as_millis()).unwrap(),
+        crate::millis_u64(duration),
         None,
     )
     .await;
     if let Err(err) = append_event_to_sink(event_sink, &run_id, &Event::WorkflowRunFailed {
         error:          error.clone(),
-        duration_ms:    u64::try_from(duration.as_millis()).unwrap(),
+        duration_ms:    crate::millis_u64(duration),
         reason:         status_reason,
         git_commit_sha: None,
         final_patch:    None,

@@ -77,7 +77,7 @@ async fn main() {
     let start = std::time::Instant::now();
 
     let (command_name, result) = Box::pin(main_inner()).await;
-    let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap();
+    let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
     let is_error = result.is_err();
     // An empty command_name means no subcommand was invoked (landing was shown);
