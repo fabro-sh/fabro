@@ -75,6 +75,7 @@ multer = "3"
 thiserror.workspace = true
 ipnet = "2.11.0"
 percent-encoding.workspace = true
+url = "2"
 
 [build-dependencies]
 chrono = { workspace = true }

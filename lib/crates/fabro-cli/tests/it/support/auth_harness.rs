@@ -377,17 +377,42 @@ fn github_base_url(base_url: &str) -> fabro_http::Url {
 }
 
 async fn drive_browser_flow(browser_url: &str) {
-    let response = browser_client()
+    let client = browser_client();
+    let response = client
         .get(browser_url)
         .send()
         .await
         .expect("browser flow request should succeed");
     let status = response.status();
+    let final_url = response.url().clone();
     let body = response
         .text()
         .await
         .expect("browser flow response body should be readable");
     if status.is_success() {
+        if body.contains("action=\"/auth/cli/resume\"")
+            && body.contains("method=\"post\"")
+            && body.contains("Authorize CLI login")
+        {
+            let confirm = client
+                .post(final_url.as_str())
+                .header(reqwest::header::ORIGIN, url_origin(&final_url))
+                .send()
+                .await
+                .expect("browser confirmation request should succeed");
+            let status = confirm.status();
+            let body = confirm
+                .text()
+                .await
+                .expect("browser confirmation response body should be readable");
+            if status.is_success() {
+                return;
+            }
+            assert!(
+                status == reqwest::StatusCode::BAD_REQUEST && body.contains("Login failed:"),
+                "browser confirmation failed with {status}\n{body}"
+            );
+        }
         return;
     }
     assert!(
@@ -402,6 +427,19 @@ fn browser_client() -> reqwest::Client {
         .no_proxy()
         .build()
         .expect("browser client should build")
+}
+
+fn url_origin(url: &reqwest::Url) -> String {
+    let mut origin = format!(
+        "{}://{}",
+        url.scheme(),
+        url.host_str().expect("URL should have a host"),
+    );
+    if let Some(port) = url.port() {
+        origin.push(':');
+        origin.push_str(&port.to_string());
+    }
+    origin
 }
 
 async fn wait_for_http_ready(base_url: &str) {

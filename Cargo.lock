@@ -2032,6 +2032,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+ "url",
  "uuid",
  "walkdir",
 ]

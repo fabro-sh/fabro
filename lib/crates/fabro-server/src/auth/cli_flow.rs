@@ -1,3 +1,4 @@
+use std::net;
 use std::sync::Arc;
 
 use axum::extract::rejection::JsonRejection;
@@ -17,6 +18,7 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
+use url::{Host, Url};
 
 use crate::auth::{AuthCode, JwtSubject, RefreshToken};
 use crate::jwt_auth::{AuthMode, ConfiguredAuth, auth_method_name};
@@ -32,6 +34,8 @@ const GITHUB_NOT_CONFIGURED: &str = "GitHub login is not configured for this ser
 const INVALID_REDIRECT_URI: &str = "The provided redirect URI is not valid for CLI login.";
 const INVALID_OR_MISSING_STATE: &str = "The login state is missing or invalid.";
 const MISSING_FLOW_COOKIE: &str = "Your login session has expired. Please start again.";
+const INVALID_CONFIRMATION_REQUEST: &str =
+    "This CLI login confirmation is invalid. Return to the Fabro login page and try again.";
 #[allow(dead_code, reason = "Reserved for future browser-only success pages.")]
 const LOGIN_SUCCESSFUL: &str = "Login successful. You can return to the CLI.";
 
@@ -104,7 +108,7 @@ pub(crate) fn api_routes() -> Router<Arc<AppState>> {
 pub(crate) fn web_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/cli/start", get(start))
-        .route("/cli/resume", get(resume))
+        .route("/cli/resume", get(resume).post(confirm_resume))
         .route("/cli/token", post(token))
         .route("/cli/refresh", post(refresh))
         .route("/cli/logout", post(logout))
@@ -146,12 +150,13 @@ async fn start(
         return static_error_page(GITHUB_NOT_CONFIGURED);
     }
 
-    let Some(redirect_uri) = params.redirect_uri.as_deref() else {
+    let Some(redirect_uri) = params
+        .redirect_uri
+        .as_deref()
+        .and_then(canonical_loopback_redirect_uri)
+    else {
         return static_error_page(INVALID_REDIRECT_URI);
     };
-    if !valid_loopback_redirect_uri(redirect_uri) {
-        return static_error_page(INVALID_REDIRECT_URI);
-    }
 
     let Some(state_token) = params.state.as_deref() else {
         return static_error_page(INVALID_OR_MISSING_STATE);
@@ -162,7 +167,7 @@ async fn start(
 
     let Some(code_challenge) = params.code_challenge.as_deref() else {
         return redirect_with_error(
-            redirect_uri,
+            &redirect_uri,
             state_token,
             "invalid_request",
             "Invalid PKCE parameters",
@@ -170,7 +175,7 @@ async fn start(
     };
     if params.code_challenge_method.as_deref() != Some("S256") {
         return redirect_with_error(
-            redirect_uri,
+            &redirect_uri,
             state_token,
             "invalid_request",
             "Invalid PKCE parameters",
@@ -182,31 +187,24 @@ async fn start(
     };
     let session = read_private_session(&headers, &session_key);
 
-    if let Some(session) = eligible_session(session.as_ref()) {
-        return issue_auth_code_response(
-            state.as_ref(),
-            session,
-            redirect_uri,
-            state_token,
-            code_challenge,
-        )
-        .await;
-    }
-
     let secure = session_cookie_secure(state.as_ref());
     let mut jar = CookieJar::new();
     add_cli_flow_cookie(
         &mut jar,
         &session_key,
         CliFlowCookie {
-            redirect_uri:   redirect_uri.to_string(),
-            state:          state_token.to_string(),
+            redirect_uri,
+            state: state_token.to_string(),
             code_challenge: code_challenge.to_string(),
         },
         secure,
     );
-    let mut response =
-        Redirect::to("/auth/login/github?return_to=/auth/cli/resume").into_response();
+    let redirect_target = if eligible_session(session.as_ref()).is_some() {
+        "/auth/cli/resume"
+    } else {
+        "/auth/login/github?return_to=/auth/cli/resume"
+    };
+    let mut response = Redirect::to(redirect_target).into_response();
     append_jar_delta(response.headers_mut(), &jar);
     response
 }
@@ -227,6 +225,17 @@ async fn resume(
     let Some(flow) = read_private_cli_flow(&headers, &session_key) else {
         return static_error_page(MISSING_FLOW_COOKIE);
     };
+    let Some(redirect_uri) = canonical_loopback_redirect_uri(&flow.redirect_uri) else {
+        let mut jar = CookieJar::new();
+        remove_cli_flow_cookie(
+            &mut jar,
+            &session_key,
+            session_cookie_secure(state.as_ref()),
+        );
+        let mut response = static_error_page(INVALID_REDIRECT_URI);
+        append_jar_delta(response.headers_mut(), &jar);
+        return response;
+    };
     let secure = session_cookie_secure(state.as_ref());
 
     if let Some(error) = params.error.as_deref() {
@@ -238,7 +247,7 @@ async fn resume(
         let mut jar = CookieJar::new();
         remove_cli_flow_cookie(&mut jar, &session_key, secure);
         let mut response =
-            redirect_with_error(&flow.redirect_uri, &flow.state, mapped_error, description);
+            redirect_with_error(&redirect_uri, &flow.state, mapped_error, description);
         append_jar_delta(response.headers_mut(), &jar);
         return response;
     }
@@ -248,7 +257,56 @@ async fn resume(
         let mut jar = CookieJar::new();
         remove_cli_flow_cookie(&mut jar, &session_key, secure);
         let mut response = redirect_with_error(
-            &flow.redirect_uri,
+            &redirect_uri,
+            &flow.state,
+            "github_session_required",
+            "GitHub session required",
+        );
+        append_jar_delta(response.headers_mut(), &jar);
+        return response;
+    };
+
+    cli_login_confirmation_page(session)
+}
+
+async fn confirm_resume(
+    State(state): State<Arc<AppState>>,
+    Extension(auth_mode): Extension<AuthMode>,
+    headers: HeaderMap,
+) -> Response {
+    if !github_enabled(&auth_mode) {
+        return static_error_page(GITHUB_NOT_CONFIGURED);
+    }
+
+    if !confirm_resume_origin_is_valid(&headers, state.as_ref()) {
+        return static_error_page(INVALID_CONFIRMATION_REQUEST);
+    }
+
+    let Some(session_key) = state.session_key() else {
+        return static_error_page(GITHUB_NOT_CONFIGURED);
+    };
+    let Some(flow) = read_private_cli_flow(&headers, &session_key) else {
+        return static_error_page(MISSING_FLOW_COOKIE);
+    };
+    let Some(redirect_uri) = canonical_loopback_redirect_uri(&flow.redirect_uri) else {
+        let mut jar = CookieJar::new();
+        remove_cli_flow_cookie(
+            &mut jar,
+            &session_key,
+            session_cookie_secure(state.as_ref()),
+        );
+        let mut response = static_error_page(INVALID_REDIRECT_URI);
+        append_jar_delta(response.headers_mut(), &jar);
+        return response;
+    };
+    let secure = session_cookie_secure(state.as_ref());
+
+    let session = read_private_session(&headers, &session_key);
+    let Some(session) = eligible_session(session.as_ref()) else {
+        let mut jar = CookieJar::new();
+        remove_cli_flow_cookie(&mut jar, &session_key, secure);
+        let mut response = redirect_with_error(
+            &redirect_uri,
             &flow.state,
             "github_session_required",
             "GitHub session required",
@@ -260,7 +318,7 @@ async fn resume(
     let mut response = issue_auth_code_response(
         state.as_ref(),
         session,
-        &flow.redirect_uri,
+        &redirect_uri,
         &flow.state,
         &flow.code_challenge,
     )
@@ -304,7 +362,11 @@ async fn token(
             "Invalid request",
         );
     };
-    let Some(redirect_uri) = body.redirect_uri.as_deref() else {
+    let Some(redirect_uri) = body
+        .redirect_uri
+        .as_deref()
+        .and_then(canonical_loopback_redirect_uri)
+    else {
         return oauth_error(
             StatusCode::BAD_REQUEST,
             "invalid_request",
@@ -355,7 +417,9 @@ async fn token(
             "PKCE verification failed",
         );
     }
-    if entry.redirect_uri != redirect_uri {
+    if canonical_loopback_redirect_uri(&entry.redirect_uri).as_deref()
+        != Some(redirect_uri.as_str())
+    {
         return oauth_error(
             StatusCode::BAD_REQUEST,
             "redirect_uri_mismatch",
@@ -708,11 +772,223 @@ fn valid_state_token(state: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
-fn valid_loopback_redirect_uri(redirect_uri: &str) -> bool {
-    (redirect_uri.starts_with("http://127.0.0.1:") || redirect_uri.starts_with("http://[::1]:"))
-        && redirect_uri.ends_with("/callback")
-        && !redirect_uri.contains('?')
-        && !redirect_uri.contains('#')
+fn confirm_resume_origin_is_valid(headers: &HeaderMap, state: &AppState) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN) else {
+        return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    let Some(web_url) = resolved_web_url(state) else {
+        return false;
+    };
+    let Ok(origin_url) = Url::parse(origin) else {
+        return false;
+    };
+    let Ok(web_url) = Url::parse(&web_url) else {
+        return false;
+    };
+
+    origin_url.scheme() == web_url.scheme()
+        && origin_url.host_str() == web_url.host_str()
+        && origin_url.port_or_known_default() == web_url.port_or_known_default()
+}
+
+fn canonical_loopback_redirect_uri(redirect_uri: &str) -> Option<String> {
+    let url = Url::parse(redirect_uri).ok()?;
+    if url.scheme() != "http" {
+        return None;
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    match url.host()? {
+        Host::Ipv4(addr) if addr == net::Ipv4Addr::LOCALHOST => {}
+        Host::Ipv6(addr) if addr == net::Ipv6Addr::LOCALHOST => {}
+        _ => return None,
+    }
+    url.port()?;
+    if url.path() != "/callback" || url.query().is_some() || url.fragment().is_some() {
+        return None;
+    }
+
+    Some(url.to_string())
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn browser_shell(status: StatusCode, title: &str, body: &str) -> Response {
+    let html = format!(
+        r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{title} · Fabro</title>
+    <style>
+      :root {{
+        color-scheme: light;
+        font-family: InterVariable, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }}
+      * {{
+        box-sizing: border-box;
+      }}
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        background: #ffffff;
+        color: #0f172a;
+      }}
+      main {{
+        width: min(100%, 34rem);
+        margin: 0 auto;
+        padding: 4rem 1.5rem;
+      }}
+      .panel {{
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        border-radius: 1.5rem;
+        background: #ffffff;
+        box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
+        padding: 2rem;
+      }}
+      .eyebrow {{
+        margin: 0 0 0.75rem;
+        color: #475569;
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }}
+      h1 {{
+        margin: 0;
+        font-size: 2rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        text-wrap: balance;
+      }}
+      p {{
+        margin: 0;
+        color: #334155;
+        font-size: 1rem;
+        line-height: 1.65;
+        text-wrap: pretty;
+      }}
+      .stack {{
+        display: grid;
+        gap: 1rem;
+      }}
+      .identity {{
+        display: grid;
+        gap: 0.5rem;
+        padding: 1rem 1.125rem;
+        border-radius: 1rem;
+        background: #f8fafc;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+      }}
+      .identity strong {{
+        color: #0f172a;
+        font-size: 1rem;
+        font-weight: 600;
+      }}
+      .button {{
+        appearance: none;
+        border: 0;
+        border-radius: 999px;
+        background: #0f172a;
+        color: #ffffff;
+        padding: 0.75rem 1rem;
+        font: inherit;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+      }}
+      .button:focus-visible {{
+        outline: 2px solid #2563eb;
+        outline-offset: 2px;
+      }}
+      form {{
+        margin: 0;
+      }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="panel">
+        <div class="stack">
+          {body}
+        </div>
+      </div>
+    </main>
+  </body>
+</html>"#,
+    );
+    let mut response = (status, Html(html)).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    response.headers_mut().insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+fn cli_login_confirmation_page(session: &SessionCookie) -> Response {
+    let login = html_escape(&session.login);
+    let display_name = if session.name.trim().is_empty() {
+        &session.login
+    } else {
+        &session.name
+    };
+    let display_name = html_escape(display_name);
+    let email = html_escape(&session.email);
+    browser_shell(
+        StatusCode::OK,
+        "Authorize CLI login",
+        &format!(
+            r#"
+<p class="eyebrow">GitHub session ready.</p>
+<h1>Authorize CLI login</h1>
+<p>This browser tab is confirming a Fabro CLI login on this machine. Only continue if you started <code>fabro auth login</code> in your terminal.</p>
+<div class="identity">
+  <strong>{display_name}</strong>
+  <p>@{login} · {email}</p>
+</div>
+<form method="post" action="/auth/cli/resume">
+  <button class="button" type="submit">Continue as {login}</button>
+</form>
+"#
+        ),
+    )
+}
+
+fn redirect_uri_with_query(redirect_uri: &str, params: &[(&str, &str)]) -> Option<String> {
+    let redirect_uri = canonical_loopback_redirect_uri(redirect_uri)?;
+    let mut location = String::with_capacity(redirect_uri.len() + 64);
+    location.push_str(&redirect_uri);
+    location.push('?');
+    for (index, (key, value)) in params.iter().enumerate() {
+        if index > 0 {
+            location.push('&');
+        }
+        location.push_str(&encode_query_value(key));
+        location.push('=');
+        location.push_str(&encode_query_value(value));
+    }
+    Some(location)
+}
+
+fn encode_query_value(value: &str) -> String {
+    utf8_percent_encode(value, QUERY_VALUE_ENCODE_SET).to_string()
 }
 
 fn pkce_challenge(verifier: &str) -> String {
@@ -846,17 +1122,11 @@ fn subject_response(
     }
 }
 
-fn encode_query_value(value: &str) -> String {
-    utf8_percent_encode(value, QUERY_VALUE_ENCODE_SET).to_string()
-}
-
 fn redirect_with_code(redirect_uri: &str, state: &str, code: &str) -> Response {
-    let location = format!(
-        "{redirect_uri}?code={}&state={}",
-        encode_query_value(code),
-        encode_query_value(state),
-    );
-    Redirect::to(&location).into_response()
+    match redirect_uri_with_query(redirect_uri, &[("code", code), ("state", state)]) {
+        Some(location) => Redirect::to(&location).into_response(),
+        None => static_error_page(INVALID_REDIRECT_URI),
+    }
 }
 
 fn redirect_with_error(
@@ -865,35 +1135,29 @@ fn redirect_with_error(
     error: &str,
     error_description: &str,
 ) -> Response {
-    let location = format!(
-        "{redirect_uri}?error={}&error_description={}&state={}",
-        encode_query_value(error),
-        encode_query_value(error_description),
-        encode_query_value(state),
-    );
-    Redirect::to(&location).into_response()
+    match redirect_uri_with_query(redirect_uri, &[
+        ("error", error),
+        ("error_description", error_description),
+        ("state", state),
+    ]) {
+        Some(location) => Redirect::to(&location).into_response(),
+        None => static_error_page(INVALID_REDIRECT_URI),
+    }
 }
 
 fn static_error_page(body: &'static str) -> Response {
-    let mut response = (
+    browser_shell(
         StatusCode::BAD_REQUEST,
-        Html(format!(
-            "<!doctype html><html><body><p>{body}</p></body></html>"
-        )),
+        "Login failed",
+        &format!(
+            r#"
+<p class="eyebrow">Login failed:</p>
+<h1>CLI sign-in could not continue</h1>
+<p>{body}</p>
+<p>Return to your terminal and run the login command again.</p>
+"#
+        ),
     )
-        .into_response();
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/html; charset=utf-8"),
-    );
-    response.headers_mut().insert(
-        "x-content-type-options",
-        HeaderValue::from_static("nosniff"),
-    );
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    response
 }
 
 fn append_jar_delta(headers: &mut HeaderMap, jar: &CookieJar) {
@@ -968,13 +1232,16 @@ async fn issue_auth_code_response(
             "GitHub session required",
         );
     };
+    let Some(redirect_uri) = canonical_loopback_redirect_uri(redirect_uri) else {
+        return static_error_page(INVALID_REDIRECT_URI);
+    };
     let entry = AuthCode {
         identity,
         login: session.login.clone(),
         name: session.name.clone(),
         email: session.email.clone(),
         code_challenge: code_challenge.to_string(),
-        redirect_uri: redirect_uri.to_string(),
+        redirect_uri: redirect_uri.clone(),
         expires_at: chrono::Utc::now() + chrono::Duration::seconds(60),
     };
 
@@ -983,7 +1250,7 @@ async fn issue_auth_code_response(
         Err(err) => {
             warn!(error = %err, "Failed to open auth code store");
             return redirect_with_error(
-                redirect_uri,
+                &redirect_uri,
                 state_token,
                 "server_error",
                 "Could not complete GitHub sign-in",
@@ -994,14 +1261,14 @@ async fn issue_auth_code_response(
     if let Err(err) = store.insert(&code, entry).await {
         warn!(error = %err, "Failed to persist auth code");
         return redirect_with_error(
-            redirect_uri,
+            &redirect_uri,
             state_token,
             "server_error",
             "Could not complete GitHub sign-in",
         );
     }
 
-    redirect_with_code(redirect_uri, state_token, &code)
+    redirect_with_code(&redirect_uri, state_token, &code)
 }
 
 #[cfg(test)]
@@ -1268,15 +1535,120 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_with_github_session_mints_auth_code_and_redirects_to_loopback() {
+    async fn start_with_github_session_sets_flow_cookie_and_redirects_to_resume() {
         let key = test_cookie_key();
-        let (app, state) = test_router(github_settings("https://fabro.example"));
+        let (app, _state) = test_router(github_settings("https://fabro.example"));
 
         let response = app
             .oneshot(
                 Request::builder()
                     .uri("/auth/cli/start?redirect_uri=http://127.0.0.1:4444/callback&state=abcdefghijklmnop&code_challenge=challenge&code_challenge_method=S256")
                     .header(header::COOKIE, github_session_cookie(&key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("/auth/cli/resume")
+        );
+
+        let cookie = response
+            .headers()
+            .get(header::SET_COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .expect("flow cookie should be set")
+            .to_string();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, cookie.parse().unwrap());
+        let flow = read_private_cli_flow(&headers, &key).expect("flow cookie should decode");
+        assert_eq!(flow, CliFlowCookie {
+            redirect_uri:   "http://127.0.0.1:4444/callback".to_string(),
+            state:          "abcdefghijklmnop".to_string(),
+            code_challenge: "challenge".to_string(),
+        });
+    }
+
+    #[tokio::test]
+    async fn resume_with_github_session_renders_confirmation_page() {
+        let key = test_cookie_key();
+        let (app, _state) = test_router(github_settings("https://fabro.example"));
+        let mut jar = cookie::CookieJar::new();
+        add_cli_flow_cookie(
+            &mut jar,
+            &key,
+            CliFlowCookie {
+                redirect_uri:   "http://127.0.0.1:4444/callback".to_string(),
+                state:          "abcdefghijklmnop".to_string(),
+                code_challenge: "challenge".to_string(),
+            },
+            true,
+        );
+        let flow_cookie = jar
+            .delta()
+            .next()
+            .expect("flow cookie should exist")
+            .encoded()
+            .to_string();
+        let cookie_header = format!("{}; {}", github_session_cookie(&key), flow_cookie);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/cli/resume")
+                    .header(header::COOKIE, cookie_header)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(html.contains("Authorize CLI login"));
+        assert!(html.contains("Continue as octocat"));
+        assert!(html.contains("form"));
+        assert!(html.contains("method=\"post\""));
+    }
+
+    #[tokio::test]
+    async fn post_resume_with_github_session_mints_auth_code_and_redirects_to_loopback() {
+        let key = test_cookie_key();
+        let (app, state) = test_router(github_settings("https://fabro.example"));
+        let mut jar = cookie::CookieJar::new();
+        add_cli_flow_cookie(
+            &mut jar,
+            &key,
+            CliFlowCookie {
+                redirect_uri:   "http://127.0.0.1:4444/callback".to_string(),
+                state:          "abcdefghijklmnop".to_string(),
+                code_challenge: "challenge".to_string(),
+            },
+            true,
+        );
+        let flow_cookie = jar
+            .delta()
+            .next()
+            .expect("flow cookie should exist")
+            .encoded()
+            .to_string();
+        let cookie_header = format!("{}; {}", github_session_cookie(&key), flow_cookie);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/cli/resume")
+                    .header(header::COOKIE, cookie_header)
+                    .header(header::ORIGIN, "https://fabro.example")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1306,6 +1678,95 @@ mod tests {
         assert_eq!(entry.redirect_uri, "http://127.0.0.1:4444/callback");
         assert_eq!(entry.code_challenge, "challenge");
         assert_eq!(entry.login, "octocat");
+    }
+
+    #[tokio::test]
+    async fn post_resume_rejects_origin_mismatch_with_html_error() {
+        let key = test_cookie_key();
+        let (app, _state) = test_router(github_settings("https://fabro.example"));
+        let mut jar = cookie::CookieJar::new();
+        add_cli_flow_cookie(
+            &mut jar,
+            &key,
+            CliFlowCookie {
+                redirect_uri:   "http://127.0.0.1:4444/callback".to_string(),
+                state:          "abcdefghijklmnop".to_string(),
+                code_challenge: "challenge".to_string(),
+            },
+            true,
+        );
+        let flow_cookie = jar
+            .delta()
+            .next()
+            .expect("flow cookie should exist")
+            .encoded()
+            .to_string();
+        let cookie_header = format!("{}; {}", github_session_cookie(&key), flow_cookie);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/cli/resume")
+                    .header(header::COOKIE, cookie_header)
+                    .header(header::ORIGIN, "https://attacker.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(html.contains("Login failed:"));
+    }
+
+    #[tokio::test]
+    async fn post_resume_without_github_session_redirects_with_github_session_required() {
+        let key = test_cookie_key();
+        let (app, _state) = test_router(github_settings("https://fabro.example"));
+        let mut jar = cookie::CookieJar::new();
+        add_cli_flow_cookie(
+            &mut jar,
+            &key,
+            CliFlowCookie {
+                redirect_uri:   "http://127.0.0.1:4444/callback".to_string(),
+                state:          "abcdefghijklmnop".to_string(),
+                code_challenge: "challenge".to_string(),
+            },
+            true,
+        );
+        let flow_cookie = jar
+            .delta()
+            .next()
+            .expect("flow cookie should exist")
+            .encoded()
+            .to_string();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/cli/resume")
+                    .header(header::COOKIE, flow_cookie)
+                    .header(header::ORIGIN, "https://fabro.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|value| value.to_str().ok()),
+            Some(
+                "http://127.0.0.1:4444/callback?error=github_session_required&error_description=GitHub%20session%20required&state=abcdefghijklmnop"
+            )
+        );
     }
 
     #[tokio::test]
@@ -1375,6 +1836,26 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("nosniff")
         );
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(html.contains("The provided redirect URI is not valid for CLI login."));
+    }
+
+    #[tokio::test]
+    async fn start_rejects_userinfo_injected_redirect_uri_with_html_error() {
+        let (app, _state) = test_router(github_settings("https://fabro.example"));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/cli/start?redirect_uri=http://127.0.0.1:1@attacker.com/callback&state=abcdefghijklmnop&code_challenge=challenge&code_challenge_method=S256")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let html = String::from_utf8(body.to_vec()).unwrap();
         assert!(html.contains("The provided redirect URI is not valid for CLI login."));
@@ -1471,6 +1952,44 @@ mod tests {
             serde_json::from_slice(&to_bytes(second.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(body["error"], "invalid_code");
+    }
+
+    #[tokio::test]
+    async fn token_rejects_userinfo_injected_redirect_uri() {
+        let (app, state) = test_router(github_settings("https://fabro.example"));
+        insert_auth_code(
+            state.as_ref(),
+            "auth-code-malicious-redirect",
+            "test-verifier",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/cli/token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "grant_type": "authorization_code",
+                            "code": "auth-code-malicious-redirect",
+                            "code_verifier": "test-verifier",
+                            "redirect_uri": "http://127.0.0.1:1@attacker.com/callback"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["error"], "invalid_request");
+        assert_eq!(body["error_description"], "Invalid request");
     }
 
     #[tokio::test]

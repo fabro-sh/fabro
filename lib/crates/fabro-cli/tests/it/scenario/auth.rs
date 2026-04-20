@@ -265,6 +265,8 @@ async fn auth_login_refresh_logout_flow_against_real_server_and_twin_github() {
     assert_eq!(status["servers"][0]["server"], harness.api_base_url);
     assert!(harness.api_requests.contains("GET /api/v1/auth/cli/config"));
     assert!(harness.web_requests.contains("GET /auth/cli/start"));
+    assert!(harness.web_requests.contains("GET /auth/cli/resume"));
+    assert!(harness.web_requests.contains("POST /auth/cli/resume"));
     assert!(harness.api_requests.contains("POST /auth/cli/token"));
     assert!(!harness.web_requests.contains("POST /auth/cli/token"));
 
