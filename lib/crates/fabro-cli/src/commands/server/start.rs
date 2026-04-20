@@ -103,14 +103,13 @@ pub(crate) async fn ensure_server_running_on_socket(
     socket_path: &Path,
     config_path: &Path,
     storage_dir: &Path,
-) -> Result<()> {
-    let _ = ensure_server_running_with_bind(
+) -> Result<Bind> {
+    ensure_server_running_with_bind(
         Some(BindRequest::Unix(socket_path.to_path_buf())),
         config_path,
         storage_dir,
     )
-    .await?;
-    Ok(())
+    .await
 }
 
 async fn ensure_server_running_with_bind(
