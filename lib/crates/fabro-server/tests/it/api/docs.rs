@@ -1,17 +1,4 @@
-#![expect(
-    clippy::disallowed_methods,
-    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
-)]
-
-use std::path::PathBuf;
-
-fn read_doc(relative_path: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../")
-        .join(relative_path);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()))
-}
+use crate::helpers::read_repo_file as read_doc;
 
 #[test]
 fn active_server_docs_describe_the_unix_socket_default() {

@@ -27,11 +27,13 @@ use tokio::time::interval;
 use tracing::{error, info, warn};
 
 use crate::bind::{self, Bind, BindRequest};
-use crate::github_webhooks::{TailscaleFunnelManager, update_github_app_webhook};
+use crate::github_webhooks::{
+    TailscaleFunnelManager, WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV, update_github_app_webhook,
+};
 use crate::ip_allowlist::{GitHubMetaResolver, IpAllowlistConfig, resolve_ip_allowlist_config};
 use crate::jwt_auth::resolve_auth_mode_with_lookup;
 use crate::server::{
-    AppStateConfig, RouterOptions, build_app_state, build_router_with_options,
+    AppState, AppStateConfig, RouterOptions, build_app_state, build_router_with_options,
     reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
 };
 use crate::server_secrets::ServerSecrets;
@@ -177,6 +179,96 @@ async fn resolve_startup_github_webhook_ip_allowlist(
     resolve_github_webhook_ip_allowlist(resolved_server_settings, github_meta_resolver)
         .await
         .map(Some)
+}
+
+async fn start_webhook_strategy(
+    resolved_server_settings: &ResolvedServerSettings,
+    state: &Arc<AppState>,
+    bind_addr: &Bind,
+    webhook_secret_present: bool,
+) -> anyhow::Result<Option<TailscaleFunnelManager>> {
+    let github = &resolved_server_settings.integrations.github;
+    let Some(strategy) = github.webhooks.as_ref().and_then(|w| w.strategy) else {
+        return Ok(None);
+    };
+
+    if github.strategy != GithubIntegrationStrategy::App {
+        warn!(
+            "GitHub webhook strategy is configured but GitHub integration auth is not set to app; skipping webhook startup"
+        );
+        return Ok(None);
+    }
+    if !webhook_secret_present {
+        warn!(
+            "Webhook strategy is configured but {WEBHOOK_SECRET_ENV} is not set; skipping webhook startup"
+        );
+        return Ok(None);
+    }
+    let Some(app_id) = github.app_id.as_ref().map(resolve_interp).transpose()? else {
+        warn!(
+            "Webhook strategy is configured but server.integrations.github.app_id is not set; skipping webhook startup"
+        );
+        return Ok(None);
+    };
+    let github_app = state.github_credentials(github).unwrap_or_else(|err| {
+        warn!(
+            error = %err,
+            "Webhook strategy is configured but GitHub credentials are invalid; skipping webhook startup"
+        );
+        None
+    });
+    let Some(fabro_github::GitHubCredentials::App(github_app)) = github_app else {
+        warn!(
+            "Webhook strategy is configured but GITHUB_APP_PRIVATE_KEY is not available; skipping webhook startup"
+        );
+        return Ok(None);
+    };
+
+    match strategy {
+        WebhookStrategy::TailscaleFunnel => {
+            let Some(port) = bound_tcp_port(bind_addr) else {
+                warn!(
+                    "GitHub webhook strategy tailscale_funnel requires a TCP server listen address; skipping webhook startup"
+                );
+                return Ok(None);
+            };
+            match TailscaleFunnelManager::start(port, &app_id, &github_app.private_key_pem).await {
+                Ok(manager) => Ok(Some(manager)),
+                Err(err) => {
+                    error!(
+                        error = %err,
+                        "Failed to start Tailscale funnel for GitHub webhooks"
+                    );
+                    Ok(None)
+                }
+            }
+        }
+        WebhookStrategy::ServerUrl => {
+            let server_api_url = resolved_server_settings
+                .api
+                .url
+                .as_ref()
+                .map(resolve_interp)
+                .transpose()?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "server.api.url must be set when webhook strategy = \"server_url\" (resolver invariant)"
+                    )
+                })?;
+            let webhook_url = format!("{}{WEBHOOK_ROUTE}", server_api_url.trim_end_matches('/'));
+            match update_github_app_webhook(&app_id, &github_app.private_key_pem, &webhook_url)
+                .await
+            {
+                Ok(()) => info!(url = %webhook_url, "GitHub App webhook URL updated"),
+                Err(err) => warn!(
+                    error = %err,
+                    url = %webhook_url,
+                    "Failed to update GitHub App webhook URL"
+                ),
+            }
+            Ok(None)
+        }
+    }
 }
 
 fn use_in_memory_store() -> bool {
@@ -351,7 +443,7 @@ where
     let vault_path = storage.secrets_path();
     let server_env_path = storage.server_state().env_path();
     let server_secrets = ServerSecrets::load(server_env_path.clone())?;
-    let webhook_secret_present = server_secrets.get("GITHUB_APP_WEBHOOK_SECRET").is_some();
+    let webhook_secret_present = server_secrets.get(WEBHOOK_SECRET_ENV).is_some();
 
     // Shared config for live reloading
     let effective_settings = apply_runtime_settings(&disk_settings, &args, &data_dir);
@@ -435,128 +527,13 @@ where
     let bound_listener = bind_listener(&bind_request).await?;
     let bind_addr = bound_listener.bind.clone();
 
-    let webhook_manager = match resolved_server_settings
-        .integrations
-        .github
-        .webhooks
-        .as_ref()
-        .and_then(|webhooks| webhooks.strategy)
-    {
-        None => None,
-        Some(_)
-            if resolved_server_settings.integrations.github.strategy
-                != GithubIntegrationStrategy::App =>
-        {
-            warn!(
-                "GitHub webhook strategy is configured but GitHub integration auth is not set to app; skipping webhook startup"
-            );
-            None
-        }
-        Some(strategy) => {
-            let webhook_app_id = resolved_server_settings
-                .integrations
-                .github
-                .app_id
-                .as_ref()
-                .map(resolve_interp)
-                .transpose()?;
-            match webhook_app_id {
-                Some(app_id) => {
-                    let github_app = state
-                        .github_credentials(&resolved_server_settings.integrations.github)
-                        .unwrap_or_else(|err| {
-                            warn!(
-                                error = %err,
-                                "Webhook strategy is configured but GitHub credentials are invalid; skipping webhook startup"
-                            );
-                            None
-                        });
-                    if webhook_secret_present {
-                        if let Some(fabro_github::GitHubCredentials::App(github_app)) = github_app {
-                            match strategy {
-                                WebhookStrategy::TailscaleFunnel => {
-                                    match bound_tcp_port(&bind_addr) {
-                                        Some(port) => match TailscaleFunnelManager::start(
-                                            port,
-                                            &app_id,
-                                            &github_app.private_key_pem,
-                                        )
-                                        .await
-                                        {
-                                            Ok(manager) => Some(manager),
-                                            Err(err) => {
-                                                error!(
-                                                    error = %err,
-                                                    "Failed to start Tailscale funnel for GitHub webhooks"
-                                                );
-                                                None
-                                            }
-                                        },
-                                        None => {
-                                            warn!(
-                                                "GitHub webhook strategy tailscale_funnel requires a TCP server listen address; skipping webhook startup"
-                                            );
-                                            None
-                                        }
-                                    }
-                                }
-                                WebhookStrategy::ServerUrl => {
-                                    let server_api_url = resolved_server_settings
-                                        .api
-                                        .url
-                                        .as_ref()
-                                        .map(resolve_interp)
-                                        .transpose()?
-                                        .expect(
-                                            "server.api.url should be validated when server_url strategy is configured",
-                                        );
-                                    let webhook_url = format!(
-                                        "{}/api/v1/webhooks/github",
-                                        server_api_url.trim_end_matches('/')
-                                    );
-                                    if let Err(err) = update_github_app_webhook(
-                                        &app_id,
-                                        &github_app.private_key_pem,
-                                        &webhook_url,
-                                    )
-                                    .await
-                                    {
-                                        warn!(
-                                            error = %err,
-                                            url = %webhook_url,
-                                            "Failed to update GitHub App webhook URL"
-                                        );
-                                    } else {
-                                        info!(
-                                            url = %webhook_url,
-                                            "GitHub App webhook URL updated"
-                                        );
-                                    }
-                                    None
-                                }
-                            }
-                        } else {
-                            warn!(
-                                "Webhook strategy is configured but GITHUB_APP_PRIVATE_KEY is not available; skipping webhook startup"
-                            );
-                            None
-                        }
-                    } else {
-                        warn!(
-                            "Webhook strategy is configured but GITHUB_APP_WEBHOOK_SECRET is not set; skipping webhook startup"
-                        );
-                        None
-                    }
-                }
-                None => {
-                    warn!(
-                        "Webhook strategy is configured but server.integrations.github.app_id is not set; skipping webhook startup"
-                    );
-                    None
-                }
-            }
-        }
-    };
+    let webhook_manager = start_webhook_strategy(
+        &resolved_server_settings,
+        &state,
+        &bind_addr,
+        webhook_secret_present,
+    )
+    .await?;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let shutdown_state = Arc::clone(&state);

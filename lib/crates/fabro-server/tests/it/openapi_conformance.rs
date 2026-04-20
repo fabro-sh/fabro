@@ -7,10 +7,6 @@
     clippy::manual_let_else,
     reason = "These spec/router conformance tests prefer direct assertions over pedantic style lints."
 )]
-#![expect(
-    clippy::disallowed_methods,
-    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
-)]
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
@@ -20,26 +16,11 @@ use fabro_server::server::{build_router, create_app_state_with_env_lookup};
 use serde_yaml::Value;
 use tower::ServiceExt;
 
-use super::helpers::{test_app_state, test_settings};
-
-fn repo_root() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("fabro-server crate should be nested under lib/crates/fabro-server")
-        .to_path_buf()
-}
+use super::helpers::{read_repo_file, test_app_state, test_settings};
 
 fn load_spec() -> Value {
-    let spec_path = repo_root().join("docs/api-reference/fabro-api.yaml");
-    let text = std::fs::read_to_string(&spec_path).expect("failed to read spec");
+    let text = read_repo_file("docs/api-reference/fabro-api.yaml");
     serde_yaml::from_str(&text).expect("failed to parse spec")
-}
-
-fn read_repo_file(relative_path: &str) -> String {
-    let path = repo_root().join(relative_path);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()))
 }
 
 fn resolve_path(path: &str) -> String {

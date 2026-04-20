@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -75,6 +76,24 @@ pub(crate) fn test_app_with_mock_anthropic(mock_base_url: &str) -> axum::Router 
 
 pub(crate) fn api(path: &str) -> String {
     format!("/api/v1{path}")
+}
+
+pub(crate) fn repo_root() -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .expect("fabro-server crate should be nested under lib/crates/fabro-server")
+        .to_path_buf()
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test fixture reads tracked files synchronously"
+)]
+pub(crate) fn read_repo_file(relative_path: &str) -> String {
+    let path = repo_root().join(relative_path);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()))
 }
 
 pub(crate) async fn body_json(body: Body) -> serde_json::Value {

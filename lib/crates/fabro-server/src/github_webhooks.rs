@@ -5,6 +5,12 @@ use tracing::{info, warn};
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Name of the server secret holding the GitHub App webhook HMAC key.
+pub(crate) const WEBHOOK_SECRET_ENV: &str = "GITHUB_APP_WEBHOOK_SECRET";
+
+/// Route path where Fabro receives GitHub App webhook deliveries.
+pub(crate) const WEBHOOK_ROUTE: &str = "/api/v1/webhooks/github";
+
 /// Verify a GitHub webhook HMAC-SHA256 signature.
 ///
 /// `signature_header` is the value of the `X-Hub-Signature-256` header,
@@ -55,7 +61,7 @@ impl TailscaleFunnelManager {
         let funnel_url = enable_tailscale_funnel(main_server_port).await?;
         info!(port = main_server_port, url = %funnel_url, "Tailscale funnel enabled");
 
-        let webhook_url = format!("{funnel_url}/api/v1/webhooks/github");
+        let webhook_url = format!("{funnel_url}{WEBHOOK_ROUTE}");
         match update_github_app_webhook(app_id, private_key_pem, &webhook_url).await {
             Ok(()) => {
                 info!(url = %webhook_url, "GitHub App webhook URL updated");
@@ -164,15 +170,15 @@ pub(crate) async fn update_github_app_webhook(
 }
 
 #[cfg(test)]
+pub(crate) fn compute_signature(secret: &[u8], body: &[u8]) -> String {
+    let mut mac = HmacSha256::new_from_slice(secret).unwrap();
+    mac.update(body);
+    format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    fn compute_signature(secret: &[u8], body: &[u8]) -> String {
-        let mut mac = HmacSha256::new_from_slice(secret).unwrap();
-        mac.update(body);
-        let result = mac.finalize();
-        format!("sha256={}", hex::encode(result.into_bytes()))
-    }
 
     #[test]
     fn valid_signature() {
