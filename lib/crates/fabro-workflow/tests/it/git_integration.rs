@@ -32,12 +32,12 @@ fn assert_success(output: &Output, context: &str) {
 }
 
 fn init_repo(dir: &Path) {
-    std::fs::create_dir_all(dir).unwrap();
+    std::fs::create_dir_all(dir).expect("failed to create repo dir");
     let init = Command::new("git")
         .args(["init"])
         .current_dir(dir)
         .output()
-        .unwrap();
+        .expect("git init should run");
     assert_success(&init, "git init");
     let commit = Command::new("git")
         .args([
@@ -52,17 +52,21 @@ fn init_repo(dir: &Path) {
         ])
         .current_dir(dir)
         .output()
-        .unwrap();
+        .expect("git commit --allow-empty should run");
     assert_success(&commit, "git commit --allow-empty");
 }
 
 fn init_bare_remote(dir: &Path) {
-    std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(
+        dir.parent()
+            .expect("bare remote path should have a parent directory"),
+    )
+    .expect("failed to create bare remote parent dir");
     let init = Command::new("git")
         .args(["init", "--bare"])
         .arg(dir)
         .output()
-        .unwrap();
+        .expect("git init --bare should run");
     assert_success(&init, "git init --bare");
 }
 
@@ -72,7 +76,7 @@ fn add_origin(repo_dir: &Path, remote_dir: &Path) {
         .arg(remote_dir)
         .current_dir(repo_dir)
         .output()
-        .unwrap();
+        .expect("git remote add origin should run");
     assert_success(&output, "git remote add origin");
 }
 
@@ -81,7 +85,7 @@ fn rename_branch(repo_dir: &Path, branch: &str) {
         .args(["branch", "-M", branch])
         .current_dir(repo_dir)
         .output()
-        .unwrap();
+        .expect("git branch -M should run");
     assert_success(&output, "git branch -M");
 }
 
@@ -99,7 +103,7 @@ fn empty_commit(repo_dir: &Path, message: &str) {
         ])
         .current_dir(repo_dir)
         .output()
-        .unwrap();
+        .expect("git commit --allow-empty should run");
     assert_success(&output, "git commit --allow-empty");
 }
 
@@ -108,9 +112,9 @@ fn list_branch(repo_dir: &Path, branch: &str) -> String {
         .args(["branch", "--list", branch])
         .current_dir(repo_dir)
         .output()
-        .unwrap();
+        .expect("git branch --list should run");
     assert_success(&output, "git branch --list");
-    String::from_utf8(output.stdout).unwrap()
+    String::from_utf8(output.stdout).expect("git branch --list output should be UTF-8")
 }
 
 fn local_env(repo: &Path) -> Arc<dyn Sandbox> {

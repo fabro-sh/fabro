@@ -173,7 +173,10 @@ async fn run_multi_turn_cache_test(
             provider_options: None,
         };
 
-        let response = adapter.complete(&request).await.unwrap();
+        let response = adapter
+            .complete(&request)
+            .await
+            .expect("provider adapter should return a response");
         let text = response.text();
         assert!(
             !text.is_empty(),

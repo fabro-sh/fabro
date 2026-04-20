@@ -27,8 +27,13 @@ impl TestServer {
         let shared_state: SharedState = Arc::new(RwLock::new(state));
         let router = build_router(shared_state);
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test server should bind an ephemeral port");
+        let port = listener
+            .local_addr()
+            .expect("bound test server should have a local address")
+            .port();
         let url = format!("http://127.0.0.1:{port}");
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();

@@ -132,7 +132,7 @@ async fn handle_git_cgi(
                         .status(StatusCode::UNAUTHORIZED)
                         .header("WWW-Authenticate", "Basic realm=\"twin-github\"")
                         .body(Body::from("Authentication required"))
-                        .unwrap();
+                        .expect("unauthorized response should build");
                 }
                 Some((_username, password)) => {
                     let token_info = state.validate_token(&password);
@@ -250,7 +250,7 @@ fn parse_cgi_response(raw: &[u8]) -> Response {
         return Response::builder()
             .status(StatusCode::OK)
             .body(Body::from(raw.to_vec()))
-            .unwrap();
+            .expect("fallback CGI response should build");
     };
 
     let header_bytes = &raw[..header_end];
@@ -277,7 +277,7 @@ fn parse_cgi_response(raw: &[u8]) -> Response {
     builder
         .status(status)
         .body(Body::from(body_bytes.to_vec()))
-        .unwrap()
+        .expect("CGI response should build")
 }
 
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {

@@ -1000,32 +1000,32 @@ impl TestContext {
             &session_paths.server.socket_path,
             false,
         );
+        let temp_dir_str = temp_dir
+            .to_str()
+            .expect("temp_dir should be valid UTF-8 for snapshot filtering");
+        let home_dir_str = home_dir
+            .to_str()
+            .expect("home_dir should be valid UTF-8 for snapshot filtering");
+        let storage_dir_str = storage_dir
+            .to_str()
+            .expect("storage_dir should be valid UTF-8 for snapshot filtering");
 
         let filters = vec![
             (
-                regex::escape(&format!("/private{}", temp_dir.to_str().unwrap())),
+                regex::escape(&format!("/private{temp_dir_str}")),
                 "[TEMP_DIR]".to_string(),
             ),
+            (regex::escape(temp_dir_str), "[TEMP_DIR]".to_string()),
             (
-                regex::escape(temp_dir.to_str().unwrap()),
-                "[TEMP_DIR]".to_string(),
-            ),
-            (
-                regex::escape(&format!("/private{}", home_dir.to_str().unwrap())),
+                regex::escape(&format!("/private{home_dir_str}")),
                 "[HOME_DIR]".to_string(),
             ),
+            (regex::escape(home_dir_str), "[HOME_DIR]".to_string()),
             (
-                regex::escape(home_dir.to_str().unwrap()),
-                "[HOME_DIR]".to_string(),
-            ),
-            (
-                regex::escape(&format!("/private{}", storage_dir.to_str().unwrap())),
+                regex::escape(&format!("/private{storage_dir_str}")),
                 "[STORAGE_DIR]".to_string(),
             ),
-            (
-                regex::escape(storage_dir.to_str().unwrap()),
-                "[STORAGE_DIR]".to_string(),
-            ),
+            (regex::escape(storage_dir_str), "[STORAGE_DIR]".to_string()),
             (regex::escape(&test_case_id), "[TEST_CASE]".to_string()),
             (regex::escape(&test_run_id), "[TEST_RUN]".to_string()),
         ];
@@ -1419,7 +1419,10 @@ impl TestContext {
             self.test_case_id(),
             scratch_dir.display()
         );
-        entries.into_iter().next().unwrap()
+        entries
+            .into_iter()
+            .next()
+            .expect("exactly one run directory should exist after the length check")
     }
 }
 
@@ -1584,7 +1587,7 @@ pub struct TwinGitHub {
 }
 
 pub fn test_http_client() -> fabro_http::HttpClient {
-    fabro_http::test_http_client().unwrap()
+    fabro_http::test_http_client().expect("test HTTP client should build")
 }
 
 impl TwinGitHub {

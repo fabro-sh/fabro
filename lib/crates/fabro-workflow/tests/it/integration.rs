@@ -188,7 +188,9 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
 }
 
 fn save_checkpoint(path: &Path, checkpoint: &Checkpoint) {
-    std::fs::write(path, serde_json::to_string_pretty(checkpoint).unwrap()).unwrap();
+    let checkpoint_json =
+        serde_json::to_string_pretty(checkpoint).expect("checkpoint should serialize to JSON");
+    std::fs::write(path, checkpoint_json).expect("checkpoint file should be written");
 }
 
 fn test_artifact_store(run_dir: &Path) -> ArtifactStore {
@@ -344,7 +346,7 @@ async fn end_to_end_linear_pipeline() {
     let graph = parse(input).expect("parse should succeed");
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().expect("temporary run dir should be created");
     let engine = WorkflowRunner::new(
         make_linear_registry(),
         Arc::new(Emitter::default()),
@@ -591,7 +593,7 @@ async fn end_to_end_human_gate_pipeline() {
     }]);
     let interviewer = Arc::new(QueueInterviewer::new(answers));
 
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().expect("temporary run dir should be created");
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
@@ -686,7 +688,7 @@ async fn human_gate_interrupted_input_fails_closed_without_fail_route() {
 
     let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::interrupted()));
 
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().expect("temporary run dir should be created");
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
@@ -8384,7 +8386,7 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
     graph.edges.push(Edge::new("run_tests", "report"));
     graph.edges.push(Edge::new("report", "exit"));
 
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().expect("temporary run dir should be created");
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));

@@ -1001,7 +1001,9 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
     let env = DaytonaSandbox::new(config, Some(creds), None, None, None)
         .await
         .expect("Failed to create Daytona client — is DAYTONA_API_KEY set?");
-    env.initialize().await.unwrap();
+    env.initialize()
+        .await
+        .expect("Daytona sandbox should initialize");
     let env: Arc<dyn Sandbox> = Arc::new(env);
 
     // Install prerequisites (bash, curl, Node 20 via nodesource) if not available
@@ -1079,7 +1081,9 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
         Err(e) => panic!("{provider}/{model} on Daytona failed: {e}"),
     }
 
-    env.cleanup().await.unwrap();
+    env.cleanup()
+        .await
+        .expect("Daytona sandbox cleanup should succeed");
 }
 
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
