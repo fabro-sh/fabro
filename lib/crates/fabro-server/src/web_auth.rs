@@ -648,14 +648,13 @@ mod tests {
     use axum::extract::State;
     use axum::http::{Request, StatusCode, header};
     use axum_extra::extract::cookie::Key;
-    use fabro_test::{assert_axum_status, expect_axum_json};
     use fabro_types::RunAuthMethod;
     use fabro_types::settings::SettingsLayer;
     use fabro_types::settings::server::{
         GithubIntegrationLayer, ServerAuthGithubLayer, ServerAuthLayer, ServerAuthMethod,
         ServerIntegrationsLayer, ServerLayer, ServerWebLayer,
     };
-    use serde_json::{Value, json};
+    use serde_json::json;
     use tower::ServiceExt;
 
     use super::{api_routes, read_private_session, routes};
@@ -739,19 +738,22 @@ mod tests {
         test_auth_router_with_settings(SettingsLayer::default(), auth_mode)
     }
 
-    async fn response_json(response: axum::response::Response) -> Value {
-        expect_axum_json(response, StatusCode::OK, "response_json").await
+    macro_rules! response_json {
+        ($response:expr) => {
+            fabro_test::expect_axum_json($response, StatusCode::OK, concat!(file!(), ":", line!()))
+        };
     }
 
-    async fn assert_status(response: axum::response::Response, expected: StatusCode) {
-        assert_axum_status(response, expected, "assert_status").await;
+    macro_rules! assert_status {
+        ($response:expr, $expected:expr) => {
+            fabro_test::assert_axum_status($response, $expected, concat!(file!(), ":", line!()))
+        };
     }
 
-    async fn checked_response(
-        response: axum::response::Response,
-        expected: StatusCode,
-    ) -> axum::response::Response {
-        fabro_test::expect_axum_status(response, expected, "checked_response").await
+    macro_rules! checked_response {
+        ($response:expr, $expected:expr) => {
+            fabro_test::expect_axum_status($response, $expected, concat!(file!(), ":", line!()))
+        };
     }
 
     #[tokio::test]
@@ -771,7 +773,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let response = checked_response(response, StatusCode::OK).await;
+        let response = checked_response!(response, StatusCode::OK).await;
 
         let session_cookie = response
             .headers()
@@ -800,7 +802,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let body = response_json(response).await;
+        let body = response_json!(response).await;
         assert_eq!(body["provider"], "dev-token");
         assert_eq!(body["user"]["login"], "dev");
     }
@@ -824,7 +826,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_status(response, StatusCode::UNAUTHORIZED).await;
+        assert_status!(response, StatusCode::UNAUTHORIZED).await;
     }
 
     #[tokio::test]
@@ -841,7 +843,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let body = response_json(response).await;
+        let body = response_json!(response).await;
         assert_eq!(body, json!({ "methods": ["dev-token"] }));
     }
 
@@ -861,7 +863,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let response = checked_response(response, StatusCode::SEE_OTHER).await;
+        let response = checked_response!(response, StatusCode::SEE_OTHER).await;
         let set_cookie = response
             .headers()
             .get(header::SET_COOKIE)
@@ -890,7 +892,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let response = checked_response(response, StatusCode::SEE_OTHER).await;
+        let response = checked_response!(response, StatusCode::SEE_OTHER).await;
         assert_eq!(
             response
                 .headers()

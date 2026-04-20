@@ -62,7 +62,7 @@ impl TailscaleFunnelManager {
         info!(port = main_server_port, url = %funnel_url, "Tailscale funnel enabled");
 
         let webhook_url = format!("{funnel_url}{WEBHOOK_ROUTE}");
-        match update_github_app_webhook(app_id, private_key_pem, &webhook_url).await {
+        match fabro_github::update_app_webhook_config(app_id, private_key_pem, &webhook_url).await {
             Ok(()) => {
                 info!(url = %webhook_url, "GitHub App webhook URL updated");
             }
@@ -135,39 +135,6 @@ async fn disable_tailscale_funnel(port: u16) {
             warn!(port, error = %err, "Failed to disable Tailscale funnel");
         }
     }
-}
-
-pub(crate) async fn update_github_app_webhook(
-    app_id: &str,
-    private_key_pem: &str,
-    webhook_url: &str,
-) -> anyhow::Result<()> {
-    let jwt =
-        fabro_github::sign_app_jwt(app_id, private_key_pem).map_err(|e| anyhow::anyhow!(e))?;
-
-    let client = fabro_http::http_client()?;
-    let body = serde_json::json!({
-        "url": webhook_url,
-        "content_type": "json",
-    });
-
-    let url = format!("{}/app/hook/config", fabro_github::github_api_base_url());
-    let resp = client
-        .patch(&url)
-        .header("Authorization", format!("Bearer {jwt}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "fabro")
-        .json(&body)
-        .send()
-        .await?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("GitHub API returned {status}: {text}");
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

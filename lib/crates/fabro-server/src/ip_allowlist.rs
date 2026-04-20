@@ -334,7 +334,6 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use axum::routing::get;
     use axum::{Router, middleware};
-    use fabro_test::assert_axum_status;
     use httpmock::MockServer;
     use tower::ServiceExt;
 
@@ -344,8 +343,10 @@ mod tests {
         IpAllowEntry::parse_literal(value).unwrap()
     }
 
-    async fn assert_status(response: axum::response::Response, expected: StatusCode) {
-        assert_axum_status(response, expected, "assert_status").await;
+    macro_rules! assert_status {
+        ($response:expr, $expected:expr) => {
+            fabro_test::assert_axum_status($response, $expected, concat!(file!(), ":", line!()))
+        };
     }
 
     #[test]
@@ -552,7 +553,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let allowed_response = app.clone().oneshot(allowed_request).await.unwrap();
-        assert_status(allowed_response, StatusCode::OK).await;
+        assert_status!(allowed_response, StatusCode::OK).await;
 
         let blocked_request = Request::builder()
             .uri("/api/v1/runs")
@@ -560,7 +561,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let blocked_response = app.oneshot(blocked_request).await.unwrap();
-        assert_status(blocked_response, StatusCode::FORBIDDEN).await;
+        assert_status!(blocked_response, StatusCode::FORBIDDEN).await;
     }
 
     #[tokio::test]
@@ -585,7 +586,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_status(health_response, StatusCode::OK).await;
+        assert_status!(health_response, StatusCode::OK).await;
 
         let blocked_response = app
             .oneshot(request_with_connect_info(
@@ -594,7 +595,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_status(blocked_response, StatusCode::FORBIDDEN).await;
+        assert_status!(blocked_response, StatusCode::FORBIDDEN).await;
     }
 
     fn request_with_connect_info(path: &str, ip: IpAddr) -> Request<Body> {

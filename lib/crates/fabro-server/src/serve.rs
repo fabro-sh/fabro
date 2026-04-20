@@ -13,7 +13,7 @@ use fabro_types::settings::server::{
     GithubIntegrationStrategy, ServerLayer, ServerListenLayer, WebhookStrategy,
 };
 use fabro_types::settings::{
-    InterpString, ObjectStoreSettings, ServerListenSettings,
+    GithubIntegrationSettings, InterpString, ObjectStoreSettings, ServerListenSettings,
     ServerSettings as ResolvedServerSettings, SettingsLayer,
 };
 use fabro_util::terminal::Styles;
@@ -27,9 +27,7 @@ use tokio::time::interval;
 use tracing::{error, info, warn};
 
 use crate::bind::{self, Bind, BindRequest};
-use crate::github_webhooks::{
-    TailscaleFunnelManager, WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV, update_github_app_webhook,
-};
+use crate::github_webhooks::{TailscaleFunnelManager, WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV};
 use crate::ip_allowlist::{GitHubMetaResolver, IpAllowlistConfig, resolve_ip_allowlist_config};
 use crate::jwt_auth::resolve_auth_mode_with_lookup;
 use crate::server::{
@@ -181,6 +179,53 @@ async fn resolve_startup_github_webhook_ip_allowlist(
         .map(Some)
 }
 
+enum WebhookPreconditions {
+    Ready {
+        app_id:          String,
+        private_key_pem: String,
+    },
+    Skip(String),
+}
+
+fn resolve_webhook_preconditions(
+    github: &GithubIntegrationSettings,
+    state: &Arc<AppState>,
+    webhook_secret_present: bool,
+) -> anyhow::Result<WebhookPreconditions> {
+    if github.strategy != GithubIntegrationStrategy::App {
+        return Ok(WebhookPreconditions::Skip(
+            "GitHub integration auth is not set to app".to_string(),
+        ));
+    }
+    if !webhook_secret_present {
+        return Ok(WebhookPreconditions::Skip(format!(
+            "{WEBHOOK_SECRET_ENV} is not set"
+        )));
+    }
+    let Some(app_id) = github.app_id.as_ref().map(resolve_interp).transpose()? else {
+        return Ok(WebhookPreconditions::Skip(
+            "server.integrations.github.app_id is not set".to_string(),
+        ));
+    };
+    let github_app = match state.github_credentials(github) {
+        Ok(creds) => creds,
+        Err(err) => {
+            return Ok(WebhookPreconditions::Skip(format!(
+                "GitHub credentials are invalid: {err}"
+            )));
+        }
+    };
+    let Some(fabro_github::GitHubCredentials::App(github_app)) = github_app else {
+        return Ok(WebhookPreconditions::Skip(
+            "GITHUB_APP_PRIVATE_KEY is not available".to_string(),
+        ));
+    };
+    Ok(WebhookPreconditions::Ready {
+        app_id,
+        private_key_pem: github_app.private_key_pem,
+    })
+}
+
 async fn start_webhook_strategy(
     resolved_server_settings: &ResolvedServerSettings,
     state: &Arc<AppState>,
@@ -192,47 +237,30 @@ async fn start_webhook_strategy(
         return Ok(None);
     };
 
-    if github.strategy != GithubIntegrationStrategy::App {
-        warn!(
-            "GitHub webhook strategy is configured but GitHub integration auth is not set to app; skipping webhook startup"
-        );
-        return Ok(None);
-    }
-    if !webhook_secret_present {
-        warn!(
-            "Webhook strategy is configured but {WEBHOOK_SECRET_ENV} is not set; skipping webhook startup"
-        );
-        return Ok(None);
-    }
-    let Some(app_id) = github.app_id.as_ref().map(resolve_interp).transpose()? else {
-        warn!(
-            "Webhook strategy is configured but server.integrations.github.app_id is not set; skipping webhook startup"
-        );
-        return Ok(None);
-    };
-    let github_app = state.github_credentials(github).unwrap_or_else(|err| {
-        warn!(
-            error = %err,
-            "Webhook strategy is configured but GitHub credentials are invalid; skipping webhook startup"
-        );
-        None
-    });
-    let Some(fabro_github::GitHubCredentials::App(github_app)) = github_app else {
-        warn!(
-            "Webhook strategy is configured but GITHUB_APP_PRIVATE_KEY is not available; skipping webhook startup"
-        );
-        return Ok(None);
-    };
+    let (app_id, private_key_pem) =
+        match resolve_webhook_preconditions(github, state, webhook_secret_present)? {
+            WebhookPreconditions::Ready {
+                app_id,
+                private_key_pem,
+            } => (app_id, private_key_pem),
+            WebhookPreconditions::Skip(reason) => {
+                warn!(
+                    %reason,
+                    "Webhook strategy is configured but skipping webhook startup"
+                );
+                return Ok(None);
+            }
+        };
 
     match strategy {
         WebhookStrategy::TailscaleFunnel => {
-            let Some(port) = bound_tcp_port(bind_addr) else {
+            let Some(port) = bind_addr.tcp_port() else {
                 warn!(
                     "GitHub webhook strategy tailscale_funnel requires a TCP server listen address; skipping webhook startup"
                 );
                 return Ok(None);
             };
-            match TailscaleFunnelManager::start(port, &app_id, &github_app.private_key_pem).await {
+            match TailscaleFunnelManager::start(port, &app_id, &private_key_pem).await {
                 Ok(manager) => Ok(Some(manager)),
                 Err(err) => {
                     error!(
@@ -256,7 +284,7 @@ async fn start_webhook_strategy(
                     )
                 })?;
             let webhook_url = format!("{}{WEBHOOK_ROUTE}", server_api_url.trim_end_matches('/'));
-            match update_github_app_webhook(&app_id, &github_app.private_key_pem, &webhook_url)
+            match fabro_github::update_app_webhook_config(&app_id, &private_key_pem, &webhook_url)
                 .await
             {
                 Ok(()) => info!(url = %webhook_url, "GitHub App webhook URL updated"),
@@ -665,13 +693,6 @@ struct BoundServerListener {
 enum BoundListener {
     Unix(UnixListener),
     Tcp(TcpListener),
-}
-
-fn bound_tcp_port(bind: &Bind) -> Option<u16> {
-    match bind {
-        Bind::Tcp(address) => Some(address.port()),
-        Bind::Unix(_) => None,
-    }
 }
 
 async fn bind_listener(requested: &BindRequest) -> anyhow::Result<BoundServerListener> {
