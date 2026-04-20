@@ -1,3 +1,5 @@
+mod auth_harness;
+
 use assert_cmd::Command;
 use fabro_store::EventEnvelope;
 use fabro_test::{TestContext, preserve_coverage_env};
@@ -44,6 +46,10 @@ macro_rules! fabro_json_snapshot {
     }};
 }
 
+pub(crate) use auth_harness::{
+    RealAuthHarness, TEST_DEV_TOKEN, complete_login_via_browser, expire_saved_access_token,
+    no_redirect_browser_client, run_detached, saved_auth_entry,
+};
 pub(crate) use fabro_json_snapshot;
 
 pub(crate) fn run_output_filters(context: &TestContext) -> Vec<(String, String)> {
