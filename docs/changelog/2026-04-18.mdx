@@ -19,6 +19,14 @@ The published Docker image switched to [Docker Hardened Images](https://www.dock
 
 A new `docker-compose.prod.yaml` stands up a Caddy 2 sidecar that handles auto-HTTPS on ports 80/443 and proxies to the Fabro service. Set `FABRO_DOMAIN` to your domain and Caddy provisions and renews the certificate; certs persist in a named volume. The base `docker-compose.yaml` has moved to the repo root.
 
+## GitHub webhook exposure is now explicit
+
+GitHub App webhook exposure no longer auto-enables just because `[server.integrations.github.webhooks]` exists. The webhook handler now lives on the main API router at `POST /api/v1/webhooks/github`, and operators must choose an explicit strategy if they want Fabro to mutate any external state on startup.
+
+- Breaking: if you previously relied on Fabro silently starting `tailscale funnel` and rewriting the GitHub App webhook URL, add `strategy = "tailscale_funnel"` under `[server.integrations.github.webhooks]` to restore that behavior.
+- New: `strategy = "server_url"` tells Fabro to use `server.api.url` and set the GitHub App webhook URL to `<server.api.url>/api/v1/webhooks/github` on startup. This is the recommended choice for stable production deployments behind HTTPS.
+- Unset `strategy`: Fabro still verifies and serves signed GitHub webhooks when `GITHUB_APP_WEBHOOK_SECRET` is present, but it will not run `tailscale funnel` and it will not rewrite the GitHub App webhook URL.
+
 ## More
 
 <Accordion title="Fixes">

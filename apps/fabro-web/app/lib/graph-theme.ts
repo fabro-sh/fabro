@@ -1,6 +1,4 @@
-import type { Theme } from "./theme";
-
-interface GraphTheme {
+export interface GraphTheme {
   fontcolor: string;
   edgeColor: string;
   nodeFill: string;
@@ -24,7 +22,7 @@ interface GraphTheme {
   failedText: string;
 }
 
-const dark: GraphTheme = {
+export const graphTheme: GraphTheme = {
   fontcolor: "#5a7a94",
   edgeColor: "#2a3f52",
   nodeFill: "#1a2b3c",
@@ -47,32 +45,3 @@ const dark: GraphTheme = {
   failedBorder: "#f87171",
   failedText: "#fca5a5",
 };
-
-const light: GraphTheme = {
-  fontcolor: "#475569",
-  edgeColor: "#cbd5e1",
-  nodeFill: "#f1f5f9",
-  nodeText: "#1e293b",
-  startFill: "#ccfbf1",
-  startBorder: "#0d9488",
-  startText: "#0d9488",
-  gateFill: "#fef3c7",
-  gateBorder: "#d97706",
-  gateText: "#d97706",
-  completedFill: "#d1fae5",
-  completedBorder: "#059669",
-  completedText: "#059669",
-  runningFill: "#ccfbf1",
-  runningBorder: "#0d9488",
-  runningText: "#0d9488",
-  runningPulseFill: "#99f6e4",
-  runningPulseStroke: "#0d9488",
-  failedFill: "#fef2f2",
-  failedBorder: "#dc2626",
-  failedText: "#dc2626",
-};
-
-export function getGraphTheme(theme: Theme): GraphTheme {
-  return theme === "dark" ? dark : light;
-}
-

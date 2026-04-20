@@ -7,7 +7,7 @@ import { dotLanguage } from "./dot-grammar";
 
 export async function registerDotLanguage(): Promise<void> {
   const highlighter = await getSharedHighlighter({
-    themes: ["pierre-dark", "pierre-light"],
+    themes: ["pierre-dark"],
     langs: [],
   });
   attachResolvedLanguages(

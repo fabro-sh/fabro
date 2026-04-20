@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::http::StatusCode;
 use fabro_config::ServerState;
 use fabro_server::bind::Bind;
 use fabro_server::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
@@ -21,7 +22,7 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
-use crate::helpers::api;
+use crate::helpers::{api, reqwest_status};
 
 const TEST_DEV_TOKEN: &str =
     "fabro_dev_abababababababababababababababababababababababababababababababab";
@@ -111,7 +112,8 @@ async fn spawn_served_listener(
 async fn wait_for_health(client: &fabro_http::HttpClient, url: &str) {
     for _ in 0..50 {
         if let Ok(response) = client.get(url).send().await {
-            if response.status() == 200 {
+            let status = response.status();
+            if status == 200 {
                 return;
             }
         }
@@ -150,7 +152,7 @@ methods = ["dev-token"]
         .await
         .expect("plain HTTP request should succeed");
 
-    assert_eq!(response.status(), 200);
+    reqwest_status(response, StatusCode::OK, "GET /api/v1/runs").await;
     handle.abort();
 }
 
@@ -165,7 +167,7 @@ async fn tcp_dev_token_auth_uses_bearer_auth() {
     let url = format!("http://127.0.0.1:{}{}", addr.port(), api("/runs"));
 
     let unauthorized = client.get(&url).send().await.unwrap();
-    assert_eq!(unauthorized.status(), 401);
+    reqwest_status(unauthorized, StatusCode::UNAUTHORIZED, "GET /api/v1/runs").await;
 
     let authorized = client
         .get(url)
@@ -173,7 +175,7 @@ async fn tcp_dev_token_auth_uses_bearer_auth() {
         .send()
         .await
         .unwrap();
-    assert_eq!(authorized.status(), 200);
+    reqwest_status(authorized, StatusCode::OK, "GET /api/v1/runs").await;
 }
 
 #[cfg(unix)]
@@ -209,7 +211,7 @@ methods = ["dev-token"]
         .await
         .expect("Unix-socket HTTP request should succeed");
 
-    assert_eq!(response.status(), 200);
+    reqwest_status(response, StatusCode::OK, "GET /api/v1/runs").await;
     handle.abort();
 }
 
@@ -231,5 +233,5 @@ async fn tcp_ip_allowlist_uses_connect_info() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), 403);
+    reqwest_status(response, StatusCode::FORBIDDEN, "GET /api/v1/runs").await;
 }

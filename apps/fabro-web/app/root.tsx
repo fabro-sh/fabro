@@ -1,21 +1,8 @@
 import { isRouteErrorResponse, Outlet } from "react-router";
-import { ThemeProvider } from "./lib/theme";
-import { buildThemeBootScript } from "./lib/theme-selection";
 import "./app.css";
 
-const themeScript = buildThemeBootScript();
-
 export default function Root() {
-  return (
-    <ThemeProvider>
-      <ThemeBoot />
-      <Outlet />
-    </ThemeProvider>
-  );
-}
-
-function ThemeBoot() {
-  return <script dangerouslySetInnerHTML={{ __html: themeScript }} />;
+  return <Outlet />;
 }
 
 export function ErrorBoundary({ error }: any) {

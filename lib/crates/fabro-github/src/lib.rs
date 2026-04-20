@@ -810,6 +810,44 @@ pub async fn get_authenticated_app(
         .map_err(|e| format!("Failed to parse GitHub App info: {e}"))
 }
 
+/// Update a GitHub App's webhook URL via `PATCH /app/hook/config`.
+///
+/// Signs an App JWT and sets the webhook endpoint and content type.
+pub async fn update_app_webhook_config(
+    app_id: &str,
+    private_key_pem: &str,
+    webhook_url: &str,
+) -> Result<(), String> {
+    let jwt = sign_app_jwt(app_id, private_key_pem)?;
+    let client = http_client()?;
+    let url = format!("{}/app/hook/config", github_api_base_url());
+    let auth = format!("Bearer {jwt}");
+    let body = serde_json::json!({
+        "url": webhook_url,
+        "content_type": "json",
+    });
+
+    let resp = HttpClient::request(
+        &client,
+        HttpMethod::Patch,
+        &url,
+        &github_headers(&auth),
+        Some(&body),
+    )
+    .await
+    .map_err(|e| format!("Failed to update GitHub App webhook: {e}"))?;
+
+    if !(200..300).contains(&resp.status) {
+        return Err(format!(
+            "GitHub API returned {}: {}",
+            resp.status,
+            resp.text()
+        ));
+    }
+
+    Ok(())
+}
+
 /// Check whether a GitHub App is publicly visible.
 ///
 /// Calls `GET /apps/{slug}` **without** authentication. Public apps return 200,

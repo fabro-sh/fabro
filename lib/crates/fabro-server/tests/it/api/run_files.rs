@@ -13,7 +13,9 @@ use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::build_router;
 use tower::ServiceExt;
 
-use crate::helpers::{MINIMAL_DOT, api, body_json, minimal_manifest_json, test_app_state};
+use crate::helpers::{
+    MINIMAL_DOT, api, minimal_manifest_json, response_json, response_status, test_app_state,
+};
 
 fn files_url(run_id: &str) -> String {
     api(&format!("/runs/{run_id}/files"))
@@ -28,7 +30,12 @@ async fn invalid_run_id_returns_400() {
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    response_status(
+        resp,
+        StatusCode::BAD_REQUEST,
+        "GET /api/v1/runs/not-a-ulid/files",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -42,7 +49,12 @@ async fn unknown_run_returns_404() {
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    response_status(
+        resp,
+        StatusCode::NOT_FOUND,
+        format!("GET /api/v1/runs/{fake}/files"),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -55,8 +67,12 @@ async fn malformed_from_sha_query_returns_400() {
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-    let body = body_json(resp.into_body()).await;
+    let body = crate::helpers::response_json(
+        resp,
+        StatusCode::BAD_REQUEST,
+        format!("{}:{}", file!(), line!()),
+    )
+    .await;
     assert!(
         body["errors"][0]["detail"]
             .as_str()
@@ -80,7 +96,12 @@ async fn non_default_from_sha_returns_400_even_when_hex() {
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    response_status(
+        resp,
+        StatusCode::BAD_REQUEST,
+        format!("GET /api/v1/runs/{fake}/files?from_sha=<non-default>"),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -93,7 +114,12 @@ async fn malformed_to_sha_returns_400() {
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    response_status(
+        resp,
+        StatusCode::BAD_REQUEST,
+        format!("GET /api/v1/runs/{fake}/files?to_sha=xyz"),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -110,8 +136,7 @@ async fn submitted_run_without_sandbox_returns_empty_envelope() {
         .body(Body::from(serde_json::to_string(&manifest).unwrap()))
         .unwrap();
     let create_resp = app.clone().oneshot(create_req).await.unwrap();
-    assert_eq!(create_resp.status(), StatusCode::CREATED);
-    let create_body = body_json(create_resp.into_body()).await;
+    let create_body = response_json(create_resp, StatusCode::CREATED, "POST /api/v1/runs").await;
     let run_id = create_body["id"].as_str().unwrap().to_string();
 
     let req = Request::builder()
@@ -120,8 +145,12 @@ async fn submitted_run_without_sandbox_returns_empty_envelope() {
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = body_json(resp.into_body()).await;
+    let body = response_json(
+        resp,
+        StatusCode::OK,
+        format!("GET /api/v1/runs/{run_id}/files"),
+    )
+    .await;
     assert!(
         body["data"].as_array().is_some_and(Vec::is_empty),
         "expected empty data: {body}"
@@ -146,8 +175,7 @@ async fn demo_mode_returns_fixture_without_touching_store() {
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = body_json(resp.into_body()).await;
+    let body = response_json(resp, StatusCode::OK, "GET /api/v1/runs/whatever/files").await;
 
     // Demo fixture ships three entries (modified + added + renamed).
     let data = body["data"].as_array().expect("data array");
@@ -175,8 +203,7 @@ async fn response_envelope_matches_openapi_paginated_run_file_list_shape() {
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = body_json(resp.into_body()).await;
+    let body = response_json(resp, StatusCode::OK, "GET /api/v1/runs/whatever/files").await;
 
     assert!(body["data"].is_array());
     assert!(body["meta"].is_object());

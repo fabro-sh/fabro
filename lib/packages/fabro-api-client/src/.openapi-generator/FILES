@@ -5,6 +5,7 @@ api/discovery-api.ts
 api/human-in-the-loop-api.ts
 api/insights-api.ts
 api/install-api.ts
+api/integrations-api.ts
 api/models-api.ts
 api/repos-api.ts
 api/run-internals-api.ts

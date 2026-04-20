@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
-import { useTheme } from "../lib/theme";
-import { getGraphTheme } from "../lib/graph-theme";
+import { graphTheme } from "../lib/graph-theme";
 import { apiFetch, apiJsonOrNull } from "../api";
 import { isVisibleStage } from "../data/runs";
 import { formatDurationSecs } from "../lib/format";
@@ -34,7 +33,7 @@ export async function loader({ request, params }: any) {
 
 type Direction = "LR" | "TB";
 
-function buildDot(direction: Direction, gt: ReturnType<typeof getGraphTheme>) {
+function buildDot(direction: Direction) {
   return `digraph sync {
     graph [label="Sync"]
     rankdir=${direction}
@@ -44,27 +43,27 @@ function buildDot(direction: Direction, gt: ReturnType<typeof getGraphTheme>) {
     node [
         fontname="ui-monospace, monospace"
         fontsize=11
-        fontcolor="${gt.nodeText}"
-        color="${gt.edgeColor}"
-        fillcolor="${gt.nodeFill}"
+        fontcolor="${graphTheme.nodeText}"
+        color="${graphTheme.edgeColor}"
+        fillcolor="${graphTheme.nodeFill}"
         style=filled
         penwidth=1.2
     ]
     edge [
         fontname="ui-monospace, monospace"
         fontsize=9
-        fontcolor="${gt.fontcolor}"
-        color="${gt.edgeColor}"
+        fontcolor="${graphTheme.fontcolor}"
+        color="${graphTheme.edgeColor}"
         arrowsize=0.7
         penwidth=1.2
     ]
 
-    start [shape=Mdiamond, label="Start", fillcolor="${gt.startFill}", color="${gt.startBorder}", fontcolor="${gt.startText}"]
-    exit  [shape=Msquare,  label="Exit",  fillcolor="${gt.startFill}", color="${gt.startBorder}", fontcolor="${gt.startText}"]
+    start [shape=Mdiamond, label="Start", fillcolor="${graphTheme.startFill}", color="${graphTheme.startBorder}", fontcolor="${graphTheme.startText}"]
+    exit  [shape=Msquare,  label="Exit",  fillcolor="${graphTheme.startFill}", color="${graphTheme.startBorder}", fontcolor="${graphTheme.startText}"]
 
     detect  [label="Detect\\nDrift"]
     propose [label="Propose\\nChanges"]
-    review  [shape=hexagon, label="Review\\nChanges", fillcolor="${gt.gateFill}", color="${gt.gateBorder}", fontcolor="${gt.gateText}"]
+    review  [shape=hexagon, label="Review\\nChanges", fillcolor="${graphTheme.gateFill}", color="${graphTheme.gateBorder}", fontcolor="${graphTheme.gateText}"]
     apply   [label="Apply\\nChanges"]
 
     start -> detect
@@ -89,90 +88,6 @@ function stripGraphTitle(svg: SVGSVGElement) {
   title.remove();
 }
 
-function annotateRunningNodes(svg: SVGSVGElement, gt: ReturnType<typeof getGraphTheme>, stageList: Stage[]) {
-  const runningDotIds = new Set(
-    stageList.filter((s) => s.status === "running").map((s) => s.dotId),
-  );
-  const completedDotIds = new Set(
-    stageList.filter((s) => s.status === "completed").map((s) => s.dotId),
-  );
-
-  const nodeGroups = svg.querySelectorAll(".node");
-  for (const group of nodeGroups) {
-    const titleEl = group.querySelector("title");
-    if (!titleEl) continue;
-    const nodeId = titleEl.textContent?.trim();
-    if (!nodeId) continue;
-
-    if (runningDotIds.has(nodeId)) {
-      // Animate with native SVG <animate> elements (cross-browser reliable)
-      const ns = "http://www.w3.org/2000/svg";
-      const shapes = group.querySelectorAll("ellipse, polygon, path");
-      for (const shape of shapes) {
-        shape.setAttribute("fill", gt.runningFill);
-        shape.setAttribute("stroke", gt.runningBorder);
-        shape.setAttribute("stroke-width", "2");
-
-        const animFill = document.createElementNS(ns, "animate");
-        animFill.setAttribute("attributeName", "fill");
-        animFill.setAttribute("values", `${gt.runningFill};${gt.runningPulseFill};${gt.runningFill}`);
-        animFill.setAttribute("dur", "1.5s");
-        animFill.setAttribute("repeatCount", "indefinite");
-        shape.appendChild(animFill);
-
-        const animStroke = document.createElementNS(ns, "animate");
-        animStroke.setAttribute("attributeName", "stroke");
-        animStroke.setAttribute("values", `${gt.runningBorder};${gt.runningPulseStroke};${gt.runningBorder}`);
-        animStroke.setAttribute("dur", "1.5s");
-        animStroke.setAttribute("repeatCount", "indefinite");
-        shape.appendChild(animStroke);
-
-        const animWidth = document.createElementNS(ns, "animate");
-        animWidth.setAttribute("attributeName", "stroke-width");
-        animWidth.setAttribute("values", "2;3.5;2");
-        animWidth.setAttribute("dur", "1.5s");
-        animWidth.setAttribute("repeatCount", "indefinite");
-        shape.appendChild(animWidth);
-      }
-      const texts = group.querySelectorAll("text");
-      for (const text of texts) {
-        text.setAttribute("fill", gt.runningText);
-      }
-    } else if (completedDotIds.has(nodeId)) {
-      // Tint completed nodes green
-      const shapes = group.querySelectorAll("ellipse, polygon, path");
-      for (const shape of shapes) {
-        shape.setAttribute("fill", gt.completedFill);
-        shape.setAttribute("stroke", gt.completedBorder);
-      }
-      const texts = group.querySelectorAll("text");
-      for (const text of texts) {
-        text.setAttribute("fill", gt.completedText);
-      }
-    }
-  }
-
-  // Also color edges leading into completed nodes
-  const edgeGroups = svg.querySelectorAll(".edge");
-  for (const group of edgeGroups) {
-    const titleEl = group.querySelector("title");
-    if (!titleEl) continue;
-    const edgeLabel = titleEl.textContent?.trim() ?? "";
-    const [, target] = edgeLabel.split("->");
-    if (!target) continue;
-    const targetId = target.trim();
-
-    if (completedDotIds.has(targetId)) {
-      const paths = group.querySelectorAll("path, polygon");
-      for (const p of paths) {
-        p.setAttribute("stroke", gt.completedBorder);
-        if (p.tagName === "polygon") p.setAttribute("fill", gt.completedBorder);
-      }
-    }
-  }
-
-}
-
 export default function RunGraph({ loaderData }: any) {
   const { id } = useParams();
   const { stages, graphSvg } = loaderData;
@@ -185,8 +100,6 @@ export default function RunGraph({ loaderData }: any) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragState = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const zoom = GRAPH_ZOOM_STEPS[zoomIndex];
-  const { theme } = useTheme();
-  const graphTheme = getGraphTheme(theme);
 
   useEffect(() => {
     let cancelled = false;
@@ -214,7 +127,7 @@ export default function RunGraph({ loaderData }: any) {
           const { instance } = await import("@viz-js/viz");
           const viz = await instance();
           if (cancelled) return;
-          svg = viz.renderSVGElement(buildDot(direction, graphTheme));
+          svg = viz.renderSVGElement(buildDot(direction));
         }
 
         stripGraphTitle(svg);
@@ -231,7 +144,7 @@ export default function RunGraph({ loaderData }: any) {
     setPan({ x: 0, y: 0 });
     render();
     return () => { cancelled = true; };
-  }, [direction, graphTheme, graphSvg, id]);
+  }, [direction, graphSvg, id]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;

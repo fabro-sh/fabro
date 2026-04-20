@@ -3,8 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import { apiFetch, apiJsonOrNull } from "../api";
 import { isVisibleStage } from "../data/runs";
 import { formatDurationSecs } from "../lib/format";
-import { useTheme } from "../lib/theme";
-import { getGraphTheme } from "../lib/graph-theme";
+import { graphTheme } from "../lib/graph-theme";
 import { StageSidebar } from "../components/stage-sidebar";
 import type { Stage } from "../components/stage-sidebar";
 import {
@@ -47,7 +46,6 @@ export default function RunOverview({ loaderData }: any) {
   const innerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const navigate = useNavigate();
-  const { theme } = useTheme();
   const [zoomIndex, setZoomIndex] = useState(GRAPH_DEFAULT_ZOOM_INDEX);
   const [direction, setDirection] = useState<Direction>("LR");
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -69,7 +67,7 @@ export default function RunOverview({ loaderData }: any) {
     if (!svg) return;
     svgRef.current = svg;
 
-    const gt = getGraphTheme(theme);
+    const gt = graphTheme;
     const runningDotIds = new Set<string>(
       stages.filter((s: Stage) => s.status === "running").map((s: Stage) => s.dotId ?? s.id),
     );
@@ -157,7 +155,7 @@ export default function RunOverview({ loaderData }: any) {
     }
     })();
     return () => { cancelled = true; };
-  }, [stages, graphSvg, theme, direction, id]);
+  }, [stages, graphSvg, direction, id]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;

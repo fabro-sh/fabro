@@ -7,7 +7,7 @@ use fabro_types::settings::SettingsLayer;
 use serde_json::json;
 use tower::ServiceExt;
 
-use crate::helpers::body_json;
+use crate::helpers::{body_json, checked_response, response_json};
 
 #[tokio::test]
 async fn retrieve_server_settings_default_view_returns_redacted_layer_settings() {
@@ -54,8 +54,7 @@ server_only = "1"
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response.into_body()).await;
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/settings").await;
     assert_eq!(body["_version"], 1);
     assert_eq!(body["server"]["storage"]["root"], "/srv/fabro");
     assert_eq!(body["server"]["scheduler"]["max_concurrent_runs"], 9);
@@ -119,7 +118,12 @@ server_only = "1"
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let response = checked_response(
+        response,
+        StatusCode::OK,
+        "GET /api/v1/settings?view=resolved",
+    )
+    .await;
     assert_eq!(
         response
             .headers()

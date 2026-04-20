@@ -21,6 +21,15 @@ use serde_json::{Map, Value, json};
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
 
+mod http_assert;
+
+pub use http_assert::{
+    assert_axum_status, assert_axum_status_in, assert_reqwest_status, assert_reqwest_status_in,
+    expect_axum_bytes, expect_axum_json, expect_axum_status, expect_axum_status_in,
+    expect_axum_text, expect_reqwest_bytes, expect_reqwest_json, expect_reqwest_status,
+    expect_reqwest_status_in, expect_reqwest_text,
+};
+
 /// Re-export `LLVM_PROFILE_FILE` into a `Command` whose env was just cleared,
 /// so subprocess coverage data lands in the profile path that
 /// `cargo-llvm-cov` configured for the parent test process. Accepts both
@@ -213,7 +222,7 @@ pub fn stop_pid(pid: u32) {
     fabro_proc::sigterm(pid);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while std::time::Instant::now() < deadline {
-        if !fabro_proc::process_alive(pid) {
+        if !fabro_proc::process_running(pid) {
             return;
         }
         poll_sleep();
@@ -474,7 +483,7 @@ fn live_marker_count(root: &Path) -> usize {
                 .map(|pid| (pid, entry.path()))
         })
         .filter(|(pid, path)| {
-            if fabro_proc::process_alive(*pid) {
+            if fabro_proc::process_running(*pid) {
                 true
             } else {
                 let _ = std::fs::remove_file(path);
@@ -740,7 +749,7 @@ fn server_record_pid(storage_dir: &Path) -> Option<u32> {
 }
 
 fn server_running(server: &ServerPaths) -> bool {
-    server_record_pid(&server.storage_dir).is_some_and(fabro_proc::process_alive)
+    server_record_pid(&server.storage_dir).is_some_and(fabro_proc::process_running)
 }
 
 #[expect(
@@ -823,11 +832,11 @@ fn stop_test_server(server: &ServerPaths) {
     let poll = std::time::Duration::from_millis(50);
     let timeout = test_server_stop_timeout();
     let mut elapsed = std::time::Duration::ZERO;
-    while elapsed < timeout && fabro_proc::process_alive(pid) {
+    while elapsed < timeout && fabro_proc::process_running(pid) {
         std::thread::sleep(poll);
         elapsed += poll;
     }
-    if fabro_proc::process_alive(pid) {
+    if fabro_proc::process_running(pid) {
         fabro_proc::sigkill(pid);
     }
 
@@ -1620,11 +1629,7 @@ impl TwinOpenAi {
             .send()
             .await
             .expect("reset twin-openai namespace");
-        assert!(
-            response.status().is_success(),
-            "reset twin-openai namespace failed: {}",
-            response.status()
-        );
+        assert_reqwest_status(response, fabro_http::StatusCode::OK, "POST /__admin/reset").await;
     }
 }
 
@@ -1661,11 +1666,12 @@ impl TwinScenarios {
             .send()
             .await
             .expect("load twin-openai scenarios");
-        assert!(
-            response.status().is_success(),
-            "load twin-openai scenarios failed: {}",
-            response.status()
-        );
+        assert_reqwest_status(
+            response,
+            fabro_http::StatusCode::OK,
+            "POST /__admin/scenarios",
+        )
+        .await;
     }
 }
 
@@ -1880,7 +1886,8 @@ pub async fn twin_openai() -> &'static TwinOpenAi {
             let healthz_url = format!("http://127.0.0.1:{}/healthz", addr.port());
             for _ in 0..50 {
                 if let Ok(resp) = client.get(&healthz_url).send().await {
-                    if resp.status().is_success() {
+                    let status = resp.status();
+                    if status == fabro_http::StatusCode::OK {
                         return TwinOpenAi { base_url };
                     }
                 }

@@ -4,9 +4,10 @@ use httpmock::MockServer;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    MINIMAL_DOT, api, body_json, create_and_start_run_from_manifest, minimal_manifest_json,
-    minimal_manifest_json_with_dry_run, test_app_state_with_options, test_app_with_mock_anthropic,
-    test_app_with_no_providers, test_app_with_scheduler, test_settings, wait_for_run_status,
+    MINIMAL_DOT, api, checked_response, create_and_start_run_from_manifest, minimal_manifest_json,
+    minimal_manifest_json_with_dry_run, response_json, response_status,
+    test_app_state_with_options, test_app_with_mock_anthropic, test_app_with_no_providers,
+    test_app_with_scheduler, test_settings, wait_for_run_status,
 };
 
 fn completion_request(stream: bool) -> Request<Body> {
@@ -65,9 +66,12 @@ async fn test_model_skip_when_no_providers() {
         .unwrap();
 
     let response = app.oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = body_json(response.into_body()).await;
+    let body = response_json(
+        response,
+        StatusCode::OK,
+        "POST /api/v1/models/claude-opus-4-6/test",
+    )
+    .await;
     assert_eq!(body["model_id"], "claude-opus-4-6");
     assert_eq!(body["status"], "skip");
 }
@@ -84,7 +88,12 @@ async fn test_model_unknown_via_full_router() {
         .unwrap();
 
     let response = app.oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    response_status(
+        response,
+        StatusCode::NOT_FOUND,
+        "POST /api/v1/models/nonexistent-model-xyz/test",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -101,7 +110,7 @@ async fn dry_run_serve_rejects_invalid_dot() {
         .unwrap();
 
     let response = app.oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    response_status(response, StatusCode::BAD_REQUEST, "POST /api/v1/runs").await;
 }
 
 #[tokio::test]
@@ -109,7 +118,12 @@ async fn completion_no_provider_non_streaming_returns_502() {
     let app = test_app_with_no_providers();
 
     let response = app.oneshot(completion_request(false)).await.unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    response_status(
+        response,
+        StatusCode::BAD_GATEWAY,
+        "POST /api/v1/completions",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -117,7 +131,12 @@ async fn completion_no_provider_streaming_returns_502() {
     let app = test_app_with_no_providers();
 
     let response = app.oneshot(completion_request(true)).await.unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    response_status(
+        response,
+        StatusCode::BAD_GATEWAY,
+        "POST /api/v1/completions?stream=true",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -149,9 +168,7 @@ async fn completion_non_streaming_returns_valid_json() {
         .oneshot(completion_request_with_model(false, "claude-sonnet-4-5"))
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = body_json(response.into_body()).await;
+    let body = response_json(response, StatusCode::OK, "POST /api/v1/completions").await;
     assert!(body["id"].is_string());
     assert_eq!(body["model"], "claude-sonnet-4-5");
     assert_eq!(body["stop_reason"], "end_turn");
@@ -185,7 +202,7 @@ async fn completion_streaming_returns_sse() {
         .oneshot(completion_request_with_model(true, "claude-sonnet-4-5"))
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    let response = checked_response(response, StatusCode::OK, "POST /api/v1/completions").await;
     let content_type = response
         .headers()
         .get("content-type")

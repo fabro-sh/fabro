@@ -18,6 +18,16 @@ pub enum BindRequest {
     TcpHost(IpAddr),
 }
 
+impl Bind {
+    /// Port of a TCP bind, or `None` for a Unix socket.
+    pub fn tcp_port(&self) -> Option<u16> {
+        match self {
+            Self::Tcp(addr) => Some(addr.port()),
+            Self::Unix(_) => None,
+        }
+    }
+}
+
 impl fmt::Display for Bind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

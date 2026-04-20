@@ -343,6 +343,12 @@ mod tests {
         IpAllowEntry::parse_literal(value).unwrap()
     }
 
+    macro_rules! assert_status {
+        ($response:expr, $expected:expr) => {
+            fabro_test::assert_axum_status($response, $expected, concat!(file!(), ":", line!()))
+        };
+    }
+
     #[test]
     fn effective_scope_inherits_global_fields_and_prefers_override_values() {
         let global = ServerIpAllowlistSettings {
@@ -547,7 +553,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let allowed_response = app.clone().oneshot(allowed_request).await.unwrap();
-        assert_eq!(allowed_response.status(), StatusCode::OK);
+        assert_status!(allowed_response, StatusCode::OK).await;
 
         let blocked_request = Request::builder()
             .uri("/api/v1/runs")
@@ -555,7 +561,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let blocked_response = app.oneshot(blocked_request).await.unwrap();
-        assert_eq!(blocked_response.status(), StatusCode::FORBIDDEN);
+        assert_status!(blocked_response, StatusCode::FORBIDDEN).await;
     }
 
     #[tokio::test]
@@ -580,7 +586,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(health_response.status(), StatusCode::OK);
+        assert_status!(health_response, StatusCode::OK).await;
 
         let blocked_response = app
             .oneshot(request_with_connect_info(
@@ -589,7 +595,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(blocked_response.status(), StatusCode::FORBIDDEN);
+        assert_status!(blocked_response, StatusCode::FORBIDDEN).await;
     }
 
     fn request_with_connect_info(path: &str, ip: IpAddr) -> Request<Body> {

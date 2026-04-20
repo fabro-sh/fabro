@@ -3,8 +3,8 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
 use crate::helpers::{
-    MINIMAL_DOT, api, body_json, create_and_start_run_from_manifest,
-    minimal_manifest_json_with_dry_run, test_app_state_with_options, test_app_with_scheduler,
+    MINIMAL_DOT, api, create_and_start_run_from_manifest, minimal_manifest_json_with_dry_run,
+    response_json, response_status, test_app_state_with_options, test_app_with_scheduler,
     test_settings, wait_for_run_status,
 };
 
@@ -25,8 +25,12 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response.into_body()).await;
+    let body = response_json(
+        response,
+        StatusCode::OK,
+        format!("POST /api/v1/runs/{run_id}/archive"),
+    )
+    .await;
     assert_eq!(body["status"], "archived");
 
     for path in &["/cancel", "/pause", "/unpause", "/start"] {
@@ -36,12 +40,12 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(
-            response.status(),
+        let body = response_json(
+            response,
             StatusCode::CONFLICT,
-            "expected 409 for POST /runs/{{id}}{path} on archived run"
-        );
-        let body = body_json(response.into_body()).await;
+            format!("POST /api/v1/runs/{run_id}{path}"),
+        )
+        .await;
         let detail = body["errors"][0]["detail"].as_str().unwrap_or_default();
         assert!(
             detail.contains("is archived") && detail.contains("fabro unarchive"),
@@ -65,10 +69,16 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
         ))
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(
-        response.status(),
+    let body = response_json(
+        response,
         StatusCode::CONFLICT,
-        "expected 409 for POST /runs/{{id}}/events on archived run"
+        format!("POST /api/v1/runs/{run_id}/events"),
+    )
+    .await;
+    let detail = body["errors"][0]["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("is archived") && detail.contains("fabro unarchive"),
+        "expected archived-rejection body on /events, got: {body}"
     );
 
     // The archive guard runs before each endpoint's state-specific lookups, so
@@ -107,12 +117,12 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
             .body(Body::from(body))
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(
-            response.status(),
+        let body = response_json(
+            response,
             StatusCode::CONFLICT,
-            "expected 409 for {method} {path} on archived run"
-        );
-        let body = body_json(response.into_body()).await;
+            format!("{method} /api/v1{path}"),
+        )
+        .await;
         let detail = body["errors"][0]["detail"].as_str().unwrap_or_default();
         assert!(
             detail.contains("is archived") && detail.contains("fabro unarchive"),
@@ -127,8 +137,12 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response.into_body()).await;
+    let body = response_json(
+        response,
+        StatusCode::OK,
+        format!("POST /api/v1/runs/{run_id}/unarchive"),
+    )
+    .await;
     assert_eq!(body["status"], "succeeded");
 }
 
@@ -160,8 +174,12 @@ async fn appending_run_archived_event_directly_is_rejected() {
         ))
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = body_json(response.into_body()).await;
+    let body = crate::helpers::response_json(
+        response,
+        StatusCode::BAD_REQUEST,
+        format!("{}:{}", file!(), line!()),
+    )
+    .await;
     let detail = body["errors"][0]["detail"].as_str().unwrap_or_default();
     assert!(
         detail.contains("lifecycle event"),
@@ -180,7 +198,12 @@ async fn archive_returns_404_for_unknown_run() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    response_status(
+        response,
+        StatusCode::NOT_FOUND,
+        "POST /api/v1/runs/01ARZ3NDEKTSV4RRFFQ69G5FAV/archive",
+    )
+    .await;
 
     let req = Request::builder()
         .method("POST")
@@ -188,7 +211,12 @@ async fn archive_returns_404_for_unknown_run() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    response_status(
+        response,
+        StatusCode::NOT_FOUND,
+        "POST /api/v1/runs/01ARZ3NDEKTSV4RRFFQ69G5FAV/unarchive",
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -207,7 +235,12 @@ async fn list_runs_respects_include_archived_flag() {
         .uri(api(&format!("/runs/{run_id}/archive")))
         .body(Body::empty())
         .unwrap();
-    app.clone().oneshot(req).await.unwrap();
+    response_status(
+        app.clone().oneshot(req).await.unwrap(),
+        StatusCode::OK,
+        format!("POST /api/v1/runs/{run_id}/archive"),
+    )
+    .await;
 
     // Default listing hides archived.
     let req = Request::builder()
@@ -216,7 +249,7 @@ async fn list_runs_respects_include_archived_flag() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    let body = body_json(response.into_body()).await;
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/runs").await;
     let ids_visible: Vec<String> = body["data"]
         .as_array()
         .unwrap()
@@ -235,7 +268,12 @@ async fn list_runs_respects_include_archived_flag() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    let body = body_json(response.into_body()).await;
+    let body = response_json(
+        response,
+        StatusCode::OK,
+        "GET /api/v1/runs?include_archived=true",
+    )
+    .await;
     let ids_all: Vec<String> = body["data"]
         .as_array()
         .unwrap()

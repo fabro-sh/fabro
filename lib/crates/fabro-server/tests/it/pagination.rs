@@ -11,7 +11,7 @@ use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::build_router;
 use tower::ServiceExt;
 
-use super::helpers::test_app_state;
+use super::helpers::{response_json, test_app_state};
 
 async fn get_json(app: axum::Router, uri: &str) -> serde_json::Value {
     let req = Request::builder()
@@ -21,11 +21,7 @@ async fn get_json(app: axum::Router, uri: &str) -> serde_json::Value {
         .body(Body::empty())
         .expect("pagination request should build");
     let response = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK, "GET {uri} failed");
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("pagination response body should fit in memory");
-    serde_json::from_slice(&body).expect("pagination response should be valid JSON")
+    response_json(response, StatusCode::OK, format!("GET {uri}")).await
 }
 
 /// Assert that a value has the paginated shape: `{ data: [...], meta: {

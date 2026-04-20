@@ -1,11 +1,12 @@
-use axum::body::{Body, to_bytes};
+use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tokio::time::sleep;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    MINIMAL_DOT, api, create_and_start_run_from_manifest, minimal_manifest_json_with_dry_run,
-    test_app_state_with_options, test_app_with_scheduler, test_settings, wait_for_run_status,
+    MINIMAL_DOT, api, checked_response, create_and_start_run_from_manifest,
+    minimal_manifest_json_with_dry_run, response_text, test_app_state_with_options,
+    test_app_with_scheduler, test_settings, wait_for_run_status,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -39,8 +40,12 @@ async fn attach_run_events_returns_sse_stream() {
         .body(Body::empty())
         .unwrap();
 
-    let response = app.oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    let response = checked_response(
+        app.oneshot(req).await.unwrap(),
+        StatusCode::OK,
+        format!("GET /api/v1/runs/{run_id}/attach"),
+    )
+    .await;
     let content_type = response
         .headers()
         .get("content-type")
@@ -71,10 +76,12 @@ async fn attach_run_events_replays_terminal_event_after_completion() {
         .unwrap();
 
     let response = app.oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let body = String::from_utf8(body.to_vec()).unwrap();
+    let body = response_text(
+        response,
+        StatusCode::OK,
+        format!("GET /api/v1/runs/{run_id}/attach?since_seq=1"),
+    )
+    .await;
     let event_names = body
         .lines()
         .filter_map(|line| line.strip_prefix("data:"))

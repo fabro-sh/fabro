@@ -299,6 +299,56 @@ trusted_proxy_count = 3
 }
 
 #[test]
+fn rejects_server_url_webhook_strategy_without_server_api_url() {
+    let file = parse(
+        r#"
+_version = 1
+
+[server.integrations.github]
+strategy = "app"
+
+[server.integrations.github.webhooks]
+strategy = "server_url"
+"#,
+    );
+
+    let errors = fabro_config::resolve_server_from_file(&file)
+        .expect_err("server_url webhook strategy should require server.api.url");
+    let rendered = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("server.api.url"));
+}
+
+#[test]
+fn rejects_configured_webhook_strategy_without_github_app_id() {
+    let file = parse(
+        r#"
+_version = 1
+
+[server.integrations.github]
+strategy = "app"
+
+[server.integrations.github.webhooks]
+strategy = "tailscale_funnel"
+"#,
+    );
+
+    let errors = fabro_config::resolve_server_from_file(&file)
+        .expect_err("configured webhook strategy should require server.integrations.github.app_id");
+    let rendered = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("server.integrations.github.app_id"));
+}
+
+#[test]
 fn rejects_invalid_ip_allowlist_entry() {
     let file = parse(
         r#"

@@ -8,7 +8,6 @@ import {
   EmptyState,
   InlineErrorBanner,
   LoadingSkeleton,
-  Toast,
 } from "./states";
 
 function renderToJson(element: React.ReactElement): any {
@@ -177,16 +176,5 @@ describe("component rendering", () => {
       button.props.onClick();
     });
     expect(clicked).toBe(1);
-  });
-
-  test("Toast renders its children in an aria-live region", () => {
-    let tree: TestRenderer.ReactTestRenderer | undefined;
-    TestRenderer.act(() => {
-      tree = TestRenderer.create(<Toast>hello</Toast>);
-    });
-    const live = tree!.root.findAll(
-      (node) => node.props?.["aria-live"] === "polite",
-    );
-    expect(live.length).toBeGreaterThan(0);
   });
 });

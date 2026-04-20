@@ -40,7 +40,7 @@
   --color-amber: #F0A45B;
   --color-coral: #E86B6B;
 
-  /* ── Semantic tokens (dark defaults) ── */
+  /* ── Semantic tokens ── */
   --color-page: #0F1729;
   --color-panel: #252C3D;
   --color-panel-alt: #1a2133;
@@ -53,37 +53,8 @@
   --color-line: rgba(255, 255, 255, 0.06);
   --color-line-strong: rgba(255, 255, 255, 0.12);
   --color-focus: rgba(103, 178, 215, 0.4);
-  /* Text color that sits on --color-teal-500 primary fills.
-     Dark mode: teal-500 is light (#67B2D7) so dark text reads best.
-     Light mode: teal-500 is dark (#0e7490) so white reads best. */
+  /* Text color that sits on --color-teal-500 primary fills. */
   --color-on-primary: #0F1729;
-}
-
-/* ── Light theme overrides ── */
-
-.light {
-  /* Semantic tokens — page is softly tinted so panels/cards (white)
-     read as the lighter surface, mirroring the dark-theme hierarchy. */
-  --color-page: #eef2f7;
-  --color-panel: #ffffff;
-  --color-panel-alt: #e4eaf1;
-  --color-overlay: rgba(15, 23, 41, 0.05);
-  --color-overlay-strong: rgba(15, 23, 41, 0.10);
-  --color-fg: #0f172a;
-  --color-fg-2: #1e293b;
-  --color-fg-3: #475569;
-  --color-fg-muted: #64748b;
-  --color-line: rgba(15, 23, 41, 0.10);
-  --color-line-strong: rgba(15, 23, 41, 0.18);
-  --color-focus: rgba(14, 116, 144, 0.5);
-  --color-on-primary: #ffffff;
-
-  /* Accent — darkened for WCAG AA on white */
-  --color-mint: #0d9488;
-  --color-amber: #d97706;
-  --color-coral: #dc2626;
-  --color-teal-300: #0891b2;
-  --color-teal-500: #0e7490;
 }
 
 /* ── Chart variables ── */
@@ -91,11 +62,6 @@
 :root {
   --chart-gridline: rgba(255, 255, 255, 0.04);
   --chart-axis-label: rgba(75, 87, 104, 1);
-}
-
-.light {
-  --chart-gridline: rgba(0, 0, 0, 0.06);
-  --chart-axis-label: rgba(71, 85, 105, 1);
 }
 
 /* ── Background atmosphere ── */
@@ -108,13 +74,6 @@
   background-attachment: fixed;
 }
 
-.light .bg-atmosphere,
-.light.bg-atmosphere {
-  background-image:
-    radial-gradient(ellipse 120% 60% at 15% 5%, rgba(14, 116, 144, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse 80% 50% at 85% 90%, rgba(13, 148, 136, 0.04) 0%, transparent 45%);
-}
-
 .bg-atmosphere::before {
   content: "";
   position: fixed;
@@ -125,11 +84,6 @@
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 200px 200px;
-}
-
-.light .bg-atmosphere::before,
-.light.bg-atmosphere::before {
-  opacity: 0.03;
 }
 
 /* ── @pierre/diffs brand overrides ── */
@@ -159,28 +113,16 @@
 }
 
 /* ── Server-rendered SVG graph overrides ── */
-/* The server injects @media (prefers-color-scheme: dark) but the app uses
-   .dark/.light classes, so we apply dark-mode colors via the class. */
+/* The server injects @media (prefers-color-scheme: dark) which won't reliably
+   fire when the OS is in light mode, so we apply dark graph colors always. */
 
-.dark .graph-svg text { fill: #c6d4e0; }
-.dark .graph-svg [stroke="#357f9e"] { stroke: #67B2D7; }
-.dark .graph-svg [stroke="#666666"] { stroke: #5a7a94; }
-.dark .graph-svg polygon[fill="#357f9e"] { fill: #67B2D7; }
-.dark .graph-svg polygon[fill="#666666"] { fill: #5a7a94; }
-.dark .graph-svg ellipse[fill="#ffffff"],
-.dark .graph-svg polygon[fill="#ffffff"] { fill: #1a2b3c; }
-.dark .graph-svg ellipse[stroke="#357f9e"],
-.dark .graph-svg polygon[stroke="#357f9e"] { stroke: #67B2D7; }
-.dark .graph-svg [fill="#1a1a1a"] { fill: #c6d4e0; }
-
-.light {
-  --diffs-bg-buffer-override: #ffffff;
-  --diffs-bg-context-override: #f8fafc;
-  --diffs-bg-hover-override: #f1f5f9;
-  --diffs-bg-separator-override: #e2e8f0;
-  --diffs-fg-number-override: #94a3b8;
-  --diffs-addition-color-override: #0d9488;
-  --diffs-fg-number-addition-override: rgba(13, 148, 136, 0.5);
-  --diffs-deletion-color-override: #dc2626;
-  --diffs-fg-number-deletion-override: rgba(220, 38, 38, 0.5);
-}
+.graph-svg text { fill: #c6d4e0; }
+.graph-svg [stroke="#357f9e"] { stroke: #67B2D7; }
+.graph-svg [stroke="#666666"] { stroke: #5a7a94; }
+.graph-svg polygon[fill="#357f9e"] { fill: #67B2D7; }
+.graph-svg polygon[fill="#666666"] { fill: #5a7a94; }
+.graph-svg ellipse[fill="#ffffff"],
+.graph-svg polygon[fill="#ffffff"] { fill: #1a2b3c; }
+.graph-svg ellipse[stroke="#357f9e"],
+.graph-svg polygon[stroke="#357f9e"] { stroke: #67B2D7; }
+.graph-svg [fill="#1a1a1a"] { fill: #c6d4e0; }

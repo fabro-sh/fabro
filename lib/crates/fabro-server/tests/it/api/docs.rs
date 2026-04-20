@@ -1,17 +1,4 @@
-#![expect(
-    clippy::disallowed_methods,
-    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
-)]
-
-use std::path::PathBuf;
-
-fn read_doc(relative_path: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../")
-        .join(relative_path);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()))
-}
+use crate::helpers::read_repo_file as read_doc;
 
 #[test]
 fn active_server_docs_describe_the_unix_socket_default() {
@@ -56,5 +43,24 @@ fn changelog_marks_removed_mutual_tls_as_historical() {
     assert!(
         changelog.contains("removed inbound mutual TLS listener support"),
         "historical changelog should clarify that inbound mutual TLS is no longer supported"
+    );
+}
+
+#[test]
+fn github_docs_describe_webhooks_as_strategy_dependent() {
+    let github = read_doc("docs/integrations/github.mdx");
+    assert!(
+        !github.contains("enables browser OAuth and webhooks"),
+        "GitHub integration docs should not imply app auth alone enables webhook delivery"
+    );
+    assert!(
+        !github.contains("| Webhooks | No | Yes |"),
+        "GitHub strategy matrix should describe webhook delivery as strategy-dependent"
+    );
+
+    let server_configuration = read_doc("docs/administration/server-configuration.mdx");
+    assert!(
+        !server_configuration.contains("enables the GitHub App flow, browser OAuth, and webhooks"),
+        "server configuration docs should not imply app auth alone enables webhook delivery"
     );
 }

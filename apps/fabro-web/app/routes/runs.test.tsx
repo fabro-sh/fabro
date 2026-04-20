@@ -43,6 +43,8 @@ describe("runs route board mapping", () => {
     expect(shouldRefreshBoardForEvent("run.queued")).toBe(true);
     expect(shouldRefreshBoardForEvent("run.blocked")).toBe(true);
     expect(shouldRefreshBoardForEvent("run.unblocked")).toBe(true);
+    expect(shouldRefreshBoardForEvent("run.archived")).toBe(true);
+    expect(shouldRefreshBoardForEvent("run.unarchived")).toBe(true);
     expect(shouldRefreshBoardForEvent("interview.started")).toBe(true);
     expect(shouldRefreshBoardForEvent("interview.completed")).toBe(true);
     expect(shouldRefreshBoardForEvent("run.created")).toBe(false);

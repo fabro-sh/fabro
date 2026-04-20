@@ -18,7 +18,7 @@ pub use pre_exec::pre_exec_pdeathsig;
 pub use pre_exec::pre_exec_setpgid;
 #[cfg(unix)]
 pub use pre_exec::pre_exec_setsid;
-pub use signal::{process_alive, process_group_alive};
+pub use signal::{process_exists, process_group_alive, process_running};
 #[cfg(unix)]
 pub use signal::{
     sigkill, sigkill_process_group, sigterm, sigterm_process_group, sigusr1, sigusr2,

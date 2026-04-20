@@ -2,7 +2,6 @@ import { useState } from "react";
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import type { FileContents } from "@pierre/diffs";
 import { File } from "@pierre/diffs/react";
-import { useTheme } from "../lib/theme";
 
 export function CollapsibleFile({
   file,
@@ -12,7 +11,6 @@ export function CollapsibleFile({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const { theme } = useTheme();
 
   const lines = file.contents.split("\n");
   const lineCount = lines.length;
@@ -38,7 +36,7 @@ export function CollapsibleFile({
         <div className="border-t border-line" />
         <File
           file={file}
-          options={{ theme: theme === "dark" ? "pierre-dark" : "pierre-light", disableFileHeader: true }}
+          options={{ theme: "pierre-dark", disableFileHeader: true }}
         />
       </div>
     </div>

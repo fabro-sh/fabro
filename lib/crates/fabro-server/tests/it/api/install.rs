@@ -18,7 +18,7 @@ use httpmock::MockServer;
 use tokio::time::sleep;
 use tower::ServiceExt;
 
-use crate::helpers::body_json;
+use crate::helpers::{checked_response, response_json, response_status, response_text};
 
 async fn configure_token_install(app: &axum::Router, token: &str) {
     let llm_response = app
@@ -36,7 +36,7 @@ async fn configure_token_install(app: &axum::Router, token: &str) {
         )
         .await
         .unwrap();
-    assert_eq!(llm_response.status(), StatusCode::NO_CONTENT);
+    response_status(llm_response, StatusCode::NO_CONTENT, "PUT /install/llm").await;
 
     let server_response = app
         .clone()
@@ -53,7 +53,12 @@ async fn configure_token_install(app: &axum::Router, token: &str) {
         )
         .await
         .unwrap();
-    assert_eq!(server_response.status(), StatusCode::NO_CONTENT);
+    response_status(
+        server_response,
+        StatusCode::NO_CONTENT,
+        "PUT /install/server",
+    )
+    .await;
 
     let github_response = app
         .clone()
@@ -70,7 +75,12 @@ async fn configure_token_install(app: &axum::Router, token: &str) {
         )
         .await
         .unwrap();
-    assert_eq!(github_response.status(), StatusCode::NO_CONTENT);
+    response_status(
+        github_response,
+        StatusCode::NO_CONTENT,
+        "PUT /install/github/token",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -88,8 +98,7 @@ async fn install_router_isolated_from_normal_api_surface() {
         )
         .await
         .unwrap();
-    assert_eq!(health_response.status(), StatusCode::OK);
-    let health_body = body_json(health_response.into_body()).await;
+    let health_body = response_json(health_response, StatusCode::OK, "GET /health").await;
     assert_eq!(health_body["status"], "ok");
     assert_eq!(health_body["mode"], "install");
 
@@ -105,14 +114,7 @@ async fn install_router_isolated_from_normal_api_surface() {
         )
         .await
         .unwrap();
-    assert_eq!(root_response.status(), StatusCode::OK);
-    let root_html = String::from_utf8(
-        axum::body::to_bytes(root_response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
+    let root_html = response_text(root_response, StatusCode::OK, "GET /").await;
     assert!(
         root_html.contains("__FABRO_MODE__ = \"install\""),
         "install shell should mark the SPA boot mode"
@@ -128,7 +130,7 @@ async fn install_router_isolated_from_normal_api_surface() {
         )
         .await
         .unwrap();
-    assert_eq!(api_response.status(), StatusCode::NOT_FOUND);
+    response_status(api_response, StatusCode::NOT_FOUND, "GET /api/v1/auth/me").await;
 }
 
 #[tokio::test]
@@ -146,7 +148,12 @@ async fn install_session_requires_valid_install_token() {
         )
         .await
         .unwrap();
-    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+    response_status(
+        unauthorized,
+        StatusCode::UNAUTHORIZED,
+        "GET /install/session",
+    )
+    .await;
 
     let authorized = app
         .oneshot(
@@ -161,8 +168,7 @@ async fn install_session_requires_valid_install_token() {
         )
         .await
         .unwrap();
-    assert_eq!(authorized.status(), StatusCode::OK);
-    let body = body_json(authorized.into_body()).await;
+    let body = response_json(authorized, StatusCode::OK, "GET /install/session").await;
     assert_eq!(
         body["prefill"]["canonical_url"],
         "https://fabro.example.com"
@@ -229,11 +235,12 @@ async fn install_endpoints_reject_missing_and_wrong_tokens() {
             )
             .await
             .unwrap();
-        assert_eq!(
-            missing_token_response.status(),
+        response_status(
+            missing_token_response,
             StatusCode::UNAUTHORIZED,
-            "missing token should be rejected for {method} {path}"
-        );
+            format!("{method} {path} without install token"),
+        )
+        .await;
 
         let wrong_token_response = app
             .clone()
@@ -244,11 +251,12 @@ async fn install_endpoints_reject_missing_and_wrong_tokens() {
             )
             .await
             .unwrap();
-        assert_eq!(
-            wrong_token_response.status(),
+        response_status(
+            wrong_token_response,
             StatusCode::UNAUTHORIZED,
-            "wrong token should be rejected for {method} {path}"
-        );
+            format!("{method} {path} with wrong install token"),
+        )
+        .await;
     }
 }
 
@@ -268,7 +276,7 @@ async fn install_endpoints_accept_query_token_when_authorization_header_is_wrong
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    response_status(response, StatusCode::OK, "GET /install/session?token=...").await;
 }
 
 #[tokio::test]
@@ -297,7 +305,7 @@ async fn token_install_finish_persists_settings_env_and_vault() {
         )
         .await
         .unwrap();
-    assert_eq!(llm_response.status(), StatusCode::NO_CONTENT);
+    response_status(llm_response, StatusCode::NO_CONTENT, "PUT /install/llm").await;
 
     let server_response = app
         .clone()
@@ -314,7 +322,12 @@ async fn token_install_finish_persists_settings_env_and_vault() {
         )
         .await
         .unwrap();
-    assert_eq!(server_response.status(), StatusCode::NO_CONTENT);
+    response_status(
+        server_response,
+        StatusCode::NO_CONTENT,
+        "PUT /install/server",
+    )
+    .await;
 
     let github_response = app
         .clone()
@@ -331,7 +344,12 @@ async fn token_install_finish_persists_settings_env_and_vault() {
         )
         .await
         .unwrap();
-    assert_eq!(github_response.status(), StatusCode::NO_CONTENT);
+    response_status(
+        github_response,
+        StatusCode::NO_CONTENT,
+        "PUT /install/github/token",
+    )
+    .await;
 
     let finish_response = app
         .oneshot(
@@ -344,8 +362,12 @@ async fn token_install_finish_persists_settings_env_and_vault() {
         )
         .await
         .unwrap();
-    assert_eq!(finish_response.status(), StatusCode::ACCEPTED);
-    let finish_body = body_json(finish_response.into_body()).await;
+    let finish_body = response_json(
+        finish_response,
+        StatusCode::ACCEPTED,
+        "POST /install/finish",
+    )
+    .await;
     assert_eq!(finish_body["status"], "completing");
     assert_eq!(finish_body["restart_url"], "https://fabro.example.com");
     assert!(
@@ -434,7 +456,7 @@ async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
         )
         .await
         .unwrap();
-    assert_eq!(llm_response.status(), StatusCode::NO_CONTENT);
+    response_status(llm_response, StatusCode::NO_CONTENT, "PUT /install/llm").await;
 
     let server_response = app
         .clone()
@@ -451,7 +473,12 @@ async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
         )
         .await
         .unwrap();
-    assert_eq!(server_response.status(), StatusCode::NO_CONTENT);
+    response_status(
+        server_response,
+        StatusCode::NO_CONTENT,
+        "PUT /install/server",
+    )
+    .await;
 
     let manifest_response = app
         .clone()
@@ -468,8 +495,12 @@ async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
         )
         .await
         .unwrap();
-    assert_eq!(manifest_response.status(), StatusCode::OK);
-    let manifest_body = body_json(manifest_response.into_body()).await;
+    let manifest_body = response_json(
+        manifest_response,
+        StatusCode::OK,
+        "POST /install/github/app/manifest",
+    )
+    .await;
     let redirect_url = manifest_body["manifest"]["redirect_url"]
         .as_str()
         .expect("redirect_url should be present");
@@ -493,7 +524,12 @@ async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
         )
         .await
         .unwrap();
-    assert_eq!(callback_response.status(), StatusCode::FOUND);
+    response_status(
+        callback_response,
+        StatusCode::FOUND,
+        "GET /install/github/app/redirect?code=stub-code&state=...",
+    )
+    .await;
 
     let finish_response = app
         .oneshot(
@@ -506,8 +542,12 @@ async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
         )
         .await
         .unwrap();
-    assert_eq!(finish_response.status(), StatusCode::ACCEPTED);
-    let finish_body = body_json(finish_response.into_body()).await;
+    let finish_body = response_json(
+        finish_response,
+        StatusCode::ACCEPTED,
+        "POST /install/finish",
+    )
+    .await;
     assert_eq!(finish_body["status"], "completing");
     assert_eq!(finish_body["restart_url"], "https://fabro.example.com");
     assert!(
@@ -561,7 +601,12 @@ async fn token_install_finish_invokes_shutdown_callback_after_accepting() {
         )
         .await
         .unwrap();
-    assert_eq!(finish_response.status(), StatusCode::ACCEPTED);
+    response_status(
+        finish_response,
+        StatusCode::ACCEPTED,
+        "POST /install/finish",
+    )
+    .await;
     assert!(!callback_invoked.load(Ordering::Acquire));
 
     sleep(Duration::from_millis(650)).await;
@@ -621,8 +666,7 @@ async fn install_validation_endpoints_validate_credentials_and_github_token() {
         )
         .await
         .unwrap();
-    assert_eq!(llm_response.status(), StatusCode::OK);
-    let llm_body = body_json(llm_response.into_body()).await;
+    let llm_body = response_json(llm_response, StatusCode::OK, "POST /install/llm/test").await;
     assert_eq!(llm_body["ok"], true);
 
     let github_response = app
@@ -637,8 +681,12 @@ async fn install_validation_endpoints_validate_credentials_and_github_token() {
         )
         .await
         .unwrap();
-    assert_eq!(github_response.status(), StatusCode::OK);
-    let github_body = body_json(github_response.into_body()).await;
+    let github_body = response_json(
+        github_response,
+        StatusCode::OK,
+        "POST /install/github/token/test",
+    )
+    .await;
     assert_eq!(github_body["username"], "octocat");
 }
 
@@ -684,7 +732,12 @@ async fn github_app_manifest_round_trip_updates_install_session() {
         )
         .await
         .unwrap();
-    assert_eq!(server_response.status(), StatusCode::NO_CONTENT);
+    response_status(
+        server_response,
+        StatusCode::NO_CONTENT,
+        "PUT /install/server",
+    )
+    .await;
 
     let manifest_response = app
         .clone()
@@ -701,8 +754,12 @@ async fn github_app_manifest_round_trip_updates_install_session() {
         )
         .await
         .unwrap();
-    assert_eq!(manifest_response.status(), StatusCode::OK);
-    let manifest_body = body_json(manifest_response.into_body()).await;
+    let manifest_body = response_json(
+        manifest_response,
+        StatusCode::OK,
+        "POST /install/github/app/manifest",
+    )
+    .await;
     assert_eq!(
         manifest_body["github_form_action"],
         "https://github.com/settings/apps/new"
@@ -722,20 +779,23 @@ async fn github_app_manifest_round_trip_updates_install_session() {
         .map(|(_, value)| value.into_owned())
         .expect("state should be embedded in redirect_url");
 
-    let callback_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/install/github/app/redirect?code=stub-code&state={state}"
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(callback_response.status(), StatusCode::FOUND);
+    let callback_response = checked_response(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/install/github/app/redirect?code=stub-code&state={state}"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        StatusCode::FOUND,
+        "GET /install/github/app/redirect?code=stub-code&state=...",
+    )
+    .await;
     assert_eq!(
         callback_response
             .headers()
@@ -756,8 +816,8 @@ async fn github_app_manifest_round_trip_updates_install_session() {
         )
         .await
         .unwrap();
-    assert_eq!(session_response.status(), StatusCode::OK);
-    let session_body = body_json(session_response.into_body()).await;
+    let session_body =
+        response_json(session_response, StatusCode::OK, "GET /install/session").await;
     assert_eq!(session_body["github"]["strategy"], "app");
     assert_eq!(session_body["github"]["slug"], "fabro-test-app");
     assert_eq!(session_body["github"]["allowed_username"], "octocat");
@@ -789,7 +849,12 @@ async fn github_app_manifest_rejects_retry_while_pending_and_preserves_prior_tok
         )
         .await
         .unwrap();
-    assert_eq!(server_response.status(), StatusCode::NO_CONTENT);
+    response_status(
+        server_response,
+        StatusCode::NO_CONTENT,
+        "PUT /install/server",
+    )
+    .await;
 
     let github_response = app
         .clone()
@@ -806,7 +871,12 @@ async fn github_app_manifest_rejects_retry_while_pending_and_preserves_prior_tok
         )
         .await
         .unwrap();
-    assert_eq!(github_response.status(), StatusCode::NO_CONTENT);
+    response_status(
+        github_response,
+        StatusCode::NO_CONTENT,
+        "PUT /install/github/token",
+    )
+    .await;
 
     let manifest_response = app
         .clone()
@@ -823,7 +893,12 @@ async fn github_app_manifest_rejects_retry_while_pending_and_preserves_prior_tok
         )
         .await
         .unwrap();
-    assert_eq!(manifest_response.status(), StatusCode::OK);
+    response_status(
+        manifest_response,
+        StatusCode::OK,
+        "POST /install/github/app/manifest",
+    )
+    .await;
 
     let session_response = app
         .clone()
@@ -837,8 +912,8 @@ async fn github_app_manifest_rejects_retry_while_pending_and_preserves_prior_tok
         )
         .await
         .unwrap();
-    assert_eq!(session_response.status(), StatusCode::OK);
-    let session_body = body_json(session_response.into_body()).await;
+    let session_body =
+        response_json(session_response, StatusCode::OK, "GET /install/session").await;
     assert_eq!(session_body["github"]["strategy"], "token");
     assert_eq!(session_body["github"]["username"], "brynary");
     assert!(
@@ -863,8 +938,12 @@ async fn github_app_manifest_rejects_retry_while_pending_and_preserves_prior_tok
         )
         .await
         .unwrap();
-    assert_eq!(retry_response.status(), StatusCode::CONFLICT);
-    let retry_body = body_json(retry_response.into_body()).await;
+    let retry_body = response_json(
+        retry_response,
+        StatusCode::CONFLICT,
+        "POST /install/github/app/manifest",
+    )
+    .await;
     assert_eq!(
         retry_body["errors"][0]["detail"],
         "GitHub App setup is already pending; finish it or wait for it to expire."
@@ -913,7 +992,12 @@ async fn github_app_redirect_rejects_invalid_or_missing_state_without_mutating_s
         )
         .await
         .unwrap();
-    assert_eq!(server_response.status(), StatusCode::NO_CONTENT);
+    response_status(
+        server_response,
+        StatusCode::NO_CONTENT,
+        "PUT /install/server",
+    )
+    .await;
 
     let manifest_response = app
         .clone()
@@ -930,8 +1014,12 @@ async fn github_app_redirect_rejects_invalid_or_missing_state_without_mutating_s
         )
         .await
         .unwrap();
-    assert_eq!(manifest_response.status(), StatusCode::OK);
-    let manifest_body = body_json(manifest_response.into_body()).await;
+    let manifest_body = response_json(
+        manifest_response,
+        StatusCode::OK,
+        "POST /install/github/app/manifest",
+    )
+    .await;
     let redirect_url = manifest_body["manifest"]["redirect_url"]
         .as_str()
         .expect("redirect_url should be present");
@@ -942,18 +1030,21 @@ async fn github_app_redirect_rejects_invalid_or_missing_state_without_mutating_s
         .map(|(_, value)| value.into_owned())
         .expect("state should be embedded in redirect_url");
 
-    let wrong_state_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/install/github/app/redirect?code=stub-code&state=wrong-state")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(wrong_state_response.status(), StatusCode::FOUND);
+    let wrong_state_response = checked_response(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/install/github/app/redirect?code=stub-code&state=wrong-state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        StatusCode::FOUND,
+        "GET /install/github/app/redirect?code=stub-code&state=wrong-state",
+    )
+    .await;
     assert_eq!(
         wrong_state_response
             .headers()
@@ -975,8 +1066,8 @@ async fn github_app_redirect_rejects_invalid_or_missing_state_without_mutating_s
         )
         .await
         .unwrap();
-    assert_eq!(session_response.status(), StatusCode::OK);
-    let session_body = body_json(session_response.into_body()).await;
+    let session_body =
+        response_json(session_response, StatusCode::OK, "GET /install/session").await;
     assert!(session_body["github"].is_null());
     assert!(
         !session_body["completed_steps"]
@@ -986,18 +1077,21 @@ async fn github_app_redirect_rejects_invalid_or_missing_state_without_mutating_s
             .any(|value| value == "github")
     );
 
-    let missing_state_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/install/github/app/redirect?code=stub-code")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(missing_state_response.status(), StatusCode::FOUND);
+    let missing_state_response = checked_response(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/install/github/app/redirect?code=stub-code")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        StatusCode::FOUND,
+        "GET /install/github/app/redirect?code=stub-code",
+    )
+    .await;
     assert_eq!(
         missing_state_response
             .headers()
@@ -1019,7 +1113,12 @@ async fn github_app_redirect_rejects_invalid_or_missing_state_without_mutating_s
         )
         .await
         .unwrap();
-    assert_eq!(valid_state_response.status(), StatusCode::FOUND);
+    response_status(
+        valid_state_response,
+        StatusCode::FOUND,
+        "GET /install/github/app/redirect?code=stub-code&state=...",
+    )
+    .await;
     conversion_mock.assert_calls_async(1).await;
 }
 
@@ -1054,7 +1153,12 @@ async fn github_app_redirect_exchange_failure_returns_to_wizard_and_keeps_pendin
         )
         .await
         .unwrap();
-    assert_eq!(server_response.status(), StatusCode::NO_CONTENT);
+    response_status(
+        server_response,
+        StatusCode::NO_CONTENT,
+        "PUT /install/server",
+    )
+    .await;
 
     let manifest_response = app
         .clone()
@@ -1071,8 +1175,12 @@ async fn github_app_redirect_exchange_failure_returns_to_wizard_and_keeps_pendin
         )
         .await
         .unwrap();
-    assert_eq!(manifest_response.status(), StatusCode::OK);
-    let manifest_body = body_json(manifest_response.into_body()).await;
+    let manifest_body = response_json(
+        manifest_response,
+        StatusCode::OK,
+        "POST /install/github/app/manifest",
+    )
+    .await;
     let redirect_url = manifest_body["manifest"]["redirect_url"]
         .as_str()
         .expect("redirect_url should be present");
@@ -1083,20 +1191,23 @@ async fn github_app_redirect_exchange_failure_returns_to_wizard_and_keeps_pendin
         .map(|(_, value)| value.into_owned())
         .expect("state should be embedded in redirect_url");
 
-    let callback_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/install/github/app/redirect?code=stub-code&state={state}"
-                ))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(callback_response.status(), StatusCode::FOUND);
+    let callback_response = checked_response(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/install/github/app/redirect?code=stub-code&state={state}"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        StatusCode::FOUND,
+        "GET /install/github/app/redirect?code=stub-code&state=...",
+    )
+    .await;
     assert_eq!(
         callback_response
             .headers()
@@ -1120,7 +1231,12 @@ async fn github_app_redirect_exchange_failure_returns_to_wizard_and_keeps_pendin
         )
         .await
         .unwrap();
-    assert_eq!(retry_response.status(), StatusCode::FOUND);
+    response_status(
+        retry_response,
+        StatusCode::FOUND,
+        "GET /install/github/app/redirect?code=stub-code&state=...",
+    )
+    .await;
     conversion_mock.assert_calls_async(2).await;
 }
 
@@ -1143,8 +1259,12 @@ async fn install_server_rejects_trailing_slash_canonical_urls() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let body = body_json(response.into_body()).await;
+    let body = response_json(
+        response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "PUT /install/server",
+    )
+    .await;
     assert_eq!(
         body["errors"][0]["detail"],
         "canonical_url must not end with a trailing slash"
@@ -1188,8 +1308,12 @@ async fn install_finish_failure_restores_settings_and_vault_but_leaves_env_keys(
         )
         .await
         .unwrap();
-    assert_eq!(finish_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let finish_body = body_json(finish_response.into_body()).await;
+    let finish_body = response_json(
+        finish_response,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "POST /install/finish",
+    )
+    .await;
     assert!(
         finish_body["errors"][0]["detail"]
             .as_str()
@@ -1234,8 +1358,8 @@ async fn install_finish_failure_restores_settings_and_vault_but_leaves_env_keys(
         )
         .await
         .unwrap();
-    assert_eq!(session_response.status(), StatusCode::OK);
-    let session_body = body_json(session_response.into_body()).await;
+    let session_body =
+        response_json(session_response, StatusCode::OK, "GET /install/session").await;
     assert!(
         session_body["completed_steps"]
             .as_array()
@@ -1277,7 +1401,12 @@ async fn install_finish_failure_leaves_home_dev_token_mirror_written() {
         )
         .await
         .unwrap();
-    assert_eq!(finish_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    response_status(
+        finish_response,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "POST /install/finish",
+    )
+    .await;
 
     let home_dev_token = dev_token::read_dev_token_file(&home.dev_token_path())
         .expect("home dev token should exist");
