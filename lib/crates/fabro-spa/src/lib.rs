@@ -29,6 +29,10 @@ pub fn get(path: &str) -> Option<AssetBytes> {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test walks the assets/ directory with sync std::fs::read_dir to enforce a build invariant"
+)]
 mod tests {
     use std::path::{Path, PathBuf};
 

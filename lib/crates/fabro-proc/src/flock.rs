@@ -32,6 +32,10 @@ pub fn flock_unlock(file: &File) -> io::Result<()> {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests exercise sync flock semantics on real temp files; uses std::fs::File directly"
+)]
 mod tests {
     use std::fs::File;
 

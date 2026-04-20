@@ -4,6 +4,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
+use tokio::task::spawn_blocking;
 use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
@@ -156,6 +157,10 @@ impl Sandbox for LocalSandbox {
         path: &str,
         depth: Option<usize>,
     ) -> Result<Vec<DirEntry>, String> {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "sync recursive read_dir; caller wraps invocation in tokio::task::spawn_blocking"
+        )]
         fn list_recursive(
             base: &std::path::Path,
             prefix: &str,
@@ -197,9 +202,13 @@ impl Sandbox for LocalSandbox {
 
         let full_path = self.resolve_path(path);
         let max_depth = depth.unwrap_or(1);
-        let mut entries = Vec::new();
-        list_recursive(&full_path, "", 0, max_depth, &mut entries)?;
-        Ok(entries)
+        spawn_blocking(move || {
+            let mut entries = Vec::new();
+            list_recursive(&full_path, "", 0, max_depth, &mut entries)?;
+            Ok(entries)
+        })
+        .await
+        .map_err(|e| format!("list_directory task failed: {e}"))?
     }
 
     async fn exec_command(
@@ -533,6 +542,10 @@ async fn sigterm_then_kill(child: &mut Child) {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "sandbox tests stage fixtures with sync std::fs writes/reads"
+)]
 mod tests {
     use std::path::PathBuf;
 

@@ -7,9 +7,6 @@ use super::short_run_id;
 use crate::args::{RunsArchiveArgs, RunsUnarchiveArgs};
 use crate::command_context::CommandContext;
 use crate::server_client;
-use crate::server_runs::{
-    ServerRunSummaryInfo, ServerSummaryLookup, resolve_server_run_from_summaries,
-};
 use crate::shared::print_json_pretty;
 
 pub(crate) async fn archive_command(
@@ -19,12 +16,10 @@ pub(crate) async fn archive_command(
     printer: Printer,
 ) -> Result<()> {
     let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
-    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     run_bulk(
         Action::Archive,
         &args.runs,
-        lookup.client(),
-        lookup.runs(),
+        ctx.server().await?.as_ref(),
         cli,
         printer,
     )
@@ -38,12 +33,10 @@ pub(crate) async fn unarchive_command(
     printer: Printer,
 ) -> Result<()> {
     let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
-    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     run_bulk(
         Action::Unarchive,
         &args.runs,
-        lookup.client(),
-        lookup.runs(),
+        ctx.server().await?.as_ref(),
         cli,
         printer,
     )
@@ -73,7 +66,6 @@ async fn run_bulk(
     action: Action,
     identifiers: &[String],
     client: &server_client::ServerStoreClient,
-    runs: &[ServerRunSummaryInfo],
     cli: &CliSettings,
     printer: Printer,
 ) -> Result<()> {
@@ -83,7 +75,7 @@ async fn run_bulk(
     let mut errors = Vec::new();
 
     for identifier in identifiers {
-        let run = match resolve_server_run_from_summaries(runs, identifier) {
+        let run = match client.resolve_run(identifier).await {
             Ok(run) => run,
             Err(err) => {
                 if !json {
@@ -98,7 +90,7 @@ async fn run_bulk(
             }
         };
 
-        let run_id = run.run_id();
+        let run_id = run.run_id;
         let result = match action {
             Action::Archive => client.archive_run(&run_id).await,
             Action::Unarchive => client.unarchive_run(&run_id).await,

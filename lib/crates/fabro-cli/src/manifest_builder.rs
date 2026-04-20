@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "CLI manifest builder: sync file I/O building install manifests"
+)]
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 

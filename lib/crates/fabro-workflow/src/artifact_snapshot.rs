@@ -4,6 +4,7 @@ use fabro_agent::Sandbox;
 use fabro_sandbox::shell_quote;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::fs;
 use tracing::{debug, warn};
 
 /// A file discovered by the find command.
@@ -257,14 +258,15 @@ fn normalize_paths(discovered: Vec<DiscoveredFile>, root: &str) -> Vec<Discovere
         .collect()
 }
 
-fn compute_artifact_info(
+async fn compute_artifact_info(
     relative_path: &str,
     local_path: &Path,
 ) -> std::result::Result<CapturedArtifactInfo, String> {
     let mime = mime_guess::from_path(relative_path)
         .first_or_octet_stream()
         .to_string();
-    let data = std::fs::read(local_path)
+    let data = fs::read(local_path)
+        .await
         .map_err(|e| format!("failed to read {}: {e}", local_path.display()))?;
     let bytes = u64::try_from(data.len()).unwrap_or(u64::MAX);
     let content_md5 = format!("{:x}", md5::compute(&data));
@@ -314,7 +316,7 @@ pub async fn collect_artifacts(
             .download_file_to_local(&file.relative_path, &dest)
             .await
         {
-            Ok(()) => match compute_artifact_info(&file.relative_path, &dest) {
+            Ok(()) => match compute_artifact_info(&file.relative_path, &dest).await {
                 Ok(info) => {
                     files_copied += 1;
                     total_bytes += info.bytes;
@@ -326,7 +328,7 @@ pub async fn collect_artifacts(
                         error = e.as_str(),
                         "Asset hash failed"
                     );
-                    let _ = std::fs::remove_file(&dest);
+                    let _ = fs::remove_file(&dest).await;
                     hash_errors += 1;
                 }
             },
@@ -352,6 +354,7 @@ pub async fn collect_artifacts(
 }
 
 #[cfg(test)]
+#[expect(clippy::disallowed_methods, reason = "tests write fixtures to disk")]
 mod tests {
     use std::collections::HashMap;
 
@@ -441,11 +444,11 @@ mod tests {
                 .get(remote_path)
                 .ok_or_else(|| format!("File not found: {remote_path}"))?;
             if let Some(parent) = local_path.parent() {
-                tokio::fs::create_dir_all(parent)
+                fs::create_dir_all(parent)
                     .await
                     .map_err(|e| format!("Failed to create dirs: {e}"))?;
             }
-            tokio::fs::write(local_path, content.as_bytes())
+            fs::write(local_path, content.as_bytes())
                 .await
                 .map_err(|e| format!("Failed to write: {e}"))?;
             Ok(())

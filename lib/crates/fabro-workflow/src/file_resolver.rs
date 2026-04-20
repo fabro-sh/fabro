@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync workflow file resolver invoked at stage setup; not on a Tokio hot path"
+)]
+
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 

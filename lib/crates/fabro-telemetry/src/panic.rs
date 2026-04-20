@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync read of the panic log at telemetry startup; not on a Tokio path"
+)]
+
 use std::panic::PanicHookInfo;
 use std::path::Path;
 

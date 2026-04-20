@@ -10,7 +10,6 @@ use fabro_util::printer::Printer;
 use crate::args::{ArtifactCommand, ArtifactNamespace, ServerTargetArgs};
 use crate::command_context::CommandContext;
 use crate::server_client::ServerStoreClient;
-use crate::server_runs::ServerSummaryLookup;
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub(super) struct ArtifactEntry {
@@ -32,11 +31,10 @@ pub(super) async fn resolve_artifacts(
     printer: Printer,
 ) -> Result<(RunId, ServerStoreClient, Vec<ArtifactEntry>)> {
     let ctx = CommandContext::for_target(server, printer, cli.clone(), cli_layer)?;
-    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-    let run = lookup.resolve(run_selector)?;
-    let run_id = run.run_id();
+    let client = ctx.server().await?;
+    let run_id = client.resolve_run(run_selector).await?.run_id;
     let mut entries = Vec::new();
-    for entry in lookup.client().list_run_artifacts(&run_id).await? {
+    for entry in client.list_run_artifacts(&run_id).await? {
         if node.is_some_and(|value| entry.node_slug != value) {
             continue;
         }
@@ -62,8 +60,7 @@ pub(super) async fn resolve_artifacts(
             .then_with(|| a.relative_path.cmp(&b.relative_path))
     });
 
-    let client = lookup.client().clone_for_reuse();
-    Ok((run_id, client, entries))
+    Ok((run_id, client.clone_for_reuse(), entries))
 }
 
 pub(crate) async fn dispatch(

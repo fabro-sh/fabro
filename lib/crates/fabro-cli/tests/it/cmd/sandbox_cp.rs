@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
+)]
+
 use fabro_test::{fabro_snapshot, test_context};
 
 use super::support::{read_text, setup_created_dry_run, setup_local_sandbox_run, text_tree};

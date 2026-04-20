@@ -4,6 +4,10 @@
     clippy::needless_borrows_for_generic_args,
     reason = "These workflow-hook tests value explicit fixtures over pedantic style lints."
 )]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
+)]
 
 use std::process::Output;
 

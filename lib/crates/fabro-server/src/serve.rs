@@ -731,6 +731,11 @@ fn server_bind_title(bind: &Bind) -> String {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_types,
+    reason = "tests reserve/probe ports via sync std::net::TcpListener; the async server under \
+              test uses tokio::net::TcpListener separately"
+)]
 mod tests {
     use std::path::PathBuf;
     use std::time::Duration;

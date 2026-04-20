@@ -1,45 +1,12 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use fabro_store::RunSummary;
 use fabro_types::{RunId, RunStatus, StatusReason};
-use fabro_workflow::run_lookup::{RunInfo, resolve_run_from_summaries, scratch_base};
 
-use crate::server_client::{self, ServerStoreClient};
-
-pub(crate) struct ServerRunLookup {
-    client:       ServerStoreClient,
-    scratch_base: PathBuf,
-    summaries:    Vec<RunSummary>,
-}
-
-impl ServerRunLookup {
-    pub(crate) async fn connect(storage_dir: &Path) -> Result<Self> {
-        Self::connect_from_scratch_base(&scratch_base(storage_dir)).await
-    }
-
-    pub(crate) async fn connect_from_scratch_base(scratch_base: &Path) -> Result<Self> {
-        let storage_dir = scratch_base.parent().unwrap_or(scratch_base);
-        let client = server_client::connect_server(storage_dir).await?;
-        let summaries = client.list_store_runs().await?;
-        Ok(Self {
-            client,
-            scratch_base: scratch_base.to_path_buf(),
-            summaries,
-        })
-    }
-
-    pub(crate) fn client(&self) -> &ServerStoreClient {
-        &self.client
-    }
-
-    pub(crate) fn resolve(&self, selector: &str) -> Result<RunInfo> {
-        resolve_run_from_summaries(&self.summaries, &self.scratch_base, selector)
-    }
-}
+use crate::server_client::ServerStoreClient;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ServerRunSummaryInfo {
@@ -47,6 +14,10 @@ pub(crate) struct ServerRunSummaryInfo {
 }
 
 impl ServerRunSummaryInfo {
+    pub(crate) fn from_summary(summary: RunSummary) -> Self {
+        Self { summary }
+    }
+
     pub(crate) fn run_id(&self) -> RunId {
         self.summary.run_id
     }
@@ -113,7 +84,7 @@ impl ServerSummaryLookup {
         let summaries = client.list_store_runs().await?;
         let mut runs = summaries
             .into_iter()
-            .map(|summary| ServerRunSummaryInfo { summary })
+            .map(ServerRunSummaryInfo::from_summary)
             .collect::<Vec<_>>();
         runs.sort_by(|a, b| {
             b.start_time_dt()
@@ -130,17 +101,6 @@ impl ServerSummaryLookup {
     pub(crate) fn runs(&self) -> &[ServerRunSummaryInfo] {
         &self.runs
     }
-
-    pub(crate) fn resolve(&self, selector: &str) -> Result<ServerRunSummaryInfo> {
-        resolve_server_run_from_infos(&self.runs, selector)
-    }
-}
-
-pub(crate) fn resolve_server_run_from_summaries(
-    runs: &[ServerRunSummaryInfo],
-    selector: &str,
-) -> Result<ServerRunSummaryInfo> {
-    resolve_server_run_from_infos(runs, selector)
 }
 
 pub(crate) fn filter_server_runs(
@@ -168,60 +128,4 @@ pub(crate) fn filter_server_runs(
         })
         .cloned()
         .collect()
-}
-
-fn resolve_server_run_from_infos(
-    runs: &[ServerRunSummaryInfo],
-    identifier: &str,
-) -> Result<ServerRunSummaryInfo> {
-    let id_matches: Vec<_> = runs
-        .iter()
-        .filter(|run| run_id_matches(run.run_id(), identifier))
-        .collect();
-
-    match id_matches.len() {
-        1 => return Ok(id_matches[0].clone()),
-        count if count > 1 => {
-            let ids: Vec<String> = id_matches
-                .iter()
-                .map(|run| run.run_id().to_string())
-                .collect();
-            bail!(
-                "Ambiguous prefix '{identifier}': {count} runs match: {}",
-                ids.join(", ")
-            );
-        }
-        _ => {}
-    }
-
-    let id_lower = identifier.to_lowercase();
-    let id_collapsed = collapse_separators(&id_lower);
-    let workflow_match = runs
-        .iter()
-        .filter(|run| {
-            if let Some(slug) = run.workflow_slug() {
-                if slug.to_lowercase() == id_lower {
-                    return true;
-                }
-            }
-            let name_lower = run.workflow_name().to_lowercase();
-            name_lower.contains(&id_lower)
-                || collapse_separators(&name_lower).contains(&id_collapsed)
-        })
-        .max_by_key(|run| run.run_id().created_at());
-
-    match workflow_match {
-        Some(run) => Ok(run.clone()),
-        None => {
-            bail!("No run found matching '{identifier}' (tried run ID prefix and workflow name)")
-        }
-    }
-}
-
-fn collapse_separators(s: &str) -> String {
-    s.chars().filter(|c| *c != '-' && *c != '_').collect()
-}
-
-fn run_id_matches(run_id: RunId, prefix: &str) -> bool {
-    run_id.to_string().starts_with(prefix)
 }

@@ -2,6 +2,10 @@
     clippy::absolute_paths,
     reason = "This test module prefers explicit type paths over extra imports."
 )]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "Integration tests stage fixtures with sync std::fs calls."
+)]
 
 use std::process::Output;
 

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync read/write of the anonymous-id cache file; not on a Tokio path"
+)]
+
 use std::fs;
 use std::path::Path;
 

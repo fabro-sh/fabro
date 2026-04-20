@@ -84,7 +84,7 @@ fn rm_rejects_submitted_run_without_force() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    cannot remove active run [ULID] (status: submitted, use -f to force)
+    cannot remove active run [ULID] (status: submitted, use force=true or --force to force)
     error: some runs could not be removed
     ");
 }
@@ -152,35 +152,39 @@ fn rm_force_removes_active_run() {
     let context = test_context!();
     let run_id = unique_run_id();
     let server = MockServer::start();
-    let list_mock = server.mock(|when, then| {
-        when.method("GET").path("/api/v1/runs");
+    let resolve_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", &run_id);
         then.status(200)
             .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "data": [{
-                        "run_id": run_id,
-                        "workflow_name": "Active Workflow",
-                        "workflow_slug": "active-workflow",
-                        "goal": "Active goal",
-                        "title": "Active goal",
-                        "labels": {},
-                        "host_repo_path": null,
-                        "repository": { "name": "unknown" },
-                        "start_time": "2026-04-05T12:00:00Z",
-                        "created_at": "2026-04-05T12:00:00Z",
-                        "status": "running",
-                        "status_reason": null,
-                        "duration_ms": 123,
-                        "total_usd_micros": null
-                    }],
-                    "meta": { "has_more": false }
+                    "run_id": run_id,
+                    "workflow_name": "Active Workflow",
+                    "workflow_slug": "active-workflow",
+                    "goal": "Active goal",
+                    "title": "Active goal",
+                    "labels": {},
+                    "host_repo_path": null,
+                    "repository": { "name": "unknown" },
+                    "start_time": "2026-04-05T12:00:00Z",
+                    "created_at": "2026-04-05T12:00:00Z",
+                    "status": "running",
+                    "status_reason": null,
+                    "blocked_reason": null,
+                    "pending_control": null,
+                    "duration_ms": 123,
+                    "elapsed_secs": 0,
+                    "total_usd_micros": null
                 })
                 .to_string(),
             );
     });
     let delete_mock = server.mock(|when, then| {
-        when.method("DELETE").path(format!("/api/v1/runs/{run_id}"));
+        when.method("DELETE")
+            .path(format!("/api/v1/runs/{run_id}"))
+            .query_param("force", "true");
         then.status(204);
     });
     context.write_home(
@@ -205,7 +209,86 @@ fn rm_force_removes_active_run() {
     ----- stderr -----
     [ULID]
     ");
-    list_mock.assert();
+    resolve_mock.assert();
+    delete_mock.assert();
+}
+
+#[test]
+fn rm_without_force_uses_resolve_then_surfaces_server_conflict() {
+    let context = test_context!();
+    let run_id = unique_run_id();
+    let server = MockServer::start();
+    let resolve_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", &run_id);
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "run_id": run_id,
+                    "workflow_name": "Active Workflow",
+                    "workflow_slug": "active-workflow",
+                    "goal": "Active goal",
+                    "title": "Active goal",
+                    "labels": {},
+                    "host_repo_path": null,
+                    "repository": { "name": "unknown" },
+                    "start_time": "2026-04-05T12:00:00Z",
+                    "created_at": "2026-04-05T12:00:00Z",
+                    "status": "running",
+                    "status_reason": null,
+                    "blocked_reason": null,
+                    "pending_control": null,
+                    "duration_ms": 123,
+                    "elapsed_secs": 0,
+                    "total_usd_micros": null
+                })
+                .to_string(),
+            );
+    });
+    let delete_mock = server.mock(|when, then| {
+        when.method("DELETE").path(format!("/api/v1/runs/{run_id}"));
+        then.status(409)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "errors": [{
+                        "status": "409",
+                        "title": "Conflict",
+                        "detail": format!(
+                            "cannot remove active run {} (status: running, use force=true or --force to force)",
+                            &run_id[..12],
+                        ),
+                    }]
+                })
+                .to_string(),
+            );
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
+    );
+
+    let mut filters = context.filters();
+    filters.push((
+        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
+        "[ULID]".to_string(),
+    ));
+    let mut cmd = context.command();
+    cmd.args(["rm", &run_id]);
+    fabro_snapshot!(filters, cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    cannot remove active run [ULID] (status: running, use force=true or --force to force)
+    error: some runs could not be removed
+    ");
+    resolve_mock.assert();
     delete_mock.assert();
 }
 
@@ -269,29 +352,28 @@ fn rm_uses_configured_server_target_without_local_run_dir() {
     let context = test_context!();
     let run_id = unique_run_id();
     let server = MockServer::start();
-    let list_mock = server.mock(|when, then| {
-        when.method("GET").path("/api/v1/runs");
+    let resolve_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", &run_id);
         then.status(200)
             .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "data": [{
-                        "run_id": run_id,
-                        "workflow_name": "Remote Workflow",
-                        "workflow_slug": "remote-workflow",
-                        "goal": "Remote goal",
-                        "title": "Remote goal",
-                        "labels": {},
-                        "host_repo_path": null,
-                        "repository": { "name": "unknown" },
-                        "start_time": "2026-04-05T12:00:00Z",
-                        "created_at": "2026-04-05T12:00:00Z",
-                        "status": "succeeded",
-                        "status_reason": null,
-                        "duration_ms": 123,
-                        "total_usd_micros": null
-                    }],
-                    "meta": { "has_more": false }
+                    "run_id": run_id,
+                    "workflow_name": "Remote Workflow",
+                    "workflow_slug": "remote-workflow",
+                    "goal": "Remote goal",
+                    "title": "Remote goal",
+                    "labels": {},
+                    "host_repo_path": null,
+                    "repository": { "name": "unknown" },
+                    "start_time": "2026-04-05T12:00:00Z",
+                    "created_at": "2026-04-05T12:00:00Z",
+                    "status": "succeeded",
+                    "status_reason": null,
+                    "duration_ms": 123,
+                    "total_usd_micros": null
                 })
                 .to_string(),
             );
@@ -320,6 +402,6 @@ fn rm_uses_configured_server_target_without_local_run_dir() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    list_mock.assert();
+    resolve_mock.assert();
     delete_mock.assert();
 }

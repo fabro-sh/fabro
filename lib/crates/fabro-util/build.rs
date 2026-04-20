@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "build script: runs at compile time outside any runtime"
+)]
+
 use std::fmt::Write;
 use std::path::Path;
 use std::{env, fs};

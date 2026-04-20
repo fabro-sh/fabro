@@ -4,21 +4,25 @@ use std::sync::OnceLock;
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use tokio::fs;
 
 const INSTALL_MODE_MARKER: &str = "__FABRO_MODE__ = \"install\"";
 
-pub fn serve(path: &str, headers: &HeaderMap) -> Response {
-    serve_with_mode(path, headers, SpaMode::Normal)
+pub async fn serve(path: &str, headers: &HeaderMap) -> Response {
+    serve_with_mode(path, headers, SpaMode::Normal).await
 }
 
-pub fn serve_install(path: &str, headers: &HeaderMap) -> Response {
-    serve_with_mode(path, headers, SpaMode::Install)
+pub async fn serve_install(path: &str, headers: &HeaderMap) -> Response {
+    serve_with_mode(path, headers, SpaMode::Install).await
 }
 
-pub(crate) fn assert_install_mode_shell_ready() {
-    let shell = cached_install_mode_shell().clone().unwrap_or_else(|| {
-        load_injected_install_shell().expect("install-mode SPA shell asset missing")
-    });
+pub(crate) async fn assert_install_mode_shell_ready() {
+    let shell = match cached_install_mode_shell().await {
+        Some(shell) => shell,
+        None => load_injected_install_shell()
+            .await
+            .expect("install-mode SPA shell asset missing"),
+    };
     let html = String::from_utf8(shell).expect("install-mode SPA shell must be valid UTF-8");
     assert!(
         html.contains(INSTALL_MODE_MARKER),
@@ -26,17 +30,21 @@ pub(crate) fn assert_install_mode_shell_ready() {
     );
 }
 
-fn cached_install_mode_shell() -> Option<Vec<u8>> {
+async fn cached_install_mode_shell() -> Option<Vec<u8>> {
     static SHELL: OnceLock<Option<Vec<u8>>> = OnceLock::new();
     if cfg!(debug_assertions) {
         // In debug builds the SPA is reloaded from disk on every request.
-        return load_injected_install_shell();
+        return load_injected_install_shell().await;
     }
-    SHELL.get_or_init(load_injected_install_shell).clone()
+    if let Some(cached) = SHELL.get() {
+        return cached.clone();
+    }
+    let loaded = load_injected_install_shell().await;
+    SHELL.get_or_init(|| loaded).clone()
 }
 
-fn load_injected_install_shell() -> Option<Vec<u8>> {
-    Some(inject_install_mode(load_asset("index.html")?))
+async fn load_injected_install_shell() -> Option<Vec<u8>> {
+    Some(inject_install_mode(load_asset("index.html").await?))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,14 +53,14 @@ enum SpaMode {
     Install,
 }
 
-fn serve_with_mode(path: &str, headers: &HeaderMap, mode: SpaMode) -> Response {
+async fn serve_with_mode(path: &str, headers: &HeaderMap, mode: SpaMode) -> Response {
     let normalized = normalize(path);
 
     if is_source_map(&normalized) {
         return (StatusCode::NOT_FOUND, "Static asset not found").into_response();
     }
 
-    if let Some(asset) = load_asset_for_mode(&normalized, mode) {
+    if let Some(asset) = load_asset_for_mode(&normalized, mode).await {
         return asset_response(&normalized, asset);
     }
 
@@ -61,7 +69,7 @@ fn serve_with_mode(path: &str, headers: &HeaderMap, mode: SpaMode) -> Response {
     // `Accept: */*`, and similar non-HTML clients get a 404 so typos
     // don't silently return 25KB of UI shell.
     if accepts_html(headers) {
-        if let Some(index) = load_asset_for_mode("index.html", mode) {
+        if let Some(index) = load_asset_for_mode("index.html", mode).await {
             return asset_response("index.html", index);
         }
     }
@@ -92,9 +100,9 @@ fn normalize(path: &str) -> String {
     }
 }
 
-fn load_asset(path: &str) -> Option<Vec<u8>> {
+async fn load_asset(path: &str) -> Option<Vec<u8>> {
     if cfg!(debug_assertions) {
-        if let Some(bytes) = read_disk_asset(path) {
+        if let Some(bytes) = read_disk_asset(path).await {
             return Some(bytes);
         }
     }
@@ -102,11 +110,11 @@ fn load_asset(path: &str) -> Option<Vec<u8>> {
     fabro_spa::get(path).map(fabro_spa::AssetBytes::into_vec)
 }
 
-fn load_asset_for_mode(path: &str, mode: SpaMode) -> Option<Vec<u8>> {
+async fn load_asset_for_mode(path: &str, mode: SpaMode) -> Option<Vec<u8>> {
     if mode == SpaMode::Install && path == "index.html" {
-        return cached_install_mode_shell();
+        return cached_install_mode_shell().await;
     }
-    load_asset(path)
+    load_asset(path).await
 }
 
 fn inject_install_mode(bytes: Vec<u8>) -> Vec<u8> {
@@ -129,14 +137,14 @@ fn inject_install_mode(bytes: Vec<u8>) -> Vec<u8> {
     injected.into_bytes()
 }
 
-fn read_disk_asset(path: &str) -> Option<Vec<u8>> {
-    read_disk_asset_from_root(&disk_asset_root(), path)
+async fn read_disk_asset(path: &str) -> Option<Vec<u8>> {
+    read_disk_asset_from_root(&disk_asset_root(), path).await
 }
 
-fn read_disk_asset_from_root(root: &Path, path: &str) -> Option<Vec<u8>> {
+async fn read_disk_asset_from_root(root: &Path, path: &str) -> Option<Vec<u8>> {
     let candidate = root.join(path);
     if candidate.is_file() {
-        std::fs::read(candidate).ok()
+        fs::read(candidate).await.ok()
     } else {
         None
     }
@@ -190,6 +198,10 @@ fn is_source_map(path: &str) -> bool {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests stage static asset fixtures with sync std::fs::write"
+)]
 mod tests {
     use axum::http::{HeaderMap, HeaderValue, header};
 
@@ -236,14 +248,16 @@ mod tests {
         assert_eq!(cache_control("index.html"), "no-cache");
     }
 
-    #[test]
-    fn disk_assets_are_loaded_from_explicit_root() {
+    #[tokio::test]
+    async fn disk_assets_are_loaded_from_explicit_root() {
         let temp_dir = tempfile::tempdir().unwrap();
         let asset_path = temp_dir.path().join("assets/override.txt");
         std::fs::create_dir_all(asset_path.parent().unwrap()).unwrap();
         std::fs::write(&asset_path, b"override").unwrap();
 
-        let bytes = read_disk_asset_from_root(temp_dir.path(), "assets/override.txt").unwrap();
+        let bytes = read_disk_asset_from_root(temp_dir.path(), "assets/override.txt")
+            .await
+            .unwrap();
         assert_eq!(bytes, b"override");
     }
 

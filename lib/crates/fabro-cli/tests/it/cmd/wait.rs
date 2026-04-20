@@ -145,11 +145,13 @@ fn wait_blocked_run_times_out_without_treating_it_as_terminal() {
     let server = MockServer::start();
     let summary = remote_run_summary(run_id.as_str(), "blocked");
 
-    let list_runs = server.mock(|when, then| {
-        when.method("GET").path("/api/v1/runs");
+    let resolve_run = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", run_id.as_str());
         then.status(200)
             .header("content-type", "application/json")
-            .body(json!({ "data": [summary.clone()], "meta": { "has_more": false } }).to_string());
+            .body(summary.clone().to_string());
     });
     let retrieve_run = server.mock(|when, then| {
         when.method("GET")
@@ -185,7 +187,7 @@ fn wait_blocked_run_times_out_without_treating_it_as_terminal() {
     ----- stderr -----
     error: Timed out after 1s waiting for run '[ULID]'
     ");
-    list_runs.assert();
+    resolve_run.assert();
     assert!(
         retrieve_run.calls() > 0,
         "wait should keep polling the blocked run summary until timeout"

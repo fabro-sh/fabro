@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "CLI `doctor` command: sync directory scan in command handler"
+)]
+
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;

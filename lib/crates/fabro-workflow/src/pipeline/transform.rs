@@ -53,6 +53,7 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
 }
 
 #[cfg(test)]
+#[expect(clippy::disallowed_methods, reason = "tests stage pipeline fixtures")]
 mod tests {
     use std::collections::HashMap;
     use std::path::Path;

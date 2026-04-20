@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync config loading utilities used at startup; not on a Tokio path"
+)]
+
 extern crate self as fabro_config;
 
 mod defaults;

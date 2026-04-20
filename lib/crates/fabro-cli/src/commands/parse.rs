@@ -1,3 +1,12 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "sync CLI `parse` command: blocking std::io::Write is the intended output mechanism"
+)]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync CLI `parse` command: blocking std::io::stdout is the intended output mechanism"
+)]
+
 use std::io::Write;
 
 use fabro_config::project::resolve_workflow;

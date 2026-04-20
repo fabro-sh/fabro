@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
+)]
+
 use fabro_test::{fabro_snapshot, test_context};
 
 use super::support::{git_stdout, output_stderr, setup_git_backed_changed_run};

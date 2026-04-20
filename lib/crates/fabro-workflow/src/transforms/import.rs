@@ -615,6 +615,7 @@ impl Transform for ImportTransform {
 }
 
 #[cfg(test)]
+#[expect(clippy::disallowed_methods, reason = "tests stage transform fixtures")]
 mod tests {
     use std::path::Path;
     use std::sync::Arc;

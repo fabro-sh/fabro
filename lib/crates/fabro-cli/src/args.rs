@@ -516,7 +516,7 @@ pub(crate) struct InspectArgs {
 #[derive(Args)]
 pub(crate) struct StoreDumpArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID prefix or workflow name
     pub(crate) run: String,

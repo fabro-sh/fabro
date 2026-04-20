@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
+)]
+
 use std::path::PathBuf;
 
 fn read_doc(relative_path: &str) -> String {

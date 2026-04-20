@@ -5,6 +5,11 @@
 //! that used to be re-exported from here live under
 //! `fabro_types::settings::run` now.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync run-config loading helpers; not on a Tokio path"
+)]
+
 use std::path::{Path, PathBuf};
 
 use fabro_types::settings::SettingsLayer;

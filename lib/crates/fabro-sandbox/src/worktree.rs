@@ -358,6 +358,10 @@ impl Sandbox for WorktreeSandbox {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "worktree tests stage fixtures with sync std::fs writes in temp dirs"
+)]
 mod tests {
     use std::sync::Mutex;
 

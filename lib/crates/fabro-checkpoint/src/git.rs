@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync git2 operations dominate this module; std::fs usage is part of the same blocking path and not on a Tokio hot path"
+)]
+
 use std::collections::BTreeMap;
 use std::path::Path;
 

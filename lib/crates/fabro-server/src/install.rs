@@ -310,8 +310,8 @@ impl TryFrom<GithubAppOwnerInput> for GitHubAppOwner {
     }
 }
 
-pub fn build_install_router(state: InstallAppState) -> Router {
-    static_files::assert_install_mode_shell_ready();
+pub async fn build_install_router(state: InstallAppState) -> Router {
+    static_files::assert_install_mode_shell_ready().await;
 
     Router::new()
         .route("/health", get(health))
@@ -346,7 +346,7 @@ pub fn build_install_router(state: InstallAppState) -> Router {
                 Ok::<_, Infallible>(StatusCode::NOT_FOUND.into_response())
             } else if matches!(req.method(), &Method::GET | &Method::HEAD) {
                 let headers = req.headers().clone();
-                Ok::<_, Infallible>(static_files::serve_install(&path, &headers))
+                Ok::<_, Infallible>(static_files::serve_install(&path, &headers).await)
             } else {
                 Ok::<_, Infallible>(StatusCode::NOT_FOUND.into_response())
             }
@@ -397,7 +397,7 @@ where
     let bound_listener = bind_install_listener(&bind_request).await?;
     state.set_install_bind(&bound_listener.bind);
     let state = state.with_finish_callback(finish_callback);
-    let router = build_install_router(state);
+    let router = build_install_router(state).await;
     let bind = bound_listener.bind.clone();
     on_ready(&bind)?;
 
@@ -897,6 +897,11 @@ async fn post_install_finish(
         server_env_secrets.push(("FABRO_DEV_TOKEN".to_string(), token.clone()));
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "install-finish handler: reads current settings file once to produce a rollback \
+                  snapshot before writing the new settings; one-shot per install-finish request"
+    )]
     let previous_settings = std::fs::read_to_string(state.config_path.as_ref()).ok();
 
     if let Err(err) = persist_install_outputs_direct(
@@ -961,7 +966,7 @@ async fn post_install_finish(
 }
 
 async fn render_install_shell(headers: HeaderMap, uri: OriginalUri) -> Response {
-    static_files::serve_install(uri.path(), &headers)
+    static_files::serve_install(uri.path(), &headers).await
 }
 
 fn token_is_valid(state: &InstallAppState, headers: &HeaderMap, query_token: Option<&str>) -> bool {

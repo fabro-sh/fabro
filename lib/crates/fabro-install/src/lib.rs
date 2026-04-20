@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "fabro-install: sync CLI install/uninstall bookkeeping; not on a Tokio hot path"
+)]
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};

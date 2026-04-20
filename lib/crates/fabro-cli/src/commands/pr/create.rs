@@ -17,7 +17,6 @@ use tracing::info;
 use crate::args::PrCreateArgs;
 use crate::command_context::CommandContext;
 use crate::commands::store::rebuild::rebuild_run_store;
-use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 use crate::shared::repo::ensure_matching_repo_origin;
 use crate::user_config;
@@ -29,10 +28,9 @@ pub(super) async fn create_command(
     printer: Printer,
 ) -> Result<()> {
     let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
-    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-    let run = lookup.resolve(&args.run_id)?;
-    let run_id = run.run_id();
-    let events = lookup.client().list_run_events(&run_id, None, None).await?;
+    let client = ctx.server().await?;
+    let run_id = client.resolve_run(&args.run_id).await?.run_id;
+    let events = client.list_run_events(&run_id, None, None).await?;
     let run_store = rebuild_run_store(&run_id, &events).await?;
     let state = run_store.state().await?;
 

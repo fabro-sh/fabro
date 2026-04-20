@@ -1,6 +1,6 @@
 #![expect(
     clippy::disallowed_methods,
-    reason = "sync run dump writer used by CLI export paths; async callers wrap it in spawn_blocking"
+    reason = "CLI-owned export writer uses sync std::fs for final local materialization"
 )]
 
 use std::collections::HashMap;
@@ -17,119 +17,26 @@ use fabro_store::{EventEnvelope, RunProjection, StageId};
 use fabro_types::{RunBlobId, parse_blob_ref, parse_legacy_blob_file_ref};
 use futures::future::BoxFuture;
 
-use crate::git::MetadataStore;
-
 #[derive(Debug, Clone)]
-pub struct RunDump {
-    entries: Vec<RunDumpEntry>,
+pub(super) struct StoreRunExport {
+    entries: Vec<StoreRunExportEntry>,
 }
 
 #[derive(Debug, Clone)]
-pub struct RunDumpEntry {
+struct StoreRunExportEntry {
     path:     String,
-    contents: RunDumpContents,
+    contents: StoreRunExportContents,
 }
 
 #[derive(Debug, Clone)]
-pub enum RunDumpContents {
+enum StoreRunExportContents {
     Text(String),
     Json(serde_json::Value),
     Bytes(Vec<u8>),
 }
 
-impl RunDump {
-    #[must_use]
-    pub fn metadata_init(state: &RunProjection) -> Self {
-        let mut entries = Vec::new();
-        if let Some(record) = state.run.as_ref() {
-            push_json_entry(&mut entries, "run.json", record);
-        }
-        if let Some(record) = state.start.as_ref() {
-            push_json_entry(&mut entries, "start.json", record);
-        }
-        if let Some(record) = state.sandbox.as_ref() {
-            push_json_entry(&mut entries, "sandbox.json", record);
-        }
-        Self { entries }
-    }
-
-    #[must_use]
-    pub fn metadata_checkpoint(state: &RunProjection) -> Self {
-        let mut entries = Vec::new();
-        let mut keys: Vec<_> = state.iter_nodes().map(|(node, _)| node.clone()).collect();
-        keys.sort();
-
-        for node_key in keys {
-            let Some(node) = state.node(&node_key) else {
-                continue;
-            };
-            let node_id = node_key.node_id();
-            let visit = node_key.visit();
-
-            if let Some(prompt) = node.prompt.as_ref() {
-                entries.push(RunDumpEntry::text(
-                    metadata_node_file_path(node_id, visit, "prompt.md"),
-                    prompt.clone(),
-                ));
-            }
-            if let Some(response) = node.response.as_ref() {
-                entries.push(RunDumpEntry::text(
-                    metadata_node_file_path(node_id, visit, "response.md"),
-                    response.clone(),
-                ));
-            }
-            if let Some(status) = node.status.as_ref() {
-                push_json_entry_path(
-                    &mut entries,
-                    &PathBuf::from(metadata_node_file_path(node_id, visit, "status.json")),
-                    status,
-                );
-            }
-            if let Some(provider_used) = node.provider_used.as_ref() {
-                entries.push(RunDumpEntry::json(
-                    metadata_node_file_path(node_id, visit, "provider_used.json"),
-                    provider_used.clone(),
-                ));
-            }
-            if let Some(diff) = node.diff.as_ref() {
-                entries.push(RunDumpEntry::text(
-                    metadata_node_file_path(node_id, visit, "diff.patch"),
-                    diff.clone(),
-                ));
-            }
-            if let Some(script_invocation) = node.script_invocation.as_ref() {
-                entries.push(RunDumpEntry::json(
-                    metadata_node_file_path(node_id, visit, "script_invocation.json"),
-                    script_invocation.clone(),
-                ));
-            }
-            if let Some(script_timing) = node.script_timing.as_ref() {
-                entries.push(RunDumpEntry::json(
-                    metadata_node_file_path(node_id, visit, "script_timing.json"),
-                    script_timing.clone(),
-                ));
-            }
-            if let Some(parallel_results) = node.parallel_results.as_ref() {
-                entries.push(RunDumpEntry::json(
-                    metadata_node_file_path(node_id, visit, "parallel_results.json"),
-                    parallel_results.clone(),
-                ));
-            }
-        }
-
-        Self { entries }
-    }
-
-    #[must_use]
-    pub fn metadata_finalize(state: &RunProjection) -> Self {
-        let mut dump = Self::metadata_checkpoint(state);
-        if let Some(retro) = state.retro.as_ref() {
-            push_json_entry(&mut dump.entries, "retro.json", retro);
-        }
-        dump
-    }
-
-    pub fn from_store_state_and_events(
+impl StoreRunExport {
+    pub(super) fn from_store_state_and_events(
         state: &RunProjection,
         events: &[EventEnvelope],
     ) -> Result<Self> {
@@ -154,7 +61,10 @@ impl RunDump {
             push_json_entry(&mut entries, "retro.json", record);
         }
         if let Some(graph_source) = state.graph_source.as_ref() {
-            entries.push(RunDumpEntry::text("graph.fabro", graph_source.clone()));
+            entries.push(StoreRunExportEntry::text(
+                "graph.fabro",
+                graph_source.clone(),
+            ));
         }
         if let Some(record) = state.sandbox.as_ref() {
             push_json_entry(&mut entries, "sandbox.json", record);
@@ -172,13 +82,13 @@ impl RunDump {
                 .join(format!("visit-{}", node_key.visit()));
 
             if let Some(prompt) = node.prompt.as_ref() {
-                entries.push(RunDumpEntry::text_path(
+                entries.push(StoreRunExportEntry::text_path(
                     &base.join("prompt.md"),
                     prompt.clone(),
                 ));
             }
             if let Some(response) = node.response.as_ref() {
-                entries.push(RunDumpEntry::text_path(
+                entries.push(StoreRunExportEntry::text_path(
                     &base.join("response.md"),
                     response.clone(),
                 ));
@@ -187,13 +97,13 @@ impl RunDump {
                 push_json_entry_path(&mut entries, &base.join("status.json"), status);
             }
             if let Some(stdout) = node.stdout.as_ref() {
-                entries.push(RunDumpEntry::text_path(
+                entries.push(StoreRunExportEntry::text_path(
                     &base.join("stdout.log"),
                     stdout.clone(),
                 ));
             }
             if let Some(stderr) = node.stderr.as_ref() {
-                entries.push(RunDumpEntry::text_path(
+                entries.push(StoreRunExportEntry::text_path(
                     &base.join("stderr.log"),
                     stderr.clone(),
                 ));
@@ -201,10 +111,13 @@ impl RunDump {
         }
 
         if let Some(prompt) = state.retro_prompt.as_ref() {
-            entries.push(RunDumpEntry::text("retro/prompt.md", prompt.clone()));
+            entries.push(StoreRunExportEntry::text("retro/prompt.md", prompt.clone()));
         }
         if let Some(response) = state.retro_response.as_ref() {
-            entries.push(RunDumpEntry::text("retro/response.md", response.clone()));
+            entries.push(StoreRunExportEntry::text(
+                "retro/response.md",
+                response.clone(),
+            ));
         }
 
         let mut events_jsonl = Vec::new();
@@ -212,7 +125,7 @@ impl RunDump {
             serde_json::to_writer(&mut events_jsonl, event)?;
             events_jsonl.write_all(b"\n")?;
         }
-        entries.push(RunDumpEntry::bytes("events.jsonl", events_jsonl));
+        entries.push(StoreRunExportEntry::bytes("events.jsonl", events_jsonl));
 
         for (seq, checkpoint) in &state.checkpoints {
             push_json_entry_path(
@@ -225,18 +138,19 @@ impl RunDump {
         Ok(Self { entries })
     }
 
-    pub fn add_artifact_bytes(
+    pub(super) fn add_artifact_bytes(
         &mut self,
         stage_id: &StageId,
         filename: &str,
         data: Vec<u8>,
     ) -> Result<()> {
         let path = artifact_dump_path(stage_id, filename)?;
-        self.entries.push(RunDumpEntry::bytes_path(&path, data));
+        self.entries
+            .push(StoreRunExportEntry::bytes_path(&path, data));
         Ok(())
     }
 
-    pub async fn hydrate_referenced_blobs_with_reader<'a, F>(
+    pub(super) async fn hydrate_referenced_blobs_with_reader<'a, F>(
         &mut self,
         mut read_blob: F,
     ) -> Result<()>
@@ -245,7 +159,7 @@ impl RunDump {
     {
         let mut cache = HashMap::new();
         for entry in &mut self.entries {
-            if let RunDumpContents::Json(value) = &mut entry.contents {
+            if let StoreRunExportContents::Json(value) = &mut entry.contents {
                 let mut blob_ids = Vec::new();
                 collect_blob_refs_in_value(value, &mut blob_ids);
                 for blob_id in blob_ids {
@@ -265,85 +179,54 @@ impl RunDump {
         Ok(())
     }
 
-    pub fn entries(&self) -> &[RunDumpEntry] {
-        &self.entries
-    }
-
-    #[must_use]
-    pub fn file_count(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn write_to_dir(&self, root: &Path) -> Result<usize> {
+    pub(super) fn write_to_dir(&self, root: &Path) -> Result<usize> {
         for entry in &self.entries {
             entry.write_to_dir(root)?;
         }
-        Ok(self.file_count())
-    }
-
-    pub fn write_to_metadata_store(
-        &self,
-        store: &MetadataStore,
-        run_id: &str,
-        message: &str,
-    ) -> Result<()> {
-        let git_entries = self.git_entries()?;
-        let refs: Vec<(&str, &[u8])> = git_entries
-            .iter()
-            .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
-            .collect();
-        store.write_files(run_id, &refs, message)?;
-        Ok(())
-    }
-
-    pub fn git_entries(&self) -> Result<Vec<(String, Vec<u8>)>> {
-        self.entries
-            .iter()
-            .map(|entry| Ok((entry.path.clone(), entry.contents.to_bytes()?)))
-            .collect()
+        Ok(self.entries.len())
     }
 }
 
-impl RunDumpEntry {
+impl StoreRunExportEntry {
     fn text(path: impl Into<String>, contents: String) -> Self {
         Self {
             path:     path.into(),
-            contents: RunDumpContents::Text(contents),
+            contents: StoreRunExportContents::Text(contents),
         }
     }
 
     fn text_path(path: &Path, contents: String) -> Self {
         Self {
             path:     path_to_string(path),
-            contents: RunDumpContents::Text(contents),
+            contents: StoreRunExportContents::Text(contents),
         }
     }
 
     fn json(path: impl Into<String>, contents: serde_json::Value) -> Self {
         Self {
             path:     path.into(),
-            contents: RunDumpContents::Json(contents),
+            contents: StoreRunExportContents::Json(contents),
         }
     }
 
     fn json_path(path: &Path, contents: serde_json::Value) -> Self {
         Self {
             path:     path_to_string(path),
-            contents: RunDumpContents::Json(contents),
+            contents: StoreRunExportContents::Json(contents),
         }
     }
 
     fn bytes(path: impl Into<String>, contents: Vec<u8>) -> Self {
         Self {
             path:     path.into(),
-            contents: RunDumpContents::Bytes(contents),
+            contents: StoreRunExportContents::Bytes(contents),
         }
     }
 
     fn bytes_path(path: &Path, contents: Vec<u8>) -> Self {
         Self {
             path:     path_to_string(path),
-            contents: RunDumpContents::Bytes(contents),
+            contents: StoreRunExportContents::Bytes(contents),
         }
     }
 
@@ -357,7 +240,7 @@ impl RunDumpEntry {
     }
 }
 
-impl RunDumpContents {
+impl StoreRunExportContents {
     fn to_bytes(&self) -> Result<Vec<u8>> {
         match self {
             Self::Text(value) => Ok(value.as_bytes().to_vec()),
@@ -367,29 +250,21 @@ impl RunDumpContents {
     }
 }
 
-fn push_json_entry<T>(entries: &mut Vec<RunDumpEntry>, path: &str, value: &T)
+fn push_json_entry<T>(entries: &mut Vec<StoreRunExportEntry>, path: &str, value: &T)
 where
     T: serde::Serialize,
 {
     if let Ok(value) = serde_json::to_value(value) {
-        entries.push(RunDumpEntry::json(path, value));
+        entries.push(StoreRunExportEntry::json(path, value));
     }
 }
 
-fn push_json_entry_path<T>(entries: &mut Vec<RunDumpEntry>, path: &Path, value: &T)
+fn push_json_entry_path<T>(entries: &mut Vec<StoreRunExportEntry>, path: &Path, value: &T)
 where
     T: serde::Serialize,
 {
     if let Ok(value) = serde_json::to_value(value) {
-        entries.push(RunDumpEntry::json_path(path, value));
-    }
-}
-
-fn metadata_node_file_path(node_id: &str, visit: u32, filename: &str) -> String {
-    if visit <= 1 {
-        format!("nodes/{node_id}/{filename}")
-    } else {
-        format!("nodes/{node_id}-visit_{visit}/{filename}")
+        entries.push(StoreRunExportEntry::json_path(path, value));
     }
 }
 

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync CLI `repo init` command: interactive prompts read from std::io::stdin"
+)]
+
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};

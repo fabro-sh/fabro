@@ -4,6 +4,11 @@
 //! tree in `fabro_types::settings::v2`. This module keeps the workflow
 //! discovery helpers and re-exports resolved project settings.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync project-level config discovery and workflow listing; not on a Tokio path"
+)]
+
 use std::fmt::Write;
 use std::path::{Component, Path, PathBuf};
 

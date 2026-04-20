@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "CLI `artifact cp` command: sync file I/O in command handler; not on a Tokio hot path"
+)]
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};

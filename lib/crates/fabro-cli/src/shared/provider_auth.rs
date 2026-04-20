@@ -1,3 +1,12 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "sync CLI: provider auth reads an API key from stdin via std::io::Read"
+)]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync CLI: provider auth reads an API key from std::io::stdin"
+)]
+
 use std::io::Read;
 use std::sync::Arc;
 

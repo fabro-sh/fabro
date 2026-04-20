@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "CLI `workflow create` command: sync file I/O creating workflow scaffolding"
+)]
+
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};

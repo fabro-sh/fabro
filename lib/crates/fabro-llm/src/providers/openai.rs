@@ -193,7 +193,7 @@ fn map_finish_reason(status: Option<&str>, has_tool_calls: bool) -> FinishReason
 }
 
 /// Translate unified messages to Responses API `input` array format.
-fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Value>) {
+async fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Value>) {
     let mut instructions_parts: Vec<String> = Vec::new();
     let mut input: Vec<serde_json::Value> = Vec::new();
 
@@ -203,37 +203,40 @@ fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Val
                 instructions_parts.push(msg.text());
             }
             Role::User => {
-                let content: Vec<serde_json::Value> = msg
-                    .content
-                    .iter()
-                    .filter_map(|part| match part {
+                let mut content = Vec::new();
+                for part in &msg.content {
+                    let maybe_content = match part {
                         ContentPart::Text(text) => {
                             Some(serde_json::json!({"type": "input_text", "text": text}))
                         }
-                        ContentPart::Image(img) => {
-                            img.url.as_ref().map_or_else(
-                                || {
-                                    img.data.as_ref().map(|data| {
-                                        let mime = img.media_type.as_deref().unwrap_or("image/png");
-                                        let b64 = BASE64_STANDARD.encode(data);
-                                        serde_json::json!({"type": "input_image", "image_url": format!("data:{mime};base64,{b64}")})
-                                    })
-                                },
-                                |url| {
-                                    if common::is_file_path(url) {
-                                        match common::load_file_as_base64(url) {
-                                            Ok((b64, mime)) => Some(serde_json::json!({"type": "input_image", "image_url": format!("data:{mime};base64,{b64}")})),
-                                            Err(_) => None,
-                                        }
-                                    } else {
-                                        Some(serde_json::json!({"type": "input_image", "image_url": url}))
+                        ContentPart::Image(img) => match &img.url {
+                            Some(url) => {
+                                if common::is_file_path(url) {
+                                    match common::load_file_as_base64(url).await {
+                                        Ok((b64, mime)) => Some(serde_json::json!({
+                                            "type": "input_image",
+                                            "image_url": format!("data:{mime};base64,{b64}"),
+                                        })),
+                                        Err(_) => None,
                                     }
-                                },
-                            )
-                        }
-                        ContentPart::Audio(_) => {
-                            Some(serde_json::json!({"type": "input_text", "text": "[Audio content not supported by this provider]"}))
-                        }
+                                } else {
+                                    Some(
+                                        serde_json::json!({"type": "input_image", "image_url": url}),
+                                    )
+                                }
+                            }
+                            None => img.data.as_ref().map(|data| {
+                                let mime = img.media_type.as_deref().unwrap_or("image/png");
+                                let b64 = BASE64_STANDARD.encode(data);
+                                serde_json::json!({
+                                    "type": "input_image",
+                                    "image_url": format!("data:{mime};base64,{b64}"),
+                                })
+                            }),
+                        },
+                        ContentPart::Audio(_) => Some(
+                            serde_json::json!({"type": "input_text", "text": "[Audio content not supported by this provider]"}),
+                        ),
                         ContentPart::Document(doc) => {
                             let desc = doc.file_name.as_ref().map_or_else(
                                 || "[Document content not supported by this provider]".to_string(),
@@ -242,8 +245,11 @@ fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Val
                             Some(serde_json::json!({"type": "input_text", "text": desc}))
                         }
                         _ => None,
-                    })
-                    .collect();
+                    };
+                    if let Some(content_part) = maybe_content {
+                        content.push(content_part);
+                    }
+                }
                 if !content.is_empty() {
                     input.push(serde_json::json!({
                         "type": "message",
@@ -383,8 +389,8 @@ fn translate_response_format(format: &ResponseFormat) -> Option<serde_json::Valu
 /// When `codex_mode` is true, unsupported fields (`temperature`,
 /// `max_output_tokens`, `top_p`) are omitted and empty instructions are sent as
 /// `""` (required by the Codex endpoint).
-fn build_api_request(request: &Request, stream: bool, codex_mode: bool) -> ApiRequest {
-    let (instructions, input) = translate_input(&request.messages);
+async fn build_api_request(request: &Request, stream: bool, codex_mode: bool) -> ApiRequest {
+    let (instructions, input) = translate_input(&request.messages).await;
     let api_tools = request.tools.as_ref().map(|t| translate_tools(t));
     let tool_choice = request.tool_choice.as_ref().map(translate_tool_choice);
     let reasoning = request
@@ -437,8 +443,12 @@ fn build_api_request(request: &Request, stream: bool, codex_mode: bool) -> ApiRe
 
 /// Serialize an `ApiRequest` to JSON and merge any `provider_options.openai`
 /// keys into it.
-fn build_request_body(request: &Request, stream: bool, codex_mode: bool) -> serde_json::Value {
-    let api_request = build_api_request(request, stream, codex_mode);
+async fn build_request_body(
+    request: &Request,
+    stream: bool,
+    codex_mode: bool,
+) -> serde_json::Value {
+    let api_request = build_api_request(request, stream, codex_mode).await;
     let mut body = serde_json::to_value(&api_request).unwrap_or_else(|_| serde_json::json!({}));
 
     if let Some(openai_opts) = request
@@ -952,7 +962,7 @@ impl ProviderAdapter for Adapter {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
-        let request_body = build_request_body(request, false, false);
+        let request_body = build_request_body(request, false, false).await;
         let url = format!("{}/responses", self.http.base_url);
 
         let mut req = self.build_request(&url).json(&request_body);
@@ -1011,7 +1021,7 @@ impl ProviderAdapter for Adapter {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
-        let request_body = build_request_body(request, true, self.codex_mode);
+        let request_body = build_request_body(request, true, self.codex_mode).await;
         let url = format!("{}/responses", self.http.base_url);
 
         let http_resp = self
@@ -1103,8 +1113,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn build_request_body_includes_metadata() {
+    #[tokio::test]
+    async fn build_request_body_includes_metadata() {
         let mut metadata = HashMap::new();
         metadata.insert("user_id".to_string(), "u123".to_string());
         metadata.insert("session".to_string(), "s456".to_string());
@@ -1112,21 +1122,21 @@ mod tests {
         let mut request = minimal_request();
         request.metadata = Some(metadata);
 
-        let body = build_request_body(&request, false, false);
+        let body = build_request_body(&request, false, false).await;
         let meta = body.get("metadata").expect("metadata should be present");
         assert_eq!(meta["user_id"], "u123");
         assert_eq!(meta["session"], "s456");
     }
 
-    #[test]
-    fn build_request_body_omits_metadata_when_none() {
+    #[tokio::test]
+    async fn build_request_body_omits_metadata_when_none() {
         let request = minimal_request();
-        let body = build_request_body(&request, false, false);
+        let body = build_request_body(&request, false, false).await;
         assert!(body.get("metadata").is_none());
     }
 
-    #[test]
-    fn build_request_body_merges_provider_options_openai() {
+    #[tokio::test]
+    async fn build_request_body_merges_provider_options_openai() {
         let mut request = minimal_request();
         request.provider_options = Some(serde_json::json!({
             "openai": {
@@ -1135,13 +1145,13 @@ mod tests {
             }
         }));
 
-        let body = build_request_body(&request, false, false);
+        let body = build_request_body(&request, false, false).await;
         assert_eq!(body["store"], true);
         assert_eq!(body["previous_response_id"], "resp_abc123");
     }
 
-    #[test]
-    fn build_request_body_provider_options_override_fields() {
+    #[tokio::test]
+    async fn build_request_body_provider_options_override_fields() {
         let mut request = minimal_request();
         request.temperature = Some(0.5);
         request.provider_options = Some(serde_json::json!({
@@ -1150,13 +1160,13 @@ mod tests {
             }
         }));
 
-        let body = build_request_body(&request, false, false);
+        let body = build_request_body(&request, false, false).await;
         // provider_options should override the base field
         assert_eq!(body["temperature"], 0.9);
     }
 
-    #[test]
-    fn build_request_body_ignores_non_openai_provider_options() {
+    #[tokio::test]
+    async fn build_request_body_ignores_non_openai_provider_options() {
         let mut request = minimal_request();
         request.provider_options = Some(serde_json::json!({
             "anthropic": {
@@ -1164,29 +1174,29 @@ mod tests {
             }
         }));
 
-        let body = build_request_body(&request, false, false);
+        let body = build_request_body(&request, false, false).await;
         // anthropic options should not leak into the OpenAI request
         assert!(body.get("thinking").is_none());
     }
 
-    #[test]
-    fn build_request_body_no_provider_options() {
+    #[tokio::test]
+    async fn build_request_body_no_provider_options() {
         let request = minimal_request();
-        let body = build_request_body(&request, false, false);
+        let body = build_request_body(&request, false, false).await;
         assert_eq!(body["model"], "gpt-4o");
         // stream field is omitted when false (skip_serializing_if)
         assert!(body.get("stream").is_none());
     }
 
-    #[test]
-    fn build_request_body_stream_flag() {
+    #[tokio::test]
+    async fn build_request_body_stream_flag() {
         let request = minimal_request();
-        let body = build_request_body(&request, true, false);
+        let body = build_request_body(&request, true, false).await;
         assert!(body["stream"].as_bool().unwrap_or(false));
     }
 
-    #[test]
-    fn build_request_body_metadata_and_provider_options_together() {
+    #[tokio::test]
+    async fn build_request_body_metadata_and_provider_options_together() {
         let mut metadata = HashMap::new();
         metadata.insert("trace_id".to_string(), "t789".to_string());
 
@@ -1198,7 +1208,7 @@ mod tests {
             }
         }));
 
-        let body = build_request_body(&request, false, false);
+        let body = build_request_body(&request, false, false).await;
         assert_eq!(body["metadata"]["trace_id"], "t789");
         assert_eq!(body["store"], true);
     }
@@ -1237,8 +1247,8 @@ mod tests {
         assert!(adapter.project_id.is_none());
         assert!(adapter.http.default_headers.is_empty());
     }
-    #[test]
-    fn audio_content_produces_text_fallback() {
+    #[tokio::test]
+    async fn audio_content_produces_text_fallback() {
         let msg = Message {
             role:         Role::User,
             content:      vec![ContentPart::Audio(AudioData {
@@ -1249,7 +1259,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let (_, input) = translate_input(&[msg]);
+        let (_, input) = translate_input(&[msg]).await;
         let content = input[0]["content"]
             .as_array()
             .expect("content should be array");
@@ -1260,8 +1270,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn document_content_produces_text_fallback_with_filename() {
+    #[tokio::test]
+    async fn document_content_produces_text_fallback_with_filename() {
         let msg = Message {
             role:         Role::User,
             content:      vec![ContentPart::Document(DocumentData {
@@ -1273,7 +1283,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let (_, input) = translate_input(&[msg]);
+        let (_, input) = translate_input(&[msg]).await;
         let content = input[0]["content"]
             .as_array()
             .expect("content should be array");
@@ -1284,8 +1294,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn document_content_produces_text_fallback_without_filename() {
+    #[tokio::test]
+    async fn document_content_produces_text_fallback_without_filename() {
         let msg = Message {
             role:         Role::User,
             content:      vec![ContentPart::Document(DocumentData {
@@ -1297,7 +1307,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let (_, input) = translate_input(&[msg]);
+        let (_, input) = translate_input(&[msg]).await;
         let content = input[0]["content"]
             .as_array()
             .expect("content should be array");
@@ -1335,8 +1345,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn translate_input_uses_item_id_for_id_field() {
+    #[tokio::test]
+    async fn translate_input_uses_item_id_for_id_field() {
         let mut tc = ToolCall::new(
             "call_xyz789",
             "get_weather",
@@ -1350,7 +1360,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let (_, input) = translate_input(&[msg]);
+        let (_, input) = translate_input(&[msg]).await;
         let fc = &input[0];
         assert_eq!(fc["type"], "function_call");
         // id field uses the fc_ prefixed item ID
@@ -1359,8 +1369,8 @@ mod tests {
         assert_eq!(fc["call_id"], "call_xyz789");
     }
 
-    #[test]
-    fn translate_input_falls_back_to_tc_id_without_metadata() {
+    #[tokio::test]
+    async fn translate_input_falls_back_to_tc_id_without_metadata() {
         let tc = ToolCall::new("call_xyz789", "get_weather", serde_json::json!({}));
 
         let msg = Message {
@@ -1369,7 +1379,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let (_, input) = translate_input(&[msg]);
+        let (_, input) = translate_input(&[msg]).await;
         let fc = &input[0];
         // Without provider_metadata, both fields use tc.id
         assert_eq!(fc["id"], "call_xyz789");
@@ -1445,8 +1455,8 @@ mod tests {
         assert!(matches!(&parts[3], ContentPart::ToolCall(_)));
     }
 
-    #[test]
-    fn reasoning_items_round_trip_through_translate_input() {
+    #[tokio::test]
+    async fn reasoning_items_round_trip_through_translate_input() {
         let reasoning = serde_json::json!({
             "type": "reasoning",
             "id": "rs_abc123",
@@ -1467,7 +1477,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let (_, input) = translate_input(&[msg]);
+        let (_, input) = translate_input(&[msg]).await;
         assert_eq!(input.len(), 2);
         // Reasoning item is emitted first
         assert_eq!(input[0]["type"], "reasoning");
@@ -1478,8 +1488,8 @@ mod tests {
         assert_eq!(input[1]["call_id"], "call_789");
     }
 
-    #[test]
-    fn reasoning_message_function_call_round_trip() {
+    #[tokio::test]
+    async fn reasoning_message_function_call_round_trip() {
         // Simulates an assistant turn with reasoning + text + tool call.
         // The opaque message item (with id/status) must be used instead of
         // constructing a new one from Text, so the reasoning item can find
@@ -1516,7 +1526,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let (_, input) = translate_input(&[msg]);
+        let (_, input) = translate_input(&[msg]).await;
         assert_eq!(input.len(), 3);
         // Reasoning first
         assert_eq!(input[0]["type"], "reasoning");
@@ -1530,8 +1540,8 @@ mod tests {
         assert_eq!(input[2]["id"], "fc_def456");
     }
 
-    #[test]
-    fn text_without_opaque_message_still_constructs_message() {
+    #[tokio::test]
+    async fn text_without_opaque_message_still_constructs_message() {
         // For non-OpenAI turns or turns without preserved message items,
         // Text parts should still produce a constructed message.
         let msg = Message {
@@ -1540,7 +1550,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let (_, input) = translate_input(&[msg]);
+        let (_, input) = translate_input(&[msg]).await;
         assert_eq!(input.len(), 1);
         assert_eq!(input[0]["type"], "message");
         assert_eq!(input[0]["role"], "assistant");
@@ -1548,8 +1558,8 @@ mod tests {
         assert!(input[0].get("id").is_none());
     }
 
-    #[test]
-    fn parse_output_round_trips_function_call_ids() {
+    #[tokio::test]
+    async fn parse_output_round_trips_function_call_ids() {
         // Simulate a response from the Responses API
         let output = vec![serde_json::json!({
             "type": "function_call",
@@ -1567,7 +1577,7 @@ mod tests {
             name:         None,
             tool_call_id: None,
         };
-        let (_, input) = translate_input(&[msg]);
+        let (_, input) = translate_input(&[msg]).await;
         let fc = &input[0];
 
         // The round-tripped function call should have correct IDs
@@ -1575,12 +1585,12 @@ mod tests {
         assert_eq!(fc["call_id"], "call_001");
     }
 
-    #[test]
-    fn build_request_body_includes_stop_sequences() {
+    #[tokio::test]
+    async fn build_request_body_includes_stop_sequences() {
         let mut request = minimal_request();
         request.stop_sequences = Some(vec!["END".to_string(), "STOP".to_string()]);
 
-        let body = build_request_body(&request, false, false);
+        let body = build_request_body(&request, false, false).await;
         let stop = body.get("stop").expect("stop should be present");
         let arr = stop.as_array().expect("stop should be an array");
         assert_eq!(arr.len(), 2);
@@ -1588,10 +1598,10 @@ mod tests {
         assert_eq!(arr[1], "STOP");
     }
 
-    #[test]
-    fn build_request_body_omits_stop_when_none() {
+    #[tokio::test]
+    async fn build_request_body_omits_stop_when_none() {
         let request = minimal_request();
-        let body = build_request_body(&request, false, false);
+        let body = build_request_body(&request, false, false).await;
         assert!(body.get("stop").is_none());
     }
 

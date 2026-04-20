@@ -53,6 +53,7 @@ pub(crate) async fn load_from_store(
 }
 
 #[cfg(test)]
+#[expect(clippy::disallowed_methods, reason = "tests stage pipeline fixtures")]
 mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;

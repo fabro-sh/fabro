@@ -317,6 +317,10 @@ pub fn sanitize_ref_component(s: &str) -> String {
 
 /// Filenames allowed in per-node directories on the shadow branch.
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests write git state fixtures to disk"
+)]
 mod tests {
     use std::fs;
     use std::sync::Arc;

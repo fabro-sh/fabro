@@ -5,7 +5,6 @@ use fabro_util::terminal::Styles;
 
 use crate::args::ResumeArgs;
 use crate::command_context::CommandContext;
-use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
 /// Resume an interrupted workflow run.
@@ -21,11 +20,10 @@ pub(crate) async fn resume_command(
     printer: Printer,
 ) -> anyhow::Result<()> {
     let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
-    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-    let run = lookup.resolve(&args.run)?;
-    let run_id = run.run_id();
+    let client = ctx.server().await?;
+    let run_id = client.resolve_run(&args.run).await?.run_id;
 
-    super::start::start_run_with_client(lookup.client(), &run_id, true).await?;
+    super::start::start_run_with_client(client.as_ref(), &run_id, true).await?;
 
     let json = cli.output.format == OutputFormat::Json;
     if args.detach {
@@ -36,7 +34,7 @@ pub(crate) async fn resume_command(
         }
     } else {
         let exit_code = super::attach::attach_run_with_client(
-            lookup.client(),
+            client.as_ref(),
             &run_id,
             true,
             styles,
@@ -46,7 +44,7 @@ pub(crate) async fn resume_command(
         .await?;
         if !json {
             super::output::print_run_summary_with_client(
-                lookup.client(),
+                client.as_ref(),
                 &run_id,
                 None,
                 styles,

@@ -250,6 +250,10 @@ pub struct AppState {
 /// Panics if openssl is not available or the key is invalid. This is acceptable
 /// because the fake server is test infrastructure and openssl is already
 /// required by the test helpers that generate key pairs.
+#[expect(
+    clippy::disallowed_types,
+    reason = "test harness: piping private key PEM into openssl via sync std::io is intentional"
+)]
 pub fn derive_public_key_pem(private_key_pem: &str) -> String {
     use std::io::Write;
     use std::process::{Command, Stdio};

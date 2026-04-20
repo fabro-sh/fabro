@@ -398,6 +398,10 @@ impl Handler for AgentHandler {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests persist per-iteration state fixtures"
+)]
 mod tests {
     use std::sync::Arc;
     use std::time::Duration;

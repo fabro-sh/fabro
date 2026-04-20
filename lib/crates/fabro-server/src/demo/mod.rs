@@ -22,6 +22,7 @@ use serde_json::json;
 
 use crate::error::ApiError;
 use crate::jwt_auth::AuthenticatedService;
+use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
 use crate::server::{AppState, PaginationParams};
 use crate::settings_view;
 
@@ -82,6 +83,30 @@ pub(crate) async fn create_run_stub(
         Json(serde_json::json!({"id": "demo-run-new", "status": "submitted", "created_at": "2026-03-06T14:30:00Z"})),
     )
         .into_response()
+}
+
+pub(crate) async fn resolve_run(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Query(params): Query<ResolveRunParams>,
+) -> Response {
+    let runs = runs::summaries();
+    match resolve_run_by_selector(
+        &runs,
+        &params.selector,
+        |run| run.run_id.clone(),
+        |run| run.workflow_slug.clone(),
+        |run| run.workflow_name.clone(),
+        |run| run.created_at,
+    ) {
+        Ok(run) => (StatusCode::OK, Json(run.clone())).into_response(),
+        Err(ResolveRunError::InvalidSelector | ResolveRunError::AmbiguousPrefix { .. }) => {
+            ApiError::bad_request("Run selector could not be resolved.").into_response()
+        }
+        Err(ResolveRunError::NotFound { .. }) => {
+            ApiError::not_found("Run not found.").into_response()
+        }
+    }
 }
 
 pub(crate) async fn start_run_stub(
@@ -288,6 +313,11 @@ pub(crate) async fn get_run_status(
         Some(run) => (StatusCode::OK, Json(run)).into_response(),
         None => ApiError::not_found("Run not found.").into_response(),
     }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct ResolveRunParams {
+    selector: String,
 }
 
 pub(crate) async fn get_questions_stub(

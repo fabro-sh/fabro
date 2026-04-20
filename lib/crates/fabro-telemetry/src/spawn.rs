@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync pre-fork filesystem interaction; the whole module runs before fork/exec"
+)]
+
 /// Spawn a fully detached subprocess that survives parent exit and terminal
 /// close.
 ///
@@ -28,6 +33,11 @@ pub fn spawn_detached(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) 
 #[allow(
     clippy::exit,
     reason = "The intermediate forked child must exit immediately after detaching."
+)]
+#[expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "Detaching must flush stdio synchronously before the double-fork."
 )]
 fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) {
     // Flush stdout/stderr before forking so the child process doesn't inherit

@@ -233,29 +233,31 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
 
     let success_server = MockServer::start();
     let success_run_id = unique_run_id();
-    let list_mock = success_server.mock(|when, then| {
-        when.method("GET").path("/api/v1/runs");
+    let resolve_mock = success_server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", success_run_id.as_str());
         then.status(200)
             .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "data": [{
-                        "run_id": success_run_id,
-                        "workflow_name": "Remote Workflow",
-                        "workflow_slug": "remote-workflow",
-                        "goal": "Remote output",
-                        "title": "Remote output",
-                        "labels": {},
-                        "host_repo_path": null,
-                        "repository": { "name": "unknown" },
-                        "start_time": "2026-04-05T12:00:00Z",
-                        "created_at": "2026-04-05T12:00:00Z",
-                        "status": "running",
-                        "status_reason": null,
-                        "duration_ms": 12,
-                        "total_usd_micros": null
-                    }],
-                    "meta": { "has_more": false }
+                    "run_id": success_run_id,
+                    "workflow_name": "Remote Workflow",
+                    "workflow_slug": "remote-workflow",
+                    "goal": "Remote output",
+                    "title": "Remote output",
+                    "labels": {},
+                    "host_repo_path": null,
+                    "repository": { "name": "unknown" },
+                    "start_time": "2026-04-05T12:00:00Z",
+                    "created_at": "2026-04-05T12:00:00Z",
+                    "status": "running",
+                    "status_reason": null,
+                    "blocked_reason": null,
+                    "pending_control": null,
+                    "duration_ms": 12,
+                    "elapsed_secs": 0,
+                    "total_usd_micros": null
                 })
                 .to_string(),
             );
@@ -324,7 +326,7 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
         String::from_utf8_lossy(&success_output.stdout),
         String::from_utf8_lossy(&success_output.stderr)
     );
-    list_mock.assert();
+    resolve_mock.assert();
     attach_mock.assert();
     let success_stdout = String::from_utf8(success_output.stdout).expect("stdout should be UTF-8");
     assert!(
@@ -336,28 +338,30 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
     let eof_run_id = unique_run_id();
 
     eof_server.mock(|when, then| {
-        when.method("GET").path("/api/v1/runs");
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", eof_run_id.as_str());
         then.status(200)
             .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "data": [{
-                        "run_id": eof_run_id,
-                        "workflow_name": "Remote Workflow",
-                        "workflow_slug": "remote-workflow",
-                        "goal": "Remote output",
-                        "title": "Remote output",
-                        "labels": {},
-                        "host_repo_path": null,
-                        "repository": { "name": "unknown" },
-                        "start_time": "2026-04-05T12:00:00Z",
-                        "created_at": "2026-04-05T12:00:00Z",
-                        "status": "running",
-                        "status_reason": null,
-                        "duration_ms": 12,
-                        "total_usd_micros": null
-                    }],
-                    "meta": { "has_more": false }
+                    "run_id": eof_run_id,
+                    "workflow_name": "Remote Workflow",
+                    "workflow_slug": "remote-workflow",
+                    "goal": "Remote output",
+                    "title": "Remote output",
+                    "labels": {},
+                    "host_repo_path": null,
+                    "repository": { "name": "unknown" },
+                    "start_time": "2026-04-05T12:00:00Z",
+                    "created_at": "2026-04-05T12:00:00Z",
+                    "status": "running",
+                    "status_reason": null,
+                    "blocked_reason": null,
+                    "pending_control": null,
+                    "duration_ms": 12,
+                    "elapsed_secs": 0,
+                    "total_usd_micros": null
                 })
                 .to_string(),
             );

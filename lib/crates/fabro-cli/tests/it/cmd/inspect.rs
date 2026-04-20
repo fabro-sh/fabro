@@ -1,10 +1,35 @@
 use fabro_test::{fabro_snapshot, test_context};
+use httpmock::MockServer;
 use insta::assert_snapshot;
+use serde_json::json;
 
 use super::support::{
     compact_git_inspect, compact_inspect, run_success, setup_completed_fast_dry_run,
     setup_created_fast_dry_run, setup_git_backed_changed_run,
 };
+use crate::support::unique_run_id;
+
+fn remote_run_summary(run_id: &str, status: &str) -> serde_json::Value {
+    json!({
+        "run_id": run_id,
+        "workflow_name": "Nightly Build",
+        "workflow_slug": "nightly-build",
+        "goal": "Inspect remote state",
+        "title": "Inspect remote state",
+        "labels": {},
+        "host_repo_path": "/srv/repo",
+        "repository": { "name": "repo" },
+        "start_time": "2026-04-19T12:00:00Z",
+        "created_at": "2026-04-19T12:00:00Z",
+        "status": status,
+        "status_reason": null,
+        "blocked_reason": null,
+        "pending_control": null,
+        "duration_ms": null,
+        "elapsed_secs": null,
+        "total_usd_micros": null
+    })
+}
 
 #[test]
 fn help() {
@@ -32,6 +57,59 @@ fn help() {
       -h, --help              Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn inspect_resolves_selector_via_server_endpoint() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let summary = remote_run_summary(run_id.as_str(), "succeeded");
+
+    let resolve_run = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", "nightly-build");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(summary.to_string());
+    });
+    let run_state = server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{}/state", run_id.as_str()));
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"nodes": {}}"#);
+    });
+
+    let mut cmd = context.command();
+    cmd.args([
+        "inspect",
+        "--server",
+        &format!("{}/api/v1", server.base_url()),
+        "nightly-build",
+    ]);
+
+    fabro_snapshot!(context.filters(), cmd, @r###"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    [
+      {
+        "run_id": "[ULID]",
+        "status": "succeeded",
+        "run_record": null,
+        "start_record": null,
+        "conclusion": null,
+        "checkpoint": null,
+        "sandbox": null
+      }
+    ]
+    ----- stderr -----
+    "###);
+
+    resolve_run.assert();
+    run_state.assert();
 }
 
 #[test]

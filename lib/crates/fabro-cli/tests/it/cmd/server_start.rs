@@ -1,3 +1,13 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "integration test: occupies a fixed TCP port via sync std::net::TcpListener to \
+              verify the server-start fallback path when the default port is unavailable"
+)]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "integration test stages server-start fixtures with sync std::fs::write"
+)]
+
 use std::process::Stdio;
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};

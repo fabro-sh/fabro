@@ -6,7 +6,6 @@ use fabro_util::terminal::Styles;
 
 use crate::args::{AttachArgs, RunCommands, RunWorkerArgs, StartArgs};
 use crate::command_context::CommandContext;
-use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 use crate::user_config::load_settings_with_storage_dir;
 
@@ -59,10 +58,9 @@ pub(crate) async fn dispatch(
         }
         RunCommands::Start(StartArgs { server, run }) => {
             let ctx = CommandContext::for_target(&server, printer, cli.clone(), cli_layer)?;
-            let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-            let run_info = lookup.resolve(&run)?;
-            let run_id = run_info.run_id();
-            start::start_run_with_client(lookup.client(), &run_id, false).await?;
+            let client = ctx.server().await?;
+            let run_id = client.resolve_run(&run).await?.run_id;
+            start::start_run_with_client(client.as_ref(), &run_id, false).await?;
             if cli.output.format == OutputFormat::Json {
                 print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
             }
@@ -71,11 +69,10 @@ pub(crate) async fn dispatch(
         RunCommands::Attach(AttachArgs { server, run }) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let ctx = CommandContext::for_target(&server, printer, cli.clone(), cli_layer)?;
-            let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-            let run_info = lookup.resolve(&run)?;
-            let run_id = run_info.run_id();
+            let client = ctx.server().await?;
+            let run_id = client.resolve_run(&run).await?.run_id;
             let exit_code = attach::attach_run_with_client(
-                lookup.client(),
+                client.as_ref(),
                 &run_id,
                 false,
                 styles,

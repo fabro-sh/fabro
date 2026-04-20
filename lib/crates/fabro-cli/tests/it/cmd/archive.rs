@@ -1,4 +1,5 @@
 use fabro_test::{fabro_snapshot, test_context};
+use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
@@ -197,4 +198,81 @@ fn archive_mixed_batch_aggregates_errors() {
     let errors = value["errors"].as_array().expect("errors should be array");
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0]["identifier"], bad);
+}
+
+#[test]
+fn archive_resolves_selector_via_server_endpoint() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let resolve_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", "nightly-build");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "run_id": run_id,
+                    "workflow_name": "Nightly Build",
+                    "workflow_slug": "nightly-build",
+                    "goal": "Nightly run",
+                    "title": "Nightly run",
+                    "labels": {},
+                    "host_repo_path": null,
+                    "repository": { "name": "unknown" },
+                    "start_time": "2026-04-05T12:00:00Z",
+                    "created_at": "2026-04-05T12:00:00Z",
+                    "status": "succeeded",
+                    "status_reason": null,
+                    "blocked_reason": null,
+                    "pending_control": null,
+                    "duration_ms": 123,
+                    "elapsed_secs": 0,
+                    "total_usd_micros": null
+                })
+                .to_string(),
+            );
+    });
+    let archive_mock = server.mock(|when, then| {
+        when.method("POST")
+            .path(format!("/api/v1/runs/{run_id}/archive"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "id": run_id,
+                    "status": "archived",
+                    "blocked_reason": null,
+                    "error": null,
+                    "queue_position": null,
+                    "status_reason": null,
+                    "pending_control": null,
+                    "created_at": "2026-04-05T12:00:00Z"
+                })
+                .to_string(),
+            );
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
+    );
+
+    let mut filters = context.filters();
+    filters.push(ulid_filter());
+    let mut cmd = context.command();
+    cmd.args(["archive", "nightly-build"]);
+    fabro_snapshot!(filters, cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    [ULID]
+    ");
+
+    resolve_mock.assert();
+    archive_mock.assert();
 }

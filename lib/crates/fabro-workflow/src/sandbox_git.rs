@@ -787,7 +787,7 @@ fn parse_batch_output(
 mod tests {
     #![expect(
         clippy::disallowed_methods,
-        reason = "These unit tests use the real git CLI to construct sandbox-git fixture repositories."
+        reason = "These unit tests use the real git CLI to construct sandbox-git fixture repositories and sync-write fixtures to disk."
     )]
 
     use super::*;

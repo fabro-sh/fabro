@@ -1,3 +1,12 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "sync CLI `run attach` command: blocking std::io::Write is the intended output mechanism"
+)]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync CLI `run attach` command: writes to std::io::stdout/stderr directly"
+)]
+
 use std::io::{IsTerminal, Write};
 #[cfg(test)]
 use std::path::Path;

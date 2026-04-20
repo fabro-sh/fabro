@@ -6,7 +6,6 @@ use tracing::info;
 
 use crate::args::{SshArgs, require_no_json_override};
 use crate::command_context::CommandContext;
-use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
 pub(crate) async fn run(
@@ -21,13 +20,9 @@ pub(crate) async fn run(
     }
 
     let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
-    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-    let run = lookup.resolve(&args.run)?;
-    let run_id = run.run_id();
-    let ssh = lookup
-        .client()
-        .create_run_ssh_access(&run_id, args.ttl)
-        .await?;
+    let client = ctx.server().await?;
+    let run_id = client.resolve_run(&args.run).await?.run_id;
+    let ssh = client.create_run_ssh_access(&run_id, args.ttl).await?;
 
     info!(run_id = %args.run, ttl_minutes = args.ttl, "Creating SSH access");
 

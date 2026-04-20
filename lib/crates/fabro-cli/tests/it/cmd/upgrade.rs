@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
+)]
+
 use assert_cmd::Command;
 use fabro_test::{TestContext, fabro_snapshot, test_context};
 

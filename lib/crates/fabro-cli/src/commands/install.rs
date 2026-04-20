@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "CLI `install` command: sync file I/O in install command handler; not on a Tokio hot path"
+)]
+
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::Path;

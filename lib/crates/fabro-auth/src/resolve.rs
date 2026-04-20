@@ -586,6 +586,11 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "integration-style test: writes and reads a fake codex script via sync std::fs to \
+                  verify the login_command string passes stdin correctly"
+    )]
     async fn openai_api_key_cli_login_command_executes_codex_from_local_bin() {
         let dir = tempfile::tempdir().unwrap();
         let local_bin = dir.path().join(".local/bin");

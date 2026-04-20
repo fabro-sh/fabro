@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "CLI server record helpers: sync read/write of local server record file"
+)]
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};

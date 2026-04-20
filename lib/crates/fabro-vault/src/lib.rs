@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "fabro-vault: sync secret-file storage; not used on a Tokio hot path"
+)]
+
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::{fmt, io};

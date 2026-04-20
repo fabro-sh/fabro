@@ -1,3 +1,9 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "directory walk for CLI run listing; async server paths call the heavier filesystem \
+              scans from spawn_blocking boundaries"
+)]
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

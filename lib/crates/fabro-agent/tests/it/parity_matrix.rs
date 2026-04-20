@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "agent parity test harness: sync std::fs for staging fixture trees and reading captured outputs"
+)]
+
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;

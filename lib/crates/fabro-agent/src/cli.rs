@@ -1,3 +1,8 @@
+#[expect(
+    clippy::disallowed_types,
+    reason = "CLI entry point writes to stdout/stderr; blocking std::io::Write is intentional and \
+              scoped to the CLI binary, not to any library code used by Tokio services"
+)]
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -11,6 +16,7 @@ use fabro_llm::types::{Request, Response};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::{Catalog, ModelHandle, Provider};
 use fabro_util::terminal::Styles;
+use tokio::io::{AsyncWriteExt, stdout};
 use tokio::signal;
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -139,6 +145,10 @@ fn is_auto_approved(level: PermissionLevel, category: &str) -> bool {
 #[allow(
     clippy::print_stderr,
     reason = "Interactive approval prompts belong on stderr, not assistant output."
+)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Interactive tool approval blocks on stdin and stderr by design."
 )]
 fn build_tool_approval(
     permissions: PermissionLevel,
@@ -461,6 +471,10 @@ pub async fn run_with_args_and_client(
 
     // Build tool approval callback
     let permissions = args.permissions.unwrap_or(PermissionLevel::ReadWrite);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "is_terminal() on stdin is a non-blocking fstat; no actual I/O performed"
+    )]
     let is_interactive = std::io::stdin().is_terminal() && !args.auto_approve;
     let tool_approval = build_tool_approval(permissions, is_interactive, styles);
     let tool_hooks: Arc<dyn ToolHookCallback> = Arc::new(ToolApprovalAdapter(tool_approval));
@@ -556,11 +570,12 @@ pub async fn run_with_args_and_client(
     tokio::spawn(async move {
         match output_format {
             OutputFormat::Json => {
+                let mut stdout = stdout();
                 while let Ok(event) = rx.recv().await {
                     if let Ok(json) = serde_json::to_string(&event) {
-                        let mut stdout = std::io::stdout().lock();
-                        let _ = writeln!(stdout, "{json}");
-                        let _ = stdout.flush();
+                        let _ = stdout.write_all(json.as_bytes()).await;
+                        let _ = stdout.write_all(b"\n").await;
+                        let _ = stdout.flush().await;
                     }
                 }
             }

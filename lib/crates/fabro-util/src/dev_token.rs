@@ -1,4 +1,14 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync atomic read/write of the local dev token file; not on a Tokio hot path. \
+              OpenOptions::open is used for setting 0o600 mode on unix"
+)]
+
 use std::fs;
+#[expect(
+    clippy::disallowed_types,
+    reason = "sync atomic write of the local dev token file; not on an async path"
+)]
 use std::io::Write as _;
 use std::path::Path;
 

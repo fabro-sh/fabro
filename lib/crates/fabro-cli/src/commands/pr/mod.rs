@@ -14,7 +14,6 @@ use fabro_util::printer::Printer;
 
 use crate::args::{PrCommand, PrNamespace, ServerTargetArgs};
 use crate::command_context::CommandContext;
-use crate::server_runs::ServerSummaryLookup;
 use crate::shared::github::build_github_credentials;
 use crate::user_config;
 
@@ -81,10 +80,9 @@ pub(crate) async fn load_pr_record(
     printer: Printer,
 ) -> Result<(PullRequestRecord, fabro_types::RunId)> {
     let ctx = CommandContext::for_target(server, printer, cli.clone(), cli_layer)?;
-    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-    let run = lookup.resolve(run_id)?;
-    let run_id = run.run_id();
-    let state = lookup.client().get_run_state(&run_id).await?;
+    let client = ctx.server().await?;
+    let run_id = client.resolve_run(run_id).await?.run_id;
+    let state = client.get_run_state(&run_id).await?;
     let record = state.pull_request.with_context(|| {
         format!("No pull request found in store. Create one first with: fabro pr create {run_id}")
     })?;

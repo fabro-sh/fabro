@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync CLI run-progress renderer: writes to std::io::stderr directly"
+)]
+
 use fabro_types::RunEvent;
 
 mod event;
@@ -43,6 +48,10 @@ impl ProgressUI {
     }
 
     #[cfg(test)]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "test helper accepts a sync blocking writer to capture rendered output"
+    )]
     fn new_plain_test(out: Box<dyn std::io::Write + Send>, verbose: bool, colors: bool) -> Self {
         Self::with_renderer(ProgressRenderer::new_plain(out, colors), verbose)
     }
@@ -421,6 +430,10 @@ mod tests {
         clippy::absolute_paths,
         clippy::needless_pass_by_value,
         reason = "These run-progress tests prefer explicit fixtures over pedantic style lints."
+    )]
+    #![expect(
+        clippy::disallowed_types,
+        reason = "These tests capture rendered output in Vec<u8> buffers."
     )]
 
     use std::io::{self, Write};

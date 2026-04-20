@@ -116,6 +116,7 @@ use crate::jwt_auth::{
     AuthMode, AuthenticatedService, AuthenticatedSubject, authenticate_service_parts,
 };
 use crate::run_files::{FilesInFlight, list_run_files, new_files_in_flight};
+use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
 use crate::server_secrets::{
     LlmClientResult, ProviderCredentials, ServerSecrets, auth_issue_message,
 };
@@ -1016,7 +1017,7 @@ pub fn build_router_with_options(
                     && matches!(req.method(), &Method::GET | &Method::HEAD)
                 {
                     let headers = req.headers().clone();
-                    Ok::<_, std::convert::Infallible>(static_files::serve(&path, &headers))
+                    Ok::<_, std::convert::Infallible>(static_files::serve(&path, &headers).await)
                 } else {
                     Ok::<_, std::convert::Infallible>(StatusCode::NOT_FOUND.into_response())
                 }
@@ -1043,6 +1044,7 @@ pub fn build_router_with_options(
 fn demo_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/runs", get(demo::list_runs).post(demo::create_run_stub))
+        .route("/runs/resolve", get(demo::resolve_run))
         .route("/boards/runs", get(demo::list_board_runs))
         .route("/preflight", post(run_preflight))
         .route("/graph/render", post(render_graph_from_manifest))
@@ -1124,6 +1126,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
 fn real_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/runs", get(list_runs).post(create_run))
+        .route("/runs/resolve", get(resolve_run))
         .route("/preflight", post(run_preflight))
         .route("/graph/render", post(render_graph_from_manifest))
         .route("/attach", get(attach_events))
@@ -1407,7 +1410,7 @@ async fn prune_runs(
     }
 
     for run_id in &prune_plan.run_ids {
-        if let Err(response) = delete_run_internal(&state, *run_id).await {
+        if let Err(response) = delete_run_internal(&state, *run_id, true).await {
             return response;
         }
     }
@@ -1460,6 +1463,10 @@ struct PrunePlan {
     total_size_bytes: u64,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "sync helper invoked from async handler via spawn_blocking (see callers at :1301 / :1341)"
+)]
 fn build_disk_usage_response(
     summaries: &[fabro_store::RunSummary],
     storage_dir: &std::path::Path,
@@ -2435,6 +2442,10 @@ pub fn create_app_state_with_env_lookup(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test helper writes a fixture server.env with sync std::fs::write"
+)]
 pub(crate) fn create_test_app_state_with_session_key(
     settings: SettingsLayer,
     session_secret: Option<&str>,
@@ -2845,9 +2856,60 @@ async fn list_runs(
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct ResolveRunQuery {
+    selector: String,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct DeleteRunQuery {
+    #[serde(default)]
+    force: bool,
+}
+
+async fn resolve_run(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ResolveRunQuery>,
+) -> Response {
+    let runs = match state
+        .store
+        .list_runs(&fabro_store::ListRunsQuery::default())
+        .await
+    {
+        Ok(runs) => runs,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    match resolve_run_by_selector(
+        &runs,
+        &query.selector,
+        |run| run.run_id.to_string(),
+        |run| run.workflow_slug.clone(),
+        |run| run.workflow_name.clone(),
+        |run| run.run_id.created_at(),
+    ) {
+        Ok(run) => (
+            StatusCode::OK,
+            Json(summary_to_api_run_summary(run.clone())),
+        )
+            .into_response(),
+        Err(err @ (ResolveRunError::InvalidSelector | ResolveRunError::AmbiguousPrefix { .. })) => {
+            ApiError::bad_request(err.to_string()).into_response()
+        }
+        Err(err @ ResolveRunError::NotFound { .. }) => {
+            ApiError::not_found(err.to_string()).into_response()
+        }
+    }
+}
+
 async fn delete_run(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
+    Query(query): Query<DeleteRunQuery>,
     Path(id): Path<String>,
 ) -> Response {
     let id = match parse_run_id_path(&id) {
@@ -2855,13 +2917,21 @@ async fn delete_run(
         Err(response) => return response,
     };
 
-    match delete_run_internal(&state, id).await {
+    match delete_run_internal(&state, id, query.force).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(response) => response,
     }
 }
 
-async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Response> {
+async fn delete_run_internal(
+    state: &Arc<AppState>,
+    id: RunId,
+    force: bool,
+) -> Result<(), Response> {
+    if !force {
+        reject_active_delete_without_force(state.as_ref(), &id).await?;
+    }
+
     let managed_run = if let Ok(mut runs) = state.runs.lock() {
         runs.remove(&id)
     } else {
@@ -2923,6 +2993,55 @@ async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Res
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         })?;
     Ok(())
+}
+
+async fn reject_active_delete_without_force(
+    state: &AppState,
+    run_id: &RunId,
+) -> Result<(), Response> {
+    let managed_status = state
+        .runs
+        .lock()
+        .ok()
+        .and_then(|runs| runs.get(run_id).map(|managed_run| managed_run.status));
+    if let Some(status) = managed_status {
+        if matches!(
+            status,
+            RunStatus::Submitted
+                | RunStatus::Queued
+                | RunStatus::Starting
+                | RunStatus::Running
+                | RunStatus::Blocked
+                | RunStatus::Paused
+        ) {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                active_run_delete_message(*run_id, status),
+            )
+            .into_response());
+        }
+        return Ok(());
+    }
+
+    match state.store.runs().find(run_id).await {
+        Ok(Some(summary)) if summary.status.is_active() => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            active_run_delete_message(*run_id, summary.status),
+        )
+        .into_response()),
+        Ok(_) => Ok(()),
+        Err(err) => {
+            Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response())
+        }
+    }
+}
+
+fn active_run_delete_message(run_id: RunId, status: impl std::fmt::Display) -> String {
+    let run_id = run_id.to_string();
+    let short_run_id = &run_id[..12.min(run_id.len())];
+    format!(
+        "cannot remove active run {short_run_id} (status: {status}, use force=true or --force to force)"
+    )
 }
 
 async fn terminate_worker_for_deletion(
@@ -3614,6 +3733,11 @@ struct WorkerServerRecord {
 
 fn current_server_target(storage_dir: &std::path::Path) -> anyhow::Result<String> {
     let record_path = Storage::new(storage_dir).server_state().record_path();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "sync helper invoked from worker_command (sync) via spawn_blocking at the async \
+                  boundary in execute_run_subprocess; see commit 9d1c0d98c"
+    )]
     let content = std::fs::read_to_string(&record_path)
         .map_err(|err| anyhow::anyhow!("failed to read {}: {err}", record_path.display()))?;
     let record: WorkerServerRecord = serde_json::from_str(&content).map_err(|err| {
@@ -4557,7 +4681,21 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         run_store.subscribe(),
     ));
 
-    let mut child = match worker_command(state.as_ref(), run_id, execution_mode, &run_dir)
+    let state_for_build = Arc::clone(&state);
+    let run_dir_for_build = run_dir.clone();
+    let build_cmd_result = spawn_blocking(move || {
+        worker_command(
+            state_for_build.as_ref(),
+            run_id,
+            execution_mode,
+            &run_dir_for_build,
+        )
+    })
+    .await;
+
+    let mut child = match build_cmd_result
+        .map_err(|err| anyhow::anyhow!("worker_command task failed: {err}"))
+        .and_then(|inner| inner)
         .and_then(|mut cmd| cmd.spawn().context("spawning run worker process"))
     {
         Ok(child) => child,
@@ -7151,6 +7289,10 @@ async fn get_graph(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "server unit tests stage fixtures with sync std::fs writes"
+)]
 mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -7526,16 +7668,16 @@ type = "http"
         assert_eq!(answer.value, AnswerValue::Cancelled);
     }
 
-    fn minimal_manifest_json(dot_source: &str) -> serde_json::Value {
+    fn manifest_json(target_path: &str, dot_source: &str) -> serde_json::Value {
         serde_json::json!({
             "version": 1,
             "cwd": "/tmp",
             "target": {
-                "identifier": "workflow.fabro",
-                "path": "workflow.fabro",
+                "identifier": target_path,
+                "path": target_path,
             },
             "workflows": {
-                "workflow.fabro": {
+                target_path: {
                     "source": dot_source,
                     "files": {},
                 },
@@ -7543,8 +7685,16 @@ type = "http"
         })
     }
 
+    fn minimal_manifest_json(dot_source: &str) -> serde_json::Value {
+        manifest_json("workflow.fabro", dot_source)
+    }
+
     fn manifest_body(dot_source: &str) -> Body {
         Body::from(serde_json::to_string(&minimal_manifest_json(dot_source)).unwrap())
+    }
+
+    fn manifest_body_for(target_path: &str, dot_source: &str) -> Body {
+        Body::from(serde_json::to_string(&manifest_json(target_path, dot_source)).unwrap())
     }
 
     async fn create_run(app: &Router, dot_source: &str) -> String {
@@ -7557,6 +7707,29 @@ type = "http"
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
         body["id"].as_str().unwrap().to_string()
+    }
+
+    async fn create_run_for_target(app: &Router, target_path: &str, dot_source: &str) -> String {
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(manifest_body_for(target_path, dot_source))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        body["id"].as_str().unwrap().to_string()
+    }
+
+    fn named_workflow_dot(name: &str, goal: &str) -> String {
+        format!(
+            r#"digraph {name} {{
+        graph [goal="{goal}"]
+        start [shape=Mdiamond]
+        exit  [shape=Msquare]
+        start -> exit
+    }}"#
+        )
     }
 
     fn multipart_body(
@@ -7929,6 +8102,144 @@ slug = "fabro"
             .unwrap();
 
         let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn resolve_run_returns_unique_run_id_prefix_match() {
+        let app = test_app_with();
+        let run_id = create_run(&app, MINIMAL_DOT).await;
+        let selector = &run_id[..8];
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api(&format!("/runs/resolve?selector={selector}")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["run_id"], run_id);
+    }
+
+    #[tokio::test]
+    async fn resolve_run_returns_bad_request_for_ambiguous_prefix() {
+        let app = test_app_with();
+        let run_id_a = create_run(&app, MINIMAL_DOT).await;
+        let run_id_b = create_run(&app, MINIMAL_DOT).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api("/runs/resolve?selector=0"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = body_json(response.into_body()).await;
+        let detail = body["errors"][0]["detail"]
+            .as_str()
+            .expect("error detail should be present");
+        assert!(
+            detail.contains(&run_id_a),
+            "detail should mention first run: {detail}"
+        );
+        assert!(
+            detail.contains(&run_id_b),
+            "detail should mention second run: {detail}"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_run_prefers_most_recent_exact_workflow_slug_match() {
+        let app = test_app_with();
+        let older_id = create_run_for_target(
+            &app,
+            "ship-feature.fabro",
+            &named_workflow_dot("ShipFeatureAlpha", "older"),
+        )
+        .await;
+        let newer_id = create_run_for_target(
+            &app,
+            "ship-feature.fabro",
+            &named_workflow_dot("ShipFeatureBeta", "newer"),
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api("/runs/resolve?selector=ship-feature"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["run_id"], newer_id);
+        assert_ne!(body["run_id"], older_id);
+    }
+
+    #[tokio::test]
+    async fn resolve_run_prefers_most_recent_collapsed_workflow_name_match() {
+        let app = test_app_with();
+        let older_id = create_run_for_target(
+            &app,
+            "nightly-alpha.fabro",
+            &named_workflow_dot("Nightly_Build", "older"),
+        )
+        .await;
+        let newer_id = create_run_for_target(
+            &app,
+            "nightly-beta.fabro",
+            &named_workflow_dot("Nightly_Build", "newer"),
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api("/runs/resolve?selector=nightlybuild"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["run_id"], newer_id);
+        assert_ne!(body["run_id"], older_id);
+    }
+
+    #[tokio::test]
+    async fn resolve_run_returns_not_found_for_unknown_selector() {
+        let app = test_app_with();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api("/runs/resolve?selector=missing-run"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
@@ -9182,7 +9493,82 @@ slug = "fabro"
 
         let req = Request::builder()
             .method("DELETE")
+            .uri(api(&format!("/runs/{run_id}?force=true")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let req = Request::builder()
+            .method("GET")
             .uri(api(&format!("/runs/{run_id}")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_active_run_requires_force() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(manifest_body(MINIMAL_DOT))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap();
+
+        let req = Request::builder()
+            .method("DELETE")
+            .uri(api(&format!("/runs/{run_id}")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = body_json(response.into_body()).await;
+        let short_run_id = &run_id[..12.min(run_id.len())];
+        let expected = format!(
+            "cannot remove active run {short_run_id} (status: submitted, use force=true or --force to force)"
+        );
+        assert_eq!(
+            body["errors"][0]["detail"].as_str(),
+            Some(expected.as_str())
+        );
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn delete_active_run_force_succeeds() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(manifest_body(MINIMAL_DOT))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap();
+
+        let req = Request::builder()
+            .method("DELETE")
+            .uri(api(&format!("/runs/{run_id}?force=true")))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();

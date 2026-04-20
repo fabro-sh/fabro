@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync env-file load/save used at CLI and server startup; not on a Tokio path"
+)]
+
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};

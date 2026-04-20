@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::args::InspectArgs;
 use crate::command_context::CommandContext;
 use crate::server_client::RunProjection;
-use crate::server_runs::{ServerRunSummaryInfo, ServerSummaryLookup};
+use crate::server_runs::ServerRunSummaryInfo;
 
 #[derive(Debug, Serialize)]
 pub(crate) struct InspectOutput {
@@ -28,10 +28,10 @@ pub(crate) async fn run(
     printer: Printer,
 ) -> Result<()> {
     let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
-    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-    let run = lookup.resolve(&args.run)?;
+    let client = ctx.server().await?;
+    let run = ServerRunSummaryInfo::from_summary(client.resolve_run(&args.run).await?);
     let run_id = run.run_id();
-    let state = lookup.client().get_run_state(&run_id).await?;
+    let state = client.get_run_state(&run_id).await?;
     let output = inspect_run_state(&run, state);
     let json = serde_json::to_string_pretty(&[output])?;
     fabro_util::printout!(printer, "{json}");

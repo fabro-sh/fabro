@@ -224,6 +224,12 @@ impl Interviewer for ConsoleInterviewer {
     async fn ask(&self, question: Question) -> Answer {
         // If stdin is a TTY, use dialoguer for interactive arrow-key navigation.
         // Otherwise, fall back to the line-based reader for piped input.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "is_terminal() on the std stdin handle is a non-blocking fstat check; no \
+                      actual I/O performed. The real blocking read runs inside spawn_blocking \
+                      below."
+        )]
         if std::io::stdin().is_terminal() {
             if let Some(ref context_text) = question.context_display {
                 let rendered = self.styles.render_markdown(context_text);

@@ -9,6 +9,7 @@ use fabro_types::{
 };
 use futures::future::BoxFuture;
 use serde_json::Value;
+use tokio::fs;
 
 use crate::context::{self, Context};
 use crate::error::{Error, Result};
@@ -174,7 +175,7 @@ pub async fn sync_artifacts_to_env(
             }
         }
 
-        let content = std::fs::read_to_string(&local_path).map_err(|e| {
+        let content = fs::read_to_string(&local_path).await.map_err(|e| {
             Error::engine(format!("failed to read local artifact {local_path}: {e}"))
         })?;
 
@@ -282,14 +283,14 @@ async fn materialize_blob_ref(
         let path = local_materialized_blob_path(run_dir, blob_id);
         if !path.exists() {
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|err| {
+                fs::create_dir_all(parent).await.map_err(|err| {
                     Error::Io(format!(
                         "creating artifact blob directory {}: {err}",
                         parent.display()
                     ))
                 })?;
             }
-            std::fs::write(&path, &bytes).map_err(|err| {
+            fs::write(&path, &bytes).await.map_err(|err| {
                 Error::Io(format!("writing artifact blob {}: {err}", path.display()))
             })?;
         }
@@ -325,7 +326,8 @@ async fn resolve_explicit_file_ref(value: &str, env: &dyn Sandbox) -> Result<Str
         return Ok(value.to_string());
     }
 
-    let content = std::fs::read_to_string(local_path)
+    let content = fs::read_to_string(local_path)
+        .await
         .map_err(|e| Error::engine(format!("failed to read local artifact {local_path}: {e}")))?;
     let filename = Path::new(local_path)
         .file_name()
@@ -360,6 +362,10 @@ fn local_materialized_blob_path(run_dir: &Path, blob_id: &RunBlobId) -> PathBuf 
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests write artifact fixtures to disk"
+)]
 mod tests {
     use std::hash::{Hash, Hasher};
     use std::sync::Arc;

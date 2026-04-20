@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "CLI user config: sync file I/O loading user config"
+)]
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};

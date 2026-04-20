@@ -10,7 +10,6 @@ use tracing::{debug, info};
 use crate::args::{CpArgs, ServerTargetArgs};
 use crate::command_context::CommandContext;
 use crate::server_client::ServerStoreClient;
-use crate::server_runs::ServerSummaryLookup;
 use crate::shared::{print_json_pretty, split_run_path};
 
 #[derive(Debug)]
@@ -134,9 +133,9 @@ async fn resolve_client_and_run_id(
     printer: Printer,
 ) -> Result<(ServerStoreClient, fabro_types::RunId)> {
     let ctx = CommandContext::for_target(server, printer, cli.clone(), cli_layer)?;
-    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-    let run = lookup.resolve(run_prefix)?;
-    Ok((lookup.client().clone_for_reuse(), run.run_id()))
+    let client = ctx.server().await?;
+    let run_id = client.resolve_run(run_prefix).await?.run_id;
+    Ok((client.clone_for_reuse(), run_id))
 }
 
 async fn write_sandbox_file(

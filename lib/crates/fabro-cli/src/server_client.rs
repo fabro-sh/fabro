@@ -85,6 +85,7 @@ impl RunAttachEventStream {
 
 pub(crate) use fabro_store::RunProjection;
 
+#[cfg(test)]
 pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClient> {
     connect_api_client_bundle(storage_dir).await
 }
@@ -664,6 +665,17 @@ impl ServerStoreClient {
         convert_type(response.into_inner())
     }
 
+    pub(crate) async fn resolve_run(&self, selector: &str) -> Result<RunSummary> {
+        let response = self
+            .client
+            .resolve_run()
+            .selector(selector.to_string())
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        convert_type(response.into_inner())
+    }
+
     pub(crate) async fn get_run_state(&self, run_id: &RunId) -> Result<RunProjection> {
         let response = self
             .client
@@ -825,14 +837,18 @@ impl ServerStoreClient {
         }
     }
 
-    pub(crate) async fn delete_store_run(&self, run_id: &RunId) -> Result<()> {
-        self.client
-            .delete_run()
-            .id(run_id.to_string())
-            .send()
-            .await
-            .map_err(map_api_error)?;
-        Ok(())
+    pub(crate) async fn delete_store_run(&self, run_id: &RunId, force: bool) -> Result<()> {
+        let mut url = fabro_http::Url::parse(&self.base_url)
+            .with_context(|| format!("invalid server base URL {}", self.base_url))?;
+        url.path_segments_mut()
+            .map_err(|()| anyhow!("server base URL cannot accept path segments"))?
+            .extend(["api", "v1", "runs", &run_id.to_string()]);
+        if force {
+            url.query_pairs_mut().append_pair("force", "true");
+        }
+
+        let response = self.http_client.delete(url).send().await?;
+        ensure_raw_response_success(response).await
     }
 
     pub(crate) async fn list_run_artifacts(
@@ -1165,6 +1181,10 @@ fn non_zero_u64_from_usize(value: usize) -> Option<NonZeroU64> {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "server-client tests stage local dev-token fixtures with sync std::fs::write"
+)]
 mod tests {
     use super::*;
 

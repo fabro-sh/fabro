@@ -731,6 +731,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test fixture setup uses sync std::fs::write to create a fake feature directory"
+    )]
     async fn fetch_feature_local_integration() {
         let tmp_src = tempfile::tempdir().unwrap();
         let feature_dir = tmp_src.path().join("my-feature");

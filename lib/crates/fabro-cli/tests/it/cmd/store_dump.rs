@@ -1,11 +1,16 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
+)]
+
 use std::fs;
 use std::time::Duration;
 
 use fabro_test::{fabro_snapshot, test_context};
 use insta::assert_snapshot;
 
-use super::support::setup_completed_dry_run;
-use crate::support::unique_run_id;
+use super::support::{local_dev_token, server_target, setup_completed_dry_run};
+use crate::support::{LightweightCli, unique_run_id};
 
 #[test]
 fn help() {
@@ -24,16 +29,48 @@ fn help() {
       <RUN>  Run ID prefix or workflow name
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-      -o, --output <OUTPUT>            Output directory (must not exist or be empty)
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+      -o, --output <OUTPUT>   Output directory (must not exist or be empty)
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn store_dump_accepts_server_target_from_separate_home() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+    let cli = LightweightCli::new();
+    let output_dir = context.temp_dir.join("remote-export");
+    let server = server_target(&context.storage_dir);
+
+    let mut cmd = cli.command();
+    cmd.args([
+        "store",
+        "dump",
+        "--server",
+        &server,
+        "--output",
+        output_dir.to_str().unwrap(),
+        &run.run_id,
+    ]);
+    if let Some(dev_token) = local_dev_token(&context.storage_dir) {
+        cmd.env("FABRO_DEV_TOKEN", dev_token);
+    }
+
+    let output = cmd.output().expect("store dump should execute");
+    assert!(
+        output.status.success(),
+        "store dump via remote server target failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output_dir.join("checkpoint.json").is_file());
 }
 
 #[test]

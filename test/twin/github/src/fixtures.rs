@@ -170,6 +170,10 @@ pub struct FixtureWebhookOptions {
 impl FixtureState {
     pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "twin test harness: sync fixture load from disk; not on a Tokio hot path"
+        )]
         let contents = fs::read_to_string(path)
             .map_err(|err| format!("failed to read fixture {}: {err}", path.display()))?;
         serde_json::from_str(&contents)

@@ -9,6 +9,10 @@
     clippy::ignore_without_reason,
     reason = "This integration module intentionally uses concise ignored-test markers."
 )]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "This integration test stages sandbox fixtures with sync std::fs."
+)]
 
 use fabro_sandbox::SandboxRecord;
 use fabro_sandbox::reconnect::reconnect;

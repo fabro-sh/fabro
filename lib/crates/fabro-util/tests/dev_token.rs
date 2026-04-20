@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "integration tests that exercise sync dev-token file operations"
+)]
+
 use std::fs;
 
 use fabro_util::Home;

@@ -51,6 +51,10 @@ impl RecordingInterviewer {
     ///
     /// # Errors
     /// Returns an error if serialization or file writing fails.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "sync helper for test-mode interview recording storage; not on a Tokio path"
+    )]
     pub fn save_to_file(&self, path: &Path) -> std::io::Result<()> {
         let json = self.to_json()?;
         std::fs::write(path, json).map_err(|err| {
@@ -66,6 +70,10 @@ impl RecordingInterviewer {
     ///
     /// # Errors
     /// Returns an error if file reading or deserialization fails.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "sync helper for test-mode interview recording storage; not on a Tokio path"
+    )]
     pub fn load_from_file(path: &Path) -> std::io::Result<Vec<(Question, Answer)>> {
         let json = std::fs::read_to_string(path).map_err(|err| {
             std::io::Error::new(

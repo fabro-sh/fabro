@@ -25,6 +25,7 @@ pub mod jwt_auth;
 mod run_files;
 mod run_files_security;
 mod run_manifest;
+mod run_selector;
 pub mod security_headers;
 pub mod serve;
 pub mod server;

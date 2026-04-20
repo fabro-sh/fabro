@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync config file load used at startup; not on a Tokio path"
+)]
+
 use std::path::{Path, PathBuf};
 
 use fabro_types::settings::run::RunGoalLayer;

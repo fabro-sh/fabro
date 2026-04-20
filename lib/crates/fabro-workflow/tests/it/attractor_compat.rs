@@ -2,6 +2,10 @@
     clippy::absolute_paths,
     reason = "This test module prefers explicit type paths over extra imports."
 )]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "This compatibility test reads fixture DOT files with sync std::fs."
+)]
 
 use std::path::Path;
 

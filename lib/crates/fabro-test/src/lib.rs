@@ -1,3 +1,10 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "fabro-test: shared test infrastructure; sync std::fs throughout is intentional for \
+              test fixtures, snapshots, and scratch directories. Tokio-path code under test sits \
+              in other crates."
+)]
+
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Path, PathBuf};

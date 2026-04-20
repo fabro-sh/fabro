@@ -1,7 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_http::HeaderMap;
-use tokio::time;
+use tokio::{fs, time};
 use tracing::warn;
 
 use crate::error::{Error, error_from_status_code};
@@ -92,7 +92,7 @@ pub fn mime_from_extension(path: &str) -> &str {
 ///
 /// # Errors
 /// Returns an error if the file cannot be read.
-pub fn load_file_as_base64(path: &str) -> Result<(String, String), std::io::Error> {
+pub async fn load_file_as_base64(path: &str) -> Result<(String, String), std::io::Error> {
     let expanded = path.strip_prefix("~/").map_or_else(
         || path.to_string(),
         |rest| {
@@ -100,7 +100,7 @@ pub fn load_file_as_base64(path: &str) -> Result<(String, String), std::io::Erro
             format!("{home}/{rest}")
         },
     );
-    let data = std::fs::read(&expanded).map_err(|err| {
+    let data = fs::read(&expanded).await.map_err(|err| {
         std::io::Error::new(err.kind(), format!("read attachment {expanded}: {err}"))
     })?;
     let mime = mime_from_extension(&expanded).to_string();

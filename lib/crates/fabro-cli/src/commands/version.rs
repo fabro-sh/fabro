@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync CLI `version` command: writes version info to std::io::stderr"
+)]
+
 use std::io::IsTerminal;
 
 use anyhow::Result;

@@ -5,6 +5,10 @@ use std::sync::Arc;
 use anyhow::anyhow;
 #[cfg(feature = "daytona")]
 use fabro_github::GitHubCredentials;
+#[allow(
+    unused_imports,
+    reason = "Daytona-enabled builds persist RunId in the sandbox spec."
+)]
 use fabro_types::RunId;
 
 use crate::config::WorktreeMode;
@@ -151,6 +155,10 @@ impl SandboxSpec {
         }
     }
 
+    #[allow(
+        clippy::unused_async,
+        reason = "Only Daytona construction awaits; local and Docker builds share the async API."
+    )]
     pub async fn build(
         &self,
         event_callback: Option<SandboxEventCallback>,

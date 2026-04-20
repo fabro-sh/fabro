@@ -6,7 +6,6 @@ use tracing::info;
 
 use crate::args::PreviewArgs;
 use crate::command_context::CommandContext;
-use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
 pub(crate) async fn run(
@@ -17,13 +16,11 @@ pub(crate) async fn run(
     printer: Printer,
 ) -> Result<()> {
     let ctx = CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
-    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-    let run = lookup.resolve(&args.run)?;
-    let run_id = run.run_id();
+    let client = ctx.server().await?;
+    let run_id = client.resolve_run(&args.run).await?.run_id;
     let expires_in_secs =
         u64::try_from(args.ttl).map_err(|_| anyhow::anyhow!("--ttl must be positive"))?;
-    let response = lookup
-        .client()
+    let response = client
         .generate_preview_url(
             &run_id,
             args.port,

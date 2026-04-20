@@ -438,6 +438,34 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/resolve:
+    get:
+      operationId: resolveRun
+      tags: [Runs]
+      summary: Resolve Run Selector
+      description: Resolves a run selector to one durable run summary using server-owned selector semantics.
+      parameters:
+        - $ref: "#/components/parameters/RunSelector"
+      responses:
+        "200":
+          description: Durable run summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreRunSummary"
+        "400":
+          description: Selector is invalid or ambiguous
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No run matched the selector
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/preflight:
     post:
       operationId: runPreflight
@@ -516,14 +544,21 @@ paths:
       operationId: deleteRun
       tags: [Runs]
       summary: Delete Run
-      description: Deletes durable store state for a run. This does not remove any local run directory.
+      description: Deletes durable store state for a run. This does not remove any local run directory. Active runs require `force=true`.
       parameters:
         - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/ForceRunDelete"
       responses:
         "204":
           description: Run deleted or already absent
         "404":
           description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run is active and requires `force=true`
           content:
             application/json:
               schema:
@@ -1941,6 +1976,15 @@ components:
         type: string
       example: 01JNQVR7M0EJ5GKAT2SC4ERS1Z
 
+    RunSelector:
+      name: selector
+      in: query
+      required: true
+      description: Run selector, such as a run ID prefix, workflow slug, or workflow name.
+      schema:
+        type: string
+      example: nightly-build
+
     SettingsView:
       name: view
       in: query
@@ -2057,6 +2101,16 @@ components:
       in: query
       required: false
       description: Whether to include archived runs in the response. Defaults to `false`.
+      schema:
+        type: boolean
+        default: false
+      example: false
+
+    ForceRunDelete:
+      name: force
+      in: query
+      required: false
+      description: Whether to force deletion of an active run. Defaults to `false`.
       schema:
         type: boolean
         default: false

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "sync workflow operation loader; runs at workflow-load time"
+)]
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

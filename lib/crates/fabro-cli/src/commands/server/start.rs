@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "CLI `server start` command: sync config/record file I/O in startup command; acquire_lock uses spawn_blocking"
+)]
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -12,7 +17,9 @@ use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::{Home, dev_token, session_secret};
+use tokio::net::{TcpStream, UnixStream};
 use tokio::process::Command as TokioCommand;
+use tokio::task::spawn_blocking;
 use tokio::time;
 
 use super::record;
@@ -459,7 +466,7 @@ async fn execute_daemon(
 
     while elapsed < timeout {
         if let Some(record) = record::read_server_record(&record_path) {
-            if try_connect(&record.bind) {
+            if try_connect(&record.bind).await {
                 if announce {
                     let pid = child.id().unwrap_or_default();
                     maybe_warn_host_port_fallback(bind, &record.bind, printer);
@@ -533,12 +540,22 @@ async fn acquire_lock(storage_dir: &Path) -> Result<std::fs::File> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating server lock directory {}", parent.display()))?;
     }
-    let lock_file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("opening server lock file {}", lock_path.display()))?;
+    let lock_path_for_open = lock_path.clone();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "OpenOptions::open inside spawn_blocking; file-lock semantics need a real \
+                  std::fs::File handle for fabro_proc::try_flock_exclusive"
+    )]
+    let lock_file = spawn_blocking(move || {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path_for_open)
+    })
+    .await
+    .context("lock-file open task failed")?
+    .with_context(|| format!("opening server lock file {}", lock_path.display()))?;
 
     let poll_interval = Duration::from_millis(50);
     let timeout = Duration::from_secs(5);
@@ -555,12 +572,15 @@ async fn acquire_lock(storage_dir: &Path) -> Result<std::fs::File> {
     Ok(lock_file)
 }
 
-fn try_connect(bind: &Bind) -> bool {
+async fn try_connect(bind: &Bind) -> bool {
+    let connect_timeout = Duration::from_millis(100);
     match bind {
-        Bind::Tcp(addr) => {
-            std::net::TcpStream::connect_timeout(addr, Duration::from_millis(100)).is_ok()
-        }
-        Bind::Unix(path) => std::os::unix::net::UnixStream::connect(path).is_ok(),
+        Bind::Tcp(addr) => time::timeout(connect_timeout, TcpStream::connect(addr))
+            .await
+            .is_ok_and(|r| r.is_ok()),
+        Bind::Unix(path) => time::timeout(connect_timeout, UnixStream::connect(path))
+            .await
+            .is_ok_and(|r| r.is_ok()),
     }
 }
 

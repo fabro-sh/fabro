@@ -233,7 +233,9 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Artifact(ns) => {
                 commands::artifact::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
             }
-            Commands::Store(ns) => commands::store::dispatch(ns, &cli_settings, printer).await?,
+            Commands::Store(ns) => {
+                commands::store::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
+            }
             Commands::RunsCmd(cmd) => {
                 commands::runs::dispatch(cmd, &cli_settings, &cli_layer, printer).await?;
             }
@@ -360,8 +362,15 @@ async fn main_inner() -> (String, Result<()>) {
                 }));
                 match result {
                     Ok(buf) => {
-                        use std::io::Write;
-                        std::io::stdout().write_all(&buf)?;
+                        #[expect(
+                            clippy::disallowed_types,
+                            clippy::disallowed_methods,
+                            reason = "sync CLI: stream shell completions to stdout"
+                        )]
+                        {
+                            use std::io::Write;
+                            std::io::stdout().write_all(&buf)?;
+                        }
                     }
                     Err(_) => {
                         anyhow::bail!(
@@ -487,6 +496,10 @@ fn server_config_log_level(settings: &SettingsLayer) -> Option<String> {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "main.rs tests stage CLI settings fixtures with sync std::fs::write"
+)]
 mod tests {
     use args::{
         Commands, InstallGitHubStrategyArg, ModelsCommand, ProviderCommand, ProviderNamespace,
