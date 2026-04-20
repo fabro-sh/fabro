@@ -141,10 +141,15 @@ pub fn normalize_failure_reason(reason: &str) -> String {
 
     use regex::Regex;
 
-    static HEX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[0-9a-f]{7,64}\b").unwrap());
-    static DIGITS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d+\b").unwrap());
-    static COMMA_SPACE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r",\s+").unwrap());
-    static WHITESPACE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
+    static HEX_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\b[0-9a-f]{7,64}\b").expect("hardcoded regex should compile")
+    });
+    static DIGITS_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\b\d+\b").expect("hardcoded regex should compile"));
+    static COMMA_SPACE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r",\s+").expect("hardcoded regex should compile"));
+    static WHITESPACE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\s+").expect("hardcoded regex should compile"));
 
     let s = reason.trim().to_lowercase();
     if s.is_empty() {

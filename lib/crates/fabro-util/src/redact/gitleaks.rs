@@ -166,7 +166,7 @@ impl GitleaksEngine {
             let secret_group = rule.secret_group();
 
             for caps in regex.captures_iter(s) {
-                let full_match = caps.get(0).unwrap();
+                let full_match = caps.get(0).expect("captures should include the full match");
 
                 // Get the secret: group 1 if it exists, otherwise full match
                 let secret_match = if secret_group > 0 {

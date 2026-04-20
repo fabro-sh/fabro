@@ -23,9 +23,8 @@ impl Default for BackoffPolicy {
 
 impl BackoffPolicy {
     pub fn delay_for_attempt(&self, attempt: u32) -> Duration {
-        let multiplier = self
-            .factor
-            .powi(i32::try_from(attempt.saturating_sub(1)).unwrap());
+        let exponent = i32::try_from(attempt.saturating_sub(1)).unwrap_or(i32::MAX);
+        let multiplier = self.factor.powi(exponent);
         let base_delay = self.initial_delay.mul_f64(multiplier);
         let capped = if base_delay > self.max_delay {
             self.max_delay

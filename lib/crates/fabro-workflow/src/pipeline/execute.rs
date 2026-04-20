@@ -231,7 +231,7 @@ pub async fn execute(init: Initialized) -> Executed {
 
     let graph_max = graph.max_node_visits();
     let max_node_visits = if graph_max > 0 {
-        Some(usize::try_from(graph_max).unwrap())
+        Some(usize::try_from(graph_max).expect("positive max_node_visits should fit in usize"))
     } else if run_options.dry_run_enabled() {
         Some(10)
     } else {
@@ -261,9 +261,11 @@ pub async fn execute(init: Initialized) -> Executed {
                                     .unwrap_or_default()
                                     .as_millis(),
                             )
-                            .unwrap();
+                            .unwrap_or(i64::MAX);
                             let idle_ms = now.saturating_sub(last);
-                            if idle_ms >= i64::try_from(stall_timeout.as_millis()).unwrap() {
+                            let stall_timeout_ms =
+                                i64::try_from(stall_timeout.as_millis()).unwrap_or(i64::MAX);
+                            if idle_ms >= stall_timeout_ms {
                                 token_clone.cancel();
                                 return;
                             }

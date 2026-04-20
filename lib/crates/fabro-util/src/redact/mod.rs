@@ -29,7 +29,9 @@ pub fn redact_string(s: &str) -> String {
     // Merge overlapping regions
     let mut merged = vec![regions[0].clone()];
     for r in &regions[1..] {
-        let last = merged.last_mut().unwrap();
+        let last = merged
+            .last_mut()
+            .expect("merged regions should be non-empty during overlap coalescing");
         if r.start <= last.end {
             last.end = last.end.max(r.end);
         } else {

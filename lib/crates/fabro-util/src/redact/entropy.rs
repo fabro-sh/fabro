@@ -7,7 +7,7 @@ use super::Region;
 /// Matches high-entropy alphanumeric strings (10+ chars).
 /// Excludes `/` to avoid matching file paths as single tokens.
 static SECRET_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[A-Za-z0-9+_=-]{10,}").unwrap());
+    LazyLock::new(|| Regex::new(r"[A-Za-z0-9+_=-]{10,}").expect("hardcoded regex should compile"));
 
 const ENTROPY_THRESHOLD: f64 = 4.5;
 

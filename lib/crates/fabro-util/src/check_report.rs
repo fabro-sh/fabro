@@ -13,7 +13,8 @@ use crate::terminal::Styles;
 fn write_styled_remediation(out: &mut String, text: &str, s: &Styles) {
     for (i, segment) in text.split('`').enumerate() {
         if i % 2 == 1 {
-            write!(out, "{}", s.bold_cyan.apply_to(segment)).unwrap();
+            write!(out, "{}", s.bold_cyan.apply_to(segment))
+                .expect("writing to String should not fail");
         } else {
             out.push_str(segment);
         }
@@ -95,15 +96,17 @@ impl CheckReport {
 
         let show_section_headers = self.sections.len() > 1;
 
-        writeln!(out, "{}", s.bold.apply_to(&self.title)).unwrap();
-        writeln!(out).unwrap();
+        writeln!(out, "{}", s.bold.apply_to(&self.title))
+            .expect("writing to String should not fail");
+        writeln!(out).expect("writing to String should not fail");
 
         for (i, section) in self.sections.iter().enumerate() {
             if show_section_headers {
                 if i > 0 {
-                    writeln!(out).unwrap();
+                    writeln!(out).expect("writing to String should not fail");
                 }
-                writeln!(out, "  {}", s.dim.apply_to(&section.title)).unwrap();
+                writeln!(out, "  {}", s.dim.apply_to(&section.title))
+                    .expect("writing to String should not fail");
             }
 
             for check in &section.checks {
@@ -120,7 +123,7 @@ impl CheckReport {
                     s.bold.apply_to(&check.name),
                     check.summary,
                 )
-                .unwrap();
+                .expect("writing to String should not fail");
 
                 if verbose {
                     for detail in &check.details {
@@ -133,9 +136,11 @@ impl CheckReport {
                             detail.text.clone()
                         };
                         if detail.warn {
-                            writeln!(out, "      • {}", s.red.apply_to(&text)).unwrap();
+                            writeln!(out, "      • {}", s.red.apply_to(&text))
+                                .expect("writing to String should not fail");
                         } else {
-                            writeln!(out, "      • {text}").unwrap();
+                            writeln!(out, "      • {text}")
+                                .expect("writing to String should not fail");
                         }
                     }
                 }
@@ -143,10 +148,10 @@ impl CheckReport {
         }
 
         let issues = self.issue_count();
-        writeln!(out).unwrap();
+        writeln!(out).expect("writing to String should not fail");
 
         if issues == 0 {
-            writeln!(out, "All checks passed.").unwrap();
+            writeln!(out, "All checks passed.").expect("writing to String should not fail");
         } else {
             writeln!(
                 out,
@@ -157,22 +162,23 @@ impl CheckReport {
                     "categories"
                 }
             )
-            .unwrap();
+            .expect("writing to String should not fail");
 
             let errors: Vec<_> = self
                 .all_checks()
                 .filter(|c| c.status == CheckStatus::Error)
                 .collect();
             if !errors.is_empty() {
-                writeln!(out).unwrap();
-                writeln!(out, "{}", s.bold.apply_to("Errors:")).unwrap();
+                writeln!(out).expect("writing to String should not fail");
+                writeln!(out, "{}", s.bold.apply_to("Errors:"))
+                    .expect("writing to String should not fail");
                 for check in &errors {
-                    write!(out, "  • {}", check.name).unwrap();
+                    write!(out, "  • {}", check.name).expect("writing to String should not fail");
                     if let Some(ref rem) = check.remediation {
-                        write!(out, " — ").unwrap();
+                        write!(out, " — ").expect("writing to String should not fail");
                         write_styled_remediation(&mut out, rem, s);
                     }
-                    writeln!(out).unwrap();
+                    writeln!(out).expect("writing to String should not fail");
                 }
             }
 
@@ -181,22 +187,23 @@ impl CheckReport {
                 .filter(|c| c.status == CheckStatus::Warning)
                 .collect();
             if !warnings.is_empty() {
-                writeln!(out).unwrap();
-                writeln!(out, "{}", s.bold.apply_to("Warnings:")).unwrap();
+                writeln!(out).expect("writing to String should not fail");
+                writeln!(out, "{}", s.bold.apply_to("Warnings:"))
+                    .expect("writing to String should not fail");
                 for check in &warnings {
-                    write!(out, "  • {}", check.name).unwrap();
+                    write!(out, "  • {}", check.name).expect("writing to String should not fail");
                     if let Some(ref rem) = check.remediation {
-                        write!(out, " — ").unwrap();
+                        write!(out, " — ").expect("writing to String should not fail");
                         write_styled_remediation(&mut out, rem, s);
                     }
-                    writeln!(out).unwrap();
+                    writeln!(out).expect("writing to String should not fail");
                 }
             }
         }
 
         if let Some(footer_text) = footer {
-            writeln!(out).unwrap();
-            writeln!(out, "{footer_text}").unwrap();
+            writeln!(out).expect("writing to String should not fail");
+            writeln!(out, "{footer_text}").expect("writing to String should not fail");
         }
 
         out

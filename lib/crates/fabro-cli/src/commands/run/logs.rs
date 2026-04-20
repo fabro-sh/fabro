@@ -141,12 +141,12 @@ fn try_parse_relative_duration(s: &str) -> Option<chrono::Duration> {
         return None;
     }
     let (num_str, unit) = s.split_at(s.len() - 1);
-    let num: u64 = num_str.parse().ok()?;
+    let num = i64::try_from(num_str.parse::<u64>().ok()?).ok()?;
     match unit {
-        "s" => Some(chrono::Duration::seconds(i64::try_from(num).unwrap())),
-        "m" => Some(chrono::Duration::minutes(i64::try_from(num).unwrap())),
-        "h" => Some(chrono::Duration::hours(i64::try_from(num).unwrap())),
-        "d" => Some(chrono::Duration::days(i64::try_from(num).unwrap())),
+        "s" => Some(chrono::Duration::seconds(num)),
+        "m" => Some(chrono::Duration::minutes(num)),
+        "h" => Some(chrono::Duration::hours(num)),
+        "d" => Some(chrono::Duration::days(num)),
         _ => None,
     }
 }
@@ -358,40 +358,39 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
             {
                 let total = billing
                     .get("total_tokens")
-                    .and_then(serde_json::Value::as_i64)
+                    .and_then(serde_json::Value::as_u64)
                     .unwrap_or(0);
                 let pad = " ".repeat(ts.len() + 1);
                 if total > 0 {
                     lines.push(format!(
                         "{}{}",
                         pad,
-                        styles.dim.apply_to(format!(
-                            "Tokens: {}",
-                            format_tokens(u64::try_from(total).unwrap())
-                        ))
+                        styles
+                            .dim
+                            .apply_to(format!("Tokens: {}", format_tokens(total)))
                     ));
                 }
                 if let Some(cache_read) = billing
                     .get("cache_read_tokens")
-                    .and_then(serde_json::Value::as_i64)
+                    .and_then(serde_json::Value::as_u64)
                 {
                     let cache_write = billing
                         .get("cache_write_tokens")
-                        .and_then(serde_json::Value::as_i64)
+                        .and_then(serde_json::Value::as_u64)
                         .unwrap_or(0);
                     lines.push(format!(
                         "{}{}",
                         pad,
                         styles.dim.apply_to(format!(
                             "Cache:  {} read, {} write",
-                            format_tokens(u64::try_from(cache_read).unwrap()),
-                            format_tokens(u64::try_from(cache_write).unwrap())
+                            format_tokens(cache_read),
+                            format_tokens(cache_write)
                         ))
                     ));
                 }
                 if let Some(reasoning) = billing
                     .get("reasoning_tokens")
-                    .and_then(serde_json::Value::as_i64)
+                    .and_then(serde_json::Value::as_u64)
                 {
                     if reasoning > 0 {
                         lines.push(format!(
@@ -399,7 +398,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                             pad,
                             styles.dim.apply_to(format!(
                                 "Reasoning: {} tokens",
-                                format_tokens(u64::try_from(reasoning).unwrap())
+                                format_tokens(reasoning)
                             ))
                         ));
                     }
@@ -840,6 +839,11 @@ mod tests {
         assert!(parse_since("").is_err());
         assert!(parse_since("abc").is_err());
         assert!(parse_since("notadate").is_err());
+    }
+
+    #[test]
+    fn parse_since_overflow_is_invalid() {
+        assert!(parse_since("9223372036854775808s").is_err());
     }
 
     #[test]

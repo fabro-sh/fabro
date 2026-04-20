@@ -298,7 +298,10 @@ fn resolve_manifest_dockerfile(
         .and_then(|sandbox| sandbox.daytona.as_mut())
         .and_then(|daytona| daytona.snapshot.as_mut())
         .and_then(|snapshot| snapshot.dockerfile.as_mut());
-    let Some(DaytonaDockerfileLayer::Path { path }) = source else {
+    let Some(source) = source else {
+        return Ok(());
+    };
+    let DaytonaDockerfileLayer::Path { path } = &*source else {
         return Ok(());
     };
     let path_owned = path.clone();
@@ -311,7 +314,7 @@ fn resolve_manifest_dockerfile(
         .get(&logical_path)
         .cloned()
         .ok_or_else(|| anyhow!("missing bundled dockerfile: {}", logical_path.display()))?;
-    *source.unwrap() = DaytonaDockerfileLayer::Inline(content);
+    *source = DaytonaDockerfileLayer::Inline(content);
     Ok(())
 }
 
@@ -842,11 +845,13 @@ fn preflight_response(
         checks: report_to_api(report),
         workflow: types::PreflightWorkflowSummary {
             diagnostics: diagnostics_to_api(validated.diagnostics()),
-            edges:       i64::try_from(validated.graph().edges.len()).unwrap(),
+            edges:       i64::try_from(validated.graph().edges.len())
+                .expect("graph edge count should fit in i64"),
             goal:        validated.graph().goal().to_string(),
             graph_path:  Some(target_path.display().to_string()),
             name:        validated.graph().name.clone(),
-            nodes:       i64::try_from(validated.graph().nodes.len()).unwrap(),
+            nodes:       i64::try_from(validated.graph().nodes.len())
+                .expect("graph node count should fit in i64"),
         },
     }
 }

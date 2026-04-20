@@ -209,7 +209,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             let stage_index = state.stage_index;
             let scope = stage_scope_for(state, &gv.id);
 
-            let duration_ms = u64::try_from(ctx.result.duration.as_millis()).unwrap();
+            let duration_ms = crate::millis_u64(ctx.result.duration);
             self.emitter.emit_scoped(
                 &Event::StageFailed {
                     node_id: gv.id.clone(),
@@ -231,9 +231,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                     index:        stage_index,
                     attempt:      ctx.attempt as usize,
                     max_attempts: ctx.result.max_attempts as usize,
-                    delay_ms:     ctx
-                        .backoff_delay
-                        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap()),
+                    delay_ms:     ctx.backoff_delay.map_or(0, crate::millis_u64),
                 },
                 &scope,
             );
@@ -255,7 +253,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let gv = node.inner();
         let stage_index = state.stage_index;
         let scope = stage_scope_for(state, &gv.id);
-        let duration_ms = u64::try_from(result.duration.as_millis()).unwrap();
+        let duration_ms = crate::millis_u64(result.duration);
         let (loop_failure_signatures, restart_failure_signatures) =
             snapshot_failure_signatures(&self.circuit_breaker);
 
@@ -419,8 +417,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
     }
 
     async fn on_run_end(&self, outcome: &Outcome, state: &WfRunState) {
-        let duration_ms =
-            u64::try_from(self.run_start.lock().unwrap().elapsed().as_millis()).unwrap();
+        let duration_ms = crate::millis_u64(self.run_start.lock().unwrap().elapsed());
         let artifact_count = self.captured_artifact_count.load(Ordering::Relaxed);
         let last_sha = self.last_git_sha.lock().unwrap().clone();
         let final_patch = self.final_patch.lock().unwrap().clone();
