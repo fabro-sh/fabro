@@ -53,6 +53,17 @@ The OpenAPI spec at `docs/api-reference/fabro-api.yaml` is the source of truth f
 4. `cargo nextest run -p fabro-server` — conformance test catches spec/router drift
 5. `cd lib/packages/fabro-api-client && bun run generate` — regenerates TypeScript Axios client
 
+### API type ownership
+
+- Treat OpenAPI as the source of truth for the wire contract, not as the automatic owner of Rust types.
+- Before adding or keeping a generated schema type, search the workspace for an existing hand-written Rust type with the same product meaning.
+- If the schema and an existing Rust type have the same semantics and serde shape, reuse the existing type via `lib/crates/fabro-api/build.rs` `with_replacement(...)` instead of generating a parallel API type.
+- If two types are close but not identical, prefer proposing changes that align them into one canonical type rather than accepting small drift. It is usually better to iterate the API now than to create permanently split Rust/API types.
+- Keep a separate API DTO only when the API is intentionally a projection, summary, or presentation-specific view of internal state. In that case, give it a distinct API-facing name instead of reusing the internal concept name.
+- Treat `ApiFoo` aliases and `foo_to_api` / `foo_from_api` adapters as a smell unless they represent a real semantic boundary. They should not exist only to bridge accidental duplicate types.
+- If a type is shared across crates and is part of the core product vocabulary, move it to a shared crate first, then make `fabro-api` reuse it.
+- For every new `with_replacement(...)`, add a `fabro-api` test that proves type identity and JSON parity with the OpenAPI schema.
+
 ## Architecture
 
 Fabro is an AI-powered workflow orchestration platform. Workflows are defined as Graphviz graphs, where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
