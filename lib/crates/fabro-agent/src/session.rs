@@ -253,12 +253,19 @@ impl Session {
     ) -> Result<(String, std::collections::HashMap<String, String>), String> {
         let sandbox = self.sandbox.as_ref();
 
-        let cmd_str = command.join(" ");
+        let cmd_str = command
+            .iter()
+            .map(|arg| fabro_sandbox::shell_quote(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
 
-        // Launch the server detached with setsid so Daytona's exec doesn't block
+        // Launch the server detached with setsid so Daytona's exec doesn't block.
+        // shell_quote the inner command for the outer `sh -c` so a single quote
+        // or metacharacter in any argv element can't break out of the wrapper.
+        let inner = format!("{cmd_str} > /tmp/mcp_server_stdout.log 2>/tmp/mcp_server_stderr.log");
         let launch_script = format!(
-            "setsid sh -c '{cmd_str} > /tmp/mcp_server_stdout.log 2>/tmp/mcp_server_stderr.log' \
-             </dev/null >/dev/null 2>&1 &\necho $!"
+            "setsid sh -c {quoted} </dev/null >/dev/null 2>&1 &\necho $!",
+            quoted = fabro_sandbox::shell_quote(&inner)
         );
         let env_ref = if env.is_empty() { None } else { Some(env) };
         let launch_result = sandbox
