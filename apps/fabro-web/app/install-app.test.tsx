@@ -172,4 +172,74 @@ describe("InstallApp", () => {
       console.error = originalConsoleError;
     }
   });
+
+  test("renders the GitHub App done screen after the manifest callback resolves", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const originalConsoleError = console.error;
+    console.error = ((...args: unknown[]) => {
+      if (
+        typeof args[0] === "string" &&
+        args[0].startsWith("react-test-renderer is deprecated")
+      ) {
+        return;
+      }
+      originalConsoleError(...args);
+    }) as typeof console.error;
+    try {
+      // Simulate the server-side /install/github/app/redirect handler having
+      // just run — session returns a fully-populated `github.app` payload.
+      const sessionResponse = {
+        completed_steps: ["llm", "server", "github"],
+        llm: null,
+        server: { canonical_url: "https://fabro.example.com" },
+        github: {
+          strategy: "app",
+          owner: { kind: "personal" },
+          app_name: "Fabro",
+          slug: "fabro-brynary",
+          allowed_username: "brynary",
+        },
+        prefill: { canonical_url: "https://fabro.example.com" },
+      };
+      const fetchMock = mock((input: RequestInfo | URL) => {
+        expect(String(input)).toBe("/install/session");
+        return Promise.resolve(
+          new Response(JSON.stringify(sessionResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      const testWindow = createTestWindow(
+        "https://fabro.example.com/install/github/done?token=test-install-token",
+      );
+      testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
+      (globalThis as { window?: unknown }).window = testWindow;
+
+      let renderer: TestRenderer.ReactTestRenderer | null = null;
+      await act(async () => {
+        renderer = TestRenderer.create(
+          <MemoryRouter initialEntries={["/install/github/done?token=test-install-token"]}>
+            <Routes>
+              <Route path="/install/*" element={<InstallApp />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+
+      await waitFor(() => {
+        const text = renderTreeText(renderer!.toJSON());
+        expect(text).toContain("GitHub App connected");
+        expect(text).toContain("fabro-brynary");
+      });
+
+      await act(async () => {
+        renderer?.unmount();
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
 });

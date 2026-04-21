@@ -259,14 +259,6 @@ export default function InstallApp() {
     );
   }
 
-  if (sessionState.status === "loading") {
-    return (
-      <InstallLayout currentStep={currentStep} completedSteps={completedSteps}>
-        <LoadingState label="Connecting to install session…" />
-      </InstallLayout>
-    );
-  }
-
   if (sessionState.status === "error") {
     return (
       <TokenEntryScreen
@@ -279,6 +271,18 @@ export default function InstallApp() {
           setInstallToken(nextToken || null);
         }}
       />
+    );
+  }
+
+  // Covers both sessionState "loading" AND the brief "idle" window between
+  // the initial render and the session-fetch useEffect. Without this guard,
+  // screens like GithubAppDoneScreen see `session == null` and navigate away
+  // before the first fetch finishes — trapping the user in a redirect loop.
+  if (!session) {
+    return (
+      <InstallLayout currentStep={currentStep} completedSteps={completedSteps}>
+        <LoadingState label="Connecting to install session…" />
+      </InstallLayout>
     );
   }
 
