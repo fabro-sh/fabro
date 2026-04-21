@@ -4,20 +4,17 @@
 )]
 
 mod args;
-mod auth_store;
 mod command_context;
 mod commands;
 mod gh;
 mod landing;
 mod logging;
-mod loopback_target;
 mod manifest_builder;
 mod server_client;
 mod server_runs;
 mod shared;
 #[cfg(feature = "sleep_inhibitor")]
 mod sleep_inhibitor;
-mod sse;
 mod user_config;
 
 #[cfg(test)]

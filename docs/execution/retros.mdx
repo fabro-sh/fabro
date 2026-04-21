@@ -101,7 +101,7 @@ Retro generation happens in two phases after a run completes:
 
 1. **Derive** — Fabro extracts stage durations from durable run events and builds a retro from the checkpoint data. This is deterministic, fast, and produces the quantitative layer.
 
-2. **Narrate** — An LLM agent session analyzes the run data. The agent receives temp files named `progress.jsonl`, `checkpoint.json`, `run.json`, and `start.json` inside its sandbox so it can grep and read the event stream and run state. The narrative fields are merged back into durable retro state.
+2. **Narrate** — An LLM agent session analyzes the run data. The agent receives `progress.jsonl`, `run.json`, `graph.fabro`, and per-stage files under `stages/{node_id}@{visit}/...` inside its sandbox so it can grep and read the event stream, run snapshot, workflow source, and full stage payloads. The narrative fields are merged back into durable retro state.
 
 Both phases run automatically at the end of every CLI run. The API server derives the quantitative layer but does not currently run the narrative agent.
 
@@ -143,4 +143,4 @@ Retros are also available via the REST API. See the [list retros](/api-reference
 
 ## Storage
 
-Retros are stored in durable run state. If you need files on disk, `fabro store dump` materializes the retro as `retro.json` alongside other exported run data.
+Retros are stored in durable run state. If you need files on disk, `fabro store dump` materializes retro text under `retro/` alongside `run.json`, stage files, and the rest of the exported run data.

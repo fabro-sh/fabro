@@ -43,18 +43,18 @@ The `Fabro-Checkpoint` trailer links each run branch commit to its metadata bran
 
 The metadata branch (`fabro/meta/{run_id}`) is an orphan branch that stores structured run data using Git's object storage directly (via `git2`). It is initialized at run start with:
 
-- **`run.json`** — Run record: run ID, created_at, config, graph, workflow slug, working directory, host repo path, base branch, labels
-- **`start.json`** — Start record: run ID, start time, run branch, base SHA
+- **`run.json`** — Current projection snapshot: run spec, start/status records, current checkpoint, conclusion, sandbox, retro state, and other run-level metadata
+- **`graph.fabro`** — Workflow source for the run
 
 After each node, the metadata branch is updated with:
 
-- **`checkpoint.json`** — Full execution state (see below)
-- **`artifacts/*.json`** — Any offloaded artifact data (large context values over 100KB)
-- **`nodes/{node_id}/`** — Per-node execution trace files (prompts, responses, status, diffs — files under 512KB from an allowlist)
+- **`run.json`** — Refreshed projection snapshot with the new current checkpoint
+- **`stages/{node_id}@{visit}/...`** — Per-stage execution trace files (prompts, responses, status, diffs, stdout/stderr, and tool metadata)
+- **`retro/*.md`** — Retro prompt/response text when present
 
 ## What's in a checkpoint
 
-The `checkpoint.json` captures everything needed to resume a run:
+The `run.json.checkpoint` snapshot captures everything needed to resume a run:
 
 | Field | Description |
 |---|---|
@@ -134,7 +134,7 @@ git show fabro/run/01JKXYZ...
 git diff main..fabro/run/01JKXYZ...
 
 # Read checkpoint data from the metadata branch
-git show fabro/meta/01JKXYZ...:checkpoint.json | jq .current_node
+git show fabro/meta/01JKXYZ...:run.json | jq .checkpoint.current_node
 ```
 
 ## Rewinding to an earlier checkpoint

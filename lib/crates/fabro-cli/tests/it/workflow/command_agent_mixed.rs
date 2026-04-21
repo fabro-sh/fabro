@@ -49,7 +49,7 @@ fn scenario_command_agent_mixed(sandbox: &str) {
     );
 
     let export_dir = store_dump_export(&context, &run_id_for(&run_dir));
-    let stdout = std::fs::read_to_string(export_dir.join("nodes/verify/visit-1/stdout.log"))
+    let stdout = std::fs::read_to_string(export_dir.join("stages/verify@1/stdout.log"))
         .expect("verify stdout.log should exist");
     assert!(
         stdout.contains("SCENARIO_FLAG_42"),

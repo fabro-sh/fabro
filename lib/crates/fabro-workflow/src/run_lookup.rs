@@ -11,8 +11,8 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use fabro_config::Storage;
 use fabro_config::user::default_storage_dir;
-use fabro_store::{Database, RunSummary};
-use fabro_types::RunId;
+use fabro_store::Database;
+use fabro_types::{RunId, RunSummary};
 use serde::Serialize;
 
 use crate::operations::make_run_dir;
@@ -66,7 +66,7 @@ impl RunInfo {
         self.summary
             .as_ref()
             .and_then(|summary| summary.workflow_name.clone())
-            .unwrap_or_else(|| "[no run record]".to_string())
+            .unwrap_or_else(|| "[no run spec]".to_string())
     }
 
     pub fn workflow_slug(&self) -> Option<&str> {
@@ -407,7 +407,7 @@ mod tests {
     use super::scan_runs_combined;
     use crate::event::{Event, append_event};
     use crate::operations::make_run_dir;
-    use crate::records::RunRecord;
+    use crate::records::RunSpec;
 
     fn memory_store() -> Arc<Database> {
         Arc::new(Database::new(
@@ -418,8 +418,8 @@ mod tests {
         ))
     }
 
-    fn sample_run_record() -> RunRecord {
-        RunRecord {
+    fn sample_run_spec() -> RunSpec {
+        RunSpec {
             run_id:            fixtures::RUN_1,
             settings:          SettingsLayer::default(),
             graph:             Graph::new("test"),
@@ -442,23 +442,23 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
 
         let store = memory_store();
-        let run_record = sample_run_record();
+        let run_spec = sample_run_spec();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
             run_id:            fixtures::RUN_1,
-            settings:          serde_json::to_value(&run_record.settings).unwrap(),
-            graph:             serde_json::to_value(&run_record.graph).unwrap(),
+            settings:          serde_json::to_value(&run_spec.settings).unwrap(),
+            graph:             serde_json::to_value(&run_spec.graph).unwrap(),
             workflow_source:   None,
             workflow_config:   None,
-            labels:            run_record.labels.clone().into_iter().collect(),
+            labels:            run_spec.labels.clone().into_iter().collect(),
             run_dir:           run_dir.display().to_string(),
-            working_directory: run_record.working_directory.display().to_string(),
-            host_repo_path:    run_record.host_repo_path.clone(),
-            repo_origin_url:   run_record.repo_origin_url.clone(),
-            base_branch:       run_record.base_branch.clone(),
-            workflow_slug:     run_record.workflow_slug.clone(),
+            working_directory: run_spec.working_directory.display().to_string(),
+            host_repo_path:    run_spec.host_repo_path.clone(),
+            repo_origin_url:   run_spec.repo_origin_url.clone(),
+            base_branch:       run_spec.base_branch.clone(),
+            workflow_slug:     run_spec.workflow_slug.clone(),
             db_prefix:         None,
-            provenance:        run_record.provenance.clone(),
+            provenance:        run_spec.provenance.clone(),
             manifest_blob:     None,
         })
         .await

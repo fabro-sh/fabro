@@ -228,7 +228,7 @@ digraph BarBaz {
 
     let run_dir = context.find_run_dir(&run_id);
     let state = run_state(&run_dir);
-    let run = state.run.as_ref().expect("run record should exist");
+    let run = state.spec.as_ref().expect("run spec should exist");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
@@ -284,7 +284,7 @@ digraph FooWorkflow {
 
     let run_dir = context.find_run_dir(&run_id);
     let state = run_state(&run_dir);
-    let run = state.run.as_ref().expect("run record should exist");
+    let run = state.spec.as_ref().expect("run spec should exist");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
@@ -351,16 +351,16 @@ fn create_persists_requested_overrides_into_store() {
         .to_string();
     let run = resolve_run(&context, &run_id);
     let state = run_state(&run.run_dir);
-    let run_record = state.run.as_ref().expect("run record should exist");
+    let run_spec = state.spec.as_ref().expect("run spec should exist");
     let labels = json!({
-        "env": run_record.labels.get("env"),
-        "team": run_record.labels.get("team"),
+        "env": run_spec.labels.get("env"),
+        "team": run_spec.labels.get("team"),
     });
-    let settings = &run_record.settings;
+    let settings = &run_spec.settings;
     let resolved_run = resolved_run(settings);
     let cli_settings = fabro_config::resolve_cli_from_file(settings).expect("cli settings");
     let compact = json!({
-        "workflow_slug": run_record.workflow_slug,
+        "workflow_slug": run_spec.workflow_slug,
         "settings": {
             "goal": match resolved_run.goal.as_ref() {
                 Some(fabro_types::settings::run::RunGoal::Inline(value)) => Some(value.as_source()),
@@ -435,9 +435,9 @@ fn create_json_does_not_imply_auto_approve() {
     assert!(
         resolved_run(
             &run_state(&run.run_dir)
-                .run
+                .spec
                 .as_ref()
-                .expect("run record should exist")
+                .expect("run spec should exist")
                 .settings,
         )
         .execution

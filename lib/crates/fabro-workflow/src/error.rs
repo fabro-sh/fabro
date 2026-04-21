@@ -474,14 +474,14 @@ mod tests {
         let source = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
         let source_message = source.to_string();
         let fabro_error = Error::from(MetadataError::Deserialize {
-            entity: "run record",
+            entity: "run spec",
             branch: "fabro/meta/run-1".to_string(),
             source,
         });
 
         assert!(matches!(fabro_error, Error::Engine { .. }));
         let message = fabro_error.to_string();
-        assert!(message.contains("deserialize run record on branch fabro/meta/run-1"));
+        assert!(message.contains("deserialize run spec on branch fabro/meta/run-1"));
         assert!(message.contains(&source_message));
     }
 

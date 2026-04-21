@@ -1,6 +1,7 @@
 mod auth_codes;
 mod auth_tokens;
-mod catalog;
+mod blob_store;
+mod run_catalog_index;
 mod run_store;
 
 use std::collections::HashMap;
@@ -8,16 +9,19 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub use auth_codes::{AuthCode, SlateAuthCodeStore};
-pub use auth_tokens::{ConsumeOutcome, RefreshToken, SlateAuthTokenStore};
-use fabro_types::RunId;
+pub use auth_codes::{AuthCode, AuthCodeStore};
+pub use auth_tokens::{ConsumeOutcome, RefreshToken, RefreshTokenStore};
+pub use blob_store::{Blob, BlobStore};
+use fabro_types::{RunId, RunSummary};
 use object_store::ObjectStore;
+pub use run_catalog_index::RunCatalogIndex;
 pub use run_store::RunDatabase;
 use run_store::RunDatabaseInner;
 use slatedb::config::{CompressionCodec, Settings};
 use tokio::sync::{Mutex, OnceCell};
 
-use crate::{Error, ListRunsQuery, Result, RunSummary, keys};
+use crate::run_state::build_summary;
+use crate::{Error, ListRunsQuery, Result, keys};
 
 #[derive(Clone)]
 pub struct Database {
@@ -27,8 +31,10 @@ pub struct Database {
     cache_path:     Option<PathBuf>,
     db:             Arc<OnceCell<slatedb::Db>>,
     active_runs:    Arc<Mutex<HashMap<RunId, Arc<RunDatabaseInner>>>>,
-    auth_codes:     Arc<OnceCell<Arc<SlateAuthCodeStore>>>,
-    auth_tokens:    Arc<OnceCell<Arc<SlateAuthTokenStore>>>,
+    blobs:          Arc<OnceCell<Arc<BlobStore>>>,
+    catalog_index:  Arc<OnceCell<Arc<RunCatalogIndex>>>,
+    auth_codes:     Arc<OnceCell<Arc<AuthCodeStore>>>,
+    refresh_tokens: Arc<OnceCell<Arc<RefreshTokenStore>>>,
 }
 
 impl std::fmt::Debug for Database {
@@ -55,8 +61,10 @@ impl Database {
             cache_path,
             db: Arc::new(OnceCell::new()),
             active_runs: Arc::new(Mutex::new(HashMap::new())),
+            blobs: Arc::new(OnceCell::new()),
+            catalog_index: Arc::new(OnceCell::new()),
             auth_codes: Arc::new(OnceCell::new()),
-            auth_tokens: Arc::new(OnceCell::new()),
+            refresh_tokens: Arc::new(OnceCell::new()),
         }
     }
 
@@ -116,7 +124,7 @@ impl Database {
             if run_exists && !active.matches_run(run_id) {
                 return Err(Error::RunAlreadyExists(run_id.to_string()));
             }
-            catalog::write_index(&db, run_id).await?;
+            self.catalog_index().await?.add(run_id).await?;
             return Ok(active);
         }
 
@@ -124,7 +132,7 @@ impl Database {
             return Err(Error::RunAlreadyExists(run_id.to_string()));
         }
 
-        catalog::write_index(&db, run_id).await?;
+        self.catalog_index().await?.add(run_id).await?;
         let run_store = RunDatabase::open_writer(*run_id, db).await?;
         self.cache_active_run(&run_store).await;
         Ok(run_store)
@@ -166,11 +174,11 @@ impl Database {
 
     pub async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
         let db = self.open_db().await?;
-        let run_ids = catalog::list_run_ids(&db, query).await?;
+        let run_ids = self.catalog_index().await?.list(query).await?;
         let mut summaries = Vec::new();
         for run_id in run_ids {
             if let Some(active) = self.get_active_run(&run_id).await {
-                summaries.push(active.state().await?.build_summary(&run_id));
+                summaries.push(build_summary(&active.state().await?, &run_id));
                 continue;
             }
             if !RunDatabase::has_any_events(&db, &run_id).await? {
@@ -201,27 +209,49 @@ impl Database {
         for key in keys_to_delete {
             db.delete(key).await?;
         }
-        catalog::delete_index(&db, run_id).await?;
+        self.catalog_index().await?.remove(run_id).await?;
         Ok(())
     }
 
-    pub async fn auth_codes(&self) -> Result<Arc<SlateAuthCodeStore>> {
+    pub async fn auth_codes(&self) -> Result<Arc<AuthCodeStore>> {
         let store = self
             .auth_codes
             .get_or_try_init(|| async {
                 let db = Arc::new(self.open_db().await?);
-                Ok::<_, Error>(Arc::new(SlateAuthCodeStore::new(db)))
+                Ok::<_, Error>(Arc::new(AuthCodeStore::new(db)))
             })
             .await?;
         Ok(Arc::clone(store))
     }
 
-    pub async fn auth_tokens(&self) -> Result<Arc<SlateAuthTokenStore>> {
+    pub async fn catalog_index(&self) -> Result<Arc<RunCatalogIndex>> {
         let store = self
-            .auth_tokens
+            .catalog_index
             .get_or_try_init(|| async {
                 let db = Arc::new(self.open_db().await?);
-                Ok::<_, Error>(Arc::new(SlateAuthTokenStore::new(db)))
+                Ok::<_, Error>(Arc::new(RunCatalogIndex::new(db)))
+            })
+            .await?;
+        Ok(Arc::clone(store))
+    }
+
+    pub async fn blobs(&self) -> Result<Arc<BlobStore>> {
+        let store = self
+            .blobs
+            .get_or_try_init(|| async {
+                let db = Arc::new(self.open_db().await?);
+                Ok::<_, Error>(Arc::new(BlobStore::new(db)))
+            })
+            .await?;
+        Ok(Arc::clone(store))
+    }
+
+    pub async fn refresh_tokens(&self) -> Result<Arc<RefreshTokenStore>> {
+        let store = self
+            .refresh_tokens
+            .get_or_try_init(|| async {
+                let db = Arc::new(self.open_db().await?);
+                Ok::<_, Error>(Arc::new(RefreshTokenStore::new(db)))
             })
             .await?;
         Ok(Arc::clone(store))
@@ -245,7 +275,7 @@ impl Runs {
 
     pub async fn find(&self, run_id: &RunId) -> Result<Option<RunSummary>> {
         match self.db.open_run_reader(run_id).await {
-            Ok(run_db) => Ok(Some(run_db.state().await?.build_summary(run_id))),
+            Ok(run_db) => Ok(Some(build_summary(&run_db.state().await?, run_id))),
             Err(Error::RunNotFound(_)) => Ok(None),
             Err(err) => Err(err),
         }
@@ -273,7 +303,7 @@ mod tests {
 
     use chrono::{DateTime, Utc};
     use fabro_types::settings::SettingsLayer;
-    use fabro_types::{AttrValue, Graph, RunControlAction, RunRecord, RunStatus, StatusReason};
+    use fabro_types::{AttrValue, Graph, RunControlAction, RunSpec, RunStatus, StatusReason};
     use futures::TryStreamExt;
     use object_store::memory::InMemory;
     use object_store::path::Path;
@@ -315,13 +345,13 @@ mod tests {
         (object_store, store)
     }
 
-    fn sample_run_record(label: &str) -> RunRecord {
+    fn sample_run_spec(label: &str) -> RunSpec {
         let mut graph = Graph::new("night-sky");
         graph.attrs.insert(
             "goal".to_string(),
             AttrValue::String("map the constellations".to_string()),
         );
-        RunRecord {
+        RunSpec {
             run_id: test_run_id(label),
             settings: SettingsLayer::default(),
             graph,
@@ -357,20 +387,20 @@ mod tests {
     }
 
     async fn append_created(run: &RunDatabase, label: &str, created_at: DateTime<Utc>) {
-        let run_record = sample_run_record(label);
+        let run_spec = sample_run_spec(label);
         run.append_event(&event_payload(
             label,
             &created_at.to_rfc3339(),
             "run.created",
             &serde_json::json!({
-                "settings": run_record.settings,
-                "graph": run_record.graph,
-                "workflow_slug": run_record.workflow_slug,
-                "working_directory": run_record.working_directory,
+                "settings": run_spec.settings,
+                "graph": run_spec.graph,
+                "workflow_slug": run_spec.workflow_slug,
+                "working_directory": run_spec.working_directory,
                 "run_dir": format!("/tmp/{label}"),
-                "host_repo_path": run_record.host_repo_path,
-                "base_branch": run_record.base_branch,
-                "labels": run_record.labels,
+                "host_repo_path": run_spec.host_repo_path,
+                "base_branch": run_spec.base_branch,
+                "labels": run_spec.labels,
             }),
         ))
         .await
@@ -436,7 +466,7 @@ mod tests {
         assert_eq!(summary[1].status_reason, Some(StatusReason::Completed));
 
         let reopened = store.open_run(&test_run_id("run-1")).await.unwrap();
-        let stored = reopened.state().await.unwrap().run.unwrap();
+        let stored = reopened.state().await.unwrap().spec.unwrap();
         assert_eq!(stored.run_id, test_run_id("run-1"));
 
         store.delete_run(&test_run_id("run-1")).await.unwrap();
@@ -579,7 +609,7 @@ mod tests {
 
         let reader = store.open_run_reader(&test_run_id("run-1")).await.unwrap();
         let state = reader.state().await.unwrap();
-        assert_eq!(state.run.unwrap().run_id, test_run_id("run-1"));
+        assert_eq!(state.spec.unwrap().run_id, test_run_id("run-1"));
 
         run.append_event(&event_payload(
             "run-1",

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use fabro_client::sse;
 use fabro_types::settings::CliSettings;
 use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
@@ -6,7 +7,6 @@ use futures::StreamExt;
 
 use crate::args::SystemEventsArgs;
 use crate::command_context::CommandContext;
-use crate::sse;
 
 pub(super) async fn events_command(
     args: &SystemEventsArgs,

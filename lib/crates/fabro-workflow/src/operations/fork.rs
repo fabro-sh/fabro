@@ -1,12 +1,14 @@
 use anyhow::{Context, Result};
 use fabro_checkpoint::branch::BranchStore;
 use fabro_checkpoint::git::Store;
+use fabro_store::RunProjection;
 use fabro_types::RunId;
 use git2::{Oid, Signature};
 
 use super::rewind::{RewindTarget, TimelineEntry, build_timeline};
 use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
-use crate::records::{Checkpoint, RunRecord, StartRecord};
+use crate::records::{Checkpoint, RunSpec, StartRecord};
+use crate::run_dump::RunDump;
 
 #[derive(Debug, Clone)]
 pub struct ForkRunInput {
@@ -65,67 +67,81 @@ fn fork_from_entry(
         .ensure_branch()
         .map_err(|e| anyhow::anyhow!("failed to create metadata branch: {e}"))?;
 
-    let source_entries = source_bs
-        .read_entries(&["run.json", "start.json", "sandbox.json"])
-        .map_err(|e| anyhow::anyhow!("failed to read source metadata: {e}"))?;
+    let source_projection = source_bs
+        .read_entry("run.json")
+        .map_err(|e| anyhow::anyhow!("failed to read source metadata: {e}"))?
+        .context("source run has no run.json")
+        .and_then(|bytes| {
+            serde_json::from_slice::<RunProjection>(&bytes)
+                .context("failed to parse source run.json")
+        })?;
 
-    let mut run_record_bytes = None;
-    let mut sandbox_bytes = None;
-    for (path, data) in source_entries {
-        match path {
-            "run.json" => run_record_bytes = Some(data),
-            "sandbox.json" => sandbox_bytes = Some(data),
-            _ => {}
-        }
-    }
-    let run_record_bytes =
-        run_record_bytes.ok_or_else(|| anyhow::anyhow!("source run has no run.json"))?;
+    let mut run_spec: RunSpec = source_projection
+        .spec
+        .clone()
+        .context("source run projection has no spec")?;
+    run_spec.run_id = new_run_id;
 
-    let mut run_record: RunRecord =
-        serde_json::from_slice(&run_record_bytes).context("failed to parse source run.json")?;
-    run_record.run_id = new_run_id;
-    let new_run_record_bytes =
-        serde_json::to_vec_pretty(&run_record).context("failed to serialize new run.json")?;
-
-    let now = new_run_id.created_at();
     let start_record = StartRecord {
         run_id:     new_run_id,
-        start_time: now,
+        start_time: new_run_id.created_at(),
         run_branch: Some(new_run_branch.clone()),
         base_sha:   None,
     };
-    let new_start_record_bytes =
-        serde_json::to_vec_pretty(&start_record).context("failed to serialize new start.json")?;
+
+    let mut init_projection = RunProjection::default();
+    init_projection.spec = Some(run_spec.clone());
+    init_projection
+        .graph_source
+        .clone_from(&source_projection.graph_source);
+    init_projection.start = Some(start_record.clone());
+    init_projection
+        .sandbox
+        .clone_from(&source_projection.sandbox);
 
     let checkpoint_bytes = store
-        .read_blob_at(entry.metadata_commit_oid, "checkpoint.json")
-        .map_err(|e| anyhow::anyhow!("failed to read checkpoint blob: {e}"))?
+        .read_blob_at(entry.metadata_commit_oid, "run.json")
+        .map_err(|e| anyhow::anyhow!("failed to read checkpoint snapshot: {e}"))?
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "no checkpoint.json at metadata commit {}",
+                "no run.json at metadata commit {}",
                 entry.metadata_commit_oid
             )
         })?;
-    let mut checkpoint: Checkpoint = serde_json::from_slice(&checkpoint_bytes)
-        .context("failed to parse source checkpoint.json")?;
+    let mut checkpoint_projection: RunProjection = serde_json::from_slice(&checkpoint_bytes)
+        .context("failed to parse source checkpoint snapshot")?;
+    let mut checkpoint: Checkpoint = checkpoint_projection
+        .checkpoint
+        .clone()
+        .context("source checkpoint snapshot has no checkpoint")?;
     checkpoint.git_commit_sha.clone_from(&entry.run_commit_sha);
-    let checkpoint_bytes =
-        serde_json::to_vec_pretty(&checkpoint).context("failed to serialize checkpoint.json")?;
+    checkpoint_projection.spec = Some(run_spec);
+    checkpoint_projection.graph_source = source_projection.graph_source;
+    checkpoint_projection.start = Some(start_record);
+    checkpoint_projection.sandbox = source_projection.sandbox;
+    checkpoint_projection.checkpoint = Some(checkpoint);
 
-    let mut init_entries: Vec<(&str, &[u8])> = vec![("run.json", &new_run_record_bytes)];
-    init_entries.push(("start.json", &new_start_record_bytes));
-    if let Some(ref sandbox) = sandbox_bytes {
-        init_entries.push(("sandbox.json", sandbox));
-    }
+    let init_entries = RunDump::from_projection(&init_projection)
+        .git_entries()
+        .context("failed to build init metadata snapshot")?;
+    let init_refs: Vec<(&str, &[u8])> = init_entries
+        .iter()
+        .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+        .collect();
+    new_bs
+        .write_entries(&init_refs, "init run")
+        .map_err(|e| anyhow::anyhow!("failed to write init metadata snapshot: {e}"))?;
 
+    let checkpoint_entries = RunDump::from_projection(&checkpoint_projection)
+        .git_entries()
+        .context("failed to build checkpoint metadata snapshot")?;
+    let checkpoint_refs: Vec<(&str, &[u8])> = checkpoint_entries
+        .iter()
+        .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+        .collect();
     new_bs
-        .write_entries(&init_entries, "init run")
-        .map_err(|e| anyhow::anyhow!("failed to write init metadata entries: {e}"))?;
-    let mut checkpoint_entries: Vec<(&str, &[u8])> = vec![("checkpoint.json", &checkpoint_bytes)];
-    checkpoint_entries.extend(init_entries.iter().copied());
-    new_bs
-        .write_entries(&checkpoint_entries, "checkpoint")
-        .map_err(|e| anyhow::anyhow!("failed to write metadata entries: {e}"))?;
+        .write_entries(&checkpoint_refs, "checkpoint")
+        .map_err(|e| anyhow::anyhow!("failed to write metadata snapshot: {e}"))?;
 
     if push {
         let source_run_branch = format!("{RUN_BRANCH_PREFIX}{source_run_id}");
@@ -147,6 +163,7 @@ fn fork_from_entry(
 mod tests {
     use std::str::FromStr;
 
+    use fabro_store::RunProjection;
     use fabro_types::RunId;
     use git2::Oid;
 
@@ -158,27 +175,31 @@ mod tests {
         value.parse().unwrap()
     }
 
-    fn make_run_record_json(run_id: &RunId) -> Vec<u8> {
-        let record = serde_json::json!({
-            "run_id": run_id.to_string(),
-            "created_at": "2025-01-01T00:00:00Z",
-            "settings": {},
-            "graph": {
-                "name": "test_workflow",
-                "nodes": {
-                    "start": {"id": "start", "attrs": {}},
-                    "build": {"id": "build", "attrs": {}},
-                    "test": {"id": "test", "attrs": {}}
+    fn make_run_projection(run_id: &RunId) -> RunProjection {
+        let mut projection = RunProjection::default();
+        projection.spec = Some(
+            serde_json::from_value(serde_json::json!({
+                "run_id": run_id.to_string(),
+                "created_at": "2025-01-01T00:00:00Z",
+                "settings": {},
+                "graph": {
+                    "name": "test_workflow",
+                    "nodes": {
+                        "start": {"id": "start", "attrs": {}},
+                        "build": {"id": "build", "attrs": {}},
+                        "test": {"id": "test", "attrs": {}}
+                    },
+                    "edges": [
+                        {"from": "start", "to": "build", "attrs": {}},
+                        {"from": "build", "to": "test", "attrs": {}}
+                    ],
+                    "attrs": {}
                 },
-                "edges": [
-                    {"from": "start", "to": "build", "attrs": {}},
-                    {"from": "build", "to": "test", "attrs": {}}
-                ],
-                "attrs": {}
-            },
-            "working_directory": "/tmp/test",
-        });
-        serde_json::to_vec_pretty(&record).unwrap()
+                "working_directory": "/tmp/test",
+            }))
+            .unwrap(),
+        );
+        projection
     }
 
     fn make_start_record_json(run_id: &RunId) -> Vec<u8> {
@@ -220,17 +241,25 @@ mod tests {
         let bs = BranchStore::new(store, &meta_branch, &sig);
         bs.ensure_branch().unwrap();
 
-        let run_record = make_run_record_json(run_id);
-        let start_record = make_start_record_json(run_id);
-        bs.write_entries(
-            &[("run.json", &run_record), ("start.json", &start_record)],
-            "init run",
-        )
-        .unwrap();
+        let mut init_projection = make_run_projection(run_id);
+        init_projection.start =
+            Some(serde_json::from_slice(&make_start_record_json(run_id)).unwrap());
+        let init_json = serde_json::to_vec_pretty(&init_projection).unwrap();
+        bs.write_entries(&[("run.json", &init_json)], "init run")
+            .unwrap();
 
         for (i, node) in nodes.iter().enumerate() {
-            let cp = make_checkpoint_json(node, 1, Some(&run_oids[i].to_string()));
-            bs.write_entry("checkpoint.json", &cp, "checkpoint")
+            let mut projection = init_projection.clone();
+            projection.checkpoint = Some(
+                serde_json::from_slice(&make_checkpoint_bytes(
+                    node,
+                    1,
+                    Some(&run_oids[i].to_string()),
+                ))
+                .unwrap(),
+            );
+            let projection_json = serde_json::to_vec_pretty(&projection).unwrap();
+            bs.write_entry("run.json", &projection_json, "checkpoint")
                 .unwrap();
         }
 
@@ -259,8 +288,11 @@ mod tests {
         let sig = test_sig();
         let bs = BranchStore::new(&store, &new_meta_branch, &sig);
         let run_json = bs.read_entry("run.json").unwrap().unwrap();
-        let run_record: RunRecord = serde_json::from_slice(&run_json).unwrap();
-        assert_eq!(run_record.run_id, new_run_id);
+        let run_spec: RunProjection = serde_json::from_slice(&run_json).unwrap();
+        assert_eq!(
+            run_spec.spec.as_ref().map(|run| run.run_id),
+            Some(new_run_id)
+        );
 
         let timeline = build_timeline(&store, &new_run_id.to_string()).unwrap();
         assert_eq!(timeline.entries.len(), 1);
@@ -279,13 +311,15 @@ mod tests {
         let meta_branch = MetadataStore::branch_name(&run_id.to_string());
         let bs = BranchStore::new(&store, &meta_branch, &sig);
         bs.ensure_branch().unwrap();
-        bs.write_entry("run.json", &make_run_record_json(&run_id), "init")
+        let init_projection = serde_json::to_vec_pretty(&make_run_projection(&run_id)).unwrap();
+        bs.write_entry("run.json", &init_projection, "init")
             .unwrap();
 
-        let cp = make_checkpoint_json("start", 1, None);
-        let oid = bs
-            .write_entry("checkpoint.json", &cp, "checkpoint")
-            .unwrap();
+        let mut checkpoint_projection = make_run_projection(&run_id);
+        checkpoint_projection.checkpoint =
+            Some(serde_json::from_slice(&make_checkpoint_bytes("start", 1, None)).unwrap());
+        let cp = serde_json::to_vec_pretty(&checkpoint_projection).unwrap();
+        let oid = bs.write_entry("run.json", &cp, "checkpoint").unwrap();
         let entry = TimelineEntry {
             ordinal:             1,
             node_name:           "start".to_string(),

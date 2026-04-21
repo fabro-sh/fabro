@@ -2,10 +2,10 @@ use std::net::IpAddr;
 
 use thiserror::Error;
 
-use crate::user_config::{self, ServerTarget};
+use crate::target::ServerTarget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LoopbackClassification {
+pub enum LoopbackClassification {
     Https,
     LoopbackHttp,
     UnixSocket,
@@ -13,7 +13,7 @@ pub(crate) enum LoopbackClassification {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum TargetSchemeError {
+pub enum TargetSchemeError {
     #[error("invalid server URL `{value}`: {reason}")]
     InvalidUrl { value: String, reason: String },
     #[error("unsupported server URL scheme `{scheme}`")]
@@ -22,22 +22,25 @@ pub(crate) enum TargetSchemeError {
     MissingHost { value: String },
 }
 
-pub(crate) fn is_loopback_or_unix_socket(
+pub(crate) fn classify_target(
     target: &ServerTarget,
 ) -> Result<LoopbackClassification, TargetSchemeError> {
-    match target {
-        ServerTarget::UnixSocket(_) => Ok(LoopbackClassification::UnixSocket),
-        ServerTarget::HttpUrl(api_url) => classify_http_target(api_url),
+    if target.is_unix_socket() {
+        Ok(LoopbackClassification::UnixSocket)
+    } else if let Some(api_url) = target.as_http_url() {
+        classify_http_target(api_url)
+    } else {
+        Err(TargetSchemeError::MissingHost {
+            value: target.to_string(),
+        })
     }
 }
 
 fn classify_http_target(api_url: &str) -> Result<LoopbackClassification, TargetSchemeError> {
-    let normalized = user_config::normalized_http_base_url(api_url);
-    let url =
-        fabro_http::Url::parse(normalized).map_err(|source| TargetSchemeError::InvalidUrl {
-            value:  api_url.to_string(),
-            reason: source.to_string(),
-        })?;
+    let url = fabro_http::Url::parse(api_url).map_err(|source| TargetSchemeError::InvalidUrl {
+        value:  api_url.to_string(),
+        reason: source.to_string(),
+    })?;
 
     match url.scheme() {
         "https" => Ok(LoopbackClassification::Https),
@@ -50,7 +53,7 @@ fn classify_http_target(api_url: &str) -> Result<LoopbackClassification, TargetS
             if !url.username().is_empty() || url.password().is_some() {
                 return Ok(LoopbackClassification::Rejected);
             }
-            let Some(authority) = raw_authority(normalized) else {
+            let Some(authority) = raw_authority(api_url) else {
                 return Err(TargetSchemeError::MissingHost {
                     value: api_url.to_string(),
                 });
@@ -119,38 +122,36 @@ fn ip_is_loopback(ip: &IpAddr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
-    use super::{LoopbackClassification, is_loopback_or_unix_socket};
-    use crate::user_config::ServerTarget;
+    use super::LoopbackClassification;
+    use crate::target::ServerTarget;
 
     #[test]
     fn classifies_https_loopback_and_unix_targets() {
         let cases = [
             (
-                ServerTarget::HttpUrl("https://fabro.example.com".to_string()),
+                ServerTarget::http_url("https://fabro.example.com").unwrap(),
                 LoopbackClassification::Https,
             ),
             (
-                ServerTarget::HttpUrl("http://127.0.0.1:3000".to_string()),
+                ServerTarget::http_url("http://127.0.0.1:3000").unwrap(),
                 LoopbackClassification::LoopbackHttp,
             ),
             (
-                ServerTarget::HttpUrl("http://[::1]:3000".to_string()),
+                ServerTarget::http_url("http://[::1]:3000").unwrap(),
                 LoopbackClassification::LoopbackHttp,
             ),
             (
-                ServerTarget::HttpUrl("http://[::ffff:127.0.0.1]:3000".to_string()),
+                ServerTarget::http_url("http://[::ffff:127.0.0.1]:3000").unwrap(),
                 LoopbackClassification::LoopbackHttp,
             ),
             (
-                ServerTarget::UnixSocket(PathBuf::from("/tmp/fabro.sock")),
+                ServerTarget::unix_socket_path("/tmp/fabro.sock").unwrap(),
                 LoopbackClassification::UnixSocket,
             ),
         ];
 
         for (target, expected) in cases {
-            assert_eq!(is_loopback_or_unix_socket(&target).unwrap(), expected);
+            assert_eq!(target.loopback_classification().unwrap(), expected);
         }
     }
 
@@ -162,23 +163,46 @@ mod tests {
             "http://127.0.0.1:1@attacker.com",
             "http://localhost",
             "http://localhost.evil.com",
-            "http://2130706433",
-            "http://0x7f000001",
         ];
 
         for api_url in cases {
-            let target = ServerTarget::HttpUrl(api_url.to_string());
+            let target = ServerTarget::http_url(api_url).unwrap();
             assert_eq!(
-                is_loopback_or_unix_socket(&target).unwrap(),
+                target.loopback_classification().unwrap(),
                 LoopbackClassification::Rejected
             );
         }
     }
 
     #[test]
-    fn rejects_unsupported_schemes() {
-        let target = ServerTarget::HttpUrl("ftp://fabro.example.com".to_string());
-        let error = is_loopback_or_unix_socket(&target).unwrap_err();
-        assert!(error.to_string().contains("unsupported server URL scheme"));
+    fn rejects_obfuscated_ipv4_literals_at_parse_time() {
+        let cases = [
+            "http://2130706433",  // decimal integer
+            "http://0x7f000001",  // hex integer
+            "http://0177.0.0.1",  // octal dotted
+            "http://127.1",       // two-part short
+            "http://127.0.1",     // three-part short
+            "http://0x7f.0.0.1",  // mixed hex/decimal
+            "http://127.00.0.1",  // leading-zero octet
+            "http://127.0.0.001", // leading-zero octet
+        ];
+        for api_url in cases {
+            assert!(
+                ServerTarget::http_url(api_url).is_err(),
+                "{api_url} should not parse as a server target"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_http_server_targets_at_parse_time() {
+        let error = "ftp://fabro.example.com"
+            .parse::<ServerTarget>()
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("server target must be an http(s) URL or absolute Unix socket path")
+        );
     }
 }

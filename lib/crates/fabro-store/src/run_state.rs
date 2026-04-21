@@ -9,56 +9,13 @@ use fabro_types::run_event::{
 };
 use fabro_types::{
     BilledModelUsage, BlockedReason, Checkpoint, Conclusion, EventBody, FailureSignature,
-    InterviewQuestionRecord, InterviewQuestionType, NodeStatusRecord, Outcome, PullRequestRecord,
-    Retro, RunControlAction, RunEvent, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord,
-    StageStatus, StartRecord, StatusReason,
+    InterviewQuestionRecord, InterviewQuestionType, NodeStatusRecord, Outcome,
+    PendingInterviewRecord, PullRequestRecord, RunControlAction, RunId, RunProjection, RunSpec,
+    RunStatus, RunStatusRecord, RunSummary, SandboxRecord, StageStatus, StartRecord, StatusReason,
 };
 use serde_json::Value;
 
-use crate::{Error, EventEnvelope, Result, RunSummary, StageId};
-
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-pub struct RunProjection {
-    pub run:                Option<RunRecord>,
-    pub graph_source:       Option<String>,
-    pub start:              Option<StartRecord>,
-    pub status:             Option<RunStatusRecord>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prior_status:       Option<RunStatus>,
-    pub pending_control:    Option<RunControlAction>,
-    pub checkpoint:         Option<Checkpoint>,
-    pub checkpoints:        Vec<(u32, Checkpoint)>,
-    pub conclusion:         Option<Conclusion>,
-    pub retro:              Option<Retro>,
-    pub retro_prompt:       Option<String>,
-    pub retro_response:     Option<String>,
-    pub sandbox:            Option<SandboxRecord>,
-    pub final_patch:        Option<String>,
-    pub pull_request:       Option<PullRequestRecord>,
-    pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
-    nodes:                  HashMap<StageId, NodeState>,
-}
-
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct PendingInterviewRecord {
-    pub question:   InterviewQuestionRecord,
-    pub started_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct NodeState {
-    pub prompt:            Option<String>,
-    pub response:          Option<String>,
-    pub status:            Option<NodeStatusRecord>,
-    pub provider_used:     Option<serde_json::Value>,
-    pub diff:              Option<String>,
-    pub script_invocation: Option<serde_json::Value>,
-    pub script_timing:     Option<serde_json::Value>,
-    pub parallel_results:  Option<serde_json::Value>,
-    pub stdout:            Option<String>,
-    pub stderr:            Option<String>,
-}
+use crate::{Error, EventEnvelope, Result};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct EventProjectionCache {
@@ -66,8 +23,16 @@ pub(crate) struct EventProjectionCache {
     pub state:    RunProjection,
 }
 
-impl RunProjection {
-    pub fn apply_events(events: &[EventEnvelope]) -> Result<Self> {
+pub trait RunProjectionReducer {
+    fn apply_events(events: &[EventEnvelope]) -> Result<Self>
+    where
+        Self: Sized;
+
+    fn apply_event(&mut self, event: &EventEnvelope) -> Result<()>;
+}
+
+impl RunProjectionReducer for RunProjection {
+    fn apply_events(events: &[EventEnvelope]) -> Result<Self> {
         let mut state = Self::default();
         for event in events {
             state.apply_event(event)?;
@@ -75,9 +40,8 @@ impl RunProjection {
         Ok(state)
     }
 
-    pub fn apply_event(&mut self, event: &EventEnvelope) -> Result<()> {
-        let stored = RunEvent::from_ref(event.payload.as_value())
-            .map_err(|err| Error::InvalidEvent(format!("invalid stored event: {err}")))?;
+    fn apply_event(&mut self, event: &EventEnvelope) -> Result<()> {
+        let stored = &event.event;
         let ts = stored.ts;
         let run_id = stored.run_id;
 
@@ -85,7 +49,7 @@ impl RunProjection {
             EventBody::RunCreated(props) => {
                 let working_directory = PathBuf::from(&props.working_directory);
                 let labels = props.labels.clone().into_iter().collect::<HashMap<_, _>>();
-                self.run = Some(RunRecord {
+                self.spec = Some(RunSpec {
                     run_id,
                     settings: props.settings.clone(),
                     graph: props.graph.clone(),
@@ -110,8 +74,8 @@ impl RunProjection {
                 });
             }
             EventBody::RunSubmitted(props) => {
-                if let Some(run) = self.run.as_mut() {
-                    run.definition_blob = props.definition_blob;
+                if let Some(spec) = self.spec.as_mut() {
+                    spec.definition_blob = props.definition_blob;
                 }
                 self.status = Some(run_status_record(RunStatus::Submitted, props.reason, ts));
             }
@@ -420,107 +384,60 @@ impl RunProjection {
 
         Ok(())
     }
+}
 
-    pub fn node(&self, node: &StageId) -> Option<&NodeState> {
-        self.nodes.get(node)
-    }
-
-    pub fn iter_nodes(&self) -> impl Iterator<Item = (&StageId, &NodeState)> {
-        self.nodes.iter()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
-    }
-
-    pub fn set_node(&mut self, node: StageId, state: NodeState) {
-        self.nodes.insert(node, state);
-    }
-
-    pub fn list_node_visits(&self, node_id: &str) -> Vec<u32> {
-        let mut visits = self
-            .nodes
-            .keys()
-            .filter(|node| node.node_id() == node_id)
-            .map(StageId::visit)
-            .collect::<Vec<_>>();
-        visits.sort_unstable();
-        visits.dedup();
-        visits
-    }
-
-    pub(crate) fn build_summary(&self, run_id: &RunId) -> RunSummary {
-        let workflow_name = self.run.as_ref().map(|run| {
-            if run.graph.name.is_empty() {
-                "unnamed".to_string()
-            } else {
-                run.graph.name.clone()
-            }
-        });
-        let goal = self.run.as_ref().and_then(|run| {
-            let goal = run.graph.goal();
-            (!goal.is_empty()).then(|| goal.to_string())
-        });
-        RunSummary {
-            run_id: *run_id,
-            workflow_name,
-            workflow_slug: self.run.as_ref().and_then(|run| run.workflow_slug.clone()),
-            goal,
-            labels: self
-                .run
-                .as_ref()
-                .map(|run| run.labels.clone())
-                .unwrap_or_default(),
-            host_repo_path: self.run.as_ref().and_then(|run| run.host_repo_path.clone()),
-            start_time: self.start.as_ref().map(|start| start.start_time),
-            status: self
-                .status
-                .as_ref()
-                .map_or(RunStatus::Submitted, |status| status.status),
-            status_reason: self.status.as_ref().and_then(|status| status.status_reason),
-            blocked_reason: self
-                .status
-                .as_ref()
-                .and_then(|status| status.blocked_reason),
-            pending_control: self.pending_control,
-            duration_ms: self
-                .conclusion
-                .as_ref()
-                .map(|conclusion| conclusion.duration_ms),
-            total_usd_micros: self
-                .conclusion
-                .as_ref()
-                .and_then(|conclusion| conclusion.billing.as_ref())
-                .and_then(|billing| billing.total_usd_micros),
+pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary {
+    let workflow_name = state.spec.as_ref().map(|spec| {
+        if spec.graph.name.is_empty() {
+            "unnamed".to_string()
+        } else {
+            spec.graph.name.clone()
         }
-    }
-
-    fn node_mut(&mut self, node_id: &str, visit: u32) -> &mut NodeState {
-        self.nodes.entry(StageId::new(node_id, visit)).or_default()
-    }
-
-    fn current_visit_for(&self, node_id: &str) -> Option<u32> {
-        self.nodes
-            .keys()
-            .filter(|node| node.node_id() == node_id)
-            .map(StageId::visit)
-            .max()
-    }
-
-    fn reset_for_rewind(&mut self) {
-        self.status = None;
-        self.pending_control = None;
-        self.checkpoint = None;
-        self.checkpoints.clear();
-        self.conclusion = None;
-        self.retro = None;
-        self.retro_prompt = None;
-        self.retro_response = None;
-        self.sandbox = None;
-        self.final_patch = None;
-        self.pull_request = None;
-        self.pending_interviews.clear();
-        self.nodes.clear();
+    });
+    let goal = state.spec.as_ref().and_then(|spec| {
+        let goal = spec.graph.goal();
+        (!goal.is_empty()).then(|| goal.to_string())
+    });
+    RunSummary {
+        run_id: *run_id,
+        workflow_name,
+        workflow_slug: state
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.workflow_slug.clone()),
+        goal,
+        labels: state
+            .spec
+            .as_ref()
+            .map(|spec| spec.labels.clone())
+            .unwrap_or_default(),
+        host_repo_path: state
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.host_repo_path.clone()),
+        start_time: state.start.as_ref().map(|start| start.start_time),
+        status: state
+            .status
+            .as_ref()
+            .map_or(RunStatus::Submitted, |status| status.status),
+        status_reason: state
+            .status
+            .as_ref()
+            .and_then(|status| status.status_reason),
+        blocked_reason: state
+            .status
+            .as_ref()
+            .and_then(|status| status.blocked_reason),
+        pending_control: state.pending_control,
+        duration_ms: state
+            .conclusion
+            .as_ref()
+            .map(|conclusion| conclusion.duration_ms),
+        total_usd_micros: state
+            .conclusion
+            .as_ref()
+            .and_then(|conclusion| conclusion.billing.as_ref())
+            .and_then(|billing| billing.total_usd_micros),
     }
 }
 
@@ -700,13 +617,13 @@ mod tests {
     };
     use fabro_types::settings::SettingsLayer;
     use fabro_types::{
-        Checkpoint, EventBody, InterviewQuestionType, RunBlobId, RunControlAction, RunEvent,
-        fixtures,
+        Checkpoint, EventBody, InterviewQuestionType, NodeState, RunBlobId, RunControlAction,
+        RunEvent, fixtures,
     };
     use serde_json::json;
 
-    use super::{NodeState, RunProjection};
-    use crate::{EventEnvelope, EventPayload, StageId};
+    use super::{RunProjection, RunProjectionReducer, build_summary};
+    use crate::{EventEnvelope, StageId};
 
     fn test_event(seq: u32, body: EventBody, node_id: Option<&str>) -> EventEnvelope {
         let event = RunEvent {
@@ -725,11 +642,7 @@ mod tests {
             body,
         };
 
-        EventEnvelope {
-            seq,
-            payload: EventPayload::new(serde_json::to_value(event).unwrap(), &fixtures::RUN_1)
-                .unwrap(),
-        }
+        EventEnvelope { seq, event }
     }
 
     fn test_raw_event(
@@ -740,17 +653,14 @@ mod tests {
     ) -> EventEnvelope {
         EventEnvelope {
             seq,
-            payload: EventPayload::new(
-                json!({
-                    "id": format!("evt-{seq}"),
-                    "ts": Utc::now().to_rfc3339(),
-                    "run_id": fixtures::RUN_1,
-                    "event": event,
-                    "node_id": node_id,
-                    "properties": properties,
-                }),
-                &fixtures::RUN_1,
-            )
+            event: RunEvent::from_value(json!({
+                "id": format!("evt-{seq}"),
+                "ts": Utc::now().to_rfc3339(),
+                "run_id": fixtures::RUN_1,
+                "event": event,
+                "node_id": node_id,
+                "properties": properties,
+            }))
             .unwrap(),
         }
     }
@@ -770,6 +680,20 @@ mod tests {
     #[test]
     fn deserialize_and_round_trip_projection_preserves_stage_ids_and_pending_control() {
         let state: RunProjection = serde_json::from_value(serde_json::json!({
+            "spec": {
+                "run_id": "01JW6A7VNFZSFF0SKXJG29Z2M3",
+                "settings": { "_version": 1 },
+                "graph": { "name": "ship", "nodes": {}, "edges": [], "attrs": {} },
+                "workflow_slug": "demo",
+                "working_directory": "/tmp/project",
+                "host_repo_path": null,
+                "repo_origin_url": null,
+                "base_branch": null,
+                "labels": {},
+                "provenance": null,
+                "manifest_blob": null,
+                "definition_blob": null
+            },
             "pending_control": "cancel",
             "checkpoints": [[
                 0,
@@ -802,6 +726,7 @@ mod tests {
 
         let round_tripped: RunProjection =
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
+        let serialized = serde_json::to_value(&state).unwrap();
         let round_tripped_node = round_tripped.node(&stage_id).unwrap();
         assert_eq!(round_tripped_node.stdout.as_deref(), Some("done"));
         assert_eq!(round_tripped.list_node_visits("build"), vec![2]);
@@ -809,27 +734,27 @@ mod tests {
             round_tripped.pending_control,
             Some(RunControlAction::Cancel)
         );
+        assert!(serialized.get("spec").is_some());
+        assert!(serialized.get("run").is_none());
     }
 
     #[test]
     fn set_node_round_trips_through_json() {
-        let mut state = RunProjection {
-            pending_control: Some(RunControlAction::Unpause),
-            checkpoints: vec![(7, Checkpoint {
-                timestamp:                  "2026-04-07T12:00:00Z".parse().unwrap(),
-                current_node:               "build".to_string(),
-                completed_nodes:            vec!["build".to_string()],
-                node_retries:               HashMap::new(),
-                context_values:             HashMap::new(),
-                node_outcomes:              HashMap::new(),
-                next_node_id:               None,
-                git_commit_sha:             None,
-                loop_failure_signatures:    HashMap::new(),
-                restart_failure_signatures: HashMap::new(),
-                node_visits:                HashMap::from([("build".to_string(), 2usize)]),
-            })],
-            ..RunProjection::default()
-        };
+        let mut state = RunProjection::default();
+        state.pending_control = Some(RunControlAction::Unpause);
+        state.checkpoints = vec![(7, Checkpoint {
+            timestamp:                  "2026-04-07T12:00:00Z".parse().unwrap(),
+            current_node:               "build".to_string(),
+            completed_nodes:            vec!["build".to_string()],
+            node_retries:               HashMap::new(),
+            context_values:             HashMap::new(),
+            node_outcomes:              HashMap::new(),
+            next_node_id:               None,
+            git_commit_sha:             None,
+            loop_failure_signatures:    HashMap::new(),
+            restart_failure_signatures: HashMap::new(),
+            node_visits:                HashMap::from([("build".to_string(), 2usize)]),
+        })];
         state.set_node(StageId::new("build", 2), NodeState {
             stdout: Some("done".to_string()),
             ..NodeState::default()
@@ -955,7 +880,7 @@ mod tests {
         assert_eq!(status_json["status_reason"], serde_json::Value::Null);
         assert_eq!(status_json["blocked_reason"], "human_input_required");
 
-        let summary = state.build_summary(&fixtures::RUN_1);
+        let summary = build_summary(&state, &fixtures::RUN_1);
         let summary_json = serde_json::to_value(summary).unwrap();
         assert_eq!(summary_json["status"], "paused");
         assert_eq!(summary_json["status_reason"], serde_json::Value::Null);
@@ -1053,25 +978,23 @@ mod tests {
 
     #[test]
     fn summary_synthesizes_submitted_when_run_exists_without_status() {
-        let state = RunProjection {
-            run: Some(fabro_types::RunRecord {
-                run_id:            fixtures::RUN_1,
-                settings:          SettingsLayer::default(),
-                graph:             fabro_types::Graph::new("test"),
-                workflow_slug:     Some("test".to_string()),
-                working_directory: std::path::PathBuf::from("/tmp/run"),
-                host_repo_path:    Some("/tmp/repo".to_string()),
-                repo_origin_url:   None,
-                base_branch:       None,
-                labels:            HashMap::new(),
-                provenance:        None,
-                manifest_blob:     None,
-                definition_blob:   None,
-            }),
-            ..RunProjection::default()
-        };
+        let mut state = RunProjection::default();
+        state.spec = Some(fabro_types::RunSpec {
+            run_id:            fixtures::RUN_1,
+            settings:          SettingsLayer::default(),
+            graph:             fabro_types::Graph::new("test"),
+            workflow_slug:     Some("test".to_string()),
+            working_directory: std::path::PathBuf::from("/tmp/run"),
+            host_repo_path:    Some("/tmp/repo".to_string()),
+            repo_origin_url:   None,
+            base_branch:       None,
+            labels:            HashMap::new(),
+            provenance:        None,
+            manifest_blob:     None,
+            definition_blob:   None,
+        });
 
-        let summary_json = serde_json::to_value(state.build_summary(&fixtures::RUN_1)).unwrap();
+        let summary_json = serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap();
         assert_eq!(summary_json["status"], "submitted");
     }
 
@@ -1082,45 +1005,39 @@ mod tests {
             RunBlobId::new(br#"{"version":1,"workflow_path":"workflow.fabro"}"#).to_string();
         let events = vec![
             EventEnvelope {
-                seq:     1,
-                payload: EventPayload::new(
-                    json!({
-                        "id": "evt-run-created",
-                        "ts": "2026-04-07T12:00:00Z",
-                        "run_id": fixtures::RUN_1,
-                        "event": "run.created",
-                        "properties": {
-                            "settings": SettingsLayer::default(),
-                            "graph": {
-                                "name": "test",
-                                "nodes": {},
-                                "edges": [],
-                                "attrs": {}
-                            },
-                            "labels": {},
-                            "run_dir": "/tmp/run",
-                            "working_directory": "/tmp/run",
-                            "manifest_blob": manifest_blob
-                        }
-                    }),
-                    &fixtures::RUN_1,
-                )
+                seq:   1,
+                event: RunEvent::from_value(json!({
+                    "id": "evt-run-created",
+                    "ts": "2026-04-07T12:00:00Z",
+                    "run_id": fixtures::RUN_1,
+                    "event": "run.created",
+                    "properties": {
+                        "settings": SettingsLayer::default(),
+                        "graph": {
+                            "name": "test",
+                            "nodes": {},
+                            "edges": [],
+                            "attrs": {}
+                        },
+                        "labels": {},
+                        "run_dir": "/tmp/run",
+                        "working_directory": "/tmp/run",
+                        "manifest_blob": manifest_blob
+                    }
+                }))
                 .unwrap(),
             },
             EventEnvelope {
-                seq:     2,
-                payload: EventPayload::new(
-                    json!({
-                        "id": "evt-run-submitted",
-                        "ts": "2026-04-07T12:00:01Z",
-                        "run_id": fixtures::RUN_1,
-                        "event": "run.submitted",
-                        "properties": {
-                            "definition_blob": definition_blob
-                        }
-                    }),
-                    &fixtures::RUN_1,
-                )
+                seq:   2,
+                event: RunEvent::from_value(json!({
+                    "id": "evt-run-submitted",
+                    "ts": "2026-04-07T12:00:01Z",
+                    "run_id": fixtures::RUN_1,
+                    "event": "run.submitted",
+                    "properties": {
+                        "definition_blob": definition_blob
+                    }
+                }))
                 .unwrap(),
             },
         ];
@@ -1129,12 +1046,12 @@ mod tests {
         let value = serde_json::to_value(&state).unwrap();
 
         assert_eq!(
-            value["run"]["manifest_blob"],
-            events[0].payload.as_value()["properties"]["manifest_blob"]
+            value["spec"]["manifest_blob"],
+            events[0].event.properties().unwrap()["manifest_blob"]
         );
         assert_eq!(
-            value["run"]["definition_blob"],
-            events[1].payload.as_value()["properties"]["definition_blob"]
+            value["spec"]["definition_blob"],
+            events[1].event.properties().unwrap()["definition_blob"]
         );
     }
 

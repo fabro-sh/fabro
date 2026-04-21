@@ -58,14 +58,14 @@ pub(crate) async fn execute(
             fabro_util::printout!(printer, "{}", created_run.run_id);
         }
     } else {
-        let exit_code = super::attach::attach_run_with_client(
+        let exit_code = Box::pin(super::attach::attach_run_with_client(
             &client,
             &created_run.run_id,
             true,
             styles,
             json,
             printer,
-        )
+        ))
         .await?;
         if !json {
             super::output::print_run_summary_with_client(

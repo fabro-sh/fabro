@@ -14,7 +14,7 @@ use crate::server_runs::ServerRunSummaryInfo;
 pub(crate) struct InspectOutput {
     pub run_id:       String,
     pub status:       RunStatus,
-    pub run_record:   Option<serde_json::Value>,
+    pub run_spec:     Option<serde_json::Value>,
     pub start_record: Option<serde_json::Value>,
     pub conclusion:   Option<serde_json::Value>,
     pub checkpoint:   Option<serde_json::Value>,
@@ -45,8 +45,8 @@ fn inspect_run_state(run: &ServerRunSummaryInfo, state: RunProjection) -> Inspec
             .status
             .as_ref()
             .map_or(run.status(), |record| record.status),
-        run_record:   state
-            .run
+        run_spec:     state
+            .spec
             .and_then(|record| serde_json::to_value(record).ok()),
         start_record: state
             .start

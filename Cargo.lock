@@ -1583,6 +1583,7 @@ name = "fabro-checkpoint"
 version = "0.208.0-nightly.1"
 dependencies = [
  "chrono",
+ "fabro-store",
  "fabro-types",
  "git2",
  "serde",
@@ -1616,6 +1617,7 @@ dependencies = [
  "fabro-api",
  "fabro-auth",
  "fabro-checkpoint",
+ "fabro-client",
  "fabro-config",
  "fabro-devcontainer",
  "fabro-github",
@@ -1680,6 +1682,32 @@ dependencies = [
  "ulid",
  "walkdir",
  "x509-parser",
+]
+
+[[package]]
+name = "fabro-client"
+version = "0.208.0-nightly.1"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "fabro-api",
+ "fabro-http",
+ "fabro-model",
+ "fabro-types",
+ "fabro-util",
+ "fs2",
+ "futures",
+ "libc",
+ "progenitor-client",
+ "rand 0.9.4",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -2074,6 +2102,8 @@ dependencies = [
  "dashmap",
  "fabro-types",
  "futures",
+ "hex",
+ "insta",
  "object_store",
  "percent-encoding",
  "serde",

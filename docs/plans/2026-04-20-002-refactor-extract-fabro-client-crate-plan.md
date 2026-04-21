@@ -41,6 +41,19 @@ These were all reasonable while the client had exactly one caller. They prevent 
 - R8. `fabro-cli` keeps CLI-owned orchestration: subprocess autostart, server-record lookup, dev-token-from-disk loading, `[cli.target]` TOML resolution, and the wrapper that stitches these together into a ready-to-use `fabro_client::Client`.
 - R9. The full workspace build passes (`cargo build --workspace`), clippy is clean (`cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`), rustfmt check passes, and all workspace tests continue to pass (`cargo nextest run --workspace`).
 
+## Review Adjustments
+
+- Remaining gaps against this plan in the current landed code:
+  - `HttpResponseFailure` → `ApiError` rename is still open.
+  - `ServerTarget` canonical-by-construction / lexical-only Unix-path canonicalization is still open; canonicalization still partly lives in `AuthStore`.
+  - `RunAttachEventStream` → `RunEventStream` rename is still open at the CLI boundary.
+  - Because the two rename cleanups above are still open, Unit 11's "no leaked old names" grep is currently expected to fail until that follow-up cleanup lands.
+- Clarifications after implementation review:
+  - `RunProjection` ownership moved to `fabro-types`; external callers may continue to import it through `fabro_store`'s re-export. Verification should check type ownership and dependency boundaries, not the literal import spelling.
+  - `Client::from_http_client(...)` is the required public constructor. `Client::new_no_proxy(...)` may remain as a convenience wrapper, primarily for tests.
+  - `TransportConnector` is an acceptable internal helper inside `fabro-client` when needed to preserve caller-specific transport configuration across refresh/rebuild flows.
+  - `fabro-cli` may retain multiple thin `connect_*` convenience wrappers so long as they preserve CLI-only orchestration and funnel into `Client::builder()` under the hood.
+
 ## Scope Boundaries
 
 **In scope:**
@@ -57,7 +70,7 @@ These were all reasonable while the client had exactly one caller. They prevent 
 - Writing a second consumer of `fabro-client` (SDK example, IDE integration, etc.) — the crate exists to enable that, not to deliver it.
 - Changing wire semantics (OpenAPI contract stays identical).
 - Migrating existing `~/.fabro/auth.json` entries. The canonical key format for HTTP targets remains identical (same `normalized_http_base_url` logic); Unix-socket canonicalization changes from `fs::canonicalize` (symlink-resolving) to lexical-only (`.`/`..` cleanup, no symlink chasing). Existing sessions against socket paths written as absolute non-symlinked paths continue to match. Users with symlinked socket paths may need to re-login — acceptable per `CLAUDE.md` ("We don't care about migration").
-- (Previously noted as out of scope; now in scope per review feedback.) `RunEvent` unknown-variant handling: add a fallback `Unknown` variant so older CLIs against newer servers survive deserialization. Covered under Unit 2.
+- `RunEvent` unknown-variant handling. Already present today via `EventBody::Unknown` at `lib/crates/fabro-types/src/run_event/mod.rs:695` (covered by `:974`). Unit 2 verifies the `EventEnvelope` restructure preserves this existing behavior — no new variant, no new code.
 - Splitting the ~40 client methods into separate `client/runs.rs`, `client/secrets.rs`, etc. modules. A single `client.rs` is acceptable at ~900 lines; cosmetic domain splitting can happen later if the file grows.
 
 ## Context & Research
@@ -96,7 +109,8 @@ None. Internal refactor; the patterns are all established locally.
 - **`ServerTarget` canonical-by-construction, lexical only.** `ServerTarget::from_url` applies today's full HTTP canonicalization inline: lowercase scheme, lowercase host, strip default ports (`:443` on https, `:80` on http), strip trailing `/`, strip `/api/v1` suffix, rebuild authority as `{scheme}://{host}[:{port}]`. `ServerTarget::from_unix_path` applies lexical `.`/`..` resolution (no FS access, no symlink chasing). `PartialEq`/`Eq`/`Hash` operate on the canonical form directly. `ServerTargetKey` is deleted; `ServerTarget` itself serves as the `AuthStore` map key. In OOP style: construction *is* the canonicalizer — no separate `canonicalize()` method. Related helpers attach to `ServerTarget` as inherent methods (`target.loopback_classification()`, `target.build_public_http_client()`) rather than free functions.
 - **`AuthStore` moves to `fabro-client`.** Default path remains `~/.fabro/auth.json` via `fabro_util::Home`. The public API (`get`/`put`/`remove`/`list`) is narrow enough that we keep it concrete — no `TokenRefresher` trait abstraction. Callers wanting alternative storage can pass an explicit path to `AuthStore::new`. If external-consumer flexibility becomes a real need later, we extract a trait then, not now.
 - **Renames applied inline with moves.** We don't do a separate rename pass — the DTOs and internal types are renamed as they move. This keeps the compiler-driven find-all-callers loop honest: every broken import is both a move and a rename in one commit.
-- **Connection API collapses to one builder.** Today's four `connect_*` functions in `server_client.rs` are all CLI-opinionated. `fabro-client` exposes a single `Client::builder().target(t).credential(c).oauth_session(s).connect().await?`. The CLI's `connect_server_with_settings` becomes a thin orchestrator: resolve target → autostart if needed → build `Credential` from dev-token/env/AuthStore → call `Client::builder()`.
+- **Connection API centers on one builder.** Today's `connect_*` functions in `server_client.rs` are CLI-opinionated convenience wrappers. `fabro-client` exposes `Client::builder().target(t).credential(c).oauth_session(s).connect().await?` as the underlying connection API. `fabro-cli` may keep several thin `connect_*` wrappers, but they must remain orchestration-only and funnel into the builder instead of duplicating transport/session assembly logic.
+- **Refresh rebuilds may use a transport connector hook.** If the CLI needs request-transport customization across OAuth refresh rebuilds (for example, preserving a CLI-specific user-agent), `fabro-client` may carry a `TransportConnector`-style helper as an internal implementation detail. This does not count as a second public connection API.
 
 - **`OAuthSession` refresh fallback via `CredentialFallback` trait.** Today's refresh flow falls back to a dev-token-from-disk when the OAuth entry is missing, expired, or revoked. That fallback lookup reads CLI-owned sources (`FABRO_DEV_TOKEN` env, `~/.fabro/dev-token`, storage-dir dev-token file, fabro-server pidfile record) that don't belong in `fabro-client`. `OAuthSession` takes an optional `Box<dyn CredentialFallback>` at build time:
   ```text
@@ -107,7 +121,7 @@ None. Internal refactor; the patterns are all established locally.
   ```
   On refresh failure modes that previously triggered fallback, `OAuthSession` calls `fallback.resolve()`. If `Some(Credential)`, the session rebuilds the client bundle with that credential; if `None`, it surfaces "session expired." The CLI provides a concrete impl in `fabro-cli` that wraps the existing dev-token-loading logic. Named trait (vs bare `Fn` closure) makes the role obvious at the `OAuthSession::builder` call site.
 
-- **`fabro_types::RunEvent` gains unknown-variant tolerance.** Add `#[serde(other)] Unknown` (or `#[serde(untagged)] Unknown(serde_json::Value)` depending on the enum shape) so a newer server's unknown event type doesn't break an older CLI at deserialize. Preserves today's accidental forward-compat that came from storing events as raw JSON. Small addition to the event enum; benefit extends beyond this plan (any event-consuming path becomes version-mismatch-tolerant).
+- **`fabro_types::RunEvent` already tolerates unknown event names.** `EventBody::Unknown { name, properties }` at `lib/crates/fabro-types/src/run_event/mod.rs:695` is the existing fallback — a newer server's unknown event type deserializes into this variant without error. Unit 2's responsibility is to *preserve* this behavior across the `EventEnvelope { seq, #[serde(flatten)] event: RunEvent }` restructure, not to add a new variant.
 - **Phased delivery.** DTO lift must land before the client extraction — otherwise `fabro-client`'s deps can't be correct. We split the work into three phases (DTO lift → `fabro-client` extraction → `fabro-cli` rewire) and land each phase as a coherent chunk. Each phase compiles and tests pass at its boundary.
 
 ## Open Questions
@@ -117,11 +131,11 @@ None. Internal refactor; the patterns are all established locally.
 - **Where do `apply_events`/`apply_event` live after `RunProjection` moves?** In `fabro-store` as an extension trait `RunProjectionReducer` implemented on `fabro_types::RunProjection`. Preserves OOP-style method-call syntax at call sites via `use fabro_store::RunProjectionReducer;`. Chosen over free functions because the workspace leans toward methods over free helpers.
 - **HTTP canonicalization scope in `ServerTarget::from_url`.** Preserve today's full normalization: lowercase scheme + lowercase host + strip default ports + strip trailing `/` + strip `/api/v1` suffix + rebuild authority. Matches today's `canonical_http_target` in `auth_store.rs:350-383` and the existing `https_normalization_collapses_equivalent_urls` test at line 507. Simpler "strip slash + api-v1 only" form was rejected because it would silently invalidate AuthStore entries for users whose URLs differed only in case or default-port.
 - **OAuthSession refresh fallback mechanism.** Add a `CredentialFallback` trait; `fabro-cli` implements it against its dev-token sources; `OAuthSession` holds `Option<Box<dyn CredentialFallback>>` and calls `fallback.resolve()` on the failure modes that previously fell back to dev-token. Named trait (not bare `Fn`) chosen for role clarity.
-- **`RunEvent` unknown-variant forward-compat.** Add an `Unknown` fallback variant in `fabro_types::RunEvent` so the `EventEnvelope` restructure doesn't regress today's accidental pass-through tolerance for unknown event types. Addressed in Unit 2.
+- **`RunEvent` unknown-variant forward-compat.** Already handled today via `EventBody::Unknown` at `lib/crates/fabro-types/src/run_event/mod.rs:695` (tested at `:974`). Unit 2 verifies the `EventEnvelope` restructure preserves this existing behavior — no new variant, no new code.
 - **Does `EventEnvelope` need `EventPayload` to travel with it?** No. OpenAPI already defines the wire shape as `seq + RunEvent flattened`. `EventPayload` is a storage-internal validation helper and stays behind.
 - **Does `AuthStore` need a trait-based abstraction?** No. Concrete type with a configurable file path is sufficient; we extract a trait the day a second implementation exists.
 - **Does `ArtifactUpload` live in `fabro-types` or `fabro-client`?** `fabro-types`. Source is `fabro-workflow` (capture) → sink is `fabro-client` (upload). Placing the DTO in `fabro-types` prevents `fabro-workflow` from having to depend on `fabro-client`.
-- **How do we handle the `Client::new_no_proxy(base_url)` constructor used by CLI tests today?** Expose `Client::from_http_client(base_url, http_client)` as a public `pub fn`; the CLI's `new_no_proxy` wrapper stays in `fabro-cli` test code.
+- **How do we handle the `Client::new_no_proxy(base_url)` constructor used by CLI tests today?** Expose `Client::from_http_client(base_url, http_client)` as the stable public `pub fn`. `Client::new_no_proxy(base_url)` may remain as a small convenience wrapper (in `fabro-client` or CLI-local test code) if it continues to earn its keep.
 - **`convert_type` serde round-trip helper — does it stay in the CLI or move with the client?** Moves with the client. It's how the client bridges `fabro_api::types::RunSummary` (wire) → `fabro_types::RunSummary` (domain) at response boundaries.
 
 ### Deferred to Implementation
@@ -301,7 +315,6 @@ Client::builder()
 Construction sites (switch to `fabro_types::EventEnvelope { seq, event }`):
 - Create: `lib/crates/fabro-types/src/event_envelope.rs`
 - Modify: `lib/crates/fabro-types/src/lib.rs` (module + re-export)
-- Modify: `lib/crates/fabro-types/src/run_event/` (add `Unknown` fallback variant — exact form depends on current enum tagging)
 - Modify: `lib/crates/fabro-store/src/types.rs` (delete old `EventEnvelope`; keep `EventPayload` internal; update tests at lines 127 and 171)
 - Modify: `lib/crates/fabro-store/src/slate/run_store.rs` (production constructors at lines 194 and 342)
 - Modify: `lib/crates/fabro-store/src/run_state.rs` (apply_event body at line 79; test fixtures at lines 728, 741, 1086, 1112; test assertions at lines 1133, 1137)
@@ -343,7 +356,7 @@ Write-path `EventPayload::new` sites (UNAFFECTED — stay in fabro-store as inte
       pub event: RunEvent,
   }
   ```
-- Add unknown-variant tolerance to `fabro_types::RunEvent` so the read-path typed deserialization doesn't regress today's forward-compat pass-through behavior. Shape depends on `RunEvent`'s current enum tagging — likely a catch-all `Unknown(serde_json::Value)` variant with `#[serde(other)]` or an `#[serde(untagged)]` fallback. Inspect the existing `fabro_types::RunEvent` definition during implementation and pick the minimal form that preserves lossless round-trip of unknown payloads.
+- Confirm today's `EventBody::Unknown { name, properties }` fallback (at `lib/crates/fabro-types/src/run_event/mod.rs:695`) continues to round-trip through the new `EventEnvelope { seq, #[serde(flatten)] event: RunEvent }` shape — the `#[serde(flatten)]` interacts cleanly with the existing catch-all. No new variant is added; we are only confirming the existing forward-compat behavior survives.
 - `fabro-store` keeps `EventPayload` strictly internal — every existing write path continues to call `EventPayload::new(value, run_id)?` for `expected_run_id` validation before persisting (unchanged behavior). No write path bypasses that check. Only the external-facing read-path return type changes.
 - At the store's read boundary (`slate/run_store.rs:194, 342` — where the old `EventEnvelope { seq, payload }` was constructed by pairing a separately-tracked seq with decoded payload bytes): deserialize the raw bytes as `RunEvent` (the on-disk format is raw RunEvent JSON without `seq`), then wrap in `fabro_types::EventEnvelope { seq, event }`. The write path at `slate/run_store.rs:201-203` continues to persist `serde_json::to_vec(payload)?` of the `EventPayload`; the `seq` comes from a separate counter, same as today.
 - CLI callers that did `event.payload.as_value()` + `RunEvent::from_ref(...)` → change to `&event.event`. This is a win at every call site (fewer conversions).
@@ -357,7 +370,7 @@ Write-path `EventPayload::new` sites (UNAFFECTED — stay in fabro-store as inte
 - Happy path: `EventEnvelope` round-trips through `serde_json` preserving both `seq` and all `RunEvent` fields, and deserializes the existing wire format identically.
 - Integration: existing `fabro-store` test `wire_event_envelope_round_trips` still passes after porting (adapt it to construct the new struct shape).
 - Integration: CLI integration tests that consume events over SSE or HTTP (e.g., `fabro-cli/tests/it/workflow/mod.rs`, `cmd/attach.rs`) continue to pass — proves the wire shape is unchanged.
-- Forward-compat: an `EventEnvelope` JSON payload whose `type` (or equivalent discriminator) is unknown to this build of `fabro-types` deserializes into a `RunEvent::Unknown` fallback variant without error, and re-serializes losslessly.
+- Forward-compat regression guard: an `EventEnvelope` JSON payload whose event name is unknown to this build of `fabro-types` deserializes into the existing `EventBody::Unknown { name, properties }` without error and re-serializes losslessly. (Covers: the `EventEnvelope` restructure did not break today's fallback at `run_event/mod.rs:695`.)
 
 **Verification:**
 - `cargo build --workspace` succeeds.
@@ -422,7 +435,7 @@ Write-path `EventPayload::new` sites (UNAFFECTED — stay in fabro-store as inte
 **Verification:**
 - `cargo build --workspace` succeeds.
 - `cargo nextest run --workspace` passes.
-- `grep -rn "fabro_store::RunProjection" lib/` returns only re-export lines and internal fabro-store uses; external callers use `fabro_types::RunProjection`.
+- `grep -rn "struct RunProjection" lib/crates/fabro-store lib/crates/fabro-types` shows the concrete struct definition only in `fabro-types`; external callers may import either `fabro_types::RunProjection` or the `fabro-store` re-export.
 
 ---
 
@@ -629,11 +642,12 @@ Write-path `EventPayload::new` sites (UNAFFECTED — stay in fabro-store as inte
   }
   ```
   The old `ClientBundle` name disappears; `ClientState` is private to the module.
-- `Client::builder()`: new public API. Replaces today's four `connect_*` functions that blend CLI opinions with transport. The CLI's own `connect_server_with_settings` becomes a thin orchestrator over `Client::builder()` (handled in Unit 9).
+- `Client::builder()`: new public API. It becomes the underlying connection API. The CLI may keep thin `connect_*` orchestration wrappers around it (handled in Unit 9), but transport/session assembly should live in the builder path rather than being duplicated across wrappers.
 - `RunEventStream` rename: the struct, its `next_event`/`buffer_sse_events` methods, and the `VecDeque<EventEnvelope>` field. `EventEnvelope` is now `fabro_types::EventEnvelope`.
 - Method bodies: the 40 wrappers move verbatim. They call `send_api(|client| ...)` — `client` is the `fabro_api::ApiClient` from `ClientState`. `convert_type::<_, fabro_types::RunSummary>(...)` continues to bridge wire → domain.
-- `Client::from_http_client(base_url, http_client)` — public `pub fn` constructor for test use (replaces today's `new_no_proxy`). The CLI's test code can still build one via this with a `no_proxy()` builder.
+- `Client::from_http_client(base_url, http_client)` — public `pub fn` constructor for test use and non-builder callers. `Client::new_no_proxy(base_url)` may remain as a small convenience wrapper built on top of it.
 - Preserve `send_api`'s 401 → refresh → retry auto-logic. `OAuthSession` owns the refresh state it needs (`target`, `auth_store`, optional `fallback`); the actual refresh HTTP call uses a bespoke HTTP client built via `target.build_public_http_client()` (method on `ServerTarget`, not a free function — OOP style).
+- If preserving caller-specific transport behavior across refresh rebuilds requires it, `Client` may carry an internal `TransportConnector` helper that can rebuild the transport with the same customization after credentials change.
 - `CredentialFallback` trait lives in `fabro-client::credential`:
   ```text
   // Directional — not implementation

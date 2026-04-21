@@ -118,7 +118,7 @@ mod tests {
 
     use super::RunStoreHandle;
     use crate::event::{Event, append_event};
-    use crate::records::RunRecord;
+    use crate::records::RunSpec;
 
     async fn test_run_store() -> fabro_store::RunDatabase {
         let store = Arc::new(Database::new(
@@ -130,8 +130,8 @@ mod tests {
         store.create_run(&fixtures::RUN_1).await.unwrap()
     }
 
-    fn test_run_record() -> RunRecord {
-        RunRecord {
+    fn test_run_spec() -> RunSpec {
+        RunSpec {
             run_id:            fixtures::RUN_1,
             settings:          SettingsLayer::default(),
             graph:             Graph::new("test"),
@@ -150,7 +150,7 @@ mod tests {
     #[tokio::test]
     async fn local_handle_loads_state_and_events() {
         let run_store = test_run_store().await;
-        let record = test_run_record();
+        let record = test_run_spec();
         append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
             run_id:            fixtures::RUN_1,
             settings:          serde_json::to_value(&record.settings).unwrap(),
@@ -175,7 +175,7 @@ mod tests {
         let state = handle.state().await.unwrap();
         let events = handle.list_events().await.unwrap();
 
-        assert_eq!(state.run.unwrap().workflow_slug.as_deref(), Some("test"));
+        assert_eq!(state.spec.unwrap().workflow_slug.as_deref(), Some("test"));
         assert_eq!(events.len(), 1);
     }
 

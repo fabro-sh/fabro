@@ -87,8 +87,8 @@ pub(crate) async fn run(
     Ok(())
 }
 
-fn event_name(event: &fabro_store::EventEnvelope) -> Option<&str> {
-    event.payload.as_value().get("event")?.as_str()
+fn event_name(event: &fabro_store::EventEnvelope) -> &str {
+    event.event.event_name()
 }
 
 fn apply_filters(
@@ -175,7 +175,7 @@ async fn follow_store_logs(
                 let had_events = !events.is_empty();
                 let saw_terminal = events
                     .iter()
-                    .any(|event| matches!(event_name(event), Some("run.completed" | "run.failed")));
+                    .any(|event| matches!(event_name(event), "run.completed" | "run.failed"));
                 for event in events {
                     let line = event_payload_line(&event)?;
                     if pretty {
@@ -268,7 +268,7 @@ async fn flush_remaining_store_events(
 }
 
 fn event_payload_line(event: &fabro_store::EventEnvelope) -> Result<String> {
-    let mut value = normalize_json_value(event.payload.as_value().clone());
+    let mut value = normalize_json_value(event.event.to_value()?);
     restore_empty_run_properties(&mut value);
     let line = serde_json::to_string(&value)?;
     Ok(redact_jsonl_line(&line))

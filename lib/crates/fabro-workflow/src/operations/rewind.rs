@@ -3,16 +3,17 @@ use std::fmt::Write;
 use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
+use fabro_checkpoint::META_BRANCH_PREFIX;
 use fabro_checkpoint::branch::{BranchStore, CommitInfo};
 use fabro_checkpoint::git::Store;
 use fabro_graphviz::graph::Graph;
 use fabro_graphviz::parser;
+use fabro_store::RunProjection;
 use fabro_types::{RunId, RunStatus};
 use git2::{Oid, Repository, Signature};
 
 use super::archive::ensure_not_archived;
 use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
-use crate::records::{Checkpoint, RunRecord};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RewindTarget {
@@ -141,12 +142,15 @@ pub fn build_timeline(store: &Store, run_id: &str) -> Result<RunTimeline> {
         if !commit.message.starts_with("checkpoint") {
             continue;
         }
-        let blob = store
-            .read_blob_at(commit.oid, "checkpoint.json")
-            .map_err(|e| anyhow::anyhow!("failed to read checkpoint blob: {e}"))?;
-        let Some(bytes) = blob else { continue };
-        let cp: Checkpoint = serde_json::from_slice(&bytes)
-            .with_context(|| format!("failed to parse checkpoint at {}", commit.oid))?;
+        let Some(projection) = read_projection_at_commit(store, commit.oid)? else {
+            continue;
+        };
+        let cp = projection.checkpoint.with_context(|| {
+            format!(
+                "metadata checkpoint {} is missing projection.checkpoint",
+                commit.oid
+            )
+        })?;
 
         ordinal += 1;
         let visit = cp.node_visits.get(&cp.current_node).copied().unwrap_or(1);
@@ -316,37 +320,42 @@ fn rewind_to_entry(store: &Store, run_id: &RunId, entry: &TimelineEntry, push: b
 }
 
 pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<RunId> {
+    find_run_id_by_prefix_opt(repo, prefix)?
+        .ok_or_else(|| anyhow::anyhow!("no run found matching '{prefix}'"))
+}
+
+/// Resolve a run id from the metadata branch refs. `Ok(None)` when no run
+/// matches; `Err` when the prefix matches more than one.
+pub(super) fn find_run_id_by_prefix_opt(repo: &Repository, prefix: &str) -> Result<Option<RunId>> {
     let refs = repo.references()?;
-    let pattern = "refs/heads/fabro/meta/";
+    let pattern = format!("refs/heads/{META_BRANCH_PREFIX}");
     let mut matches = Vec::new();
 
     for reference in refs.flatten() {
         let Some(name) = reference.name() else {
             continue;
         };
-        if let Some(run_id) = name.strip_prefix(pattern) {
-            let Ok(run_id) = run_id.parse::<RunId>() else {
-                continue;
-            };
-            if run_id.to_string() == prefix {
-                return Ok(run_id);
-            }
-            if run_id.to_string().starts_with(prefix) {
-                matches.push(run_id);
-            }
+        let Some(run_id) = name.strip_prefix(&pattern) else {
+            continue;
+        };
+        let Ok(run_id) = run_id.parse::<RunId>() else {
+            continue;
+        };
+        if run_id.to_string() == prefix {
+            return Ok(Some(run_id));
+        }
+        if run_id.to_string().starts_with(prefix) {
+            matches.push(run_id);
         }
     }
 
     match matches.len() {
-        0 => bail!("no run found matching '{prefix}'"),
-        1 => Ok(matches
-            .into_iter()
-            .next()
-            .expect("exactly one run should match when len is 1")),
+        0 => Ok(None),
+        1 => Ok(matches.into_iter().next()),
         _ => {
             let mut msg = format!("ambiguous run ID prefix '{prefix}', matches:\n");
-            for m in &matches {
-                let _ = writeln!(msg, "  {m}");
+            for run_id in &matches {
+                let _ = writeln!(msg, "  {run_id}");
             }
             bail!("{msg}")
         }
@@ -354,34 +363,38 @@ pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<RunId> {
 }
 
 fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
-    let branch = MetadataStore::branch_name(run_id);
-    let Ok(sig) = Signature::now("Fabro", "noreply@fabro.sh") else {
+    let Ok(Some(projection)) = MetadataStore::read_run_projection(store.repo_dir(), run_id) else {
         return HashMap::new();
     };
-    let bs = BranchStore::new(store, &branch, &sig);
 
-    if let Ok(Some(run_bytes)) = bs.read_entry("run.json") {
-        if let Ok(record) = serde_json::from_slice::<RunRecord>(&run_bytes) {
-            return detect_parallel_interior(&record.graph);
-        }
+    if let Some(spec) = projection.spec {
+        return detect_parallel_interior(&spec.graph);
     }
 
-    let graph_bytes = match bs.read_entry("workflow.fabro") {
-        Ok(Some(bytes)) => bytes,
-        _ => match bs.read_entry("graph.fabro") {
-            Ok(Some(bytes)) => bytes,
-            _ => return HashMap::new(),
-        },
+    let Some(dot_source) = projection.graph_source else {
+        return HashMap::new();
     };
-    let dot_source = String::from_utf8_lossy(&graph_bytes);
     let Ok(graph) = parser::parse(&dot_source) else {
         return HashMap::new();
     };
     detect_parallel_interior(&graph)
 }
 
+fn read_projection_at_commit(store: &Store, oid: Oid) -> Result<Option<RunProjection>> {
+    let blob = store
+        .read_blob_at(oid, "run.json")
+        .map_err(|e| anyhow::anyhow!("failed to read projection blob: {e}"))?;
+    let Some(bytes) = blob else {
+        return Ok(None);
+    };
+    let projection = serde_json::from_slice(&bytes)
+        .with_context(|| format!("failed to parse projection at {oid}"))?;
+    Ok(Some(projection))
+}
+
 #[cfg(test)]
 mod tests {
+    use fabro_store::RunProjection;
     use fabro_types::{RunId, fixtures};
 
     use super::super::test_support::*;
@@ -389,6 +402,19 @@ mod tests {
 
     fn parse_run_id(value: &str) -> RunId {
         value.parse().unwrap()
+    }
+
+    fn checkpoint_projection_json(
+        current_node: &str,
+        visit: usize,
+        git_commit_sha: Option<&str>,
+    ) -> Vec<u8> {
+        let mut projection = RunProjection::default();
+        projection.checkpoint = Some(
+            serde_json::from_slice(&make_checkpoint_bytes(current_node, visit, git_commit_sha))
+                .unwrap(),
+        );
+        serde_json::to_vec_pretty(&projection).unwrap()
     }
 
     #[test]
@@ -416,12 +442,10 @@ mod tests {
         bs.ensure_branch().unwrap();
 
         bs.write_entry("run.json", b"{}", "init run").unwrap();
-        let cp1 = make_checkpoint_json("start", 1, Some("aaa"));
-        bs.write_entry("checkpoint.json", &cp1, "checkpoint")
-            .unwrap();
-        let cp2 = make_checkpoint_json("build", 1, Some("bbb"));
-        bs.write_entry("checkpoint.json", &cp2, "checkpoint")
-            .unwrap();
+        let cp1 = checkpoint_projection_json("start", 1, Some("aaa"));
+        bs.write_entry("run.json", &cp1, "checkpoint").unwrap();
+        let cp2 = checkpoint_projection_json("build", 1, Some("bbb"));
+        bs.write_entry("run.json", &cp2, "checkpoint").unwrap();
 
         let timeline = build_timeline(&store, "test-run-1").unwrap();
         assert_eq!(timeline.entries.len(), 2);
@@ -513,13 +537,10 @@ mod tests {
         bs.ensure_branch().unwrap();
 
         bs.write_entry("run.json", b"{}", "init run").unwrap();
-        let cp1 = make_checkpoint_json("start", 1, None);
-        let oid1 = bs
-            .write_entry("checkpoint.json", &cp1, "checkpoint")
-            .unwrap();
-        let cp2 = make_checkpoint_json("build", 1, None);
-        bs.write_entry("checkpoint.json", &cp2, "checkpoint")
-            .unwrap();
+        let cp1 = checkpoint_projection_json("start", 1, None);
+        let oid1 = bs.write_entry("run.json", &cp1, "checkpoint").unwrap();
+        let cp2 = checkpoint_projection_json("build", 1, None);
+        bs.write_entry("run.json", &cp2, "checkpoint").unwrap();
 
         rewind(&store, &RewindInput {
             run_id:         fixtures::RUN_1,

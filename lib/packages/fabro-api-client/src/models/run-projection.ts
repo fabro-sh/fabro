@@ -33,7 +33,7 @@ import type { RunStatusRecord } from './run-status-record';
  * Raw internal run projection derived from the event log.
  */
 export interface RunProjection {
-    'run'?: { [key: string]: any; } | null;
+    'spec'?: { [key: string]: any; } | null;
     'graph_source'?: string | null;
     'start'?: { [key: string]: any; } | null;
     'status'?: RunStatusRecord | null;

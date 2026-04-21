@@ -92,19 +92,19 @@ pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec
 pub fn extract_stage_durations_from_events(events: &[EventEnvelope]) -> HashMap<String, u64> {
     let mut durations = HashMap::new();
     for envelope in events {
-        let value = envelope.payload.as_value();
-        let event_name = value.get("event").and_then(serde_json::Value::as_str);
-        if event_name != Some("stage.completed") && event_name != Some("stage.failed") {
+        let event = &envelope.event;
+        let event_name = event.event_name();
+        if event_name != "stage.completed" && event_name != "stage.failed" {
             continue;
         }
-        let Some(node_id) = value.get("node_id").and_then(serde_json::Value::as_str) else {
+        let Some(node_id) = event.node_id.as_deref() else {
             continue;
         };
-        let Some(duration_ms) = value
-            .get("properties")
-            .and_then(serde_json::Value::as_object)
-            .and_then(|properties| properties.get("duration_ms"))
-            .and_then(serde_json::Value::as_u64)
+        let Some(duration_ms) = event
+            .properties()
+            .ok()
+            .and_then(|properties| properties.get("duration_ms").cloned())
+            .and_then(|duration| duration.as_u64())
         else {
             continue;
         };

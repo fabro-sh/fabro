@@ -5,7 +5,7 @@ use crate::support::{LightweightCli, unique_run_id};
 
 fn live_run_state_response() -> serde_json::Value {
     serde_json::json!({
-        "run": null,
+        "spec": null,
         "graph_source": null,
         "start": null,
         "status": {

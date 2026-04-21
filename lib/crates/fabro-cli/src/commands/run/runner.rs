@@ -14,12 +14,11 @@ use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use fabro_config::Storage;
 use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage};
-use fabro_store::{EventEnvelope, EventPayload, RunProjection};
+use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_types::settings::run::RunMode;
 use fabro_types::settings::{InterpString, SettingsLayer};
-use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, StatusReason};
+use fabro_types::{ArtifactUpload, EventBody, RunBlobId, RunEvent, RunId, StatusReason};
 use fabro_vault::Vault;
-use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use fabro_workflow::artifact_upload::{ArtifactSink, StageArtifactUploader};
 use fabro_workflow::event::{Emitter, RunEventSink};
 use fabro_workflow::operations::{self, StartServices};
@@ -70,10 +69,10 @@ pub(crate) async fn execute(
         .state()
         .await
         .with_context(|| format!("failed to load run state for {run_id}"))?;
-    let run_record = run_state
-        .run
+    let run_spec = run_state
+        .spec
         .as_ref()
-        .ok_or_else(|| anyhow!("Run {run_id} has no run record in store"))?;
+        .ok_or_else(|| anyhow!("Run {run_id} has no run spec in store"))?;
     let artifact_sink = Some(ArtifactSink::Uploader(build_artifact_uploader(
         run_id,
         client.clone_for_reuse(),
@@ -90,7 +89,7 @@ pub(crate) async fn execute(
             Some(arc) => Some(arc.read().await),
             None => None,
         };
-        maybe_build_github_credentials(&run_record.settings, vault_guard.as_deref())?
+        maybe_build_github_credentials(&run_spec.settings, vault_guard.as_deref())?
     };
     let services = StartServices {
         run_id,
@@ -264,7 +263,7 @@ impl StageArtifactUploader for HttpArtifactUploader {
         &self,
         stage_id: &fabro_types::StageId,
         artifact_capture_dir: &Path,
-        artifacts: &[CapturedArtifactInfo],
+        artifacts: &[ArtifactUpload],
     ) -> Result<()> {
         if artifacts.is_empty() {
             return Ok(());
@@ -306,7 +305,7 @@ impl StageArtifactUploader for MissingArtifactUploadTokenUploader {
         &self,
         _stage_id: &fabro_types::StageId,
         _artifact_capture_dir: &Path,
-        _artifacts: &[CapturedArtifactInfo],
+        _artifacts: &[ArtifactUpload],
     ) -> Result<()> {
         Err(anyhow!(
             "run {} could not upload artifacts because the worker did not receive an artifact upload token",
@@ -369,8 +368,10 @@ impl HttpRunStore {
     }
 
     async fn apply_acknowledged_event(&self, seq: u32, event: &RunEvent) -> Result<()> {
-        let payload = EventPayload::new(event.to_value()?, &self.run_id)?;
-        let envelope = EventEnvelope { seq, payload };
+        let envelope = EventEnvelope {
+            seq,
+            event: event.clone(),
+        };
 
         {
             let mut state = self.state.lock().await;

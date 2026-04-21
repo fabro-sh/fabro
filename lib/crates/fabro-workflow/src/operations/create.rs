@@ -27,7 +27,7 @@ use crate::event::{Event, append_event, to_run_event_at};
 use crate::file_resolver::FileResolver;
 use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
-use crate::records::RunRecord;
+use crate::records::RunSpec;
 use crate::run_lookup::default_scratch_base;
 use crate::run_materialization::materialize_run;
 use crate::transforms::Transform;
@@ -202,7 +202,7 @@ async fn persist_created_run(
     submitted_manifest_bytes: Option<&[u8]>,
     accepted_definition: Option<&RunDefinition>,
 ) -> Result<(), Error> {
-    let record = persisted.run_record();
+    let record = persisted.run_spec();
     let run_store = match store.create_run(&record.run_id).await {
         Ok(run_store) => run_store,
         Err(err) => store
@@ -409,7 +409,7 @@ fn persist_validated(
     let run_id = run_id.unwrap_or_else(RunId::new);
     let run_dir = run_dir.unwrap_or_else(|| default_run_dir(&run_id));
 
-    let run_record = RunRecord {
+    let run_spec = RunSpec {
         run_id,
         settings,
         graph: validated.graph().clone(),
@@ -424,10 +424,7 @@ fn persist_validated(
         definition_blob: None,
     };
 
-    pipeline::persist(validated, PersistOptions {
-        run_dir,
-        run_record,
-    })
+    pipeline::persist(validated, PersistOptions { run_dir, run_spec })
 }
 
 pub(crate) fn default_run_dir(run_id: &RunId) -> PathBuf {
@@ -812,9 +809,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(created.run_id, fixtures::RUN_1);
-        assert_eq!(created.persisted.run_record().graph.goal(), "override goal");
+        assert_eq!(created.persisted.run_spec().graph.goal(), "override goal");
         assert_eq!(
-            fabro_config::resolve_run_from_file(&created.persisted.run_record().settings)
+            fabro_config::resolve_run_from_file(&created.persisted.run_spec().settings)
                 .unwrap()
                 .model
                 .name
@@ -824,7 +821,7 @@ mod tests {
             Some("claude-sonnet-4-6")
         );
         assert_eq!(
-            fabro_config::resolve_run_from_file(&created.persisted.run_record().settings)
+            fabro_config::resolve_run_from_file(&created.persisted.run_spec().settings)
                 .unwrap()
                 .model
                 .provider
@@ -834,7 +831,7 @@ mod tests {
             Some("anthropic")
         );
         assert_eq!(
-            match fabro_config::resolve_run_from_file(&created.persisted.run_record().settings)
+            match fabro_config::resolve_run_from_file(&created.persisted.run_spec().settings)
                 .unwrap()
                 .goal
             {
@@ -847,13 +844,13 @@ mod tests {
             Some("override goal")
         );
         assert!(
-            fabro_config::resolve_run_from_file(&created.persisted.run_record().settings)
+            fabro_config::resolve_run_from_file(&created.persisted.run_spec().settings)
                 .unwrap()
                 .pull_request
                 .is_none()
         );
         assert_eq!(
-            created.persisted.run_record().workflow_slug.as_deref(),
+            created.persisted.run_spec().workflow_slug.as_deref(),
             Some("slug")
         );
         let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
@@ -906,13 +903,13 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(created.persisted.run_record().working_directory, workspace);
+        assert_eq!(created.persisted.run_spec().working_directory, workspace);
         assert_eq!(
-            created.persisted.run_record().host_repo_path.as_deref(),
+            created.persisted.run_spec().host_repo_path.as_deref(),
             Some(
                 created
                     .persisted
-                    .run_record()
+                    .run_spec()
                     .working_directory
                     .to_string_lossy()
                     .as_ref()
@@ -946,7 +943,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            created.persisted.run_record().repo_origin_url.as_deref(),
+            created.persisted.run_spec().repo_origin_url.as_deref(),
             Some("https://github.com/acme/widgets")
         );
     }
@@ -1022,10 +1019,7 @@ mod tests {
         let run_store = store.open_run_reader(&created.run_id).await.unwrap();
         let events = run_store.list_events().await.unwrap();
 
-        assert_eq!(
-            events.first().unwrap().payload.as_value()["event"],
-            "run.created"
-        );
+        assert_eq!(events.first().unwrap().event.event_name(), "run.created");
     }
 
     #[tokio::test]
@@ -1077,7 +1071,7 @@ mod tests {
 
         let run_store = store.open_run_reader(&created.run_id).await.unwrap();
         let state = run_store.state().await.unwrap();
-        let run = state.run.expect("run should be projected");
+        let run = state.spec.expect("run should be projected");
         let provenance = run.provenance.expect("provenance should be projected");
 
         assert_eq!(provenance.server.unwrap().version, "0.9.0");

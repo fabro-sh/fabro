@@ -192,7 +192,7 @@ mod tests {
     use crate::context::Context;
     use crate::event::{Emitter, Event, StoreProgressLogger, append_event};
     use crate::pipeline::types::Executed;
-    use crate::records::{Checkpoint, CheckpointExt, RunRecord};
+    use crate::records::{Checkpoint, CheckpointExt, RunSpec};
     use crate::run_options::RunOptions;
 
     fn test_run_id() -> RunId {
@@ -232,7 +232,7 @@ mod tests {
     ) -> fabro_store::RunDatabase {
         let inner = test_store().create_run(&test_run_id()).await.unwrap();
         let run_store = inner;
-        let run_record = RunRecord {
+        let run_spec = RunSpec {
             run_id:            test_run_id(),
             settings:          SettingsLayer::default(),
             graph:             Graph::new("test"),
@@ -248,19 +248,19 @@ mod tests {
         };
         append_event(&run_store, &test_run_id(), &Event::RunCreated {
             run_id:            test_run_id(),
-            settings:          serde_json::to_value(&run_record.settings).unwrap(),
-            graph:             serde_json::to_value(&run_record.graph).unwrap(),
+            settings:          serde_json::to_value(&run_spec.settings).unwrap(),
+            graph:             serde_json::to_value(&run_spec.graph).unwrap(),
             workflow_source:   None,
             workflow_config:   None,
-            labels:            run_record.labels.clone().into_iter().collect(),
+            labels:            run_spec.labels.clone().into_iter().collect(),
             run_dir:           run_dir.to_string_lossy().to_string(),
             working_directory: run_dir.to_string_lossy().to_string(),
             host_repo_path:    None,
-            repo_origin_url:   run_record.repo_origin_url.clone(),
+            repo_origin_url:   run_spec.repo_origin_url.clone(),
             base_branch:       None,
             workflow_slug:     None,
             db_prefix:         None,
-            provenance:        run_record.provenance.clone(),
+            provenance:        run_spec.provenance.clone(),
             manifest_blob:     None,
         })
         .await
@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retro_phase_writes_retro_json() {
+    async fn retro_phase_persists_retro_in_projection() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();

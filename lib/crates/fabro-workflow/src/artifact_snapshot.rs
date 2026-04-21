@@ -2,7 +2,7 @@ use std::path::Path;
 
 use fabro_agent::Sandbox;
 use fabro_sandbox::shell_quote;
-use serde::{Deserialize, Serialize};
+use fabro_types::ArtifactUpload;
 use sha2::{Digest, Sha256};
 use tokio::fs;
 use tracing::{debug, warn};
@@ -15,25 +15,15 @@ pub struct DiscoveredFile {
     pub mtime_epoch_secs: f64,
 }
 
-/// Metadata for a single captured artifact file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CapturedArtifactInfo {
-    pub path:           String,
-    pub mime:           String,
-    pub content_md5:    String,
-    pub content_sha256: String,
-    pub bytes:          u64,
-}
-
 /// Summary of an artifact collection run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArtifactCollectionSummary {
     pub files_copied:    usize,
     pub total_bytes:     u64,
     pub files_skipped:   usize,
     pub download_errors: usize,
     pub hash_errors:     usize,
-    pub captured_assets: Vec<CapturedArtifactInfo>,
+    pub captured_assets: Vec<ArtifactUpload>,
 }
 
 /// Directories to exclude from the find search and checkpoint commits.
@@ -261,7 +251,7 @@ fn normalize_paths(discovered: Vec<DiscoveredFile>, root: &str) -> Vec<Discovere
 async fn compute_artifact_info(
     relative_path: &str,
     local_path: &Path,
-) -> std::result::Result<CapturedArtifactInfo, String> {
+) -> std::result::Result<ArtifactUpload, String> {
     let mime = mime_guess::from_path(relative_path)
         .first_or_octet_stream()
         .to_string();
@@ -271,7 +261,7 @@ async fn compute_artifact_info(
     let bytes = u64::try_from(data.len()).unwrap_or(u64::MAX);
     let content_md5 = format!("{:x}", md5::compute(&data));
     let content_sha256 = hex::encode(Sha256::digest(&data));
-    Ok(CapturedArtifactInfo {
+    Ok(ArtifactUpload {
         path: relative_path.to_string(),
         mime,
         content_md5,
@@ -308,7 +298,7 @@ pub async fn collect_artifacts(
     let mut total_bytes: u64 = 0;
     let mut download_errors: usize = 0;
     let mut hash_errors: usize = 0;
-    let mut captured_assets: Vec<CapturedArtifactInfo> = Vec::new();
+    let mut captured_assets: Vec<ArtifactUpload> = Vec::new();
 
     for file in &to_collect {
         let dest = artifact_capture_dir.join(&file.relative_path);

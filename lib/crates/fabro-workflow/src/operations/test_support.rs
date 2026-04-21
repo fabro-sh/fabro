@@ -13,7 +13,7 @@ pub(super) fn test_sig() -> Signature<'static> {
     Signature::now("Test", "test@example.com").unwrap()
 }
 
-pub(super) fn make_checkpoint_json(
+pub(super) fn make_checkpoint_bytes(
     current_node: &str,
     visit: usize,
     git_sha: Option<&str>,

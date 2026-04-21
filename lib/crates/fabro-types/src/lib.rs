@@ -1,10 +1,12 @@
 extern crate self as fabro_types;
 
+pub mod artifact;
 pub mod auth;
 pub mod billing;
 pub mod blob_ref;
 pub mod checkpoint;
 pub mod conclusion;
+pub mod event_envelope;
 pub mod failure_signature;
 pub mod graph;
 pub mod interview;
@@ -16,12 +18,15 @@ pub mod run;
 pub mod run_blob_id;
 pub mod run_event;
 pub mod run_id;
+pub mod run_projection;
+pub mod run_summary;
 pub mod sandbox_record;
 pub mod settings;
 pub mod stage_id;
 pub mod start;
 pub mod status;
 
+pub use artifact::ArtifactUpload;
 pub use auth::{IdpIdentity, IdpIdentityError};
 pub use billing::{
     AnthropicBillingFacts, AnthropicModelPricing, BilledModelUsage, BilledTokenCounts,
@@ -34,6 +39,7 @@ pub use blob_ref::{
 };
 pub use checkpoint::Checkpoint;
 pub use conclusion::{Conclusion, StageSummary};
+pub use event_envelope::EventEnvelope;
 pub use failure_signature::FailureSignature;
 pub use graph::{AttrValue, Edge, Graph, Node, is_llm_handler_type, shape_to_handler_type};
 pub use interview::{InterviewQuestionRecord, InterviewQuestionType};
@@ -45,12 +51,14 @@ pub use retro::{
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,
 };
 pub use run::{
-    RunAuthMethod, RunClientProvenance, RunProvenance, RunRecord, RunServerProvenance,
+    RunAuthMethod, RunClientProvenance, RunProvenance, RunServerProvenance, RunSpec,
     RunSubjectProvenance,
 };
 pub use run_blob_id::RunBlobId;
 pub use run_event::{ActorKind, ActorRef, EventBody, RunEvent, RunNoticeLevel};
 pub use run_id::{RunId, fixtures};
+pub use run_projection::{NodeState, PendingInterviewRecord, RunProjection};
+pub use run_summary::RunSummary;
 pub use sandbox_record::SandboxRecord;
 pub use stage_id::{ParallelBranchId, StageId};
 pub use start::StartRecord;

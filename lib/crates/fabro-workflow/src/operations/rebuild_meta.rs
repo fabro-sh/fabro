@@ -5,8 +5,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use fabro_checkpoint::branch::BranchStore;
 use fabro_checkpoint::git::Store as GitStore;
-use fabro_store::{Database as DurableStore, RunDatabase as DurableRunStore};
-use fabro_types::{RunId, StageId};
+use fabro_store::{
+    Database as DurableStore, RunDatabase as DurableRunStore, RunProjection, RunProjectionReducer,
+};
+use fabro_types::{EventBody, RunId};
 use git2::{Repository, Signature};
 use tokio::task::spawn_blocking;
 use ulid::Ulid;
@@ -14,6 +16,7 @@ use ulid::Ulid;
 use super::rewind::{self, RunTimeline, build_timeline};
 use crate::git::MetadataStore;
 use crate::records::Checkpoint;
+use crate::run_dump::RunDump;
 
 pub async fn rebuild_metadata_branch(
     git_store: &GitStore,
@@ -25,11 +28,10 @@ pub async fn rebuild_metadata_branch(
         bail!("metadata branch already exists for run {run_id}");
     }
 
-    let state = run_store.state().await?;
-    let run_record = state
-        .run
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("run record not found for {run_id}"))?;
+    let events = run_store.list_events().await?;
+    if events.is_empty() {
+        bail!("run spec not found for {run_id}");
+    }
 
     let sig = Signature::now("Fabro", "noreply@fabro.sh")?;
     let scratch_branch = format!("fabro/meta-rebuild/{run_id}/{}", Ulid::new());
@@ -37,99 +39,67 @@ pub async fn rebuild_metadata_branch(
 
     let result = async {
         bs.ensure_branch()?;
+        let mut projection = RunProjection::default();
+        let mut latest_init_snapshot = None;
+        let mut init_written = false;
+        let mut checkpoint_snapshots: Vec<(u32, RunProjection)> = Vec::new();
 
-        let mut init_entries = Vec::new();
-        init_entries.push((
-            "run.json".to_string(),
-            serde_json::to_vec_pretty(&run_record)?,
-        ));
-        if let Some(start) = state.start.clone() {
-            init_entries.push(("start.json".to_string(), serde_json::to_vec_pretty(&start)?));
-        }
-        if let Some(sandbox) = state.sandbox.clone() {
-            init_entries.push((
-                "sandbox.json".to_string(),
-                serde_json::to_vec_pretty(&sandbox)?,
-            ));
-        }
-        write_entries(&bs, &init_entries, "init run")?;
+        for event in &events {
+            let stored = &event.event;
+            let is_checkpoint = matches!(stored.body, EventBody::CheckpointCompleted(_));
 
-        let mut checkpoints = state.checkpoints.clone();
-        backfill_missing_checkpoint_shas(git_store, run_id, &mut checkpoints);
-
-        for (_seq, checkpoint) in checkpoints {
-            let mut entries = Vec::new();
-            entries.push((
-                "checkpoint.json".to_string(),
-                serde_json::to_vec_pretty(&checkpoint)?,
-            ));
-
-            for node_id in &checkpoint.completed_nodes {
-                let max_visit = checkpoint.node_visits.get(node_id).copied().unwrap_or(1);
-                for visit in 1..=max_visit {
-                    let visit = u32::try_from(visit)
-                        .with_context(|| format!("visit {visit} for node {node_id} exceeds u32"))?;
-                    let Some(node) = state.node(&StageId::new(node_id, visit)).cloned() else {
-                        continue;
-                    };
-
-                    if let Some(prompt) = node.prompt {
-                        entries.push((
-                            node_file_path(node_id, visit, "prompt.md"),
-                            prompt.into_bytes(),
-                        ));
-                    }
-                    if let Some(response) = node.response {
-                        entries.push((
-                            node_file_path(node_id, visit, "response.md"),
-                            response.into_bytes(),
-                        ));
-                    }
-                    if let Some(status) = node.status {
-                        entries.push((
-                            node_file_path(node_id, visit, "status.json"),
-                            serde_json::to_vec_pretty(&status)?,
-                        ));
-                    }
-                    if let Some(provider_used) = node.provider_used {
-                        entries.push((
-                            node_file_path(node_id, visit, "provider_used.json"),
-                            serde_json::to_vec_pretty(&provider_used)?,
-                        ));
-                    }
-                    if let Some(diff) = node.diff {
-                        entries.push((
-                            node_file_path(node_id, visit, "diff.patch"),
-                            diff.into_bytes(),
-                        ));
-                    }
-                    if let Some(script_invocation) = node.script_invocation {
-                        entries.push((
-                            node_file_path(node_id, visit, "script_invocation.json"),
-                            serde_json::to_vec_pretty(&script_invocation)?,
-                        ));
-                    }
-                    if let Some(script_timing) = node.script_timing {
-                        entries.push((
-                            node_file_path(node_id, visit, "script_timing.json"),
-                            serde_json::to_vec_pretty(&script_timing)?,
-                        ));
-                    }
-                    if let Some(parallel_results) = node.parallel_results {
-                        entries.push((
-                            node_file_path(node_id, visit, "parallel_results.json"),
-                            serde_json::to_vec_pretty(&parallel_results)?,
-                        ));
-                    }
-                }
+            if !init_written && !is_checkpoint && projection.spec.is_some() {
+                latest_init_snapshot = Some(projection.clone());
             }
 
-            write_entries(&bs, &entries, "checkpoint")?;
+            projection.apply_event(event)?;
+
+            if is_checkpoint {
+                if !init_written {
+                    let init_snapshot = latest_init_snapshot.take().unwrap_or_else(|| {
+                        let mut snapshot = projection.clone();
+                        snapshot.checkpoint = None;
+                        snapshot.checkpoints.clear();
+                        snapshot
+                    });
+                    write_projection_snapshot(&bs, &init_snapshot, "init run")?;
+                    init_written = true;
+                }
+                checkpoint_snapshots.push((event.seq, projection.clone()));
+            }
         }
 
-        if let Some(retro) = state.retro.clone() {
-            let entries = vec![("retro.json".to_string(), serde_json::to_vec_pretty(&retro)?)];
-            write_entries(&bs, &entries, "finalize run")?;
+        if projection.spec.is_none() {
+            bail!("run spec not found for {run_id}");
+        }
+
+        if !init_written {
+            write_projection_snapshot(&bs, &projection, "init run")?;
+        }
+
+        let mut checkpoints: Vec<(u32, Checkpoint)> = checkpoint_snapshots
+            .iter()
+            .map(|(seq, snapshot)| {
+                let checkpoint = snapshot
+                    .checkpoint
+                    .clone()
+                    .expect("checkpoint snapshots must include projection.checkpoint");
+                (*seq, checkpoint)
+            })
+            .collect();
+        backfill_missing_checkpoint_shas(git_store, run_id, &mut checkpoints);
+
+        for ((_, snapshot), (_, checkpoint)) in checkpoint_snapshots.iter_mut().zip(checkpoints) {
+            snapshot.checkpoint = Some(checkpoint);
+            write_projection_snapshot(&bs, snapshot, "checkpoint")?;
+        }
+
+        if projection.conclusion.is_some()
+            || projection.retro.is_some()
+            || projection.retro_prompt.is_some()
+            || projection.retro_response.is_some()
+        {
+            write_projection_snapshot(&bs, &projection, "finalize run")?;
         }
 
         Ok::<(), anyhow::Error>(())
@@ -177,7 +147,7 @@ pub async fn find_run_id_by_prefix_or_store(
     fabro_store: &DurableStore,
     prefix: &str,
 ) -> Result<RunId> {
-    if let Some(run_id) = find_run_id_by_prefix_in_refs(repo, prefix)? {
+    if let Some(run_id) = rewind::find_run_id_by_prefix_opt(repo, prefix)? {
         return Ok(run_id);
     }
 
@@ -248,6 +218,17 @@ fn write_entries(
     Ok(())
 }
 
+fn write_projection_snapshot(
+    branch_store: &BranchStore<'_>,
+    projection: &RunProjection,
+    message: &str,
+) -> Result<()> {
+    let entries = RunDump::from_projection(projection)
+        .git_entries()
+        .context("failed to serialize metadata projection snapshot")?;
+    write_entries(branch_store, &entries, message)
+}
+
 fn backfill_missing_checkpoint_shas(
     git_store: &GitStore,
     run_id: &RunId,
@@ -278,45 +259,6 @@ fn backfill_missing_checkpoint_shas(
             }
         }
     }
-}
-
-fn node_file_path(node_id: &str, visit: u32, filename: &str) -> String {
-    if visit <= 1 {
-        format!("nodes/{node_id}/{filename}")
-    } else {
-        format!("nodes/{node_id}-visit_{visit}/{filename}")
-    }
-}
-
-fn find_run_id_by_prefix_in_refs(repo: &Repository, prefix: &str) -> Result<Option<RunId>> {
-    let refs = repo.references()?;
-    let pattern = "refs/heads/fabro/meta/";
-    let mut matches = Vec::new();
-
-    for reference in refs.flatten() {
-        let Some(name) = reference.name() else {
-            continue;
-        };
-        let Some(run_id) = name.strip_prefix(pattern) else {
-            continue;
-        };
-        let Ok(run_id) = run_id.parse::<RunId>() else {
-            continue;
-        };
-
-        if run_id.to_string() == prefix {
-            return Ok(Some(run_id));
-        }
-        if run_id.to_string().starts_with(prefix) {
-            matches.push(run_id);
-        }
-    }
-
-    if matches.is_empty() {
-        return Ok(None);
-    }
-
-    resolve_prefix_matches(prefix, matches).map(Some)
 }
 
 fn repo_root_path(repo: &Repository) -> PathBuf {
@@ -367,14 +309,14 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
     use fabro_graphviz::graph::Graph;
-    use fabro_store::{Database, StageId};
+    use fabro_store::{Database, RunProjection, StageId};
     use fabro_types::settings::SettingsLayer;
-    use fabro_types::{RunId, RunRecord, SandboxRecord, StartRecord, fixtures};
+    use fabro_types::{RunId, RunSpec, SandboxRecord, StartRecord, fixtures};
     use object_store::memory::InMemory;
 
     use super::*;
     use crate::event::{Event, append_event};
-    use crate::operations::test_support::{make_checkpoint_json, temp_repo, test_sig};
+    use crate::operations::test_support::{temp_repo, test_sig};
     use crate::records::Checkpoint;
 
     fn created_at() -> chrono::DateTime<Utc> {
@@ -398,8 +340,8 @@ mod tests {
         ))
     }
 
-    fn sample_run_record(run_id: RunId, host_repo_path: Option<&str>) -> RunRecord {
-        RunRecord {
+    fn sample_run_spec(run_id: RunId, host_repo_path: Option<&str>) -> RunSpec {
+        RunSpec {
             run_id,
             settings: SettingsLayer::default(),
             graph: Graph::new("test"),
@@ -467,22 +409,22 @@ mod tests {
         host_repo_path: Option<&str>,
     ) -> DurableRunStore {
         let run_store = store.create_run(&run_id).await.unwrap();
-        let run_record = sample_run_record(run_id, host_repo_path);
+        let run_spec = sample_run_spec(run_id, host_repo_path);
         append_event(&run_store, &run_id, &Event::RunCreated {
             run_id,
-            settings: serde_json::to_value(&run_record.settings).unwrap(),
-            graph: serde_json::to_value(&run_record.graph).unwrap(),
+            settings: serde_json::to_value(&run_spec.settings).unwrap(),
+            graph: serde_json::to_value(&run_spec.graph).unwrap(),
             workflow_source: None,
             workflow_config: None,
-            labels: run_record.labels.clone().into_iter().collect(),
+            labels: run_spec.labels.clone().into_iter().collect(),
             run_dir: String::new(),
-            working_directory: run_record.working_directory.display().to_string(),
-            host_repo_path: run_record.host_repo_path.clone(),
-            repo_origin_url: run_record.repo_origin_url.clone(),
-            base_branch: run_record.base_branch.clone(),
-            workflow_slug: run_record.workflow_slug.clone(),
+            working_directory: run_spec.working_directory.display().to_string(),
+            host_repo_path: run_spec.host_repo_path.clone(),
+            repo_origin_url: run_spec.repo_origin_url.clone(),
+            base_branch: run_spec.base_branch.clone(),
+            workflow_slug: run_spec.workflow_slug.clone(),
             db_prefix: None,
-            provenance: run_record.provenance.clone(),
+            provenance: run_spec.provenance.clone(),
             manifest_blob: None,
         })
         .await
@@ -693,30 +635,54 @@ mod tests {
         assert_eq!(checkpoint_commits.len(), 2);
         assert_eq!(
             git_store
-                .read_blob_at(checkpoint_commits[0], "nodes/build/prompt.md")
+                .read_blob_at(checkpoint_commits[0], "stages/build@1/prompt.md")
                 .unwrap()
                 .as_deref(),
             Some("visit one".as_bytes())
         );
-        assert!(
-            git_store
-                .read_blob_at(checkpoint_commits[0], "nodes/build-visit_2/prompt.md")
+        let first_projection: RunProjection = serde_json::from_slice(
+            &git_store
+                .read_blob_at(checkpoint_commits[0], "run.json")
                 .unwrap()
-                .is_none()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            first_projection
+                .checkpoint
+                .as_ref()
+                .and_then(|checkpoint| checkpoint.node_visits.get("build"))
+                .copied(),
+            Some(1)
         );
         assert_eq!(
             git_store
-                .read_blob_at(checkpoint_commits[1], "nodes/build/prompt.md")
+                .read_blob_at(checkpoint_commits[1], "stages/build@1/prompt.md")
                 .unwrap()
                 .as_deref(),
             Some("visit one".as_bytes())
         );
         assert_eq!(
             git_store
-                .read_blob_at(checkpoint_commits[1], "nodes/build-visit_2/prompt.md")
+                .read_blob_at(checkpoint_commits[1], "stages/build@2/prompt.md")
                 .unwrap()
                 .as_deref(),
             Some("visit two".as_bytes())
+        );
+        let second_projection: RunProjection = serde_json::from_slice(
+            &git_store
+                .read_blob_at(checkpoint_commits[1], "run.json")
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            second_projection
+                .checkpoint
+                .as_ref()
+                .and_then(|checkpoint| checkpoint.node_visits.get("build"))
+                .copied(),
+            Some(2)
         );
     }
 
@@ -796,16 +762,40 @@ mod tests {
         let branch = MetadataStore::branch_name(&test_run_id().to_string());
         let bs = BranchStore::new(&git_store, &branch, &sig);
         bs.ensure_branch().unwrap();
-        bs.write_entry("run.json", b"{}", "init run").unwrap();
+        let mut init_projection = RunProjection::default();
+        init_projection.spec = Some(sample_run_spec(test_run_id(), None));
+        init_projection.start = Some(sample_start_record(test_run_id()));
         bs.write_entry(
-            "checkpoint.json",
-            &make_checkpoint_json("start", 1, Some("aaa")),
+            "run.json",
+            &serde_json::to_vec_pretty(&init_projection).unwrap(),
+            "init run",
+        )
+        .unwrap();
+
+        let mut first_checkpoint_projection = init_projection.clone();
+        first_checkpoint_projection.checkpoint = Some(sample_checkpoint(
+            "start",
+            &["start"],
+            &[("start", 1)],
+            Some("aaa"),
+        ));
+        bs.write_entry(
+            "run.json",
+            &serde_json::to_vec_pretty(&first_checkpoint_projection).unwrap(),
             "checkpoint",
         )
         .unwrap();
+
+        let mut second_checkpoint_projection = init_projection;
+        second_checkpoint_projection.checkpoint = Some(sample_checkpoint(
+            "build",
+            &["start", "build"],
+            &[("start", 1), ("build", 1)],
+            Some("bbb"),
+        ));
         bs.write_entry(
-            "checkpoint.json",
-            &make_checkpoint_json("build", 1, Some("bbb")),
+            "run.json",
+            &serde_json::to_vec_pretty(&second_checkpoint_projection).unwrap(),
             "checkpoint",
         )
         .unwrap();
@@ -830,7 +820,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rebuild_metadata_branch_errors_when_run_record_is_missing() {
+    async fn rebuild_metadata_branch_errors_when_run_spec_is_missing() {
         let (_dir, git_store) = temp_repo();
         let durable_store = memory_store();
         let run_store = durable_store.create_run(&test_run_id()).await.unwrap();
@@ -838,7 +828,7 @@ mod tests {
         let err = rebuild_metadata_branch(&git_store, &run_store, &test_run_id())
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("run record not found"));
+        assert!(err.to_string().contains("run spec not found"));
     }
 
     #[tokio::test]
@@ -984,20 +974,22 @@ mod tests {
             .map(|commit| commit.oid)
             .collect();
 
-        let first: Checkpoint = serde_json::from_slice(
+        let first_projection: RunProjection = serde_json::from_slice(
             &git_store
-                .read_blob_at(checkpoint_commits[0], "checkpoint.json")
+                .read_blob_at(checkpoint_commits[0], "run.json")
                 .unwrap()
                 .unwrap(),
         )
         .unwrap();
-        let second: Checkpoint = serde_json::from_slice(
+        let second_projection: RunProjection = serde_json::from_slice(
             &git_store
-                .read_blob_at(checkpoint_commits[1], "checkpoint.json")
+                .read_blob_at(checkpoint_commits[1], "run.json")
                 .unwrap()
                 .unwrap(),
         )
         .unwrap();
+        let first = first_projection.checkpoint.unwrap();
+        let second = second_projection.checkpoint.unwrap();
 
         assert_eq!(
             first.git_commit_sha.as_deref(),

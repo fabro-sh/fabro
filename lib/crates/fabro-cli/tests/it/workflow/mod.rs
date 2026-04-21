@@ -37,13 +37,13 @@ pub(super) fn read_conclusion(run_dir: &Path) -> Value {
     .expect("conclusion should serialize")
 }
 
-pub(super) fn read_run_record(run_dir: &Path) -> Value {
+pub(super) fn read_run_spec(run_dir: &Path) -> Value {
     serde_json::to_value(
         run_state(run_dir)
-            .run
-            .expect("run store run record should exist"),
+            .spec
+            .expect("run store run spec should exist"),
     )
-    .expect("run record should serialize")
+    .expect("run spec should serialize")
 }
 
 pub(super) fn completed_nodes(run_dir: &Path) -> Vec<String> {
@@ -54,14 +54,9 @@ pub(super) fn completed_nodes(run_dir: &Path) -> Vec<String> {
 }
 
 pub(super) fn has_event(run_dir: &Path, event_name: &str) -> bool {
-    run_events(run_dir).into_iter().any(|event| {
-        event
-            .payload
-            .as_value()
-            .get("event")
-            .and_then(Value::as_str)
-            == Some(event_name)
-    })
+    run_events(run_dir)
+        .into_iter()
+        .any(|event| event.event.event_name() == event_name)
 }
 
 pub(super) fn store_dump_export(context: &TestContext, run_id: &str) -> PathBuf {

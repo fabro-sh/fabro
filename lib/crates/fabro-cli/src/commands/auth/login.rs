@@ -3,6 +3,7 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
 use fabro_api::types;
+use fabro_client::{AuthEntry, AuthStore, StoredSubject, ensure_refresh_target_transport};
 use fabro_http::header::CONTENT_TYPE;
 use fabro_types::settings::CliSettings;
 use fabro_types::settings::cli::CliLayer;
@@ -11,9 +12,7 @@ use serde::Deserialize;
 use tokio::time::timeout;
 
 use crate::args::{AuthLoginArgs, require_no_json_override};
-use crate::auth_store::{AuthEntry, AuthStore, ServerTargetKey, StoredSubject};
 use crate::command_context::CommandContext;
-use crate::loopback_target::{LoopbackClassification, is_loopback_or_unix_socket};
 use crate::user_config;
 use crate::user_config::ServerTarget;
 
@@ -56,7 +55,6 @@ pub(super) async fn login_command(
     {
         let ctx = CommandContext::base(printer, cli.clone(), cli_layer)?;
         let target = user_config::resolve_server_target(&args.server, ctx.machine_settings())?;
-        let server_key = ServerTargetKey::new(&target)?;
         let config = fetch_cli_auth_config(&target).await?;
         if !config.enabled {
             bail!("{}", cli_auth_unavailable_message(config.reason.as_deref()));
@@ -98,14 +96,7 @@ pub(super) async fn login_command(
             }
         };
 
-        match is_loopback_or_unix_socket(&target)? {
-            LoopbackClassification::Https
-            | LoopbackClassification::LoopbackHttp
-            | LoopbackClassification::UnixSocket => {}
-            LoopbackClassification::Rejected => {
-                bail!("{}", token_transport_error(&target));
-            }
-        }
+        ensure_refresh_target_transport(&target)?;
 
         let tokens = exchange_cli_token(&target, &code, &pkce.verifier, &redirect_uri).await?;
         let entry = AuthEntry {
@@ -123,15 +114,15 @@ pub(super) async fn login_command(
             logged_in_at:             Utc::now(),
         };
         let summary = identity_summary(&entry.subject);
-        AuthStore::default().put(&server_key, entry)?;
-        fabro_util::printerr!(printer, "Logged in to {} as {}", server_key, summary);
+        AuthStore::default().put(&target, entry)?;
+        fabro_util::printerr!(printer, "Logged in to {} as {}", target, summary);
         Ok(())
     }
 }
 
 #[cfg(unix)]
 async fn fetch_cli_auth_config(target: &ServerTarget) -> Result<types::CliAuthConfig> {
-    let (http_client, base_url) = user_config::build_public_http_client(target)?;
+    let (http_client, base_url) = target.build_public_http_client()?;
     let client = fabro_api::ApiClient::new_with_client(&base_url, http_client);
     client
         .get_cli_auth_config()
@@ -148,7 +139,7 @@ async fn exchange_cli_token(
     code_verifier: &str,
     redirect_uri: &str,
 ) -> Result<CliTokenResponse> {
-    let (http_client, base_url) = user_config::build_public_http_client(target)?;
+    let (http_client, base_url) = target.build_public_http_client()?;
     let response = http_client
         .post(format!("{base_url}/auth/cli/token"))
         .header(CONTENT_TYPE, "application/json")
@@ -243,12 +234,6 @@ fn login_failure_message(error_code: &str, error_description: Option<&str>) -> S
     }
 }
 
-fn token_transport_error(target: &ServerTarget) -> String {
-    format!(
-        "Refusing to send refresh-token credentials over plaintext HTTP to a non-loopback host ({target}). Use HTTPS, or bind the server to 127.0.0.1 / ::1."
-    )
-}
-
 fn identity_summary(subject: &StoredSubject) -> String {
     if !subject.name.is_empty() && !subject.email.is_empty() {
         format!("{} ({} <{}>)", subject.login, subject.name, subject.email)
@@ -270,11 +255,11 @@ struct OAuthErrorBody {
 mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use fabro_client::LoopbackClassification;
     use insta::assert_snapshot;
     use sha2::{Digest, Sha256};
 
     use super::{build_browser_url, cli_auth_unavailable_message, login_failure_message};
-    use crate::loopback_target::{LoopbackClassification, is_loopback_or_unix_socket};
     use crate::user_config::ServerTarget;
 
     #[test]
@@ -343,9 +328,9 @@ mod tests {
 
     #[test]
     fn token_transport_accepts_only_https_loopback_or_unix() {
-        let target = ServerTarget::HttpUrl("https://fabro.example.com".to_string());
+        let target = ServerTarget::http_url("https://fabro.example.com").unwrap();
         assert_eq!(
-            is_loopback_or_unix_socket(&target).unwrap(),
+            target.loopback_classification().unwrap(),
             LoopbackClassification::Https
         );
     }

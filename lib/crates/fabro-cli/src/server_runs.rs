@@ -3,8 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use fabro_store::RunSummary;
-use fabro_types::{RunId, RunStatus, StatusReason};
+use fabro_types::{RunId, RunStatus, RunSummary, StatusReason};
 
 use crate::server_client::Client;
 
@@ -26,7 +25,7 @@ impl ServerRunSummaryInfo {
         self.summary
             .workflow_name
             .clone()
-            .unwrap_or_else(|| "[no run record]".to_string())
+            .unwrap_or_else(|| "[no run spec]".to_string())
     }
 
     pub(crate) fn workflow_slug(&self) -> Option<&str> {

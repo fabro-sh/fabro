@@ -134,20 +134,22 @@ fn fork_from_earlier_checkpoint_uses_expected_sha() {
     ]);
     assert_eq!(new_head.trim(), expected_head);
 
-    let checkpoint = git_show_json(
+    let run_snapshot = git_show_json(
         &setup.repo_dir,
-        &format!("fabro/meta/{new_run_id}:checkpoint.json"),
+        &format!("fabro/meta/{new_run_id}:run.json"),
     );
-    assert_eq!(checkpoint["current_node"].as_str(), Some("step_one"));
     assert_eq!(
-        checkpoint["git_commit_sha"].as_str(),
+        run_snapshot["checkpoint"]["current_node"].as_str(),
+        Some("step_one")
+    );
+    assert_eq!(
+        run_snapshot["checkpoint"]["git_commit_sha"].as_str(),
         Some(expected_head.as_str())
     );
 
-    let start = git_show_json(
-        &setup.repo_dir,
-        &format!("fabro/meta/{new_run_id}:start.json"),
-    );
     let expected_branch = format!("fabro/run/{new_run_id}");
-    assert_eq!(start["run_branch"].as_str(), Some(expected_branch.as_str()));
+    assert_eq!(
+        run_snapshot["start"]["run_branch"].as_str(),
+        Some(expected_branch.as_str())
+    );
 }

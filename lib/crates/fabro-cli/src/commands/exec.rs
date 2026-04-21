@@ -115,7 +115,7 @@ struct AuthenticatedFabroServerAdapter {
 
 impl AuthenticatedFabroServerAdapter {
     fn new(client: server_client::Client, provider_name: impl Into<String>) -> Self {
-        let base_url = client.base_url().to_string();
+        let base_url = client.base_url().clone();
         Self {
             client,
             base_url,
@@ -212,7 +212,7 @@ fn transport_error(provider: &str, err: &anyhow::Error) -> LlmError {
     }
 }
 
-fn map_response_failure(provider: &str, failure: &server_client::HttpResponseFailure) -> LlmError {
+fn map_response_failure(provider: &str, failure: &fabro_client::ApiError) -> LlmError {
     let retry_after = parse_retry_after(&failure.headers);
     let (message, code, raw) = parse_server_error_body(&failure.body);
     error_from_status_code(

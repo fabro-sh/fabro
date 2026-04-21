@@ -465,7 +465,7 @@ pub async fn initialize(
     persisted: Persisted,
     mut options: InitOptions,
 ) -> Result<Initialized, Error> {
-    let (graph, source, _diagnostics, run_dir, _run_record) = persisted.into_parts();
+    let (graph, source, _diagnostics, run_dir, _run_spec) = persisted.into_parts();
     options.run_options.run_dir = run_dir.clone();
     options.run_options.git = options.git.clone();
 
@@ -770,7 +770,7 @@ mod tests {
     use super::*;
     use crate::event::StoreProgressLogger;
     use crate::pipeline::types::InitOptions;
-    use crate::records::RunRecord;
+    use crate::records::RunSpec;
     use crate::run_options::RunOptions;
 
     fn test_run_id() -> RunId {
@@ -864,7 +864,7 @@ mod tests {
             source,
             vec![],
             run_dir.to_path_buf(),
-            RunRecord {
+            RunSpec {
                 run_id: test_run_id(),
                 settings: SettingsLayer::default(),
                 graph,

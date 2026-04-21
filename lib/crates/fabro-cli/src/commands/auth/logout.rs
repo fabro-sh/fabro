@@ -1,11 +1,11 @@
 use anyhow::{Result, bail};
+use fabro_client::{AuthEntry, AuthStore};
 use fabro_http::header::AUTHORIZATION;
 use fabro_types::settings::CliSettings;
 use fabro_types::settings::cli::CliLayer;
 use fabro_util::printer::Printer;
 
 use crate::args::{AuthLogoutArgs, require_no_json_override};
-use crate::auth_store::{AuthEntry, AuthStore, ServerTargetKey};
 use crate::command_context::CommandContext;
 use crate::user_config;
 use crate::user_config::ServerTarget;
@@ -29,13 +29,11 @@ pub(super) async fn logout_command(
         }
 
         let mut warnings = Vec::new();
-        for (key, entry) in entries {
-            if let Ok(target) = server_target_from_key(&key) {
-                if let Err(error) = revoke_remote_session(&target, &entry).await {
-                    warnings.push(format_warning(&key, &error.to_string()));
-                }
+        for (target, entry) in entries {
+            if let Err(error) = revoke_remote_session(&target, &entry).await {
+                warnings.push(format_warning(&target, &error.to_string()));
             }
-            store.remove(&key)?;
+            store.remove(&target)?;
         }
 
         for warning in warnings {
@@ -46,22 +44,21 @@ pub(super) async fn logout_command(
     }
 
     let target = user_config::resolve_server_target(&args.server, ctx.machine_settings())?;
-    let key = ServerTargetKey::new(&target)?;
-    let Some(entry) = store.get(&key)? else {
-        fabro_util::printerr!(printer, "Not logged in to {}.", key);
+    let Some(entry) = store.get(&target)? else {
+        fabro_util::printerr!(printer, "Not logged in to {}.", target);
         return Ok(());
     };
 
     if let Err(error) = revoke_remote_session(&target, &entry).await {
-        fabro_util::printerr!(printer, "{}", format_warning(&key, &error.to_string()));
+        fabro_util::printerr!(printer, "{}", format_warning(&target, &error.to_string()));
     }
-    store.remove(&key)?;
-    fabro_util::printerr!(printer, "Logged out from {}.", key);
+    store.remove(&target)?;
+    fabro_util::printerr!(printer, "Logged out from {}.", target);
     Ok(())
 }
 
 async fn revoke_remote_session(target: &ServerTarget, entry: &AuthEntry) -> Result<()> {
-    let (http_client, base_url) = user_config::build_public_http_client(target)?;
+    let (http_client, base_url) = target.build_public_http_client()?;
     let response = http_client
         .post(format!("{base_url}/auth/cli/logout"))
         .header(AUTHORIZATION, format!("Bearer {}", entry.refresh_token))
@@ -79,62 +76,21 @@ async fn revoke_remote_session(target: &ServerTarget, entry: &AuthEntry) -> Resu
     bail!("request failed with status {status}: {body}")
 }
 
-fn server_target_from_key(key: &ServerTargetKey) -> Result<ServerTarget> {
-    let value = key.to_string();
-    if let Some(path) = value.strip_prefix("unix://") {
-        return Ok(ServerTarget::UnixSocket(path.into()));
-    }
-    if value.starts_with("http://") || value.starts_with("https://") {
-        return Ok(ServerTarget::HttpUrl(value));
-    }
-    bail!("invalid auth store server key `{value}`")
-}
-
-fn format_warning(key: &ServerTargetKey, error: &str) -> String {
+fn format_warning(target: &ServerTarget, error: &str) -> String {
     format!(
-        "Warning: removed local session for {key}, but remote revocation failed: {error}. The refresh token may remain valid until it expires."
+        "Warning: removed local session for {target}, but remote revocation failed: {error}. The refresh token may remain valid until it expires."
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
-    use super::{format_warning, server_target_from_key};
-    use crate::auth_store::ServerTargetKey;
+    use super::format_warning;
     use crate::user_config::ServerTarget;
 
     #[test]
-    fn rebuilds_server_target_from_http_key() {
-        let key = ServerTargetKey::new(&ServerTarget::HttpUrl(
-            "https://fabro.example.com/api/v1".to_string(),
-        ))
-        .unwrap();
-
-        assert_eq!(
-            server_target_from_key(&key).unwrap(),
-            ServerTarget::HttpUrl("https://fabro.example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn rebuilds_server_target_from_unix_key() {
-        let key = ServerTargetKey::new(&ServerTarget::UnixSocket(PathBuf::from("/tmp/fabro.sock")))
-            .unwrap();
-
-        assert_eq!(
-            server_target_from_key(&key).unwrap(),
-            ServerTarget::UnixSocket(PathBuf::from("/tmp/fabro.sock"))
-        );
-    }
-
-    #[test]
     fn warning_mentions_local_removal_and_remote_failure() {
-        let key = ServerTargetKey::new(&ServerTarget::HttpUrl(
-            "https://fabro.example.com".to_string(),
-        ))
-        .unwrap();
-        let warning = format_warning(&key, "request failed with status 500");
+        let target = ServerTarget::http_url("https://fabro.example.com").unwrap();
+        let warning = format_warning(&target, "request failed with status 500");
         assert!(warning.contains("removed local session"));
         assert!(warning.contains("remote revocation failed"));
     }

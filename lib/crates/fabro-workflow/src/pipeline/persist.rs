@@ -11,7 +11,7 @@ pub(crate) fn persist(
     mut options: PersistOptions,
 ) -> Result<Persisted, Error> {
     let (graph, source, diagnostics) = validated.into_parts();
-    options.run_record.graph = graph.clone();
+    options.run_spec.graph = graph.clone();
 
     std::fs::create_dir_all(&options.run_dir).map_err(|err| {
         Error::Io(format!(
@@ -25,7 +25,7 @@ pub(crate) fn persist(
         source,
         diagnostics,
         options.run_dir,
-        options.run_record,
+        options.run_spec,
     ))
 }
 
@@ -37,10 +37,10 @@ pub(crate) async fn load_from_store(
         .state()
         .await
         .map_err(|err| Error::engine(err.to_string()))?;
-    let run_record = state
-        .run
-        .ok_or_else(|| Error::Precondition("run record missing from store".to_string()))?;
-    let graph = run_record.graph.clone();
+    let run_spec = state
+        .spec
+        .ok_or_else(|| Error::Precondition("run spec missing from store".to_string()))?;
+    let graph = run_spec.graph.clone();
     let source = state.graph_source.unwrap_or_default();
 
     Ok(Persisted::new(
@@ -48,7 +48,7 @@ pub(crate) async fn load_from_store(
         source,
         Vec::new(),
         run_dir.to_path_buf(),
-        run_record,
+        run_spec,
     ))
 }
 
@@ -70,7 +70,7 @@ mod tests {
 
     use super::*;
     use crate::event::{Event, append_event};
-    use crate::records::RunRecord;
+    use crate::records::RunSpec;
 
     fn memory_store() -> Arc<Database> {
         Arc::new(Database::new(
@@ -125,8 +125,8 @@ mod tests {
         graph
     }
 
-    fn sample_record(graph: Graph) -> RunRecord {
-        RunRecord {
+    fn sample_record(graph: Graph) -> RunSpec {
+        RunSpec {
             run_id: fixtures::RUN_1,
             settings: SettingsLayer {
                 run: Some(RunLayer {
@@ -161,7 +161,7 @@ mod tests {
         }
     }
 
-    async fn seeded_store(run_dir: &Path, record: &RunRecord, source: Option<&str>) -> RunDatabase {
+    async fn seeded_store(run_dir: &Path, record: &RunSpec, source: Option<&str>) -> RunDatabase {
         let store = memory_store();
         let run_store = store.create_run(&record.run_id).await.unwrap();
         append_event(&run_store, &record.run_id, &Event::RunCreated {
@@ -194,8 +194,8 @@ mod tests {
         let persisted = persist(
             Validated::new(graph.clone(), source, vec![]),
             PersistOptions {
-                run_dir:    run_dir.clone(),
-                run_record: sample_record(different_graph()),
+                run_dir:  run_dir.clone(),
+                run_spec: sample_record(different_graph()),
             },
         )
         .unwrap();
@@ -207,13 +207,13 @@ mod tests {
         );
         assert_eq!(persisted.run_dir(), run_dir.as_path());
         assert_eq!(
-            serde_json::to_value(persisted.run_record().graph.clone()).unwrap(),
+            serde_json::to_value(persisted.run_spec().graph.clone()).unwrap(),
             serde_json::to_value(graph).unwrap()
         );
     }
 
     #[test]
-    fn persist_overwrites_run_record_graph_with_validated_graph() {
+    fn persist_overwrites_run_spec_graph_with_validated_graph() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         let (graph, source) = graph_and_source();
@@ -221,22 +221,22 @@ mod tests {
         let persisted = persist(
             Validated::new(graph.clone(), source, vec![]),
             PersistOptions {
-                run_dir:    run_dir.clone(),
-                run_record: sample_record(different_graph()),
+                run_dir:  run_dir.clone(),
+                run_spec: sample_record(different_graph()),
             },
         )
         .unwrap();
 
-        assert_eq!(persisted.run_record().graph.name, graph.name);
-        assert!(persisted.run_record().graph.nodes.contains_key("exit"));
+        assert_eq!(persisted.run_spec().graph.name, graph.name);
+        assert!(persisted.run_spec().graph.nodes.contains_key("exit"));
         assert_eq!(
-            serde_json::to_value(persisted.run_record().graph.clone()).unwrap(),
+            serde_json::to_value(persisted.run_spec().graph.clone()).unwrap(),
             serde_json::to_value(graph).unwrap()
         );
     }
 
     #[tokio::test]
-    async fn load_from_store_roundtrips_full_run_record_fields() {
+    async fn load_from_store_roundtrips_full_run_spec_fields() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         let (graph, source) = graph_and_source();
@@ -246,8 +246,8 @@ mod tests {
         persist(
             Validated::new(graph, source.clone(), vec![]),
             PersistOptions {
-                run_dir:    run_dir.clone(),
-                run_record: expected.clone(),
+                run_dir:  run_dir.clone(),
+                run_spec: expected.clone(),
             },
         )
         .unwrap();
@@ -257,7 +257,7 @@ mod tests {
             .await
             .unwrap();
 
-        let loaded_record = loaded.run_record();
+        let loaded_record = loaded.run_spec();
         assert_eq!(loaded_record.run_id, expected.run_id);
         assert!(
             (loaded_record.run_id.created_at().timestamp_millis()
@@ -288,7 +288,7 @@ mod tests {
 
         let err = persist(Validated::new(graph, source, vec![]), PersistOptions {
             run_dir,
-            run_record: sample_record(different_graph()),
+            run_spec: sample_record(different_graph()),
         })
         .unwrap_err();
 
@@ -313,7 +313,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_from_store_reads_graph_from_run_record_and_source_from_store() {
+    async fn load_from_store_reads_graph_from_run_spec_and_source_from_store() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();

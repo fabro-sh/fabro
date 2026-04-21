@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use fabro_client::{AuthEntry, AuthStore};
 use fabro_types::settings::CliSettings;
 use fabro_types::settings::cli::CliLayer;
 use fabro_util::dev_token::{read_dev_token_file, validate_dev_token_format};
@@ -7,7 +8,6 @@ use fabro_util::printer::Printer;
 use serde::Serialize;
 
 use crate::args::AuthStatusArgs;
-use crate::auth_store::{AuthEntry, AuthStore, ServerTargetKey};
 use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 use crate::user_config;
@@ -126,7 +126,7 @@ fn all_rows(store: &AuthStore, now: DateTime<Utc>) -> Result<Vec<StatusRow>> {
     Ok(store
         .list()?
         .into_iter()
-        .map(|(key, entry)| status_row(&key, entry, now))
+        .map(|(target, entry)| status_row(&target, entry, now))
         .collect())
 }
 
@@ -135,17 +135,16 @@ fn filter_rows(
     target: &ServerTarget,
     now: DateTime<Utc>,
 ) -> Result<Vec<StatusRow>> {
-    let key = ServerTargetKey::new(target)?;
     Ok(store
-        .get(&key)?
+        .get(target)?
         .into_iter()
-        .map(|entry| status_row(&key, entry, now))
+        .map(|entry| status_row(target, entry, now))
         .collect())
 }
 
-fn status_row(key: &ServerTargetKey, entry: AuthEntry, now: DateTime<Utc>) -> StatusRow {
+fn status_row(target: &ServerTarget, entry: AuthEntry, now: DateTime<Utc>) -> StatusRow {
     StatusRow {
-        server:                   key.to_string(),
+        server:                   target.to_string(),
         oauth_state:              oauth_state(&entry, now),
         access_token_expires_at:  entry.access_token_expires_at,
         refresh_token_expires_at: entry.refresh_token_expires_at,
@@ -187,9 +186,9 @@ fn load_dev_token_if_available() -> bool {
 #[cfg(test)]
 mod tests {
     use chrono::Duration;
+    use fabro_client::{AuthEntry, StoredSubject};
 
     use super::{OAuthState, human_state, oauth_state};
-    use crate::auth_store::{AuthEntry, StoredSubject};
 
     fn entry(access_offset_secs: i64, refresh_offset_secs: i64) -> AuthEntry {
         let now = chrono::Utc::now();

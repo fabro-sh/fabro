@@ -13,14 +13,14 @@ use super::overrides::run_args_layer;
 use crate::args::RunArgs;
 use crate::command_context::CommandContext;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, run_manifest_args};
-use crate::user_config::{self, ServerTarget};
+use crate::user_config;
 
 pub(crate) struct CreatedRun {
     pub(crate) run_id:        RunId,
     pub(crate) local_run_dir: Option<PathBuf>,
 }
 
-/// Create a workflow run: allocate run directory, persist RunRecord, return
+/// Create a workflow run: allocate run directory, persist RunSpec, return
 /// (run_id, run_dir).
 ///
 /// This does NOT execute the workflow — it only prepares the run directory.
@@ -73,14 +73,15 @@ pub(crate) async fn create_run(
     }
 
     let created_run_id = client.create_run_from_manifest(built.manifest).await?;
-    let local_run_dir = match &target {
-        ServerTarget::UnixSocket(_) => Some(
+    let local_run_dir = if target.is_unix_socket() {
+        Some(
             Storage::new(user_config::storage_dir(ctx.machine_settings())?)
                 .run_scratch(&created_run_id)
                 .root()
                 .to_path_buf(),
-        ),
-        ServerTarget::HttpUrl(_) => None,
+        )
+    } else {
+        None
     };
 
     Ok(CreatedRun {

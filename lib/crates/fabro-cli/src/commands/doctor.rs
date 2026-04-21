@@ -343,7 +343,7 @@ pub(crate) async fn run_doctor(
         checks: vec![CheckResult {
             name:        "Location".to_string(),
             status:      CheckStatus::Pass,
-            summary:     server.base_url().to_string(),
+            summary:     server.base_url().clone(),
             details:     vec![],
             remediation: None,
         }],

@@ -71,14 +71,14 @@ pub(crate) async fn dispatch(
             let ctx = CommandContext::for_target(&server, printer, cli.clone(), cli_layer)?;
             let client = ctx.server().await?;
             let run_id = client.resolve_run(&run).await?.run_id;
-            let exit_code = attach::attach_run_with_client(
+            let exit_code = Box::pin(attach::attach_run_with_client(
                 client.as_ref(),
                 &run_id,
                 false,
                 styles,
                 cli.output.format == OutputFormat::Json,
                 printer,
-            )
+            ))
             .await?;
             if exit_code != std::process::ExitCode::SUCCESS {
                 std::process::exit(1);
@@ -116,7 +116,10 @@ pub(crate) async fn dispatch(
                     CommandContext::for_target(&args.server, printer, cli.clone(), cli_layer)?;
                 crate::sleep_inhibitor::guard(ctx.cli_settings().exec.prevent_idle_sleep)
             };
-            resume::resume_command(args, styles, cli, cli_layer, printer).await
+            Box::pin(resume::resume_command(
+                args, styles, cli, cli_layer, printer,
+            ))
+            .await
         }
         RunCommands::Rewind(args) => {
             let styles = Styles::detect_stderr();

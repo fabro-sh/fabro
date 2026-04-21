@@ -505,7 +505,7 @@ where
         cache_path,
     ));
     let auth_code_store = store.auth_codes().await?;
-    let auth_token_store = store.auth_tokens().await?;
+    let auth_token_store = store.refresh_tokens().await?;
     let (artifact_object_store, artifact_prefix) =
         build_artifact_object_store(&resolved_server_settings)?;
     let artifact_store = fabro_store::ArtifactStore::new(artifact_object_store, artifact_prefix);
@@ -796,8 +796,8 @@ async fn wait_for_shutdown(mut shutdown_rx: watch::Receiver<bool>) {
 }
 
 fn spawn_auth_store_reapers(
-    auth_codes: Arc<fabro_store::SlateAuthCodeStore>,
-    auth_tokens: Arc<fabro_store::SlateAuthTokenStore>,
+    auth_codes: Arc<fabro_store::AuthCodeStore>,
+    auth_tokens: Arc<fabro_store::RefreshTokenStore>,
     shutdown_rx: watch::Receiver<bool>,
 ) {
     spawn_auth_code_reaper(auth_codes, shutdown_rx.clone());
@@ -805,7 +805,7 @@ fn spawn_auth_store_reapers(
 }
 
 fn spawn_auth_code_reaper(
-    auth_codes: Arc<fabro_store::SlateAuthCodeStore>,
+    auth_codes: Arc<fabro_store::AuthCodeStore>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
     tokio::spawn(async move {
@@ -826,7 +826,7 @@ fn spawn_auth_code_reaper(
 }
 
 fn spawn_refresh_token_reaper(
-    auth_tokens: Arc<fabro_store::SlateAuthTokenStore>,
+    auth_tokens: Arc<fabro_store::RefreshTokenStore>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
     tokio::spawn(async move {

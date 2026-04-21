@@ -635,6 +635,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
       {
         "event": "run.queued",
         "id": "[EVENT_ID]",
+        "properties": {},
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
       },

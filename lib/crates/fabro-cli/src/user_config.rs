@@ -1,7 +1,8 @@
-use std::fmt;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
+pub(crate) use fabro_client::ServerTarget;
 pub(crate) use fabro_config::user::*;
 use fabro_types::settings::cli::CliTargetSettings;
 use fabro_types::settings::{CliSettings, SettingsLayer};
@@ -60,52 +61,6 @@ pub(crate) fn apply_storage_dir_override(
     layer
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ServerTarget {
-    HttpUrl(String),
-    UnixSocket(PathBuf),
-}
-
-impl fmt::Display for ServerTarget {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::HttpUrl(api_url) => f.write_str(api_url),
-            Self::UnixSocket(path) => write!(f, "unix://{}", path.display()),
-        }
-    }
-}
-
-pub(crate) fn normalized_http_base_url(api_url: &str) -> &str {
-    let trimmed = api_url.trim_end_matches('/');
-    trimmed.strip_suffix("/api/v1").unwrap_or(trimmed)
-}
-
-pub(crate) fn build_public_http_client(
-    target: &ServerTarget,
-) -> Result<(fabro_http::HttpClient, String)> {
-    match target {
-        ServerTarget::HttpUrl(api_url) => {
-            let http_client = cli_http_client_builder().build()?;
-            Ok((http_client, normalized_http_base_url(api_url).to_string()))
-        }
-        ServerTarget::UnixSocket(path) => {
-            #[cfg(unix)]
-            {
-                let http_client = cli_http_client_builder()
-                    .unix_socket(path)
-                    .no_proxy()
-                    .build()?;
-                Ok((http_client, "http://fabro".to_string()))
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = path;
-                bail!("Unix-socket HTTP client is not supported on this platform")
-            }
-        }
-    }
-}
-
 /// Pull the resolved CLI target configuration out of `[cli.target]`.
 /// Returns either an http(s) URL or a unix socket path.
 fn cli_target_from_settings(settings: &CliSettings) -> Option<String> {
@@ -125,7 +80,7 @@ fn configured_server_target(settings: &SettingsLayer) -> Result<Option<ServerTar
 }
 
 pub(crate) fn default_server_target() -> ServerTarget {
-    ServerTarget::UnixSocket(default_socket_path())
+    ServerTarget::unix_socket_path(default_socket_path()).expect("default socket path is absolute")
 }
 
 pub(crate) fn storage_dir(settings: &SettingsLayer) -> anyhow::Result<PathBuf> {
@@ -153,16 +108,7 @@ pub(crate) fn storage_dir(settings: &SettingsLayer) -> anyhow::Result<PathBuf> {
 }
 
 fn parse_server_target(value: &str) -> Result<ServerTarget> {
-    if value.starts_with("http://") || value.starts_with("https://") {
-        return Ok(ServerTarget::HttpUrl(value.to_string()));
-    }
-
-    let path = Path::new(value);
-    if path.is_absolute() {
-        return Ok(ServerTarget::UnixSocket(path.to_path_buf()));
-    }
-
-    bail!("server target must be an http(s) URL or absolute Unix socket path")
+    ServerTarget::from_str(value)
 }
 
 fn explicit_server_target(args: &ServerTargetArgs) -> Result<Option<ServerTarget>> {
@@ -219,7 +165,7 @@ mod tests {
     fn exec_uses_cli_server_target() {
         assert_eq!(
             exec_server_target(&server_target_args(Some("https://cli.example.com"))).unwrap(),
-            Some(ServerTarget::HttpUrl("https://cli.example.com".to_string()))
+            Some(ServerTarget::http_url("https://cli.example.com").unwrap())
         );
     }
 
@@ -227,7 +173,7 @@ mod tests {
     fn exec_supports_explicit_unix_socket_target() {
         assert_eq!(
             exec_server_target(&server_target_args(Some("/tmp/fabro.sock"))).unwrap(),
-            Some(ServerTarget::UnixSocket(PathBuf::from("/tmp/fabro.sock")))
+            Some(ServerTarget::unix_socket_path("/tmp/fabro.sock").unwrap())
         );
     }
 
@@ -249,7 +195,7 @@ url = "https://config.example.com"
         );
         assert_eq!(
             resolve_server_target(&server_target_args(None), &settings).unwrap(),
-            ServerTarget::HttpUrl("https://config.example.com".to_string())
+            ServerTarget::http_url("https://config.example.com").unwrap()
         );
     }
 
@@ -270,7 +216,7 @@ url = "https://config.example.com"
                 &settings
             )
             .unwrap(),
-            ServerTarget::HttpUrl("https://cli.example.com".to_string())
+            ServerTarget::http_url("https://cli.example.com").unwrap()
         );
     }
 
@@ -279,7 +225,8 @@ url = "https://config.example.com"
         let settings = SettingsLayer::default();
         assert_eq!(
             resolve_server_target(&server_target_args(None), &settings).unwrap(),
-            ServerTarget::UnixSocket(dirs::home_dir().unwrap().join(".fabro/fabro.sock"))
+            ServerTarget::unix_socket_path(dirs::home_dir().unwrap().join(".fabro/fabro.sock"))
+                .unwrap()
         );
     }
 
@@ -300,7 +247,7 @@ url = "https://config.example.com"
                 &settings
             )
             .unwrap(),
-            ServerTarget::HttpUrl("https://cli.example.com".to_string())
+            ServerTarget::http_url("https://cli.example.com").unwrap()
         );
     }
 

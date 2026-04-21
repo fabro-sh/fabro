@@ -1,4 +1,4 @@
-pub(crate) fn drain_sse_payloads(buffer: &mut Vec<u8>, finalize: bool) -> Vec<String> {
+pub fn drain_sse_payloads(buffer: &mut Vec<u8>, finalize: bool) -> Vec<String> {
     let mut payloads = Vec::new();
 
     while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {

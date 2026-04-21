@@ -39,6 +39,7 @@ graphviz-sys.workspace = true
 fabro-validate = { path = "../fabro-validate" }
 fabro-workflow = { path = "../fabro-workflow" }
 fabro-server = { path = "../fabro-server" }
+fabro-client = { path = "../fabro-client" }
 fabro-api = { path = "../fabro-api" }
 fabro-telemetry = { path = "../fabro-telemetry" }
 fabro-store = { path = "../fabro-store" }

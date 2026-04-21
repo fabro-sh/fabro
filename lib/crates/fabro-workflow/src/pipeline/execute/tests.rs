@@ -30,7 +30,7 @@ use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline::initialize;
 use crate::pipeline::types::{InitOptions, LlmSpec, Persisted, SandboxEnvSpec};
-use crate::records::RunRecord;
+use crate::records::RunSpec;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{RunStatus, StatusReason};
 use crate::test_support::run_graph;
@@ -135,7 +135,7 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunI
         source,
         vec![],
         run_dir.to_path_buf(),
-        RunRecord {
+        RunSpec {
             run_id,
             settings: SettingsLayer::default(),
             graph,
@@ -645,7 +645,7 @@ async fn execute_conditional_routing_uses_unconditional_success_path() {
 }
 
 #[tokio::test]
-async fn execute_writes_start_json_and_node_status() {
+async fn execute_persists_start_record_and_node_status() {
     let dir = tempfile::tempdir().unwrap();
     let mut run_options = test_run_options(dir.path(), "test-run");
     run_options.git = Some(GitCheckpointOptions {

@@ -79,7 +79,8 @@ client_id = "Iv1.test"
     ));
     let auth_codes = store.auth_codes().await.unwrap();
     auth_codes
-        .insert("integration-code", AuthCode {
+        .insert(AuthCode {
+            code:           "integration-code".to_string(),
             identity:       fabro_types::IdpIdentity::new("https://github.com", "12345").unwrap(),
             login:          "octocat".to_string(),
             name:           "The Octocat".to_string(),
@@ -143,7 +144,7 @@ url = "https://fabro.example"
 client_id = "Iv1.test"
 "#,
     ));
-    let auth_tokens = store.auth_tokens().await.unwrap();
+    let auth_tokens = store.refresh_tokens().await.unwrap();
     let now = chrono::Utc::now();
     auth_tokens
         .insert_refresh_token(RefreshToken {

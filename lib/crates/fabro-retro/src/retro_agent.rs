@@ -1,16 +1,16 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use fabro_agent::tool_registry::RegisteredTool;
 use fabro_agent::{
     AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session, SessionEvent,
-    SessionOptions, Turn,
+    SessionOptions, Turn, shell_quote,
 };
 use fabro_llm::client::Client;
 use fabro_llm::provider::Provider;
 use fabro_llm::types::ToolDefinition;
-use fabro_store::{EventEnvelope, RunProjection};
+use fabro_store::{EventEnvelope, RunProjection, SerializableProjection};
 use tokio::task::JoinHandle;
 
 use crate::retro::{RetroNarrative, SmoothnessRating};
@@ -19,9 +19,9 @@ const RETRO_SYSTEM_PROMPT: &str = r"You are a workflow run retrospective analyst
 
 You have access to the run's data files:
 - `progress.jsonl` — the full event stream (stage starts/completions, agent tool calls, errors, retries)
-- `checkpoint.json` — final execution state with node outcomes
-- `run.json` — run record with config, graph, and metadata
-- `start.json` — start record with start time and git info
+- `run.json` — serialized run projection with the run spec, checkpoint state, conclusion, retro data, and other metadata
+- `graph.fabro` — the workflow source for the run
+- `stages/{node_id}@{visit}/...` — per-stage prompt, response, status, diff, stdout/stderr, and tool metadata files
 
 ## Your task
 
@@ -30,6 +30,7 @@ You have access to the run's data files:
    - Check agent tool call patterns for wrong approaches or pivots
    - Note which stages took longest or had issues
    - Look for patterns indicating friction (repeated similar tool calls, error recovery)
+   - Use `run.json` for the run-level snapshot, `graph.fabro` for workflow intent, and `stages/` for full per-stage payloads
 
 2. **Call the `submit_retro` tool** with your structured analysis.
 
@@ -124,7 +125,8 @@ pub fn build_retro_prompt(retro_data_dir: &str) -> String {
     format!(
         "Analyze the workflow run data at `{retro_data_dir}/` and generate a retrospective. \
          The key file is `{retro_data_dir}/progress.jsonl` which contains the full event stream. \
-         Also check `{retro_data_dir}/checkpoint.json` for stage outcomes. \
+         Use `{retro_data_dir}/run.json` for the run-level snapshot, `{retro_data_dir}/graph.fabro` \
+         for the workflow source, and `{retro_data_dir}/stages/` for full per-stage payloads. \
          Use grep to search for interesting signals (failures, retries, errors, approach changes) \
          rather than reading the entire file. When done, call the `submit_retro` tool with your analysis."
     )
@@ -299,50 +301,122 @@ async fn upload_data_files(
     _run_dir: &Path,
     target_dir: &str,
 ) -> anyhow::Result<()> {
-    // Create target directory
-    sandbox
-        .exec_command(&format!("mkdir -p {target_dir}"), 10_000, None, None, None)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create retro data dir: {e}"))?;
-
-    let progress_content = {
-        let lines: Vec<String> = events
-            .iter()
-            .filter_map(|env| serde_json::to_string(env.payload.as_value()).ok())
-            .collect();
-        if lines.is_empty() {
-            None
-        } else {
-            Some(lines.join("\n") + "\n")
+    let progress_content = (!events.is_empty()).then(|| {
+        let mut buf = String::new();
+        for env in events {
+            if let Ok(line) = serde_json::to_string(&env.event) {
+                buf.push_str(&line);
+                buf.push('\n');
+            }
         }
-    };
-    if let Some(content) = progress_content {
-        sandbox
-            .write_file(&format!("{target_dir}/progress.jsonl"), &content)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to upload progress.jsonl: {e}"))?;
+        buf
+    });
+    upload_file(
+        sandbox,
+        target_dir,
+        Path::new("progress.jsonl"),
+        progress_content,
+    )
+    .await?;
+
+    let run_content = serde_json::to_string_pretty(&SerializableProjection(state))?;
+    upload_file(
+        sandbox,
+        target_dir,
+        Path::new("run.json"),
+        Some(run_content),
+    )
+    .await?;
+    upload_file(
+        sandbox,
+        target_dir,
+        Path::new("graph.fabro"),
+        state.graph_source.clone(),
+    )
+    .await?;
+
+    let mut stage_ids: Vec<_> = state
+        .iter_nodes()
+        .map(|(stage_id, _)| stage_id.clone())
+        .collect();
+    stage_ids.sort();
+
+    for stage_id in stage_ids {
+        let Some(node) = state.node(&stage_id) else {
+            continue;
+        };
+        let base = PathBuf::from("stages").join(stage_id.to_string());
+        upload_file(
+            sandbox,
+            target_dir,
+            &base.join("prompt.md"),
+            node.prompt.clone(),
+        )
+        .await?;
+        upload_file(
+            sandbox,
+            target_dir,
+            &base.join("response.md"),
+            node.response.clone(),
+        )
+        .await?;
+        upload_json_file(
+            sandbox,
+            target_dir,
+            &base.join("status.json"),
+            node.status.as_ref(),
+        )
+        .await?;
+        upload_json_file(
+            sandbox,
+            target_dir,
+            &base.join("provider_used.json"),
+            node.provider_used.as_ref(),
+        )
+        .await?;
+        upload_file(
+            sandbox,
+            target_dir,
+            &base.join("diff.patch"),
+            node.diff.clone(),
+        )
+        .await?;
+        upload_json_file(
+            sandbox,
+            target_dir,
+            &base.join("script_invocation.json"),
+            node.script_invocation.as_ref(),
+        )
+        .await?;
+        upload_json_file(
+            sandbox,
+            target_dir,
+            &base.join("script_timing.json"),
+            node.script_timing.as_ref(),
+        )
+        .await?;
+        upload_json_file(
+            sandbox,
+            target_dir,
+            &base.join("parallel_results.json"),
+            node.parallel_results.as_ref(),
+        )
+        .await?;
+        upload_file(
+            sandbox,
+            target_dir,
+            &base.join("stdout.log"),
+            node.stdout.clone(),
+        )
+        .await?;
+        upload_file(
+            sandbox,
+            target_dir,
+            &base.join("stderr.log"),
+            node.stderr.clone(),
+        )
+        .await?;
     }
-
-    let checkpoint_content = state
-        .checkpoint
-        .clone()
-        .map(|cp| serde_json::to_string_pretty(&cp))
-        .transpose()?;
-    upload_file(sandbox, target_dir, "checkpoint.json", checkpoint_content).await?;
-
-    let run_content = state
-        .run
-        .clone()
-        .map(|run| serde_json::to_string_pretty(&run))
-        .transpose()?;
-    upload_file(sandbox, target_dir, "run.json", run_content).await?;
-
-    let start_content = state
-        .start
-        .clone()
-        .map(|start| serde_json::to_string_pretty(&start))
-        .transpose()?;
-    upload_file(sandbox, target_dir, "start.json", start_content).await?;
 
     Ok(())
 }
@@ -350,20 +424,64 @@ async fn upload_data_files(
 async fn upload_file(
     sandbox: &Arc<dyn Sandbox>,
     target_dir: &str,
-    filename: &str,
+    relative: &Path,
     content: Option<String>,
 ) -> anyhow::Result<()> {
-    if let Some(content) = content {
-        sandbox
-            .write_file(&format!("{target_dir}/{filename}"), &content)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to upload {filename}: {e}"))?;
+    let Some(content) = content else {
+        return Ok(());
+    };
+    let path = Path::new(target_dir).join(relative);
+    let remote_path = path.to_string_lossy().into_owned();
+    ensure_remote_dir(sandbox, &path).await?;
+    sandbox
+        .write_file(&remote_path, &content)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to upload {}: {e}", relative.display()))?;
+    Ok(())
+}
+
+async fn upload_json_file<T>(
+    sandbox: &Arc<dyn Sandbox>,
+    target_dir: &str,
+    relative: &Path,
+    value: Option<&T>,
+) -> anyhow::Result<()>
+where
+    T: serde::Serialize,
+{
+    let content = value.map(serde_json::to_string_pretty).transpose()?;
+    upload_file(sandbox, target_dir, relative, content).await
+}
+
+async fn ensure_remote_dir(sandbox: &Arc<dyn Sandbox>, path: &Path) -> anyhow::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Retro upload path has no parent: {}", path.display()))?;
+    let command = format!("mkdir -p {}", shell_quote(&parent.to_string_lossy()));
+    let result = sandbox
+        .exec_command(&command, 10_000, None, None, None)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to create retro upload dir: {e}"))?;
+    if result.exit_code != 0 {
+        return Err(anyhow::anyhow!(
+            "Failed to create retro upload dir {}: {}",
+            parent.display(),
+            result.stderr
+        ));
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use chrono::{TimeZone, Utc};
+    use fabro_agent::LocalSandbox;
+    use fabro_store::{NodeState, StageId};
+    use fabro_types::{NodeStatusRecord, StageStatus};
+    use tokio::fs;
+
     use super::*;
 
     #[test]
@@ -413,5 +531,95 @@ mod tests {
         assert!(narrative.learnings.is_empty());
         assert!(narrative.friction_points.is_empty());
         assert!(narrative.open_items.is_empty());
+    }
+
+    #[test]
+    fn retro_prompt_mentions_graph_and_stage_files() {
+        let prompt = build_retro_prompt(RETRO_DATA_DIR);
+
+        assert!(prompt.contains("run.json"));
+        assert!(prompt.contains("graph.fabro"));
+        assert!(prompt.contains("stages/"));
+    }
+
+    #[tokio::test]
+    async fn upload_data_files_writes_projection_graph_and_stage_files() {
+        let sandbox_root = tempfile::tempdir().expect("sandbox tempdir should exist");
+        let sandbox: Arc<dyn Sandbox> =
+            Arc::new(LocalSandbox::new(sandbox_root.path().to_path_buf()));
+        let output_dir = tempfile::tempdir().expect("retro tempdir should exist");
+        let target_dir = output_dir.path().join("retro");
+        let target_dir_str = target_dir.to_string_lossy().to_string();
+
+        let stage_id = StageId::new("build", 2);
+        let mut state = RunProjection::default();
+        state.graph_source = Some("digraph Ship {}".to_string());
+        state.set_node(stage_id, NodeState {
+            prompt:            Some("plan".to_string()),
+            response:          Some("done".to_string()),
+            status:            Some(NodeStatusRecord {
+                status:         StageStatus::Success,
+                notes:          Some("ok".to_string()),
+                failure_reason: None,
+                timestamp:      Utc
+                    .with_ymd_and_hms(2026, 4, 20, 12, 1, 0)
+                    .single()
+                    .unwrap(),
+            }),
+            provider_used:     Some(serde_json::json!({ "provider": "openai" })),
+            diff:              Some("diff --git a/a b/a".to_string()),
+            script_invocation: Some(serde_json::json!({ "command": "cargo test" })),
+            script_timing:     Some(serde_json::json!({ "duration_ms": 10 })),
+            parallel_results:  Some(serde_json::json!([{ "stage": "fanout@1" }])),
+            stdout:            Some("stdout".to_string()),
+            stderr:            Some("stderr".to_string()),
+        });
+
+        upload_data_files(&sandbox, &state, &[], output_dir.path(), &target_dir_str)
+            .await
+            .expect("retro files should upload");
+
+        let run_json: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(target_dir.join("run.json"))
+                .await
+                .expect("run.json should exist"),
+        )
+        .expect("run.json should parse");
+        assert!(run_json.get("spec").is_some());
+        assert!(run_json.get("run").is_none());
+        assert!(run_json["nodes"]["build@2"]["prompt"].is_null());
+        assert!(run_json["nodes"]["build@2"]["diff"].is_null());
+        assert_eq!(
+            fs::read_to_string(target_dir.join("graph.fabro"))
+                .await
+                .expect("graph.fabro should exist"),
+            "digraph Ship {}"
+        );
+        assert_eq!(
+            fs::read_to_string(target_dir.join("stages/build@2/prompt.md"))
+                .await
+                .expect("prompt file should exist"),
+            "plan"
+        );
+        assert_eq!(
+            fs::read_to_string(target_dir.join("stages/build@2/response.md"))
+                .await
+                .expect("response file should exist"),
+            "done"
+        );
+        assert_eq!(
+            fs::read_to_string(target_dir.join("stages/build@2/stdout.log"))
+                .await
+                .expect("stdout file should exist"),
+            "stdout"
+        );
+        assert!(
+            target_dir.join("stages/build@2/status.json").exists(),
+            "status file should exist"
+        );
+        assert!(
+            !target_dir.join("progress.jsonl").exists(),
+            "progress file should be omitted when there are no events"
+        );
     }
 }

@@ -4,14 +4,15 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use bytes::Bytes;
 use chrono::Utc;
-use fabro_types::{RunBlobId, RunId};
+use fabro_types::{RunBlobId, RunEvent, RunId, RunSummary};
 use futures::Stream;
 use slatedb::{Db, DbRead};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use crate::run_state::EventProjectionCache;
-use crate::{Error, EventEnvelope, EventPayload, Result, RunProjection, RunSummary, keys};
+use super::blob_store::BlobStore;
+use crate::run_state::{EventProjectionCache, RunProjectionReducer, build_summary};
+use crate::{Error, EventEnvelope, EventPayload, Result, RunProjection, keys};
 
 const DEFAULT_EVENT_TAIL_LIMIT: usize = 1024;
 #[derive(Clone)]
@@ -32,6 +33,7 @@ impl std::fmt::Debug for RunDatabase {
 pub(crate) struct RunDatabaseInner {
     run_id:             RunId,
     db:                 Db,
+    blob_store:         BlobStore,
     event_seq:          AtomicU32,
     close_lock:         Mutex<()>,
     state_lock:         Mutex<()>,
@@ -43,33 +45,23 @@ pub(crate) struct RunDatabaseInner {
 
 impl RunDatabase {
     pub(crate) async fn open_writer(run_id: RunId, db: Db) -> Result<Self> {
-        let event_seq =
-            recover_next_seq(&db, keys::run_events_prefix(&run_id), keys::parse_event_seq).await?;
-        let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
-        Ok(Self {
-            inner:     Arc::new(RunDatabaseInner {
-                run_id,
-                db,
-                event_seq: AtomicU32::new(event_seq),
-                close_lock: Mutex::new(()),
-                state_lock: Mutex::new(()),
-                projection_cache: Mutex::new(EventProjectionCache::default()),
-                recent_events: Mutex::new(VecDeque::with_capacity(DEFAULT_EVENT_TAIL_LIMIT)),
-                recent_event_limit: DEFAULT_EVENT_TAIL_LIMIT,
-                event_tx,
-            }),
-            read_only: false,
-        })
+        Self::build(run_id, db, false).await
     }
 
     pub(crate) async fn open_reader(run_id: RunId, db: Db) -> Result<Self> {
+        Self::build(run_id, db, true).await
+    }
+
+    async fn build(run_id: RunId, db: Db, read_only: bool) -> Result<Self> {
         let event_seq =
             recover_next_seq(&db, keys::run_events_prefix(&run_id), keys::parse_event_seq).await?;
         let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
+        let blob_store = BlobStore::new(Arc::new(db.clone()));
         Ok(Self {
-            inner:     Arc::new(RunDatabaseInner {
+            inner: Arc::new(RunDatabaseInner {
                 run_id,
                 db,
+                blob_store,
                 event_seq: AtomicU32::new(event_seq),
                 close_lock: Mutex::new(()),
                 state_lock: Mutex::new(()),
@@ -78,7 +70,7 @@ impl RunDatabase {
                 recent_event_limit: DEFAULT_EVENT_TAIL_LIMIT,
                 event_tx,
             }),
-            read_only: true,
+            read_only,
         })
     }
 
@@ -131,7 +123,7 @@ impl RunDatabase {
     {
         let events = list_events_from(db, run_id, 1).await?;
         let state = RunProjection::apply_events(&events)?;
-        Ok(state.build_summary(run_id))
+        Ok(build_summary(&state, run_id))
     }
 
     async fn projected_state(&self) -> Result<RunProjection> {
@@ -193,7 +185,7 @@ impl RunDatabase {
         let seq = self.inner.event_seq.fetch_add(1, Ordering::SeqCst);
         let event = EventEnvelope {
             seq,
-            payload: payload.clone(),
+            event: RunEvent::try_from(payload)?,
         };
         self.inner
             .db
@@ -284,17 +276,11 @@ impl RunDatabase {
         if self.read_only {
             return Err(Error::ReadOnly);
         }
-        let id = RunBlobId::new(data);
-        self.inner.db.put(keys::blob_key(&id), data).await?;
-        Ok(id)
+        self.inner.blob_store.write(data).await
     }
 
     pub async fn read_blob(&self, id: &RunBlobId) -> Result<Option<Bytes>> {
-        let global = self.inner.db.get(keys::blob_key(id)).await?;
-        if global.is_some() {
-            return Ok(global);
-        }
-        Ok(None)
+        self.inner.blob_store.read(id).await
     }
 
     pub async fn list_blobs(&self) -> Result<Vec<RunBlobId>> {
@@ -341,7 +327,7 @@ where
         }
         events.push(EventEnvelope {
             seq,
-            payload: serde_json::from_slice(&entry.value)?,
+            event: serde_json::from_slice(&entry.value)?,
         });
     }
     events.sort_by_key(|event| event.seq);

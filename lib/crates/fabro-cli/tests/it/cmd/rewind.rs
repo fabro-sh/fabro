@@ -129,7 +129,7 @@ fn rewind_preserves_event_history_and_clears_terminal_snapshot_state() {
     assert!(
         before_events
             .iter()
-            .any(|event| event.payload.as_value()["event"] == "run.completed"),
+            .any(|event| event.event.event_name() == "run.completed"),
         "setup run should be completed before rewind"
     );
 
@@ -153,28 +153,31 @@ fn rewind_preserves_event_history_and_clears_terminal_snapshot_state() {
     assert_eq!(
         after_events[..before_events.len()]
             .iter()
-            .map(|event| event.payload.as_value()["event"].as_str().unwrap())
+            .map(|event| event.event.event_name())
             .collect::<Vec<_>>(),
         before_events
             .iter()
-            .map(|event| event.payload.as_value()["event"].as_str().unwrap())
+            .map(|event| event.event.event_name())
             .collect::<Vec<_>>(),
         "rewind should preserve the prior event prefix"
     );
     assert_eq!(
-        after_events[before_events.len()].payload.as_value()["event"],
+        after_events[before_events.len()].event.event_name(),
         "run.rewound"
     );
     assert_eq!(
-        after_events[before_events.len() + 1].payload.as_value()["event"],
+        after_events[before_events.len() + 1].event.event_name(),
         "checkpoint.completed"
     );
     assert_eq!(
-        after_events[before_events.len() + 2].payload.as_value()["event"],
+        after_events[before_events.len() + 2].event.event_name(),
         "run.submitted"
     );
     assert!(
-        after_events[before_events.len() + 2].payload.as_value()["properties"]["definition_blob"]
+        after_events[before_events.len() + 2]
+            .event
+            .properties()
+            .unwrap()["definition_blob"]
             .is_string(),
         "rewind should re-emit run.submitted with the definition_blob"
     );

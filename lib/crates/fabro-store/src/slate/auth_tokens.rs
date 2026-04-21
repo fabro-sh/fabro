@@ -4,11 +4,10 @@ use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use fabro_types::IdpIdentity;
 use serde::{Deserialize, Serialize};
-use slatedb::WriteBatch;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::{Result, keys};
+use crate::record::{JsonCodec, Record, Repository, transaction};
+use crate::{KeyedMutex, Result};
 
 const REPLAY_REVOCATION_TTL_SECONDS: i64 = 60;
 
@@ -27,6 +26,17 @@ pub struct RefreshToken {
     pub user_agent:   String,
 }
 
+impl Record for RefreshToken {
+    type Id = [u8; 32];
+    type Codec = JsonCodec;
+
+    const PREFIX: &'static str = "auth/refresh";
+
+    fn id(&self) -> Self::Id {
+        self.token_hash
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConsumeOutcome {
     Rotated(RefreshToken, Box<RefreshToken>),
@@ -35,45 +45,37 @@ pub enum ConsumeOutcome {
     NotFound,
 }
 
-pub struct SlateAuthTokenStore {
+pub struct RefreshTokenStore {
     db:                 Arc<slatedb::Db>,
-    refresh_locks:      DashMap<[u8; 32], Arc<Mutex<()>>>,
+    repo:               Repository<RefreshToken>,
+    consume_locks:      KeyedMutex<[u8; 32]>,
+    /// In-memory only: persisting attacker-supplied hashes would be an
+    /// unbounded-growth surface under a token-stuffing attack.
     replay_revocations: DashMap<[u8; 32], DateTime<Utc>>,
 }
 
-impl std::fmt::Debug for SlateAuthTokenStore {
+impl std::fmt::Debug for RefreshTokenStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SlateAuthTokenStore")
-            .finish_non_exhaustive()
+        f.debug_struct("RefreshTokenStore").finish_non_exhaustive()
     }
 }
 
-impl SlateAuthTokenStore {
+impl RefreshTokenStore {
     pub(crate) fn new(db: Arc<slatedb::Db>) -> Self {
         Self {
+            repo: Repository::new(Arc::clone(&db)),
             db,
-            refresh_locks: DashMap::new(),
+            consume_locks: KeyedMutex::new(),
             replay_revocations: DashMap::new(),
         }
     }
 
     pub async fn insert_refresh_token(&self, token: RefreshToken) -> Result<()> {
-        self.db
-            .put(
-                keys::auth_refresh_key(&token.token_hash),
-                serde_json::to_vec(&token)?,
-            )
-            .await?;
-        Ok(())
+        self.repo.put(&token).await
     }
 
     pub async fn find_refresh_token(&self, token_hash: &[u8; 32]) -> Result<Option<RefreshToken>> {
-        self.db
-            .get(keys::auth_refresh_key(token_hash))
-            .await?
-            .map(|bytes| serde_json::from_slice::<RefreshToken>(&bytes))
-            .transpose()
-            .map_err(Into::into)
+        self.repo.get(token_hash).await
     }
 
     pub async fn consume_and_rotate(
@@ -82,14 +84,9 @@ impl SlateAuthTokenStore {
         new_token: RefreshToken,
         now: DateTime<Utc>,
     ) -> Result<ConsumeOutcome> {
-        let mutex = self
-            .refresh_locks
-            .entry(presented_hash)
-            .or_insert_with(|| Arc::new(Mutex::new(())))
-            .clone();
-        let _guard = mutex.lock().await;
+        let _guard = self.consume_locks.lock(presented_hash).await;
 
-        let outcome = match self.find_refresh_token(&presented_hash).await? {
+        let outcome = match self.repo.get(&presented_hash).await? {
             None => ConsumeOutcome::NotFound,
             Some(existing) if now >= existing.expires_at => ConsumeOutcome::Expired,
             Some(existing) if existing.used => ConsumeOutcome::Reused(existing),
@@ -98,66 +95,26 @@ impl SlateAuthTokenStore {
                 old_token.used = true;
                 old_token.last_used_at = now;
 
-                let mut batch = WriteBatch::new();
-                batch.put(
-                    keys::auth_refresh_key(&presented_hash),
-                    serde_json::to_vec(&old_token)?,
-                );
-                batch.put(
-                    keys::auth_refresh_key(&new_token.token_hash),
-                    serde_json::to_vec(&new_token)?,
-                );
-                self.db.write(batch).await?;
+                transaction(&self.db, |tx| {
+                    tx.put(&old_token)?;
+                    tx.put(&new_token)?;
+                    Ok(())
+                })
+                .await?;
 
                 ConsumeOutcome::Rotated(old_token, Box::new(new_token))
             }
         };
 
-        if Arc::strong_count(&mutex) == 2 {
-            self.refresh_locks.remove(&presented_hash);
-        }
-
         Ok(outcome)
     }
 
     pub async fn delete_chain(&self, chain_id: Uuid) -> Result<u64> {
-        let mut iter = self.db.scan_prefix(keys::auth_refresh_prefix()).await?;
-        let mut keys_to_delete = Vec::new();
-        while let Some(entry) = iter.next().await? {
-            let token: RefreshToken = serde_json::from_slice(&entry.value)?;
-            if token.chain_id == chain_id {
-                keys_to_delete.push(
-                    String::from_utf8(entry.key.to_vec())
-                        .expect("slatedb keys should be valid utf-8"),
-                );
-            }
-        }
-
-        for key in &keys_to_delete {
-            self.db.delete(key).await?;
-        }
-
-        Ok(keys_to_delete.len() as u64)
+        self.repo.gc(|token| token.chain_id == chain_id).await
     }
 
     pub async fn gc_expired(&self, cutoff: DateTime<Utc>) -> Result<u64> {
-        let mut iter = self.db.scan_prefix(keys::auth_refresh_prefix()).await?;
-        let mut keys_to_delete = Vec::new();
-        while let Some(entry) = iter.next().await? {
-            let token: RefreshToken = serde_json::from_slice(&entry.value)?;
-            if token.expires_at <= cutoff {
-                keys_to_delete.push(
-                    String::from_utf8(entry.key.to_vec())
-                        .expect("slatedb keys should be valid utf-8"),
-                );
-            }
-        }
-
-        for key in &keys_to_delete {
-            self.db.delete(key).await?;
-        }
-
-        Ok(keys_to_delete.len() as u64)
+        self.repo.gc(|token| token.expires_at <= cutoff).await
     }
 
     pub fn mark_refresh_token_replay(&self, token_hash: [u8; 32], now: DateTime<Utc>) {
@@ -188,17 +145,17 @@ mod tests {
     use tokio::task::JoinSet;
     use uuid::Uuid;
 
-    use super::{ConsumeOutcome, RefreshToken, SlateAuthTokenStore};
+    use super::{ConsumeOutcome, RefreshToken, RefreshTokenStore};
     use crate::Database;
 
-    async fn store() -> Arc<SlateAuthTokenStore> {
+    async fn store() -> Arc<RefreshTokenStore> {
         let db = Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),
             None,
         );
-        db.auth_tokens().await.unwrap()
+        db.refresh_tokens().await.unwrap()
     }
 
     fn refresh_token(hash: [u8; 32], chain_id: Uuid, used: bool) -> RefreshToken {

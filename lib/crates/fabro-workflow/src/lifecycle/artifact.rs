@@ -9,12 +9,12 @@ use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, NodeDecision, 
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 use fabro_store::ArtifactStore;
-use fabro_types::{RunId, StageId};
+use fabro_types::{ArtifactUpload, RunId, StageId};
 use tokio::fs;
 use tokio::time::sleep;
 
 use crate::artifact::{normalize_durable_updates, offload_large_values, sync_artifacts_to_env};
-use crate::artifact_snapshot::{CapturedArtifactInfo, collect_artifacts};
+use crate::artifact_snapshot::collect_artifacts;
 use crate::artifact_upload::ArtifactSink;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::graph::{WorkflowGraph, WorkflowNode};
@@ -209,7 +209,7 @@ impl ArtifactLifecycle {
         &self,
         stage_id: &StageId,
         artifact_capture_dir: &std::path::Path,
-        artifacts: &[CapturedArtifactInfo],
+        artifacts: &[ArtifactUpload],
     ) -> Result<(), String> {
         let Some(sink) = self.artifact_sink.as_ref() else {
             return Err("artifact sink is not configured".to_string());
@@ -238,7 +238,7 @@ impl ArtifactLifecycle {
         sink: &ArtifactSink,
         stage_id: &StageId,
         artifact_capture_dir: &std::path::Path,
-        artifacts: &[CapturedArtifactInfo],
+        artifacts: &[ArtifactUpload],
     ) -> Result<(), String> {
         match sink {
             ArtifactSink::Store(store) => {
@@ -257,7 +257,7 @@ impl ArtifactLifecycle {
         store: &ArtifactStore,
         stage_id: &StageId,
         artifact_capture_dir: &std::path::Path,
-        artifacts: &[CapturedArtifactInfo],
+        artifacts: &[ArtifactUpload],
     ) -> Result<(), String> {
         for artifact in artifacts {
             let local_path = artifact_capture_dir.join(&artifact.path);

@@ -3166,7 +3166,7 @@ mod tests {
         let line = events
             .into_iter()
             .next()
-            .map(|event| event.payload.as_value().clone())
+            .map(|event| event.event.to_value().unwrap())
             .unwrap();
         assert!(line.get("id").is_some());
         assert_eq!(line["event"], "run.notice");

@@ -8,9 +8,9 @@
 )]
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::{fmt, fs};
 
 use chrono::{DateTime, Utc};
 use fs2::FileExt;
@@ -18,68 +18,31 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::user_config::{ServerTarget, normalized_http_base_url};
+use crate::target::ServerTarget;
 
 const AUTH_FILE_ENV: &str = "FABRO_AUTH_FILE";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct StoredSubject {
-    pub(crate) idp_issuer:  String,
-    pub(crate) idp_subject: String,
-    pub(crate) login:       String,
-    pub(crate) name:        String,
-    pub(crate) email:       String,
+pub struct StoredSubject {
+    pub idp_issuer:  String,
+    pub idp_subject: String,
+    pub login:       String,
+    pub name:        String,
+    pub email:       String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct AuthEntry {
-    pub(crate) access_token:             String,
-    pub(crate) access_token_expires_at:  DateTime<Utc>,
-    pub(crate) refresh_token:            String,
-    pub(crate) refresh_token_expires_at: DateTime<Utc>,
-    pub(crate) subject:                  StoredSubject,
-    pub(crate) logged_in_at:             DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct ServerTargetKey(String);
-
-impl ServerTargetKey {
-    pub(crate) fn new(target: &ServerTarget) -> Result<Self, AuthStoreError> {
-        match target {
-            ServerTarget::HttpUrl(api_url) => canonical_http_target(api_url).map(Self),
-            ServerTarget::UnixSocket(path) => Ok(Self(format!(
-                "unix://{}",
-                canonical_socket_path(path)?.display()
-            ))),
-        }
-    }
-
-    fn from_canonical(canonical: String) -> Self {
-        Self(canonical)
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for ServerTargetKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl TryFrom<&ServerTarget> for ServerTargetKey {
-    type Error = AuthStoreError;
-
-    fn try_from(value: &ServerTarget) -> Result<Self, Self::Error> {
-        Self::new(value)
-    }
+pub struct AuthEntry {
+    pub access_token:             String,
+    pub access_token_expires_at:  DateTime<Utc>,
+    pub refresh_token:            String,
+    pub refresh_token_expires_at: DateTime<Utc>,
+    pub subject:                  StoredSubject,
+    pub logged_in_at:             DateTime<Utc>,
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum AuthStoreError {
+pub enum AuthStoreError {
     #[allow(
         dead_code,
         reason = "This platform-gated variant is exercised on non-Unix targets."
@@ -118,7 +81,7 @@ pub(crate) enum AuthStoreError {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum LockError {
+pub enum LockError {
     #[error(
         "the filesystem backing {path} does not support file locking; move the auth store to a local filesystem or set {AUTH_FILE_ENV} to a local path"
     )]
@@ -131,7 +94,7 @@ pub(crate) enum LockError {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct AuthStore {
+pub struct AuthStore {
     path: PathBuf,
 }
 
@@ -152,97 +115,83 @@ impl Default for AuthStore {
 }
 
 impl AuthStore {
-    pub(crate) fn new(path: PathBuf) -> Self {
+    pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
 
-    pub(crate) fn get(&self, key: &ServerTargetKey) -> Result<Option<AuthEntry>, AuthStoreError> {
-        if !self.path.exists() {
-            return Ok(None);
-        }
-
+    pub fn get(&self, target: &ServerTarget) -> Result<Option<AuthEntry>, AuthStoreError> {
+        let key = key_for_target(target);
         self.with_shared_lock(|| {
             let file = self.read_auth_file()?;
-            Ok(file.servers.get(key.as_str()).cloned())
+            Ok(file.servers.get(&key).cloned())
         })
     }
 
-    pub(crate) fn put(
-        &self,
-        key: &ServerTargetKey,
-        entry: AuthEntry,
-    ) -> Result<(), AuthStoreError> {
+    pub fn put(&self, target: &ServerTarget, entry: AuthEntry) -> Result<(), AuthStoreError> {
         #[cfg(not(unix))]
         {
-            let _ = (key, entry);
+            let _ = (target, entry);
             Err(AuthStoreError::UnsupportedPlatform)
         }
 
         #[cfg(unix)]
         {
+            let key = key_for_target(target);
             self.ensure_parent_dir()?;
             self.with_exclusive_lock(|| {
-                let mut file = self.read_auth_file_if_exists()?;
-                file.servers.insert(key.to_string(), entry);
+                let mut file = self.read_auth_file()?;
+                file.servers.insert(key, entry);
                 self.write_auth_file(&file)
             })
         }
     }
 
-    pub(crate) fn remove(&self, key: &ServerTargetKey) -> Result<bool, AuthStoreError> {
+    pub fn remove(&self, target: &ServerTarget) -> Result<bool, AuthStoreError> {
         #[cfg(not(unix))]
         {
-            let _ = key;
+            let _ = target;
             Err(AuthStoreError::UnsupportedPlatform)
         }
 
         #[cfg(unix)]
         {
-            if !self.path.exists() {
-                return Ok(false);
-            }
-
+            let key = key_for_target(target);
             self.ensure_parent_dir()?;
             self.with_exclusive_lock(|| {
-                let mut file = self.read_auth_file_if_exists()?;
-                let removed = file.servers.remove(key.as_str()).is_some();
-                self.write_auth_file(&file)?;
+                let mut file = self.read_auth_file()?;
+                let removed = file.servers.remove(&key).is_some();
+                if removed {
+                    self.write_auth_file(&file)?;
+                }
                 Ok(removed)
             })
         }
     }
 
-    pub(crate) fn list(&self) -> Result<Vec<(ServerTargetKey, AuthEntry)>, AuthStoreError> {
-        if !self.path.exists() {
-            return Ok(Vec::new());
-        }
-
+    pub fn list(&self) -> Result<Vec<(ServerTarget, AuthEntry)>, AuthStoreError> {
         self.with_shared_lock(|| {
             let file = self.read_auth_file()?;
-            Ok(file
-                .servers
+            file.servers
                 .into_iter()
-                .map(|(key, entry)| (ServerTargetKey::from_canonical(key), entry))
-                .collect())
+                .map(|(key, entry)| Ok((parse_stored_target(&key)?, entry)))
+                .collect::<Result<Vec<_>, AuthStoreError>>()
         })
     }
 
     fn read_auth_file(&self) -> Result<AuthFile, AuthStoreError> {
-        let contents = fs::read_to_string(&self.path).map_err(|source| AuthStoreError::Read {
-            path: self.path.clone(),
-            source,
-        })?;
-        serde_json::from_str(&contents).map_err(|source| AuthStoreError::Corrupt {
-            path: self.path.clone(),
-            source,
-        })
-    }
-
-    fn read_auth_file_if_exists(&self) -> Result<AuthFile, AuthStoreError> {
-        if !self.path.exists() {
-            return Ok(AuthFile::default());
+        match fs::read_to_string(&self.path) {
+            Ok(contents) => {
+                serde_json::from_str(&contents).map_err(|source| AuthStoreError::Corrupt {
+                    path: self.path.clone(),
+                    source,
+                })
+            }
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(AuthFile::default()),
+            Err(source) => Err(AuthStoreError::Read {
+                path: self.path.clone(),
+                source,
+            }),
         }
-        self.read_auth_file()
     }
 
     #[cfg(unix)]
@@ -347,48 +296,26 @@ impl AuthStore {
     }
 }
 
-fn canonical_http_target(api_url: &str) -> Result<String, AuthStoreError> {
-    let trimmed = api_url.trim();
-    let normalized = normalized_http_base_url(trimmed);
-    let url =
-        fabro_http::Url::parse(normalized).map_err(|_| AuthStoreError::InvalidServerTarget {
-            value: api_url.to_string(),
-        })?;
-    let scheme = url.scheme().to_ascii_lowercase();
-    let Some(host) = url.host_str() else {
-        return Err(AuthStoreError::InvalidServerTarget {
-            value: api_url.to_string(),
-        });
-    };
-    let host = host.to_ascii_lowercase();
-    let Some(port) = url.port_or_known_default() else {
-        return Err(AuthStoreError::InvalidServerTarget {
-            value: api_url.to_string(),
-        });
-    };
-    let default_port = match scheme.as_str() {
-        "http" => 80,
-        "https" => 443,
-        _ => {
-            return Err(AuthStoreError::InvalidServerTarget {
-                value: api_url.to_string(),
-            });
-        }
-    };
-    if port == default_port {
-        Ok(format!("{scheme}://{host}"))
-    } else {
-        Ok(format!("{scheme}://{host}:{port}"))
-    }
+fn key_for_target(target: &ServerTarget) -> String {
+    target.to_string()
 }
 
-fn canonical_socket_path(path: &Path) -> Result<PathBuf, AuthStoreError> {
-    if !path.is_absolute() {
-        return Err(AuthStoreError::InvalidServerTarget {
-            value: path.display().to_string(),
+fn parse_stored_target(value: &str) -> Result<ServerTarget, AuthStoreError> {
+    if let Some(path) = value.strip_prefix("unix://") {
+        return ServerTarget::unix_socket_path(path).map_err(|_| {
+            AuthStoreError::InvalidServerTarget {
+                value: value.to_string(),
+            }
         });
     }
-    Ok(fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
+    if value.starts_with("http://") || value.starts_with("https://") {
+        return ServerTarget::http_url(value).map_err(|_| AuthStoreError::InvalidServerTarget {
+            value: value.to_string(),
+        });
+    }
+    Err(AuthStoreError::InvalidServerTarget {
+        value: value.to_string(),
+    })
 }
 
 #[cfg(unix)]
@@ -438,8 +365,8 @@ mod tests {
 
     #[cfg(unix)]
     use super::{AUTH_FILE_ENV, LockError, classify_lock_error};
-    use super::{AuthEntry, AuthStore, ServerTargetKey, StoredSubject};
-    use crate::user_config::ServerTarget;
+    use super::{AuthEntry, AuthStore, StoredSubject, key_for_target};
+    use crate::target::ServerTarget;
 
     fn entry(login: &str) -> AuthEntry {
         let now = chrono::Utc::now();
@@ -460,7 +387,7 @@ mod tests {
     }
 
     fn https_target(value: &str) -> ServerTarget {
-        ServerTarget::HttpUrl(value.to_string())
+        ServerTarget::http_url(value).unwrap()
     }
 
     #[cfg(unix)]
@@ -468,11 +395,11 @@ mod tests {
     fn round_trips_https_entry() {
         let temp = tempfile::tempdir().unwrap();
         let store = AuthStore::new(temp.path().join("auth.json"));
-        let key = ServerTargetKey::new(&https_target("https://fabro.example.com")).unwrap();
+        let target = https_target("https://fabro.example.com");
 
-        store.put(&key, entry("octocat")).unwrap();
+        store.put(&target, entry("octocat")).unwrap();
 
-        let saved = store.get(&key).unwrap().unwrap();
+        let saved = store.get(&target).unwrap().unwrap();
         assert_eq!(saved.subject.login, "octocat");
     }
 
@@ -481,11 +408,11 @@ mod tests {
     fn round_trips_loopback_http_entry() {
         let temp = tempfile::tempdir().unwrap();
         let store = AuthStore::new(temp.path().join("auth.json"));
-        let key = ServerTargetKey::new(&https_target("http://127.0.0.1:3000")).unwrap();
+        let target = https_target("http://127.0.0.1:3000");
 
-        store.put(&key, entry("alice")).unwrap();
+        store.put(&target, entry("alice")).unwrap();
 
-        let saved = store.get(&key).unwrap().unwrap();
+        let saved = store.get(&target).unwrap().unwrap();
         assert_eq!(saved.subject.login, "alice");
     }
 
@@ -496,19 +423,19 @@ mod tests {
         let socket = temp.path().join("fabro.sock");
         std::fs::write(&socket, "").unwrap();
         let store = AuthStore::new(temp.path().join("auth.json"));
-        let key = ServerTargetKey::new(&ServerTarget::UnixSocket(socket)).unwrap();
+        let target = ServerTarget::unix_socket_path(socket).unwrap();
 
-        store.put(&key, entry("unix")).unwrap();
+        store.put(&target, entry("unix")).unwrap();
 
-        let saved = store.get(&key).unwrap().unwrap();
+        let saved = store.get(&target).unwrap().unwrap();
         assert_eq!(saved.subject.login, "unix");
     }
 
     #[test]
     fn https_normalization_collapses_equivalent_urls() {
-        let a = ServerTargetKey::new(&https_target("https://EXAMPLE.COM/")).unwrap();
-        let b = ServerTargetKey::new(&https_target("https://example.com:443")).unwrap();
-        let c = ServerTargetKey::new(&https_target("https://example.com")).unwrap();
+        let a = key_for_target(&https_target("https://EXAMPLE.COM/"));
+        let b = key_for_target(&https_target("https://example.com:443"));
+        let c = key_for_target(&https_target("https://example.com"));
 
         assert_eq!(a, b);
         assert_eq!(b, c);
@@ -516,36 +443,34 @@ mod tests {
 
     #[test]
     fn distinct_unix_socket_paths_do_not_collide() {
-        let a =
-            ServerTargetKey::new(&ServerTarget::UnixSocket(PathBuf::from("/tmp/a.sock"))).unwrap();
-        let b =
-            ServerTargetKey::new(&ServerTarget::UnixSocket(PathBuf::from("/tmp/b.sock"))).unwrap();
+        let a = key_for_target(&ServerTarget::unix_socket_path("/tmp/a.sock").unwrap());
+        let b = key_for_target(&ServerTarget::unix_socket_path("/tmp/b.sock").unwrap());
 
         assert_ne!(a, b);
     }
 
     #[cfg(unix)]
     #[test]
-    fn canonicalizes_symlinked_socket_paths() {
+    fn preserves_distinct_symlinked_socket_paths() {
         let temp = tempfile::tempdir().unwrap();
         let socket = temp.path().join("fabro.sock");
         let link = temp.path().join("fabro-link.sock");
         std::fs::write(&socket, "").unwrap();
         std::os::unix::fs::symlink(&socket, &link).unwrap();
 
-        let direct = ServerTargetKey::new(&ServerTarget::UnixSocket(socket)).unwrap();
-        let via_link = ServerTargetKey::new(&ServerTarget::UnixSocket(link)).unwrap();
+        let direct = key_for_target(&ServerTarget::unix_socket_path(socket).unwrap());
+        let via_link = key_for_target(&ServerTarget::unix_socket_path(link).unwrap());
 
-        assert_eq!(direct, via_link);
+        assert_ne!(direct, via_link);
     }
 
     #[test]
     fn missing_file_returns_empty_results() {
         let temp = tempfile::tempdir().unwrap();
         let store = AuthStore::new(temp.path().join("auth.json"));
-        let key = ServerTargetKey::new(&https_target("https://fabro.example.com")).unwrap();
+        let target = https_target("https://fabro.example.com");
 
-        assert!(store.get(&key).unwrap().is_none());
+        assert!(store.get(&target).unwrap().is_none());
         assert!(store.list().unwrap().is_empty());
     }
 
@@ -555,9 +480,9 @@ mod tests {
         let path = temp.path().join("auth.json");
         std::fs::write(&path, "{not-json").unwrap();
         let store = AuthStore::new(path.clone());
-        let key = ServerTargetKey::new(&https_target("https://fabro.example.com")).unwrap();
+        let target = https_target("https://fabro.example.com");
 
-        let err = store.get(&key).unwrap_err();
+        let err = store.get(&target).unwrap_err();
         assert!(err.to_string().contains(&path.display().to_string()));
     }
 
@@ -566,21 +491,21 @@ mod tests {
     fn concurrent_puts_do_not_corrupt_file() {
         let temp = tempfile::tempdir().unwrap();
         let store = Arc::new(AuthStore::new(temp.path().join("auth.json")));
-        let key = ServerTargetKey::new(&https_target("https://fabro.example.com")).unwrap();
+        let target = https_target("https://fabro.example.com");
 
         let mut tasks = Vec::new();
         for login in ["alice", "bob"] {
             let store = Arc::clone(&store);
-            let key = key.clone();
+            let target = target.clone();
             tasks.push(thread::spawn(move || {
-                store.put(&key, entry(login)).unwrap();
+                store.put(&target, entry(login)).unwrap();
             }));
         }
         for task in tasks {
             task.join().unwrap();
         }
 
-        let saved = store.get(&key).unwrap().unwrap();
+        let saved = store.get(&target).unwrap().unwrap();
         assert!(matches!(saved.subject.login.as_str(), "alice" | "bob"));
     }
 
@@ -591,9 +516,9 @@ mod tests {
 
         let temp = tempfile::tempdir().unwrap();
         let store = AuthStore::new(temp.path().join("auth.json"));
-        let key = ServerTargetKey::new(&https_target("https://fabro.example.com")).unwrap();
+        let target = https_target("https://fabro.example.com");
 
-        store.put(&key, entry("octocat")).unwrap();
+        store.put(&target, entry("octocat")).unwrap();
 
         let mode = std::fs::metadata(temp.path().join("auth.json"))
             .unwrap()
@@ -608,9 +533,9 @@ mod tests {
     fn put_returns_unsupported_platform() {
         let temp = tempfile::tempdir().unwrap();
         let store = AuthStore::new(temp.path().join("auth.json"));
-        let key = ServerTargetKey::new(&https_target("https://fabro.example.com")).unwrap();
+        let target = https_target("https://fabro.example.com");
 
-        let err = store.put(&key, entry("octocat")).unwrap_err();
+        let err = store.put(&target, entry("octocat")).unwrap_err();
         assert!(err.to_string().contains("not supported on this platform"));
     }
 

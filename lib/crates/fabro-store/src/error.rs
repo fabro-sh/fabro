@@ -16,6 +16,10 @@ pub enum Error {
     RunAlreadyExists(String),
     #[error("run store is read-only")]
     ReadOnly,
+    #[error("invalid key segment: {segment:?}")]
+    InvalidKeySegment { segment: String },
+    #[error("failed to parse key: {0}")]
+    KeyParse(String),
     #[error("{0}")]
     Other(String),
 }

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use fabro_types::fixtures;
 use fabro_types::graph::Graph;
-use fabro_types::run::RunRecord;
+use fabro_types::run::RunSpec;
 use fabro_types::settings::run::{RunGoalLayer, RunLayer};
 use fabro_types::settings::server::{
     GithubIntegrationLayer, ServerIntegrationsLayer, ServerLayer, ServerStorageLayer,
@@ -37,8 +37,8 @@ fn templated_settings() -> SettingsLayer {
 }
 
 #[test]
-fn run_record_round_trips_templated_settings() {
-    let record = RunRecord {
+fn run_spec_round_trips_templated_settings() {
+    let record = RunSpec {
         run_id:            fixtures::RUN_1,
         settings:          templated_settings(),
         graph:             Graph::new("ship"),
@@ -54,7 +54,7 @@ fn run_record_round_trips_templated_settings() {
     };
 
     let json = serde_json::to_value(&record).expect("record should serialize");
-    let round_trip: RunRecord =
+    let round_trip: RunSpec =
         serde_json::from_value(json.clone()).expect("record should deserialize");
 
     assert_eq!(

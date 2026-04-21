@@ -17,7 +17,7 @@ pub(crate) async fn rebuild_run_store(
     ));
     let run_store = store.create_run(run_id).await?;
     for event in events {
-        let payload = EventPayload::new(event.payload.as_value().clone(), run_id)?;
+        let payload = EventPayload::new(event.event.to_value()?, run_id)?;
         run_store.append_event(&payload).await?;
     }
     Ok(run_store)

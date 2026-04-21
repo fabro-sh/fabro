@@ -8,17 +8,17 @@ pub(crate) struct SlateKey(String);
 impl SlateKey {
     const SEP: char = '\0';
 
-    fn new(segment: impl fmt::Display) -> Self {
+    pub(crate) fn new(segment: impl fmt::Display) -> Self {
         Self(segment.to_string())
     }
 
-    fn with(mut self, segment: impl fmt::Display) -> Self {
+    pub(crate) fn with(mut self, segment: impl fmt::Display) -> Self {
         self.0.push(Self::SEP);
         write!(&mut self.0, "{segment}").expect("write to String cannot fail");
         self
     }
 
-    fn into_prefix(mut self) -> Self {
+    pub(crate) fn into_prefix(mut self) -> Self {
         self.0.push(Self::SEP);
         self
     }
@@ -28,7 +28,7 @@ impl SlateKey {
         &self.0
     }
 
-    fn segments(raw: &str) -> impl Iterator<Item = &str> {
+    pub(crate) fn segments(raw: &str) -> impl Iterator<Item = &str> {
         raw.split(Self::SEP)
     }
 }
@@ -40,21 +40,6 @@ impl AsRef<[u8]> for SlateKey {
 }
 
 // --- Construction ---
-
-pub(crate) fn runs_index_by_start_prefix() -> SlateKey {
-    SlateKey::new("runs")
-        .with("_index")
-        .with("by-start")
-        .into_prefix()
-}
-
-pub(crate) fn runs_index_by_start_key(run_id: &RunId) -> SlateKey {
-    SlateKey::new("runs")
-        .with("_index")
-        .with("by-start")
-        .with(run_id.created_at().format("%Y-%m-%d"))
-        .with(run_id)
-}
 
 pub(crate) fn run_data_prefix(run_id: &RunId) -> SlateKey {
     SlateKey::new("runs").with(run_id).into_prefix()
@@ -76,30 +61,6 @@ pub(crate) fn run_event_key(run_id: &RunId, seq: u32, epoch_ms: i64) -> SlateKey
 
 pub(crate) fn blobs_prefix() -> SlateKey {
     SlateKey::new("blobs").with("sha256").into_prefix()
-}
-
-pub(crate) fn blob_key(id: &RunBlobId) -> SlateKey {
-    SlateKey::new("blobs").with("sha256").with(id)
-}
-
-pub(crate) fn auth_code_prefix() -> SlateKey {
-    SlateKey::new("auth").with("code").into_prefix()
-}
-
-pub(crate) fn auth_code_key(code: &str) -> SlateKey {
-    SlateKey::new("auth").with("code").with(code)
-}
-
-pub(crate) fn auth_refresh_prefix() -> SlateKey {
-    SlateKey::new("auth").with("refresh").into_prefix()
-}
-
-pub(crate) fn auth_refresh_key(token_hash: &[u8; 32]) -> SlateKey {
-    let mut encoded = String::with_capacity(token_hash.len() * 2);
-    for byte in token_hash {
-        write!(&mut encoded, "{byte:02x}").expect("write to String cannot fail");
-    }
-    SlateKey::new("auth").with("refresh").with(encoded)
 }
 
 // --- Parsing ---
@@ -127,15 +88,6 @@ pub(crate) fn parse_blob_id(key: &str) -> Option<RunBlobId> {
         return None;
     }
     id.parse().ok()
-}
-
-pub(crate) fn parse_run_id_from_index_key(key: &str) -> Option<RunId> {
-    let mut segments = SlateKey::segments(key);
-    let _ = segments.next()?; // "runs"
-    let _ = segments.next()?; // "_index"
-    let _ = segments.next()?; // "by-start"
-    let _ = segments.next()?; // date
-    segments.next()?.parse().ok()
 }
 
 #[cfg(test)]
@@ -170,23 +122,9 @@ mod tests {
     }
 
     #[test]
-    fn index_key_segments() {
-        let run_id: RunId = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
-        let key = runs_index_by_start_key(&run_id);
-        let segments: Vec<&str> = SlateKey::segments(key.as_str()).collect();
-        assert_eq!(segments, [
-            "runs",
-            "_index",
-            "by-start",
-            &run_id.created_at().format("%Y-%m-%d").to_string(),
-            &run_id.to_string(),
-        ]);
-    }
-
-    #[test]
     fn blob_key_segments() {
         let blob_id = RunBlobId::new(b"summary");
-        let key = blob_key(&blob_id);
+        let key = SlateKey::new("blobs").with("sha256").with(blob_id);
         let segments: Vec<&str> = SlateKey::segments(key.as_str()).collect();
         assert_eq!(segments, ["blobs", "sha256", &blob_id.to_string()]);
     }
@@ -208,12 +146,8 @@ mod tests {
         );
 
         let blob_id = RunBlobId::new(b"summary");
-        assert_eq!(parse_blob_id(blob_key(&blob_id).as_str()), Some(blob_id));
-
-        assert_eq!(
-            parse_run_id_from_index_key(runs_index_by_start_key(&run_id).as_str()),
-            Some(run_id)
-        );
+        let key = SlateKey::new("blobs").with("sha256").with(blob_id);
+        assert_eq!(parse_blob_id(key.as_str()), Some(blob_id));
     }
 
     #[test]

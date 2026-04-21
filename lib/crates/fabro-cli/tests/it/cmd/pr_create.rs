@@ -65,7 +65,7 @@ fn pr_create_completed_dry_run_without_run_branch_errors() {
 }
 
 #[test]
-fn pr_create_uses_store_run_record_without_run_json() {
+fn pr_create_uses_store_run_spec_without_run_json() {
     let context = test_context!();
     let run = setup_completed_fast_dry_run(&context);
 
