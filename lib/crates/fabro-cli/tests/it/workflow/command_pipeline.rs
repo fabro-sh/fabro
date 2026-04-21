@@ -48,7 +48,7 @@ fn scenario_command_pipeline(sandbox: &str) {
     );
 
     let export_dir = store_dump_export(&context, &run_id_for(&run_dir));
-    let stdout1 = std::fs::read_to_string(export_dir.join("nodes/step1/visit-1/stdout.log"))
+    let stdout1 = std::fs::read_to_string(export_dir.join("stages/step1@1/stdout.log"))
         .expect("step1 stdout.log should exist");
     assert!(
         stdout1.contains("hello-from-step1"),

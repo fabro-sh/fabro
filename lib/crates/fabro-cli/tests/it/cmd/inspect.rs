@@ -98,7 +98,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
       {
         "run_id": "[ULID]",
         "status": "succeeded",
-        "run_record": null,
+        "run_spec": null,
         "start_record": null,
         "conclusion": null,
         "checkpoint": null,
@@ -113,7 +113,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
 }
 
 #[test]
-fn inspect_created_run_shows_run_record_without_start_or_conclusion() {
+fn inspect_created_run_shows_run_spec_without_start_or_conclusion() {
     let context = test_context!();
     let run = setup_created_fast_dry_run(&context);
     let output = run_success(&context, &["inspect", &run.run_id]);
@@ -123,7 +123,7 @@ fn inspect_created_run_shows_run_record_without_start_or_conclusion() {
       {
         "run_id": "[ULID]",
         "status": "submitted",
-        "run_record": {
+        "run_spec": {
           "goal": "Run tests and report results",
           "workflow_name": "Simple",
           "workflow_slug": "simple",
@@ -156,7 +156,7 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
       {
         "run_id": "[ULID]",
         "status": "succeeded",
-        "run_record": {
+        "run_spec": {
           "goal": "Run tests and report results",
           "workflow_name": "Simple",
           "workflow_slug": "simple",
@@ -222,7 +222,7 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
       {
         "run_id": "[ULID]",
         "status": "succeeded",
-        "run_record": {
+        "run_spec": {
           "goal": "Run tests and report results",
           "workflow_name": "Simple",
           "workflow_slug": "simple",
@@ -273,7 +273,7 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
       {
         "run_id": "[ULID]",
         "status": "succeeded",
-        "run_record": {
+        "run_spec": {
           "goal": "Edit a tracked file",
           "workflow_name": "Flow",
           "workflow_slug": "flow",

@@ -63,7 +63,7 @@ pub(crate) async fn export_run(
 ) -> Result<usize> {
     let state = run_store.state().await?;
     let run_id = state
-        .run
+        .spec
         .as_ref()
         .map(|run| run.run_id)
         .context("run has no data in the store")?;
@@ -317,7 +317,7 @@ mod tests {
     use fabro_types::settings::SettingsLayer;
     use fabro_types::{
         AggregateStats, AttrValue, BilledTokenCounts, Checkpoint, Conclusion, Graph,
-        NodeStatusRecord, Retro, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord,
+        NodeStatusRecord, Retro, RunId, RunSpec, RunStatus, RunStatusRecord, SandboxRecord,
         StageStatus, StartRecord, StatusReason, fixtures,
     };
     use fabro_workflow::event::{Event, append_event};
@@ -348,13 +348,13 @@ mod tests {
         (store, artifact_store)
     }
 
-    fn sample_run_record(run_id: RunId, _created_at: DateTime<Utc>) -> RunRecord {
+    fn sample_run_spec(run_id: RunId, _created_at: DateTime<Utc>) -> RunSpec {
         let mut graph = Graph::new("night-sky");
         graph.attrs.insert(
             "goal".to_string(),
             AttrValue::String("map the constellations".to_string()),
         );
-        RunRecord {
+        RunSpec {
             run_id,
             settings: SettingsLayer::default(),
             graph,
@@ -478,7 +478,7 @@ mod tests {
         let created_at = dt("2026-03-27T12:00:00Z");
         let run_id = test_run_id();
         let run = store.create_run(&run_id).await.unwrap();
-        let run_record = sample_run_record(run_id, created_at);
+        let run_spec = sample_run_spec(run_id, created_at);
         let start_record = sample_start_record(run_id, created_at);
         let status_record = sample_status();
         let mut first_checkpoint = sample_checkpoint("plan", 1);
@@ -500,19 +500,19 @@ mod tests {
         let node = StageId::new("code", 2);
         append_event(&run, &run_id, &Event::RunCreated {
             run_id,
-            settings: serde_json::to_value(&run_record.settings).unwrap(),
-            graph: serde_json::to_value(&run_record.graph).unwrap(),
+            settings: serde_json::to_value(&run_spec.settings).unwrap(),
+            graph: serde_json::to_value(&run_spec.graph).unwrap(),
             workflow_source: Some("digraph night_sky {}".to_string()),
             workflow_config: None,
-            labels: run_record.labels.clone().into_iter().collect(),
+            labels: run_spec.labels.clone().into_iter().collect(),
             run_dir: "/tmp/night-sky-run".to_string(),
-            working_directory: run_record.working_directory.display().to_string(),
-            host_repo_path: run_record.host_repo_path.clone(),
-            repo_origin_url: run_record.repo_origin_url.clone(),
-            base_branch: run_record.base_branch.clone(),
-            workflow_slug: run_record.workflow_slug.clone(),
+            working_directory: run_spec.working_directory.display().to_string(),
+            host_repo_path: run_spec.host_repo_path.clone(),
+            repo_origin_url: run_spec.repo_origin_url.clone(),
+            base_branch: run_spec.base_branch.clone(),
+            workflow_slug: run_spec.workflow_slug.clone(),
             db_prefix: None,
-            provenance: run_record.provenance.clone(),
+            provenance: run_spec.provenance.clone(),
             manifest_blob: None,
         })
         .await
@@ -520,7 +520,7 @@ mod tests {
         append_event(&run, &run_id, &Event::WorkflowRunStarted {
             name: "night-sky".to_string(),
             run_id,
-            base_branch: run_record.base_branch.clone(),
+            base_branch: run_spec.base_branch.clone(),
             base_sha: start_record.base_sha.clone(),
             run_branch: start_record.run_branch.clone(),
             worktree_dir: None,
@@ -707,46 +707,79 @@ mod tests {
         let file_count = export_run(&run, &artifact_store, output.path())
             .await
             .unwrap();
-        assert_eq!(file_count, 20);
+        assert_eq!(file_count, 16);
 
-        let exported_run: RunRecord = read_json(&output.path().join("run.json"));
-        assert_eq!(exported_run.run_id, run_id);
-
-        let exported_start: StartRecord = read_json(&output.path().join("start.json"));
-        assert_eq!(exported_start.run_id, run_id);
-
-        let exported_status: RunStatusRecord = read_json(&output.path().join("status.json"));
-        assert_eq!(exported_status.status, RunStatus::Succeeded);
-
-        let exported_checkpoint: Checkpoint = read_json(&output.path().join("checkpoint.json"));
-        assert_eq!(exported_checkpoint.current_node, "code");
+        let exported_run: RunProjection = read_json(&output.path().join("run.json"));
         assert_eq!(
-            exported_checkpoint.context_values.get("artifact"),
+            exported_run.spec.as_ref().map(|run| run.run_id),
+            Some(run_id)
+        );
+        assert_eq!(
+            exported_run.start.as_ref().map(|start| start.run_id),
+            Some(run_id)
+        );
+        assert_eq!(
+            exported_run.status.as_ref().map(|status| status.status),
+            Some(RunStatus::Succeeded)
+        );
+        assert_eq!(
+            exported_run
+                .checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.current_node.as_str()),
+            Some("code")
+        );
+        assert_eq!(
+            exported_run
+                .checkpoint
+                .as_ref()
+                .and_then(|checkpoint| checkpoint.context_values.get("artifact")),
             Some(&serde_json::json!({"done": true}))
         );
+        assert!(exported_run.conclusion.is_some());
+        assert!(exported_run.sandbox.is_some());
+        assert!(exported_run.retro.is_some());
+        assert!(!output.path().join("start.json").exists());
+        assert!(!output.path().join("status.json").exists());
+        assert!(!output.path().join("checkpoint.json").exists());
+        assert!(!output.path().join("sandbox.json").exists());
+        assert!(!output.path().join("retro.json").exists());
+        assert!(!output.path().join("conclusion.json").exists());
         assert_eq!(
             std::fs::read_to_string(output.path().join("graph.fabro")).unwrap(),
             "digraph night_sky {}"
         );
 
         assert_eq!(
-            std::fs::read_to_string(output.path().join("nodes/code/visit-2/prompt.md")).unwrap(),
+            std::fs::read_to_string(output.path().join("stages/code@2/prompt.md")).unwrap(),
             "Plan the fix"
         );
         assert_eq!(
-            std::fs::read_to_string(output.path().join("nodes/code/visit-2/response.md")).unwrap(),
+            std::fs::read_to_string(output.path().join("stages/code@2/response.md")).unwrap(),
             "Implemented"
         );
         let node_status: NodeStatusRecord =
-            read_json(&output.path().join("nodes/code/visit-2/status.json"));
+            read_json(&output.path().join("stages/code@2/status.json"));
         assert_eq!(node_status.status, StageStatus::Success);
         assert_eq!(
-            std::fs::read_to_string(output.path().join("nodes/code/visit-2/stdout.log")).unwrap(),
+            std::fs::read_to_string(output.path().join("stages/code@2/stdout.log")).unwrap(),
             "stdout line"
         );
         assert_eq!(
-            std::fs::read_to_string(output.path().join("nodes/code/visit-2/stderr.log")).unwrap(),
+            std::fs::read_to_string(output.path().join("stages/code@2/stderr.log")).unwrap(),
             ""
+        );
+        assert!(
+            output
+                .path()
+                .join("stages/code@2/script_invocation.json")
+                .is_file()
+        );
+        assert!(
+            output
+                .path()
+                .join("stages/code@2/script_timing.json")
+                .is_file()
         );
 
         assert_eq!(
@@ -799,7 +832,7 @@ mod tests {
             .unwrap(),
             b"hello"
         );
-        assert!(!output.path().join("nodes/artifact-only").exists());
+        assert!(!output.path().join("stages/artifact-only@7").exists());
     }
 
     #[test]

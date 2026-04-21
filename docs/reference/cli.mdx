@@ -444,7 +444,7 @@ Manage GitHub pull requests created by workflow runs. Requires GitHub access to 
 
 ### `fabro pr create`
 
-Create a GitHub pull request from a completed workflow run. Uses the run's persisted run record, conclusion, and diff.
+Create a GitHub pull request from a completed workflow run. Uses the run's persisted run spec, conclusion, and diff.
 
 ```bash
 fabro pr create <run-id>
@@ -619,7 +619,7 @@ fabro logs -f my-workflow -p
 
 ## `fabro inspect`
 
-Show detailed JSON data for a workflow run, including its run record, start record, conclusion, checkpoint, and sandbox record.
+Show detailed JSON data for a workflow run, including its run spec, start record, conclusion, checkpoint, and sandbox record.
 
 ```bash
 fabro inspect <RUN>

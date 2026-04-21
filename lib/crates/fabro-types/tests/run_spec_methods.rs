@@ -1,0 +1,45 @@
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use fabro_types::fixtures;
+use fabro_types::graph::Graph;
+use fabro_types::run::RunSpec;
+use fabro_types::settings::SettingsLayer;
+
+fn sample_run_spec() -> RunSpec {
+    RunSpec {
+        run_id:            fixtures::RUN_1,
+        settings:          SettingsLayer::default(),
+        graph:             Graph::new("ship"),
+        workflow_slug:     Some("demo".to_string()),
+        working_directory: PathBuf::from("/tmp/project"),
+        host_repo_path:    Some("/tmp/project".to_string()),
+        repo_origin_url:   Some("https://github.com/fabro-sh/fabro.git".to_string()),
+        base_branch:       Some("main".to_string()),
+        labels:            HashMap::from([("team".to_string(), "platform".to_string())]),
+        provenance:        None,
+        manifest_blob:     None,
+        definition_blob:   None,
+    }
+}
+
+#[test]
+fn run_spec_getters_return_declared_fields() {
+    let run_spec = sample_run_spec();
+
+    assert_eq!(run_spec.id(), fixtures::RUN_1);
+    assert_eq!(run_spec.graph().name, "ship");
+    assert_eq!(run_spec.settings(), &SettingsLayer::default());
+    assert_eq!(run_spec.workflow_slug(), Some("demo"));
+    assert_eq!(run_spec.working_directory(), Path::new("/tmp/project"));
+    assert_eq!(
+        run_spec.labels().get("team").map(String::as_str),
+        Some("platform")
+    );
+    assert_eq!(run_spec.host_repo_path(), Some("/tmp/project"));
+    assert_eq!(
+        run_spec.repo_origin_url(),
+        Some("https://github.com/fabro-sh/fabro.git")
+    );
+    assert_eq!(run_spec.base_branch(), Some("main"));
+}

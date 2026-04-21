@@ -9024,8 +9024,8 @@ async fn downstream_remote_execution_materializes_blob_refs_to_sandbox_files() {
 // ---------------------------------------------------------------------------
 
 /// Verify that revisited nodes get distinct stage directories:
-///   visit 1 → `nodes/{id}/`
-///   visit 2 → `nodes/{id}-attempt_2/`
+///   visit 1 → `stages/{id}@1/`
+///   visit 2 → `stages/{id}@2/`
 #[tokio::test]
 async fn node_dir_uses_visit_count_on_revisit() {
     // Handler that fails on first call, succeeds on second.
@@ -10515,10 +10515,10 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     );
 
     // 8. Verify round-trip: shadow checkpoint's completed_nodes matches expected
-    let run_record = MetadataStore::read_run_record(repo.path(), &run_id.to_string())
-        .expect("read_run_record should not error")
-        .expect("shadow branch should contain run record");
-    assert_eq!(run_record.run_id, run_id);
+    let run_spec = MetadataStore::read_run_spec(repo.path(), &run_id.to_string())
+        .expect("read_run_spec should not error")
+        .expect("shadow branch should contain run spec");
+    assert_eq!(run_spec.run_id, run_id);
 
     // Cleanup worktree
     let _ = std::process::Command::new("git")

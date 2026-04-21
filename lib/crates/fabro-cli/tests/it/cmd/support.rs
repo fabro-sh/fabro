@@ -904,29 +904,29 @@ pub(crate) fn compact_inspect(output: &Output) -> Value {
     Value::Array(
         items.into_iter()
             .map(|item| {
-                let run_record = item["run_record"].clone();
+                let run_spec = item["run_spec"].clone();
                 let checkpoint = item["checkpoint"].clone();
                 let conclusion = item["conclusion"].clone();
                 let sandbox = item["sandbox"].clone();
-                let dry_run = run_record
+                let dry_run = run_spec
                     .pointer("/settings/run/execution/mode")
                     .and_then(Value::as_str)
                     .map(|mode| Value::Bool(mode == "dry_run"));
                 serde_json::json!({
                     "run_id": "[ULID]",
                     "status": item["status"],
-                    "run_record": {
-                        "goal": run_record.pointer("/settings/run/goal"),
-                        "workflow_name": run_record.pointer("/graph/name"),
-                        "workflow_slug": run_record.pointer("/workflow_slug"),
-                        "sandbox_provider": run_record.pointer("/settings/run/sandbox/provider"),
+                    "run_spec": {
+                        "goal": run_spec.pointer("/settings/run/goal"),
+                        "workflow_name": run_spec.pointer("/graph/name"),
+                        "workflow_slug": run_spec.pointer("/workflow_slug"),
+                        "sandbox_provider": run_spec.pointer("/settings/run/sandbox/provider"),
                         "dry_run": dry_run,
-                        "provenance": run_record.pointer("/provenance").as_ref().map(|_| {
+                        "provenance": run_spec.pointer("/provenance").as_ref().map(|_| {
                             serde_json::json!({
                                 "server_version": "[VERSION]",
-                                "client_name": run_record.pointer("/provenance/client/name"),
+                                "client_name": run_spec.pointer("/provenance/client/name"),
                                 "client_version": "[VERSION]",
-                                "subject_auth_method": run_record.pointer("/provenance/subject/auth_method"),
+                                "subject_auth_method": run_spec.pointer("/provenance/subject/auth_method"),
                             })
                         }),
                     },
@@ -966,7 +966,7 @@ pub(crate) fn compact_git_inspect(output: &Output) -> Value {
     Value::Array(
         items.into_iter()
             .map(|item| {
-                let run_record = item["run_record"].clone();
+                let run_spec = item["run_spec"].clone();
                 let start_record = item["start_record"].clone();
                 let checkpoint = item["checkpoint"].clone();
                 let conclusion = item["conclusion"].clone();
@@ -974,18 +974,18 @@ pub(crate) fn compact_git_inspect(output: &Output) -> Value {
                 serde_json::json!({
                     "run_id": "[ULID]",
                     "status": item["status"],
-                    "run_record": {
-                        "goal": run_record.pointer("/settings/run/goal"),
-                        "workflow_name": run_record.pointer("/graph/name"),
-                        "workflow_slug": run_record.pointer("/workflow_slug"),
-                        "llm_provider": run_record.pointer("/settings/run/model/provider"),
-                        "sandbox_provider": run_record.pointer("/settings/run/sandbox/provider"),
-                        "provenance": run_record.pointer("/provenance").as_ref().map(|_| {
+                    "run_spec": {
+                        "goal": run_spec.pointer("/settings/run/goal"),
+                        "workflow_name": run_spec.pointer("/graph/name"),
+                        "workflow_slug": run_spec.pointer("/workflow_slug"),
+                        "llm_provider": run_spec.pointer("/settings/run/model/provider"),
+                        "sandbox_provider": run_spec.pointer("/settings/run/sandbox/provider"),
+                        "provenance": run_spec.pointer("/provenance").as_ref().map(|_| {
                             serde_json::json!({
                                 "server_version": "[VERSION]",
-                                "client_name": run_record.pointer("/provenance/client/name"),
+                                "client_name": run_spec.pointer("/provenance/client/name"),
                                 "client_version": "[VERSION]",
-                                "subject_auth_method": run_record.pointer("/provenance/subject/auth_method"),
+                                "subject_auth_method": run_spec.pointer("/provenance/subject/auth_method"),
                             })
                         }),
                     },

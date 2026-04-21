@@ -117,7 +117,7 @@ fn strip_owner_domains(file: &mut SettingsLayer) {
 /// the server's local `~/.fabro/settings.toml` when the corresponding client
 /// value is absent. Run-shaped defaults (model, prepare, sandbox, checkpoint,
 /// hooks, agent mcps, etc.) also flow from server to client so the persisted
-/// run record matches the server's local configuration.
+/// run spec matches the server's local configuration.
 fn apply_server_defaults(mut settings: SettingsLayer, server: &SettingsLayer) -> SettingsLayer {
     // Server-owned domains: server-side always wins when client left blank.
     // Use the v2 merge matrix with the server layer in lower precedence so

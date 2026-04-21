@@ -20,7 +20,7 @@ pub(crate) struct CreatedRun {
     pub(crate) local_run_dir: Option<PathBuf>,
 }
 
-/// Create a workflow run: allocate run directory, persist RunRecord, return
+/// Create a workflow run: allocate run directory, persist RunSpec, return
 /// (run_id, run_dir).
 ///
 /// This does NOT execute the workflow — it only prepares the run directory.

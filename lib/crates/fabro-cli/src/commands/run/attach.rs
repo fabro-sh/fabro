@@ -82,11 +82,11 @@ pub(crate) async fn attach_run_with_client(
     printer: Printer,
 ) -> Result<ExitCode> {
     let state = client.get_run_state(run_id).await?;
-    let auto_approve = state.run.as_ref().is_some_and(|record| {
+    let auto_approve = state.spec.as_ref().is_some_and(|record| {
         fabro_config::resolve_run_from_file(&record.settings)
             .is_ok_and(|settings| settings.execution.approval == ApprovalMode::Auto)
     });
-    let verbose = state.run.as_ref().is_some_and(|record| {
+    let verbose = state.spec.as_ref().is_some_and(|record| {
         fabro_config::resolve_cli_from_file(&record.settings)
             .is_ok_and(|settings| settings.output.verbosity == OutputVerbosity::Verbose)
     });
@@ -502,7 +502,7 @@ mod tests {
 
     fn terminal_run_state_response() -> serde_json::Value {
         serde_json::json!({
-            "run": null,
+            "spec": null,
             "graph_source": null,
             "start": null,
             "status": {

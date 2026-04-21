@@ -273,7 +273,7 @@ mod tests {
 
     use chrono::{DateTime, Utc};
     use fabro_types::settings::SettingsLayer;
-    use fabro_types::{AttrValue, Graph, RunControlAction, RunRecord, RunStatus, StatusReason};
+    use fabro_types::{AttrValue, Graph, RunControlAction, RunSpec, RunStatus, StatusReason};
     use futures::TryStreamExt;
     use object_store::memory::InMemory;
     use object_store::path::Path;
@@ -315,13 +315,13 @@ mod tests {
         (object_store, store)
     }
 
-    fn sample_run_record(label: &str) -> RunRecord {
+    fn sample_run_spec(label: &str) -> RunSpec {
         let mut graph = Graph::new("night-sky");
         graph.attrs.insert(
             "goal".to_string(),
             AttrValue::String("map the constellations".to_string()),
         );
-        RunRecord {
+        RunSpec {
             run_id: test_run_id(label),
             settings: SettingsLayer::default(),
             graph,
@@ -357,20 +357,20 @@ mod tests {
     }
 
     async fn append_created(run: &RunDatabase, label: &str, created_at: DateTime<Utc>) {
-        let run_record = sample_run_record(label);
+        let run_spec = sample_run_spec(label);
         run.append_event(&event_payload(
             label,
             &created_at.to_rfc3339(),
             "run.created",
             &serde_json::json!({
-                "settings": run_record.settings,
-                "graph": run_record.graph,
-                "workflow_slug": run_record.workflow_slug,
-                "working_directory": run_record.working_directory,
+                "settings": run_spec.settings,
+                "graph": run_spec.graph,
+                "workflow_slug": run_spec.workflow_slug,
+                "working_directory": run_spec.working_directory,
                 "run_dir": format!("/tmp/{label}"),
-                "host_repo_path": run_record.host_repo_path,
-                "base_branch": run_record.base_branch,
-                "labels": run_record.labels,
+                "host_repo_path": run_spec.host_repo_path,
+                "base_branch": run_spec.base_branch,
+                "labels": run_spec.labels,
             }),
         ))
         .await
@@ -436,7 +436,7 @@ mod tests {
         assert_eq!(summary[1].status_reason, Some(StatusReason::Completed));
 
         let reopened = store.open_run(&test_run_id("run-1")).await.unwrap();
-        let stored = reopened.state().await.unwrap().run.unwrap();
+        let stored = reopened.state().await.unwrap().spec.unwrap();
         assert_eq!(stored.run_id, test_run_id("run-1"));
 
         store.delete_run(&test_run_id("run-1")).await.unwrap();
@@ -579,7 +579,7 @@ mod tests {
 
         let reader = store.open_run_reader(&test_run_id("run-1")).await.unwrap();
         let state = reader.state().await.unwrap();
-        assert_eq!(state.run.unwrap().run_id, test_run_id("run-1"));
+        assert_eq!(state.spec.unwrap().run_id, test_run_id("run-1"));
 
         run.append_event(&event_payload(
             "run-1",

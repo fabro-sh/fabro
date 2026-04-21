@@ -3714,7 +3714,7 @@ components:
       required:
         - nodes
       properties:
-        run:
+        spec:
           type: ["object", "null"]
           additionalProperties: true
         graph_source:

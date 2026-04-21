@@ -26,7 +26,7 @@ use crate::event::Emitter;
 use crate::file_resolver::FileResolver;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
-use crate::records::{Checkpoint, Conclusion, RunRecord};
+use crate::records::{Checkpoint, Conclusion, RunSpec};
 use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::runtime_store::RunStoreHandle;
@@ -113,12 +113,12 @@ impl Validated {
 
 /// Options for the PERSIST phase.
 pub(crate) struct PersistOptions {
-    pub run_dir:    PathBuf,
-    pub run_record: RunRecord,
+    pub run_dir:  PathBuf,
+    pub run_spec: RunSpec,
 }
 
 /// Output of the PERSIST phase. Run directory created and the validated
-/// workflow is persisted into the durable run record.
+/// workflow is persisted into the durable run spec.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Persisted {
@@ -126,7 +126,7 @@ pub struct Persisted {
     source:      String,
     diagnostics: Vec<Diagnostic>,
     run_dir:     PathBuf,
-    run_record:  RunRecord,
+    run_spec:    RunSpec,
 }
 
 impl Persisted {
@@ -136,14 +136,14 @@ impl Persisted {
         source: String,
         diagnostics: Vec<Diagnostic>,
         run_dir: PathBuf,
-        run_record: RunRecord,
+        run_spec: RunSpec,
     ) -> Self {
         Self {
             graph,
             source,
             diagnostics,
             run_dir,
-            run_record,
+            run_spec,
         }
     }
 
@@ -163,8 +163,8 @@ impl Persisted {
         &self.run_dir
     }
 
-    pub fn run_record(&self) -> &RunRecord {
-        &self.run_record
+    pub fn run_spec(&self) -> &RunSpec {
+        &self.run_spec
     }
 
     /// True if any diagnostic has Error severity.
@@ -191,14 +191,14 @@ impl Persisted {
         Ok(())
     }
 
-    /// Consume into owned graph, source, diagnostics, run dir, and run record.
-    pub fn into_parts(self) -> (Graph, String, Vec<Diagnostic>, PathBuf, RunRecord) {
+    /// Consume into owned graph, source, diagnostics, run dir, and run spec.
+    pub fn into_parts(self) -> (Graph, String, Vec<Diagnostic>, PathBuf, RunSpec) {
         (
             self.graph,
             self.source,
             self.diagnostics,
             self.run_dir,
-            self.run_record,
+            self.run_spec,
         )
     }
 

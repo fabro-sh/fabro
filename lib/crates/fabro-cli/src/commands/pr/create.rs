@@ -34,9 +34,9 @@ pub(super) async fn create_command(
     let run_store = rebuild_run_store(&run_id, &events).await?;
     let state = run_store.state().await?;
 
-    let record = state.run.context("Failed to load run record from store")?;
+    let run_spec = state.spec.context("Failed to load run spec from store")?;
     ensure_matching_repo_origin(
-        record.repo_origin_url.as_deref(),
+        run_spec.repo_origin_url.as_deref(),
         "create a pull request for",
     )?;
 
@@ -72,7 +72,7 @@ pub(super) async fn create_command(
     let (origin_url, detected_branch) =
         detect_repo_info(&cwd).map_err(|err| anyhow::anyhow!("{err}"))?;
 
-    let base_branch = record
+    let base_branch = run_spec
         .base_branch
         .as_deref()
         .or(detected_branch.as_deref())
@@ -113,12 +113,12 @@ pub(super) async fn create_command(
             .clone()
     });
 
-    let record = maybe_open_pull_request(
+    let pull_request = maybe_open_pull_request(
         &creds,
         &origin_url,
         base_branch,
         run_branch,
-        record.graph.goal(),
+        run_spec.graph.goal(),
         &diff,
         &model,
         true,
@@ -129,7 +129,7 @@ pub(super) async fn create_command(
     .await
     .map_err(|err| anyhow::anyhow!("{err}"))?;
 
-    match record {
+    match pull_request {
         Some(record) => {
             info!(pr_url = %record.html_url, "Pull request created");
             if cli.output.format == OutputFormat::Json {

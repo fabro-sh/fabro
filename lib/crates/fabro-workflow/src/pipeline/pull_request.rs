@@ -11,7 +11,7 @@ use tracing::{debug, info};
 use super::types::{Concluded, Finalized, PullRequestOptions};
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::outcome::{StageStatus, format_cost as outcome_format_cost};
-use crate::records::{Conclusion, RunRecord};
+use crate::records::{Conclusion, RunSpec};
 use crate::runtime_store::RunStoreHandle;
 
 /// Derive a PR title from the workflow goal.
@@ -107,7 +107,7 @@ fn format_retro_section(retro: &Retro) -> String {
 /// optionally a workflow graph summary in another `<details>` block.
 fn format_arc_details_section(
     conclusion: &Conclusion,
-    run_record: Option<&RunRecord>,
+    run_spec: Option<&RunSpec>,
     dot_source: Option<&str>,
 ) -> String {
     let mut parts = Vec::new();
@@ -143,8 +143,8 @@ fn format_arc_details_section(
     parts.push(String::new());
     parts.push("</details>".to_string());
 
-    // Workflow graph summary — prefer RunRecord's graph, fall back to DOT parsing
-    if let Some(record) = run_record {
+    // Workflow graph summary — prefer RunSpec's graph, fall back to DOT parsing
+    if let Some(record) = run_spec {
         let workflow_name = if record.graph.name.is_empty() {
             "unnamed"
         } else {
@@ -328,7 +328,7 @@ pub async fn build_pr_body(
         .ok();
     let plan_text = run_state.as_ref().and_then(read_plan_text);
     let retro = run_state.as_ref().and_then(|state| state.retro.clone());
-    let run_record = run_state.as_ref().and_then(|state| state.run.clone());
+    let run_spec = run_state.as_ref().and_then(|state| state.spec.clone());
     let dot_source = run_state
         .as_ref()
         .and_then(|state| state.graph_source.clone());
@@ -374,7 +374,7 @@ pub async fn build_pr_body(
     let retro_section = retro.as_ref().map(format_retro_section).unwrap_or_default();
     let arc_details_section = conclusion
         .as_ref()
-        .map(|c| format_arc_details_section(c, run_record.as_ref(), dot_source.as_deref()))
+        .map(|c| format_arc_details_section(c, run_spec.as_ref(), dot_source.as_deref()))
         .unwrap_or_default();
 
     let body = assemble_pr_body(
@@ -597,7 +597,7 @@ mod tests {
     };
     use fabro_store::Database;
     use fabro_types::settings::SettingsLayer;
-    use fabro_types::{BilledTokenCounts, RunRecord, fixtures};
+    use fabro_types::{BilledTokenCounts, RunSpec, fixtures};
     use futures::stream;
     use object_store::memory::InMemory;
 
@@ -1086,7 +1086,7 @@ mod tests {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
-        let run_record = RunRecord {
+        let run_spec = RunSpec {
             run_id:            fixtures::RUN_1,
             settings:          SettingsLayer::default(),
             graph:             Graph::new("test"),
@@ -1102,19 +1102,19 @@ mod tests {
         };
         append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
             run_id:            fixtures::RUN_1,
-            settings:          serde_json::to_value(&run_record.settings).unwrap(),
-            graph:             serde_json::to_value(&run_record.graph).unwrap(),
+            settings:          serde_json::to_value(&run_spec.settings).unwrap(),
+            graph:             serde_json::to_value(&run_spec.graph).unwrap(),
             workflow_source:   Some("digraph test { plan -> code }".to_string()),
             workflow_config:   None,
-            labels:            run_record.labels.clone().into_iter().collect(),
-            run_dir:           run_record.working_directory.display().to_string(),
-            working_directory: run_record.working_directory.display().to_string(),
-            host_repo_path:    run_record.host_repo_path.clone(),
-            repo_origin_url:   run_record.repo_origin_url.clone(),
-            base_branch:       run_record.base_branch.clone(),
-            workflow_slug:     run_record.workflow_slug.clone(),
+            labels:            run_spec.labels.clone().into_iter().collect(),
+            run_dir:           run_spec.working_directory.display().to_string(),
+            working_directory: run_spec.working_directory.display().to_string(),
+            host_repo_path:    run_spec.host_repo_path.clone(),
+            repo_origin_url:   run_spec.repo_origin_url.clone(),
+            base_branch:       run_spec.base_branch.clone(),
+            workflow_slug:     run_spec.workflow_slug.clone(),
             db_prefix:         None,
-            provenance:        run_record.provenance.clone(),
+            provenance:        run_spec.provenance.clone(),
             manifest_blob:     None,
         })
         .await
@@ -1151,7 +1151,7 @@ mod tests {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
-        let run_record = RunRecord {
+        let run_spec = RunSpec {
             run_id:            fixtures::RUN_1,
             settings:          SettingsLayer::default(),
             graph:             Graph::new("test"),
@@ -1167,19 +1167,19 @@ mod tests {
         };
         append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
             run_id:            fixtures::RUN_1,
-            settings:          serde_json::to_value(&run_record.settings).unwrap(),
-            graph:             serde_json::to_value(&run_record.graph).unwrap(),
+            settings:          serde_json::to_value(&run_spec.settings).unwrap(),
+            graph:             serde_json::to_value(&run_spec.graph).unwrap(),
             workflow_source:   Some("digraph test { plan -> code }".to_string()),
             workflow_config:   None,
-            labels:            run_record.labels.clone().into_iter().collect(),
-            run_dir:           run_record.working_directory.display().to_string(),
-            working_directory: run_record.working_directory.display().to_string(),
-            host_repo_path:    run_record.host_repo_path.clone(),
-            repo_origin_url:   run_record.repo_origin_url.clone(),
-            base_branch:       run_record.base_branch.clone(),
-            workflow_slug:     run_record.workflow_slug.clone(),
+            labels:            run_spec.labels.clone().into_iter().collect(),
+            run_dir:           run_spec.working_directory.display().to_string(),
+            working_directory: run_spec.working_directory.display().to_string(),
+            host_repo_path:    run_spec.host_repo_path.clone(),
+            repo_origin_url:   run_spec.repo_origin_url.clone(),
+            base_branch:       run_spec.base_branch.clone(),
+            workflow_slug:     run_spec.workflow_slug.clone(),
             db_prefix:         None,
-            provenance:        run_record.provenance.clone(),
+            provenance:        run_spec.provenance.clone(),
             manifest_blob:     None,
         })
         .await
@@ -1369,7 +1369,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        let run_record = RunRecord {
+        let run_spec = RunSpec {
             run_id:            fixtures::RUN_1,
             settings:          SettingsLayer::default(),
             graph:             Graph::new("test"),
@@ -1385,19 +1385,19 @@ mod tests {
         };
         append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
             run_id:            fixtures::RUN_1,
-            settings:          serde_json::to_value(&run_record.settings).unwrap(),
-            graph:             serde_json::to_value(&run_record.graph).unwrap(),
+            settings:          serde_json::to_value(&run_spec.settings).unwrap(),
+            graph:             serde_json::to_value(&run_spec.graph).unwrap(),
             workflow_source:   None,
             workflow_config:   None,
-            labels:            run_record.labels.clone().into_iter().collect(),
-            run_dir:           run_record.working_directory.display().to_string(),
+            labels:            run_spec.labels.clone().into_iter().collect(),
+            run_dir:           run_spec.working_directory.display().to_string(),
             working_directory: tmp.path().display().to_string(),
             host_repo_path:    None,
-            repo_origin_url:   run_record.repo_origin_url.clone(),
+            repo_origin_url:   run_spec.repo_origin_url.clone(),
             base_branch:       None,
             workflow_slug:     None,
             db_prefix:         None,
-            provenance:        run_record.provenance.clone(),
+            provenance:        run_spec.provenance.clone(),
             manifest_blob:     None,
         })
         .await

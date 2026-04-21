@@ -53,15 +53,15 @@ fn local_run_lifecycle() {
         "workflow_name should be CommandPipeline"
     );
 
-    // 3. inspect <run_id> — JSON array with run_record and conclusion
+    // 3. inspect <run_id> — JSON array with run_spec and conclusion
     let inspect_out = cmd(&["inspect", &run_id]).success();
     let inspect_stdout = String::from_utf8(inspect_out.get_output().stdout.clone()).unwrap();
     let items: Vec<Value> =
         serde_json::from_str(&inspect_stdout).expect("inspect should produce a JSON array");
     assert!(!items.is_empty(), "inspect should return at least one item");
     assert!(
-        items[0]["run_record"].is_object(),
-        "inspect should include run_record"
+        items[0]["run_spec"].is_object(),
+        "inspect should include run_spec"
     );
     assert!(
         items[0]["conclusion"].is_object(),
@@ -317,14 +317,14 @@ digraph FooWorkflow {
         .assert()
         .success();
 
-    let run_record = run_state(&context.find_run_dir(&run_id))
-        .run
-        .expect("run record should exist");
+    let run_spec = run_state(&context.find_run_dir(&run_id))
+        .spec
+        .expect("run spec should exist");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "graph_name": run_record.graph.name,
-            "workflow_slug": run_record.workflow_slug,
+            "graph_name": run_spec.graph.name,
+            "workflow_slug": run_spec.workflow_slug,
         }),
         @r#"
         {

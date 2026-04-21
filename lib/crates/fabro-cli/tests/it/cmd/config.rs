@@ -573,27 +573,27 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
         });
 
     let state = run_state(&run_dir);
-    let run_record =
-        serde_json::to_value(state.run.as_ref().expect("run record should exist")).unwrap();
+    let run_spec =
+        serde_json::to_value(state.spec.as_ref().expect("run spec should exist")).unwrap();
     assert_eq!(
-        run_record["settings"]["run"]["execution"]["approval"].as_str(),
+        run_spec["settings"]["run"]["execution"]["approval"].as_str(),
         Some("auto")
     );
     assert_eq!(
-        run_record["settings"]["server"]["storage"]["root"].as_str(),
+        run_spec["settings"]["server"]["storage"]["root"].as_str(),
         Some(storage_dir.to_str().unwrap())
     );
     assert_eq!(
-        run_record["settings"]["run"]["sandbox"]["preserve"].as_bool(),
+        run_spec["settings"]["run"]["sandbox"]["preserve"].as_bool(),
         Some(true)
     );
     assert_eq!(
-        run_record["settings"]["run"]["model"]["name"].as_str(),
+        run_spec["settings"]["run"]["model"]["name"].as_str(),
         Some("gpt-5.2")
     );
     // v2 R30: run.prepare.steps replaces the whole ordered list across layers.
     assert_eq!(
-        run_record["settings"]["run"]["prepare"]["steps"],
+        run_spec["settings"]["run"]["prepare"]["steps"],
         serde_json::json!([{"script": "workflow-setup"}])
     );
 }

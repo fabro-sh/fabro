@@ -42,7 +42,7 @@ fn preflight_response() -> serde_json::Value {
 
 fn remote_run_state_response() -> serde_json::Value {
     serde_json::json!({
-        "run": null,
+        "spec": null,
         "graph_source": null,
         "start": null,
         "status": null,

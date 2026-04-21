@@ -743,7 +743,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         );
     }
 
-    // Verify checkpoint.json has git_commit_sha
+    // Verify the persisted checkpoint snapshot has git_commit_sha
     let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
     assert!(
         checkpoint.git_commit_sha.is_some(),

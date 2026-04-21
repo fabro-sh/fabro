@@ -4,6 +4,7 @@ mod artifact_store;
 mod error;
 mod keys;
 mod run_state;
+mod serializable_projection;
 mod slate;
 mod types;
 
@@ -11,6 +12,7 @@ pub use artifact_store::{ArtifactStore, NodeArtifact};
 pub use error::{Error, Result};
 pub use fabro_types::{RunBlobId, StageId};
 pub use run_state::{NodeState, PendingInterviewRecord, RunProjection};
+pub use serializable_projection::SerializableProjection;
 pub use slate::{
     AuthCode, ConsumeOutcome, Database, RefreshToken, RunDatabase, Runs, SlateAuthCodeStore,
     SlateAuthTokenStore,

@@ -26,7 +26,7 @@ impl ServerRunSummaryInfo {
         self.summary
             .workflow_name
             .clone()
-            .unwrap_or_else(|| "[no run record]".to_string())
+            .unwrap_or_else(|| "[no run spec]".to_string())
     }
 
     pub(crate) fn workflow_slug(&self) -> Option<&str> {

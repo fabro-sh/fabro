@@ -277,7 +277,7 @@ async fn persist_terminal_engine_failure(
 
 impl RunSession {
     async fn new(persisted: &Persisted, services: StartServices) -> Result<Self, Error> {
-        let record = persisted.run_record();
+        let record = persisted.run_spec();
         let settings = &record.settings;
         let working_directory = record.working_directory.clone();
         let state = services
@@ -292,7 +292,7 @@ impl RunSession {
                 meta_branch: Some(MetadataStore::branch_name(&record.run_id.to_string())),
             })
         });
-        let definition_blob = state.run.as_ref().and_then(|run| run.definition_blob);
+        let definition_blob = state.spec.as_ref().and_then(|run| run.definition_blob);
         let accepted_definition = match definition_blob {
             Some(blob_id) => {
                 Some(load_accepted_run_definition(&services.run_store, blob_id).await?)
@@ -669,7 +669,7 @@ impl RunSession {
         let preserve_sandbox = self.preserve_sandbox;
         let on_node = self.on_node.clone();
 
-        let record = persisted.run_record();
+        let record = persisted.run_spec();
         let run_options = RunOptions {
             settings:         record.settings.clone(),
             run_dir:          persisted.run_dir().to_path_buf(),

@@ -149,11 +149,10 @@ fn build_conclusion_from_parts(
     }
 }
 
-/// Write a finalize commit to the shadow branch with retro.json and final node
-/// files.
+/// Write a finalize projection snapshot commit to the metadata branch.
 ///
-/// This captures the last diff.patch (written after the final checkpoint) and
-/// retro.json. Best-effort: errors are logged as warnings.
+/// This captures the final `run.json` projection state, including conclusion
+/// and retro data. Best-effort: errors are logged as warnings.
 pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &RunStoreHandle) {
     let (Some(meta_branch), Some(repo_path)) = (
         run_options
@@ -170,7 +169,7 @@ pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &RunStor
     let Ok(store_state) = run_store.state().await else {
         return;
     };
-    let dump = RunDump::metadata_finalize(&store_state);
+    let dump = RunDump::from_projection(&store_state);
     if let Err(e) =
         dump.write_to_metadata_store(&store, &run_options.run_id.to_string(), "finalize run")
     {

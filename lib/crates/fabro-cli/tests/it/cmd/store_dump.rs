@@ -70,7 +70,7 @@ fn store_dump_accepts_server_target_from_separate_home() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output_dir.join("checkpoint.json").is_file());
+    assert!(output_dir.join("run.json").is_file());
 }
 
 #[test]
@@ -145,10 +145,10 @@ fn store_dump_exports_large_command_output_backed_by_blob_refs() {
         String::from_utf8_lossy(&dump_output.stderr)
     );
 
-    let checkpoint = fs::read_to_string(output_dir.join("checkpoint.json")).unwrap();
+    let run_json = fs::read_to_string(output_dir.join("run.json")).unwrap();
     assert!(
-        !checkpoint.contains("blob://sha256/"),
-        "checkpoint export should hydrate blob refs\n{checkpoint}"
+        !run_json.contains("blob://sha256/"),
+        "run export should hydrate blob refs\n{run_json}"
     );
 }
 
@@ -248,10 +248,10 @@ include = ["assets/**"]
         String::from_utf8_lossy(&dump_output.stderr)
     );
 
-    let checkpoint = fs::read_to_string(output_dir.join("checkpoint.json")).unwrap();
+    let run_json = fs::read_to_string(output_dir.join("run.json")).unwrap();
     assert!(
-        !checkpoint.contains("blob://sha256/"),
-        "checkpoint export should hydrate blob refs\n{checkpoint}"
+        !run_json.contains("blob://sha256/"),
+        "run export should hydrate blob refs\n{run_json}"
     );
     assert_eq!(
         fs::read_to_string(output_dir.join("artifacts/nodes/big/visit-1/assets/shared/report.txt"))
@@ -278,28 +278,23 @@ fn store_dump_exports_completed_run_snapshot() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Exported 17 files for run [ULID] to [TEMP_DIR]/export
+    Exported 12 files for run [ULID] to [TEMP_DIR]/export
     ----- stderr -----
     ");
 
     assert_snapshot!(dump_file_summary(&output_dir), @"
-    checkpoint.json
     checkpoints/0013.json
     checkpoints/0017.json
     checkpoints/0021.json
-    conclusion.json
     events.jsonl
     graph.fabro
-    nodes/exit/visit-1/status.json
-    nodes/report/visit-1/response.md
-    nodes/report/visit-1/status.json
-    nodes/run_tests/visit-1/response.md
-    nodes/run_tests/visit-1/status.json
-    nodes/start/visit-1/status.json
     run.json
-    sandbox.json
-    start.json
-    status.json
+    stages/exit@1/status.json
+    stages/report@1/response.md
+    stages/report@1/status.json
+    stages/run_tests@1/response.md
+    stages/run_tests@1/status.json
+    stages/start@1/status.json
     ");
 }
 

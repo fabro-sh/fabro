@@ -295,4 +295,4 @@ Use prompt nodes for analysis, classification, and summarization tasks where too
 
 ## Prompt logging
 
-Fabro writes the assembled prompt to `{run_dir}/nodes/{node_id}/prompt.md` for every agent and prompt stage. This includes the preamble (if any) and the expanded prompt text. Use these files for debugging when an agent behaves unexpectedly.
+Fabro persists the assembled prompt to `stages/{node_id}@{visit}/prompt.md` in metadata snapshots and `fabro store dump` output for every agent and prompt stage. This includes the preamble (if any) and the expanded prompt text. Use these files for debugging when an agent behaves unexpectedly.

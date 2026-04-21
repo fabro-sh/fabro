@@ -1,1 +1,1 @@
-pub use fabro_types::run::RunRecord;
+pub use fabro_types::run::RunSpec;

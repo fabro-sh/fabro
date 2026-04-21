@@ -4378,14 +4378,14 @@ async fn start_run(
         }
     }
 
-    let Some(run_record) = run_state.run.as_ref() else {
+    let Some(run_spec) = run_state.spec.as_ref() else {
         return ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "run record missing from store",
+            "run spec missing from store",
         )
         .into_response();
     };
-    let run_dir = match resolved_storage_dir(&run_record.settings) {
+    let run_dir = match resolved_storage_dir(&run_spec.settings) {
         Ok(storage_dir) => Storage::new(storage_dir)
             .run_scratch(&id)
             .root()
@@ -4562,7 +4562,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
             return;
         }
     };
-    let github_settings = match resolved_github_settings(&persisted.run_record().settings) {
+    let github_settings = match resolved_github_settings(&persisted.run_spec().settings) {
         Ok(settings) => settings,
         Err(err) => {
             tracing::error!(run_id = %run_id, error = %err, "Invalid GitHub integration config");
@@ -4577,7 +4577,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         }
     };
     let github_app_result = match fabro_config::resolve_run_from_file(
-        &persisted.run_record().settings,
+        &persisted.run_spec().settings,
     ) {
         Ok(settings) => {
             let required_github_credentials = (settings.execution.mode != RunMode::DryRun
@@ -5101,10 +5101,10 @@ async fn get_run_settings(
                 .into_response();
         }
     };
-    let Some(run_record) = run_state.run else {
+    let Some(run_spec) = run_state.spec else {
         return ApiError::not_found("Run not found.").into_response();
     };
-    let redacted = settings_view::redact_for_api(&run_record.settings);
+    let redacted = settings_view::redact_for_api(&run_spec.settings);
     let mut value = match serde_json::to_value(&redacted) {
         Ok(value) => value,
         Err(err) => {
@@ -5503,10 +5503,7 @@ async fn read_run_blob(
     }
 }
 
-async fn load_run_record(
-    state: &AppState,
-    run_id: &RunId,
-) -> Result<fabro_types::RunRecord, Response> {
+async fn load_run_spec(state: &AppState, run_id: &RunId) -> Result<fabro_types::RunSpec, Response> {
     let run_store = state
         .store
         .open_run_reader(run_id)
@@ -5515,10 +5512,10 @@ async fn load_run_record(
     let run_state = run_store.state().await.map_err(|err| {
         ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
     })?;
-    run_state.run.ok_or_else(|| {
+    run_state.spec.ok_or_else(|| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "run record missing from store",
+            "run spec missing from store",
         )
         .into_response()
     })
@@ -5533,7 +5530,7 @@ async fn list_run_artifacts(
         Ok(id) => id,
         Err(response) => return response,
     };
-    if let Err(response) = load_run_record(state.as_ref(), &id).await {
+    if let Err(response) = load_run_spec(state.as_ref(), &id).await {
         return response;
     }
 
@@ -5570,7 +5567,7 @@ async fn list_stage_artifacts(
         Ok(stage_id) => stage_id,
         Err(response) => return response,
     };
-    if let Err(response) = load_run_record(state.as_ref(), &id).await {
+    if let Err(response) = load_run_spec(state.as_ref(), &id).await {
         return response;
     }
 
@@ -5962,7 +5959,7 @@ async fn put_stage_artifact(
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
-    if let Err(response) = load_run_record(state.as_ref(), &id).await.map(|_| ()) {
+    if let Err(response) = load_run_spec(state.as_ref(), &id).await.map(|_| ()) {
         return response;
     }
 
@@ -6020,7 +6017,7 @@ async fn get_stage_artifact(
         Ok(path) => path,
         Err(response) => return response,
     };
-    if let Err(response) = load_run_record(state.as_ref(), &id).await {
+    if let Err(response) = load_run_spec(state.as_ref(), &id).await {
         return response;
     }
 
@@ -8655,20 +8652,20 @@ slug = "fabro"
         let response = app.oneshot(req).await.unwrap();
         let body = response_json!(response, StatusCode::OK).await;
         assert_eq!(
-            body["run"]["provenance"]["server"]["version"],
+            body["spec"]["provenance"]["server"]["version"],
             FABRO_VERSION
         );
         assert_eq!(
-            body["run"]["provenance"]["client"]["user_agent"],
+            body["spec"]["provenance"]["client"]["user_agent"],
             "fabro-cli/1.2.3"
         );
-        assert_eq!(body["run"]["provenance"]["client"]["name"], "fabro-cli");
-        assert_eq!(body["run"]["provenance"]["client"]["version"], "1.2.3");
+        assert_eq!(body["spec"]["provenance"]["client"]["name"], "fabro-cli");
+        assert_eq!(body["spec"]["provenance"]["client"]["version"], "1.2.3");
         assert_eq!(
-            body["run"]["provenance"]["subject"]["auth_method"],
+            body["spec"]["provenance"]["subject"]["auth_method"],
             "disabled"
         );
-        assert!(body["run"]["provenance"]["subject"]["login"].is_null());
+        assert!(body["spec"]["provenance"]["subject"]["login"].is_null());
     }
 
     #[tokio::test]
@@ -8741,10 +8738,10 @@ slug = "fabro"
             .unwrap();
         let state_body = response_json!(state_response, StatusCode::OK).await;
         assert_eq!(
-            state_body["run"]["provenance"]["subject"]["auth_method"],
+            state_body["spec"]["provenance"]["subject"]["auth_method"],
             "dev_token"
         );
-        assert_eq!(state_body["run"]["provenance"]["subject"]["login"], "dev");
+        assert_eq!(state_body["spec"]["provenance"]["subject"]["login"], "dev");
     }
 
     #[tokio::test]
@@ -9009,7 +9006,7 @@ slug = "fabro"
     }
 
     #[tokio::test]
-    async fn create_run_persists_run_record() {
+    async fn create_run_persists_run_spec() {
         let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
@@ -9026,7 +9023,7 @@ slug = "fabro"
             .await
             .unwrap();
 
-        assert!(run_state.run.is_some());
+        assert!(run_state.spec.is_some());
     }
 
     #[tokio::test]
@@ -9873,7 +9870,7 @@ level = "debug"
                 .and_then(|run| run.run_dir.clone())
                 .expect("run_dir should be recorded")
         };
-        let run_record = state
+        let run_spec = state
             .store
             .open_run_reader(&run_id)
             .await
@@ -9881,10 +9878,10 @@ level = "debug"
             .state()
             .await
             .unwrap()
-            .run
-            .expect("run record should exist");
-        let resolved_run = fabro_config::resolve_run_from_file(&run_record.settings).unwrap();
-        let resolved_server = fabro_config::resolve_server_from_file(&run_record.settings).unwrap();
+            .spec
+            .expect("run spec should exist");
+        let resolved_run = fabro_config::resolve_run_from_file(&run_spec.settings).unwrap();
+        let resolved_server = fabro_config::resolve_server_from_file(&run_spec.settings).unwrap();
 
         // Verify a sampling of the persisted v2 settings, including inherited
         // run execution mode from server settings.

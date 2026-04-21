@@ -8,6 +8,7 @@ use std::path::Path;
 
 use fabro_checkpoint::branch::BranchStore;
 use fabro_checkpoint::git::Store as GitStore;
+use fabro_store::RunProjection;
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Checkpoint;
 use fabro_workflow::operations::{RunTimeline, build_timeline};
@@ -42,12 +43,14 @@ fn metadata_checkpoints(repo_dir: &Path, run_id: &str) -> Vec<Checkpoint> {
         .rev()
         .filter(|commit| commit.message.starts_with("checkpoint"))
         .map(|commit| {
-            let checkpoint_blob = store
-                .read_blob_at(commit.oid, "checkpoint.json")
-                .expect("checkpoint blob should load")
-                .expect("checkpoint blob should exist");
-            serde_json::from_slice::<Checkpoint>(&checkpoint_blob)
-                .expect("checkpoint blob should deserialize")
+            let projection_blob = store
+                .read_blob_at(commit.oid, "run.json")
+                .expect("projection blob should load")
+                .expect("projection blob should exist");
+            serde_json::from_slice::<RunProjection>(&projection_blob)
+                .expect("projection blob should deserialize")
+                .checkpoint
+                .expect("projection checkpoint should exist")
         })
         .collect()
 }
@@ -59,11 +62,14 @@ fn latest_metadata_checkpoint(repo_dir: &Path, run_id: &str) -> Checkpoint {
         .resolve_ref(&format!("fabro/meta/{run_id}"))
         .expect("metadata branch should resolve")
         .expect("metadata branch tip should exist");
-    let checkpoint_blob = store
-        .read_blob_at(tip, "checkpoint.json")
-        .expect("latest checkpoint blob should load")
-        .expect("latest checkpoint blob should exist");
-    serde_json::from_slice(&checkpoint_blob).expect("latest checkpoint blob should deserialize")
+    let projection_blob = store
+        .read_blob_at(tip, "run.json")
+        .expect("latest projection blob should load")
+        .expect("latest projection blob should exist");
+    serde_json::from_slice::<RunProjection>(&projection_blob)
+        .expect("latest projection blob should deserialize")
+        .checkpoint
+        .expect("latest projection checkpoint should exist")
 }
 
 fn timeline_run_shas(repo_dir: &Path, run_id: &str) -> Vec<Option<String>> {

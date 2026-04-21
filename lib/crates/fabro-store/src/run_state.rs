@@ -10,7 +10,7 @@ use fabro_types::run_event::{
 use fabro_types::{
     BilledModelUsage, BlockedReason, Checkpoint, Conclusion, EventBody, FailureSignature,
     InterviewQuestionRecord, InterviewQuestionType, NodeStatusRecord, Outcome, PullRequestRecord,
-    Retro, RunControlAction, RunEvent, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord,
+    Retro, RunControlAction, RunEvent, RunId, RunSpec, RunStatus, RunStatusRecord, SandboxRecord,
     StageStatus, StartRecord, StatusReason,
 };
 use serde_json::Value;
@@ -20,7 +20,7 @@ use crate::{Error, EventEnvelope, Result, RunSummary, StageId};
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct RunProjection {
-    pub run:                Option<RunRecord>,
+    pub spec:               Option<RunSpec>,
     pub graph_source:       Option<String>,
     pub start:              Option<StartRecord>,
     pub status:             Option<RunStatusRecord>,
@@ -85,7 +85,7 @@ impl RunProjection {
             EventBody::RunCreated(props) => {
                 let working_directory = PathBuf::from(&props.working_directory);
                 let labels = props.labels.clone().into_iter().collect::<HashMap<_, _>>();
-                self.run = Some(RunRecord {
+                self.spec = Some(RunSpec {
                     run_id,
                     settings: props.settings.clone(),
                     graph: props.graph.clone(),
@@ -110,8 +110,8 @@ impl RunProjection {
                 });
             }
             EventBody::RunSubmitted(props) => {
-                if let Some(run) = self.run.as_mut() {
-                    run.definition_blob = props.definition_blob;
+                if let Some(spec) = self.spec.as_mut() {
+                    spec.definition_blob = props.definition_blob;
                 }
                 self.status = Some(run_status_record(RunStatus::Submitted, props.reason, ts));
             }
@@ -449,29 +449,55 @@ impl RunProjection {
         visits
     }
 
+    pub fn spec(&self) -> Option<&RunSpec> {
+        self.spec.as_ref()
+    }
+
+    pub fn status(&self) -> Option<RunStatus> {
+        self.status.as_ref().map(|status| status.status)
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        self.status().is_some_and(RunStatus::is_terminal)
+    }
+
+    pub fn current_checkpoint(&self) -> Option<&Checkpoint> {
+        self.checkpoint.as_ref()
+    }
+
+    pub fn pending_interviews(&self) -> &BTreeMap<String, PendingInterviewRecord> {
+        &self.pending_interviews
+    }
+
     pub(crate) fn build_summary(&self, run_id: &RunId) -> RunSummary {
-        let workflow_name = self.run.as_ref().map(|run| {
-            if run.graph.name.is_empty() {
+        let workflow_name = self.spec.as_ref().map(|spec| {
+            if spec.graph.name.is_empty() {
                 "unnamed".to_string()
             } else {
-                run.graph.name.clone()
+                spec.graph.name.clone()
             }
         });
-        let goal = self.run.as_ref().and_then(|run| {
-            let goal = run.graph.goal();
+        let goal = self.spec.as_ref().and_then(|spec| {
+            let goal = spec.graph.goal();
             (!goal.is_empty()).then(|| goal.to_string())
         });
         RunSummary {
             run_id: *run_id,
             workflow_name,
-            workflow_slug: self.run.as_ref().and_then(|run| run.workflow_slug.clone()),
+            workflow_slug: self
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.workflow_slug.clone()),
             goal,
             labels: self
-                .run
+                .spec
                 .as_ref()
-                .map(|run| run.labels.clone())
+                .map(|spec| spec.labels.clone())
                 .unwrap_or_default(),
-            host_repo_path: self.run.as_ref().and_then(|run| run.host_repo_path.clone()),
+            host_repo_path: self
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.host_repo_path.clone()),
             start_time: self.start.as_ref().map(|start| start.start_time),
             status: self
                 .status
@@ -770,6 +796,20 @@ mod tests {
     #[test]
     fn deserialize_and_round_trip_projection_preserves_stage_ids_and_pending_control() {
         let state: RunProjection = serde_json::from_value(serde_json::json!({
+            "spec": {
+                "run_id": "01JW6A7VNFZSFF0SKXJG29Z2M3",
+                "settings": { "_version": 1 },
+                "graph": { "name": "ship", "nodes": {}, "edges": [], "attrs": {} },
+                "workflow_slug": "demo",
+                "working_directory": "/tmp/project",
+                "host_repo_path": null,
+                "repo_origin_url": null,
+                "base_branch": null,
+                "labels": {},
+                "provenance": null,
+                "manifest_blob": null,
+                "definition_blob": null
+            },
             "pending_control": "cancel",
             "checkpoints": [[
                 0,
@@ -802,6 +842,7 @@ mod tests {
 
         let round_tripped: RunProjection =
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
+        let serialized = serde_json::to_value(&state).unwrap();
         let round_tripped_node = round_tripped.node(&stage_id).unwrap();
         assert_eq!(round_tripped_node.stdout.as_deref(), Some("done"));
         assert_eq!(round_tripped.list_node_visits("build"), vec![2]);
@@ -809,6 +850,8 @@ mod tests {
             round_tripped.pending_control,
             Some(RunControlAction::Cancel)
         );
+        assert!(serialized.get("spec").is_some());
+        assert!(serialized.get("run").is_none());
     }
 
     #[test]
@@ -1054,7 +1097,7 @@ mod tests {
     #[test]
     fn summary_synthesizes_submitted_when_run_exists_without_status() {
         let state = RunProjection {
-            run: Some(fabro_types::RunRecord {
+            spec: Some(fabro_types::RunSpec {
                 run_id:            fixtures::RUN_1,
                 settings:          SettingsLayer::default(),
                 graph:             fabro_types::Graph::new("test"),
@@ -1129,11 +1172,11 @@ mod tests {
         let value = serde_json::to_value(&state).unwrap();
 
         assert_eq!(
-            value["run"]["manifest_blob"],
+            value["spec"]["manifest_blob"],
             events[0].payload.as_value()["properties"]["manifest_blob"]
         );
         assert_eq!(
-            value["run"]["definition_blob"],
+            value["spec"]["definition_blob"],
             events[1].payload.as_value()["properties"]["definition_blob"]
         );
     }

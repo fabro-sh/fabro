@@ -93,7 +93,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             let git_author = self.run_options.git_author();
             let store = MetadataStore::new(repo_path, &git_author);
             let state = self.run_store.state().await.ok();
-            let init_dump = state.as_ref().map(RunDump::metadata_init);
+            let init_dump = state.as_ref().map(RunDump::from_projection);
             let init_entries = init_dump
                 .as_ref()
                 .and_then(|dump| dump.git_entries().ok())
@@ -148,34 +148,56 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 HashMap::new(),
                 None,
             );
-            if let Ok(cp_json) = serde_json::to_vec_pretty(&checkpoint) {
-                let mut extra_entries: Vec<(String, Vec<u8>)> = Vec::new();
-                if let Ok(store_state) = self.run_store.state().await {
-                    if let Ok(mut dump_entries) =
-                        RunDump::metadata_checkpoint(&store_state).git_entries()
-                    {
-                        extra_entries.append(&mut dump_entries);
+            match self.run_store.state().await {
+                Ok(mut snapshot_state) => {
+                    snapshot_state.checkpoint = Some(checkpoint);
+                    let dump = RunDump::from_projection(&snapshot_state);
+                    match dump.git_entries() {
+                        Ok(dump_entries) => {
+                            let refs: Vec<(&str, &[u8])> = dump_entries
+                                .iter()
+                                .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+                                .collect();
+                            match store.write_snapshot(
+                                &self.run_id.to_string(),
+                                &refs,
+                                "checkpoint",
+                            ) {
+                                Ok(sha) => Some(sha),
+                                Err(e) => {
+                                    self.emitter.emit(&Event::RunNotice {
+                                        level:   RunNoticeLevel::Warn,
+                                        code:    "checkpoint_metadata_write_failed".to_string(),
+                                        message: format!(
+                                            "[node: {node_id}] metadata checkpoint write failed: {e}"
+                                        ),
+                                    });
+                                    None
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.emitter.emit(&Event::RunNotice {
+                                level:   RunNoticeLevel::Warn,
+                                code:    "checkpoint_metadata_write_failed".to_string(),
+                                message: format!(
+                                    "[node: {node_id}] metadata checkpoint serialization failed: {e}"
+                                ),
+                            });
+                            None
+                        }
                     }
                 }
-                let extra_refs: Vec<(&str, &[u8])> = extra_entries
-                    .iter()
-                    .map(|(k, v)| (k.as_str(), v.as_slice()))
-                    .collect();
-                match store.write_checkpoint(&self.run_id.to_string(), &cp_json, &extra_refs) {
-                    Ok(sha) => Some(sha),
-                    Err(e) => {
-                        self.emitter.emit(&Event::RunNotice {
-                            level:   RunNoticeLevel::Warn,
-                            code:    "checkpoint_metadata_write_failed".to_string(),
-                            message: format!(
-                                "[node: {node_id}] metadata checkpoint write failed: {e}"
-                            ),
-                        });
-                        None
-                    }
+                Err(e) => {
+                    self.emitter.emit(&Event::RunNotice {
+                        level:   RunNoticeLevel::Warn,
+                        code:    "checkpoint_metadata_write_failed".to_string(),
+                        message: format!(
+                            "[node: {node_id}] failed to load run state for metadata snapshot: {e}"
+                        ),
+                    });
+                    None
                 }
-            } else {
-                None
             }
         } else {
             None

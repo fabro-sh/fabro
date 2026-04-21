@@ -6,8 +6,8 @@
 use fabro_test::test_context;
 
 use super::{
-    completed_nodes, find_run_dir, fixture, has_event, read_conclusion, read_run_record,
-    run_id_for, sandbox_tests, store_dump_export, timeout_for,
+    completed_nodes, find_run_dir, fixture, has_event, read_conclusion, read_run_spec, run_id_for,
+    sandbox_tests, store_dump_export, timeout_for,
 };
 
 sandbox_tests!(full_stack, keys = ["ANTHROPIC_API_KEY"]);
@@ -42,15 +42,15 @@ fn scenario_full_stack(sandbox: &str) {
         "duration_ms should be > 0"
     );
 
-    // RunRecord should have key fields
-    let run_record = read_run_record(&run_dir);
+    // RunSpec should have key fields
+    let run_spec = read_run_spec(&run_dir);
     assert!(
-        run_record["run_id"].as_str().is_some(),
-        "run record should have run_id"
+        run_spec["run_id"].as_str().is_some(),
+        "run spec should have run_id"
     );
     assert!(
-        run_record["graph"]["name"].as_str().is_some(),
-        "run record should have graph.name"
+        run_spec["graph"]["name"].as_str().is_some(),
+        "run spec should have graph.name"
     );
 
     // Progress events
@@ -74,7 +74,7 @@ fn scenario_full_stack(sandbox: &str) {
 
     // Verify node stdout should contain PASS
     let export_dir = store_dump_export(&context, &run_id_for(&run_dir));
-    let stdout = std::fs::read_to_string(export_dir.join("nodes/verify/visit-1/stdout.log"))
+    let stdout = std::fs::read_to_string(export_dir.join("stages/verify@1/stdout.log"))
         .expect("verify stdout.log should exist");
     assert!(
         stdout.contains("PASS"),

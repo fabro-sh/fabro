@@ -70,10 +70,10 @@ pub(crate) async fn execute(
         .state()
         .await
         .with_context(|| format!("failed to load run state for {run_id}"))?;
-    let run_record = run_state
-        .run
+    let run_spec = run_state
+        .spec
         .as_ref()
-        .ok_or_else(|| anyhow!("Run {run_id} has no run record in store"))?;
+        .ok_or_else(|| anyhow!("Run {run_id} has no run spec in store"))?;
     let artifact_sink = Some(ArtifactSink::Uploader(build_artifact_uploader(
         run_id,
         client.clone_for_reuse(),
@@ -90,7 +90,7 @@ pub(crate) async fn execute(
             Some(arc) => Some(arc.read().await),
             None => None,
         };
-        maybe_build_github_credentials(&run_record.settings, vault_guard.as_deref())?
+        maybe_build_github_credentials(&run_spec.settings, vault_guard.as_deref())?
     };
     let services = StartServices {
         run_id,

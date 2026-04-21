@@ -36,7 +36,7 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
     let checkpoint = state
         .checkpoint
         .ok_or_else(|| Error::Precondition("no checkpoint to resume from".to_string()))?;
-    let definition_blob = state.run.as_ref().and_then(|run| run.definition_blob);
+    let definition_blob = state.spec.as_ref().and_then(|run| run.definition_blob);
 
     cleanup_resume_artifacts(run_dir);
     append_event_to_sink(

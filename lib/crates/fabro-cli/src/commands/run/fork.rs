@@ -25,8 +25,8 @@ pub(crate) async fn run(
     let client = ctx.server().await?;
     let run_id = client.resolve_run(&args.run_id).await?.run_id;
     let state = client.get_run_state(&run_id).await?;
-    let record = state.run.context("Failed to load run record from store")?;
-    ensure_matching_repo_origin(record.repo_origin_url.as_deref(), "fork")?;
+    let run_spec = state.spec.context("Failed to load run spec from store")?;
+    ensure_matching_repo_origin(run_spec.repo_origin_url.as_deref(), "fork")?;
     let store = Store::new(repo);
     let events = client.list_run_events(&run_id, None, None).await?;
     let run_store = rebuild_run_store(&run_id, &events).await?;

@@ -7,7 +7,7 @@ When an agent or prompt node finishes, Fabro captures its response text and prod
 
 ## Response capture
 
-After an agent or prompt node completes, Fabro captures the full response text and writes it to the run logs at `{run_dir}/nodes/{node_id}/response.md`. It also writes the final outcome (status, context updates, routing directives) to `{run_dir}/nodes/{node_id}/status.json`.
+After an agent or prompt node completes, Fabro captures the full response text and persists it to `stages/{node_id}@{visit}/response.md` in metadata snapshots and `fabro store dump` output. It also writes the final outcome (status, context updates, routing directives) to `stages/{node_id}@{visit}/status.json`.
 
 ## Context updates
 
@@ -92,7 +92,7 @@ review -> approve [label="Approve"]
 
 ## Output logging
 
-Fabro writes several files per stage to `{run_dir}/nodes/{node_id}/`:
+Fabro writes several files per stage to `stages/{node_id}@{visit}/` in metadata snapshots and `fabro store dump` output:
 
 | File | Contents |
 |---|---|
@@ -100,7 +100,7 @@ Fabro writes several files per stage to `{run_dir}/nodes/{node_id}/`:
 | `response.md` | The full LLM response text |
 | `status.json` | The outcome: status, context updates, routing directives, usage stats |
 
-These files are written for every agent and prompt node execution, including retries (visit count is appended to the directory name for repeat visits). Use them for debugging unexpected agent behavior or verifying that routing directives were extracted correctly.
+These files are written for every agent and prompt node execution, including retries. Use them for debugging unexpected agent behavior or verifying that routing directives were extracted correctly.
 
 ## File tracking
 

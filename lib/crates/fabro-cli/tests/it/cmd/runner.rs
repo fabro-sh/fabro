@@ -275,7 +275,7 @@ digraph GitHubApp {
 
     let run_dir = context.find_run_dir(&run_id);
     let state = run_state(&run_dir);
-    let run = state.run.as_ref().expect("run record should exist");
+    let run = state.spec.as_ref().expect("run spec should exist");
     let resolved_server = fabro_config::resolve_server_from_file(&run.settings).unwrap();
     fabro_json_snapshot!(
         context,
@@ -465,7 +465,7 @@ digraph Test {
 }
 
 #[test]
-fn runner_reports_missing_run_record_without_prefetching_events() {
+fn runner_reports_missing_run_spec_without_prefetching_events() {
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
@@ -478,7 +478,7 @@ fn runner_reports_missing_run_record_without_prefetching_events() {
             .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "run": null,
+                    "spec": null,
                     "graph_source": null,
                     "start": null,
                     "status": null,
@@ -523,14 +523,14 @@ fn runner_reports_missing_run_record_without_prefetching_events() {
 
     assert!(
         !output.status.success(),
-        "worker should fail when run record is missing:\nstdout:\n{}\nstderr:\n{}",
+        "worker should fail when run spec is missing:\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     state_mock.assert();
     events_mock.assert_calls(0);
     assert!(
-        output_stderr(&output).contains("has no run record in store"),
+        output_stderr(&output).contains("has no run spec in store"),
         "{}",
         output_stderr(&output)
     );

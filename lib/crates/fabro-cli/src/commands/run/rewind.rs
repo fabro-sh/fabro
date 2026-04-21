@@ -47,8 +47,8 @@ pub(crate) async fn run(
         .as_ref()
         .map(|record| record.status)
         .context("run has no recorded status — cannot rewind")?;
-    let record = state.run.context("Failed to load run record from store")?;
-    ensure_matching_repo_origin(record.repo_origin_url.as_deref(), "rewind")?;
+    let run_spec = state.spec.context("Failed to load run spec from store")?;
+    ensure_matching_repo_origin(run_spec.repo_origin_url.as_deref(), "rewind")?;
     let store = Store::new(repo);
     let events = client.list_run_events(&run_id, None, None).await?;
     let run_store = rebuild_run_store(&run_id, &events).await?;
@@ -120,12 +120,13 @@ async fn reset_rewound_run_state(
         anyhow::anyhow!("failed to load durable store state before rewind: {err}")
     })?;
 
-    let definition_blob = state.run.as_ref().and_then(|run| run.definition_blob);
-    let _run_record = state
-        .run
-        .context("failed to restore run record after rewind: missing run metadata")?;
-    let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
-        .context("rewound metadata branch is missing checkpoint.json")?;
+    let definition_blob = state.spec.as_ref().and_then(|run| run.definition_blob);
+    if state.spec.is_none() {
+        anyhow::bail!("failed to restore run spec after rewind: missing run metadata");
+    }
+    let checkpoint = MetadataStore::read_run_projection(git_store.repo_dir(), &run_id.to_string())?
+        .and_then(|projection| projection.checkpoint)
+        .context("rewound metadata branch is missing run.json checkpoint state")?;
     let previous_status = state.status.map(|status| status.status.to_string());
 
     client
