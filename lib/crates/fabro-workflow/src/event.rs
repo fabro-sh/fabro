@@ -1348,7 +1348,14 @@ fn billed_token_counts_from_llm(usage: &LlmTokenCounts) -> BilledTokenCounts {
 }
 
 fn stage_status_from_string(status: &str) -> StageStatus {
-    serde_json::from_value(Value::String(status.to_string())).expect("valid stage status")
+    status.parse().unwrap_or_else(|_| {
+        tracing::warn!(
+            status,
+            "unknown stored stage status in StageCompleted event; \
+             falling back to StageStatus::Fail to keep replay alive"
+        );
+        StageStatus::Fail
+    })
 }
 
 fn stored_event_fields(event: &Event, scope: Option<&StageScope>) -> StoredEventFields {
