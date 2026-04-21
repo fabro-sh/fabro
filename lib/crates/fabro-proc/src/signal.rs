@@ -83,17 +83,64 @@ fn unix_process_state(pid: u32) -> Option<char> {
 pub fn process_group_alive(pgid: u32) -> bool {
     #[cfg(unix)]
     {
-        let Ok(pgid) = i32::try_from(pgid) else {
+        let Ok(pgid_i32) = i32::try_from(pgid) else {
             return false;
         };
         // SAFETY: kill(-pgid, 0) is a read-only probe for the process group.
-        unsafe { libc::kill(-pgid, 0) == 0 }
+        if unsafe { libc::kill(-pgid_i32, 0) } != 0 {
+            return false;
+        }
+        // Linux's kill(-pgid, 0) succeeds even when every member is a zombie
+        // waiting to be reaped, unlike macOS. Disambiguate so callers polling
+        // on group liveness don't burn their grace period on a dead group.
+        #[cfg(target_os = "linux")]
+        {
+            linux_group_has_non_zombie(pgid)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            true
+        }
     }
     #[cfg(not(unix))]
     {
         let _ = pgid;
         true
     }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_group_has_non_zombie(pgid: u32) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return true;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        // Format: "pid (comm) state ppid pgrp ..."; comm may contain ')' so
+        // anchor on the final ')' before parsing subsequent fields.
+        let Some((_, tail)) = stat.rsplit_once(')') else {
+            continue;
+        };
+        let mut fields = tail.split_whitespace();
+        let state = fields.next();
+        let _ppid = fields.next();
+        let Some(pgrp) = fields.next().and_then(|s| s.parse::<u32>().ok()) else {
+            continue;
+        };
+        if pgrp == pgid && state != Some("Z") {
+            return true;
+        }
+    }
+    false
 }
 
 /// Send SIGTERM to a single process.
