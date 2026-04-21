@@ -92,7 +92,7 @@ impl RealAuthHarness {
         let github_base = github_base_url(&twin.base_url);
         let router = build_router_with_options(
             state,
-            auth_mode,
+            &auth_mode,
             Arc::new(IpAllowlistConfig::default()),
             RouterOptions {
                 web_enabled:                 true,

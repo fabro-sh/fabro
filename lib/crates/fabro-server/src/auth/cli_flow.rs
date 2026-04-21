@@ -754,7 +754,9 @@ fn session_cookie_secure(state: &AppState) -> bool {
 }
 
 fn eligible_session(session: Option<&SessionCookie>) -> Option<&SessionCookie> {
-    session.filter(|session| session.identity.is_some())
+    session.filter(|session| {
+        session.identity.is_some() && session.auth_method == RunAuthMethod::Github
+    })
 }
 
 fn valid_state_token(state: &str) -> bool {
