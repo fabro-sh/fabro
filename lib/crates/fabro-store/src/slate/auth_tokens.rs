@@ -49,9 +49,8 @@ pub struct RefreshTokenStore {
     db:                 Arc<slatedb::Db>,
     repo:               Repository<RefreshToken>,
     consume_locks:      KeyedMutex<[u8; 32]>,
-    /// In-memory only by design (origin R6): persisting attacker-supplied
-    /// hashes adds an unbounded-growth surface under token-stuffing attack with
-    /// no security benefit. Do not migrate this into Repository<R>.
+    /// In-memory only: persisting attacker-supplied hashes would be an
+    /// unbounded-growth surface under a token-stuffing attack.
     replay_revocations: DashMap<[u8; 32], DateTime<Utc>>,
 }
 

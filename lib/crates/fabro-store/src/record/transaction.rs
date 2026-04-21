@@ -10,20 +10,21 @@ where
 {
     let mut tx = Tx::new();
     let value = f(&mut tx)?;
-    if !tx.has_ops {
-        return Ok(value);
+    if tx.has_ops {
+        db.write(tx.batch).await?;
     }
-    db.write(tx.into_batch()).await?;
     Ok(value)
 }
 
 pub(crate) struct Tx {
     batch:   WriteBatch,
+    /// SlateDB rejects empty `WriteBatch` commits; skip the write entirely
+    /// when the closure produced no operations.
     has_ops: bool,
 }
 
 impl Tx {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             batch:   WriteBatch::new(),
             has_ops: false,
@@ -50,10 +51,6 @@ impl Tx {
         self.batch.delete(key_for_id::<R>(id)?);
         self.has_ops = true;
         Ok(self)
-    }
-
-    fn into_batch(self) -> WriteBatch {
-        self.batch
     }
 }
 

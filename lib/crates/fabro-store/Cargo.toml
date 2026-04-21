@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 fabro-types = { path = "../fabro-types" }
+hex.workspace = true
 slatedb.workspace = true
 object_store.workspace = true
 percent-encoding.workspace = true

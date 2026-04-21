@@ -81,16 +81,15 @@ use crate::{Error, Result, keys};
 /// named store such as `AuthCodeStore` or `RefreshTokenStore`, which can add
 /// domain-specific behavior on top of the generic storage primitives here.
 pub(crate) struct Repository<R: Record> {
-    db:              Arc<Db>,
-    prefix_segments: Vec<&'static str>,
-    _record:         PhantomData<R>,
+    db:      Arc<Db>,
+    _record: PhantomData<R>,
 }
 
 impl<R: Record> Repository<R> {
     pub(crate) fn new(db: Arc<Db>) -> Self {
+        validate_prefix::<R>();
         Self {
             db,
-            prefix_segments: prefix_segments::<R>(),
             _record: PhantomData,
         }
     }
@@ -141,32 +140,22 @@ impl<R: Record> Repository<R> {
         extra_segments: &'a [&'a str],
     ) -> RepositoryStream<'a, (R::Id, R)> {
         match prefix_key::<R>(extra_segments) {
-            Ok(prefix) => {
-                let prefix_segments = self.prefix_segments.clone();
-                Box::pin(
-                    scan_entries(Arc::clone(&self.db), &prefix).map(move |result| {
-                        result
-                            .map_err(Into::into)
-                            .and_then(|entry| decode_entry::<R>(&entry, &prefix_segments))
-                    }),
-                )
-            }
+            Ok(prefix) => Box::pin(scan_entries(Arc::clone(&self.db), &prefix).map(|result| {
+                result
+                    .map_err(Into::into)
+                    .and_then(|entry| decode_entry::<R>(&entry))
+            })),
             Err(err) => Box::pin(stream::once(async move { Err(err) })),
         }
     }
 
     pub(crate) fn scan_ids_stream(&self) -> RepositoryStream<'_, R::Id> {
         match prefix_key::<R>(&[]) {
-            Ok(prefix) => {
-                let prefix_segments = self.prefix_segments.clone();
-                Box::pin(
-                    scan_entries(Arc::clone(&self.db), &prefix).map(move |result| {
-                        result
-                            .map_err(Into::into)
-                            .and_then(|entry| parse_entry_id::<R>(&entry, &prefix_segments))
-                    }),
-                )
-            }
+            Ok(prefix) => Box::pin(scan_entries(Arc::clone(&self.db), &prefix).map(|result| {
+                result
+                    .map_err(Into::into)
+                    .and_then(|entry| parse_entry_id::<R>(&entry))
+            })),
             Err(err) => Box::pin(stream::once(async move { Err(err) })),
         }
     }
@@ -198,52 +187,48 @@ impl<R: Record> Repository<R> {
 pub(crate) type RepositoryStream<'a, T> = Pin<Box<dyn Stream<Item = Result<T>> + Send + 'a>>;
 
 pub(super) fn key_for_id<R: Record>(id: &R::Id) -> Result<keys::SlateKey> {
-    let prefix_segments = prefix_segments::<R>();
     let id_segments = id.key_segments();
-    let id_segments: Vec<&str> = id_segments.iter().map(String::as_str).collect();
     key_from_segments(
-        prefix_segments
-            .iter()
-            .copied()
-            .chain(id_segments.iter().copied()),
+        R::PREFIX
+            .split('/')
+            .chain(id_segments.iter().map(String::as_str)),
     )
 }
 
 pub(super) fn prefix_key<R: Record>(extra_segments: &[&str]) -> Result<keys::SlateKey> {
-    let prefix_segments = prefix_segments::<R>();
-    prefix_from_segments(
-        prefix_segments
-            .iter()
-            .copied()
-            .chain(extra_segments.iter().copied()),
-    )
+    prefix_from_segments(R::PREFIX.split('/').chain(extra_segments.iter().copied()))
 }
 
-fn decode_entry<R: Record>(entry: &KeyValue, prefix_segments: &[&str]) -> Result<(R::Id, R)> {
-    let id = parse_entry_id::<R>(entry, prefix_segments)?;
+fn decode_entry<R: Record>(entry: &KeyValue) -> Result<(R::Id, R)> {
+    let id = parse_entry_id::<R>(entry)?;
     let value = R::Codec::decode(&entry.value)?;
     Ok((id, value))
 }
 
-fn parse_entry_id<R: Record>(entry: &KeyValue, prefix_segments: &[&str]) -> Result<R::Id> {
+fn parse_entry_id<R: Record>(entry: &KeyValue) -> Result<R::Id> {
     let raw_key = String::from_utf8(entry.key.to_vec())
         .map_err(|err| Error::Other(format!("stored key is not valid UTF-8: {err}")))?;
     let segments: Vec<&str> = keys::SlateKey::segments(&raw_key).collect();
-    if segments.len() < prefix_segments.len() {
+    let prefix_len = R::PREFIX.split('/').count();
+    if segments.len() < prefix_len {
         return Err(Error::KeyParse(format!(
             "key {raw_key:?} had {} segments, expected at least {} for prefix {}",
             segments.len(),
-            prefix_segments.len(),
+            prefix_len,
             R::PREFIX
         )));
     }
-    if segments[..prefix_segments.len()] != prefix_segments[..] {
+    if !segments[..prefix_len]
+        .iter()
+        .copied()
+        .eq(R::PREFIX.split('/'))
+    {
         return Err(Error::KeyParse(format!(
             "key {raw_key:?} did not match expected prefix {}",
             R::PREFIX
         )));
     }
-    R::Id::from_key_segments(&segments[prefix_segments.len()..])
+    R::Id::from_key_segments(&segments[prefix_len..])
 }
 
 fn scan_entries(
@@ -274,7 +259,7 @@ fn scan_entries(
     )
 }
 
-fn prefix_segments<R: Record>() -> Vec<&'static str> {
+fn validate_prefix<R: Record>() {
     debug_assert!(
         !R::PREFIX.is_empty()
             && !R::PREFIX.starts_with('/')
@@ -283,7 +268,6 @@ fn prefix_segments<R: Record>() -> Vec<&'static str> {
         "Record::PREFIX must be a non-empty '/'-separated path with no empty segments: {}",
         R::PREFIX
     );
-    R::PREFIX.split('/').collect()
 }
 
 fn key_from_segments<'a>(segments: impl IntoIterator<Item = &'a str>) -> Result<keys::SlateKey> {

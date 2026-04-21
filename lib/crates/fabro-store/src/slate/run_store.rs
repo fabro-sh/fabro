@@ -33,6 +33,7 @@ impl std::fmt::Debug for RunDatabase {
 pub(crate) struct RunDatabaseInner {
     run_id:             RunId,
     db:                 Db,
+    blob_store:         BlobStore,
     event_seq:          AtomicU32,
     close_lock:         Mutex<()>,
     state_lock:         Mutex<()>,
@@ -44,33 +45,23 @@ pub(crate) struct RunDatabaseInner {
 
 impl RunDatabase {
     pub(crate) async fn open_writer(run_id: RunId, db: Db) -> Result<Self> {
-        let event_seq =
-            recover_next_seq(&db, keys::run_events_prefix(&run_id), keys::parse_event_seq).await?;
-        let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
-        Ok(Self {
-            inner:     Arc::new(RunDatabaseInner {
-                run_id,
-                db,
-                event_seq: AtomicU32::new(event_seq),
-                close_lock: Mutex::new(()),
-                state_lock: Mutex::new(()),
-                projection_cache: Mutex::new(EventProjectionCache::default()),
-                recent_events: Mutex::new(VecDeque::with_capacity(DEFAULT_EVENT_TAIL_LIMIT)),
-                recent_event_limit: DEFAULT_EVENT_TAIL_LIMIT,
-                event_tx,
-            }),
-            read_only: false,
-        })
+        Self::build(run_id, db, false).await
     }
 
     pub(crate) async fn open_reader(run_id: RunId, db: Db) -> Result<Self> {
+        Self::build(run_id, db, true).await
+    }
+
+    async fn build(run_id: RunId, db: Db, read_only: bool) -> Result<Self> {
         let event_seq =
             recover_next_seq(&db, keys::run_events_prefix(&run_id), keys::parse_event_seq).await?;
         let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
+        let blob_store = BlobStore::new(Arc::new(db.clone()));
         Ok(Self {
-            inner:     Arc::new(RunDatabaseInner {
+            inner: Arc::new(RunDatabaseInner {
                 run_id,
                 db,
+                blob_store,
                 event_seq: AtomicU32::new(event_seq),
                 close_lock: Mutex::new(()),
                 state_lock: Mutex::new(()),
@@ -79,7 +70,7 @@ impl RunDatabase {
                 recent_event_limit: DEFAULT_EVENT_TAIL_LIMIT,
                 event_tx,
             }),
-            read_only: true,
+            read_only,
         })
     }
 
@@ -285,15 +276,11 @@ impl RunDatabase {
         if self.read_only {
             return Err(Error::ReadOnly);
         }
-        BlobStore::new(Arc::new(self.inner.db.clone()))
-            .write(data)
-            .await
+        self.inner.blob_store.write(data).await
     }
 
     pub async fn read_blob(&self, id: &RunBlobId) -> Result<Option<Bytes>> {
-        BlobStore::new(Arc::new(self.inner.db.clone()))
-            .read(id)
-            .await
+        self.inner.blob_store.read(id).await
     }
 
     pub async fn list_blobs(&self) -> Result<Vec<RunBlobId>> {
