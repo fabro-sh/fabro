@@ -20,7 +20,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { ciConfig, columnStatusDisplay, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
-import { apiPaginatedJson } from "../api";
+import { apiPaginatedJson, getAuthConfig } from "../api";
 import { EmptyState } from "../components/state";
 import type { PaginatedBoardRunList } from "@qltysh/fabro-api-client";
 
@@ -110,11 +110,19 @@ export function buildBoardColumns(response: BoardRunsResponse): Column[] {
 }
 
 export async function loader({ request }: any) {
-  const response = await apiPaginatedJson<
-    PaginatedBoardRunList["data"][number],
-    { columns: BoardRunsResponse["columns"] }
-  >("/boards/runs", { request });
-  return { columns: buildBoardColumns(response) };
+  const [response, authConfig] = await Promise.all([
+    apiPaginatedJson<
+      PaginatedBoardRunList["data"][number],
+      { columns: BoardRunsResponse["columns"] }
+    >("/boards/runs", { request }),
+    // Failure here only affects the blank-slate quick-start hint.
+    // Default to no auth step rather than blocking the page.
+    getAuthConfig().catch(() => ({ methods: [] as string[] })),
+  ]);
+  return {
+    columns: buildBoardColumns(response),
+    hasGitHubAuth: authConfig.methods.includes("github"),
+  };
 }
 
 function boardLifecycleStatusLabel(run: Pick<RunItem, "column" | "lifecycleStatusLabel">): string | null {
@@ -578,8 +586,6 @@ function TerminalLine({ prompt, command }: { prompt: string; command: string }) 
   );
 }
 
-const GETTING_STARTED_COMMANDS = "fabro repo init && fabro run hello";
-
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -610,7 +616,12 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function RunsLandingEmpty() {
+function RunsLandingEmpty({ hasGitHubAuth }: { hasGitHubAuth: boolean }) {
+  const quickStartCommands = [
+    hasGitHubAuth ? "fabro auth login" : null,
+    "fabro repo init",
+    "fabro run hello",
+  ].filter((command): command is string => command !== null);
   return (
     <div className="mt-4 flex flex-col items-center">
       <div className="w-full max-w-lg space-y-5">
@@ -625,10 +636,11 @@ function RunsLandingEmpty() {
           </div>
           <div className="flex items-start justify-between rounded-md bg-page px-4 py-3">
             <div className="space-y-1.5">
-              <TerminalLine prompt="$" command="fabro repo init" />
-              <TerminalLine prompt="$" command="fabro run hello" />
+              {quickStartCommands.map((command) => (
+                <TerminalLine key={command} prompt="$" command={command} />
+              ))}
             </div>
-            <CopyButton text={GETTING_STARTED_COMMANDS} />
+            <CopyButton text={quickStartCommands.join(" && ")} />
           </div>
         </div>
 
@@ -672,6 +684,7 @@ function RunsLandingEmpty() {
 
 export default function Runs({ loaderData }: any) {
   const initialColumns = loaderData.columns;
+  const hasGitHubAuth: boolean = loaderData.hasGitHubAuth === true;
   const allRepos = [
     ...new Set(
       initialColumns.flatMap((col: Column) => col.items.map((item: RunItem) => String(item.repo))),
@@ -816,7 +829,7 @@ export default function Runs({ loaderData }: any) {
               ))}
             </div>
             {totalRuns === 0 ? (
-              <RunsLandingEmpty />
+              <RunsLandingEmpty hasGitHubAuth={hasGitHubAuth} />
             ) : filteredRuns === 0 ? (
               <div className="py-8">
                 <EmptyState
@@ -868,7 +881,7 @@ export default function Runs({ loaderData }: any) {
               })}
             </div>
             {totalRuns === 0 ? (
-              <RunsLandingEmpty />
+              <RunsLandingEmpty hasGitHubAuth={hasGitHubAuth} />
             ) : filteredRuns === 0 ? (
               <div className="py-8">
                 <EmptyState
