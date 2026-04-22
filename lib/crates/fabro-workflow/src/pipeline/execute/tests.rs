@@ -791,12 +791,9 @@ async fn execute_cancelled_mid_run_persists_cancelled_status() {
 
     assert!(matches!(executed.outcome, Err(Error::Cancelled)));
     let status = executed.run_store.state().await.unwrap().status.unwrap();
-    assert_eq!(
-        status,
-        RunStatus::Failed {
-            reason: FailureReason::Cancelled,
-        }
-    );
+    assert_eq!(status, RunStatus::Failed {
+        reason: FailureReason::Cancelled,
+    });
 }
 
 #[tokio::test]

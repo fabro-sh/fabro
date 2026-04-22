@@ -597,7 +597,7 @@ mod tests {
     };
     use fabro_store::Database;
     use fabro_types::settings::SettingsLayer;
-    use fabro_types::{BilledTokenCounts, RunSpec, fixtures};
+    use fabro_types::{BilledTokenCounts, RunSpec, SuccessReason, fixtures};
     use futures::stream;
     use object_store::memory::InMemory;
 
@@ -1406,7 +1406,7 @@ mod tests {
             duration_ms:          1,
             artifact_count:       0,
             status:               "success".to_string(),
-            reason:               None,
+            reason:               SuccessReason::Completed,
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          Some(

@@ -551,7 +551,7 @@ pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
             fabro_types::RunStatus::Dead => "dead",
             fabro_types::RunStatus::Archived { .. } => "archived",
         }) {
-            if expected.iter().any(|candidate| *candidate == status) {
+            if expected.contains(&status) {
                 return status.to_string();
             }
         }

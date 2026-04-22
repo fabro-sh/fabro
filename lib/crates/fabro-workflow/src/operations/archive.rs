@@ -1,5 +1,5 @@
 use fabro_store::{Database, Error as StoreError};
-use fabro_types::{ActorRef, RunId, RunStatus};
+use fabro_types::{ActorRef, RunId, RunStatus, TerminalStatus};
 
 use crate::error::Error;
 use crate::event::{self, Event};
@@ -34,7 +34,7 @@ pub fn ensure_not_archived(status: Option<RunStatus>, run_id: &RunId) -> Result<
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArchiveOutcome {
     /// Event was appended; projection transitions to `Archived`.
-    Archived { prior_status: RunStatus },
+    Archived { prior_status: TerminalStatus },
     /// Run was already archived; no event emitted.
     AlreadyArchived,
 }
@@ -43,7 +43,7 @@ pub enum ArchiveOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnarchiveOutcome {
     /// Event was appended; projection transitions back to `restored_status`.
-    Unarchived { restored_status: RunStatus },
+    Unarchived { restored_status: TerminalStatus },
     /// Run was terminal but not archived; no event emitted. Symmetric with
     /// `ArchiveOutcome::AlreadyArchived`.
     NotArchived { status: RunStatus },
@@ -85,9 +85,13 @@ pub async fn archive(
         .await
         .map_err(|err| Error::engine(err.to_string()))?;
 
-    Ok(ArchiveOutcome::Archived {
-        prior_status: current,
-    })
+    let prior_status = current.terminal_status().ok_or_else(|| {
+        Error::engine(format!(
+            "run {run_id} passed archive precondition but had non-terminal status {current}"
+        ))
+    })?;
+
+    Ok(ArchiveOutcome::Archived { prior_status })
 }
 
 /// Unarchive a previously archived run, restoring its prior terminal status.
@@ -111,12 +115,11 @@ pub async fn unarchive(
     })?;
 
     if let RunStatus::Archived { prior } = current {
-        let restored = RunStatus::from(prior);
         event::append_event(&run_store, run_id, &Event::RunUnarchived { actor })
-        .await
-        .map_err(|err| Error::engine(err.to_string()))?;
+            .await
+            .map_err(|err| Error::engine(err.to_string()))?;
         return Ok(UnarchiveOutcome::Unarchived {
-            restored_status: restored,
+            restored_status: prior,
         });
     }
 
@@ -206,18 +209,15 @@ mod tests {
 
         let outcome = archive(&store, &run_id, None).await.unwrap();
         assert_eq!(outcome, ArchiveOutcome::Archived {
-            prior_status: RunStatus::Succeeded {
+            prior_status: TerminalStatus::Succeeded {
                 reason: SuccessReason::Completed,
             },
         });
-        assert_eq!(
-            current_status(&store, &run_id).await,
-            RunStatus::Archived {
-                prior: TerminalStatus::Succeeded {
-                    reason: SuccessReason::Completed,
-                },
-            }
-        );
+        assert_eq!(current_status(&store, &run_id).await, RunStatus::Archived {
+            prior: TerminalStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            },
+        });
 
         let projection = store
             .open_run_reader(&run_id)
@@ -244,18 +244,15 @@ mod tests {
 
         let outcome = archive(&store, &run_id, None).await.unwrap();
         assert_eq!(outcome, ArchiveOutcome::Archived {
-            prior_status: RunStatus::Failed {
+            prior_status: TerminalStatus::Failed {
                 reason: FailureReason::WorkflowError,
             },
         });
-        assert_eq!(
-            current_status(&store, &run_id).await,
-            RunStatus::Archived {
-                prior: TerminalStatus::Failed {
-                    reason: FailureReason::WorkflowError,
-                },
-            }
-        );
+        assert_eq!(current_status(&store, &run_id).await, RunStatus::Archived {
+            prior: TerminalStatus::Failed {
+                reason: FailureReason::WorkflowError,
+            },
+        });
     }
 
     #[tokio::test]
@@ -298,7 +295,7 @@ mod tests {
 
         let outcome = unarchive(&store, &run_id, None).await.unwrap();
         assert_eq!(outcome, UnarchiveOutcome::Unarchived {
-            restored_status: RunStatus::Succeeded {
+            restored_status: TerminalStatus::Succeeded {
                 reason: SuccessReason::Completed,
             },
         });
@@ -326,16 +323,13 @@ mod tests {
 
         let outcome = unarchive(&store, &run_id, None).await.unwrap();
         assert_eq!(outcome, UnarchiveOutcome::Unarchived {
-            restored_status: RunStatus::Failed {
+            restored_status: TerminalStatus::Failed {
                 reason: FailureReason::WorkflowError,
             },
         });
-        assert_eq!(
-            current_status(&store, &run_id).await,
-            RunStatus::Failed {
-                reason: FailureReason::WorkflowError,
-            }
-        );
+        assert_eq!(current_status(&store, &run_id).await, RunStatus::Failed {
+            reason: FailureReason::WorkflowError,
+        });
     }
 
     #[tokio::test]
@@ -409,13 +403,10 @@ mod tests {
         let events_after = event_count(&store, &run_id).await;
 
         assert_eq!(events_after - events_before, 3);
-        assert_eq!(
-            current_status(&store, &run_id).await,
-            RunStatus::Archived {
-                prior: TerminalStatus::Succeeded {
-                    reason: SuccessReason::Completed,
-                },
-            }
-        );
+        assert_eq!(current_status(&store, &run_id).await, RunStatus::Archived {
+            prior: TerminalStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            },
+        });
     }
 }

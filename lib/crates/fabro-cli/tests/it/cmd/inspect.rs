@@ -9,7 +9,7 @@ use super::support::{
 };
 use crate::support::unique_run_id;
 
-fn remote_run_summary(run_id: &str, status: serde_json::Value) -> serde_json::Value {
+fn remote_run_summary(run_id: &str, status: &serde_json::Value) -> serde_json::Value {
     json!({
         "run_id": run_id,
         "workflow_name": "Nightly Build",
@@ -64,7 +64,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
     let run_id = unique_run_id();
     let summary = remote_run_summary(
         run_id.as_str(),
-        json!({
+        &json!({
             "kind": "succeeded",
             "reason": "completed"
         }),

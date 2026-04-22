@@ -455,7 +455,7 @@ fn state_exit_code(state: &server_client::RunProjection) -> Option<ExitCode> {
     }
 
     match state.status {
-        Some(status) if matches!(status, RunStatus::Succeeded { .. }) => Some(ExitCode::from(0)),
+        Some(RunStatus::Succeeded { .. }) => Some(ExitCode::from(0)),
         Some(status) if status.is_terminal() => Some(ExitCode::from(1)),
         Some(_) | None => None,
     }

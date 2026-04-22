@@ -261,11 +261,11 @@ async fn persist_terminal_engine_failure(
         _ => FailureReason::WorkflowError,
     };
     if let Err(err) = append_event_to_sink(event_sink, &run_id, &Event::WorkflowRunFailed {
-        error:          error.clone(),
-        duration_ms:    crate::millis_u64(duration),
+        error: error.clone(),
+        duration_ms: crate::millis_u64(duration),
         reason,
         git_commit_sha: None,
-        final_patch:    None,
+        final_patch: None,
     })
     .await
     {
@@ -857,11 +857,11 @@ impl Drop for DetachedRunBootstrapGuard {
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
                     let _ = append_event_to_sink(&event_sink, &run_id, &Event::WorkflowRunFailed {
-                        error:          Error::engine(reason.to_string()),
-                        duration_ms:    0,
+                        error: Error::engine(reason.to_string()),
+                        duration_ms: 0,
                         reason,
                         git_commit_sha: None,
-                        final_patch:    None,
+                        final_patch: None,
                     })
                     .await;
                 });
@@ -925,11 +925,11 @@ impl Drop for DetachedRunCompletionGuard {
         if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
                 let _ = append_event_to_sink(&event_sink, &run_id, &Event::WorkflowRunFailed {
-                    error:          Error::engine(message.to_string()),
-                    duration_ms:    0,
+                    error: Error::engine(message.to_string()),
+                    duration_ms: 0,
                     reason,
                     git_commit_sha: None,
-                    final_patch:    None,
+                    final_patch: None,
                 })
                 .await;
                 let _ = append_event_to_sink(&event_sink, &run_id, &Event::RunNotice {
@@ -954,11 +954,11 @@ async fn persist_detached_failure(
     let message = error.to_string();
 
     if let Err(err) = append_event_to_sink(event_sink, &run_id, &Event::WorkflowRunFailed {
-        error:          error.clone(),
-        duration_ms:    0,
+        error: error.clone(),
+        duration_ms: 0,
         reason,
         git_commit_sha: None,
-        final_patch:    None,
+        final_patch: None,
     })
     .await
     {
@@ -1421,6 +1421,12 @@ mod tests {
         })
         .await
         .unwrap();
+        crate::event::append_event(&run_store, &fixtures::RUN_1, &Event::RunStarting)
+            .await
+            .unwrap();
+        crate::event::append_event(&run_store, &fixtures::RUN_1, &Event::RunRunning)
+            .await
+            .unwrap();
         crate::event::append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
             duration_ms:          conclusion.duration_ms,
             artifact_count:       0,

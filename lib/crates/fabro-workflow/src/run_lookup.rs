@@ -466,7 +466,6 @@ mod tests {
         .await
         .unwrap();
         append_event(&run_store, &fixtures::RUN_1, &Event::RunSubmitted {
-            reason:          None,
             definition_blob: None,
         })
         .await

@@ -198,7 +198,6 @@ mod tests {
             tool_call_id:       None,
             actor:              None,
             body:               EventBody::RunSubmitted(RunSubmittedProps {
-                reason:          None,
                 definition_blob: None,
             }),
         };

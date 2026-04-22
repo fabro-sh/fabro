@@ -75,6 +75,9 @@ impl RunStatus {
         if matches!(to, Self::Dead) {
             return true;
         }
+        if matches!((self, to), (Self::Failed { .. }, Self::Submitted)) {
+            return true;
+        }
         if self.is_immutable() {
             return matches!(to, Self::Archived { .. });
         }
@@ -86,8 +89,7 @@ impl RunStatus {
         }
         matches!(
             (self, to),
-            (Self::Submitted, Self::Queued)
-                | (Self::Submitted, Self::Starting)
+            (Self::Submitted, Self::Queued | Self::Starting)
                 | (
                     Self::Queued
                         | Self::Starting

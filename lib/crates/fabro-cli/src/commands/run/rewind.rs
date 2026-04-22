@@ -154,9 +154,7 @@ async fn reset_rewound_run_state(
             &run_event(
                 *run_id,
                 None,
-                EventBody::RunSubmitted(RunSubmittedProps {
-                    definition_blob,
-                }),
+                EventBody::RunSubmitted(RunSubmittedProps { definition_blob }),
             ),
         )
         .await

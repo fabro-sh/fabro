@@ -15,7 +15,9 @@ mod tests {
 
     use super::EventEnvelope;
     use crate::run_event::RunCompletedProps;
-    use crate::{ActorRef, EventBody, ParallelBranchId, RunEvent, StageId, SuccessReason, fixtures};
+    use crate::{
+        ActorRef, EventBody, ParallelBranchId, RunEvent, StageId, SuccessReason, fixtures,
+    };
 
     #[test]
     fn wire_event_envelope_round_trips() {

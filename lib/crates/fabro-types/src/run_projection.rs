@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, HashMap};
 use chrono::{DateTime, Utc};
 
 use crate::{
-    Checkpoint, Conclusion, InterviewQuestionRecord, NodeStatusRecord, PullRequestRecord, Retro,
-    InvalidTransition, RunControlAction, RunSpec, RunStatus, SandboxRecord, StageId, StartRecord,
+    Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition, NodeStatusRecord,
+    PullRequestRecord, Retro, RunControlAction, RunSpec, RunStatus, SandboxRecord, StageId,
+    StartRecord,
 };
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]

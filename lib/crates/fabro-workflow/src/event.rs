@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::{
-    ActorRef, BilledTokenCounts, BlockedReason, ParallelBranchId, RunBlobId, RunControlAction,
-    FailureReason, RunEvent, RunId, RunProvenance, StageId, StageStatus, SuccessReason,
+    ActorRef, BilledTokenCounts, BlockedReason, FailureReason, ParallelBranchId, RunBlobId,
+    RunControlAction, RunEvent, RunId, RunProvenance, StageId, StageStatus, SuccessReason,
     run_event as fabro_types,
 };
 use anyhow::{Context, Result};
@@ -1543,14 +1543,18 @@ fn event_body_from_event(event: &Event) -> EventBody {
             worktree_dir: worktree_dir.clone(),
             goal:         goal.clone(),
         }),
-        Event::RunSubmitted {
-            definition_blob,
-        } => EventBody::RunSubmitted(fabro_types::RunSubmittedProps {
-            definition_blob: *definition_blob,
-        }),
+        Event::RunSubmitted { definition_blob } => {
+            EventBody::RunSubmitted(fabro_types::RunSubmittedProps {
+                definition_blob: *definition_blob,
+            })
+        }
         Event::RunQueued => EventBody::RunQueued(fabro_types::RunStatusEffectProps::default()),
-        Event::RunStarting => EventBody::RunStarting(fabro_types::RunStatusTransitionProps::default()),
-        Event::RunRunning => EventBody::RunRunning(fabro_types::RunStatusTransitionProps::default()),
+        Event::RunStarting => {
+            EventBody::RunStarting(fabro_types::RunStatusTransitionProps::default())
+        }
+        Event::RunRunning => {
+            EventBody::RunRunning(fabro_types::RunStatusTransitionProps::default())
+        }
         Event::RunBlocked { blocked_reason } => {
             EventBody::RunBlocked(fabro_types::RunBlockedProps {
                 blocked_reason: *blocked_reason,
@@ -1559,7 +1563,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::RunUnblocked => {
             EventBody::RunUnblocked(fabro_types::RunStatusEffectProps::default())
         }
-        Event::RunRemoving => EventBody::RunRemoving(fabro_types::RunStatusTransitionProps::default()),
+        Event::RunRemoving => {
+            EventBody::RunRemoving(fabro_types::RunStatusTransitionProps::default())
+        }
         Event::RunCancelRequested { .. } => {
             EventBody::RunCancelRequested(fabro_types::RunControlRequestedProps {
                 action: RunControlAction::Cancel,
@@ -1593,9 +1599,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::RunArchived { actor } => EventBody::RunArchived(fabro_types::RunArchivedProps {
             actor: actor.clone(),
         }),
-        Event::RunUnarchived { actor } => EventBody::RunUnarchived(fabro_types::RunUnarchivedProps {
-            actor: actor.clone(),
-        }),
+        Event::RunUnarchived { actor } => {
+            EventBody::RunUnarchived(fabro_types::RunUnarchivedProps {
+                actor: actor.clone(),
+            })
+        }
         Event::WorkflowRunCompleted {
             duration_ms,
             artifact_count,
@@ -3420,9 +3428,7 @@ mod tests {
             "run.archived"
         );
         assert_eq!(
-            event_name(&Event::RunUnarchived {
-                actor: None,
-            }),
+            event_name(&Event::RunUnarchived { actor: None }),
             "run.unarchived"
         );
     }

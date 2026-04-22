@@ -1409,12 +1409,9 @@ mod runs {
                 &[],
             );
 
-            assert_eq!(
-                summary.status,
-                RunStatus::Failed {
-                    reason: FailureReason::Cancelled,
-                }
-            );
+            assert_eq!(summary.status, RunStatus::Failed {
+                reason: FailureReason::Cancelled,
+            });
         }
 
         #[test]
@@ -1434,12 +1431,9 @@ mod runs {
                 &[],
             );
 
-            assert_eq!(
-                summary.status,
-                RunStatus::Failed {
-                    reason: FailureReason::WorkflowError,
-                }
-            );
+            assert_eq!(summary.status, RunStatus::Failed {
+                reason: FailureReason::WorkflowError,
+            });
         }
 
         #[test]

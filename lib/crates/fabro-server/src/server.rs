@@ -3659,9 +3659,8 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
         EventBody::RunUnblocked(_) => {
             managed_run.status = match managed_run.status {
                 RunStatus::Paused {
-                    prior_block: Some(_),
+                    prior_block: Some(_) | None,
                 } => RunStatus::Paused { prior_block: None },
-                RunStatus::Paused { prior_block: None } => RunStatus::Paused { prior_block: None },
                 _ => RunStatus::Running,
             };
         }
@@ -6562,8 +6561,7 @@ async fn pause_run(
                 .lock()
                 .expect("runs lock poisoned")
                 .get(&id)
-                .map(|run| run.status)
-                .unwrap_or(RunStatus::Paused { prior_block: None })
+                .map_or(RunStatus::Paused { prior_block: None }, |run| run.status)
         }
     };
     let pending_control = match load_pending_control(state.as_ref(), id).await {
@@ -6668,8 +6666,7 @@ async fn unpause_run(
                 .lock()
                 .expect("runs lock poisoned")
                 .get(&id)
-                .map(|run| run.status)
-                .unwrap_or(RunStatus::Running)
+                .map_or(RunStatus::Running, |run| run.status)
         }
     };
     let pending_control = match load_pending_control(state.as_ref(), id).await {

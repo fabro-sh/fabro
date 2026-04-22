@@ -266,7 +266,9 @@ async fn persist_created_run(
         .await
         .map(|_| ())
         .map_err(store_error)?;
-    append_event(&run_store, &record.run_id, &Event::RunSubmitted { definition_blob })
+    append_event(&run_store, &record.run_id, &Event::RunSubmitted {
+        definition_blob,
+    })
     .await
     .map_err(store_error)
 }
@@ -858,7 +860,7 @@ mod tests {
         );
         let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
         assert_eq!(
-            run_store.state().await.unwrap().status.unwrap().status,
+            run_store.state().await.unwrap().status.unwrap(),
             crate::run_status::RunStatus::Submitted
         );
         assert_eq!(created.run_dir, default_run_dir(&fixtures::RUN_1));

@@ -464,12 +464,9 @@ mod tests {
         assert_eq!(summary[1].run_id, test_run_id("run-1"));
         assert_eq!(summary[1].workflow_name, Some("night-sky".to_string()));
         assert_eq!(summary[1].goal, Some("map the constellations".to_string()));
-        assert_eq!(
-            summary[1].status,
-            RunStatus::Succeeded {
-                reason: SuccessReason::Completed,
-            }
-        );
+        assert_eq!(summary[1].status, RunStatus::Succeeded {
+            reason: SuccessReason::Completed,
+        });
 
         let reopened = store.open_run(&test_run_id("run-1")).await.unwrap();
         let stored = reopened.state().await.unwrap().spec.unwrap();
@@ -602,12 +599,9 @@ mod tests {
 
         let summary = store.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(summary.len(), 1);
-        assert_eq!(
-            summary[0].status,
-            RunStatus::Failed {
-                reason: FailureReason::Cancelled,
-            }
-        );
+        assert_eq!(summary[0].status, RunStatus::Failed {
+            reason: FailureReason::Cancelled,
+        });
         assert_eq!(summary[0].pending_control, None);
     }
 
@@ -651,11 +645,8 @@ mod tests {
         let summary = reopened.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(summary.len(), 1);
         assert_eq!(summary[0].run_id, test_run_id("run-1"));
-        assert_eq!(
-            summary[0].status,
-            RunStatus::Succeeded {
-                reason: SuccessReason::Completed,
-            }
-        );
+        assert_eq!(summary[0].status, RunStatus::Succeeded {
+            reason: SuccessReason::Completed,
+        });
     }
 }

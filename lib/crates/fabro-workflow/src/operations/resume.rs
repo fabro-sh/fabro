@@ -42,9 +42,7 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
     append_event_to_sink(
         &services.event_sink,
         &services.run_id,
-        &Event::RunSubmitted {
-            definition_blob,
-        },
+        &Event::RunSubmitted { definition_blob },
     )
     .await
     .map_err(|err| Error::engine(err.to_string()))?;

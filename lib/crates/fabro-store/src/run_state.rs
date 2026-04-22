@@ -8,10 +8,10 @@ use fabro_types::run_event::{
     RunFailedProps, StageCompletedProps, StagePromptProps,
 };
 use fabro_types::{
-    BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature,
-    InterviewQuestionRecord, InterviewQuestionType, NodeStatusRecord, Outcome,
-    PendingInterviewRecord, PullRequestRecord, RunControlAction, RunId, RunProjection, RunSpec,
-    RunStatus, RunSummary, SandboxRecord, StageStatus, StartRecord, TerminalStatus,
+    BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
+    InterviewQuestionType, NodeStatusRecord, Outcome, PendingInterviewRecord, PullRequestRecord,
+    RunControlAction, RunId, RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord,
+    StageStatus, StartRecord, TerminalStatus,
 };
 use serde_json::Value;
 
@@ -562,8 +562,7 @@ mod tests {
     use fabro_types::settings::SettingsLayer;
     use fabro_types::{
         BlockedReason, Checkpoint, EventBody, FailureReason, InterviewQuestionType, NodeState,
-        RunBlobId, RunControlAction, RunEvent, RunStatus, SuccessReason, TerminalStatus,
-        fixtures,
+        RunBlobId, RunControlAction, RunEvent, RunStatus, SuccessReason, TerminalStatus, fixtures,
     };
     use serde_json::json;
 
@@ -1163,12 +1162,24 @@ mod tests {
     fn duplicate_event_noops_without_bumping_status_updated_at() {
         let mut state = RunProjection::default();
         state
-            .apply_event(&test_raw_event_at(1, "2026-04-07T12:00:00Z", "run.running", &json!({}), None))
+            .apply_event(&test_raw_event_at(
+                1,
+                "2026-04-07T12:00:00Z",
+                "run.running",
+                &json!({}),
+                None,
+            ))
             .unwrap();
         let first_updated_at = state.status_updated_at;
 
         state
-            .apply_event(&test_raw_event_at(2, "2026-04-07T12:01:00Z", "run.running", &json!({}), None))
+            .apply_event(&test_raw_event_at(
+                2,
+                "2026-04-07T12:01:00Z",
+                "run.running",
+                &json!({}),
+                None,
+            ))
             .unwrap();
 
         assert_eq!(state.status(), Some(RunStatus::Running));

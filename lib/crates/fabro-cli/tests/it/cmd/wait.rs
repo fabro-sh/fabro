@@ -5,7 +5,7 @@ use serde_json::json;
 use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
 use crate::support::unique_run_id;
 
-fn remote_run_summary(run_id: &str, status: serde_json::Value) -> serde_json::Value {
+fn remote_run_summary(run_id: &str, status: &serde_json::Value) -> serde_json::Value {
     json!({
         "run_id": run_id,
         "workflow_name": "Blocked Remote Workflow",
@@ -143,7 +143,7 @@ fn wait_blocked_run_times_out_without_treating_it_as_terminal() {
     let server = MockServer::start();
     let summary = remote_run_summary(
         run_id.as_str(),
-        json!({
+        &json!({
             "kind": "blocked",
             "blocked_reason": "human_input_required"
         }),

@@ -290,16 +290,12 @@ mod tests {
         std::fs::write(&status_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
 
         // Simulate what the poll loop does
-        let status = serde_json::from_str::<RunStatus>(
-            &std::fs::read_to_string(&status_path).unwrap(),
-        )
-        .unwrap();
+        let status =
+            serde_json::from_str::<RunStatus>(&std::fs::read_to_string(&status_path).unwrap())
+                .unwrap();
         assert!(status.is_terminal());
-        assert_eq!(
-            status,
-            RunStatus::Succeeded {
-                reason: SuccessReason::Completed,
-            }
-        );
+        assert_eq!(status, RunStatus::Succeeded {
+            reason: SuccessReason::Completed,
+        });
     }
 }

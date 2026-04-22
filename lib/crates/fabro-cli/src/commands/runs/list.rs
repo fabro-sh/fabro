@@ -146,9 +146,7 @@ fn status_cell(status: RunStatus, use_color: bool) -> CellStruct {
         RunStatus::Succeeded { .. } => Some(Color::Green),
         RunStatus::Failed { .. } => Some(Color::Red),
         RunStatus::Running | RunStatus::Starting | RunStatus::Submitted => Some(Color::Cyan),
-        RunStatus::Queued | RunStatus::Dead | RunStatus::Archived { .. } => {
-            Some(Color::Ansi256(8))
-        }
+        RunStatus::Queued | RunStatus::Dead | RunStatus::Archived { .. } => Some(Color::Ansi256(8)),
         RunStatus::Blocked { .. } | RunStatus::Removing => Some(Color::Yellow),
         RunStatus::Paused { .. } => Some(Color::Magenta),
     };
