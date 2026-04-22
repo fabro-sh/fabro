@@ -390,12 +390,12 @@ mod tests {
         store
             .write_snapshot(
                 &run_id,
-                &[("retro/prompt.md", b"how did it go?")],
+                &[("stages/retro/prompt.md", b"how did it go?")],
                 "finalize run",
             )
             .unwrap();
 
-        let data = branch_entry(dir.path(), &run_id, "retro/prompt.md");
+        let data = branch_entry(dir.path(), &run_id, "stages/retro/prompt.md");
         assert_eq!(data, b"how did it go?");
 
         let spec = MetadataStore::read_run_spec(dir.path(), &run_id)

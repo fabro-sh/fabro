@@ -38,14 +38,14 @@ Reconstructed metadata branches and `fabro store dump` exports now use the same 
 
 - `run.json` for the current projection snapshot, including the current checkpoint
 - `graph.fabro` for workflow source
-- `retro/*.md` for retro prompt/response text
+- `stages/retro/*.md` for retro prompt/response text
 - `stages/{node_id}@{visit}/...` for per-stage prompt, response, status, diff, stdout, and stderr files
 
 `fabro store dump` adds export-only history surfaces on top of that shared layout:
 
 - `events.jsonl` for the durable event stream
 - `checkpoints/*.json` for checkpoint history snapshots
-- `artifacts/nodes/{node_id}/visit-{n}/...` for exported artifact payloads
+- `artifacts/{node_id}@{visit}/...` for exported artifact payloads
 
 ## Browsing runs
 

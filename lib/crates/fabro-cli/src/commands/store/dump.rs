@@ -783,11 +783,11 @@ mod tests {
         );
 
         assert_eq!(
-            std::fs::read_to_string(output.path().join("retro/prompt.md")).unwrap(),
+            std::fs::read_to_string(output.path().join("stages/retro/prompt.md")).unwrap(),
             "How did it go?"
         );
         assert_eq!(
-            std::fs::read_to_string(output.path().join("retro/response.md")).unwrap(),
+            std::fs::read_to_string(output.path().join("stages/retro/response.md")).unwrap(),
             "Smooth enough"
         );
 
@@ -815,19 +815,14 @@ mod tests {
         assert!(!output.path().join("blobs").exists());
 
         assert_eq!(
-            std::fs::read(
-                output
-                    .path()
-                    .join("artifacts/nodes/code/visit-2/src/lib.rs")
-            )
-            .unwrap(),
+            std::fs::read(output.path().join("artifacts/code@2/src/lib.rs")).unwrap(),
             b"fn main() {}"
         );
         assert_eq!(
             std::fs::read(
                 output
                     .path()
-                    .join("artifacts/nodes/artifact-only/visit-7/logs/output.txt")
+                    .join("artifacts/artifact-only@7/logs/output.txt")
             )
             .unwrap(),
             b"hello"
