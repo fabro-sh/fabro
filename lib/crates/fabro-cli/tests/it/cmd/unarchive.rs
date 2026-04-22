@@ -94,7 +94,8 @@ fn unarchive_archived_run_restores_prior_terminal_status() {
     assert!(output.status.success());
     let runs: Vec<Value> = serde_json::from_slice(&output.stdout).expect("ps JSON should parse");
     assert_eq!(runs.len(), 1, "ps -a should show the unarchived run");
-    assert_eq!(runs[0]["status"], "succeeded");
+    assert_eq!(runs[0]["status"]["kind"], "succeeded");
+    assert_eq!(runs[0]["status"]["reason"], "completed");
 }
 
 #[test]
@@ -229,9 +230,13 @@ fn unarchive_resolves_selector_via_server_endpoint() {
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",
-                    "status": "archived",
-                    "status_reason": null,
-                    "blocked_reason": null,
+                    "status": {
+                        "kind": "archived",
+                        "prior": {
+                            "kind": "succeeded",
+                            "reason": "completed"
+                        }
+                    },
                     "pending_control": null,
                     "duration_ms": 123,
                     "elapsed_secs": 0,
@@ -248,11 +253,12 @@ fn unarchive_resolves_selector_via_server_endpoint() {
             .body(
                 serde_json::json!({
                     "id": run_id,
-                    "status": "succeeded",
-                    "blocked_reason": null,
+                    "status": {
+                        "kind": "succeeded",
+                        "reason": "completed"
+                    },
                     "error": null,
                     "queue_position": null,
-                    "status_reason": null,
                     "pending_control": null,
                     "created_at": "2026-04-05T12:00:00Z"
                 })

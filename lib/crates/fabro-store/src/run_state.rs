@@ -8,10 +8,10 @@ use fabro_types::run_event::{
     RunFailedProps, StageCompletedProps, StagePromptProps,
 };
 use fabro_types::{
-    BilledModelUsage, BlockedReason, Checkpoint, Conclusion, EventBody, FailureSignature,
+    BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature,
     InterviewQuestionRecord, InterviewQuestionType, NodeStatusRecord, Outcome,
     PendingInterviewRecord, PullRequestRecord, RunControlAction, RunId, RunProjection, RunSpec,
-    RunStatus, RunStatusRecord, RunSummary, SandboxRecord, StageStatus, StartRecord, StatusReason,
+    RunStatus, RunSummary, SandboxRecord, StageStatus, StartRecord, TerminalStatus,
 };
 use serde_json::Value;
 
@@ -77,59 +77,43 @@ impl RunProjectionReducer for RunProjection {
                 if let Some(spec) = self.spec.as_mut() {
                     spec.definition_blob = props.definition_blob;
                 }
-                self.status = Some(run_status_record(RunStatus::Submitted, props.reason, ts));
+                self.try_apply_status(RunStatus::Submitted, ts)?;
             }
             EventBody::RunQueued(_) => {
-                self.status = Some(run_status_record(RunStatus::Queued, None, ts));
+                self.try_apply_status(RunStatus::Queued, ts)?;
             }
-            EventBody::RunStarting(props) => {
-                self.status = Some(run_status_record(RunStatus::Starting, props.reason, ts));
+            EventBody::RunStarting(_) => {
+                self.try_apply_status(RunStatus::Starting, ts)?;
             }
-            EventBody::RunRunning(props) => {
-                self.status = Some(run_status_record(RunStatus::Running, props.reason, ts));
+            EventBody::RunRunning(_) => {
+                self.try_apply_status(RunStatus::Running, ts)?;
             }
             EventBody::RunBlocked(props) => {
-                let visible_status = if self
-                    .status
-                    .as_ref()
-                    .is_some_and(|status| status.status == RunStatus::Paused)
-                {
-                    RunStatus::Paused
+                let next = if matches!(self.status, Some(RunStatus::Paused { .. })) {
+                    RunStatus::Paused {
+                        prior_block: Some(props.blocked_reason),
+                    }
                 } else {
-                    RunStatus::Blocked
+                    RunStatus::Blocked {
+                        blocked_reason: props.blocked_reason,
+                    }
                 };
-                self.status = Some(run_status_record_with_blocked_reason(
-                    visible_status,
-                    None,
-                    Some(props.blocked_reason),
-                    ts,
-                ));
+                self.try_apply_status(next, ts)?;
             }
             EventBody::RunUnblocked(_) => {
-                self.status = Some(match self.status.as_ref() {
-                    Some(status) if status.status == RunStatus::Paused => {
-                        run_status_record_with_blocked_reason(
-                            RunStatus::Paused,
-                            status.status_reason,
-                            None,
-                            ts,
-                        )
+                let next = match self.status {
+                    Some(RunStatus::Paused {
+                        prior_block: Some(_),
+                    }) => RunStatus::Paused { prior_block: None },
+                    Some(RunStatus::Paused { prior_block: None }) => {
+                        RunStatus::Paused { prior_block: None }
                     }
-                    Some(status) => run_status_record_with_blocked_reason(
-                        if status.status == RunStatus::Blocked {
-                            RunStatus::Running
-                        } else {
-                            status.status
-                        },
-                        status.status_reason,
-                        None,
-                        ts,
-                    ),
-                    None => run_status_record(RunStatus::Running, None, ts),
-                });
+                    _ => RunStatus::Running,
+                };
+                self.try_apply_status(next, ts)?;
             }
-            EventBody::RunRemoving(props) => {
-                self.status = Some(run_status_record(RunStatus::Removing, props.reason, ts));
+            EventBody::RunRemoving(_) => {
+                self.try_apply_status(RunStatus::Removing, ts)?;
             }
             EventBody::RunCancelRequested(_) => {
                 self.pending_control = Some(RunControlAction::Cancel);
@@ -141,36 +125,43 @@ impl RunProjectionReducer for RunProjection {
                 self.pending_control = Some(RunControlAction::Unpause);
             }
             EventBody::RunPaused(_) => {
-                self.status = Some(run_status_record_with_blocked_reason(
-                    RunStatus::Paused,
-                    None,
-                    self.status
-                        .as_ref()
-                        .and_then(|status| status.blocked_reason),
+                self.try_apply_status(
+                    RunStatus::Paused {
+                        prior_block: self.status().and_then(RunStatus::blocked_reason),
+                    },
                     ts,
-                ));
+                )?;
                 self.pending_control = None;
             }
             EventBody::RunUnpaused(_) => {
-                self.status = Some(run_status_record_with_blocked_reason(
-                    RunStatus::Running,
-                    None,
-                    self.status
-                        .as_ref()
-                        .and_then(|status| status.blocked_reason),
-                    ts,
-                ));
+                let next = match self.status {
+                    Some(RunStatus::Paused {
+                        prior_block: Some(blocked_reason),
+                    }) => RunStatus::Blocked { blocked_reason },
+                    _ => RunStatus::Running,
+                };
+                self.try_apply_status(next, ts)?;
                 self.pending_control = None;
             }
             EventBody::RunCompleted(props) => {
-                self.status = Some(run_status_record(RunStatus::Succeeded, props.reason, ts));
+                self.try_apply_status(
+                    RunStatus::Succeeded {
+                        reason: props.reason,
+                    },
+                    ts,
+                )?;
                 self.pending_control = None;
                 self.conclusion = Some(conclusion_from_completed(props, ts)?);
                 self.final_patch.clone_from(&props.final_patch);
                 self.pending_interviews.clear();
             }
             EventBody::RunFailed(props) => {
-                self.status = Some(run_status_record(RunStatus::Failed, props.reason, ts));
+                self.try_apply_status(
+                    RunStatus::Failed {
+                        reason: props.reason,
+                    },
+                    ts,
+                )?;
                 self.pending_control = None;
                 self.conclusion = Some(conclusion_from_failed(props, ts));
                 self.final_patch.clone_from(&props.final_patch);
@@ -180,40 +171,26 @@ impl RunProjectionReducer for RunProjection {
                 self.reset_for_rewind();
             }
             EventBody::RunArchived(_props) => {
-                // Idempotent on replay: a second RunArchived (from a concurrent
-                // archive race or a tampered log) must not overwrite
-                // prior_status — doing so would permanently corrupt the run
-                // (unarchive would then restore status=Archived and never
-                // recover). We also ignore the archive attempt when current
-                // status is not a terminal non-archived — the operations
-                // layer is the only legitimate emitter and it validates
-                // there, but replay must be defensive.
-                let current = self.status.as_ref().map(|record| record.status);
-                if matches!(
-                    current,
-                    Some(RunStatus::Succeeded | RunStatus::Failed | RunStatus::Dead)
-                ) {
-                    self.prior_status = current;
-                    self.status = Some(run_status_record(RunStatus::Archived, None, ts));
+                if let Some(current) = self.status {
+                    if matches!(current, RunStatus::Archived { .. }) {
+                        return Ok(());
+                    }
+                    let Some(prior) = current.terminal_status() else {
+                        return Err(fabro_types::InvalidTransition {
+                            from: current,
+                            to:   RunStatus::Archived {
+                                prior: TerminalStatus::Dead,
+                            },
+                        }
+                        .into());
+                    };
+                    self.try_apply_status(RunStatus::Archived { prior }, ts)?;
                 }
             }
-            EventBody::RunUnarchived(props)
-                if matches!(
-                    self.status.as_ref().map(|record| record.status),
-                    Some(RunStatus::Archived)
-                ) && matches!(
-                    props.restored_status,
-                    RunStatus::Succeeded | RunStatus::Failed | RunStatus::Dead
-                ) =>
-            {
-                // Defensive: restored_status must be a real terminal status.
-                // Accepting e.g. Running here would produce a projection
-                // whose status is Running without any RunRunning event in
-                // the log, breaking the is_active / is_terminal invariants.
-                // The operations layer only ever writes validated terminals,
-                // but replay must enforce it.
-                self.status = Some(run_status_record(props.restored_status, None, ts));
-                self.prior_status = None;
+            EventBody::RunUnarchived(_props) => {
+                if let Some(RunStatus::Archived { prior }) = self.status {
+                    self.try_apply_status(prior.into(), ts)?;
+                }
             }
             EventBody::CheckpointCompleted(props) => {
                 let checkpoint = checkpoint_from_props(props, ts);
@@ -416,18 +393,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
             .as_ref()
             .and_then(|spec| spec.host_repo_path.clone()),
         start_time: state.start.as_ref().map(|start| start.start_time),
-        status: state
-            .status
-            .as_ref()
-            .map_or(RunStatus::Submitted, |status| status.status),
-        status_reason: state
-            .status
-            .as_ref()
-            .and_then(|status| status.status_reason),
-        blocked_reason: state
-            .status
-            .as_ref()
-            .and_then(|status| status.blocked_reason),
+        status: state.status.unwrap_or(RunStatus::Submitted),
         pending_control: state.pending_control,
         duration_ms: state
             .conclusion
@@ -438,28 +404,6 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
             .as_ref()
             .and_then(|conclusion| conclusion.billing.as_ref())
             .and_then(|billing| billing.total_usd_micros),
-    }
-}
-
-fn run_status_record(
-    status: RunStatus,
-    status_reason: Option<StatusReason>,
-    updated_at: DateTime<Utc>,
-) -> RunStatusRecord {
-    run_status_record_with_blocked_reason(status, status_reason, None, updated_at)
-}
-
-fn run_status_record_with_blocked_reason(
-    status: RunStatus,
-    status_reason: Option<StatusReason>,
-    blocked_reason: Option<BlockedReason>,
-    updated_at: DateTime<Utc>,
-) -> RunStatusRecord {
-    RunStatusRecord {
-        status,
-        status_reason,
-        blocked_reason,
-        updated_at,
     }
 }
 
@@ -617,13 +561,14 @@ mod tests {
     };
     use fabro_types::settings::SettingsLayer;
     use fabro_types::{
-        Checkpoint, EventBody, InterviewQuestionType, NodeState, RunBlobId, RunControlAction,
-        RunEvent, fixtures,
+        BlockedReason, Checkpoint, EventBody, FailureReason, InterviewQuestionType, NodeState,
+        RunBlobId, RunControlAction, RunEvent, RunStatus, SuccessReason, TerminalStatus,
+        fixtures,
     };
     use serde_json::json;
 
     use super::{RunProjection, RunProjectionReducer, build_summary};
-    use crate::{EventEnvelope, StageId};
+    use crate::{Error, EventEnvelope, StageId};
 
     fn test_event(seq: u32, body: EventBody, node_id: Option<&str>) -> EventEnvelope {
         let event = RunEvent {
@@ -656,6 +601,27 @@ mod tests {
             event: RunEvent::from_value(json!({
                 "id": format!("evt-{seq}"),
                 "ts": Utc::now().to_rfc3339(),
+                "run_id": fixtures::RUN_1,
+                "event": event,
+                "node_id": node_id,
+                "properties": properties,
+            }))
+            .unwrap(),
+        }
+    }
+
+    fn test_raw_event_at(
+        seq: u32,
+        ts: &str,
+        event: &str,
+        properties: &serde_json::Value,
+        node_id: Option<&str>,
+    ) -> EventEnvelope {
+        EventEnvelope {
+            seq,
+            event: RunEvent::from_value(json!({
+                "id": format!("evt-{seq}"),
+                "ts": ts,
                 "run_id": fixtures::RUN_1,
                 "event": event,
                 "node_id": node_id,
@@ -851,40 +817,54 @@ mod tests {
         state
             .apply_event(&test_raw_event(1, "run.queued", &json!({}), None))
             .unwrap();
-        assert_eq!(
-            state
-                .status
-                .as_ref()
-                .map(|status| status.status.to_string()),
-            Some("queued".to_string())
-        );
+        assert_eq!(state.status(), Some(RunStatus::Queued));
 
         state
+            .apply_event(&test_raw_event(2, "run.starting", &json!({}), None))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event(3, "run.running", &json!({}), None))
+            .unwrap();
+        state
             .apply_event(&test_event(
-                2,
+                4,
                 EventBody::RunPaused(RunControlEffectProps::default()),
                 None,
             ))
             .unwrap();
         state
             .apply_event(&test_raw_event(
-                3,
+                5,
                 "run.blocked",
                 &json!({ "blocked_reason": "human_input_required" }),
                 None,
             ))
             .unwrap();
 
-        let status_json = serde_json::to_value(state.status.as_ref().unwrap()).unwrap();
-        assert_eq!(status_json["status"], "paused");
-        assert_eq!(status_json["status_reason"], serde_json::Value::Null);
-        assert_eq!(status_json["blocked_reason"], "human_input_required");
+        let status_json = serde_json::to_value(state.status().unwrap()).unwrap();
+        assert_eq!(
+            state.status(),
+            Some(RunStatus::Paused {
+                prior_block: Some(BlockedReason::HumanInputRequired),
+            })
+        );
+        assert_eq!(
+            status_json,
+            json!({
+                "kind": "paused",
+                "prior_block": "human_input_required"
+            })
+        );
 
         let summary = build_summary(&state, &fixtures::RUN_1);
         let summary_json = serde_json::to_value(summary).unwrap();
-        assert_eq!(summary_json["status"], "paused");
-        assert_eq!(summary_json["status_reason"], serde_json::Value::Null);
-        assert_eq!(summary_json["blocked_reason"], "human_input_required");
+        assert_eq!(
+            summary_json["status"],
+            json!({
+                "kind": "paused",
+                "prior_block": "human_input_required"
+            })
+        );
     }
 
     #[test]
@@ -903,9 +883,9 @@ mod tests {
             .apply_event(&test_raw_event(2, "run.unblocked", &json!({}), None))
             .unwrap();
 
-        let status_json = serde_json::to_value(state.status.as_ref().unwrap()).unwrap();
-        assert_eq!(status_json["status"], "running");
-        assert_eq!(status_json["blocked_reason"], serde_json::Value::Null);
+        assert_eq!(state.status(), Some(RunStatus::Running));
+        let status_json = serde_json::to_value(state.status().unwrap()).unwrap();
+        assert_eq!(status_json, json!({ "kind": "running" }));
     }
 
     #[test]
@@ -931,9 +911,18 @@ mod tests {
             .apply_event(&test_raw_event(3, "run.unblocked", &json!({}), None))
             .unwrap();
 
-        let status_json = serde_json::to_value(state.status.as_ref().unwrap()).unwrap();
-        assert_eq!(status_json["status"], "paused");
-        assert_eq!(status_json["blocked_reason"], serde_json::Value::Null);
+        assert_eq!(
+            state.status(),
+            Some(RunStatus::Paused { prior_block: None })
+        );
+        let status_json = serde_json::to_value(state.status().unwrap()).unwrap();
+        assert_eq!(
+            status_json,
+            json!({
+                "kind": "paused",
+                "prior_block": null
+            })
+        );
     }
 
     #[test]
@@ -971,9 +960,20 @@ mod tests {
             ))
             .unwrap();
 
-        let status_json = serde_json::to_value(state.status.as_ref().unwrap()).unwrap();
-        assert_eq!(status_json["status"], "blocked");
-        assert_eq!(status_json["blocked_reason"], "human_input_required");
+        assert_eq!(
+            state.status(),
+            Some(RunStatus::Blocked {
+                blocked_reason: BlockedReason::HumanInputRequired,
+            })
+        );
+        let status_json = serde_json::to_value(state.status().unwrap()).unwrap();
+        assert_eq!(
+            status_json,
+            json!({
+                "kind": "blocked",
+                "blocked_reason": "human_input_required"
+            })
+        );
     }
 
     #[test]
@@ -995,7 +995,7 @@ mod tests {
         });
 
         let summary_json = serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap();
-        assert_eq!(summary_json["status"], "submitted");
+        assert_eq!(summary_json["status"], json!({ "kind": "submitted" }));
     }
 
     #[test]
@@ -1065,7 +1065,7 @@ mod tests {
                 EventBody::RunFailed(RunFailedProps {
                     error:          "boom".to_string(),
                     duration_ms:    42,
-                    reason:         None,
+                    reason:         FailureReason::WorkflowError,
                     git_commit_sha: Some("abc123".to_string()),
                     final_patch:    Some(patch.to_string()),
                 }),
@@ -1077,121 +1077,165 @@ mod tests {
     }
 
     #[test]
-    fn legacy_run_failed_event_without_final_patch_replays_as_none() {
+    fn run_archived_captures_prior_status_and_preserves_reason() {
+        use fabro_types::run_event::{RunArchivedProps, RunCompletedProps};
+
         let mut state = RunProjection::default();
-        // Existing SlateDB events predating the final_patch field should deserialize
-        // cleanly as None — no backfill required.
+        state
+            .apply_event(&test_event(
+                1,
+                EventBody::RunCompleted(RunCompletedProps {
+                    duration_ms:          10,
+                    artifact_count:       0,
+                    status:               "success".to_string(),
+                    reason:               SuccessReason::Completed,
+                    total_usd_micros:     None,
+                    final_git_commit_sha: None,
+                    final_patch:          None,
+                    billing:              None,
+                }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::RunArchived(RunArchivedProps { actor: None }),
+                None,
+            ))
+            .unwrap();
+
+        assert_eq!(
+            state.status(),
+            Some(RunStatus::Archived {
+                prior: TerminalStatus::Succeeded {
+                    reason: SuccessReason::Completed,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn run_unarchived_restores_prior_status() {
+        use fabro_types::run_event::{RunArchivedProps, RunCompletedProps, RunUnarchivedProps};
+
+        let mut state = RunProjection::default();
+        state
+            .apply_event(&test_event(
+                1,
+                EventBody::RunCompleted(RunCompletedProps {
+                    duration_ms:          10,
+                    artifact_count:       0,
+                    status:               "success".to_string(),
+                    reason:               SuccessReason::PartialSuccess,
+                    total_usd_micros:     None,
+                    final_git_commit_sha: None,
+                    final_patch:          None,
+                    billing:              None,
+                }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::RunArchived(RunArchivedProps { actor: None }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                3,
+                EventBody::RunUnarchived(RunUnarchivedProps { actor: None }),
+                None,
+            ))
+            .unwrap();
+
+        assert_eq!(
+            state.status(),
+            Some(RunStatus::Succeeded {
+                reason: SuccessReason::PartialSuccess,
+            })
+        );
+    }
+
+    #[test]
+    fn duplicate_event_noops_without_bumping_status_updated_at() {
+        let mut state = RunProjection::default();
+        state
+            .apply_event(&test_raw_event_at(1, "2026-04-07T12:00:00Z", "run.running", &json!({}), None))
+            .unwrap();
+        let first_updated_at = state.status_updated_at;
+
+        state
+            .apply_event(&test_raw_event_at(2, "2026-04-07T12:01:00Z", "run.running", &json!({}), None))
+            .unwrap();
+
+        assert_eq!(state.status(), Some(RunStatus::Running));
+        assert_eq!(state.status_updated_at, first_updated_at);
+    }
+
+    #[test]
+    fn paused_over_blocked_round_trips_back_to_blocked() {
+        let mut state = RunProjection::default();
+        state
+            .apply_event(&test_raw_event(1, "run.running", &json!({}), None))
+            .unwrap();
         state
             .apply_event(&test_raw_event(
-                1,
-                "run.failed",
-                &json!({
-                    "error": "boom",
-                    "duration_ms": 1,
-                }),
-                None,
-            ))
-            .unwrap();
-
-        assert!(state.final_patch.is_none());
-    }
-
-    #[test]
-    fn run_archived_captures_prior_status_and_sets_archived() {
-        use fabro_types::RunStatus;
-        use fabro_types::run_event::{RunArchivedProps, RunCompletedProps};
-
-        let mut state = RunProjection::default();
-        state
-            .apply_event(&test_event(
-                1,
-                EventBody::RunCompleted(RunCompletedProps {
-                    duration_ms:          10,
-                    artifact_count:       0,
-                    status:               "success".to_string(),
-                    reason:               None,
-                    total_usd_micros:     None,
-                    final_git_commit_sha: None,
-                    final_patch:          None,
-                    billing:              None,
-                }),
-                None,
-            ))
-            .unwrap();
-        assert_eq!(
-            state.status.as_ref().map(|record| record.status),
-            Some(RunStatus::Succeeded)
-        );
-        assert_eq!(state.prior_status, None);
-
-        state
-            .apply_event(&test_event(
                 2,
-                EventBody::RunArchived(RunArchivedProps { actor: None }),
-                None,
-            ))
-            .unwrap();
-
-        assert_eq!(
-            state.status.as_ref().map(|record| record.status),
-            Some(RunStatus::Archived)
-        );
-        assert_eq!(state.prior_status, Some(RunStatus::Succeeded));
-    }
-
-    #[test]
-    fn run_unarchived_restores_status_and_clears_prior_status() {
-        use fabro_types::RunStatus;
-        use fabro_types::run_event::{RunArchivedProps, RunCompletedProps, RunUnarchivedProps};
-
-        let mut state = RunProjection::default();
-        state
-            .apply_event(&test_event(
-                1,
-                EventBody::RunCompleted(RunCompletedProps {
-                    duration_ms:          10,
-                    artifact_count:       0,
-                    status:               "success".to_string(),
-                    reason:               None,
-                    total_usd_micros:     None,
-                    final_git_commit_sha: None,
-                    final_patch:          None,
-                    billing:              None,
-                }),
-                None,
-            ))
-            .unwrap();
-        state
-            .apply_event(&test_event(
-                2,
-                EventBody::RunArchived(RunArchivedProps { actor: None }),
+                "run.blocked",
+                &json!({ "blocked_reason": "human_input_required" }),
                 None,
             ))
             .unwrap();
         state
             .apply_event(&test_event(
                 3,
-                EventBody::RunUnarchived(RunUnarchivedProps {
-                    actor:           None,
-                    restored_status: RunStatus::Succeeded,
-                }),
+                EventBody::RunPaused(RunControlEffectProps::default()),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                4,
+                EventBody::RunUnpaused(RunControlEffectProps::default()),
                 None,
             ))
             .unwrap();
 
         assert_eq!(
-            state.status.as_ref().map(|record| record.status),
-            Some(RunStatus::Succeeded)
+            state.status(),
+            Some(RunStatus::Blocked {
+                blocked_reason: BlockedReason::HumanInputRequired,
+            })
         );
-        assert_eq!(state.prior_status, None);
     }
 
     #[test]
-    fn run_unarchived_uses_event_payload_even_when_prior_status_differs() {
-        // The event payload is authoritative: the unarchive apply arm sets status
-        // from `restored_status`, ignoring whatever `prior_status` was captured.
-        use fabro_types::RunStatus;
-        use fabro_types::run_event::{RunArchivedProps, RunCompletedProps, RunUnarchivedProps};
+    fn run_archived_on_non_terminal_projection_is_rejected() {
+        use fabro_types::run_event::RunArchivedProps;
+
+        let mut state = RunProjection::default();
+        state
+            .apply_event(&test_raw_event(1, "run.running", &json!({}), None))
+            .unwrap();
+
+        let err = state
+            .apply_event(&test_event(
+                2,
+                EventBody::RunArchived(RunArchivedProps { actor: None }),
+                None,
+            ))
+            .unwrap_err();
+
+        assert!(matches!(err, Error::InvalidTransition(_)));
+        assert_eq!(state.status(), Some(RunStatus::Running));
+    }
+
+    #[test]
+    fn run_unarchived_replayed_on_non_archived_projection_is_ignored() {
+        use fabro_types::run_event::{RunCompletedProps, RunUnarchivedProps};
 
         let mut state = RunProjection::default();
         state
@@ -1201,7 +1245,7 @@ mod tests {
                     duration_ms:          10,
                     artifact_count:       0,
                     status:               "success".to_string(),
-                    reason:               None,
+                    reason:               SuccessReason::Completed,
                     total_usd_micros:     None,
                     final_git_commit_sha: None,
                     final_patch:          None,
@@ -1210,158 +1254,22 @@ mod tests {
                 None,
             ))
             .unwrap();
+        let updated_at = state.status_updated_at;
+
         state
             .apply_event(&test_event(
                 2,
-                EventBody::RunArchived(RunArchivedProps { actor: None }),
-                None,
-            ))
-            .unwrap();
-        state
-            .apply_event(&test_event(
-                3,
-                EventBody::RunUnarchived(RunUnarchivedProps {
-                    actor:           None,
-                    restored_status: RunStatus::Failed,
-                }),
+                EventBody::RunUnarchived(RunUnarchivedProps { actor: None }),
                 None,
             ))
             .unwrap();
 
         assert_eq!(
-            state.status.as_ref().map(|record| record.status),
-            Some(RunStatus::Failed)
+            state.status(),
+            Some(RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            })
         );
-        assert_eq!(state.prior_status, None);
-    }
-
-    #[test]
-    fn double_archive_preserves_prior_status() {
-        // Two RunArchived events in sequence — possible under a concurrent
-        // archive race or a replayed/retried write — must not overwrite
-        // prior_status with Archived. Otherwise unarchive would emit
-        // restored_status=Archived, the apply arm would set status=Archived +
-        // prior_status=None, and the run would be permanently unrecoverable.
-        use fabro_types::RunStatus;
-        use fabro_types::run_event::{RunArchivedProps, RunCompletedProps};
-
-        let mut state = RunProjection::default();
-        state
-            .apply_event(&test_event(
-                1,
-                EventBody::RunCompleted(RunCompletedProps {
-                    duration_ms:          10,
-                    artifact_count:       0,
-                    status:               "success".to_string(),
-                    reason:               None,
-                    total_usd_micros:     None,
-                    final_git_commit_sha: None,
-                    final_patch:          None,
-                    billing:              None,
-                }),
-                None,
-            ))
-            .unwrap();
-        state
-            .apply_event(&test_event(
-                2,
-                EventBody::RunArchived(RunArchivedProps { actor: None }),
-                None,
-            ))
-            .unwrap();
-        state
-            .apply_event(&test_event(
-                3,
-                EventBody::RunArchived(RunArchivedProps { actor: None }),
-                None,
-            ))
-            .unwrap();
-
-        assert_eq!(
-            state.status.as_ref().map(|record| record.status),
-            Some(RunStatus::Archived)
-        );
-        assert_eq!(state.prior_status, Some(RunStatus::Succeeded));
-    }
-
-    #[test]
-    fn run_unarchived_with_non_terminal_restored_status_is_ignored() {
-        // The operations layer never emits this, but a corrupt log or an
-        // imported event must not drag the projection into a nonsense state
-        // (status=Running without any RunRunning event preceding it).
-        use fabro_types::RunStatus;
-        use fabro_types::run_event::{RunArchivedProps, RunCompletedProps, RunUnarchivedProps};
-
-        let mut state = RunProjection::default();
-        state
-            .apply_event(&test_event(
-                1,
-                EventBody::RunCompleted(RunCompletedProps {
-                    duration_ms:          10,
-                    artifact_count:       0,
-                    status:               "success".to_string(),
-                    reason:               None,
-                    total_usd_micros:     None,
-                    final_git_commit_sha: None,
-                    final_patch:          None,
-                    billing:              None,
-                }),
-                None,
-            ))
-            .unwrap();
-        state
-            .apply_event(&test_event(
-                2,
-                EventBody::RunArchived(RunArchivedProps { actor: None }),
-                None,
-            ))
-            .unwrap();
-        state
-            .apply_event(&test_event(
-                3,
-                EventBody::RunUnarchived(RunUnarchivedProps {
-                    actor:           None,
-                    restored_status: RunStatus::Running,
-                }),
-                None,
-            ))
-            .unwrap();
-
-        assert_eq!(
-            state.status.as_ref().map(|record| record.status),
-            Some(RunStatus::Archived)
-        );
-        assert_eq!(state.prior_status, Some(RunStatus::Succeeded));
-    }
-
-    #[test]
-    fn run_archived_on_non_terminal_projection_is_ignored() {
-        // Same defensive posture on the other side: an event log that
-        // somehow contains RunArchived on a Running run must not produce
-        // a projection with status=Archived and prior_status=Some(Running).
-        use fabro_types::RunStatus;
-        use fabro_types::run_event::{RunArchivedProps, RunStatusTransitionProps};
-
-        let mut state = RunProjection::default();
-        state
-            .apply_event(&test_event(
-                1,
-                EventBody::RunRunning(RunStatusTransitionProps { reason: None }),
-                None,
-            ))
-            .unwrap();
-        state
-            .apply_event(&test_event(
-                2,
-                EventBody::RunArchived(RunArchivedProps { actor: None }),
-                None,
-            ))
-            .unwrap();
-
-        assert_eq!(
-            state.status.as_ref().map(|record| record.status),
-            Some(RunStatus::Running)
-        );
-        assert_eq!(state.prior_status, None);
+        assert_eq!(state.status_updated_at, updated_at);
     }
 }

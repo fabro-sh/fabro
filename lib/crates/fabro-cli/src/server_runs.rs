@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use fabro_types::{RunId, RunStatus, RunSummary, StatusReason};
+use fabro_types::{RunId, RunStatus, RunSummary};
 
 use crate::server_client::Client;
 
@@ -34,10 +34,6 @@ impl ServerRunSummaryInfo {
 
     pub(crate) fn status(&self) -> RunStatus {
         self.summary.status
-    }
-
-    pub(crate) fn status_reason(&self) -> Option<StatusReason> {
-        self.summary.status_reason
     }
 
     pub(crate) fn start_time(&self) -> String {

@@ -13,6 +13,10 @@ fn resolved_run(
 }
 
 fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
+    let status = match status {
+        "submitted" => json!({ "kind": "submitted" }),
+        other => panic!("unsupported test status {other:?}"),
+    };
     serde_json::json!({
         "id": run_id,
         "status": status,

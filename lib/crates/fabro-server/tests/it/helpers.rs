@@ -234,9 +234,9 @@ pub(crate) async fn wait_for_run_status(
 ) -> String {
     for _ in 0..POLL_ATTEMPTS {
         let body = run_json(app, run_id).await;
-        let status = body["status"]
+        let status = body["status"]["kind"]
             .as_str()
-            .expect("run response should include a string status")
+            .expect("run response should include a tagged status kind")
             .to_string();
         if expected.iter().any(|candidate| *candidate == status) {
             return status;
@@ -253,9 +253,9 @@ pub(crate) async fn wait_for_run_status_not_in(
 ) -> String {
     for _ in 0..POLL_ATTEMPTS {
         let body = run_json(app, run_id).await;
-        let status = body["status"]
+        let status = body["status"]["kind"]
             .as_str()
-            .expect("run response should include a string status")
+            .expect("run response should include a tagged status kind")
             .to_string();
         if unexpected.iter().all(|candidate| *candidate != status) {
             return status;

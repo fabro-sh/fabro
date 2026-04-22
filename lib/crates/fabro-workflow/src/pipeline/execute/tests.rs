@@ -32,7 +32,7 @@ use crate::pipeline::initialize;
 use crate::pipeline::types::{InitOptions, LlmSpec, Persisted, SandboxEnvSpec};
 use crate::records::RunSpec;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
-use crate::run_status::{RunStatus, StatusReason};
+use crate::run_status::{FailureReason, RunStatus};
 use crate::test_support::run_graph;
 
 fn local_env() -> Arc<dyn Sandbox> {
@@ -791,8 +791,12 @@ async fn execute_cancelled_mid_run_persists_cancelled_status() {
 
     assert!(matches!(executed.outcome, Err(Error::Cancelled)));
     let status = executed.run_store.state().await.unwrap().status.unwrap();
-    assert_eq!(status.status, RunStatus::Failed);
-    assert_eq!(status.status_reason, Some(StatusReason::Cancelled));
+    assert_eq!(
+        status,
+        RunStatus::Failed {
+            reason: FailureReason::Cancelled,
+        }
+    );
 }
 
 #[tokio::test]

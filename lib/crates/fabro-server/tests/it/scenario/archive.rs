@@ -31,7 +31,7 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
         format!("POST /api/v1/runs/{run_id}/archive"),
     )
     .await;
-    assert_eq!(body["status"], "archived");
+    assert_eq!(body["status"]["kind"], "archived");
 
     for path in &["/cancel", "/pause", "/unpause", "/start"] {
         let req = Request::builder()
@@ -143,7 +143,7 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
         format!("POST /api/v1/runs/{run_id}/unarchive"),
     )
     .await;
-    assert_eq!(body["status"], "succeeded");
+    assert_eq!(body["status"]["kind"], "succeeded");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

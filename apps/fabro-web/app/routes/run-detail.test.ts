@@ -64,7 +64,7 @@ describe("run-detail loader", () => {
           run_id: "run-1",
           title: "Blocked run",
           repository: { name: "repo" },
-          status: "blocked",
+          status: { kind: "blocked", blocked_reason: "human_input_required" },
           workflow_name: "review",
         },
       },
@@ -94,7 +94,7 @@ describe("run-detail loader", () => {
           run_id: "run-1",
           title: "Blocked run",
           repository: { name: "repo" },
-          status: "blocked",
+          status: { kind: "blocked", blocked_reason: "human_input_required" },
           workflow_name: "review",
         },
       },
@@ -154,8 +154,7 @@ describe("run-detail action", () => {
         status: 200,
         body: {
           id: "run-1",
-          status: "failed",
-          status_reason: "cancelled",
+          status: { kind: "failed", reason: "cancelled" },
           created_at: "2026-04-20T12:00:00Z",
         },
       },
@@ -171,8 +170,7 @@ describe("run-detail action", () => {
       ok: true,
       run: {
         id: "run-1",
-        status: "failed",
-        status_reason: "cancelled",
+        status: { kind: "failed", reason: "cancelled" },
         created_at: "2026-04-20T12:00:00Z",
       },
     });
@@ -235,7 +233,11 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "cancel",
       ok: true,
-      run: { id: "run-1", status: "failed", status_reason: "cancelled", created_at: "2026-04-20T12:00:00Z" },
+      run: {
+        id: "run-1",
+        status: { kind: "failed", reason: "cancelled" },
+        created_at: "2026-04-20T12:00:00Z",
+      },
     };
 
     const firstState = handleLifecycleToastResult("cancel", result, initialState, api);
@@ -255,7 +257,7 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "cancel",
       ok: true,
-      run: { id: "run-1", status: "running", created_at: "2026-04-20T12:00:00Z" },
+      run: { id: "run-1", status: { kind: "running" }, created_at: "2026-04-20T12:00:00Z" },
     };
 
     handleLifecycleToastResult("cancel", result, initialState, api);
@@ -269,7 +271,14 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "archive",
       ok: true,
-      run: { id: "run-1", status: "archived", created_at: "2026-04-20T12:00:00Z" },
+      run: {
+        id: "run-1",
+        status: {
+          kind: "archived",
+          prior: { kind: "succeeded", reason: "completed" },
+        },
+        created_at: "2026-04-20T12:00:00Z",
+      },
     };
 
     const firstState = handleLifecycleToastResult("archive", result, initialState, api, () => {
@@ -297,7 +306,11 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "unarchive",
       ok: true,
-      run: { id: "run-1", status: "succeeded", created_at: "2026-04-20T12:00:00Z" },
+      run: {
+        id: "run-1",
+        status: { kind: "succeeded", reason: "completed" },
+        created_at: "2026-04-20T12:00:00Z",
+      },
     };
     const stateWithActiveToast: LifecycleToastState = {
       activeArchiveToastId: "toast-9",

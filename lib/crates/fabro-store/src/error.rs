@@ -20,6 +20,8 @@ pub enum Error {
     InvalidKeySegment { segment: String },
     #[error("failed to parse key: {0}")]
     KeyParse(String),
+    #[error("invalid status transition: {0}")]
+    InvalidTransition(#[from] fabro_types::InvalidTransition),
     #[error("{0}")]
     Other(String),
 }

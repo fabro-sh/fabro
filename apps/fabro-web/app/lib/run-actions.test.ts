@@ -58,15 +58,16 @@ describe("run lifecycle actions", () => {
       status: 200,
       body: JSON.stringify({
         id: "run-1",
-        status: "failed",
-        status_reason: "cancelled",
+        status: { kind: "failed", reason: "cancelled" },
         created_at: "2026-04-20T12:00:00Z",
       }),
     });
 
     const result = await cancelRun("run-1");
-    expect(result.status).toBe("failed");
-    expect(result.status_reason).toBe("cancelled");
+    expect(result.status.kind).toBe("failed");
+    if (result.status.kind === "failed") {
+      expect(result.status.reason).toBe("cancelled");
+    }
   });
 
   test("archiveRun parses a 200 response", async () => {
@@ -74,13 +75,16 @@ describe("run lifecycle actions", () => {
       status: 200,
       body: JSON.stringify({
         id: "run-1",
-        status: "archived",
+        status: {
+          kind: "archived",
+          prior: { kind: "succeeded", reason: "completed" },
+        },
         created_at: "2026-04-20T12:00:00Z",
       }),
     });
 
     const result = await archiveRun("run-1");
-    expect(result.status).toBe("archived");
+    expect(result.status.kind).toBe("archived");
   });
 
   test("unarchiveRun parses a 200 response", async () => {
@@ -88,13 +92,13 @@ describe("run lifecycle actions", () => {
       status: 200,
       body: JSON.stringify({
         id: "run-1",
-        status: "succeeded",
+        status: { kind: "succeeded", reason: "completed" },
         created_at: "2026-04-20T12:00:00Z",
       }),
     });
 
     const result = await unarchiveRun("run-1");
-    expect(result.status).toBe("succeeded");
+    expect(result.status.kind).toBe("succeeded");
   });
 
   test("404 and 409 preserve the parsed error envelope", async () => {
@@ -162,15 +166,14 @@ describe("run lifecycle actions", () => {
     expect(
       isTerminalCancelledRun({
         id: "run-1",
-        status: "failed",
-        status_reason: "cancelled",
+        status: { kind: "failed", reason: "cancelled" },
         created_at: "2026-04-20T12:00:00Z",
       }),
     ).toBe(true);
     expect(
       isTerminalCancelledRun({
         id: "run-1",
-        status: "running",
+        status: { kind: "running" },
         pending_control: "cancel",
         created_at: "2026-04-20T12:00:00Z",
       }),

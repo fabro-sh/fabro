@@ -47,7 +47,7 @@ use crate::pipeline::{
 use crate::records::Checkpoint;
 use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
-use crate::run_status::{RunStatus, StatusReason};
+use crate::run_status::{FailureReason, RunStatus};
 use crate::runtime_store::RunStoreHandle;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 
@@ -124,14 +124,13 @@ pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, E
         ));
     }
 
-    if let Some(record) = state.status {
+    if let Some(status) = state.status {
         if !matches!(
-            record.status,
+            status,
             RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting
         ) {
             return Err(Error::Precondition(format!(
-                "cannot start run: status is {:?}, expected submitted",
-                record.status
+                "cannot start run: status is {status}, expected submitted"
             )));
         }
     }
@@ -155,24 +154,20 @@ pub(super) async fn execute_persisted_run(
             &event_sink,
             run_dir,
             "bootstrap",
-            StatusReason::BootstrapFailed,
+            FailureReason::BootstrapFailed,
             &error,
         )
         .await;
         return Err(error);
     }
-    if let Err(err) = append_event_to_sink(&event_sink, &run_id, &Event::RunStarting {
-        reason: Some(StatusReason::SandboxInitializing),
-    })
-    .await
-    {
+    if let Err(err) = append_event_to_sink(&event_sink, &run_id, &Event::RunStarting).await {
         let error = Error::engine(err.to_string());
         let _ = persist_detached_failure(
             run_id,
             &event_sink,
             run_dir,
             "bootstrap",
-            StatusReason::BootstrapFailed,
+            FailureReason::BootstrapFailed,
             &error,
         )
         .await;
@@ -190,7 +185,7 @@ pub(super) async fn execute_persisted_run(
                 &event_sink,
                 run_dir,
                 "bootstrap",
-                StatusReason::BootstrapFailed,
+                FailureReason::BootstrapFailed,
                 &err,
             )
             .await;
@@ -207,7 +202,7 @@ pub(super) async fn execute_persisted_run(
                 &event_sink,
                 run_dir,
                 "bootstrap",
-                StatusReason::BootstrapFailed,
+                FailureReason::BootstrapFailed,
                 &err,
             )
             .await;
@@ -252,8 +247,7 @@ async fn persist_terminal_engine_failure(
     duration: Duration,
 ) {
     let engine_result: Result<Outcome, Error> = Err(error.clone());
-    let (final_status, failure_reason, _run_status, status_reason) =
-        classify_engine_result(&engine_result);
+    let (final_status, failure_reason, run_status) = classify_engine_result(&engine_result);
     let _conclusion = build_conclusion_from_store(
         run_store,
         final_status,
@@ -262,10 +256,14 @@ async fn persist_terminal_engine_failure(
         None,
     )
     .await;
+    let reason = match run_status {
+        RunStatus::Failed { reason } => reason,
+        _ => FailureReason::WorkflowError,
+    };
     if let Err(err) = append_event_to_sink(event_sink, &run_id, &Event::WorkflowRunFailed {
         error:          error.clone(),
         duration_ms:    crate::millis_u64(duration),
-        reason:         status_reason,
+        reason,
         git_commit_sha: None,
         final_patch:    None,
     })
@@ -850,18 +848,18 @@ impl Drop for DetachedRunBootstrapGuard {
                 .as_ref()
                 .is_some_and(|token| token.load(Ordering::SeqCst));
             let reason = if cancelled {
-                StatusReason::Cancelled
+                FailureReason::Cancelled
             } else {
-                StatusReason::SandboxInitFailed
+                FailureReason::SandboxInitFailed
             };
             let run_id = self.run_id;
             let event_sink = self.event_sink.clone();
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
                     let _ = append_event_to_sink(&event_sink, &run_id, &Event::WorkflowRunFailed {
-                        error:          Error::engine(format!("{reason:?}")),
+                        error:          Error::engine(reason.to_string()),
                         duration_ms:    0,
-                        reason:         Some(reason),
+                        reason,
                         git_commit_sha: None,
                         final_patch:    None,
                     })
@@ -908,9 +906,9 @@ impl Drop for DetachedRunCompletionGuard {
             .as_ref()
             .is_some_and(|token| token.load(Ordering::SeqCst));
         let reason = if cancelled {
-            StatusReason::Cancelled
+            FailureReason::Cancelled
         } else {
-            StatusReason::WorkflowError
+            FailureReason::WorkflowError
         };
         let message = if cancelled {
             POSTRUN_CANCELLED_MESSAGE
@@ -929,7 +927,7 @@ impl Drop for DetachedRunCompletionGuard {
                 let _ = append_event_to_sink(&event_sink, &run_id, &Event::WorkflowRunFailed {
                     error:          Error::engine(message.to_string()),
                     duration_ms:    0,
-                    reason:         Some(reason),
+                    reason,
                     git_commit_sha: None,
                     final_patch:    None,
                 })
@@ -950,7 +948,7 @@ async fn persist_detached_failure(
     event_sink: &RunEventSink,
     _run_dir: &Path,
     phase: &'static str,
-    reason: StatusReason,
+    reason: FailureReason,
     error: &Error,
 ) -> Result<(), Error> {
     let message = error.to_string();
@@ -958,7 +956,7 @@ async fn persist_detached_failure(
     if let Err(err) = append_event_to_sink(event_sink, &run_id, &Event::WorkflowRunFailed {
         error:          error.clone(),
         duration_ms:    0,
-        reason:         Some(reason),
+        reason,
         git_commit_sha: None,
         final_patch:    None,
     })
@@ -1427,7 +1425,7 @@ mod tests {
             duration_ms:          conclusion.duration_ms,
             artifact_count:       0,
             status:               "success".to_string(),
-            reason:               None,
+            reason:               crate::run_status::SuccessReason::Completed,
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,

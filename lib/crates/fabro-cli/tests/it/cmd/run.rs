@@ -15,6 +15,11 @@ use super::support::{output_stderr, wait_for_event_names};
 use crate::support::{fabro_json_snapshot, run_output_filters, unique_run_id};
 
 fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
+    let status = match status {
+        "submitted" => serde_json::json!({ "kind": "submitted" }),
+        "queued" => serde_json::json!({ "kind": "queued" }),
+        other => panic!("unsupported test status {other:?}"),
+    };
     serde_json::json!({
         "id": run_id,
         "status": status,
@@ -90,7 +95,8 @@ fn run_completed_event(run_id: &str) -> serde_json::Value {
         "properties": {
             "duration_ms": 12,
             "artifact_count": 0,
-            "status": "success"
+            "status": "success",
+            "reason": "completed"
         }
     })
 }

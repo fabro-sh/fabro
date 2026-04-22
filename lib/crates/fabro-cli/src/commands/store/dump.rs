@@ -317,8 +317,8 @@ mod tests {
     use fabro_types::settings::SettingsLayer;
     use fabro_types::{
         AggregateStats, AttrValue, BilledTokenCounts, Checkpoint, Conclusion, Graph,
-        NodeStatusRecord, Retro, RunId, RunSpec, RunStatus, RunStatusRecord, SandboxRecord,
-        StageStatus, StartRecord, StatusReason, fixtures,
+        NodeStatusRecord, Retro, RunId, RunSpec, RunStatus, SandboxRecord, StageStatus,
+        StartRecord, SuccessReason, fixtures,
     };
     use fabro_workflow::event::{Event, append_event};
     use object_store::ObjectStore;
@@ -376,15 +376,6 @@ mod tests {
             start_time: created_at + chrono::Duration::seconds(5),
             run_branch: Some(format!("fabro/run/{run_id}")),
             base_sha: Some("abc123".to_string()),
-        }
-    }
-
-    fn sample_status() -> RunStatusRecord {
-        RunStatusRecord {
-            status:         RunStatus::Running,
-            status_reason:  Some(StatusReason::SandboxInitializing),
-            blocked_reason: None,
-            updated_at:     dt("2026-03-27T12:05:00Z"),
         }
     }
 
@@ -480,7 +471,6 @@ mod tests {
         let run = store.create_run(&run_id).await.unwrap();
         let run_spec = sample_run_spec(run_id, created_at);
         let start_record = sample_start_record(run_id, created_at);
-        let status_record = sample_status();
         let mut first_checkpoint = sample_checkpoint("plan", 1);
         let mut second_checkpoint = sample_checkpoint("code", 2);
         let conclusion = sample_conclusion();
@@ -528,11 +518,9 @@ mod tests {
         })
         .await
         .unwrap();
-        append_event(&run, &run_id, &Event::RunRunning {
-            reason: status_record.status_reason,
-        })
-        .await
-        .unwrap();
+        append_event(&run, &run_id, &Event::RunRunning)
+            .await
+            .unwrap();
         for checkpoint in [&first_checkpoint, &second_checkpoint] {
             append_event(&run, &run_id, &Event::CheckpointCompleted {
                 node_id: checkpoint.current_node.clone(),
@@ -654,7 +642,7 @@ mod tests {
             duration_ms:          conclusion.duration_ms,
             artifact_count:       0,
             status:               "success".to_string(),
-            reason:               None,
+            reason:               SuccessReason::Completed,
             total_usd_micros:     conclusion
                 .billing
                 .as_ref()
@@ -719,8 +707,10 @@ mod tests {
             Some(run_id)
         );
         assert_eq!(
-            exported_run.status.as_ref().map(|status| status.status),
-            Some(RunStatus::Succeeded)
+            exported_run.status,
+            Some(RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            })
         );
         assert_eq!(
             exported_run

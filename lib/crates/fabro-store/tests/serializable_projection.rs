@@ -7,8 +7,8 @@ use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
 use fabro_types::settings::SettingsLayer;
 use fabro_types::{
-    Checkpoint, NodeStatusRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus,
-    StartRecord, fixtures,
+    Checkpoint, NodeStatusRecord, RunStatus, SandboxRecord, StageStatus, StartRecord,
+    TerminalStatus, fixtures,
 };
 use serde_json::json;
 
@@ -62,7 +62,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         run_branch: Some("fabro/run/demo".to_string()),
         base_sha:   Some("deadbeef".to_string()),
     });
-    projection.status = Some(RunStatusRecord::new(RunStatus::Running, None));
+    projection.status = Some(RunStatus::Running);
     projection.checkpoint = Some(sample_checkpoint());
     projection.sandbox = Some(SandboxRecord {
         provider:               "local".to_string(),
@@ -133,7 +133,9 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
 fn projection_query_methods_expose_common_state() {
     let mut projection = RunProjection::default();
     projection.spec = Some(sample_run_spec());
-    projection.status = Some(RunStatusRecord::new(RunStatus::Archived, None));
+    projection.status = Some(RunStatus::Archived {
+        prior: TerminalStatus::Dead,
+    });
     projection.checkpoint = Some(sample_checkpoint());
     projection.pending_interviews = BTreeMap::from([(
         "q-1".to_string(),
@@ -144,7 +146,12 @@ fn projection_query_methods_expose_common_state() {
         projection.spec().map(RunSpec::workflow_slug),
         Some(Some("demo"))
     );
-    assert_eq!(projection.status(), Some(RunStatus::Archived));
+    assert_eq!(
+        projection.status(),
+        Some(RunStatus::Archived {
+            prior: TerminalStatus::Dead,
+        })
+    );
     assert!(projection.is_terminal());
     assert_eq!(
         projection

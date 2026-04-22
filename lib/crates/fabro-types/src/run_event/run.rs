@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{ActorRef, BilledTokenCounts, RunNoticeLevel};
 use crate::settings::SettingsLayer;
-use crate::status::{BlockedReason, RunStatus};
-use crate::{Graph, RunBlobId, RunControlAction, RunProvenance, StatusReason};
+use crate::status::{BlockedReason, FailureReason, SuccessReason};
+use crate::{Graph, RunBlobId, RunControlAction, RunProvenance};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCreatedProps {
@@ -50,11 +50,13 @@ pub struct RunStartedProps {
     pub goal:         Option<String>,
 }
 
+#[allow(
+    clippy::empty_structs_with_brackets,
+    reason = "This type must serialize as {} rather than null."
+)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RunStatusTransitionProps {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<StatusReason>,
-}
+#[derive(Default)]
+pub struct RunStatusTransitionProps {}
 
 #[allow(
     clippy::empty_structs_with_brackets,
@@ -65,8 +67,6 @@ pub struct RunStatusEffectProps {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSubmittedProps {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason:          Option<StatusReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition_blob: Option<RunBlobId>,
 }
@@ -108,8 +108,7 @@ pub struct RunArchivedProps {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunUnarchivedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor:           Option<ActorRef>,
-    pub restored_status: RunStatus,
+    pub actor: Option<ActorRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -117,8 +116,7 @@ pub struct RunCompletedProps {
     pub duration_ms:          u64,
     pub artifact_count:       usize,
     pub status:               String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason:               Option<StatusReason>,
+    pub reason:               SuccessReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_usd_micros:     Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -133,8 +131,7 @@ pub struct RunCompletedProps {
 pub struct RunFailedProps {
     pub error:          String,
     pub duration_ms:    u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason:         Option<StatusReason>,
+    pub reason:         FailureReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_commit_sha: Option<String>,
     // Optional unified-patch text captured at run end. Additive for back-compat:

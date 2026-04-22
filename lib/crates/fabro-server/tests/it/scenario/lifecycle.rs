@@ -91,8 +91,8 @@ async fn wait_for_run_state(
 ) -> serde_json::Value {
     for _ in 0..POLL_ATTEMPTS {
         let body = run_json(app, run_id).await;
-        if body["status"].as_str() == Some(expected_status)
-            && body["status_reason"].as_str() == Some(expected_reason)
+        if body["status"]["kind"].as_str() == Some(expected_status)
+            && body["status"]["reason"].as_str() == Some(expected_reason)
         {
             return body;
         }
@@ -248,7 +248,7 @@ async fn full_http_lifecycle_cancel() {
         format!("POST /api/v1/runs/{run_id}/cancel"),
     )
     .await;
-    assert_eq!(body["status"], "running");
+    assert_eq!(body["status"]["kind"], "running");
     // `pending_control` is computed from the store projection after the cancel
     // event is appended AND the worker is signaled. The worker is sitting at a
     // human gate; once notified it can emit a clearing event before this
@@ -263,7 +263,7 @@ async fn full_http_lifecycle_cancel() {
 
     // Verify the durable store view converges to cancelled failure.
     let body = wait_for_run_state(&app, &run_id, "failed", "cancelled").await;
-    assert_eq!(body["status_reason"], "cancelled");
+    assert_eq!(body["status"]["reason"], "cancelled");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

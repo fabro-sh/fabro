@@ -385,7 +385,7 @@ fn reason_for_fallback(projection: &fabro_store::RunProjection) -> RunFilesMetaD
     let is_terminal = projection
         .status
         .as_ref()
-        .is_some_and(|s| s.status.is_terminal());
+        .is_some_and(|status| status.is_terminal());
     if is_terminal {
         RunFilesMetaDegradedReason::SandboxGone
     } else {

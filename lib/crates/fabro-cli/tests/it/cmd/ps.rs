@@ -204,11 +204,13 @@ fn ps_all_json_lists_created_and_completed_runs() {
         "all runs should be scoped to the current test session: {runs:#?}"
     );
     assert!(
-        runs.iter().any(|run| run["status"] == "submitted"),
+        runs.iter().any(|run| run["status"]["kind"] == "submitted"),
         "ps should include the created run: {runs:#?}"
     );
     assert!(
-        runs.iter().any(|run| run["status"] == "succeeded"),
+        runs.iter().any(|run| {
+            run["status"]["kind"] == "succeeded" && run["status"]["reason"] == "completed"
+        }),
         "ps should include the completed run: {runs:#?}"
     );
 }
@@ -319,7 +321,8 @@ fn ps_filters_by_workflow_and_label() {
     );
     let run = &runs[0];
     assert_eq!(run["workflow_name"], "Simple");
-    assert_eq!(run["status"], "succeeded");
+    assert_eq!(run["status"]["kind"], "succeeded");
+    assert_eq!(run["status"]["reason"], "completed");
     assert_eq!(run["labels"]["suite"], "alpha");
     assert_eq!(run["labels"]["fabro_test_case"], context.test_case_id());
     assert_eq!(run["labels"]["fabro_test_run"], context.test_run_id());
@@ -349,8 +352,10 @@ fn ps_uses_configured_server_target_without_server_flag() {
                         "repository": { "name": "repo" },
                         "start_time": "2026-04-05T12:00:00Z",
                         "created_at": "2026-04-05T12:00:00Z",
-                        "status": "succeeded",
-                        "status_reason": null,
+                        "status": {
+                            "kind": "succeeded",
+                            "reason": "completed"
+                        },
                         "duration_ms": 123,
                         "total_usd_micros": null
                     }],
@@ -403,8 +408,10 @@ fn ps_explicit_remote_target_ignores_broken_local_storage_settings() {
                         "repository": { "name": "repo" },
                         "start_time": "2026-04-20T12:00:00Z",
                         "created_at": "2026-04-20T12:00:00Z",
-                        "status": "succeeded",
-                        "status_reason": null,
+                        "status": {
+                            "kind": "succeeded",
+                            "reason": "completed"
+                        },
                         "duration_ms": 123,
                         "total_usd_micros": null
                     }],

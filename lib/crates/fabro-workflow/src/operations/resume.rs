@@ -14,9 +14,9 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
         .await
         .map_err(|err| Error::engine(err.to_string()))?;
 
-    if let Some(record) = state.status {
-        super::archive::ensure_not_archived(Some(record.status), &services.run_id)?;
-        if record.status == RunStatus::Succeeded {
+    if let Some(status) = state.status {
+        super::archive::ensure_not_archived(Some(status), &services.run_id)?;
+        if matches!(status, RunStatus::Succeeded { .. }) {
             return Err(Error::Precondition(
                 "run already finished successfully — nothing to resume".to_string(),
             ));
@@ -43,7 +43,6 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
         &services.event_sink,
         &services.run_id,
         &Event::RunSubmitted {
-            reason: None,
             definition_blob,
         },
     )

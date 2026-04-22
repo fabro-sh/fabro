@@ -15,7 +15,7 @@ use super::short_run_id;
 use crate::args::RunsListArgs;
 use crate::command_context::CommandContext;
 use crate::server_runs::{ServerSummaryLookup, filter_server_runs};
-use crate::shared::{color_if, format_duration_ms, tilde_path};
+use crate::shared::{color_if, format_duration_ms, run_status_kind, tilde_path};
 
 pub(crate) async fn list_command(
     args: &RunsListArgs,
@@ -44,7 +44,6 @@ pub(crate) async fn list_command(
                     "workflow_name": run.workflow_name(),
                     "workflow_slug": run.workflow_slug(),
                     "status": run.status(),
-                    "status_reason": run.status_reason(),
                     "start_time": run.start_time(),
                     "labels": run.labels(),
                     "duration_ms": run.duration_ms(),
@@ -142,14 +141,16 @@ pub(crate) async fn list_command(
 }
 
 fn status_cell(status: RunStatus, use_color: bool) -> CellStruct {
-    let text = status.to_string();
+    let text = run_status_kind(status);
     let color = match status {
-        RunStatus::Succeeded => Some(Color::Green),
-        RunStatus::Failed => Some(Color::Red),
+        RunStatus::Succeeded { .. } => Some(Color::Green),
+        RunStatus::Failed { .. } => Some(Color::Red),
         RunStatus::Running | RunStatus::Starting | RunStatus::Submitted => Some(Color::Cyan),
-        RunStatus::Queued | RunStatus::Dead | RunStatus::Archived => Some(Color::Ansi256(8)),
-        RunStatus::Blocked | RunStatus::Removing => Some(Color::Yellow),
-        RunStatus::Paused => Some(Color::Magenta),
+        RunStatus::Queued | RunStatus::Dead | RunStatus::Archived { .. } => {
+            Some(Color::Ansi256(8))
+        }
+        RunStatus::Blocked { .. } | RunStatus::Removing => Some(Color::Yellow),
+        RunStatus::Paused { .. } => Some(Color::Magenta),
     };
     text.cell()
         .bold(use_color && color != Some(Color::Ansi256(8)))

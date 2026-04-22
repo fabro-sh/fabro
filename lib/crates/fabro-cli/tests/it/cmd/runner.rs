@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use fabro_store::EventEnvelope;
 use fabro_test::{assert_reqwest_status, expect_reqwest_json, fabro_snapshot, test_context};
-use fabro_types::{EventBody, RunEvent, StatusReason};
+use fabro_types::{EventBody, FailureReason, RunEvent};
 use httpmock::MockServer;
 
 use super::support::{
@@ -757,6 +757,10 @@ fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
     let status_record = run_state(&run_dir)
         .status
         .expect("cancelled run should have a status record");
-    assert_eq!(status_record.status.to_string(), "failed");
-    assert_eq!(status_record.status_reason, Some(StatusReason::Cancelled));
+    assert_eq!(
+        status_record,
+        fabro_types::RunStatus::Failed {
+            reason: FailureReason::Cancelled,
+        }
+    );
 }

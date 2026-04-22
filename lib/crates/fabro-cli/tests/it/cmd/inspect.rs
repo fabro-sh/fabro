@@ -9,7 +9,7 @@ use super::support::{
 };
 use crate::support::unique_run_id;
 
-fn remote_run_summary(run_id: &str, status: &str) -> serde_json::Value {
+fn remote_run_summary(run_id: &str, status: serde_json::Value) -> serde_json::Value {
     json!({
         "run_id": run_id,
         "workflow_name": "Nightly Build",
@@ -22,8 +22,6 @@ fn remote_run_summary(run_id: &str, status: &str) -> serde_json::Value {
         "start_time": "2026-04-19T12:00:00Z",
         "created_at": "2026-04-19T12:00:00Z",
         "status": status,
-        "status_reason": null,
-        "blocked_reason": null,
         "pending_control": null,
         "duration_ms": null,
         "elapsed_secs": null,
@@ -64,7 +62,13 @@ fn inspect_resolves_selector_via_server_endpoint() {
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
-    let summary = remote_run_summary(run_id.as_str(), "succeeded");
+    let summary = remote_run_summary(
+        run_id.as_str(),
+        json!({
+            "kind": "succeeded",
+            "reason": "completed"
+        }),
+    );
 
     let resolve_run = server.mock(|when, then| {
         when.method("GET")
@@ -97,7 +101,10 @@ fn inspect_resolves_selector_via_server_endpoint() {
     [
       {
         "run_id": "[ULID]",
-        "status": "succeeded",
+        "status": {
+          "kind": "succeeded",
+          "reason": "completed"
+        },
         "run_spec": null,
         "start_record": null,
         "conclusion": null,
@@ -122,7 +129,9 @@ fn inspect_created_run_shows_run_spec_without_start_or_conclusion() {
     [
       {
         "run_id": "[ULID]",
-        "status": "submitted",
+        "status": {
+          "kind": "submitted"
+        },
         "run_spec": {
           "goal": "Run tests and report results",
           "workflow_name": "Simple",
@@ -155,7 +164,10 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
     [
       {
         "run_id": "[ULID]",
-        "status": "succeeded",
+        "status": {
+          "kind": "succeeded",
+          "reason": "completed"
+        },
         "run_spec": {
           "goal": "Run tests and report results",
           "workflow_name": "Simple",
@@ -221,7 +233,10 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
     [
       {
         "run_id": "[ULID]",
-        "status": "succeeded",
+        "status": {
+          "kind": "succeeded",
+          "reason": "completed"
+        },
         "run_spec": {
           "goal": "Run tests and report results",
           "workflow_name": "Simple",
@@ -272,7 +287,10 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
     [
       {
         "run_id": "[ULID]",
-        "status": "succeeded",
+        "status": {
+          "kind": "succeeded",
+          "reason": "completed"
+        },
         "run_spec": {
           "goal": "Edit a tracked file",
           "workflow_name": "Flow",

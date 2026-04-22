@@ -379,8 +379,7 @@ pub(crate) async fn cancel_stub(
         StatusCode::OK,
         Json(serde_json::json!({
             "id": id,
-            "status": "failed",
-            "status_reason": "cancelled",
+            "status": { "kind": "failed", "reason": "cancelled" },
             "created_at": "2026-03-06T14:30:00Z"
         })),
     )
@@ -767,7 +766,6 @@ fn ts(s: &str) -> DateTime<Utc> {
 
 mod runs {
     use std::collections::HashMap;
-    use std::str::FromStr;
     use std::time::Duration;
 
     use fabro_api::types::*;
@@ -796,8 +794,6 @@ mod runs {
         total_usd_micros: Option<i64>,
         entries: &[(&str, &str)],
     ) -> StoreRunSummary {
-        let status_reason = status_reason.and_then(parse_status_reason);
-
         StoreRunSummary {
             created_at: ts(created_at),
             duration_ms: elapsed_secs.and_then(duration_ms_from_secs),
@@ -811,10 +807,8 @@ mod runs {
             },
             run_id: run_id.into(),
             start_time: Some(ts(created_at)),
-            status: RunStatus::from_str(status)
-                .unwrap_or_else(|_| panic!("invalid demo run status: {status}")),
-            status_reason,
-            blocked_reason: None,
+            status: parse_run_status(status, status_reason)
+                .unwrap_or_else(|| panic!("invalid demo run status: {status}")),
             title: truncate_goal(goal),
             total_usd_micros,
             workflow_name: Some(workflow_name.into()),
@@ -822,8 +816,52 @@ mod runs {
         }
     }
 
-    fn parse_status_reason(reason: &str) -> Option<StatusReason> {
-        StatusReason::from_str(reason).ok()
+    fn parse_run_status(status: &str, status_reason: Option<&str>) -> Option<RunStatus> {
+        match status {
+            "submitted" => Some(RunStatus::Submitted),
+            "queued" => Some(RunStatus::Queued),
+            "starting" => Some(RunStatus::Starting),
+            "running" => Some(RunStatus::Running),
+            "blocked" => Some(RunStatus::Blocked {
+                blocked_reason: BlockedReason::HumanInputRequired,
+            }),
+            "paused" => Some(RunStatus::Paused { prior_block: None }),
+            "removing" => Some(RunStatus::Removing),
+            "succeeded" => Some(RunStatus::Succeeded {
+                reason: status_reason
+                    .and_then(parse_success_reason)
+                    .unwrap_or(SuccessReason::Completed),
+            }),
+            "failed" => Some(RunStatus::Failed {
+                reason: status_reason
+                    .and_then(parse_failure_reason)
+                    .unwrap_or(FailureReason::WorkflowError),
+            }),
+            "dead" => Some(RunStatus::Dead),
+            _ => None,
+        }
+    }
+
+    fn parse_success_reason(reason: &str) -> Option<SuccessReason> {
+        match reason {
+            "completed" => Some(SuccessReason::Completed),
+            "partial_success" => Some(SuccessReason::PartialSuccess),
+            _ => None,
+        }
+    }
+
+    fn parse_failure_reason(reason: &str) -> Option<FailureReason> {
+        match reason {
+            "workflow_error" => Some(FailureReason::WorkflowError),
+            "cancelled" => Some(FailureReason::Cancelled),
+            "terminated" => Some(FailureReason::Terminated),
+            "transient_infra" => Some(FailureReason::TransientInfra),
+            "budget_exhausted" => Some(FailureReason::BudgetExhausted),
+            "launch_failed" => Some(FailureReason::LaunchFailed),
+            "bootstrap_failed" => Some(FailureReason::BootstrapFailed),
+            "sandbox_init_failed" => Some(FailureReason::SandboxInitFailed),
+            _ => None,
+        }
     }
 
     fn duration_ms_from_secs(secs: f64) -> Option<i64> {
@@ -862,8 +900,7 @@ mod runs {
             run_id: summary.run_id,
             sandbox,
             start_time: summary.start_time,
-            status: summary.status.to_string(),
-            status_reason: summary.status_reason,
+            status: summary.status,
             title: summary.title,
             total_usd_micros: summary.total_usd_micros,
             workflow_name: summary.workflow_name,
@@ -1372,7 +1409,12 @@ mod runs {
                 &[],
             );
 
-            assert_eq!(summary.status_reason, Some(StatusReason::Cancelled));
+            assert_eq!(
+                summary.status,
+                RunStatus::Failed {
+                    reason: FailureReason::Cancelled,
+                }
+            );
         }
 
         #[test]
@@ -1392,7 +1434,12 @@ mod runs {
                 &[],
             );
 
-            assert_eq!(summary.status_reason, None);
+            assert_eq!(
+                summary.status,
+                RunStatus::Failed {
+                    reason: FailureReason::WorkflowError,
+                }
+            );
         }
 
         #[test]

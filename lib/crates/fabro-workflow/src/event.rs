@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::{
     ActorRef, BilledTokenCounts, BlockedReason, ParallelBranchId, RunBlobId, RunControlAction,
-    RunEvent, RunId, RunProvenance, RunStatus, StageId, StageStatus, StatusReason,
+    FailureReason, RunEvent, RunId, RunProvenance, StageId, StageStatus, SuccessReason,
     run_event as fabro_types,
 };
 use anyhow::{Context, Result};
@@ -78,27 +78,16 @@ pub enum Event {
     },
     RunSubmitted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason:          Option<StatusReason>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         definition_blob: Option<RunBlobId>,
     },
     RunQueued,
-    RunStarting {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason: Option<StatusReason>,
-    },
-    RunRunning {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason: Option<StatusReason>,
-    },
+    RunStarting,
+    RunRunning,
     RunBlocked {
         blocked_reason: BlockedReason,
     },
     RunUnblocked,
-    RunRemoving {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason: Option<StatusReason>,
-    },
+    RunRemoving,
     RunCancelRequested {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor: Option<ActorRef>,
@@ -128,16 +117,14 @@ pub enum Event {
     },
     RunUnarchived {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        actor:           Option<ActorRef>,
-        restored_status: RunStatus,
+        actor: Option<ActorRef>,
     },
     WorkflowRunCompleted {
         duration_ms:          u64,
         artifact_count:       usize,
         #[serde(default)]
         status:               String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason:               Option<StatusReason>,
+        reason:               SuccessReason,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         total_usd_micros:     Option<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -150,8 +137,7 @@ pub enum Event {
     WorkflowRunFailed {
         error:          Error,
         duration_ms:    u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason:         Option<StatusReason>,
+        reason:         FailureReason,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         git_commit_sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -588,20 +574,17 @@ impl Event {
             Self::WorkflowRunStarted { name, run_id, .. } => {
                 info!(workflow = name.as_str(), run_id = %run_id, "Workflow run started");
             }
-            Self::RunSubmitted {
-                reason,
-                definition_blob,
-            } => {
-                info!(?reason, ?definition_blob, "Run submitted");
+            Self::RunSubmitted { definition_blob } => {
+                info!(?definition_blob, "Run submitted");
             }
             Self::RunQueued => {
                 info!("Run queued");
             }
-            Self::RunStarting { reason } => {
-                info!(?reason, "Run starting");
+            Self::RunStarting => {
+                info!("Run starting");
             }
-            Self::RunRunning { reason } => {
-                info!(?reason, "Run running");
+            Self::RunRunning => {
+                info!("Run running");
             }
             Self::RunBlocked { blocked_reason } => {
                 info!(?blocked_reason, "Run blocked");
@@ -609,8 +592,8 @@ impl Event {
             Self::RunUnblocked => {
                 info!("Run unblocked");
             }
-            Self::RunRemoving { reason } => {
-                info!(?reason, "Run removing");
+            Self::RunRemoving => {
+                info!("Run removing");
             }
             Self::RunCancelRequested { .. } => {
                 info!("Run cancel requested");
@@ -646,11 +629,8 @@ impl Event {
             Self::RunArchived { actor } => {
                 info!(?actor, "Run archived");
             }
-            Self::RunUnarchived {
-                actor,
-                restored_status,
-            } => {
-                info!(?actor, ?restored_status, "Run unarchived");
+            Self::RunUnarchived { actor } => {
+                info!(?actor, "Run unarchived");
             }
             Self::WorkflowRunCompleted {
                 duration_ms,
@@ -1185,11 +1165,11 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::WorkflowRunStarted { .. } => "run.started",
         Event::RunSubmitted { .. } => "run.submitted",
         Event::RunQueued => "run.queued",
-        Event::RunStarting { .. } => "run.starting",
-        Event::RunRunning { .. } => "run.running",
+        Event::RunStarting => "run.starting",
+        Event::RunRunning => "run.running",
         Event::RunBlocked { .. } => "run.blocked",
         Event::RunUnblocked => "run.unblocked",
-        Event::RunRemoving { .. } => "run.removing",
+        Event::RunRemoving => "run.removing",
         Event::RunCancelRequested { .. } => "run.cancel.requested",
         Event::RunPauseRequested { .. } => "run.pause.requested",
         Event::RunUnpauseRequested { .. } => "run.unpause.requested",
@@ -1564,19 +1544,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
             goal:         goal.clone(),
         }),
         Event::RunSubmitted {
-            reason,
             definition_blob,
         } => EventBody::RunSubmitted(fabro_types::RunSubmittedProps {
-            reason:          *reason,
             definition_blob: *definition_blob,
         }),
         Event::RunQueued => EventBody::RunQueued(fabro_types::RunStatusEffectProps::default()),
-        Event::RunStarting { reason } => {
-            EventBody::RunStarting(fabro_types::RunStatusTransitionProps { reason: *reason })
-        }
-        Event::RunRunning { reason } => {
-            EventBody::RunRunning(fabro_types::RunStatusTransitionProps { reason: *reason })
-        }
+        Event::RunStarting => EventBody::RunStarting(fabro_types::RunStatusTransitionProps::default()),
+        Event::RunRunning => EventBody::RunRunning(fabro_types::RunStatusTransitionProps::default()),
         Event::RunBlocked { blocked_reason } => {
             EventBody::RunBlocked(fabro_types::RunBlockedProps {
                 blocked_reason: *blocked_reason,
@@ -1585,9 +1559,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::RunUnblocked => {
             EventBody::RunUnblocked(fabro_types::RunStatusEffectProps::default())
         }
-        Event::RunRemoving { reason } => {
-            EventBody::RunRemoving(fabro_types::RunStatusTransitionProps { reason: *reason })
-        }
+        Event::RunRemoving => EventBody::RunRemoving(fabro_types::RunStatusTransitionProps::default()),
         Event::RunCancelRequested { .. } => {
             EventBody::RunCancelRequested(fabro_types::RunControlRequestedProps {
                 action: RunControlAction::Cancel,
@@ -1621,12 +1593,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::RunArchived { actor } => EventBody::RunArchived(fabro_types::RunArchivedProps {
             actor: actor.clone(),
         }),
-        Event::RunUnarchived {
-            actor,
-            restored_status,
-        } => EventBody::RunUnarchived(fabro_types::RunUnarchivedProps {
-            actor:           actor.clone(),
-            restored_status: *restored_status,
+        Event::RunUnarchived { actor } => EventBody::RunUnarchived(fabro_types::RunUnarchivedProps {
+            actor: actor.clone(),
         }),
         Event::WorkflowRunCompleted {
             duration_ms,
@@ -3140,7 +3108,7 @@ mod tests {
         let stored = to_run_event(&fixtures::RUN_6, &Event::WorkflowRunFailed {
             error:          Error::handler("boom"),
             duration_ms:    900,
-            reason:         Some(StatusReason::WorkflowError),
+            reason:         FailureReason::WorkflowError,
             git_commit_sha: Some("abc123".to_string()),
             final_patch:    None,
         });
@@ -3414,7 +3382,7 @@ mod tests {
 
     #[test]
     fn run_level_events_without_scope_leave_stage_id_absent() {
-        let stored = to_run_event(&fixtures::RUN_1, &Event::RunRunning { reason: None });
+        let stored = to_run_event(&fixtures::RUN_1, &Event::RunRunning);
         assert!(stored.stage_id.is_none());
         assert!(stored.parallel_group_id.is_none());
         assert!(stored.parallel_branch_id.is_none());
@@ -3453,8 +3421,7 @@ mod tests {
         );
         assert_eq!(
             event_name(&Event::RunUnarchived {
-                actor:           None,
-                restored_status: RunStatus::Succeeded,
+                actor: None,
             }),
             "run.unarchived"
         );
@@ -3477,7 +3444,7 @@ mod tests {
     }
 
     #[test]
-    fn run_unarchived_round_trips_actor_and_restored_status() {
+    fn run_unarchived_round_trips_actor_in_envelope() {
         let actor = ActorRef {
             kind:    ActorKind::User,
             id:      Some("bob".to_string()),
@@ -3485,14 +3452,12 @@ mod tests {
         };
 
         let unarchived = to_run_event(&fixtures::RUN_1, &Event::RunUnarchived {
-            actor:           Some(actor.clone()),
-            restored_status: RunStatus::Failed,
+            actor: Some(actor.clone()),
         });
         assert_eq!(unarchived.event_name(), "run.unarchived");
         assert_eq!(unarchived.actor.as_ref().expect("actor set"), &actor);
         match &unarchived.body {
             EventBody::RunUnarchived(props) => {
-                assert_eq!(props.restored_status, RunStatus::Failed);
                 assert_eq!(props.actor.as_ref().expect("actor set"), &actor);
             }
             other => panic!("expected RunUnarchived body, got {other:?}"),

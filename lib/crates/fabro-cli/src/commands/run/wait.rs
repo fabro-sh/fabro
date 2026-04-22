@@ -22,7 +22,7 @@ use tracing::info;
 
 use crate::args::WaitArgs;
 use crate::command_context::CommandContext;
-use crate::shared::{format_duration_ms, format_usd_micros};
+use crate::shared::{format_duration_ms, format_usd_micros, run_status_kind};
 
 pub(crate) async fn run(
     args: &WaitArgs,
@@ -72,7 +72,7 @@ pub(crate) async fn run(
         print_human_output(final_status, &run_id, conclusion.as_ref(), styles, printer);
     }
 
-    if final_status == RunStatus::Succeeded {
+    if matches!(final_status, RunStatus::Succeeded { .. }) {
         Ok(())
     } else {
         std::process::exit(1);
@@ -86,7 +86,7 @@ fn build_json_output(
 ) -> serde_json::Value {
     let mut value = serde_json::json!({
         "run_id": run_id,
-        "status": status.to_string(),
+        "status": run_status_kind(status),
     });
     if let Some(c) = conclusion {
         value["duration_ms"] = c.duration_ms.into();
@@ -109,10 +109,10 @@ fn print_human_output(
     printer: Printer,
 ) {
     let (style, label) = match status {
-        RunStatus::Succeeded => (&styles.bold_green, "Succeeded"),
-        RunStatus::Failed => (&styles.bold_red, "Failed"),
+        RunStatus::Succeeded { .. } => (&styles.bold_green, "Succeeded"),
+        RunStatus::Failed { .. } => (&styles.bold_red, "Failed"),
         RunStatus::Dead => (&styles.bold_red, "Dead"),
-        RunStatus::Archived => (&styles.dim, "Archived"),
+        RunStatus::Archived { .. } => (&styles.dim, "Archived"),
         // Poll loop only breaks on is_terminal() which is the four arms above.
         _ => unreachable!(),
     };
@@ -142,10 +142,9 @@ fn print_human_output(
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::{BilledTokenCounts, fixtures};
+    use fabro_types::{BilledTokenCounts, RunStatus, SuccessReason, fixtures};
     use fabro_workflow::outcome::StageStatus;
     use fabro_workflow::records::Conclusion;
-    use fabro_workflow::run_status::RunStatusRecord;
 
     use super::*;
 
@@ -174,7 +173,13 @@ mod tests {
             }),
             total_retries:        0,
         };
-        let json = build_json_output(RunStatus::Succeeded, &run_id, Some(&conclusion));
+        let json = build_json_output(
+            RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            },
+            &run_id,
+            Some(&conclusion),
+        );
         assert_eq!(json["run_id"], run_id.to_string());
         assert_eq!(json["status"], "succeeded");
         assert_eq!(json["duration_ms"], 12345);
@@ -184,7 +189,13 @@ mod tests {
     #[test]
     fn json_output_failed_without_conclusion() {
         let run_id = fixtures::RUN_2;
-        let json = build_json_output(RunStatus::Failed, &run_id, None);
+        let json = build_json_output(
+            RunStatus::Failed {
+                reason: fabro_types::FailureReason::WorkflowError,
+            },
+            &run_id,
+            None,
+        );
         assert_eq!(json["run_id"], run_id.to_string());
         assert_eq!(json["status"], "failed");
         assert!(json.get("duration_ms").is_none());
@@ -210,7 +221,13 @@ mod tests {
             billing:              None,
             total_retries:        0,
         };
-        let json = build_json_output(RunStatus::Failed, &run_id, Some(&conclusion));
+        let json = build_json_output(
+            RunStatus::Failed {
+                reason: fabro_types::FailureReason::WorkflowError,
+            },
+            &run_id,
+            Some(&conclusion),
+        );
         assert!(json.get("total_usd_micros").is_none());
         assert_eq!(json["duration_ms"], 500);
     }
@@ -239,7 +256,9 @@ mod tests {
         };
         // Just verify no panic; actual stderr output is hard to capture
         print_human_output(
-            RunStatus::Succeeded,
+            RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            },
             &run_id,
             Some(&conclusion),
             &styles,
@@ -251,7 +270,9 @@ mod tests {
     fn human_output_failed_no_conclusion() {
         let styles = no_color_styles();
         print_human_output(
-            RunStatus::Failed,
+            RunStatus::Failed {
+                reason: fabro_types::FailureReason::WorkflowError,
+            },
             &fixtures::RUN_6,
             None,
             &styles,
@@ -263,16 +284,22 @@ mod tests {
     fn poll_terminal_immediately() {
         let dir = tempfile::tempdir().unwrap();
         let status_path = dir.path().join("status.json");
-        let record = RunStatusRecord::new(RunStatus::Succeeded, None);
+        let record = RunStatus::Succeeded {
+            reason: SuccessReason::Completed,
+        };
         std::fs::write(&status_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
 
         // Simulate what the poll loop does
-        let status = serde_json::from_str::<RunStatusRecord>(
+        let status = serde_json::from_str::<RunStatus>(
             &std::fs::read_to_string(&status_path).unwrap(),
         )
-        .unwrap()
-        .status;
+        .unwrap();
         assert!(status.is_terminal());
-        assert_eq!(status, RunStatus::Succeeded);
+        assert_eq!(
+            status,
+            RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            }
+        );
     }
 }

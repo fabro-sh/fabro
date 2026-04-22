@@ -1,5 +1,9 @@
 import { formatElapsedSecs, formatDurationSecs } from "../lib/format";
-import type { RunListItem, StoreRunSummary } from "@qltysh/fabro-api-client";
+import type {
+  RunListItem,
+  RunStatus as ApiRunStatus,
+  StoreRunSummary,
+} from "@qltysh/fabro-api-client";
 
 export type CiStatus = "passing" | "failing" | "pending";
 
@@ -17,7 +21,7 @@ export interface RunItem {
   title: string;
   workflow: string;
   column?: ColumnStatus;
-  lifecycleStatus?: string | null;
+  lifecycleStatus?: RunStatus | null;
   lifecycleStatusLabel?: string;
   number?: number;
   additions?: number;
@@ -50,14 +54,19 @@ function displayRunTitle(title: string | null | undefined): string {
   return title?.trim() ? title : "Untitled run";
 }
 
+function runStatusKind(status: ApiRunStatus | null | undefined): RunStatus | null {
+  return status?.kind ?? null;
+}
+
 export function mapRunListItem(item: RunListItem): RunItem {
+  const lifecycleStatus = runStatusKind(item.status);
   return {
     id: item.run_id,
     repo: item.repository.name,
     title: displayRunTitle(item.title),
     workflow: item.workflow_slug ?? item.workflow_name ?? "unknown",
     column: item.column,
-    lifecycleStatus: item.status,
+    lifecycleStatus,
     lifecycleStatusLabel: lifecycleStatusLabel(item.status),
     number: item.pull_request?.number,
     additions: item.pull_request?.additions,
@@ -78,12 +87,13 @@ export function mapRunListItem(item: RunListItem): RunItem {
 export type RunSummaryResponse = StoreRunSummary;
 
 export function mapRunSummaryToRunItem(summary: RunSummaryResponse): RunItem {
+  const lifecycleStatus = runStatusKind(summary.status);
   return {
     id: summary.run_id,
     repo: summary.repository.name,
     title: displayRunTitle(summary.title),
     workflow: summary.workflow_slug ?? summary.workflow_name ?? "unknown",
-    lifecycleStatus: summary.status,
+    lifecycleStatus,
     lifecycleStatusLabel: lifecycleStatusLabel(summary.status),
     elapsed:
       summary.elapsed_secs != null
@@ -94,8 +104,8 @@ export function mapRunSummaryToRunItem(summary: RunSummaryResponse): RunItem {
   };
 }
 
-export function columnForStatus(status: string | null | undefined): ColumnStatus | null {
-  switch (status) {
+export function columnForStatus(status: ApiRunStatus | null | undefined): ColumnStatus | null {
+  switch (status?.kind) {
     case "submitted":
     case "queued":
     case "starting":
@@ -155,9 +165,10 @@ export function isRunStatus(s: string): s is RunStatus {
   return knownRunStatuses.has(s);
 }
 
-function lifecycleStatusLabel(status: string | null | undefined): string | undefined {
-  if (!status) return undefined;
-  return isRunStatus(status) ? runStatusDisplay[status].label : status;
+function lifecycleStatusLabel(status: ApiRunStatus | null | undefined): string | undefined {
+  const kind = runStatusKind(status);
+  if (!kind) return undefined;
+  return runStatusDisplay[kind].label;
 }
 
 /** Graph control nodes hidden from stage lists in the UI. */

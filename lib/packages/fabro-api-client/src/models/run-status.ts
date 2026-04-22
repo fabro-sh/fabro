@@ -13,26 +13,53 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { BlockedReason } from './blocked-reason';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { FailureReason } from './failure-reason';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatusArchived } from './run-status-archived';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatusBlocked } from './run-status-blocked';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatusDead } from './run-status-dead';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatusFailed } from './run-status-failed';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatusPaused } from './run-status-paused';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatusQueued } from './run-status-queued';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatusRemoving } from './run-status-removing';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatusRunning } from './run-status-running';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatusStarting } from './run-status-starting';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatusSubmitted } from './run-status-submitted';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunStatusSucceeded } from './run-status-succeeded';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { TerminalStatus } from './terminal-status';
 
 /**
+ * @type RunStatus
  * Lifecycle status of a run. `archived` is a terminal status reached by an explicit user action on a previously terminal (`succeeded`, `failed`, or `dead`) run; archived runs are hidden from default listings and are read-only until unarchived. 
  */
-
-export const RunStatus = {
-    SUBMITTED: 'submitted',
-    QUEUED: 'queued',
-    STARTING: 'starting',
-    RUNNING: 'running',
-    BLOCKED: 'blocked',
-    PAUSED: 'paused',
-    REMOVING: 'removing',
-    SUCCEEDED: 'succeeded',
-    FAILED: 'failed',
-    DEAD: 'dead',
-    ARCHIVED: 'archived'
-} as const;
-
-export type RunStatus = typeof RunStatus[keyof typeof RunStatus];
-
+export type RunStatus = { kind: 'archived' } & RunStatusArchived | { kind: 'blocked' } & RunStatusBlocked | { kind: 'dead' } & RunStatusDead | { kind: 'failed' } & RunStatusFailed | { kind: 'paused' } & RunStatusPaused | { kind: 'queued' } & RunStatusQueued | { kind: 'removing' } & RunStatusRemoving | { kind: 'running' } & RunStatusRunning | { kind: 'starting' } & RunStatusStarting | { kind: 'submitted' } & RunStatusSubmitted | { kind: 'succeeded' } & RunStatusSucceeded;
 
 

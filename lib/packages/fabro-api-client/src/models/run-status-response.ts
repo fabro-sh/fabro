@@ -15,9 +15,6 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { BlockedReason } from './blocked-reason';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { RunControlAction } from './run-control-action';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -25,9 +22,6 @@ import type { RunError } from './run-error';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { RunStatus } from './run-status';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { StatusReason } from './status-reason';
 
 /**
  * Current status of a run with optional error and queue position.
@@ -40,11 +34,9 @@ export interface RunStatusResponse {
     'status': RunStatus;
     'error'?: RunError;
     /**
-     * Position in the queue (1-based). Only present when status is `queued`.
+     * Position in the queue (1-based). Only present when the status kind is `queued`.
      */
     'queue_position'?: number;
-    'status_reason'?: StatusReason | null;
-    'blocked_reason'?: BlockedReason | null;
     'pending_control'?: RunControlAction | null;
     /**
      * Timestamp when the run was created.

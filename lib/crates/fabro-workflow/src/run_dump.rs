@@ -428,8 +428,8 @@ mod tests {
     use fabro_types::run::RunSpec;
     use fabro_types::settings::SettingsLayer;
     use fabro_types::{
-        Checkpoint, Conclusion, NodeStatusRecord, RunStatus, RunStatusRecord, SandboxRecord,
-        StageStatus, StartRecord, fixtures,
+        Checkpoint, Conclusion, NodeStatusRecord, RunStatus, SandboxRecord, StageStatus,
+        StartRecord, SuccessReason, fixtures,
     };
 
     use super::RunDump;
@@ -486,7 +486,9 @@ mod tests {
             run_branch: Some("fabro/run/demo".to_string()),
             base_sha:   Some("deadbeef".to_string()),
         });
-        projection.status = Some(RunStatusRecord::new(RunStatus::Succeeded, None));
+        projection.status = Some(RunStatus::Succeeded {
+            reason: SuccessReason::Completed,
+        });
         projection.checkpoint = Some(sample_checkpoint());
         projection.conclusion = Some(Conclusion {
             timestamp:            Utc

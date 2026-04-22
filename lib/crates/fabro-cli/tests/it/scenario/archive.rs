@@ -28,7 +28,8 @@ fn archive_lifecycle_end_to_end() {
     let visible = ps_runs(&context, true);
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0]["run_id"], run.run_id);
-    assert_eq!(visible[0]["status"], "succeeded");
+    assert_eq!(visible[0]["status"]["kind"], "succeeded");
+    assert_eq!(visible[0]["status"]["reason"], "completed");
 
     let archive = context
         .command()
@@ -50,7 +51,9 @@ fn archive_lifecycle_end_to_end() {
     let with_archived = ps_runs(&context, true);
     assert_eq!(with_archived.len(), 1);
     assert_eq!(with_archived[0]["run_id"], run.run_id);
-    assert_eq!(with_archived[0]["status"], "archived");
+    assert_eq!(with_archived[0]["status"]["kind"], "archived");
+    assert_eq!(with_archived[0]["status"]["prior"]["kind"], "succeeded");
+    assert_eq!(with_archived[0]["status"]["prior"]["reason"], "completed");
 
     let unarchive = context
         .command()
@@ -63,7 +66,8 @@ fn archive_lifecycle_end_to_end() {
         String::from_utf8_lossy(&unarchive.stderr)
     );
     let restored = ps_runs(&context, true);
-    assert_eq!(restored[0]["status"], "succeeded");
+    assert_eq!(restored[0]["status"]["kind"], "succeeded");
+    assert_eq!(restored[0]["status"]["reason"], "completed");
 
     // `rm` must remain available on archived runs — archive and delete are
     // orthogonal per the plan's Scope Boundaries.

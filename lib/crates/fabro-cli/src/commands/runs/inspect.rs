@@ -41,10 +41,7 @@ pub(crate) async fn run(
 fn inspect_run_state(run: &ServerRunSummaryInfo, state: RunProjection) -> InspectOutput {
     InspectOutput {
         run_id:       run.run_id().to_string(),
-        status:       state
-            .status
-            .as_ref()
-            .map_or(run.status(), |record| record.status),
+        status:       state.status.unwrap_or(run.status()),
         run_spec:     state
             .spec
             .and_then(|record| serde_json::to_value(record).ok()),

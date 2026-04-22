@@ -184,8 +184,8 @@ fn rewind_preserves_event_history_and_clears_terminal_snapshot_state() {
 
     let state = run_state(&setup.run.run_dir);
     assert_eq!(
-        state.status.as_ref().map(|status| &status.status),
-        Some(&fabro_types::RunStatus::Submitted)
+        state.status,
+        Some(fabro_types::RunStatus::Submitted)
     );
     assert!(state.conclusion.is_none(), "rewind should clear conclusion");
     assert!(

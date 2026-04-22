@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import TestRenderer from "react-test-renderer";
 
-import { RunStatus } from "@qltysh/fabro-api-client";
 import {
   deriveEmptyKind,
   emptyStateCopy,
@@ -106,12 +105,22 @@ describe("deriveEmptyKind", () => {
   });
 
   test("every documented RunStatus gets a non-unknown empty kind", () => {
-    // Regression guard sourced from the generated API client enum so any
-    // new RunStatus added to the OpenAPI spec fails this test until the
-    // decision table grows a branch. Without this guard, unhandled
-    // statuses silently render as "unknown" ("not available right now") —
-    // misleading copy for e.g. a paused or archived run.
-    for (const status of Object.values(RunStatus)) {
+    // Regression guard sourced from the documented wire discriminators. If
+    // a new RunStatus kind lands in the API, this list should be updated
+    // alongside the decision table below.
+    for (const status of [
+      "submitted",
+      "queued",
+      "starting",
+      "running",
+      "blocked",
+      "paused",
+      "removing",
+      "succeeded",
+      "failed",
+      "dead",
+      "archived",
+    ]) {
       const result = deriveEmptyKind({
         runStatus: status,
         totalChanged: 0,

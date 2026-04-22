@@ -9,10 +9,9 @@ fn live_run_state_response() -> serde_json::Value {
         "graph_source": null,
         "start": null,
         "status": {
-            "status": "running",
-            "reason": null,
-            "updated_at": "2026-04-05T12:00:01Z"
+            "kind": "running"
         },
+        "status_updated_at": "2026-04-05T12:00:01Z",
         "checkpoint": null,
         "checkpoints": [],
         "conclusion": null,
@@ -36,7 +35,8 @@ fn run_sse_body(run_id: &str) -> String {
         "properties": {
             "duration_ms": 12,
             "artifact_count": 0,
-            "status": "success"
+            "status": "success",
+            "reason": "completed"
         }
     });
 
@@ -251,9 +251,9 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",
-                    "status": "running",
-                    "status_reason": null,
-                    "blocked_reason": null,
+                    "status": {
+                        "kind": "running"
+                    },
                     "pending_control": null,
                     "duration_ms": 12,
                     "elapsed_secs": 0,
@@ -355,9 +355,9 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",
-                    "status": "running",
-                    "status_reason": null,
-                    "blocked_reason": null,
+                    "status": {
+                        "kind": "running"
+                    },
                     "pending_control": null,
                     "duration_ms": 12,
                     "elapsed_secs": 0,

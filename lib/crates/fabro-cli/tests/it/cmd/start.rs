@@ -185,7 +185,7 @@ fn start_rejects_already_active_or_completed_run() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: cannot start run: status is Succeeded, expected submitted
+    error: cannot start run: status is succeeded(completed), expected submitted
     ");
 }
 

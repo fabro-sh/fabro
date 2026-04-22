@@ -266,10 +266,7 @@ async fn persist_created_run(
         .await
         .map(|_| ())
         .map_err(store_error)?;
-    append_event(&run_store, &record.run_id, &Event::RunSubmitted {
-        reason: None,
-        definition_blob,
-    })
+    append_event(&run_store, &record.run_id, &Event::RunSubmitted { definition_blob })
     .await
     .map_err(store_error)
 }

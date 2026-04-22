@@ -538,12 +538,21 @@ pub(crate) fn write_gated_workflow(path: &Path, name: &str, goal: &str) -> Workf
 pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
     let deadline = Instant::now() + COMMAND_TIMEOUT;
     loop {
-        if let Some(status) = run_state(run_dir)
-            .status
-            .map(|record| record.status.to_string())
-        {
+        if let Some(status) = run_state(run_dir).status.map(|status| match status {
+            fabro_types::RunStatus::Submitted => "submitted",
+            fabro_types::RunStatus::Queued => "queued",
+            fabro_types::RunStatus::Starting => "starting",
+            fabro_types::RunStatus::Running => "running",
+            fabro_types::RunStatus::Blocked { .. } => "blocked",
+            fabro_types::RunStatus::Paused { .. } => "paused",
+            fabro_types::RunStatus::Removing => "removing",
+            fabro_types::RunStatus::Succeeded { .. } => "succeeded",
+            fabro_types::RunStatus::Failed { .. } => "failed",
+            fabro_types::RunStatus::Dead => "dead",
+            fabro_types::RunStatus::Archived { .. } => "archived",
+        }) {
             if expected.iter().any(|candidate| *candidate == status) {
-                return status;
+                return status.to_string();
             }
         }
         assert!(

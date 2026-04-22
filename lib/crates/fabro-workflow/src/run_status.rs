@@ -1,1 +1,1 @@
-pub use fabro_types::status::{RunStatus, RunStatusRecord, StatusReason};
+pub use fabro_types::status::{FailureReason, RunStatus, SuccessReason, TerminalStatus};

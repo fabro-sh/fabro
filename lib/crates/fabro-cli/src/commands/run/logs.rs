@@ -235,7 +235,7 @@ async fn run_concluded(
     Ok(state.conclusion.is_some()
         || state
             .status
-            .is_some_and(|record| record.status.is_terminal()))
+            .is_some_and(|status| status.is_terminal()))
 }
 
 async fn flush_remaining_store_events(

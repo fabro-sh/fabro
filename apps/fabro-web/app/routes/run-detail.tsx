@@ -128,9 +128,10 @@ export async function loader({ request, params }: any): Promise<RunDetailLoaderD
   const summary: RunSummaryResponse = await response.json();
   const item = mapRunSummaryToRunItem(summary);
   const rawStatus = summary.status;
-  const display = isRunStatus(rawStatus)
-    ? runStatusDisplay[rawStatus]
-    : { label: rawStatus, dot: "bg-fg-muted", text: "text-fg-muted" };
+  const statusKind = rawStatus.kind;
+  const display = isRunStatus(statusKind)
+    ? runStatusDisplay[statusKind]
+    : { label: statusKind, dot: "bg-fg-muted", text: "text-fg-muted" };
 
   return {
     run: {
@@ -140,7 +141,7 @@ export async function loader({ request, params }: any): Promise<RunDetailLoaderD
       statusText: display.text,
     },
     blockedQuestionText:
-      rawStatus === "blocked"
+      statusKind === "blocked"
         ? await loadBlockedQuestionText(params.id, request?.signal)
         : null,
   };

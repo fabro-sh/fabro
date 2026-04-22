@@ -96,7 +96,9 @@ fn archive_succeeded_run_hides_it_from_default_ps() {
     assert!(output.status.success());
     let runs: Vec<Value> = serde_json::from_slice(&output.stdout).expect("ps JSON should parse");
     assert_eq!(runs.len(), 1, "ps -a should show the archived run");
-    assert_eq!(runs[0]["status"], "archived");
+    assert_eq!(runs[0]["status"]["kind"], "archived");
+    assert_eq!(runs[0]["status"]["prior"]["kind"], "succeeded");
+    assert_eq!(runs[0]["status"]["prior"]["reason"], "completed");
     assert_eq!(runs[0]["run_id"], run.run_id);
 }
 
@@ -223,9 +225,10 @@ fn archive_resolves_selector_via_server_endpoint() {
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",
-                    "status": "succeeded",
-                    "status_reason": null,
-                    "blocked_reason": null,
+                    "status": {
+                        "kind": "succeeded",
+                        "reason": "completed"
+                    },
                     "pending_control": null,
                     "duration_ms": 123,
                     "elapsed_secs": 0,
@@ -242,11 +245,15 @@ fn archive_resolves_selector_via_server_endpoint() {
             .body(
                 serde_json::json!({
                     "id": run_id,
-                    "status": "archived",
-                    "blocked_reason": null,
+                    "status": {
+                        "kind": "archived",
+                        "prior": {
+                            "kind": "succeeded",
+                            "reason": "completed"
+                        }
+                    },
                     "error": null,
                     "queue_position": null,
-                    "status_reason": null,
                     "pending_control": null,
                     "created_at": "2026-04-05T12:00:00Z"
                 })

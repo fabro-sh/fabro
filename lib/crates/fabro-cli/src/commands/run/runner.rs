@@ -17,7 +17,7 @@ use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMe
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_types::settings::run::RunMode;
 use fabro_types::settings::{InterpString, SettingsLayer};
-use fabro_types::{ArtifactUpload, EventBody, RunBlobId, RunEvent, RunId, StatusReason};
+use fabro_types::{ArtifactUpload, EventBody, FailureReason, RunBlobId, RunEvent, RunId};
 use fabro_vault::Vault;
 use fabro_workflow::artifact_upload::{ArtifactSink, StageArtifactUploader};
 use fabro_workflow::event::{Emitter, RunEventSink};
@@ -485,7 +485,7 @@ fn worker_title_phase_for_event(body: &EventBody) -> Option<WorkerTitlePhase> {
         }
         EventBody::RunPaused(_) => Some(WorkerTitlePhase::Paused),
         EventBody::RunCompleted(_) => Some(WorkerTitlePhase::Succeeded),
-        EventBody::RunFailed(props) => Some(if props.reason == Some(StatusReason::Cancelled) {
+        EventBody::RunFailed(props) => Some(if props.reason == FailureReason::Cancelled {
             WorkerTitlePhase::Cancelled
         } else {
             WorkerTitlePhase::Failed
@@ -593,7 +593,7 @@ mod tests {
         InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
         RunFailedProps, RunStatusTransitionProps,
     };
-    use fabro_types::{EventBody, StatusReason, fixtures};
+    use fabro_types::{EventBody, FailureReason, SuccessReason, fixtures};
     use fabro_vault::{SecretType, Vault};
     use fabro_workflow::artifact_upload::StageArtifactUploader;
 
@@ -633,9 +633,7 @@ mod tests {
     #[test]
     fn worker_title_phase_tracks_lifecycle_events() {
         assert_eq!(
-            worker_title_phase_for_event(&EventBody::RunStarting(RunStatusTransitionProps {
-                reason: None,
-            })),
+            worker_title_phase_for_event(&EventBody::RunStarting(RunStatusTransitionProps {})),
             Some(WorkerTitlePhase::Init)
         );
         assert_eq!(
@@ -669,7 +667,7 @@ mod tests {
                 duration_ms:          10,
                 artifact_count:       0,
                 status:               "success".to_string(),
-                reason:               None,
+                reason:               SuccessReason::Completed,
                 total_usd_micros:     None,
                 final_git_commit_sha: None,
                 final_patch:          None,
@@ -681,7 +679,7 @@ mod tests {
             worker_title_phase_for_event(&EventBody::RunFailed(RunFailedProps {
                 error:          "cancelled".to_string(),
                 duration_ms:    10,
-                reason:         Some(StatusReason::Cancelled),
+                reason:         FailureReason::Cancelled,
                 git_commit_sha: None,
                 final_patch:    None,
             })),
@@ -691,7 +689,7 @@ mod tests {
             worker_title_phase_for_event(&EventBody::RunFailed(RunFailedProps {
                 error:          "boom".to_string(),
                 duration_ms:    10,
-                reason:         Some(StatusReason::Terminated),
+                reason:         FailureReason::Terminated,
                 git_commit_sha: None,
                 final_patch:    None,
             })),

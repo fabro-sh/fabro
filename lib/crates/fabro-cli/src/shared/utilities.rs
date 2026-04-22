@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cli_table::Color;
+use fabro_types::RunStatus;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_validate::{Diagnostic, Severity};
@@ -110,6 +111,22 @@ pub(crate) fn absolute_or_current(path: &Path) -> PathBuf {
 
 pub(crate) fn color_if(use_color: bool, color: Color) -> Option<Color> {
     if use_color { Some(color) } else { None }
+}
+
+pub(crate) fn run_status_kind(status: RunStatus) -> &'static str {
+    match status {
+        RunStatus::Submitted => "submitted",
+        RunStatus::Queued => "queued",
+        RunStatus::Starting => "starting",
+        RunStatus::Running => "running",
+        RunStatus::Blocked { .. } => "blocked",
+        RunStatus::Paused { .. } => "paused",
+        RunStatus::Removing => "removing",
+        RunStatus::Succeeded { .. } => "succeeded",
+        RunStatus::Failed { .. } => "failed",
+        RunStatus::Dead => "dead",
+        RunStatus::Archived { .. } => "archived",
+    }
 }
 
 pub(crate) fn split_run_path(s: &str) -> Option<(&str, &str)> {

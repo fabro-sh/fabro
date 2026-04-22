@@ -11,7 +11,7 @@ use fabro_core::lifecycle::{
 };
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
-use fabro_types::{BilledTokenCounts, RunId, StatusReason};
+use fabro_types::{BilledTokenCounts, FailureReason, RunId, SuccessReason};
 
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
@@ -117,7 +117,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             worktree_dir: self.worktree_dir.clone(),
             goal:         self.goal.clone(),
         });
-        self.emitter.emit(&Event::RunRunning { reason: None });
+        self.emitter.emit(&Event::RunRunning);
 
         Ok(())
     }
@@ -451,7 +451,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             self.emitter.emit(&Event::WorkflowRunFailed {
                 error: Error::Cancelled,
                 duration_ms,
-                reason: Some(StatusReason::Cancelled),
+                reason: FailureReason::Cancelled,
                 git_commit_sha: last_sha,
                 final_patch: final_patch.clone(),
             });
@@ -463,10 +463,10 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 duration_ms,
                 artifact_count,
                 status: outcome.status.to_string(),
-                reason: Some(match outcome.status {
-                    StageStatus::PartialSuccess => StatusReason::PartialSuccess,
-                    _ => StatusReason::Completed,
-                }),
+                reason: match outcome.status {
+                    StageStatus::PartialSuccess => SuccessReason::PartialSuccess,
+                    _ => SuccessReason::Completed,
+                },
                 total_usd_micros,
                 final_git_commit_sha: last_sha,
                 final_patch,
@@ -480,7 +480,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             self.emitter.emit(&Event::WorkflowRunFailed {
                 error: Error::engine(error_msg),
                 duration_ms,
-                reason: Some(StatusReason::WorkflowError),
+                reason: FailureReason::WorkflowError,
                 git_commit_sha: last_sha,
                 final_patch,
             });

@@ -645,9 +645,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
       {
         "event": "run.starting",
         "id": "[EVENT_ID]",
-        "properties": {
-          "reason": "sandbox_initializing"
-        },
+        "properties": {},
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
       },

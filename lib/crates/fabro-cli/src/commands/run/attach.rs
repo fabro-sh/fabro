@@ -355,7 +355,7 @@ fn state_is_terminal(state: &server_client::RunProjection) -> bool {
         || state
             .status
             .as_ref()
-            .is_some_and(|record| record.status.is_terminal())
+            .is_some_and(|status| status.is_terminal())
 }
 
 fn emit_progress_line(
@@ -454,9 +454,9 @@ fn state_exit_code(state: &server_client::RunProjection) -> Option<ExitCode> {
         });
     }
 
-    match state.status.as_ref() {
-        Some(record) if record.status == RunStatus::Succeeded => Some(ExitCode::from(0)),
-        Some(record) if record.status.is_terminal() => Some(ExitCode::from(1)),
+    match state.status {
+        Some(status) if matches!(status, RunStatus::Succeeded { .. }) => Some(ExitCode::from(0)),
+        Some(status) if status.is_terminal() => Some(ExitCode::from(1)),
         Some(_) | None => None,
     }
 }
@@ -502,10 +502,10 @@ mod tests {
             "graph_source": null,
             "start": null,
             "status": {
-                "status": "failed",
-                "reason": "cancelled",
-                "updated_at": "2026-04-05T12:00:02Z"
+                "kind": "failed",
+                "reason": "cancelled"
             },
+            "status_updated_at": "2026-04-05T12:00:02Z",
             "checkpoint": null,
             "checkpoints": [],
             "conclusion": null,
@@ -522,10 +522,12 @@ mod tests {
     fn cancel_run_response(run_id: RunId) -> serde_json::Value {
         serde_json::json!({
             "id": run_id,
-            "status": "failed",
+            "status": {
+                "kind": "failed",
+                "reason": "cancelled"
+            },
             "error": null,
             "queue_position": null,
-            "status_reason": "cancelled",
             "pending_control": null,
             "created_at": "2026-04-05T12:00:00Z"
         })

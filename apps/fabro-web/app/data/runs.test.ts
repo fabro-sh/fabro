@@ -18,7 +18,7 @@ describe("mapRunListItem", () => {
       workflow_name: "Fix Build",
       host_repo_path: "/home/user/myrepo",
       repository: { name: "myrepo" },
-      status: "paused",
+      status: { kind: "paused", prior_block: null },
       labels: {},
       column: "running",
       elapsed_secs: 65,
@@ -26,7 +26,6 @@ describe("mapRunListItem", () => {
       total_usd_micros: 500000,
       created_at: "2026-04-08T12:00:00Z",
       start_time: "2026-04-08T12:00:00Z",
-      status_reason: null,
       pending_control: null,
     } as const;
     const item = mapRunListItem(summary);
@@ -48,7 +47,7 @@ describe("mapRunListItem", () => {
       workflow_name: "Fix Build",
       host_repo_path: "/home/user/myrepo",
       repository: { name: "myrepo" },
-      status: "running",
+      status: { kind: "running" },
       labels: {},
       column: "running",
       elapsed_secs: null,
@@ -56,7 +55,6 @@ describe("mapRunListItem", () => {
       total_usd_micros: null,
       created_at: "2026-04-08T12:00:00Z",
       start_time: null,
-      status_reason: null,
       pending_control: null,
     } as const;
 
@@ -74,14 +72,13 @@ describe("mapRunSummaryToRunItem", () => {
       workflow_name: "Fix Build",
       host_repo_path: "/home/user/myrepo",
       repository: { name: "myrepo" },
-      status: "running",
+      status: { kind: "running" },
       duration_ms: 65000,
       elapsed_secs: 65,
       total_usd_micros: 500000,
       labels: {},
       created_at: "2026-04-08T12:00:00Z",
       start_time: "2026-04-08T12:00:00Z",
-      status_reason: null,
       pending_control: null,
     };
     const item = mapRunSummaryToRunItem(summary);
@@ -102,14 +99,13 @@ describe("mapRunSummaryToRunItem", () => {
       workflow_name: null,
       host_repo_path: null,
       repository: { name: "unknown" },
-      status: "submitted",
+      status: { kind: "submitted" },
       duration_ms: null,
       elapsed_secs: null,
       total_usd_micros: null,
       labels: {},
       created_at: "2026-04-08T12:00:00Z",
       start_time: null,
-      status_reason: null,
       pending_control: null,
     };
     const item = mapRunSummaryToRunItem(summary);

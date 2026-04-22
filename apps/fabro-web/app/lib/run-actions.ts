@@ -49,7 +49,7 @@ export function canUnarchive(status: string | null | undefined): boolean {
 }
 
 export function isTerminalCancelledRun(run: RunStatusResponse): boolean {
-  return (run.status === "failed" || run.status === "dead") && run.status_reason === "cancelled";
+  return run.status.kind === "failed" && run.status.reason === "cancelled";
 }
 
 export function mapError(error: unknown, action: LifecycleAction): string {

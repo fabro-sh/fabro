@@ -1,13 +1,12 @@
 use std::any::{TypeId, type_name};
 
-use chrono::{TimeZone, Utc};
 use fabro_api::types::{
-    BlockedReason as ApiBlockedReason, RunControlAction as ApiRunControlAction,
-    RunStatus as ApiRunStatus, RunStatusRecord as ApiRunStatusRecord,
-    StatusReason as ApiStatusReason,
+    BlockedReason as ApiBlockedReason, FailureReason as ApiFailureReason,
+    RunControlAction as ApiRunControlAction, RunStatus as ApiRunStatus,
+    SuccessReason as ApiSuccessReason, TerminalStatus as ApiTerminalStatus,
 };
 use fabro_types::status::{
-    BlockedReason, RunControlAction, RunStatus, RunStatusRecord, StatusReason,
+    BlockedReason, FailureReason, RunControlAction, RunStatus, SuccessReason, TerminalStatus,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -15,44 +14,117 @@ use serde_json::{Value, json};
 #[test]
 fn status_family_reuses_domain_types() {
     assert_same_type::<ApiRunStatus, RunStatus>();
-    assert_same_type::<ApiStatusReason, StatusReason>();
+    assert_same_type::<ApiSuccessReason, SuccessReason>();
+    assert_same_type::<ApiFailureReason, FailureReason>();
+    assert_same_type::<ApiTerminalStatus, TerminalStatus>();
     assert_same_type::<ApiBlockedReason, BlockedReason>();
     assert_same_type::<ApiRunControlAction, RunControlAction>();
-    assert_same_type::<ApiRunStatusRecord, RunStatusRecord>();
-}
-
-// The `status_family_reuses_domain_types` assertions above prove each API type
-// is the same type as its domain counterpart, so each variant below only needs
-// to be asserted once to lock in the OpenAPI string token.
-
-#[test]
-fn run_status_json_tokens_match_openapi() {
-    assert_string_json(RunStatus::Submitted, "submitted");
-    assert_string_json(RunStatus::Queued, "queued");
-    assert_string_json(RunStatus::Starting, "starting");
-    assert_string_json(RunStatus::Running, "running");
-    assert_string_json(RunStatus::Blocked, "blocked");
-    assert_string_json(RunStatus::Paused, "paused");
-    assert_string_json(RunStatus::Removing, "removing");
-    assert_string_json(RunStatus::Succeeded, "succeeded");
-    assert_string_json(RunStatus::Failed, "failed");
-    assert_string_json(RunStatus::Dead, "dead");
-    assert_string_json(RunStatus::Archived, "archived");
 }
 
 #[test]
-fn status_reason_json_tokens_match_openapi() {
-    assert_string_json(StatusReason::Completed, "completed");
-    assert_string_json(StatusReason::PartialSuccess, "partial_success");
-    assert_string_json(StatusReason::WorkflowError, "workflow_error");
-    assert_string_json(StatusReason::Cancelled, "cancelled");
-    assert_string_json(StatusReason::Terminated, "terminated");
-    assert_string_json(StatusReason::TransientInfra, "transient_infra");
-    assert_string_json(StatusReason::BudgetExhausted, "budget_exhausted");
-    assert_string_json(StatusReason::LaunchFailed, "launch_failed");
-    assert_string_json(StatusReason::BootstrapFailed, "bootstrap_failed");
-    assert_string_json(StatusReason::SandboxInitFailed, "sandbox_init_failed");
-    assert_string_json(StatusReason::SandboxInitializing, "sandbox_initializing");
+fn run_status_json_matches_openapi_shape() {
+    assert_json(
+        RunStatus::Submitted,
+        json!({
+            "kind": "submitted"
+        }),
+    );
+    assert_json(
+        RunStatus::Queued,
+        json!({
+            "kind": "queued"
+        }),
+    );
+    assert_json(
+        RunStatus::Starting,
+        json!({
+            "kind": "starting"
+        }),
+    );
+    assert_json(
+        RunStatus::Running,
+        json!({
+            "kind": "running"
+        }),
+    );
+    assert_json(
+        RunStatus::Blocked {
+            blocked_reason: BlockedReason::HumanInputRequired,
+        },
+        json!({
+            "kind": "blocked",
+            "blocked_reason": "human_input_required"
+        }),
+    );
+    assert_json(
+        RunStatus::Paused { prior_block: None },
+        json!({
+            "kind": "paused",
+            "prior_block": null
+        }),
+    );
+    assert_json(
+        RunStatus::Removing,
+        json!({
+            "kind": "removing"
+        }),
+    );
+    assert_json(
+        RunStatus::Succeeded {
+            reason: SuccessReason::Completed,
+        },
+        json!({
+            "kind": "succeeded",
+            "reason": "completed"
+        }),
+    );
+    assert_json(
+        RunStatus::Failed {
+            reason: FailureReason::Cancelled,
+        },
+        json!({
+            "kind": "failed",
+            "reason": "cancelled"
+        }),
+    );
+    assert_json(
+        RunStatus::Dead,
+        json!({
+            "kind": "dead"
+        }),
+    );
+    assert_json(
+        RunStatus::Archived {
+            prior: TerminalStatus::Succeeded {
+                reason: SuccessReason::PartialSuccess,
+            },
+        },
+        json!({
+            "kind": "archived",
+            "prior": {
+                "kind": "succeeded",
+                "reason": "partial_success"
+            }
+        }),
+    );
+}
+
+#[test]
+fn success_reason_json_tokens_match_openapi() {
+    assert_string_json(SuccessReason::Completed, "completed");
+    assert_string_json(SuccessReason::PartialSuccess, "partial_success");
+}
+
+#[test]
+fn failure_reason_json_tokens_match_openapi() {
+    assert_string_json(FailureReason::WorkflowError, "workflow_error");
+    assert_string_json(FailureReason::Cancelled, "cancelled");
+    assert_string_json(FailureReason::Terminated, "terminated");
+    assert_string_json(FailureReason::TransientInfra, "transient_infra");
+    assert_string_json(FailureReason::BudgetExhausted, "budget_exhausted");
+    assert_string_json(FailureReason::LaunchFailed, "launch_failed");
+    assert_string_json(FailureReason::BootstrapFailed, "bootstrap_failed");
+    assert_string_json(FailureReason::SandboxInitFailed, "sandbox_init_failed");
 }
 
 #[test]
@@ -68,34 +140,31 @@ fn run_control_action_json_tokens_match_openapi() {
 }
 
 #[test]
-fn run_status_record_json_matches_openapi_shape() {
-    let updated_at = Utc
-        .with_ymd_and_hms(2026, 1, 2, 3, 4, 5)
-        .single()
-        .expect("fixed timestamp should be valid");
-    let expected = json!({
-        "status": "failed",
-        "status_reason": "cancelled",
-        "blocked_reason": "human_input_required",
-        "updated_at": "2026-01-02T03:04:05Z"
-    });
-
-    let record = RunStatusRecord {
-        status: RunStatus::Failed,
-        status_reason: Some(StatusReason::Cancelled),
-        blocked_reason: Some(BlockedReason::HumanInputRequired),
-        updated_at,
-    };
-    assert_eq!(serde_json::to_value(&record).unwrap(), expected);
-
-    let round_trip: RunStatusRecord = serde_json::from_value(expected).unwrap();
-    assert_eq!(round_trip.status, RunStatus::Failed);
-    assert_eq!(round_trip.status_reason, Some(StatusReason::Cancelled));
-    assert_eq!(
-        round_trip.blocked_reason,
-        Some(BlockedReason::HumanInputRequired)
+fn terminal_status_json_matches_openapi_shape() {
+    assert_json(
+        TerminalStatus::Succeeded {
+            reason: SuccessReason::Completed,
+        },
+        json!({
+            "kind": "succeeded",
+            "reason": "completed"
+        }),
     );
-    assert_eq!(round_trip.updated_at, updated_at);
+    assert_json(
+        TerminalStatus::Failed {
+            reason: FailureReason::Cancelled,
+        },
+        json!({
+            "kind": "failed",
+            "reason": "cancelled"
+        }),
+    );
+    assert_json(
+        TerminalStatus::Dead,
+        json!({
+            "kind": "dead"
+        }),
+    );
 }
 
 fn assert_same_type<T: 'static, U: 'static>() {
@@ -113,4 +182,8 @@ fn assert_string_json<T: Serialize>(value: T, expected: &str) {
         serde_json::to_value(value).unwrap(),
         Value::String(expected.into())
     );
+}
+
+fn assert_json<T: Serialize>(value: T, expected: Value) {
+    assert_eq!(serde_json::to_value(value).unwrap(), expected);
 }

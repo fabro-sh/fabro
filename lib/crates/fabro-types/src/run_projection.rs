@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 
 use crate::{
     Checkpoint, Conclusion, InterviewQuestionRecord, NodeStatusRecord, PullRequestRecord, Retro,
-    RunControlAction, RunSpec, RunStatus, RunStatusRecord, SandboxRecord, StageId, StartRecord,
+    InvalidTransition, RunControlAction, RunSpec, RunStatus, SandboxRecord, StageId, StartRecord,
 };
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -13,9 +13,8 @@ pub struct RunProjection {
     pub spec:               Option<RunSpec>,
     pub graph_source:       Option<String>,
     pub start:              Option<StartRecord>,
-    pub status:             Option<RunStatusRecord>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prior_status:       Option<RunStatus>,
+    pub status:             Option<RunStatus>,
+    pub status_updated_at:  Option<DateTime<Utc>>,
     pub pending_control:    Option<RunControlAction>,
     pub checkpoint:         Option<Checkpoint>,
     pub checkpoints:        Vec<(u32, Checkpoint)>,
@@ -84,7 +83,7 @@ impl RunProjection {
     }
 
     pub fn status(&self) -> Option<RunStatus> {
-        self.status.as_ref().map(|status| status.status)
+        self.status
     }
 
     pub fn is_terminal(&self) -> bool {
@@ -111,8 +110,29 @@ impl RunProjection {
             .max()
     }
 
+    pub fn try_apply_status(
+        &mut self,
+        new: RunStatus,
+        ts: DateTime<Utc>,
+    ) -> Result<(), InvalidTransition> {
+        match self.status {
+            Some(current) if current == new => Ok(()),
+            Some(current) => {
+                self.status = Some(current.transition_to(new)?);
+                self.status_updated_at = Some(ts);
+                Ok(())
+            }
+            None => {
+                self.status = Some(new);
+                self.status_updated_at = Some(ts);
+                Ok(())
+            }
+        }
+    }
+
     pub fn reset_for_rewind(&mut self) {
         self.status = None;
+        self.status_updated_at = None;
         self.pending_control = None;
         self.checkpoint = None;
         self.checkpoints.clear();

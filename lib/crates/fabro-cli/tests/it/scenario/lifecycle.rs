@@ -147,7 +147,19 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "status": state.status.map(|status| status.status),
+            "status": state.status.map(|status| match status {
+                fabro_types::RunStatus::Submitted => "submitted",
+                fabro_types::RunStatus::Queued => "queued",
+                fabro_types::RunStatus::Starting => "starting",
+                fabro_types::RunStatus::Running => "running",
+                fabro_types::RunStatus::Blocked { .. } => "blocked",
+                fabro_types::RunStatus::Paused { .. } => "paused",
+                fabro_types::RunStatus::Removing => "removing",
+                fabro_types::RunStatus::Succeeded { .. } => "succeeded",
+                fabro_types::RunStatus::Failed { .. } => "failed",
+                fabro_types::RunStatus::Dead => "dead",
+                fabro_types::RunStatus::Archived { .. } => "archived",
+            }),
             "has_conclusion": state.conclusion.is_some(),
         }),
         @r#"

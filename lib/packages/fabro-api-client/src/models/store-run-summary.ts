@@ -15,9 +15,6 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { BlockedReason } from './blocked-reason';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { RepositoryReference } from './repository-reference';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -25,9 +22,6 @@ import type { RunControlAction } from './run-control-action';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { RunStatus } from './run-status';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { StatusReason } from './status-reason';
 
 /**
  * Durable run summary derived from the backing store.
@@ -44,8 +38,6 @@ export interface StoreRunSummary {
     'start_time'?: string | null;
     'created_at': string;
     'status': RunStatus;
-    'status_reason'?: StatusReason | null;
-    'blocked_reason'?: BlockedReason | null;
     'pending_control'?: RunControlAction | null;
     'duration_ms'?: number | null;
     'elapsed_secs'?: number | null;

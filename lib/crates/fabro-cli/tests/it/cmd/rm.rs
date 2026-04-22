@@ -170,9 +170,9 @@ fn rm_force_removes_active_run() {
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",
-                    "status": "running",
-                    "status_reason": null,
-                    "blocked_reason": null,
+                    "status": {
+                        "kind": "running"
+                    },
                     "pending_control": null,
                     "duration_ms": 123,
                     "elapsed_secs": 0,
@@ -236,9 +236,9 @@ fn rm_without_force_uses_resolve_then_surfaces_server_conflict() {
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",
-                    "status": "running",
-                    "status_reason": null,
-                    "blocked_reason": null,
+                    "status": {
+                        "kind": "running"
+                    },
                     "pending_control": null,
                     "duration_ms": 123,
                     "elapsed_secs": 0,
@@ -370,8 +370,10 @@ fn rm_uses_configured_server_target_without_local_run_dir() {
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",
-                    "status": "succeeded",
-                    "status_reason": null,
+                    "status": {
+                        "kind": "succeeded",
+                        "reason": "completed"
+                    },
                     "duration_ms": 123,
                     "total_usd_micros": null
                 })

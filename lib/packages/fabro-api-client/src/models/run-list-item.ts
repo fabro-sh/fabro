@@ -33,7 +33,7 @@ import type { RunQuestion } from './run-question';
 import type { RunSandbox } from './run-sandbox';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { StatusReason } from './status-reason';
+import type { RunStatus } from './run-status';
 
 /**
  * Canonical run summary shown in the board view, extended with board-specific metadata.
@@ -51,11 +51,10 @@ export interface RunListItem {
      * Human-readable title describing the run\'s goal.
      */
     'title': string;
-    'status': string;
+    'status': RunStatus;
     'labels': { [key: string]: string; };
     'host_repo_path'?: string | null;
     'start_time'?: string | null;
-    'status_reason'?: StatusReason | null;
     'pending_control'?: RunControlAction | null;
     'duration_ms'?: number | null;
     'elapsed_secs'?: number | null;

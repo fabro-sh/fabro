@@ -16,7 +16,7 @@ use fabro_types::{RunId, RunSummary};
 use serde::Serialize;
 
 use crate::operations::make_run_dir;
-use crate::run_status::{RunStatus, StatusReason};
+use crate::run_status::RunStatus;
 
 #[derive(Debug, Clone)]
 struct RunLocalState {
@@ -81,10 +81,12 @@ impl RunInfo {
             .map_or(RunStatus::Submitted, |summary| summary.status)
     }
 
-    pub fn status_reason(&self) -> Option<StatusReason> {
-        self.summary
-            .as_ref()
-            .and_then(|summary| summary.status_reason)
+    pub fn status_reason(&self) -> Option<String> {
+        match self.status() {
+            RunStatus::Succeeded { reason } => Some(reason.to_string()),
+            RunStatus::Failed { reason } => Some(reason.to_string()),
+            _ => None,
+        }
     }
 
     pub fn start_time(&self) -> String {

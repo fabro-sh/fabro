@@ -1129,14 +1129,11 @@ mod tests {
     }
 
     #[test]
-    fn run_unarchived_serializes_with_restored_status() {
-        let body = EventBody::RunUnarchived(RunUnarchivedProps {
-            actor:           None,
-            restored_status: crate::RunStatus::Failed,
-        });
+    fn run_unarchived_serializes_with_actor_only() {
+        let body = EventBody::RunUnarchived(RunUnarchivedProps { actor: None });
         let value = serde_json::to_value(&body).unwrap();
         assert_eq!(value["event"], "run.unarchived");
-        assert_eq!(value["properties"]["restored_status"], "failed");
+        assert_eq!(value["properties"], json!({}));
     }
 
     #[test]
@@ -1172,15 +1169,12 @@ mod tests {
             "ts": "2026-04-19T12:00:00.000Z",
             "run_id": fixtures::RUN_1,
             "event": "run.unarchived",
-            "properties": {
-                "restored_status": "succeeded"
-            }
+            "properties": {}
         });
 
         let parsed = RunEvent::from_value(value.clone()).unwrap();
         match &parsed.body {
             EventBody::RunUnarchived(props) => {
-                assert_eq!(props.restored_status, crate::RunStatus::Succeeded);
                 assert!(props.actor.is_none());
             }
             other => panic!("expected RunUnarchived body, got {other:?}"),

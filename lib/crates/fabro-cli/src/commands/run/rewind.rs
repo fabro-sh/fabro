@@ -44,8 +44,6 @@ pub(crate) async fn run(
     let state = client.get_run_state(&run_id).await?;
     let current_status = state
         .status
-        .as_ref()
-        .map(|record| record.status)
         .context("run has no recorded status — cannot rewind")?;
     let run_spec = state.spec.context("Failed to load run spec from store")?;
     ensure_matching_repo_origin(run_spec.repo_origin_url.as_deref(), "rewind")?;
@@ -127,7 +125,7 @@ async fn reset_rewound_run_state(
     let checkpoint = MetadataStore::read_run_projection(git_store.repo_dir(), &run_id.to_string())?
         .and_then(|projection| projection.checkpoint)
         .context("rewound metadata branch is missing run.json checkpoint state")?;
-    let previous_status = state.status.map(|status| status.status.to_string());
+    let previous_status = state.status.map(|status| status.to_string());
 
     client
         .append_run_event(
@@ -157,7 +155,6 @@ async fn reset_rewound_run_state(
                 *run_id,
                 None,
                 EventBody::RunSubmitted(RunSubmittedProps {
-                    reason: None,
                     definition_blob,
                 }),
             ),

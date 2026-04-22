@@ -395,7 +395,7 @@ fn read_projection_at_commit(store: &Store, oid: Oid) -> Result<Option<RunProjec
 #[cfg(test)]
 mod tests {
     use fabro_store::RunProjection;
-    use fabro_types::{RunId, fixtures};
+    use fabro_types::{RunId, RunStatus, SuccessReason, TerminalStatus, fixtures};
 
     use super::super::test_support::*;
     use super::*;
@@ -546,7 +546,9 @@ mod tests {
             run_id:         fixtures::RUN_1,
             target:         RewindTarget::Ordinal(1),
             push:           false,
-            current_status: RunStatus::Succeeded,
+            current_status: RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            },
         })
         .unwrap();
 
@@ -562,7 +564,11 @@ mod tests {
             run_id:         fixtures::RUN_1,
             target:         RewindTarget::Ordinal(1),
             push:           false,
-            current_status: RunStatus::Archived,
+            current_status: RunStatus::Archived {
+                prior: TerminalStatus::Succeeded {
+                    reason: SuccessReason::Completed,
+                },
+            },
         })
         .unwrap_err();
         let message = err.to_string();

@@ -303,7 +303,9 @@ mod tests {
 
     use chrono::{DateTime, Utc};
     use fabro_types::settings::SettingsLayer;
-    use fabro_types::{AttrValue, Graph, RunControlAction, RunSpec, RunStatus, StatusReason};
+    use fabro_types::{
+        AttrValue, FailureReason, Graph, RunControlAction, RunSpec, RunStatus, SuccessReason,
+    };
     use futures::TryStreamExt;
     use object_store::memory::InMemory;
     use object_store::path::Path;
@@ -462,8 +464,12 @@ mod tests {
         assert_eq!(summary[1].run_id, test_run_id("run-1"));
         assert_eq!(summary[1].workflow_name, Some("night-sky".to_string()));
         assert_eq!(summary[1].goal, Some("map the constellations".to_string()));
-        assert_eq!(summary[1].status, RunStatus::Succeeded);
-        assert_eq!(summary[1].status_reason, Some(StatusReason::Completed));
+        assert_eq!(
+            summary[1].status,
+            RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            }
+        );
 
         let reopened = store.open_run(&test_run_id("run-1")).await.unwrap();
         let stored = reopened.state().await.unwrap().spec.unwrap();
@@ -596,8 +602,12 @@ mod tests {
 
         let summary = store.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(summary.len(), 1);
-        assert_eq!(summary[0].status, RunStatus::Failed);
-        assert_eq!(summary[0].status_reason, Some(StatusReason::Cancelled));
+        assert_eq!(
+            summary[0].status,
+            RunStatus::Failed {
+                reason: FailureReason::Cancelled,
+            }
+        );
         assert_eq!(summary[0].pending_control, None);
     }
 
@@ -641,6 +651,11 @@ mod tests {
         let summary = reopened.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(summary.len(), 1);
         assert_eq!(summary[0].run_id, test_run_id("run-1"));
-        assert_eq!(summary[0].status, RunStatus::Succeeded);
+        assert_eq!(
+            summary[0].status,
+            RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            }
+        );
     }
 }

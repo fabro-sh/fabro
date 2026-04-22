@@ -11,7 +11,7 @@ use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
 use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
-use crate::run_status::{RunStatus, StatusReason};
+use crate::run_status::{FailureReason, RunStatus, SuccessReason};
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::git_push_host;
 
@@ -30,35 +30,37 @@ fn emit_run_notice(
 
 pub fn classify_engine_result(
     engine_result: &Result<Outcome, Error>,
-) -> (StageStatus, Option<String>, RunStatus, Option<StatusReason>) {
+) -> (StageStatus, Option<String>, RunStatus) {
     match engine_result {
         Ok(outcome) => {
             let status = outcome.status.clone();
             let failure_reason = outcome.failure_reason().map(String::from);
-            let (run_status, status_reason) = match status {
-                StageStatus::Success | StageStatus::Skipped => {
-                    (RunStatus::Succeeded, Some(StatusReason::Completed))
-                }
-                StageStatus::PartialSuccess => {
-                    (RunStatus::Succeeded, Some(StatusReason::PartialSuccess))
-                }
-                StageStatus::Fail | StageStatus::Retry => {
-                    (RunStatus::Failed, Some(StatusReason::WorkflowError))
-                }
+            let run_status = match status {
+                StageStatus::Success | StageStatus::Skipped => RunStatus::Succeeded {
+                    reason: SuccessReason::Completed,
+                },
+                StageStatus::PartialSuccess => RunStatus::Succeeded {
+                    reason: SuccessReason::PartialSuccess,
+                },
+                StageStatus::Fail | StageStatus::Retry => RunStatus::Failed {
+                    reason: FailureReason::WorkflowError,
+                },
             };
-            (status, failure_reason, run_status, status_reason)
+            (status, failure_reason, run_status)
         }
         Err(Error::Cancelled) => (
             StageStatus::Fail,
             Some("Cancelled".to_string()),
-            RunStatus::Failed,
-            Some(StatusReason::Cancelled),
+            RunStatus::Failed {
+                reason: FailureReason::Cancelled,
+            },
         ),
         Err(err) => (
             StageStatus::Fail,
             Some(err.to_string()),
-            RunStatus::Failed,
-            Some(StatusReason::WorkflowError),
+            RunStatus::Failed {
+                reason: FailureReason::WorkflowError,
+            },
         ),
     }
 }
@@ -235,8 +237,7 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
         retro: _,
     } = retroed;
 
-    let (final_status, failure_reason, _run_status, _status_reason) =
-        classify_engine_result(&outcome);
+    let (final_status, failure_reason, _run_status) = classify_engine_result(&outcome);
     let conclusion = build_conclusion_from_store(
         &options.run_store,
         final_status,
