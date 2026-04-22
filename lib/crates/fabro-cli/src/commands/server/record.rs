@@ -15,12 +15,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ServerRecord {
-    pub pid:            u32,
-    pub bind:           Bind,
-    pub log_path:       PathBuf,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dev_token_path: Option<PathBuf>,
-    pub started_at:     DateTime<Utc>,
+    pub pid:        u32,
+    pub bind:       Bind,
+    pub log_path:   PathBuf,
+    pub started_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -129,11 +127,10 @@ mod tests {
 
     fn test_record(bind: Bind) -> ServerRecord {
         ServerRecord {
-            pid:            std::process::id(),
+            pid:        std::process::id(),
             bind,
-            log_path:       PathBuf::from("/tmp/storage/logs/server.log"),
-            dev_token_path: None,
-            started_at:     Utc::now(),
+            log_path:   PathBuf::from("/tmp/storage/logs/server.log"),
+            started_at: Utc::now(),
         }
     }
 

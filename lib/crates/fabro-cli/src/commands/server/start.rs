@@ -16,7 +16,7 @@ use fabro_server::serve;
 use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
-use fabro_util::{Home, dev_token, session_secret};
+use fabro_util::session_secret;
 use fabro_types::settings::ServerAuthMethod;
 use tokio::net::{TcpStream, UnixStream};
 use tokio::process::Command as TokioCommand;
@@ -216,41 +216,6 @@ fn server_max_concurrent_runs_override() -> Option<usize> {
         .filter(|value| *value > 0)
 }
 
-fn load_or_create_local_dev_token(storage_dir: &Path, home: &Home) -> Result<String> {
-    if let Some(token) = std::env::var("FABRO_DEV_TOKEN")
-        .ok()
-        .filter(|token| dev_token::validate_dev_token_format(token))
-    {
-        return Ok(token);
-    }
-
-    let runtime_state = ServerRuntimeState::new(storage_dir);
-    let server_env_path = runtime_state.env_path();
-    if let Some(token) = envfile::read_env_file(&server_env_path)
-        .ok()
-        .and_then(|entries| entries.get("FABRO_DEV_TOKEN").cloned())
-        .filter(|token| dev_token::validate_dev_token_format(token))
-    {
-        dev_token::write_dev_token(&home.dev_token_path(), &token)
-            .with_context(|| format!("writing dev token to {}", home.dev_token_path().display()))?;
-        let storage_token_path = runtime_state.dev_token_path();
-        dev_token::write_dev_token(&storage_token_path, &token)
-            .with_context(|| format!("writing dev token to {}", storage_token_path.display()))?;
-        return Ok(token);
-    }
-
-    let token = dev_token::read_or_mint_dev_token_for_install(&home.dev_token_path()).with_context(|| {
-        format!(
-            "loading or creating dev token at {}",
-            home.dev_token_path().display()
-        )
-    })?;
-    let storage_token_path = runtime_state.dev_token_path();
-    dev_token::write_dev_token(&storage_token_path, &token)
-        .with_context(|| format!("writing dev token to {}", storage_token_path.display()))?;
-    Ok(token)
-}
-
 fn configured_auth_methods(config_path: Option<&Path>) -> Vec<ServerAuthMethod> {
     load_settings_config(config_path)
         .ok()
@@ -258,9 +223,6 @@ fn configured_auth_methods(config_path: Option<&Path>) -> Vec<ServerAuthMethod> 
         .unwrap_or_default()
 }
 
-fn dev_token_auth_enabled(config_path: Option<&Path>) -> bool {
-    configured_auth_methods(config_path).contains(&ServerAuthMethod::DevToken)
-}
 fn valid_session_secret(secret: &str) -> bool {
     session_secret::validate_session_secret(secret).is_ok()
 }
@@ -300,40 +262,15 @@ async fn execute_foreground(
     styles: &'static Styles,
     _printer: Printer,
 ) -> Result<()> {
-    let dev_token_enabled = dev_token_auth_enabled(serve_args.config.as_deref());
-    let home = Home::from_env();
-    let token = dev_token_enabled
-        .then(|| load_or_create_local_dev_token(&storage_dir, &home))
-        .transpose()?;
     let session_secret = load_or_create_local_session_secret(&storage_dir)?;
-    let prior_token = std::env::var_os("FABRO_DEV_TOKEN");
-    let prior_token_path = std::env::var_os("FABRO_DEV_TOKEN_PATH");
     let prior_session_secret = std::env::var_os("SESSION_SECRET");
-    if let Some(token) = token.as_deref() {
-        std::env::set_var("FABRO_DEV_TOKEN", token);
-        std::env::set_var("FABRO_DEV_TOKEN_PATH", home.dev_token_path());
-    } else {
-        std::env::remove_var("FABRO_DEV_TOKEN");
-        std::env::remove_var("FABRO_DEV_TOKEN_PATH");
-    }
     std::env::set_var("SESSION_SECRET", &session_secret);
-    let _env_guard = scopeguard::guard(
-        (prior_token, prior_token_path, prior_session_secret),
-        |(prior_token, prior_token_path, prior_session_secret)| {
-            match prior_token {
-                Some(value) => std::env::set_var("FABRO_DEV_TOKEN", value),
-                None => std::env::remove_var("FABRO_DEV_TOKEN"),
-            }
-            match prior_token_path {
-                Some(value) => std::env::set_var("FABRO_DEV_TOKEN_PATH", value),
-                None => std::env::remove_var("FABRO_DEV_TOKEN_PATH"),
-            }
-            match prior_session_secret {
-                Some(value) => std::env::set_var("SESSION_SECRET", value),
-                None => std::env::remove_var("SESSION_SECRET"),
-            }
-        },
-    );
+    let _env_guard = scopeguard::guard(prior_session_secret, |prior_session_secret| {
+        match prior_session_secret {
+            Some(value) => std::env::set_var("SESSION_SECRET", value),
+            None => std::env::remove_var("SESSION_SECRET"),
+        }
+    });
 
     let runtime_state = ServerRuntimeState::new(&storage_dir);
     let record_path = runtime_state.record_path();
@@ -362,7 +299,6 @@ async fn execute_foreground(
                 pid,
                 bind: resolved_bind.clone(),
                 log_path: log_path.clone(),
-                dev_token_path: token.as_ref().map(|_| home.dev_token_path()),
                 started_at: Utc::now(),
             })
         },
@@ -444,20 +380,8 @@ async fn execute_daemon(
         cmd.arg("--watch-web");
     }
 
-    let dev_token_enabled = dev_token_auth_enabled(serve_args.config.as_deref());
-    let home = Home::from_env();
-    let token = dev_token_enabled
-        .then(|| load_or_create_local_dev_token(storage_dir, &home))
-        .transpose()?;
     let session_secret = load_or_create_local_session_secret(storage_dir)?;
     cmd.arg("--storage-dir").arg(storage_dir);
-    if let Some(token) = token.as_deref() {
-        cmd.env("FABRO_DEV_TOKEN", token);
-        cmd.env("FABRO_DEV_TOKEN_PATH", home.dev_token_path());
-    } else {
-        cmd.env_remove("FABRO_DEV_TOKEN");
-        cmd.env_remove("FABRO_DEV_TOKEN_PATH");
-    }
     cmd.env("SESSION_SECRET", &session_secret);
 
     cmd.env_remove("FABRO_JSON");
