@@ -13,7 +13,7 @@ struct Classified {
 }
 
 impl Classified {
-    const fn class(&self) -> ExitClass {
+    fn class(&self) -> ExitClass {
         self.class
     }
 }

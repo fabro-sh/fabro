@@ -220,10 +220,8 @@ fn classify_server_agent_auth(err: anyhow::Error) -> anyhow::Error {
             .is_some_and(|error| {
                 matches!(
                     error,
-                    fabro_agent::Error::Llm(fabro_llm::Error::Provider {
-                        kind: fabro_llm::ProviderErrorKind::Authentication,
-                        ..
-                    })
+                    fabro_agent::Error::Llm(llm)
+                        if llm.provider_kind() == Some(ProviderErrorKind::Authentication)
                 )
             })
     });
