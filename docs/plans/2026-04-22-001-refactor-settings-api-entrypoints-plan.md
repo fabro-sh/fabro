@@ -9,338 +9,362 @@ date: 2026-04-22
 
 ## Overview
 
-Replace the current free-function / layer-passing settings API with three
-owner-first context types that expose `::resolve*()` constructors. Callers ask
-for exactly the settings their context owns, and the merge/layer machinery
-becomes an internal concern of `fabro-config`.
+Replace the free-function settings API with two owner-first context types
+that expose dense, resolved views of current config. The elegance rule:
 
-Today, reading resolved settings means composing free functions
-(`fabro_config::resolve_server_from_file`, `resolve_cli_from_file`, etc.) over
-a sparse `SettingsLayer`, driven by a three-variant `EffectiveSettingsMode`
-enum (`LocalOnly`, `RemoteServer`, `LocalDaemon`). Two of those variants are
-effectively dead: `RemoteServer` is only reached by test helpers, and
-`LocalOnly` is only reached by `fabro settings --local`. A single god type
-`Settings` carries all six namespaces, and callers freely reach into namespaces
-they don't own.
+- **`SettingsLayer`** is the sparse transport/storage form — what TOML
+  files parse into, what's persisted in run manifests, what merges with
+  precedence.
+- **Context types** (`ServerSettings`, `UserSettings`) are dense,
+  owner-scoped, resolved views of a *current process's* config,
+  computed from a layer at the moment a consumer needs them.
+
+These roles do not overlap: stored artifacts are layers; current-config
+reads are views. Stored-layer readers (code that reads specific
+namespaces off a persisted run's `SettingsLayer`) keep using
+per-namespace resolvers — the layer is the real artifact there.
 
 After this refactor:
 
-- **`ServerSettings`** — `server` + `features` namespaces. Resolved by the
-  server at startup; returned by `GET /api/v1/settings`.
-- **`UserSettings`** — `cli` + `features` namespaces. Resolved by the CLI
-  process from its local `~/.fabro/settings.toml`.
-- **`WorkflowSettings`** — all six namespaces (`server`, `project`, `workflow`,
-  `run`, `cli`, `features`). Resolved server-side when a submitted run is
-  materialized. Replaces today's `Settings` god type.
+- **`ServerSettings`** — `server` + `features` namespaces. Derived from
+  the server's **effective runtime layer** (the post-`apply_runtime_settings`
+  `SettingsLayer` that folds in CLI overrides like `--storage-dir` and
+  `--bind`) at startup and whenever hot-reload refreshes the layer.
+  Held in `AppState` alongside the shared layer itself.
+  `GET /api/v1/settings` serves the current in-memory view directly —
+  no per-request disk read, no view toggle, no redaction.
+- **`UserSettings`** — `cli` + `features` namespaces. The CLI process
+  builds one from its own `~/.fabro/settings.toml`. `fabro run attach`
+  uses the *live* `UserSettings` at attach time.
 
-Each type gets an `::resolve*()` constructor; each hides the `SettingsLayer`
-plumbing. The mode enum disappears, the `--local` diagnostic path is deleted,
-and `materialize_settings_layer` becomes a single straight-line function
-behind `WorkflowSettings::resolve_for_run`.
+Both context types expose `from_layer(&SettingsLayer)` (primitive) and
+`resolve()` (convenience that loads the default file; used by tools
+and tests, not the server startup path which composes `from_layer`
+against the effective runtime layer).
+
+The god type `Settings` goes away with no named replacement — its
+former consumers either migrate to per-namespace resolvers (the
+stored-layer readers) or are deleted wholesale (the view-toggle
+machinery removed by Unit 7). `EffectiveSettingsMode` goes away;
+`fabro settings --local` goes away; redaction machinery goes away.
+
+Settings contain no secrets — `InterpString` templates preserve
+`{{ env.NAME }}` unresolved on the wire. Actual secrets live in
+`ServerSecrets` / Vault.
 
 ## Problem Frame
 
-The settings API grew around a layered-config design (`SettingsLayer` +
-free-function resolvers + mode enum) that is now visibly clunky. Symptoms:
+The settings API grew around a layered-config design that's now visibly
+clunky:
 
-- Every caller that wants a resolved value first needs a `SettingsLayer`, then
-  picks the right `resolve_*_from_file` helper. The layer is exposed in the
-  public API even though few callers should care.
-- The `EffectiveSettingsMode` enum has three variants encoding
-  client/server trust rules, but today's production code path always picks
-  `LocalDaemon`. `RemoteServer` is test-only (a vestige of the removed
-  "CLI executes workflows directly" flow), and `LocalOnly` exists only to
-  back `fabro settings --local`.
-- The god type `fabro_types::settings::Settings` carries all six namespaces
-  indiscriminately. A server-side path that needs `run.*` also gets `cli.*`
-  in the same struct, obscuring ownership.
-- A recent CLI/server boundary cleanup (commit `5b1c40764`) moved all
-  `[server.*]` reads into `fabro_cli::local_server` so general CLI commands
-  couldn't accidentally reach them. That boundary is preserved today by
-  convention + a shell script (`bin/dev/check-boundary.sh`). Type-level
-  projection — where a CLI command that holds a `UserSettings` *cannot*
-  read `server.*` at all — is a stronger form of the same invariant.
+- Every caller that wants a resolved value first takes a `SettingsLayer`,
+  then picks the right `resolve_*_from_file` helper. The layer plumbing is
+  on the public surface even though most callers just want "give me the
+  server config."
+- `EffectiveSettingsMode` has three variants; production code always picks
+  `LocalDaemon`. The enum is dead ceremony.
+- `fabro_types::settings::Settings` is a god type — server-side execution
+  code needing `run.*` also gets `cli.*` in the same struct.
+- The CLI/server trust boundary is enforced by `fabro_cli::local_server`
+  convention plus `bin/dev/check-boundary.sh`. Type-level projection does
+  this at compile time.
 
-The settings schema itself is in good shape (see origin-adjacent context
-below). This plan is the programmatic API layer over that schema.
+The settings schema itself is fine. This plan is the programmatic API over
+it.
 
 ## Requirements Trace
 
-- **R1.** Outside code calls `ServerSettings::resolve()`,
-  `UserSettings::resolve()`, or `WorkflowSettings::resolve_for_run(...)` — no
-  caller outside `fabro-config` constructs a `SettingsLayer` or calls
-  `resolve_*_from_file` for normal resolution.
-- **R2.** Each context type exposes only the namespaces it owns (strict
-  projection): `ServerSettings` has `server` + `features`; `UserSettings`
-  has `cli` + `features`; `WorkflowSettings` has all six.
-- **R3.** The `EffectiveSettingsMode` enum is deleted. The merge code path
-  that survives is the current `LocalDaemon` behavior (strip owner domains
-  from project/workflow; server is authoritative for server-owned fields).
-- **R4.** The `fabro settings --local` flag and all supporting CLI-side
-  filesystem-walking layer assembly is removed. `fabro settings` always
-  talks to the server.
-- **R5.** `GET /api/v1/settings` returns a dense `ServerSettings` payload
-  (no `view=layer|resolved` toggle, no `X-Fabro-Settings-View` header).
-  The OpenAPI schema describes the dense shape properly, not
-  `additionalProperties: true`.
+- **R1.** Current-config callers (the server's in-memory settings, the
+  CLI process's settings) use the context types. Stored-layer readers —
+  code that reads specific namespaces off a persisted `SettingsLayer`
+  (`runner.rs`, `operations/create.rs`) — continue to use per-namespace
+  resolvers. The layer is the real artifact there and must not be
+  contorted to fit the context-type API.
+- **R2.** Each context type exposes namespaces owned by its consumer,
+  plus the cross-cutting `features.*` namespace.
+- **R3.** `EffectiveSettingsMode` is deleted. One merge path remains.
+- **R4.** `fabro settings --local` and its filesystem-walking assembly
+  are deleted.
+- **R5.** `GET /api/v1/settings` returns the server's in-memory
+  `ServerSettings` as a typed JSON body. No `view=` query param, no
+  `X-Fabro-Settings-View` header, no disk re-read, no redaction.
 - **R6.** Today's per-namespace resolved types (`ServerSettings`,
   `CliSettings`, `ProjectSettings`, `WorkflowSettings`, `RunSettings`,
-  `FeaturesSettings`) are renamed with a `*Namespace` suffix, freeing the
-  shorter names for the new context types.
-- **R7.** Today's god type `fabro_types::settings::Settings` is deleted;
-  callers migrate to `WorkflowSettings`, which has the same field set.
-- **R8.** `materialize_settings_layer`, `EffectiveSettingsLayers`'s
-  construction path, and `user::load_settings_config` are no longer part of
-  the public API of `fabro-config`. (`EffectiveSettingsLayers` the struct
-  may remain `pub` as the input to `WorkflowSettings::resolve_for_run`,
-  since only `fabro-server/run_manifest.rs` builds it.)
-- **R9.** The CLI/server boundary enforced today by
-  `fabro_cli::local_server` + `bin/dev/check-boundary.sh` stays intact or
-  strengthens. In particular, CLI commands that don't need
-  `server.*` never hold a `ServerSettings` — they hold `UserSettings`
-  instead.
+  `FeaturesSettings`) rename with a `*Namespace` suffix, freeing the
+  short names for context types. Only `ServerSettings` and `UserSettings`
+  are defined as context types in this PR.
+- **R7.** The `Settings` god type (and the public `fabro_config::resolve`
+  function that returns it, and the `load_and_resolve` helper that
+  wraps them) are deleted. No named replacement type is introduced;
+  consumers migrate to per-namespace resolvers or disappear with the
+  view-toggle machinery Unit 7 removes.
+- **R8.** Layer-merge internals are `pub(crate)` or private.
+  Per-namespace resolver visibility matches reality (see Key Technical
+  Decisions).
+- **R9.** The CLI/server trust boundary survives. `fabro_cli::local_server`
+  remains the only sanctioned CLI-side gateway to `[server.*]`;
+  `bin/dev/check-boundary.sh` updates to cover the new symbols.
 
 ## Scope Boundaries
 
 - **Not changing** the TOML schema, namespace inventory, merge precedence,
-  or strip-owner-domains trust rules. The *rules* survive; only the API that
-  exposes them changes.
-- **Not changing** the wire format of persisted run settings (still a
-  `SettingsLayer` serialized into the run spec).
-- **Not adding** new endpoints or new CLI commands. Only the response shape
-  of `GET /api/v1/settings` changes.
-- **Not reworking** the CLI/server boundary enforcement script beyond the
-  mechanical updates that follow from renames.
-- **Not relocating** the `fabro_cli::local_server` module. Its three
-  boundary helpers (`storage_dir`, `bind_request`, `auth_methods`) continue
-  to be the sanctioned entry points from CLI lifecycle commands into
-  `[server.*]`.
-- **Out of scope:** any UX redesign of `fabro settings` output beyond the
-  minimal change required by the narrower server response (see Unit 7).
+  or owner-domain stripping rules.
+- **Not changing** `PreparedManifest.settings` — stays `SettingsLayer`.
+  Wire format for persisted run settings unchanged.
+- **Not migrating** stored-layer readers. `runner.rs:507-508`
+  (`resolve_run_from_file` / `resolve_server_from_file` on `record.settings`)
+  and `operations/create.rs` (metadata aggregation from stored layers) are
+  legitimate consumers of the sparse layer, not candidates for
+  context-type migration.
+- **Not adding** endpoints or CLI commands.
+- **Settings contain no secrets** (invariant, with documented gaps).
+  Secret-bearing fields should be `InterpString`. Known gaps not addressed
+  here: `McpTransport::Http.headers`, `McpTransport::Stdio.env`,
+  `McpTransport::Sandbox.env`, `HookType::Http.headers`, `run.inputs`,
+  `run.metadata`. Pre-existing; deferred to a follow-up plan that retypes
+  the maps to `HashMap<String, InterpString>` and adds submit-time
+  validation. Any new field added by this refactor must satisfy the
+  invariant.
 
 ## Context & Research
 
 ### Relevant Code and Patterns
 
-- `lib/crates/fabro-config/src/effective_settings.rs` — layer merge, mode
-  enum, owner-domain stripping, server-authoritative overrides.
-- `lib/crates/fabro-config/src/resolve/` — per-namespace resolve helpers
-  (`resolve_server_from_file` and siblings).
-- `lib/crates/fabro-config/src/user.rs` — loads `~/.fabro/settings.toml`
-  into a `SettingsLayer`; exposes `default_settings_path()` via
-  `fabro_util::home::Home::from_env()`.
-- `lib/crates/fabro-types/src/settings/resolved.rs` — the god type
-  `Settings` (six-field struct).
-- `lib/crates/fabro-types/src/settings/mod.rs` — re-exports the
-  per-namespace resolved types that will be renamed.
-- `lib/crates/fabro-cli/src/local_server.rs` — the single sanctioned CLI
-  entry point into `[server.*]`. Today's example of the owner-first
-  boundary pattern we're lifting to the type system.
-- `lib/crates/fabro-cli/src/commands/config/mod.rs` — current
-  `fabro settings` command; contains the `--local` branch and the
-  filesystem-walking layer assembly that will be deleted.
-- `lib/crates/fabro-server/src/run_manifest.rs` — the sole production
-  caller of `materialize_settings_layer`; always picks `LocalDaemon`.
-- `lib/crates/fabro-server/src/settings_view.rs` — redacts `Settings` for
-  API responses. Signature retypes as part of the god-type removal.
-- `docs/api-reference/fabro-api.yaml` — OpenAPI spec. `GET /api/v1/settings`
-  at line 1947; `ServerSettings` schema at line 4897 (currently
-  `additionalProperties: true`, with `view=layer|resolved` query param).
-  Rust types regenerate via `lib/crates/fabro-api/build.rs`; TypeScript
-  client regenerates via `cd lib/packages/fabro-api-client && bun run
-  generate`.
-- `lib/crates/fabro-server/tests/it/openapi_conformance.rs` — conformance
-  test that catches spec/router drift; the refactor must keep this green.
-- `bin/dev/check-boundary.sh` — regression guard for the
-  `fabro_cli::local_server` boundary; needs a pass after the renames to
-  confirm the grep patterns still work.
+- `lib/crates/fabro-config/src/effective_settings.rs` — layer merge +
+  owner-domain stripping.
+- `lib/crates/fabro-config/src/resolve/` — per-namespace resolve helpers.
+- `lib/crates/fabro-config/src/user.rs` — loads
+  `~/.fabro/settings.toml` into a `SettingsLayer`.
+- `lib/crates/fabro-types/src/settings/resolved.rs` — god type `Settings`.
+- `lib/crates/fabro-types/src/settings/mod.rs` — re-exports per-namespace
+  types to be renamed.
+- `lib/crates/fabro-cli/src/local_server.rs` — single sanctioned CLI
+  gateway to `[server.*]`.
+- `lib/crates/fabro-cli/src/commands/config/mod.rs` — `fabro settings`
+  command; contains `--local` branch to delete.
+- `lib/crates/fabro-server/src/run_manifest.rs` — sole production caller
+  of `materialize_settings_layer`.
+- `lib/crates/fabro-server/src/settings_view.rs` — deleted by this
+  refactor.
+- `lib/crates/fabro-server/src/server.rs` — `AppState` will hold the
+  server's `ServerSettings`; the settings endpoint handler serves it
+  directly.
+- `docs/api-reference/fabro-api.yaml` — OpenAPI spec.
+- `bin/dev/check-boundary.sh` — CLI/server boundary regression guard.
 
 ### Related Context
 
-- `docs/brainstorms/2026-04-08-settings-toml-redesign-requirements.md`
-  defined the six-namespace schema (R3), owner-first trust boundaries (R16),
-  and the paste-anywhere / strict-namespacing rules this refactor now
-  operationalizes in code. Not a strict origin for this plan — it defined
-  the file schema; this plan defines the programmatic API over it — but
-  the motivation is directly downstream of R16.
-- Recent cleanup commit `7cb6c65d5 Remove dev-token minting from server
-  start` and `77fc77872 Gate dev-token handling on explicit auth methods`
-  are the most recent touches in this area; they didn't change the settings
-  API shape.
+- `docs/brainstorms/2026-04-08-settings-toml-redesign-requirements.md` —
+  defined the six-namespace schema and owner-first trust boundaries. This
+  plan operationalizes those boundaries in code.
 
 ### Call-Site Inventory
 
-To size the migration:
-
 - `resolve_server_from_file` outside `fabro-config`: ~20 call sites across
-  `fabro-cli` (`local_server.rs`, `commands/exec.rs`, `commands/install.rs`,
-  `commands/pr/mod.rs`, `commands/run/attach.rs`, `commands/run/runner.rs`),
-  `fabro-server` (`serve.rs`, `run_manifest.rs`, `install.rs`, `server.rs`,
-  `jwt_auth.rs`), and `fabro-install/src/lib.rs`.
-- `resolve_cli_from_file` outside `fabro-config`: 3 call sites —
-  `fabro-cli/src/user_config.rs`, `fabro-cli/src/commands/run/attach.rs`,
-  `fabro-cli/src/commands/config/mod.rs` (`--local` path, will be deleted).
-- `materialize_settings_layer`: 3 call sites —
-  `fabro-config/src/lib.rs` (internal `load_and_resolve`),
-  `fabro-cli/src/commands/config/mod.rs` (`--local`, will be deleted),
-  `fabro-server/src/run_manifest.rs` (becomes
-  `WorkflowSettings::resolve_for_run`).
-- References to per-namespace resolved type names that will be renamed to
-  `*Namespace`: ~57 across the workspace.
+  `fabro-cli`, `fabro-server`, `fabro-workflow`, `fabro-install`. Re-run
+  `grep -rn "resolve_server_from_file" lib/` before Unit 4 to confirm the
+  full set.
+- `resolve_cli_from_file` outside `fabro-config`: `user_config.rs`,
+  `attach.rs` (deleted in Unit 5).
+- `materialize_settings_layer` outside tests: `run_manifest.rs` only.
+- Per-namespace type name references to rename: ~57.
 
 ### Institutional Learnings
 
-- No prior `docs/solutions/` entries cover this area; the refactor starts
-  from current code and the adjacent brainstorm.
+- No prior `docs/solutions/` entries cover this area.
 
 ## Key Technical Decisions
 
-- **Four types collapse to three.** An earlier sketch carried a
-  `LocalWorkflowSettings` type to serve `fabro settings --local`. Deleting
-  the `--local` flag eliminates the only caller and lets
-  `LocalWorkflowSettings` go away entirely. **Rationale:** the
-  diagnostic value of `--local` is narrow (first-run sanity checks,
-  debugging a server that can't start), mostly covered by reading
-  `~/.fabro/settings.toml` directly or by a future purpose-built
-  `fabro doctor`-style command. The simplification — one fewer type, no
-  mode enum, one merge path — dominates.
-- **`UserSettings`, not `CliSettings`, for the CLI-process context type.**
-  Reflects both the *source* (`~/.fabro/settings.toml` is the user's file)
-  and the *scope* (personal/machine preferences). Also avoids the collision
-  with the now-renamed `cli.*` namespace type (`CliNamespace`) that lives
-  inside it.
-- **`WorkflowSettings` includes `cli.*`.** The server does not read
-  `cli.*` for any decision (audited: zero reads in `fabro-server`,
-  `fabro-workflow`, `fabro-agent`). But `cli.*` is meaningfully *stored
-  per-run* so that `fabro run attach` can reproduce submit-time
-  `output.verbosity`. Treating `cli.*` inside `WorkflowSettings` as an
-  opaque snapshot of client state at submit time, not as a server input,
-  matches this usage and lets the CLI round-trip the info it needs.
-- **`features.*` appears on all three context types.** Feature flags are
-  cross-cutting; both the CLI process and the server consult them, and a
-  run carries its own snapshot. Small cost for a uniform rule.
-- **Delete `EffectiveSettingsMode` entirely, not just `RemoteServer`.**
-  After `LocalOnly` (Unit 1) and `RemoteServer` (Unit 2) are both removed,
-  the only remaining variant is `LocalDaemon`. A one-variant enum has no
-  value; the function loses its `mode` parameter and becomes a single
-  straight-line implementation.
-- **`GET /api/v1/settings` collapses to one dense shape.** The current
-  `view=layer|resolved` toggle and `X-Fabro-Settings-View` header go away.
-  The endpoint returns a typed `ServerSettings` (schema properly described,
-  not `additionalProperties: true`). **Rationale:** the layer shape is an
-  internal representation, not a client contract; once internal code doesn't
-  pass layers around, the API shouldn't either.
-- **`fabro settings` composes local + remote views.** Without `--local`
-  and with a narrower server response, the CLI constructs its display from
-  both sides: local `UserSettings::resolve()` (for `cli` + local `features`)
-  and the server's `ServerSettings` (for `server` + server's `features`).
-  This is more truthful than today's behavior, where the server synthesizes
-  a cross-namespace view that conflates its `cli.*` with the client's.
-- **`EffectiveSettingsLayers` stays `pub`** (in `fabro-config`), since
-  `fabro-server/run_manifest.rs` is the one external caller that needs to
-  build one to pass to `WorkflowSettings::resolve_for_run`. Its
-  construction is simple enough that a builder isn't warranted.
-- **Placement of context types.** New context types live in `fabro-types`
-  alongside existing namespace types (keeping the type definitions in one
-  crate and the resolution logic in `fabro-config`). `impl` blocks for
-  `::resolve*()` live in `fabro-config` via extension traits or inherent
-  impls in the resolution module — whichever is mechanically simplest
-  given orphan rules; this is an implementation-time call.
+- **Layer and view are distinct roles.** `SettingsLayer` is sparse
+  transport/storage. Context types are dense, owner-scoped, resolved views
+  computed from a layer (or combination) at read time. Persisted artifacts
+  are layers; live reads are views. These don't overlap and don't convert
+  in place.
+
+- **`GET /api/v1/settings` serves `AppState` in memory.** The server
+  builds its `ServerSettings` at startup from the *effective runtime
+  layer* (post-`apply_runtime_settings`, which folds in CLI overrides
+  like `--storage-dir` and `--bind`) and stores it in `AppState`.
+  Hot-reload keeps the derived view in sync via
+  `state.replace_settings(...)`. The handler returns a clone of the
+  current value. No per-request disk read. No view toggle. No
+  redaction. No response header.
+
+- **No `WorkflowSettings` in this PR.** An earlier draft introduced a
+  `WorkflowSettings` context type as the dense resolved view for
+  server-side execution, but the refactor has no production caller that
+  needs it: `operations/create.rs` migrates to per-namespace resolvers
+  (legitimate stored-layer read), `server.rs:1337` is deleted wholesale
+  as part of Unit 7's view-toggle removal, and `settings_view.rs`
+  disappears entirely. Introducing `WorkflowSettings::resolve_for_run`
+  with no caller is speculative abstraction. If future server code
+  wants a dense multi-namespace view, it can add the type then with a
+  real consumer. `PreparedManifest.settings` stays `SettingsLayer`
+  (unchanged by this refactor); server execution code reads specific
+  namespaces via per-namespace resolvers as it does today.
+
+- **Attach honors live CLI settings.** `fabro run attach` calls
+  `UserSettings::resolve()` on the attaching process's config.
+  Submit-time `cli.*` on a stored run is inert — no code reads it back.
+
+- **Two constructors per context type.**
+  `ServerSettings::from_layer(&SettingsLayer)` is the primitive;
+  `ServerSettings::resolve()` loads the default
+  `~/.fabro/settings.toml` and delegates. `UserSettings` has the same
+  pair. No `resolve_from(path)`: `--config` handling is an existing
+  `serve.rs` concern that produces the on-disk settings layer before
+  `apply_runtime_settings` runs; the new `ServerSettings::from_layer`
+  is invoked on the resulting *effective runtime layer*, not on a
+  fresh disk read.
+
+- **Delete `EffectiveSettingsMode`.** Production always picks
+  `LocalDaemon`; the enum is ceremony. `materialize_settings_layer`
+  becomes a single straight-line function.
+
+- **Delete redaction.** Settings contain no secrets. `settings_view.rs`,
+  `redact_for_api`, `redact_resolved_value`, `SettingsApiView`,
+  `SettingsQuery`, `X-Fabro-Settings-View` — all deleted. Both settings
+  endpoints serialize directly. If a future field should not be exposed,
+  the fix is to type it as `InterpString`, not to reintroduce redaction.
+
+- **`fabro settings` composes local + server.** The CLI renders
+  `UserSettings::resolve()` (local) plus the server's `ServerSettings`
+  (fetched via the endpoint). Two sections.
+
+- **Typed OpenAPI schema via `Deserialize` + `with_replacement`.**
+  Aligned with CLAUDE.md's API type ownership doctrine. The `ServerSettings`
+  OpenAPI schema describes the internal Rust type directly; progenitor
+  reuses it via `with_replacement`. Reachable namespace types gain
+  `Deserialize` derives; types with custom `Serialize` get matching custom
+  `Deserialize` (notably `InterpString`, which must preserve unresolved
+  templates).
+
+- **`features.*` on both context types — the one carve-out to
+  owner-first.** Cross-cutting by design; server and CLI both gate
+  behavior on feature flags, and server execution code consumes them
+  via its per-namespace `resolve_features_from_file` reads on stored
+  layers.
+
+- **Context types live in `fabro-config`.** Inherent `impl` blocks must
+  live with the type per Rust's orphan rules. `fabro-types` keeps only
+  per-namespace shape types.
+
+- **Per-namespace resolver visibility, decided once:** all six
+  `resolve_*_from_file` helpers stay `pub`, because each has at least
+  one cross-crate consumer:
+  - `resolve_server_from_file` — `runner.rs:508` reads `server.*` off
+    stored `record.settings`.
+  - `resolve_run_from_file` — `runner.rs:507`, `run_manifest.rs:369`,
+    `operations/create.rs` read `run.*` off stored layers.
+  - `resolve_project_from_file`, `resolve_workflow_from_file` —
+    `operations/create.rs` reads their `.metadata` for label
+    aggregation.
+  - `resolve_cli_from_file` — `fabro-cli/tests/it/cmd/create.rs:364`
+    integration test asserts the persisted `cli.*` wire shape.
+  - `resolve_features_from_file` — `fabro-server/src/server.rs:1414`
+    reads `features.session_sandboxes`; the
+    `fabro-config/tests/resolve_features.rs` integration test also
+    depends on it.
+- **Other `fabro-config` visibility:**
+  - `pub(crate)`: `materialize_settings_layer` — internal helper; the
+    merge step stays inside `run_manifest.rs`'s call site, consumed only
+    via the public `SettingsLayer` output.
+  - `pub`: `user::load_settings_config` — external caller in
+    `fabro-server/src/serve.rs` loads the on-disk config layer before
+    `apply_runtime_settings`.
+  - `pub(crate)`: `EffectiveSettingsLayers` — no external consumer
+    remains after `WorkflowSettings` is dropped (`run_manifest.rs`
+    builds layers internally for its own `materialize_settings_layer`
+    call).
 
 ## Open Questions
 
 ### Resolved During Planning
 
-- *Should `cli.*` be on `WorkflowSettings`?* Yes — see "Key Technical
-  Decisions." Snapshot semantics for attach, not a server input.
-- *Should `features.*` duplicate across all three types?* Yes. Uniform
-  rule; low cost; all three contexts consult feature flags.
-- *Should we keep a `fabro settings --local` equivalent for diagnostics?*
-  No. Deleted outright; re-introduce as a targeted `fabro doctor`-style
-  command later if needed.
-- *Does the OpenAPI response narrow?* Yes. `GET /api/v1/settings` returns
-  only `server` + `features` namespaces. The CLI composes the rest locally.
+- *Introduce a `WorkflowSettings` context type?* No. The refactor has
+  no production caller that needs a dense multi-namespace view —
+  `operations/create.rs` migrates to per-namespace resolvers, the
+  view-toggle branches are deleted. Adding the type speculatively
+  violates the no-speculative-cleanup directive.
+- *Context types' crate?* `fabro-config`.
+- *`GET /api/v1/settings` re-read from disk per request?* No. Serves
+  `AppState.server_settings`.
+- *`PreparedManifest.settings` retype?* No. Stays `SettingsLayer`.
+- *Stored-layer readers migrate to context types?* No. They stay on
+  per-namespace resolvers.
+- *Redaction for the new endpoints?* None. Deleted entirely.
 
 ### Deferred to Implementation
 
-- **Exact placement of `impl ServerSettings { fn resolve() ... }` etc.**
-  Likely in `fabro-config` to keep resolution logic colocated with the
-  merge code, but orphan rules may push them back into `fabro-types`.
-  Mechanical call at implementation time.
-- **`fabro settings` output layout.** The command currently dumps a flat
-  JSON/YAML tree with all six namespaces. Post-refactor it renders two
-  sections (user / server). The exact shape is a small UX call; snapshot
-  tests drive the answer during implementation.
-- **Whether `resolve_run_from_file` and siblings survive.** Callers like
-  `fabro-cli/src/commands/run/attach.rs` and
-  `fabro-cli/src/commands/run/runner.rs` currently pluck individual
-  namespaces out of a stored `SettingsLayer`. They may migrate to
-  `WorkflowSettings::from_stored_layer(layer, server)` or keep using
-  per-namespace resolvers (now `pub(crate)`-visible through an adapter).
-  Resolved during Unit 6 based on which reads cleanly; either is fine.
-- **Whether `EffectiveSettingsLayers::new` should gain a fluent builder.**
-  Single caller today; keep the existing positional constructor unless
-  Unit 6 surfaces a reason.
+- `fabro settings` output layout (two-section render — labels, ordering,
+  field suppression). Snapshot tests drive.
 
 ## High-Level Technical Design
 
-> *This illustrates the intended approach and is directional guidance for
-> review, not implementation specification. The implementing agent should
-> treat it as context, not code to reproduce.*
+> *Directional guidance, not implementation specification.*
 
-**Type inventory after refactor:**
+**Type inventory:**
 
 ```
-// Per-namespace resolved types (renamed)
-ServerNamespace       // was ServerSettings
-CliNamespace          // was CliSettings
-ProjectNamespace      // was ProjectSettings
-WorkflowNamespace     // was WorkflowSettings
-RunNamespace          // was RunSettings
-FeaturesNamespace     // was FeaturesSettings
+// Per-namespace dense types (renamed from today's *Settings)
+ServerNamespace, CliNamespace, ProjectNamespace,
+WorkflowNamespace, RunNamespace, FeaturesNamespace
 
-// Context types (new)
-ServerSettings    { server: ServerNamespace, features: FeaturesNamespace }
-UserSettings      { cli: CliNamespace,       features: FeaturesNamespace }
-WorkflowSettings  { server, project, workflow, run, cli, features }
-                  // same field set as today's `Settings` god type
+// Context types (new; all in fabro-config)
+ServerSettings   { server: ServerNamespace, features: FeaturesNamespace }
+UserSettings     { cli: CliNamespace,       features: FeaturesNamespace }
 ```
 
-**Public entry points (sketch — directional):**
+**Public constructors:**
 
 ```
 impl ServerSettings {
-    fn resolve()                     -> Result<Self>;  // reads ~/.fabro/settings.toml
-    fn resolve_from(path: &Path)     -> Result<Self>;  // honors --config override
+    fn from_layer(&SettingsLayer) -> Result<Self>;
+    fn resolve() -> Result<Self>;
 }
 
 impl UserSettings {
-    fn resolve()                     -> Result<Self>;
-    fn resolve_from(path: &Path)     -> Result<Self>;
-}
-
-impl WorkflowSettings {
-    fn resolve_for_run(
-        layers: EffectiveSettingsLayers,
-        server: &ServerSettings,
-    ) -> Result<Self>;
+    fn from_layer(&SettingsLayer) -> Result<Self>;
+    fn resolve() -> Result<Self>;
 }
 ```
 
-**Call-site topology, before and after:**
+**Role separation:**
 
 ```
-Before                                    After
-──────                                    ─────
-user::load_settings_config(path)     ─►   ServerSettings::resolve_from(path)
-  → resolve_server_from_file(&layer)
+SettingsLayer           — sparse transport/storage. Unchanged.
+ServerSettings          — dense view. AppState holds one; API serves it.
+UserSettings            — dense view. CLI process builds one.
+```
 
-user::load_settings_config(None)     ─►   UserSettings::resolve()
-  → resolve_cli_from_file(&layer)
+**Call-site topology:**
 
-EffectiveSettingsLayers + layers     ─►   WorkflowSettings::resolve_for_run(
-  materialize_settings_layer(                 layers, &server_settings)
-    layers, Some(server), LocalDaemon)
+```
+Before                                      After
+──────                                      ─────
+resolve_server_from_file(&layer)       ─►   ServerSettings::from_layer(&layer)
+  (for current-config reads)                (stored-layer reads keep
+                                             resolve_*_from_file)
+
+GET /api/v1/settings: load + resolve   ─►   GET /api/v1/settings: clone AppState.server_settings
+  + redact + serialize per request
+
+resolve_cli_from_file(&layer)          ─►   UserSettings::resolve() or ::from_layer
+attach reads stored cli.*              ─►   attach calls UserSettings::resolve()
+
+fabro_config::resolve(&layer)          ─►   per-namespace resolvers at each call site
+  (god-type god fn) in create.rs            (project/workflow/run metadata reads)
+
+materialize_settings_layer(...)        ─►   materialize_settings_layer(...)
+                                             (stays at run_manifest.rs merge site;
+                                              loses the `mode` parameter; output
+                                              still stored in PreparedManifest.settings
+                                              as SettingsLayer)
+
+Settings god type                      ─►   deleted; no named replacement
+
+runner.rs / operations/create.rs:      ─►   unchanged (pub per-namespace resolvers)
+  per-namespace stored-layer reads
 ```
 
 **Unit dependency graph:**
@@ -348,13 +372,13 @@ EffectiveSettingsLayers + layers     ─►   WorkflowSettings::resolve_for_run(
 ```mermaid
 flowchart TB
     U1[Unit 1: Delete --local]
-    U2[Unit 2: Delete RemoteServer + mode enum]
-    U3[Unit 3: Rename per-namespace types]
-    U4[Unit 4: ServerSettings::resolve]
-    U5[Unit 5: UserSettings::resolve]
-    U6[Unit 6: WorkflowSettings::resolve_for_run]
-    U7[Unit 7: Narrow GET /api/v1/settings]
-    U8[Unit 8: Privatize merge internals]
+    U2[Unit 2: Delete mode enum]
+    U3[Unit 3: Rename to *Namespace]
+    U4[Unit 4: ServerSettings + AppState]
+    U5[Unit 5: UserSettings + live attach]
+    U6[Unit 6: Delete Settings god type]
+    U7[Unit 7: New /api/v1/settings shape]
+    U8[Unit 8: Privatize internals]
 
     U1 --> U2
     U2 --> U3
@@ -362,23 +386,17 @@ flowchart TB
     U3 --> U5
     U3 --> U6
     U4 --> U7
+    U6 --> U7
     U4 --> U8
     U5 --> U8
     U6 --> U8
-    U6 --> U7
 ```
-
-`U4`, `U5`, and `U6` can progress in parallel once `U3` lands. `U7`
-depends on `U4` and `U6` (the server handler for `GET /api/v1/settings`
-needs `ServerSettings::resolve`, and the CLI's `fabro settings` command
-consumes both the remote `ServerSettings` and local `UserSettings`).
 
 ## Implementation Units
 
 - [ ] **Unit 1: Delete `fabro settings --local` and the `LocalOnly` path**
 
-**Goal:** Remove `--local` flag, its helpers, and the `LocalOnly` variant
-of `EffectiveSettingsMode`. `fabro settings` always talks to the server.
+**Goal:** Remove `--local`, its helpers, and the `LocalOnly` variant.
 
 **Requirements:** R4.
 
@@ -390,618 +408,585 @@ of `EffectiveSettingsMode`. `fabro settings` always talks to the server.
 - Modify: `lib/crates/fabro-cli/src/commands/config/mod.rs` — delete
   `local_settings_value`, `workflow_and_project_layers`, `config_layers`,
   `strip_nulls`, `resolve_local_settings_value`, `render_resolve_errors`,
-  and the `args.local` / `args.workflow` branches in `rendered_config`.
-- Modify: `lib/crates/fabro-cli/src/main.rs` — remove the `args.local`
-  snapshot-test assertions (lines ~1072, ~1097).
+  and the `args.local` / `args.workflow` branches.
+- Modify: `lib/crates/fabro-cli/src/main.rs` — remove `args.local`
+  snapshot-test assertions.
 - Modify: `lib/crates/fabro-config/src/effective_settings.rs` — remove
   `LocalOnly` variant and its match arm.
-- Modify: `lib/crates/fabro-config/tests/resolve_root.rs` — drop the
-  `LocalOnly` test case (or migrate to `LocalDaemon` if still useful).
-- Modify: `lib/crates/fabro-config/src/effective_settings.rs` (tests
-  module) — drop the `LocalOnly` test at line ~218/~307.
-- Modify: CLI snapshot fixtures for `fabro settings --local` if any exist
-  under `lib/crates/fabro-cli/tests/`.
-- Test: `lib/crates/fabro-cli/tests/it/cmd/config.rs` (or wherever the
-  settings-command tests live) — replace `--local` cases with
-  through-server cases.
+- Modify: `lib/crates/fabro-config/tests/resolve_root.rs` and the
+  `effective_settings.rs` tests module — drop `LocalOnly` cases.
+- Delete: `lib/crates/fabro-cli/tests/it/cmd/config.rs` tests that depend
+  on `--local` (e.g., `settings_local_merges_cli_and_project_defaults`,
+  `settings_local_workflow_name_applies_run_overlay_and_deep_merges`).
+  They assert filesystem-walked behavior that's being removed entirely.
 
 **Approach:**
-- `--workflow WORKFLOW` was only meaningful together with `--local` (the
-  current code bails if it's passed alone). Both flags go.
-- Keep the `fabro settings` command working via the existing
-  `ctx.server().retrieve_resolved_server_settings()` path. That path
-  changes shape in Unit 7, not here.
-- `LocalOnly` removal is purely dead-code deletion once the CLI stops
-  calling it; safe to do in the same unit.
-
-**Patterns to follow:**
-- Existing CLI argument deletion pattern (check recent commits for
-  precedent on removed flags).
+- `--workflow WORKFLOW` was only meaningful with `--local`. Both go.
+- `fabro settings` continues to work via the server path (reshaped in
+  Unit 7).
+- `LocalOnly` removal is dead-code deletion once the CLI stops calling it.
 
 **Test scenarios:**
-- *Happy path:* `fabro settings` (no args) with a running server returns
-  the server's resolved settings. Unchanged from pre-refactor behavior
-  modulo Unit 7's narrowing.
-- *Error path:* `fabro settings --local` no longer parses;
-  the CLI's usage error mentions the flag is gone (or the help output
-  omits it, which is enough).
-- *Error path:* `fabro settings WORKFLOW_ARG` no longer parses — the
-  positional was only meaningful with `--local`.
+- *Contract:* `fabro settings` with a running server returns the
+  server's settings (shape reshaped in Unit 7).
+- *Parser-level:* `fabro settings --local` fails to parse. `fabro settings
+  WORKFLOW_ARG` fails to parse.
 
 **Verification:**
-- `cargo build --workspace` succeeds.
-- `cargo nextest run -p fabro-cli` passes; snapshot tests for
-  `fabro settings` no longer reference `--local`.
-- `grep -rn "LocalOnly\|args\.local\|SettingsArgs.*local" lib/` returns
-  only deliberate references (e.g., doc comments), not code paths.
+- `cargo build --workspace` and `cargo nextest run -p fabro-cli` pass.
+- `grep -rn "LocalOnly\|args\.local" lib/` returns only deliberate doc
+  references.
 
 ---
 
-- [ ] **Unit 2: Delete `EffectiveSettingsMode::RemoteServer` and collapse the enum**
+- [ ] **Unit 2: Delete `EffectiveSettingsMode` entirely**
 
-**Goal:** Migrate test-only `RemoteServer` calls to `LocalDaemon`, then
-delete the enum entirely. `materialize_settings_layer` loses its `mode`
-parameter.
+**Goal:** Kill the mode enum. `materialize_settings_layer` becomes a
+single straight-line function.
 
 **Requirements:** R3.
 
-**Dependencies:** Unit 1 (removes `LocalOnly`; after both are gone, only
-`LocalDaemon` remains).
+**Dependencies:** Unit 1.
 
 **Files:**
 - Modify: `lib/crates/fabro-config/src/effective_settings.rs` — delete
-  `EffectiveSettingsMode` enum, remove `mode` parameter from
-  `materialize_settings_layer`, flatten the match into a single code path
-  (strip owner domains, merge, apply `apply_local_daemon_overrides`).
+  `EffectiveSettingsMode`; remove `mode` parameter from
+  `materialize_settings_layer`; flatten to a single path (strip owner
+  domains, merge, apply server authority). Rename
+  `apply_local_daemon_overrides` → `enforce_server_authority`. Delete
+  `apply_server_defaults` (no surviving caller).
 - Modify: `lib/crates/fabro-config/src/lib.rs` — update internal
-  `load_and_resolve` to match new signature.
+  `load_and_resolve` to match.
 - Modify: `lib/crates/fabro-server/src/run_manifest.rs` — call
   `materialize_settings_layer(layers, Some(server_settings))` without a
-  mode; remove the `local_daemon_mode` plumbing if it was solely driving
-  the enum choice. If `local_daemon_mode` is used elsewhere in AppState
-  for non-settings purposes, leave that alone.
+  mode.
 - Modify: `lib/crates/fabro-server/src/server.rs` — remove the
-  `local_daemon_mode` field from `AppState` (~line 581) and
-  `AppStateConfig` (~line 598); update the three handler call sites
-  that pass it into `run_manifest::prepare_manifest_with_mode`
-  (`create_run` ~line 4104, `run_preflight` ~line 4212,
-  `render_graph_from_manifest` ~line 4242); update helper function
-  signatures (~lines 2515, 2541, 2641, 2708); remove the test helper
-  at ~line 2575. Can be phrased as "remove the `local_daemon_mode`
-  field and all its threading."
-- Modify: `lib/crates/fabro-config/src/effective_settings.rs` (tests
-  module) — replace `RemoteServer` test at line ~378 with a
-  `LocalDaemon`-style assertion, or delete if redundant.
+  `local_daemon_mode` field from `AppState` and `AppStateConfig`; update
+  the three handler call sites that thread it (`create_run` ~line 4104,
+  `run_preflight` ~line 4212, `render_graph_from_manifest` ~line 4242);
+  update helper signatures (~lines 2515, 2541, 2641, 2708); remove the
+  test helper at ~line 2575.
+- Modify: `effective_settings.rs` tests module — delete the
+  `RemoteServer` test case (`cli_and_server_domains_from_fabro_toml_are_inert_under_remote_mode`).
+  Verify its unique assertions are covered by the surviving `LocalDaemon`
+  test at ~line 437; if any coverage is unique, fold that assertion into
+  the surviving test.
 
 **Approach:**
-- Verify `local_daemon_mode` in `fabro-server` is only used for settings
-  mode selection before deleting it. Preliminary inspection says yes
-  (`serve.rs:523` sets it true, tests set it false, `run_manifest.rs`
-  consumes it only to pick between `RemoteServer` and `LocalDaemon`).
-- `apply_server_defaults` (the RemoteServer-specific code path) should be
-  deletable along with the enum — no surviving caller.
-- Keep `apply_local_daemon_overrides` (now the only override strategy);
-  consider renaming it to `apply_server_overrides` since "LocalDaemon" is
-  about to stop being a named concept.
-
-**Patterns to follow:**
-- `strip_owner_domains` and `apply_local_daemon_overrides` stay as
-  private helpers inside `effective_settings`.
+- `apply_server_defaults` (the `RemoteServer` code path) has no surviving
+  caller; delete along with the enum.
+- Keep `strip_owner_domains` and `enforce_server_authority` as private
+  helpers.
 
 **Test scenarios:**
-- *Happy path:* `materialize_settings_layer` with representative layers
-  produces the same output as the pre-refactor `LocalDaemon` invocation
-  (server owns storage/scheduler/artifacts/web; project/workflow
-  `[cli]/[server]` stripped).
-- *Edge case:* When `server_settings` is `Some(empty_layer)`, the output
-  preserves client values and doesn't panic.
+- *Contract:* `materialize_settings_layer` with representative layers
+  produces the same output as the pre-refactor `LocalDaemon` invocation.
+- *Edge case:* `Some(empty_layer)` for server settings preserves client
+  values and doesn't panic.
 
 **Verification:**
-- `cargo build --workspace` succeeds.
-- `cargo nextest run -p fabro-config` passes.
-- `grep -rn "EffectiveSettingsMode\|RemoteServer\|LocalDaemon" lib/`
-  returns no hits.
+- `cargo build --workspace` and `cargo nextest run -p fabro-config` pass.
+- `grep -rn "EffectiveSettingsMode\|RemoteServer\|LocalDaemon\|local_daemon_mode" lib/`
+  returns zero hits.
 
 ---
 
-- [ ] **Unit 3: Rename per-namespace resolved types to `*Namespace` suffix**
+- [ ] **Unit 3: Rename per-namespace resolved types to `*Namespace`**
 
-**Goal:** Free the short names (`ServerSettings`, `CliSettings`, etc.) for
-the new context types by renaming today's per-namespace types.
+**Goal:** Free the short names for context types.
 
 **Requirements:** R6.
 
-**Dependencies:** Units 1 and 2 (so the file churn touches stable code).
+**Dependencies:** Units 1, 2.
 
 **Files:**
-- Modify: `lib/crates/fabro-types/src/settings/mod.rs` — rename the
-  re-exports.
-- Modify: `lib/crates/fabro-types/src/settings/server.rs` — rename
-  `ServerSettings` to `ServerNamespace`; adjust references.
-- Modify: `lib/crates/fabro-types/src/settings/cli.rs` — rename
-  `CliSettings` to `CliNamespace`; propagate.
-- Modify: `lib/crates/fabro-types/src/settings/project.rs`,
-  `workflow.rs`, `run.rs`, `features.rs` — same pattern.
+- Modify: `lib/crates/fabro-types/src/settings/{mod,server,cli,project,workflow,run,features}.rs`
+  — rename each per-namespace type (`ServerSettings` → `ServerNamespace`,
+  etc.).
 - Modify: `lib/crates/fabro-types/src/settings/resolved.rs` — update the
-  `Settings` god-type field types.
+  god-type field types (the god type itself goes away in Unit 6).
 - Modify: `lib/crates/fabro-config/src/resolve/mod.rs` and siblings —
-  update return types of `resolve_server_from_file` (now `ServerNamespace`)
-  and similar; function names unchanged in this unit.
-- Modify: all ~57 other references across the workspace (mechanical).
+  update return types.
+- Modify: ~57 other references across the workspace (mechanical).
 
-**Approach:**
-- Type-only rename. Function names, field names, and serde wire format
-  are unchanged.
-- Use `cargo check --workspace` after each rename to catch missed sites.
-- `replace_all` is safe for most grep hits; verify nothing outside the
-  settings domain shares these names (prior grep confirmed no collisions).
+**Approach:** Type-only rename. Function names, field names, and serde
+wire format unchanged. Use `cargo check --workspace` between file batches.
 
-**Execution note:** Mechanical rename, suitable for `Execution target:
-external-delegate` if desired.
+**Execution note:** Mechanical; suitable for `Execution target:
+external-delegate`.
 
-**Patterns to follow:**
-- Recent refactors in this repo tend to land renames in one commit per
-  type-family when the blast radius is contained. Single unit per this
-  plan is fine.
-
-**Test scenarios:**
-- *Happy path:* All existing tests continue to pass — this unit changes
-  no behavior. The compiler is the primary witness.
+**Test scenarios:** All existing tests continue to pass. Compiler is the
+primary witness.
 
 **Verification:**
 - `cargo build --workspace` and `cargo nextest run --workspace` pass.
 - `grep -rn "fabro_types::settings::\(ServerSettings\|CliSettings\|ProjectSettings\|WorkflowSettings\|RunSettings\|FeaturesSettings\)\b" lib/`
-  returns no hits (all references now use `*Namespace`).
-- `cargo +nightly-2026-04-14 clippy --workspace --all-targets
-  -- -D warnings` clean.
+  returns zero hits.
+- Clippy clean.
 
 ---
 
-- [ ] **Unit 4: Introduce `ServerSettings` context type and `::resolve*()` constructors**
+- [ ] **Unit 4: Introduce `ServerSettings`; `AppState` holds one**
 
-**Goal:** Add the new `ServerSettings { server, features }` type with
-constructors, and migrate all existing `resolve_server_from_file` callers.
+**Goal:** Add `ServerSettings` with `from_layer` + `resolve`. Build one at
+server startup and store in `AppState`. Migrate current-config callers.
 
 **Requirements:** R1, R2.
 
 **Dependencies:** Unit 3.
 
 **Files:**
-- Create / Modify: `lib/crates/fabro-types/src/settings/context.rs`
-  (new module) — define `ServerSettings` struct.
-- Modify: `lib/crates/fabro-types/src/settings/mod.rs` — re-export
-  `ServerSettings` at the crate root.
-- Modify: `lib/crates/fabro-config/src/resolve/mod.rs` or a new
-  `context.rs` — add `impl ServerSettings { fn resolve(); fn resolve_from(path); }`.
-- Modify: every caller of `resolve_server_from_file` (~20 sites across
-  `fabro-cli`, `fabro-server`, `fabro-install`).
-- Modify: `lib/crates/fabro-workflow/src/operations/start.rs` — the
-  `resolve_server_from_file` call at ~line 384 migrates along with the
-  other sites. (Earlier call-site inventory missed `fabro-workflow`;
-  re-run `grep -rn "resolve_server_from_file" lib/` before Unit 4 to
-  confirm the full set, including test harnesses under
-  `fabro-server/tests/it/` and `fabro-cli/tests/it/support/`.)
-- Modify: `lib/crates/fabro-config/src/user.rs` — make
-  `load_settings_config` `pub(crate)` (it becomes an implementation detail
-  of `ServerSettings::resolve_from`).
-- Modify: `bin/dev/check-boundary.sh` — add grep patterns for the new
-  `ServerSettings::resolve` / `ServerSettings::resolve_from` symbols so
-  the regression guard covers the migration window, not just the
-  pre-rename state. (Moved here from Unit 8 so the script never goes
-  blind to the new symbol between Unit 4 and Unit 8.)
-- Test: `lib/crates/fabro-config/tests/resolve_server.rs` — add tests
-  for `ServerSettings::resolve_from(path)` that parallel existing
-  per-function tests.
+- Create: `lib/crates/fabro-config/src/context.rs` — `ServerSettings {
+  server: ServerNamespace, features: FeaturesNamespace }`. Inherent
+  `from_layer(&SettingsLayer) -> Result<Self>` and `resolve() ->
+  Result<Self>`.
+- Modify: `lib/crates/fabro-config/src/lib.rs` — re-export `ServerSettings`.
+- Modify: `lib/crates/fabro-server/src/serve.rs` (~lines 478-482) —
+  startup already computes
+  `effective_settings = apply_runtime_settings(&disk_settings, &args, &data_dir)`
+  (the post-runtime-override layer that folds in `--storage-dir`,
+  `--bind`, etc.). Add
+  `let server_settings = ServerSettings::from_layer(&effective_settings)?;`
+  alongside the existing `resolved_server_settings =
+  resolve_server_settings(&effective_settings)?` line, and thread
+  `server_settings` into `AppState`. Derive from the effective runtime
+  layer, not from a fresh `~/.fabro/settings.toml` read; a fresh read
+  would drop the CLI overrides.
+- Modify: `lib/crates/fabro-server/src/serve.rs` (~line 600, the
+  hot-reload path) — when `apply_runtime_settings(...)` is rerun and
+  `state_for_poll.replace_settings(effective)` is called, also refresh
+  `AppState.server_settings` from the new layer so the typed view
+  stays in sync with the `Arc<RwLock<SettingsLayer>>`.
+- Modify: `lib/crates/fabro-server/src/server.rs` — add
+  `server_settings: Arc<ServerSettings>` (or equivalent interior
+  mutability for hot-reload refresh) to `AppState`. Extend
+  `replace_settings(...)` to also update the derived `ServerSettings`
+  so both are consistent after reload.
+- Modify: every current-config caller of `resolve_server_from_file` (~20
+  sites across `fabro-cli`, `fabro-server`, `fabro-workflow`,
+  `fabro-install`) — switch to `ServerSettings::from_layer(&layer)` where
+  a layer is already in hand, or `ServerSettings::resolve()` where
+  defaults apply. Stored-layer readers (`runner.rs:507-508`) stay on
+  `resolve_server_from_file`.
+- Modify: `bin/dev/check-boundary.sh` — add grep patterns for
+  `ServerSettings::resolve` and `ServerSettings::from_layer` so the
+  regression guard covers the migration window.
+- Test: `lib/crates/fabro-config/tests/resolve_server.rs` — add tests for
+  `ServerSettings::from_layer` and `ServerSettings::resolve`.
 
 **Approach:**
-- `ServerSettings::resolve()` reads `Home::from_env().user_config()`.
-- `ServerSettings::resolve_from(path)` honors an explicit override (the
-  `--config` flag case).
-- Internally both call the same `user::load_settings_config` →
-  `resolve_server_from_file(&layer)` pipeline; the free function
-  `resolve_server_from_file` stays available as `pub(crate)` for
-  Unit 6 / Unit 8 to handle.
-- Mechanical migration of ~20 call sites. Most are a one-line
-  substitution (`fabro_config::resolve_server_from_file(&layer)` →
-  `ServerSettings::resolve_from(path)` or similar).
-
-**Patterns to follow:**
-- Existing inherent-impl pattern in `fabro-types` for dense types.
-- `fabro_cli::local_server` continues to be the only module importing
-  `ServerSettings` in the CLI crate (with a narrow API surface); confirm
-  `bin/dev/check-boundary.sh` still passes.
+- `from_layer` invokes the per-namespace resolver and wraps the result.
+  Single primitive.
+- `resolve()` loads the default `~/.fabro/settings.toml` and delegates
+  to `from_layer`. Useful for tools (`fabro doctor`-style),
+  integration tests, and any process that wants "the defaults on this
+  machine." **Not** used by the server startup path: the server's
+  authoritative settings are the *effective runtime layer* produced by
+  `apply_runtime_settings`, which a fresh disk read doesn't see.
+- Server startup: after `serve.rs` builds `effective_settings =
+  apply_runtime_settings(...)`, it calls
+  `ServerSettings::from_layer(&effective_settings)` and stores the
+  result in `AppState`. Hot-reload (`state.replace_settings(...)`) also
+  refreshes that derived view.
+- `AppState.server_settings` is the server's canonical current-config
+  value. Handlers read it, not disk. It's always in sync with the
+  layer in `AppState`'s `RwLock<SettingsLayer>`.
 
 **Test scenarios:**
-- *Happy path:* `ServerSettings::resolve_from(valid_path)` returns the
-  same `ServerNamespace` + `FeaturesNamespace` values that
-  `resolve_server_from_file(&parsed_layer)` would have returned.
-- *Happy path:* `ServerSettings::resolve()` with `$FABRO_HOME` set points
-  to a temp dir successfully loads that directory's `settings.toml`.
-- *Error path:* `ServerSettings::resolve_from(nonexistent_path)` returns
-  the file-not-found error (not a panic, matches current behavior).
-- *Error path:* `ServerSettings::resolve_from(path_with_invalid_toml)`
-  returns a parse error that preserves today's error formatting.
-- *Integration:* the server's startup path (`serve.rs:353`) boots
-  successfully using `ServerSettings::resolve_from`.
+- *Contract:* `from_layer(&layer)` returns the same data as the old
+  free function on the same layer.
+- *Contract:* `resolve()` with `$FABRO_HOME` set to a temp dir loads
+  that directory's `settings.toml`.
+- *Integration:* Server startup derives `AppState.server_settings`
+  from the effective runtime layer (post-`apply_runtime_settings`).
+  A startup with `--storage-dir /tmp/foo` produces
+  `AppState.server_settings.server.storage` reflecting `/tmp/foo`,
+  confirming CLI overrides flow through to the typed view.
+- *Integration:* Hot-reload (triggered via the existing
+  `state.replace_settings(effective)` pathway) refreshes
+  `AppState.server_settings` so the typed view reflects the updated
+  layer.
 
 **Verification:**
 - `cargo build --workspace` and `cargo nextest run --workspace` pass.
 - `grep -rn "resolve_server_from_file" lib/` returns only
-  `fabro-config/src/` internal references.
-- `bin/dev/check-boundary.sh` still passes.
-- `bin/dev/check-boundary.sh` catches a deliberate unsanctioned
-  `ServerSettings::resolve*` import outside the allowlist (confirm by
-  temporarily introducing one in a throwaway branch before merging).
+  `fabro-config/src/` and stored-layer reader call sites.
+- `bin/dev/check-boundary.sh` still passes; verify on a throwaway branch
+  that it catches a deliberate unsanctioned `ServerSettings::resolve*`
+  import.
 
 ---
 
-- [ ] **Unit 5: Introduce `UserSettings` context type and `::resolve*()` constructors**
+- [ ] **Unit 5: Introduce `UserSettings`; attach uses live config**
 
-**Goal:** Add `UserSettings { cli, features }` with constructors; migrate
-`resolve_cli_from_file` callers outside the `--local` path (already
-deleted in Unit 1).
+**Goal:** Add `UserSettings` with `from_layer` + `resolve`.
+`fabro run attach` reads the attaching process's live `UserSettings`.
 
 **Requirements:** R1, R2.
 
 **Dependencies:** Unit 3.
 
 **Files:**
-- Modify: `lib/crates/fabro-types/src/settings/context.rs` — add
-  `UserSettings` next to `ServerSettings`.
-- Modify: `lib/crates/fabro-config/src/resolve/mod.rs` (or the
-  context module) — add `impl UserSettings { fn resolve();
-  fn resolve_from(path); }`.
-- Modify: `lib/crates/fabro-cli/src/user_config.rs` — replace the
-  `resolve_cli_from_file` usage with `UserSettings::resolve_from`.
-- Modify: `lib/crates/fabro-cli/src/commands/run/attach.rs` — the
-  call at line ~90 reads `cli.output.verbosity` from a *stored* run
-  layer (not the user's live config). Decide in Unit 6 whether this
-  migrates to a `WorkflowSettings`-shaped access or keeps a
-  `pub(crate)` per-namespace resolver. Leave this call site alone in
-  Unit 5.
+- Modify: `lib/crates/fabro-config/src/context.rs` — add `UserSettings {
+  cli: CliNamespace, features: FeaturesNamespace }`. Inherent
+  `from_layer(&SettingsLayer)` and `resolve()`.
+- Modify: `lib/crates/fabro-config/src/lib.rs` — re-export `UserSettings`.
+- Modify: `lib/crates/fabro-cli/src/user_config.rs` — replace
+  `resolve_cli_from_file` usage with `UserSettings::from_layer` or
+  `UserSettings::resolve()`.
+- Modify: `lib/crates/fabro-cli/src/commands/run/attach.rs` — delete the
+  stored-layer `resolve_cli_from_file(&record.settings)` read at ~line 90.
+  Attach reads the attaching process's `UserSettings` (already threaded
+  through the command context) and honors its verbosity.
+- Delete: any test that asserted submit-time verbosity preservation on
+  attach. Add a test that attach honors the attaching CLI's live
+  verbosity.
 - Test: `lib/crates/fabro-config/tests/resolve_cli.rs` — add
-  `UserSettings::resolve_from` cases.
+  `UserSettings::from_layer` and `UserSettings::resolve` cases.
 
 **Approach:**
-- `UserSettings::resolve()` is the counterpart to
-  `ServerSettings::resolve()` for CLI-owned namespaces. Same loader,
-  different resolver.
-- Today's `user_config.rs` wraps `resolve_cli_from_file` with error
-  formatting; shape that error formatting into `UserSettings::resolve_from`
-  or wrap at the call site.
-
-**Patterns to follow:**
-- Same as Unit 4.
+- Mirror `ServerSettings`'s shape.
+- Attach-verbosity behavior changes: attach honors live settings. Stored
+  `cli.*` on a run is inert; wire format unchanged.
 
 **Test scenarios:**
-- *Happy path:* `UserSettings::resolve_from(valid_path)` returns
-  `cli` + `features` namespaces, matching
-  `resolve_cli_from_file(&layer)` output.
-- *Happy path:* `UserSettings::resolve()` picks up
-  `$FABRO_HOME/settings.toml`.
+- *Contract:* `from_layer` and `resolve` return the expected namespaces.
 - *Edge case:* Missing `~/.fabro/settings.toml` returns defaults without
-  erroring (current behavior).
-- *Error path:* Invalid TOML returns a parse error with the same shape as
-  today.
+  erroring.
+- *Behavior:* `fabro run attach --verbose` against a non-verbose submitted
+  run prints verbose output; reversed case prints non-verbose output.
 
 **Verification:**
 - `cargo build --workspace` and `cargo nextest run --workspace` pass.
-- `grep -rn "resolve_cli_from_file" lib/` returns only internal
-  `fabro-config/src/` references and (temporarily) the attach.rs site
-  to be addressed in Unit 6.
+- `grep -rn "resolve_cli_from_file" lib/` returns only
+  `fabro-config/src/` internal references **plus**
+  `fabro-cli/tests/it/cmd/create.rs:364` (the integration test that
+  asserts the persisted `cli.*` wire shape — per the KTD visibility
+  policy, this test intentionally keeps `resolve_cli_from_file`
+  public). The `--local` call site at `commands/config/mod.rs:121`
+  was deleted in Unit 1; `user_config.rs` migrates to
+  `UserSettings::from_layer` in this unit; the `attach.rs` read is
+  deleted in this unit.
 
 ---
 
-- [ ] **Unit 6: Introduce `WorkflowSettings` context type and `::resolve_for_run()`**
+- [ ] **Unit 6: Delete the `Settings` god type and its ecosystem**
 
-**Goal:** Add `WorkflowSettings` with all six namespaces, replace today's
-`Settings` god type, and migrate the one `materialize_settings_layer`
-call site in `fabro-server`.
+**Goal:** Remove `fabro_types::settings::Settings`, the
+god-type-returning `fabro_config::resolve` function, the
+`fabro_config::load_and_resolve` helper, and all their dependent code
+— tests and production — without introducing a named replacement
+type.
 
-**Requirements:** R1, R2, R7.
+**Requirements:** R7.
 
-**Dependencies:** Unit 3, Unit 4 (needs `ServerSettings` as the second
-parameter to `resolve_for_run`).
+**Dependencies:** Units 3 (renames) and 4 (context types exist for
+migrated callers).
 
 **Files:**
-- Modify: `lib/crates/fabro-types/src/settings/context.rs` — add
-  `WorkflowSettings { server, project, workflow, run, cli, features }`.
-- Modify: `lib/crates/fabro-types/src/settings/resolved.rs` — delete the
-  `Settings` god type (now shadowed by `WorkflowSettings`).
+
+*Delete the type and wrapper functions:*
+- Delete: `lib/crates/fabro-types/src/settings/resolved.rs` (the
+  `Settings` struct itself).
 - Modify: `lib/crates/fabro-types/src/settings/mod.rs` — remove the
   `Settings` re-export.
-- Modify: `lib/crates/fabro-config/src/resolve/mod.rs` (or context
-  module) — add `impl WorkflowSettings { fn resolve_for_run(
-  layers: EffectiveSettingsLayers, server: &ServerSettings) -> Result<Self> }`.
-- Modify: `lib/crates/fabro-server/src/run_manifest.rs` — replace the
-  `materialize_settings_layer` call at line ~88 with
-  `WorkflowSettings::resolve_for_run(layers, &server_settings)`;
-  retype `PreparedManifest.settings` from `SettingsLayer` to
-  `WorkflowSettings`.
-- Modify: `lib/crates/fabro-server/src/settings_view.rs:66` — update
-  `redact_resolved_value(&Settings)` to take `&WorkflowSettings`.
-- Modify: downstream server code that reads `prepared.settings` — its
-  type narrowed from `SettingsLayer` to `WorkflowSettings`, which should
-  be a tightening rather than a loss (dense resolved values instead of
-  sparse layer).
-- Modify: `lib/crates/fabro-cli/src/commands/run/attach.rs` and
-  `lib/crates/fabro-cli/src/commands/run/runner.rs` — migrate the
-  per-namespace resolver calls (`resolve_run_from_file`,
-  `resolve_server_from_file`, `resolve_cli_from_file` applied to a
-  stored `SettingsLayer`) to a single `WorkflowSettings::from_stored_layer`
-  constructor *or* keep the per-namespace access via a `pub(crate)`
-  adapter. Choose based on which reads cleanly at the call sites.
-- Modify: `lib/crates/fabro-workflow/src/operations/create.rs` — imports
-  and uses the `Settings` god type (~line 19 import; ~line 289 read via
-  `resolve_settings_tree` / `combined_labels`). Retype alongside the
-  god-type removal.
-- Test: add tests in `lib/crates/fabro-config/tests/` for
-  `WorkflowSettings::resolve_for_run` covering owner-domain stripping
-  and server-authoritative overrides.
+- Modify: `lib/crates/fabro-config/src/lib.rs` — delete the
+  `load_and_resolve` public helper (it returns `Settings`); delete the
+  `use fabro_types::settings::{Settings, SettingsLayer}` import (keep
+  the `SettingsLayer` import via its own `use`).
+- Modify: `lib/crates/fabro-config/src/resolve/mod.rs` — delete the
+  public `fn resolve(&SettingsLayer) -> Result<Settings>` function
+  (the god-type-returning one); remove it from `pub use
+  resolve::{...}` in `lib.rs`. Per-namespace resolvers are unaffected.
+
+*Migrate the one production caller of `fabro_config::resolve`:*
+- Modify: `lib/crates/fabro-workflow/src/operations/create.rs` — uses
+  `Settings` at ~line 19 (import) and ~lines 289-298
+  (`resolve_settings_tree` / `combined_labels`). The caller at ~line
+  107 reads **both** `resolved_settings.server.storage.root` (to
+  compute `storage_root` for run persistence) and
+  `combined_labels(&resolved_settings)` (project/workflow/run
+  metadata). Replace `resolve_settings_tree` so it returns a small
+  struct (or 4-tuple) containing `ServerNamespace` +
+  `ProjectNamespace` + `WorkflowNamespace` + `RunNamespace`, built
+  from `fabro_config::resolve_server_from_file`,
+  `resolve_project_from_file`, `resolve_workflow_from_file`, and
+  `resolve_run_from_file` on the same `SettingsLayer`. Update the
+  call site at ~line 107 to read `.server.storage.root` off the
+  returned `ServerNamespace`, and `combined_labels` to read
+  `.metadata` off each of `ProjectNamespace` / `WorkflowNamespace` /
+  `RunNamespace`. All four per-namespace resolvers stay `pub` per
+  Unit 8.
+
+*Migrate or delete dependent tests:*
+- Modify: `lib/crates/fabro-config/tests/resolve_root.rs` — tests
+  (including ~line 12 imports and ~line 43 call) currently exercise
+  `fabro_config::resolve`. Rewrite each assertion against the
+  surviving per-namespace resolvers: e.g.,
+  `resolve_root.rs::resolves_root_settings_require_explicit_server_auth_methods`
+  becomes a test on `resolve_server_from_file(&SettingsLayer::default())`.
+  Tests that check multi-namespace behavior split into per-namespace
+  assertions.
+- Modify: `lib/crates/fabro-config/tests/defaults.rs` — ~line 94 calls
+  `resolve(&SettingsLayer::default())`. Rewrite to target the specific
+  per-namespace resolver whose default the test is asserting (likely
+  `resolve_server_from_file`, from the `server.auth.methods` check
+  shown by grep).
+- Modify: `lib/crates/fabro-cli/tests/it/cmd/config.rs` — ~line 160
+  `resolved_server_settings_fixture` calls `fabro_config::resolve(...)`
+  to produce a Settings-shaped fixture for the settings command tests.
+  Replace with a fixture built via
+  `ServerSettings::from_layer(&server_settings_layer_fixture())`
+  (produces only `server` + `features`, matching the new
+  `GET /api/v1/settings` response shape).
+
+*Server.rs branch removed by Unit 7:*
+- `lib/crates/fabro-server/src/server.rs:1337` (the
+  `fabro_config::resolve(&settings)` call inside the `?view=resolved`
+  branch of `retrieveServerSettings`) is already deleted by Unit 7's
+  handler simplification. No separate action needed here.
+
+*Settings_view deletion by Unit 7:*
+- `lib/crates/fabro-server/src/settings_view.rs` (the
+  `redact_resolved_value(&Settings)` function plus test at ~line 257)
+  is deleted entirely by Unit 7. No separate action needed here.
+
+*Run_manifest.rs: mode parameter only:*
+- Modify: `lib/crates/fabro-server/src/run_manifest.rs` — the existing
+  `materialize_settings_layer(layers, Some(server_settings), mode)`
+  call **stays**; this unit only removes the `mode` argument (Unit 2
+  deleted the enum). `materialize_settings_layer` still produces the
+  merged `SettingsLayer` stored in `PreparedManifest.settings`. No
+  `WorkflowSettings` or other context type is constructed here.
 
 **Approach:**
-- `WorkflowSettings` has the identical field set as today's `Settings`.
-  This unit is as much a rename + method-attachment as a new type. Once
-  renamed, the conceptual purpose is sharper: it's the per-run resolved
-  view, not a god bucket.
-- `resolve_for_run` internally calls the (now private)
-  `materialize_settings_layer` and then the per-namespace resolvers to
-  produce each dense namespace. The implementation is straight-line.
-- For `attach.rs` / `runner.rs`: a stored run's `SettingsLayer` is a
-  post-merge artifact (see `run_manifest.rs` where it's captured). A
-  `WorkflowSettings::from_stored_layer(layer, server)` that re-resolves
-  may be cleaner than three per-namespace calls. Confirm at
-  implementation time.
-
-**Execution note:** Start with a passing test for
-`WorkflowSettings::resolve_for_run` that reproduces the current
-`run_manifest.rs` output for a representative layer set; then migrate
-the call site; then delete `Settings`.
-
-**Patterns to follow:**
-- The existing resolve pipeline in `fabro-config/src/resolve/` — keep the
-  per-namespace resolvers as building blocks; `WorkflowSettings::resolve_for_run`
-  composes them.
+- The god type has exactly one production consumer outside the
+  view-toggle machinery (`operations/create.rs`); migrate it. Every
+  other `fabro_config::resolve` call site is either a test (migrate or
+  delete) or inside code already being deleted by Unit 7.
+- No replacement context type: stored-layer readers keep using
+  per-namespace resolvers per R1; current-config reads are covered by
+  `ServerSettings`/`UserSettings` (Units 4-5).
+- `PreparedManifest.settings: SettingsLayer` is unchanged; the
+  run_manifest merge pipeline stays intact.
 
 **Test scenarios:**
-- *Happy path:* `WorkflowSettings::resolve_for_run` with layers
-  containing `[project]`, `[workflow]`, `[run]` sections plus a
-  `ServerSettings` carrying non-default `server.storage` produces a
-  result where `server.storage` came from `ServerSettings` and run-level
-  fields came from the layers.
-- *Happy path:* `cli.*` stanzas in the `project` or `workflow` layers
-  are stripped (owner-domain rule); only the user layer's `cli.*`
-  reaches the result.
-- *Edge case:* Empty layers + non-empty `ServerSettings` produce a
-  result with `ServerSettings` values for server/features and default
-  values elsewhere.
-- *Error path:* `resolve_for_run` returns the same resolution errors
-  (missing required fields, invalid enum values) that
-  `resolve_run_from_file` produces today on equivalent input.
-- *Integration:* The full `run_manifest.rs` pipeline produces a
-  `PreparedManifest` whose `settings` field is a `WorkflowSettings` that
-  downstream validation (`validate_prepared_manifest`) accepts.
+- *Contract:* `operations/create.rs` label aggregation produces the
+  same result as before — per-namespace metadata combined by the
+  replacement `resolve_settings_tree`.
+- *Migration:* rewritten `resolve_root.rs` and `defaults.rs` tests
+  cover the same assertions at the per-namespace resolver level.
+- *Migration:* the `fabro settings` command test in
+  `tests/it/cmd/config.rs` still passes with the `ServerSettings`-shaped
+  fixture.
 
 **Verification:**
 - `cargo build --workspace` and `cargo nextest run --workspace` pass.
-- `grep -rn "fabro_types::settings::Settings\b" lib/` returns no hits.
-- `grep -rn "materialize_settings_layer" lib/` returns only
-  `fabro-config/src/` internal references.
+- `grep -rn "fabro_types::settings::Settings\b" lib/` returns zero
+  hits.
+- `grep -rn "fabro_config::resolve\b" lib/` returns zero hits (the
+  god-type-returning function is gone; per-namespace
+  `fabro_config::resolve_*_from_file` and the new context-type
+  constructors remain).
+- `grep -rn "load_and_resolve" lib/` returns zero hits.
 
 ---
 
-- [ ] **Unit 7: Narrow `GET /api/v1/settings` to dense `ServerSettings`; compose `fabro settings` output**
+- [ ] **Unit 7: Typed `GET /api/v1/settings` served from `AppState`; delete redaction**
 
-**Goal:** Change the server's settings endpoint to return a single dense
-shape matching the new `ServerSettings` context type. Update the CLI's
-`fabro settings` to compose local `UserSettings` + remote `ServerSettings`.
+**Goal:** The handler returns a typed `ServerSettings` from `AppState` in
+memory. Delete the redaction machinery. Typed OpenAPI schema via
+`Deserialize` + `with_replacement`.
 
 **Requirements:** R5.
 
-**Dependencies:** Unit 4 (needs `ServerSettings`), Unit 6 (needs
-`settings_view` migrated off `Settings`).
+**Dependencies:** Units 4, 6.
 
 **Files:**
-- Modify: `docs/api-reference/fabro-api.yaml` — at line ~1947 remove the
-  `view` query parameter and the `X-Fabro-Settings-View` header; at
-  line ~4897 replace the `ServerSettings` schema's
-  `additionalProperties: true` with a proper typed definition
-  (two fields: `server`, `features`) whose child schemas match the
-  new `ServerSettings` Rust type.
-- Modify: `lib/crates/fabro-api/build.rs` — if `with_replacement(...)`
-  adapters are needed to wire the new `ServerSettings` Rust type into
-  the generated client, add them.
-- Regenerate: `cargo build -p fabro-api` (build.rs runs progenitor).
+- Modify: `docs/api-reference/fabro-api.yaml`:
+  - Remove the `view` query parameter and `X-Fabro-Settings-View` header
+    from the `retrieveServerSettings` operation.
+  - Replace `ServerSettings`'s `additionalProperties: true` with a typed
+    schema (two fields: `server`, `features`) matching the Rust
+    `ServerSettings`.
+  - Rename the `RunSettings` schema to `RunSettingsLayer` and update its
+    description to reflect that the endpoint returns the persisted
+    `SettingsLayer` as-is.
+  - Remove all `redact`, `redaction`, `secret subtrees` language across
+    the YAML.
+- Modify: `lib/crates/fabro-api/build.rs` — add `with_replacement(...)`
+  entries mapping the OpenAPI `ServerSettings` schema (and nested types)
+  to the internal Rust types.
+- Modify: `lib/crates/fabro-types/src/settings/server.rs`, `features.rs`,
+  and reachable child types — add `Deserialize` derives. For types with
+  custom `Serialize` (`serialize_socket_addr`, `InterpString`, etc.),
+  implement matching custom `Deserialize`. `InterpString::Deserialize`
+  must preserve unresolved `{{ env.NAME }}` templates.
+- Add: `lib/crates/fabro-api/tests/` type-identity + JSON-parity test
+  (per CLAUDE.md's `with_replacement` requirement).
+- Regenerate: `cargo build -p fabro-api` (progenitor runs in build.rs).
 - Regenerate: `cd lib/packages/fabro-api-client && bun run generate`.
 - Modify: `lib/crates/fabro-server/src/server.rs` — the
-  `retrieveServerSettings` handler (find by `operationId`) returns
-  `ServerSettings::resolve()`'s serialized form; remove the view-toggle
-  branching and the custom response header.
-- Modify: `lib/crates/fabro-client/src/client.rs` — simplify
-  `retrieve_resolved_server_settings` (~lines 493-513) to drop the
-  `?view=resolved` query parameter and the `X-Fabro-Settings-View`
-  response-header check; update the error message and any CLI-side test
-  assertions that pin the old error text (e.g.,
-  `lib/crates/fabro-cli/tests/it/cmd/config.rs`).
-- Modify: `lib/crates/fabro-server/src/settings_view.rs` — reshape
-  redaction to work on a `ServerSettings` (dense) rather than a
-  `SettingsLayer` or `Settings` god type. `server.listen` still
-  redacts.
-- Modify: `lib/crates/fabro-cli/src/commands/config/mod.rs` — update
-  `rendered_config` to fetch the new `ServerSettings` shape from the
-  server and merge with a local `UserSettings::resolve()` for display.
-- Modify: `apps/fabro-web/` or any other TypeScript consumer of the
-  generated `retrieveServerSettings` — if any consumer exists, update
-  to the new shape. (Initial inspection suggests the web app does not
-  call this endpoint; confirm at implementation time.)
-- Run: `scripts/refresh-fabro-spa.sh` if any `apps/fabro-web/` code
-  changed.
-- Test: `lib/crates/fabro-server/tests/it/openapi_conformance.rs` —
-  conformance test should verify the new single-shape endpoint matches
-  the spec.
-- Test: snapshot tests for `fabro settings` output (under
-  `lib/crates/fabro-cli/tests/`) — regenerate and review with
-  `cargo insta pending-snapshots` → `cargo insta accept --snapshot ...`.
+  `retrieveServerSettings` handler returns a clone of
+  `AppState.server_settings`. No view toggle, no response header, no
+  redaction. The `/runs/:id/settings` handler serializes
+  `run_spec.settings` (the `SettingsLayer`) directly.
+- Modify: `lib/crates/fabro-client/src/client.rs` (~lines 493-513) —
+  simplify `retrieve_resolved_server_settings` to drop `?view=resolved`
+  and the header check.
+- Delete: `lib/crates/fabro-server/src/settings_view.rs` (module + tests).
+  This removes `SettingsApiView`, `SettingsQuery`,
+  `RESOLVED_VIEW_HEADER_NAME`, `RESOLVED_VIEW_HEADER_VALUE`,
+  `redact_for_api`, `redact_resolved_value`.
+- Modify: `lib/crates/fabro-server/src/demo/mod.rs` (~lines 602-621 and
+  ~line 242) — the parallel demo settings handler imports
+  `settings_view::{SettingsQuery, SettingsApiView, RESOLVED_VIEW_HEADER_NAME}`.
+  Replace with direct serialization of the demo fixture in the new shape.
+- Delete or rewrite every test still wired to the old view-toggle /
+  `X-Fabro-Settings-View` contract:
+  - `lib/crates/fabro-server/tests/it/api/settings.rs:63` and `:143`
+    (the entire
+    `retrieve_server_settings_resolved_view_returns_dense_settings_and_marker`
+    test goes away; layer-view test reshapes to the new single-shape
+    response).
+  - `lib/crates/fabro-server/tests/it/api/runs.rs:116` (redaction
+    assertion on `/runs/:id/settings` — the endpoint now returns the
+    layer unredacted).
+  - `lib/crates/fabro-server/src/server.rs:7491` (inline unit test
+    that issues `GET /settings?view=resolved` — rewrite to hit
+    `/settings` without the query parameter, or delete if it was only
+    covering the resolved view branch).
+  - `lib/crates/fabro-cli/tests/it/cmd/config.rs:923, :1008, :1011`
+    (CLI config-command integration tests mock
+    `/api/v1/settings?view=resolved` with an
+    `X-Fabro-Settings-View: resolved` response header; migrate the
+    mocks to the new single-shape contract — no `view` query param,
+    no custom header, body = typed `ServerSettings` fixture built via
+    `ServerSettings::from_layer(&server_settings_layer_fixture())`).
+- Modify: `lib/crates/fabro-cli/src/commands/config/mod.rs` —
+  `rendered_config` fetches the new `ServerSettings` from the endpoint
+  and merges with `UserSettings::resolve()` for a two-section display.
+- Modify: `apps/fabro-web/app/routes/settings.tsx` — consume the newly
+  typed `ServerSettings` shape explicitly.
+- Run: `scripts/refresh-fabro-spa.sh`.
 
 **Approach:**
-- The endpoint's Rust handler path is selected via `operationId:
-  retrieveServerSettings` in the spec. Find the corresponding function in
-  `server.rs` and simplify it to `ServerSettings::resolve()` serialized
-  to JSON (after redaction).
-- The OpenAPI schema rewrite should describe the full nested shape of
-  `ServerSettings` so generated clients get real types, not
-  `additionalProperties: true`.
-- `fabro settings` display: two sections — one labeled something like
-  "user" (from local `UserSettings::resolve()`) and one labeled
-  "server" (from the API). Exact label/format is a minor UX call; keep
-  snapshot tests as the source of truth.
+- The endpoint returns the in-memory `AppState.server_settings`. No
+  per-request disk read.
+- OpenAPI conformance (`openapi_conformance.rs`) verifies the new
+  single-shape endpoint against the spec.
 
-**Patterns to follow:**
-- OpenAPI-first workflow per `CLAUDE.md`: edit the YAML, rebuild
-  fabro-api, run conformance tests.
-- `bun run generate` workflow for the TypeScript client.
-- `scripts/refresh-fabro-spa.sh` if the SPA bundle is affected.
-
-**Test scenarios:**
-- *Happy path:* `GET /api/v1/settings` returns JSON with `server` and
-  `features` top-level keys; no other keys.
-- *Happy path:* `server.listen` remains redacted in the response (same
-  policy as today).
-- *Edge case:* The endpoint has no `view` query parameter; passing
-  `?view=layer` returns a 200 with the new dense shape (query param
-  silently ignored per OpenAPI's permissive defaults) *or* a 400 if the
-  router rejects unknown params — assert whichever matches the router's
-  current behavior for unknown params.
-- *Edge case:* `fabro settings` output with a running server prints both
-  the user section and the server section; output is stable across runs.
-- *Integration:* OpenAPI conformance test
-  (`openapi_conformance.rs`) passes — spec and router match.
-- *Integration:* Generated TypeScript client's
-  `retrieveServerSettings` returns a typed object with `server` and
-  `features` fields.
+**Test scenarios (canonical only):**
+- *Contract:* `GET /api/v1/settings` returns JSON with exactly two
+  top-level keys, `server` and `features`. The typed shape matches the
+  OpenAPI `ServerSettings` schema.
+- *Contract:* Generated TypeScript client returns a typed object with
+  `server` and `features` fields.
+- *Contract:* `GET /api/v1/runs/:id/settings` returns the persisted
+  `SettingsLayer` (renamed `RunSettingsLayer` in the spec) directly.
+- *Behavior:* `server.listen` is present and visible in the main settings
+  response.
+- *Integration:* OpenAPI conformance passes.
+- *Integration:* `fabro settings` renders two sections (user / server)
+  without errors.
 
 **Verification:**
 - `cargo build -p fabro-api` succeeds (progenitor codegen clean).
 - `cargo nextest run -p fabro-server` passes, including conformance.
 - `cd lib/packages/fabro-api-client && bun run generate && bun run
   typecheck` succeeds.
-- `fabro settings` (manual smoke test) displays a two-section layout
-  with no `SettingsLayer`-style sparse fields.
-- CI's SPA-drift check passes (no uncommitted `lib/crates/fabro-spa/
-  assets/` drift).
+- CI's SPA-drift check passes.
 
 ---
 
-- [ ] **Unit 8: Privatize merge internals; delete dead helpers**
+- [ ] **Unit 8: Privatize merge internals**
 
-**Goal:** Reduce the public surface of `fabro-config` to the three
-context types and their `::resolve*()` methods. Delete free functions
-and helpers whose callers have all migrated.
+**Goal:** Minimize the public surface of `fabro-config`. Context types
+and their constructors are the primary API; internal helpers go
+`pub(crate)`.
 
 **Requirements:** R1, R8.
 
 **Dependencies:** Units 4, 5, 6.
 
 **Files:**
-- Modify: `lib/crates/fabro-config/src/effective_settings.rs` — make
-  `materialize_settings_layer` `pub(crate)`.
-- Modify: `lib/crates/fabro-config/src/lib.rs` — remove or privatize
-  `load_and_resolve` (it became a thin wrapper when the mode enum went
-  away; decide whether it's still worth keeping for tests or can be
-  deleted).
-- Modify: `lib/crates/fabro-config/src/user.rs` — make
-  `load_settings_config` `pub(crate)`.
-- Modify: `lib/crates/fabro-config/src/resolve/mod.rs` — make
-  `resolve_server_from_file`, `resolve_cli_from_file`,
-  `resolve_project_from_file`, `resolve_workflow_from_file`,
-  `resolve_run_from_file`, `resolve_features_from_file` either
-  `pub(crate)` or fully private. Some may still need visibility for
-  tests or for the attach/runner code paths decided in Unit 6.
-- Modify: `lib/crates/fabro-config/src/lib.rs` — update crate-level
-  re-exports to expose only `ServerSettings`, `UserSettings`,
-  `WorkflowSettings`, `EffectiveSettingsLayers` (as input type), and
-  error types.
-- Note: `bin/dev/check-boundary.sh` grep-pattern updates already
-  landed in Unit 4 (moved earlier so the script never loses coverage
-  during the Unit 4 → 7 migration window). Unit 8 only verifies the
-  script still passes after the privatization pass.
+- Modify: `lib/crates/fabro-config/src/effective_settings.rs` —
+  `materialize_settings_layer` → `pub(crate)`.
+- `lib/crates/fabro-config/src/resolve/mod.rs` — all six
+  `resolve_*_from_file` functions (`project`, `workflow`, `run`, `cli`,
+  `server`, `features`) keep their existing `pub` visibility. Each has
+  at least one cross-crate consumer; see the KTD visibility decision
+  for the specific sites.
+- Keep `pub`: `lib/crates/fabro-config/src/user.rs::load_settings_config`
+  — `fabro-server/src/serve.rs` loads the on-disk settings layer via
+  it. No visibility change.
+- Modify: `lib/crates/fabro-config/src/lib.rs` — **settings-entrypoint
+  re-exports only**. Narrow scope:
+  - **Add:** `ServerSettings`, `UserSettings` (the new context types).
+  - **Remove:** the `Settings` type and the god-type-returning
+    `resolve` function from the public re-export list (both deleted in
+    Unit 6).
+  - **Leave untouched:** existing re-exports of `Error`, `Result`,
+    `Home`, `expand_tilde`, `apply_builtin_defaults`,
+    `defaults_layer`, `load_settings_*`, `parse_settings_layer`, the
+    `storage` module, and any other non-settings-entrypoint APIs.
+    These serve cross-workspace consumers (e.g.,
+    `fabro-workflow/src/run_lookup.rs`,
+    `fabro-workflow/src/operations/create.rs`) whose API surface is
+    out of scope for this refactor.
+  - Update the *settings-entrypoint* paragraph in the crate-level
+    doc comment to describe the two context types and their
+    constructors as the primary resolution API. Do **not** rewrite
+    the full crate doc comment.
 
-**Approach:**
-- This is a cleanup pass. After Units 4–6, the grep-verified callers
-  are all internal; flipping visibility should compile cleanly.
-- Prefer `pub(crate)` over fully private when the tests module in the
-  same crate still needs access.
-- Document in the `fabro-config` crate-level doc comment what the public
-  surface is (three context types + their constructors + error types).
-
-**Patterns to follow:**
-- Minimum-visibility convention in this codebase: start private, widen
-  only when a real caller needs it.
+**Approach:** Cleanup pass. Flip visibility; compile.
 
 **Test scenarios:**
-- *Happy path:* Downstream crates compile after the visibility
-  narrowing; no caller had a dependency that got cut.
-- *Integration:* `bin/dev/check-boundary.sh` passes with updated grep
-  patterns.
+- *Integration:* Downstream crates compile after visibility narrowing.
 
 **Verification:**
-- `cargo build --workspace` succeeds.
-- `cargo nextest run --workspace` passes.
-- `grep -rn "pub fn resolve_.*_from_file" lib/crates/fabro-config/`
-  returns zero hits (all are now `pub(crate)` or private).
+- `cargo build --workspace` and `cargo nextest run --workspace` pass.
+- `grep -rn "pub fn resolve_\(project\|workflow\|run\|cli\|server\|features\)_from_file" lib/crates/fabro-config/`
+  returns six hits (all six per-namespace resolvers remain `pub`
+  because each has cross-crate consumers).
 - `bin/dev/check-boundary.sh` passes.
 
 ## System-Wide Impact
 
-- **Interaction graph:** Every CLI command that reads user/server config
-  changes its import. ~20 call sites across `fabro-cli`, `fabro-server`,
-  and `fabro-install` migrate from free-function calls to context-type
-  constructors. Mechanical but broad.
-- **Error propagation:** Today's resolver errors flow back unchanged from
-  `resolve_*_from_file`; the new constructors wrap the same error types
-  at crate boundaries. No new error categories.
-- **State lifecycle risks:** None. The refactor preserves merge semantics
-  and the persisted `SettingsLayer` wire format for run manifests.
-- **API surface parity:** `GET /api/v1/settings` changes shape (Unit 7).
-  The CLI is the only known in-tree consumer. External API consumers
-  that called `?view=resolved` will see a similar-shaped response
-  (now the only shape); external consumers that called `?view=layer`
-  see a different shape. The project is single-node and greenfield, so
-  this break is acceptable per prior decisions; surface it in release
-  notes regardless.
-- **Integration coverage:** OpenAPI conformance test
-  (`lib/crates/fabro-server/tests/it/openapi_conformance.rs`) is the
-  primary cross-layer guardrail. Generated Rust types (via progenitor)
-  and TypeScript client (via openapi-generator) must both regenerate
-  cleanly.
-- **Unchanged invariants:** TOML file format, namespace inventory (six
-  namespaces), namespace ownership rules (cli/server are owner-first),
-  layering precedence (user → project → workflow → args), server's
-  authority over server-owned fields, `fabro_cli::local_server` as the
-  single CLI-side gateway to `[server.*]` for lifecycle commands.
+- **Interaction graph:** ~20 current-config call sites migrate from
+  `resolve_server_from_file(&layer)` to `ServerSettings::from_layer(&layer)`
+  (or `::resolve()`). Stored-layer reads unchanged.
+- **Error propagation:** Resolver errors flow back unchanged; constructors
+  wrap today's error types.
+- **API surface:** `GET /api/v1/settings` shape changes (single dense
+  `ServerSettings` served from `AppState`). `GET /api/v1/runs/:id/settings`
+  shape unchanged (still the persisted `SettingsLayer`; OpenAPI schema
+  renamed `RunSettingsLayer`).
+- **Integration coverage:** OpenAPI conformance guards spec/router
+  alignment. Progenitor regen + `bun run generate` + SPA refresh is the
+  known hygiene.
+- **Unchanged invariants:** TOML file format, namespace inventory,
+  layering precedence, server authority over server-owned fields,
+  `PreparedManifest.settings` wire format, `fabro_cli::local_server` as
+  the sanctioned CLI gateway to `[server.*]`.
 
 ## Risks & Dependencies
 
 | Risk | Mitigation |
 |------|------------|
-| The 57-reference mechanical rename (Unit 3) lands incomplete, leaving compilation broken mid-merge | Use `cargo check --workspace` after each file batch; prefer a single atomic commit for Unit 3; if splitting, keep the rename consistent within each commit so the build stays green |
-| OpenAPI response shape change breaks an external consumer we don't know about | Single-node greenfield app; release notes flag the break; spec change is captured in git history for discoverability |
-| `fabro settings` snapshot tests drift in non-obvious ways after Unit 7's output restructuring | Use `cargo insta pending-snapshots` and review diffs before accepting; don't batch-accept across unrelated changes |
-| TypeScript client regeneration (Unit 7) drifts from committed bundle, failing CI's `git diff --exit-code` check on `lib/crates/fabro-spa/assets/` | Run `scripts/refresh-fabro-spa.sh` after `bun run generate`; confirm the committed SPA matches source before pushing |
-| `fabro run attach` verbosity replay breaks if the stored-layer access pattern is migrated awkwardly in Unit 6 | Keep the attach test that asserts "submit-time verbosity is preserved on attach" green throughout; if needed, keep `resolve_cli_from_file` as `pub(crate)` for this specific read path |
-| `bin/dev/check-boundary.sh` grep patterns reference old free-function names and silently pass after the rename (false-negative boundary check) | Script update moved from Unit 8 into Unit 4 so the guard never loses coverage during the Unit 4 → 7 migration window. Unit 4 verification includes a throwaway-branch test confirming the script catches an unsanctioned `ServerSettings::resolve*` import |
+| The ~57-reference rename (Unit 3) lands incomplete, breaking the build mid-merge | Atomic commit for Unit 3; `cargo check --workspace` between file batches |
+| TypeScript regen drift fails CI's SPA-bundle check | Run `scripts/refresh-fabro-spa.sh` after `bun run generate` |
+| `fabro settings` snapshot tests drift | `cargo insta pending-snapshots` + review per-snapshot before accept |
+| `bin/dev/check-boundary.sh` silently passes after the rename | Script updated in Unit 4 (not Unit 8) so coverage never drops; verified on a throwaway branch |
 
 ## Documentation / Operational Notes
 
-- Update `docs/api-reference/fabro-api.yaml` description prose for
-  `/api/v1/settings` to reflect the single dense response shape.
-- Update any in-repo docs that reference `fabro settings --local` (if
-  any; grep `docs/` during Unit 1).
-- `CLAUDE.md`'s "API workflow" section already describes the OpenAPI →
-  Rust → TypeScript pipeline; no changes needed there.
-- Release notes (or changelog equivalent): call out the
-  `fabro settings --local` removal and the `GET /api/v1/settings`
-  response-shape change as deliberate breaking cleanups.
+- OpenAPI description prose for `/api/v1/settings` updated to reflect the
+  single-shape response.
+- `CLAUDE.md`'s "API workflow" section already describes the
+  OpenAPI → Rust → TypeScript pipeline; no changes needed.
+- Release notes: `fabro settings --local` removed; `GET /api/v1/settings`
+  response shape changed; redaction removed.
 
 ## Sources & References
 
@@ -1009,12 +994,8 @@ and helpers whose callers have all migrated.
   `lib/crates/fabro-types/src/settings/resolved.rs`,
   `lib/crates/fabro-cli/src/local_server.rs`,
   `lib/crates/fabro-server/src/run_manifest.rs`,
-  `lib/crates/fabro-server/src/settings_view.rs`,
   `docs/api-reference/fabro-api.yaml`.
-- Related brainstorm (adjacent, not strict origin):
+- Adjacent brainstorm:
   `docs/brainstorms/2026-04-08-settings-toml-redesign-requirements.md`
-  (especially R16 on owner-first namespace boundaries).
-- Recent commits establishing the current boundary that this refactor
-  lifts to the type system: `5b1c40764` (CLI server-settings reads
-  restricted to `fabro_cli::local_server`), along with
-  `bin/dev/check-boundary.sh`.
+  (R16 on owner-first namespace boundaries).
+- Boundary-enforcement commit: `5b1c40764` + `bin/dev/check-boundary.sh`.
