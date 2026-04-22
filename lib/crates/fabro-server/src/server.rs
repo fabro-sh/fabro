@@ -1536,21 +1536,23 @@ async fn attach_events(
     };
 
     let stream =
-        BroadcastStream::new(state.global_event_tx.subscribe()).filter_map(move |result| {
-            match result {
-                Ok(event) => {
-                    if !event_matches_run_filter(&event, run_filter.as_ref()) {
-                        return None;
-                    }
-                    sse_event_from_store(&event).map(Ok::<Event, std::convert::Infallible>)
-                }
-                Err(_) => None,
-            }
+        filtered_global_events(state.global_event_tx.subscribe(), run_filter).filter_map(|event| {
+            sse_event_from_store(&event).map(Ok::<Event, std::convert::Infallible>)
         });
 
     Sse::new(stream)
         .keep_alive(KeepAlive::default())
         .into_response()
+}
+
+fn filtered_global_events(
+    event_rx: broadcast::Receiver<EventEnvelope>,
+    run_filter: Option<HashSet<RunId>>,
+) -> impl tokio_stream::Stream<Item = EventEnvelope> {
+    BroadcastStream::new(event_rx).filter_map(move |result| match result {
+        Ok(event) if event_matches_run_filter(&event, run_filter.as_ref()) => Some(event),
+        Ok(_) | Err(_) => None,
+    })
 }
 
 struct PrunePlan {
@@ -7342,11 +7344,13 @@ mod tests {
 
     use axum::body::Body;
     use axum::http::{Request, header};
+    use chrono::Utc;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
     use fabro_model::Provider;
     use fabro_types::settings::ServerAuthMethod;
     use fabro_types::{InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunId, fixtures};
     use serde_json::json;
+    use tokio_stream::StreamExt as _;
     use tower::ServiceExt;
 
     use super::*;
@@ -8135,6 +8139,27 @@ allowed_usernames = ["octocat"]
         )
         .unwrap();
         run_store.append_event(&payload).await.unwrap();
+    }
+
+    fn test_event_envelope(seq: u32, run_id: RunId, body: EventBody) -> EventEnvelope {
+        EventEnvelope {
+            seq,
+            event: RunEvent {
+                id: format!("evt-{seq}"),
+                ts: Utc::now(),
+                run_id,
+                node_id: None,
+                node_label: None,
+                stage_id: None,
+                parallel_group_id: None,
+                parallel_branch_id: None,
+                session_id: None,
+                parent_session_id: None,
+                tool_call_id: None,
+                actor: None,
+                body,
+            },
+        }
     }
 
     #[tokio::test]
@@ -11185,6 +11210,36 @@ timeout = "30s"
             .as_str()
             .expect("paged item should still include sandbox metadata");
         assert!(matches!(sandbox_id, "sb-first" | "sb-second"));
+    }
+
+    #[tokio::test]
+    async fn filtered_global_events_streams_only_matching_run_ids() {
+        let run_one = fixtures::RUN_1;
+        let run_two = fixtures::RUN_2;
+        let (event_tx, _) = broadcast::channel(8);
+
+        let stream = filtered_global_events(event_tx.subscribe(), Some(HashSet::from([run_one])));
+
+        event_tx
+            .send(test_event_envelope(
+                1,
+                run_two,
+                EventBody::RunQueued(Default::default()),
+            ))
+            .unwrap();
+        event_tx
+            .send(test_event_envelope(
+                2,
+                run_one,
+                EventBody::RunQueued(Default::default()),
+            ))
+            .unwrap();
+        drop(event_tx);
+
+        let events = stream.collect::<Vec<_>>().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].seq, 2);
+        assert_eq!(events[0].event.run_id, run_one);
     }
 
     #[test]
