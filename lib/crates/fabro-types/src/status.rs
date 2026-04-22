@@ -1,11 +1,12 @@
 use std::fmt;
-use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum RunStatus {
     Submitted,
     Queued,
@@ -91,57 +92,6 @@ impl RunStatus {
     }
 }
 
-impl fmt::Display for RunStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Self::Submitted => "submitted",
-            Self::Queued => "queued",
-            Self::Starting => "starting",
-            Self::Running => "running",
-            Self::Blocked => "blocked",
-            Self::Paused => "paused",
-            Self::Removing => "removing",
-            Self::Succeeded => "succeeded",
-            Self::Failed => "failed",
-            Self::Dead => "dead",
-            Self::Archived => "archived",
-        };
-        f.write_str(s)
-    }
-}
-
-impl FromStr for RunStatus {
-    type Err = ParseRunStatusError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "submitted" => Ok(Self::Submitted),
-            "queued" => Ok(Self::Queued),
-            "starting" => Ok(Self::Starting),
-            "running" => Ok(Self::Running),
-            "blocked" => Ok(Self::Blocked),
-            "paused" => Ok(Self::Paused),
-            "removing" => Ok(Self::Removing),
-            "succeeded" => Ok(Self::Succeeded),
-            "failed" => Ok(Self::Failed),
-            "dead" => Ok(Self::Dead),
-            "archived" => Ok(Self::Archived),
-            _ => Err(ParseRunStatusError(s.to_string())),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ParseRunStatusError(String);
-
-impl fmt::Display for ParseRunStatusError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid run status: {:?}", self.0)
-    }
-}
-
-impl std::error::Error for ParseRunStatusError {}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct InvalidTransition {
     pub from: RunStatus,
@@ -156,8 +106,9 @@ impl fmt::Display for InvalidTransition {
 
 impl std::error::Error for InvalidTransition {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum StatusReason {
     Completed,
     PartialSuccess,
@@ -171,57 +122,6 @@ pub enum StatusReason {
     SandboxInitFailed,
     SandboxInitializing,
 }
-
-impl fmt::Display for StatusReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Self::Completed => "completed",
-            Self::PartialSuccess => "partial_success",
-            Self::WorkflowError => "workflow_error",
-            Self::Cancelled => "cancelled",
-            Self::Terminated => "terminated",
-            Self::TransientInfra => "transient_infra",
-            Self::BudgetExhausted => "budget_exhausted",
-            Self::LaunchFailed => "launch_failed",
-            Self::BootstrapFailed => "bootstrap_failed",
-            Self::SandboxInitFailed => "sandbox_init_failed",
-            Self::SandboxInitializing => "sandbox_initializing",
-        };
-        f.write_str(s)
-    }
-}
-
-impl FromStr for StatusReason {
-    type Err = ParseStatusReasonError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "completed" => Ok(Self::Completed),
-            "partial_success" => Ok(Self::PartialSuccess),
-            "workflow_error" => Ok(Self::WorkflowError),
-            "cancelled" => Ok(Self::Cancelled),
-            "terminated" => Ok(Self::Terminated),
-            "transient_infra" => Ok(Self::TransientInfra),
-            "budget_exhausted" => Ok(Self::BudgetExhausted),
-            "launch_failed" => Ok(Self::LaunchFailed),
-            "bootstrap_failed" => Ok(Self::BootstrapFailed),
-            "sandbox_init_failed" => Ok(Self::SandboxInitFailed),
-            "sandbox_initializing" => Ok(Self::SandboxInitializing),
-            _ => Err(ParseStatusReasonError(s.to_string())),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ParseStatusReasonError(String);
-
-impl fmt::Display for ParseStatusReasonError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid status reason: {:?}", self.0)
-    }
-}
-
-impl std::error::Error for ParseStatusReasonError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

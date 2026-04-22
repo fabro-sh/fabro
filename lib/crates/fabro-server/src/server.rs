@@ -6751,7 +6751,13 @@ async fn list_models(
     let provider = match params.provider.as_deref() {
         Some(value) => match fabro_model::Provider::from_str(value) {
             Ok(provider) => Some(provider),
-            Err(err) => return ApiError::new(StatusCode::BAD_REQUEST, err).into_response(),
+            Err(_) => {
+                return ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    format!("unknown provider: {value}"),
+                )
+                .into_response();
+            }
         },
         None => None,
     };
@@ -6799,7 +6805,13 @@ async fn test_model(
     let mode = match params.mode.as_deref() {
         Some(value) => match ModelTestMode::from_str(value) {
             Ok(mode) => mode,
-            Err(err) => return ApiError::new(StatusCode::BAD_REQUEST, err).into_response(),
+            Err(_) => {
+                return ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    format!("invalid model test mode: {value}"),
+                )
+                .into_response();
+            }
         },
         None => ModelTestMode::Basic,
     };
@@ -11203,14 +11215,14 @@ timeout = "30s"
             .send(test_event_envelope(
                 1,
                 run_two,
-                EventBody::RunQueued(Default::default()),
+                EventBody::RunQueued(fabro_types::run_event::RunStatusEffectProps::default()),
             ))
             .unwrap();
         event_tx
             .send(test_event_envelope(
                 2,
                 run_one,
-                EventBody::RunQueued(Default::default()),
+                EventBody::RunQueued(fabro_types::run_event::RunStatusEffectProps::default()),
             ))
             .unwrap();
         drop(event_tx);

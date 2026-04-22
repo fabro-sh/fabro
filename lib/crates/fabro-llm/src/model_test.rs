@@ -1,8 +1,8 @@
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use fabro_model::Model;
+use strum::{EnumString, IntoStaticStr};
 use tokio::time;
 
 use crate::client::Client;
@@ -10,7 +10,8 @@ use crate::generate::{self, GenerateParams};
 use crate::tools::Tool;
 use crate::types::{GenerateResult, ReasoningEffort};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumString, IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum ModelTestMode {
     #[default]
     Basic,
@@ -19,11 +20,8 @@ pub enum ModelTestMode {
 
 impl ModelTestMode {
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Basic => "basic",
-            Self::Deep => "deep",
-        }
+    pub fn as_str(self) -> &'static str {
+        self.into()
     }
 
     #[must_use]
@@ -35,19 +33,8 @@ impl ModelTestMode {
     }
 }
 
-impl FromStr for ModelTestMode {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "basic" => Ok(Self::Basic),
-            "deep" => Ok(Self::Deep),
-            other => Err(format!("invalid model test mode: {other}")),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum ModelTestStatus {
     Ok,
     Error,
@@ -55,11 +42,8 @@ pub enum ModelTestStatus {
 
 impl ModelTestStatus {
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Ok => "ok",
-            Self::Error => "error",
-        }
+    pub fn as_str(self) -> &'static str {
+        self.into()
     }
 }
 

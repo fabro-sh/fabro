@@ -420,12 +420,10 @@ pub async fn run_with_args_and_client(
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
 
     // Parse provider string to enum early for compile-time safety
-    let provider: Provider = args
-        .provider
-        .as_deref()
-        .unwrap_or("anthropic")
+    let provider_str = args.provider.as_deref().unwrap_or("anthropic");
+    let provider: Provider = provider_str
         .parse()
-        .map_err(|e: String| anyhow::anyhow!("{e}"))?;
+        .map_err(|_| anyhow::anyhow!("unknown provider: {provider_str}"))?;
 
     // Build LLM client — use provided client or create from env
     let mut client = if let Some(c) = llm_client {

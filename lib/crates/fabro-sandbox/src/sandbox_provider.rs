@@ -1,8 +1,8 @@
-use std::fmt;
-use std::str::FromStr;
+use strum::{Display, EnumString};
 
 /// Sandbox provider for agent tool operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Display, EnumString)]
+#[strum(serialize_all = "lowercase", ascii_case_insensitive)]
 pub enum SandboxProvider {
     /// Run tools on the local host (default)
     #[default]
@@ -19,29 +19,6 @@ impl SandboxProvider {
     /// dry-run compatible).
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local)
-    }
-}
-
-impl fmt::Display for SandboxProvider {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Local => write!(f, "local"),
-            Self::Docker => write!(f, "docker"),
-            Self::Daytona => write!(f, "daytona"),
-        }
-    }
-}
-
-impl FromStr for SandboxProvider {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "local" => Ok(Self::Local),
-            "docker" => Ok(Self::Docker),
-            "daytona" => Ok(Self::Daytona),
-            other => Err(format!("unknown sandbox provider: {other}")),
-        }
     }
 }
 
