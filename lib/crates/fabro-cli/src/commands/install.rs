@@ -57,7 +57,7 @@ use crate::shared::provider_auth::{
     ApiKeySource, authenticate_provider, authenticate_provider_with_api_key_source,
     authenticate_provider_with_method, prompt_confirm, prompt_password, provider_display_name,
 };
-use crate::{server_client, user_config};
+use crate::{local_server, server_client, user_config};
 
 const GITHUB_TOKEN_SECRET_KEY: &str = "GITHUB_TOKEN";
 const GITHUB_APP_PRIVATE_KEY_KEY: &str = "GITHUB_APP_PRIVATE_KEY";
@@ -1161,7 +1161,7 @@ fn persist_server_env_secrets(storage_dir: &Path, secrets: &[(String, String)]) 
         return Ok(());
     }
 
-    let env_path = Storage::new(storage_dir).server_state().env_path();
+    let env_path = Storage::new(storage_dir).runtime_state().env_path();
     envfile::merge_env_file(&env_path, secrets.iter().cloned())
         .with_context(|| format!("merging server env secrets into {}", env_path.display()))?;
     Ok(())
@@ -1223,7 +1223,7 @@ fn persist_github_install_changes(
     writes: &PendingGitHubInstallWrite<'_>,
 ) -> Result<()> {
     let storage = Storage::new(storage_dir);
-    let server_env_path = storage.server_state().env_path();
+    let server_env_path = storage.runtime_state().env_path();
     let vault_path = storage.secrets_path();
     let previous_server_env = std::fs::read_to_string(&server_env_path).ok();
     let previous_vault = std::fs::read_to_string(&vault_path).ok();
@@ -1494,7 +1494,7 @@ async fn run_install_github_inner(
             .context("failed to parse existing settings.toml")?,
         args.storage_dir.as_deref(),
     );
-    let storage_dir = user_config::storage_dir(&parsed_settings).unwrap_or_else(|_| {
+    let storage_dir = local_server::storage_dir(&parsed_settings).unwrap_or_else(|_| {
         args.storage_dir
             .clone_path()
             .unwrap_or_else(default_storage_dir)
@@ -1586,7 +1586,7 @@ async fn run_install_github_inner(
                     .and_then(|auth| auth.methods)
                     .unwrap_or_default();
                 let token = dev_token::read_dev_token_file(
-                    &Storage::new(&storage_dir).server_state().dev_token_path(),
+                    &Storage::new(&storage_dir).runtime_state().dev_token_path(),
                 );
                 print_auth_status(&methods, token.as_deref(), &s, printer);
                 fabro_util::printerr!(printer, "");
@@ -1641,7 +1641,7 @@ async fn run_install_inner(
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
     let cli_settings = user_config::load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let storage_dir = user_config::storage_dir(&cli_settings)?;
+    let storage_dir = local_server::storage_dir(&cli_settings)?;
     let server_was_running = record::active_server_record(&storage_dir)?.is_some();
     let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
     let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
@@ -1823,7 +1823,7 @@ async fn run_install_inner(
                 &fabro_util::Home::from_env().dev_token_path(),
             )?;
             dev_token::write_dev_token(
-                &Storage::new(&storage_dir).server_state().dev_token_path(),
+                &Storage::new(&storage_dir).runtime_state().dev_token_path(),
                 &token,
             )?;
             fabro_util::printerr!(
@@ -1879,7 +1879,7 @@ async fn run_install_inner(
         "  {} Saved {} runtime secrets to {}",
         s.green.apply_to("✔"),
         server_env_pairs.len(),
-        path::contract_tilde(&Storage::new(&storage_dir).server_state().env_path()).display()
+        path::contract_tilde(&Storage::new(&storage_dir).runtime_state().env_path()).display()
     );
     fabro_util::printerr!(
         printer,
@@ -1911,7 +1911,7 @@ async fn run_install_inner(
                 .map(Vec::as_slice)
                 .unwrap_or_default();
             let token = dev_token::read_dev_token_file(
-                &Storage::new(&storage_dir).server_state().dev_token_path(),
+                &Storage::new(&storage_dir).runtime_state().dev_token_path(),
             );
             print_auth_status(methods, token.as_deref(), &s, printer);
             fabro_util::printerr!(printer, "");
@@ -2561,7 +2561,7 @@ client_id = "client-id"
         .unwrap();
 
         let server_env =
-            std::fs::read_to_string(Storage::new(dir.path()).server_state().env_path()).unwrap();
+            std::fs::read_to_string(Storage::new(dir.path()).runtime_state().env_path()).unwrap();
         assert!(server_env.contains("SESSION_SECRET=session"));
         assert!(server_env.contains("FABRO_JWT_PUBLIC_KEY=public-key"));
         assert_eq!(created.calls_async().await, 2);
@@ -2817,7 +2817,7 @@ client_id = "client-id"
         .await;
 
         assert!(result.is_err());
-        assert!(Storage::new(dir.path()).server_state().env_path().exists());
+        assert!(Storage::new(dir.path()).runtime_state().env_path().exists());
         assert!(!settings_path.exists());
         assert!(stop_called.load(Ordering::SeqCst));
     }
@@ -2861,7 +2861,7 @@ client_id = "client-id"
     fn persist_github_install_changes_replaces_app_env_keys_with_token_secret() {
         let dir = tempfile::tempdir().unwrap();
         let storage = Storage::new(dir.path());
-        let server_env_path = storage.server_state().env_path();
+        let server_env_path = storage.runtime_state().env_path();
         envfile::write_env_file(
             &server_env_path,
             &std::collections::HashMap::from([
@@ -2923,7 +2923,7 @@ client_id = "client-id"
     fn persist_github_install_changes_replaces_token_secret_with_app_env_keys() {
         let dir = tempfile::tempdir().unwrap();
         let storage = Storage::new(dir.path());
-        let server_env_path = storage.server_state().env_path();
+        let server_env_path = storage.runtime_state().env_path();
         envfile::write_env_file(
             &server_env_path,
             &std::collections::HashMap::from([("KEEP_ME".to_string(), "1".to_string())]),

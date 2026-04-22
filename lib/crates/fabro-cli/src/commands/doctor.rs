@@ -1,9 +1,4 @@
-#![expect(
-    clippy::disallowed_methods,
-    reason = "CLI `doctor` command: sync directory scan in command handler"
-)]
-
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use fabro_api::types as api_types;
@@ -21,7 +16,6 @@ use fabro_util::version::FABRO_VERSION;
 use crate::args::DoctorArgs;
 use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
-use crate::user_config;
 
 pub(crate) fn check_config(settings_path: Option<PathBuf>) -> CheckResult {
     match settings_path {
@@ -46,65 +40,6 @@ pub(crate) fn check_config(settings_path: Option<PathBuf>) -> CheckResult {
                 "Create ~/.fabro/settings.toml to configure Fabro".to_string(),
             )],
             remediation: Some("Create ~/.fabro/settings.toml".to_string()),
-        },
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct StorageDirStatus {
-    path:     PathBuf,
-    exists:   bool,
-    readable: bool,
-    writable: bool,
-}
-
-fn probe_storage_dir(path: &Path) -> StorageDirStatus {
-    let exists = path.is_dir();
-    let readable = exists && std::fs::read_dir(path).is_ok();
-    let writable = exists && tempfile::tempfile_in(path).is_ok();
-
-    StorageDirStatus {
-        path: path.to_path_buf(),
-        exists,
-        readable,
-        writable,
-    }
-}
-
-fn check_storage_dir(status: &StorageDirStatus) -> CheckResult {
-    let display = contract_tilde(&status.path);
-    let display = display.display();
-    let details = vec![
-        CheckDetail::new(format!(
-            "Exists: {}",
-            if status.exists { "yes" } else { "no" }
-        )),
-        CheckDetail::new(format!(
-            "Readable: {}",
-            if status.readable { "yes" } else { "no" }
-        )),
-        CheckDetail::new(format!(
-            "Writable: {}",
-            if status.writable { "yes" } else { "no" }
-        )),
-    ];
-    let is_healthy = status.exists && status.readable && status.writable;
-
-    CheckResult {
-        name: "Storage directory".to_string(),
-        status: if is_healthy {
-            CheckStatus::Pass
-        } else {
-            CheckStatus::Error
-        },
-        summary: display.to_string(),
-        details,
-        remediation: if is_healthy {
-            None
-        } else if !status.exists {
-            Some(format!("Create the directory: mkdir -p {display}"))
-        } else {
-            Some(format!("Fix permissions on {display}"))
         },
     }
 }
@@ -230,19 +165,11 @@ pub(crate) async fn run_doctor(
 
     let settings_config_path = active_settings_path(None);
 
-    let settings = user_config::load_settings().unwrap_or_default();
-    let storage_dir_path =
-        user_config::storage_dir(&settings).unwrap_or_else(|_| user_config::default_storage_dir());
-    let storage_dir = probe_storage_dir(&storage_dir_path);
-
-    let local_checks = vec![
-        check_config(
-            settings_config_path
-                .exists()
-                .then_some(settings_config_path),
-        ),
-        check_storage_dir(&storage_dir),
-    ];
+    let local_checks = vec![check_config(
+        settings_config_path
+            .exists()
+            .then_some(settings_config_path),
+    )];
 
     let mut report = CheckReport {
         title:    "Fabro Doctor".to_string(),
@@ -407,81 +334,6 @@ mod tests {
         let result = check_config(None);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.remediation.is_some());
-    }
-
-    // -- check_storage_dir --
-
-    #[test]
-    fn probe_storage_dir_existing_dir_is_readable_and_writable() {
-        let dir = tempfile::tempdir().unwrap();
-        let status = probe_storage_dir(dir.path());
-
-        assert_eq!(status, StorageDirStatus {
-            path:     dir.path().to_path_buf(),
-            exists:   true,
-            readable: true,
-            writable: true,
-        });
-    }
-
-    #[test]
-    fn probe_storage_dir_missing_dir_is_not_usable() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("missing");
-        let status = probe_storage_dir(&path);
-
-        assert_eq!(status, StorageDirStatus {
-            path,
-            exists: false,
-            readable: false,
-            writable: false,
-        });
-    }
-
-    #[test]
-    fn check_storage_dir_pass() {
-        let result = check_storage_dir(&StorageDirStatus {
-            path:     PathBuf::from("/home/user/.fabro"),
-            exists:   true,
-            readable: true,
-            writable: true,
-        });
-
-        assert_eq!(result.status, CheckStatus::Pass);
-        assert_eq!(result.summary, "/home/user/.fabro");
-        assert!(result.remediation.is_none());
-        assert_eq!(result.details.len(), 3);
-    }
-
-    #[test]
-    fn check_storage_dir_not_exists() {
-        let result = check_storage_dir(&StorageDirStatus {
-            path:     PathBuf::from("/tmp/nonexistent-fabro-doctor-test-xyz"),
-            exists:   false,
-            readable: false,
-            writable: false,
-        });
-
-        assert_eq!(result.status, CheckStatus::Error);
-        assert!(result.summary.contains("nonexistent-fabro-doctor-test-xyz"));
-        assert!(result.remediation.as_deref().unwrap().contains("mkdir -p"));
-    }
-
-    #[test]
-    fn check_storage_dir_not_writable() {
-        let result = check_storage_dir(&StorageDirStatus {
-            path:     PathBuf::from("/home/user/.fabro"),
-            exists:   true,
-            readable: true,
-            writable: false,
-        });
-
-        assert_eq!(result.status, CheckStatus::Error);
-        assert_eq!(result.summary, "/home/user/.fabro");
-        assert_eq!(
-            result.remediation.as_deref(),
-            Some("Fix permissions on /home/user/.fabro")
-        );
     }
 
     #[test]

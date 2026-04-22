@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_config::Storage;
+use fabro_config::ServerRuntimeState;
 use fabro_config::user::default_storage_dir;
 use fabro_server::bind::Bind;
 use fabro_util::Home;
@@ -52,7 +52,7 @@ pub(crate) fn server_record_is_running(record: &ServerRecord) -> bool {
 }
 
 fn server_record_path(storage_dir: &Path) -> PathBuf {
-    Storage::new(storage_dir).server_state().record_path()
+    ServerRuntimeState::new(storage_dir).record_path()
 }
 
 fn legacy_record_path(storage_dir: &Path) -> Option<PathBuf> {
@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn write_and_read_round_trip() {
         let dir = tempfile::tempdir().unwrap();
-        let path = Storage::new(dir.path()).server_state().record_path();
+        let path = ServerRuntimeState::new(dir.path()).record_path();
         let record = test_record(Bind::Tcp("127.0.0.1:3000".parse().unwrap()));
         write_server_record(&path, &record).unwrap();
 
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn active_server_record_cleans_stale_dead_pid() {
         let dir = tempfile::tempdir().unwrap();
-        let path = Storage::new(dir.path()).server_state().record_path();
+        let path = ServerRuntimeState::new(dir.path()).record_path();
         let mut record = test_record(Bind::Tcp("127.0.0.1:3000".parse().unwrap()));
         record.pid = u32::MAX; // definitely not alive
         write_server_record(&path, &record).unwrap();

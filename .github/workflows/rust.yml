@@ -10,6 +10,7 @@ on:
       - "Cargo.lock"
       - ".cargo/**"
       - ".config/**"
+      - "bin/dev/**"
       - "openapi/**"
       - ".github/workflows/rust.yml"
   pull_request:
@@ -21,6 +22,7 @@ on:
       - "Cargo.lock"
       - ".cargo/**"
       - ".config/**"
+      - "bin/dev/**"
       - "openapi/**"
       - ".github/workflows/rust.yml"
   workflow_dispatch:
@@ -35,6 +37,17 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  boundary:
+    name: Boundary
+    runs-on: ubuntu-24.04-x86-32-cores
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - run: bin/dev/check-boundary.sh
+
   fmt:
     name: Format
     runs-on: ubuntu-24.04-x86-32-cores

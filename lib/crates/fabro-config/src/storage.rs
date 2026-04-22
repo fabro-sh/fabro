@@ -9,7 +9,7 @@ pub struct Storage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ServerState {
+pub struct ServerRuntimeState {
     root: PathBuf,
 }
 
@@ -27,11 +27,6 @@ impl Storage {
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
-    }
-
-    #[must_use]
-    pub fn logs_dir(&self) -> PathBuf {
-        self.root.join("logs")
     }
 
     #[must_use]
@@ -53,8 +48,8 @@ impl Storage {
     }
 
     #[must_use]
-    pub fn server_state(&self) -> ServerState {
-        ServerState::new(self.root.clone())
+    pub fn runtime_state(&self) -> ServerRuntimeState {
+        ServerRuntimeState::new(self.root.clone())
     }
 
     #[must_use]
@@ -83,10 +78,15 @@ impl Storage {
     }
 }
 
-impl ServerState {
+impl ServerRuntimeState {
     #[must_use]
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
+    }
+
+    #[must_use]
+    pub fn logs_dir(&self) -> PathBuf {
+        self.root.join("logs")
     }
 
     #[must_use]
@@ -101,7 +101,7 @@ impl ServerState {
 
     #[must_use]
     pub fn log_path(&self) -> PathBuf {
-        self.root.join("logs").join("server.log")
+        self.logs_dir().join("server.log")
     }
 
     #[must_use]
@@ -163,17 +163,14 @@ mod tests {
     use chrono::Local;
     use fabro_types::RunId;
 
-    use super::{RunScratch, Storage};
+    use super::{RunScratch, ServerRuntimeState, Storage};
 
     #[test]
     fn storage_accessors_are_relative_to_root() {
         let storage = Storage::new("/tmp/fabro-data");
+        let runtime = ServerRuntimeState::new("/tmp/fabro-data");
 
         assert_eq!(storage.root(), std::path::Path::new("/tmp/fabro-data"));
-        assert_eq!(
-            storage.logs_dir(),
-            std::path::Path::new("/tmp/fabro-data/logs")
-        );
         assert_eq!(
             storage.cache_dir(),
             std::path::Path::new("/tmp/fabro-data/cache")
@@ -199,19 +196,23 @@ mod tests {
             std::path::Path::new("/tmp/fabro-data/objects/artifacts")
         );
         assert_eq!(
-            storage.server_state().record_path(),
+            runtime.logs_dir(),
+            std::path::Path::new("/tmp/fabro-data/logs")
+        );
+        assert_eq!(
+            runtime.record_path(),
             std::path::Path::new("/tmp/fabro-data/server.json")
         );
         assert_eq!(
-            storage.server_state().lock_path(),
+            runtime.lock_path(),
             std::path::Path::new("/tmp/fabro-data/server.lock")
         );
         assert_eq!(
-            storage.server_state().log_path(),
+            runtime.log_path(),
             std::path::Path::new("/tmp/fabro-data/logs/server.log")
         );
         assert_eq!(
-            storage.server_state().env_path(),
+            runtime.env_path(),
             std::path::Path::new("/tmp/fabro-data/server.env")
         );
     }

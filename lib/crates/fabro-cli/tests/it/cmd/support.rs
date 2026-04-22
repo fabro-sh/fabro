@@ -666,7 +666,7 @@ struct TestServerRecord {
 }
 
 pub(crate) fn local_dev_token(storage_dir: &Path) -> Option<String> {
-    let server_state = Storage::new(storage_dir).server_state();
+    let server_state = Storage::new(storage_dir).runtime_state();
 
     fabro_util::dev_token::read_dev_token_file(&server_state.dev_token_path()).or_else(|| {
         std::fs::read_to_string(server_state.record_path())
@@ -679,7 +679,7 @@ pub(crate) fn local_dev_token(storage_dir: &Path) -> Option<String> {
 }
 
 pub(crate) fn server_endpoint(storage_dir: &Path) -> Option<(fabro_http::HttpClient, String)> {
-    let record_path = Storage::new(storage_dir).server_state().record_path();
+    let record_path = Storage::new(storage_dir).runtime_state().record_path();
     let record = std::fs::read_to_string(record_path)
         .ok()
         .and_then(|content| serde_json::from_str::<TestServerRecord>(&content).ok())?;
@@ -714,7 +714,7 @@ pub(crate) fn server_endpoint(storage_dir: &Path) -> Option<(fabro_http::HttpCli
 }
 
 pub(crate) fn server_target(storage_dir: &Path) -> String {
-    let record_path = Storage::new(storage_dir).server_state().record_path();
+    let record_path = Storage::new(storage_dir).runtime_state().record_path();
     let record = std::fs::read_to_string(record_path)
         .ok()
         .and_then(|content| serde_json::from_str::<TestServerRecord>(&content).ok())

@@ -17,9 +17,7 @@ use fabro_workflow::records::Conclusion;
 use indicatif::HumanDuration;
 
 use crate::server_client;
-use crate::shared::{
-    format_tokens_human, format_usd_micros, print_diagnostics, relative_path, tilde_path,
-};
+use crate::shared::{format_tokens_human, format_usd_micros, print_diagnostics, relative_path};
 
 pub(crate) fn print_preflight_workflow_summary(
     workflow: &types::PreflightWorkflowSummary,
@@ -133,7 +131,6 @@ pub(crate) fn api_check_report_to_local(report: &types::PreflightCheckReport) ->
 pub(crate) async fn print_run_summary_with_client(
     client: &server_client::Client,
     run_id: &fabro_types::RunId,
-    local_run_dir: Option<&Path>,
     styles: &Styles,
     printer: Printer,
 ) -> Result<()> {
@@ -151,7 +148,6 @@ pub(crate) async fn print_run_summary_with_client(
     print_run_conclusion(
         &conclusion,
         run_id,
-        local_run_dir,
         None,
         pr_url.as_deref(),
         styles,
@@ -160,16 +156,13 @@ pub(crate) async fn print_run_summary_with_client(
     let final_output =
         resolve_final_output_with_client(client, run_id, checkpoint.as_ref()).await?;
     print_final_output(final_output.as_deref(), styles, printer);
-    if local_run_dir.is_some() {
-        print_assets_with_client(client, run_id, styles, printer).await?;
-    }
+    print_assets_with_client(client, run_id, styles, printer).await?;
     Ok(())
 }
 
 pub(crate) fn print_run_conclusion(
     conclusion: &Conclusion,
     run_id: impl std::fmt::Display,
-    run_dir: Option<&Path>,
     pushed_branch: Option<&str>,
     pr_url: Option<&str>,
     styles: &Styles,
@@ -249,16 +242,6 @@ pub(crate) fn print_run_conclusion(
                     .apply_to(format!("Toks:      {}", format_tokens_human(total_tokens)))
             );
         }
-    }
-
-    if let Some(run_dir) = run_dir {
-        fabro_util::printerr!(
-            printer,
-            "{}",
-            styles
-                .dim
-                .apply_to(format!("Run:       {}", tilde_path(run_dir)))
-        );
     }
 
     if let Some(ref failure) = conclusion.failure_reason {

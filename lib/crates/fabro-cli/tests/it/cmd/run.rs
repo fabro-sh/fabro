@@ -530,6 +530,13 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
             .header("Content-Type", "application/json")
             .body(remote_run_state_response().to_string());
     });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/artifacts"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(serde_json::json!({ "data": [] }).to_string());
+    });
 
     let workflow = context.install_fixture("simple.fabro");
     let output = context
@@ -665,7 +672,6 @@ fn dry_run_simple() {
     Run:       [ULID]
     Status:    SUCCESS
     Duration:  [DURATION]
-    Run:       [RUN_DIR]
 
     === Output ===
     [Simulated] Response for stage: report

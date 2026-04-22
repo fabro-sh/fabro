@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use fabro_config::{ServerState, parse_settings_layer, resolve_server_from_file};
+use fabro_config::{ServerRuntimeState, parse_settings_layer, resolve_server_from_file};
 use fabro_server::bind::Bind;
 use fabro_server::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
 use fabro_server::jwt_auth::{AuthMode, resolve_auth_mode_with_lookup};
@@ -64,7 +64,7 @@ fn write_test_config(tempdir: &TempDir, settings: &str) -> PathBuf {
     let config_path = tempdir.path().join("settings.toml");
     std::fs::write(&config_path, settings).expect("test settings should write");
     std::fs::write(
-        ServerState::new(tempdir.path()).env_path(),
+        ServerRuntimeState::new(tempdir.path()).env_path(),
         format!("FABRO_DEV_TOKEN={TEST_DEV_TOKEN}\nSESSION_SECRET={TEST_SESSION_SECRET}\n"),
     )
     .expect("test env file should write");

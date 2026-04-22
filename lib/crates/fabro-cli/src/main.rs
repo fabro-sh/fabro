@@ -8,6 +8,7 @@ mod command_context;
 mod commands;
 mod gh;
 mod landing;
+mod local_server;
 mod logging;
 mod manifest_builder;
 mod server_client;
@@ -481,8 +482,8 @@ async fn prepare_server_bootstrap(
 ) -> Result<PreTracingBootstrap> {
     let settings =
         user_config::load_settings_with_config_and_storage_dir(config_path, storage_dir)?;
-    let storage_dir = user_config::storage_dir(&settings)?;
-    let storage = fabro_config::Storage::new(&storage_dir);
+    let storage_dir = local_server::storage_dir(&settings)?;
+    let runtime_state = fabro_config::ServerRuntimeState::new(storage_dir.clone());
     let foreground_server_log_bootstrap = if foreground {
         Some(commands::server::start::prepare_foreground_server_log(&storage_dir).await?)
     } else {
@@ -491,19 +492,11 @@ async fn prepare_server_bootstrap(
 
     Ok(PreTracingBootstrap {
         sink: logging::InternalLogSink::Server {
-            path: storage.server_state().log_path(),
+            path: runtime_state.log_path(),
         },
-        config_log_level: server_config_log_level(&settings),
+        config_log_level: local_server::config_log_level(&settings),
         foreground_server_log_bootstrap,
     })
-}
-
-fn server_config_log_level(settings: &SettingsLayer) -> Option<String> {
-    settings
-        .server
-        .as_ref()
-        .and_then(|server| server.logging.as_ref())
-        .and_then(|logging| logging.level.clone())
 }
 
 #[cfg(test)]

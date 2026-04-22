@@ -68,7 +68,7 @@ pub async fn run_all(state: &AppState) -> DiagnosticsReport {
             },
             CheckSection {
                 title:  "Configuration".to_string(),
-                checks: vec![crypto],
+                checks: vec![crypto, check_storage_dir(state)],
             },
         ],
     }
@@ -398,6 +398,45 @@ fn check_sandbox(state: &AppState) -> CheckResult {
     }
 }
 
+fn check_storage_dir(state: &AppState) -> CheckResult {
+    check_storage_dir_path(&state.server_storage_dir())
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Server diagnostics deliberately performs a synchronous local filesystem probe."
+)]
+fn check_storage_dir_path(path: &std::path::Path) -> CheckResult {
+    let exists = path.is_dir();
+    let readable = exists && std::fs::read_dir(path).is_ok();
+    let writable = exists && tempfile::tempfile_in(path).is_ok();
+    let details = vec![
+        CheckDetail::new(format!("Exists: {}", if exists { "yes" } else { "no" })),
+        CheckDetail::new(format!("Readable: {}", if readable { "yes" } else { "no" })),
+        CheckDetail::new(format!("Writable: {}", if writable { "yes" } else { "no" })),
+    ];
+    let is_healthy = exists && readable && writable;
+    let display = path.display();
+
+    CheckResult {
+        name: "Storage directory".to_string(),
+        status: if is_healthy {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Error
+        },
+        summary: display.to_string(),
+        details,
+        remediation: if is_healthy {
+            None
+        } else if !exists {
+            Some(format!("Create the directory: mkdir -p {display}"))
+        } else {
+            Some(format!("Fix permissions on {display}"))
+        },
+    }
+}
+
 async fn check_brave_search(state: &AppState) -> CheckResult {
     let Some(api_key) = state.vault_or_env("BRAVE_SEARCH_API_KEY") else {
         return CheckResult {
@@ -541,5 +580,41 @@ fn check_crypto(state: &AppState) -> CheckResult {
             details,
             remediation: Some(errors.join("; ")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_storage_dir_path_passes_for_readable_writable_directory() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let result = check_storage_dir_path(dir.path());
+
+        assert_eq!(result.name, "Storage directory");
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert_eq!(result.summary, dir.path().display().to_string());
+        assert!(result.remediation.is_none());
+    }
+
+    #[test]
+    fn check_storage_dir_path_errors_for_missing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing");
+
+        let result = check_storage_dir_path(&missing);
+
+        assert_eq!(result.name, "Storage directory");
+        assert_eq!(result.status, CheckStatus::Error);
+        assert_eq!(result.summary, missing.display().to_string());
+        assert_eq!(
+            result.remediation,
+            Some(format!(
+                "Create the directory: mkdir -p {}",
+                missing.display()
+            ))
+        );
     }
 }

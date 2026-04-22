@@ -37,6 +37,10 @@ pub(crate) async fn dispatch(
     }
 }
 
+#[allow(
+    deprecated,
+    reason = "boundary-exempt(pr-api): remove with follow-up #1 when PR ops move server-side"
+)]
 fn load_github_credentials_required(
     cli: &CliSettings,
     cli_layer: &CliLayer,

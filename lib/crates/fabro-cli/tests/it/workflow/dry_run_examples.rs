@@ -32,7 +32,6 @@ fn dry_run_branching() {
     Run:       [ULID]
     Status:    SUCCESS
     Duration:  [DURATION]
-    Run:       [RUN_DIR]
 
     === Output ===
     [Simulated] Response for stage: validate
@@ -66,7 +65,6 @@ fn dry_run_conditions() {
     Run:       [ULID]
     Status:    SUCCESS
     Duration:  [DURATION]
-    Run:       [RUN_DIR]
 
     === Output ===
     [Simulated] Response for stage: path_b
@@ -101,7 +99,6 @@ fn dry_run_parallel() {
     Run:       [ULID]
     Status:    SUCCESS
     Duration:  [DURATION]
-    Run:       [RUN_DIR]
 
     === Output ===
     [Simulated] Response for stage: review
@@ -136,7 +133,6 @@ fn dry_run_styled() {
     Run:       [ULID]
     Status:    SUCCESS
     Duration:  [DURATION]
-    Run:       [RUN_DIR]
 
     === Output ===
     [Simulated] Response for stage: critical_review
@@ -169,6 +165,5 @@ fn dry_run_legacy_tool() {
     Run:       [ULID]
     Status:    SUCCESS
     Duration:  [DURATION]
-    Run:       [RUN_DIR]
     ");
 }

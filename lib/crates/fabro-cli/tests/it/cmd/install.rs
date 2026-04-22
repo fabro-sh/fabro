@@ -237,7 +237,7 @@ mode = "keep-me"
         ),
     );
 
-    let server_env_path = Storage::new(&storage_dir).server_state().env_path();
+    let server_env_path = Storage::new(&storage_dir).runtime_state().env_path();
     envfile::write_env_file(
         &server_env_path,
         &std::collections::HashMap::from([

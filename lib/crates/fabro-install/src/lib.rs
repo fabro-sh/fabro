@@ -266,7 +266,7 @@ fn persist_server_env_secrets(storage_dir: &Path, secrets: &[(String, String)]) 
         return Ok(());
     }
 
-    let env_path = Storage::new(storage_dir).server_state().env_path();
+    let env_path = Storage::new(storage_dir).runtime_state().env_path();
     envfile::merge_env_file(&env_path, secrets.iter().cloned())
         .with_context(|| format!("merging server env secrets into {}", env_path.display()))?;
     Ok(())
@@ -500,7 +500,7 @@ name = "custom"
         assert_eq!(restored.get("EXISTING_SECRET"), Some("keep"));
         assert_eq!(restored.get("bad-secret-name"), None);
 
-        let server_env = envfile::read_env_file(&storage.server_state().env_path()).unwrap();
+        let server_env = envfile::read_env_file(&storage.runtime_state().env_path()).unwrap();
         assert_eq!(
             server_env.get("SESSION_SECRET").map(String::as_str),
             Some("session")

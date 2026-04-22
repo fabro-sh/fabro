@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use chrono::Utc;
-use fabro_config::Storage;
+use fabro_config::ServerRuntimeState;
 use fabro_server::bind::BindRequest;
 use fabro_server::serve;
 use fabro_server::serve::ServeArgs;
@@ -35,7 +35,7 @@ pub(crate) async fn execute(
         None
     };
 
-    let log_path = Storage::new(&storage_dir).server_state().log_path();
+    let log_path = ServerRuntimeState::new(&storage_dir).log_path();
     let dev_token_path = std::env::var_os("FABRO_DEV_TOKEN_PATH").map(PathBuf::from);
     let pid = std::process::id();
 

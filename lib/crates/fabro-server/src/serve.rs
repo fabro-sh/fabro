@@ -470,7 +470,7 @@ where
     };
     let storage = Storage::new(&data_dir);
     let vault_path = storage.secrets_path();
-    let server_env_path = storage.server_state().env_path();
+    let server_env_path = storage.runtime_state().env_path();
     let server_secrets = ServerSecrets::load(server_env_path.clone())?;
     let webhook_secret_present = server_secrets.get(WEBHOOK_SECRET_ENV).is_some();
 

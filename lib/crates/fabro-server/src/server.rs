@@ -1566,7 +1566,7 @@ fn build_disk_usage_response(
     verbose: bool,
 ) -> anyhow::Result<DiskUsageResponse> {
     let scratch_base_dir = scratch_base(storage_dir);
-    let logs_base_dir = Storage::new(storage_dir).logs_dir();
+    let logs_base_dir = Storage::new(storage_dir).runtime_state().logs_dir();
     let runs = scan_runs_with_summaries(summaries, &scratch_base_dir)?;
 
     let mut active_count = 0u64;
@@ -3744,7 +3744,7 @@ struct WorkerServerRecord {
 }
 
 fn current_server_target(storage_dir: &std::path::Path) -> anyhow::Result<String> {
-    let record_path = Storage::new(storage_dir).server_state().record_path();
+    let record_path = Storage::new(storage_dir).runtime_state().record_path();
     #[expect(
         clippy::disallowed_methods,
         reason = "sync helper invoked from worker_command (sync) via spawn_blocking at the async \

@@ -8,7 +8,7 @@ use fabro_client::{
     apply_bearer_token_auth,
 };
 pub(crate) use fabro_client::{Client, RunEventStream};
-use fabro_config::Storage;
+use fabro_config::ServerRuntimeState;
 use fabro_server::bind::Bind;
 pub(crate) use fabro_types::RunProjection;
 use fabro_types::settings::SettingsLayer;
@@ -18,6 +18,7 @@ use tokio::time::sleep;
 
 use crate::args::ServerTargetArgs;
 use crate::commands::server::{record, start};
+use crate::local_server;
 use crate::user_config::{self, cli_http_client_builder};
 
 #[derive(Debug)]
@@ -69,7 +70,7 @@ pub(crate) async fn connect_server_with_settings(
         if let Some(path) = target.as_unix_socket_path() {
             return connect_managed_unix_socket_api_client_bundle(
                 path,
-                &user_config::storage_dir(settings)?,
+                &local_server::storage_dir(settings)?,
                 base_config_path,
             )
             .await;
@@ -77,7 +78,7 @@ pub(crate) async fn connect_server_with_settings(
         return connect_target_api_client_bundle(&target).await;
     }
 
-    connect_local_api_client_bundle(&user_config::storage_dir(settings)?, base_config_path).await
+    connect_local_api_client_bundle(&local_server::storage_dir(settings)?, base_config_path).await
 }
 
 async fn connect_managed_unix_socket_api_client_bundle(
@@ -137,16 +138,6 @@ async fn connect_local_api_client_bundle(
             Ok(Client::from_http_client(base_url, http_client))
         }
     }
-}
-
-#[allow(
-    dead_code,
-    reason = "Retained for pending storage-backed internal callers and referenced in existing design docs."
-)]
-pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::ApiClient> {
-    connect_local_api_client_bundle(storage_dir, &user_config::active_settings_path(None))
-        .await
-        .map(|client| client.api_client())
 }
 
 async fn connect_target_api_client_bundle(target: &ServerTarget) -> Result<Client> {
@@ -230,12 +221,13 @@ fn load_dev_token_if_available_from_sources(
     }
 
     if let Some(storage_dir) = storage_dir {
-        let storage_token_path = Storage::new(storage_dir).server_state().dev_token_path();
+        let runtime_state = ServerRuntimeState::new(storage_dir);
+        let storage_token_path = runtime_state.dev_token_path();
         if let Some(token) = dev_token::read_dev_token_file(&storage_token_path) {
             return Some(token);
         }
 
-        let record_path = Storage::new(storage_dir).server_state().record_path();
+        let record_path = runtime_state.record_path();
         if let Some(token) = record::read_server_record(&record_path)
             .and_then(|server| server.dev_token_path)
             .as_deref()
@@ -413,15 +405,12 @@ mod tests {
         let token_path = token_dir.path().join("dev-token");
         std::fs::write(&token_path, token).unwrap();
 
-        let record_path = fabro_config::Storage::new(storage.path())
-            .server_state()
-            .record_path();
+        let runtime_state = fabro_config::ServerRuntimeState::new(storage.path());
+        let record_path = runtime_state.record_path();
         record::write_server_record(&record_path, &record::ServerRecord {
             pid:            std::process::id(),
             bind:           Bind::Unix(temp_home.path().join("fabro.sock")),
-            log_path:       fabro_config::Storage::new(storage.path())
-                .server_state()
-                .log_path(),
+            log_path:       runtime_state.log_path(),
             dev_token_path: Some(token_path),
             started_at:     Utc::now(),
         })

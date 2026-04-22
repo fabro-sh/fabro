@@ -71,7 +71,6 @@ pub(crate) async fn execute(
             super::output::print_run_summary_with_client(
                 &client,
                 &created_run.run_id,
-                created_run.local_run_dir.as_deref(),
                 styles,
                 printer,
             )

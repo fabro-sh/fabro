@@ -1,6 +1,3 @@
-use std::path::PathBuf;
-
-use fabro_config::Storage;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
 use fabro_types::RunId;
@@ -13,11 +10,9 @@ use super::overrides::run_args_layer;
 use crate::args::RunArgs;
 use crate::command_context::CommandContext;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, run_manifest_args};
-use crate::user_config;
 
 pub(crate) struct CreatedRun {
-    pub(crate) run_id:        RunId,
-    pub(crate) local_run_dir: Option<PathBuf>,
+    pub(crate) run_id: RunId,
 }
 
 /// Create a workflow run: allocate run directory, persist RunSpec, return
@@ -54,7 +49,6 @@ pub(crate) async fn create_run(
         user_layer: load_settings_user()?,
         user_settings_path: Some(active_settings_path(None)),
     })?;
-    let target = user_config::resolve_server_target(&args.target, ctx.machine_settings())?;
     let client = ctx.server().await?;
     if !quiet {
         let preflight = client.run_preflight(built.manifest.clone()).await?;
@@ -73,19 +67,8 @@ pub(crate) async fn create_run(
     }
 
     let created_run_id = client.create_run_from_manifest(built.manifest).await?;
-    let local_run_dir = if target.is_unix_socket() {
-        Some(
-            Storage::new(user_config::storage_dir(ctx.machine_settings())?)
-                .run_scratch(&created_run_id)
-                .root()
-                .to_path_buf(),
-        )
-    } else {
-        None
-    };
 
     Ok(CreatedRun {
         run_id: created_run_id,
-        local_run_dir,
     })
 }

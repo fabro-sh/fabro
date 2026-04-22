@@ -21,6 +21,10 @@ use crate::shared::print_json_pretty;
 use crate::shared::repo::ensure_matching_repo_origin;
 use crate::user_config;
 
+#[allow(
+    deprecated,
+    reason = "boundary-exempt(pr-api): remove with follow-up #1 when PR ops move server-side"
+)]
 pub(super) async fn create_command(
     args: PrCreateArgs,
     cli: &CliSettings,

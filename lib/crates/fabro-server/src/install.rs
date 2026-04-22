@@ -826,7 +826,7 @@ async fn post_install_finish(
             };
             if let Err(err) = dev_token::write_dev_token(
                 &Storage::new(state.storage_dir.as_ref())
-                    .server_state()
+                    .runtime_state()
                     .dev_token_path(),
                 &token,
             ) {

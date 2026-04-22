@@ -10,6 +10,7 @@ use fabro_util::version::FABRO_VERSION;
 use tracing::debug;
 
 use crate::args::ServerTargetArgs;
+use crate::local_server;
 
 pub(crate) fn load_settings() -> anyhow::Result<SettingsLayer> {
     load_settings_with_config_and_storage_dir(None, None)
@@ -83,28 +84,11 @@ pub(crate) fn default_server_target() -> ServerTarget {
     ServerTarget::unix_socket_path(default_socket_path()).expect("default socket path is absolute")
 }
 
+#[deprecated(
+    note = "use local_server::storage_dir for lifecycle; PR commands must move to server-side API"
+)]
 pub(crate) fn storage_dir(settings: &SettingsLayer) -> anyhow::Result<PathBuf> {
-    let resolved = fabro_config::resolve_server_from_file(settings).map_err(|errors| {
-        anyhow::anyhow!(
-            "failed to resolve server settings:\n{}",
-            errors
-                .into_iter()
-                .map(|error| error.to_string())
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
-    })?;
-    let resolved_root = resolved
-        .storage
-        .root
-        .resolve(|name| std::env::var(name).ok())
-        .map_err(|err| {
-            anyhow::anyhow!(
-                "failed to resolve {}: {err}",
-                resolved.storage.root.as_source()
-            )
-        })?;
-    Ok(PathBuf::from(resolved_root.value))
+    local_server::storage_dir(settings)
 }
 
 fn parse_server_target(value: &str) -> Result<ServerTarget> {

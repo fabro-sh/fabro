@@ -23,7 +23,7 @@ use tracing::warn;
 use crate::args::UninstallArgs;
 use crate::commands::server;
 use crate::shared::{format_size, print_json_pretty, tilde_path};
-use crate::user_config;
+use crate::{local_server, user_config};
 
 #[derive(Debug, Serialize)]
 struct Inventory {
@@ -59,13 +59,10 @@ pub(crate) async fn run_uninstall(
         return Ok(());
     }
 
-    let storage_dir = user_config::load_settings().map_or_else(
-        |_| user_config::default_storage_dir(),
-        |settings| {
-            user_config::storage_dir(&settings)
-                .unwrap_or_else(|_| user_config::default_storage_dir())
-        },
-    );
+    let storage_dir = user_config::load_settings()
+        .ok()
+        .and_then(|settings| local_server::storage_dir(&settings).ok())
+        .unwrap_or_else(user_config::default_storage_dir);
 
     let inventory = build_inventory(&home_root, &storage_dir)?;
 
