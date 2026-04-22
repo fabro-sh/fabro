@@ -11,7 +11,8 @@ use std::io::Write;
 use std::path::Path;
 
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
-use fabro_config::{load_and_resolve, load_settings_project, project};
+use fabro_config::{load_settings_project, project};
+use fabro_types::settings::Settings;
 use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_types::settings::{CliSettings, SettingsLayer};
 use fabro_util::printer::Printer;
@@ -90,13 +91,57 @@ fn local_settings_value(
 ) -> anyhow::Result<serde_json::Value> {
     let base_ctx = CommandContext::base(printer, cli.clone(), cli_layer)?;
     let layers = config_layers(&base_ctx, args.workflow.as_deref())?;
-    let mut value = serde_json::to_value(load_and_resolve(
+    let local_settings = fabro_config::effective_settings::materialize_settings_layer(
         layers,
         None,
         EffectiveSettingsMode::LocalOnly,
-    )?)?;
+    )?;
+    let mut value = serde_json::to_value(resolve_local_settings(&local_settings, printer)?)?;
     strip_nulls(&mut value);
     Ok(value)
+}
+
+fn render_resolve_errors(errors: Vec<fabro_config::ResolveError>) -> anyhow::Error {
+    anyhow::anyhow!(
+        "failed to resolve local settings:\n{}",
+        errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
+}
+
+fn resolve_local_settings(file: &SettingsLayer, printer: Printer) -> anyhow::Result<Settings> {
+    let file = fabro_config::apply_builtin_defaults(file.clone());
+
+    let project = fabro_config::resolve_project_from_file(&file).map_err(render_resolve_errors)?;
+    let workflow = fabro_config::resolve_workflow_from_file(&file).map_err(render_resolve_errors)?;
+    let run = fabro_config::resolve_run_from_file(&file).map_err(render_resolve_errors)?;
+    let cli = fabro_config::resolve_cli_from_file(&file).map_err(render_resolve_errors)?;
+    let features = fabro_config::resolve_features_from_file(&file).map_err(render_resolve_errors)?;
+
+    let server = match fabro_config::resolve_server_from_file(&file) {
+        Ok(server) => server,
+        Err(errors) => {
+            for error in &errors {
+                fabro_util::printerr!(printer, "warning: server config: {error}");
+            }
+
+            let server_layer = file.server.clone().unwrap_or_default();
+            let mut ignored = Vec::new();
+            fabro_config::resolve_server(&server_layer, &mut ignored)
+        }
+    };
+
+    Ok(Settings {
+        project,
+        workflow,
+        run,
+        cli,
+        server,
+        features,
+    })
 }
 
 async fn rendered_config(

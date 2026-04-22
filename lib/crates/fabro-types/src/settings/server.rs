@@ -71,19 +71,10 @@ impl Default for ServerWebSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ServerAuthSettings {
     pub methods: Vec<ServerAuthMethod>,
     pub github:  ServerAuthGithubSettings,
-}
-
-impl Default for ServerAuthSettings {
-    fn default() -> Self {
-        Self {
-            methods: vec![ServerAuthMethod::DevToken],
-            github:  ServerAuthGithubSettings::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -84,25 +84,11 @@ pub(crate) fn default_server_target() -> ServerTarget {
 }
 
 pub(crate) fn storage_dir(settings: &SettingsLayer) -> anyhow::Result<PathBuf> {
-    let resolved = fabro_config::resolve_server_from_file(settings).map_err(|errors| {
-        anyhow::anyhow!(
-            "failed to resolve server settings:\n{}",
-            errors
-                .into_iter()
-                .map(|error| error.to_string())
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
-    })?;
-    let resolved_root = resolved
-        .storage
-        .root
+    let storage_root = fabro_config::resolve_storage_root(settings);
+    let resolved_root = storage_root
         .resolve(|name| std::env::var(name).ok())
         .map_err(|err| {
-            anyhow::anyhow!(
-                "failed to resolve {}: {err}",
-                resolved.storage.root.as_source()
-            )
+            anyhow::anyhow!("failed to resolve {}: {err}", storage_root.as_source())
         })?;
     Ok(PathBuf::from(resolved_root.value))
 }
@@ -258,5 +244,47 @@ url = "https://config.example.com"
             error.to_string(),
             "server target must be an http(s) URL or absolute Unix socket path"
         );
+    }
+
+    #[test]
+    fn storage_dir_defaults_without_server_auth_methods() {
+        let settings = SettingsLayer::default();
+
+        assert_eq!(storage_dir(&settings).unwrap(), fabro_config::user::default_storage_dir());
+    }
+
+    #[test]
+    fn storage_dir_uses_explicit_server_storage_root() {
+        let settings = parse_v2(
+            r#"
+_version = 1
+
+[server.storage]
+root = "/srv/fabro"
+"#,
+        );
+
+        assert_eq!(storage_dir(&settings).unwrap(), PathBuf::from("/srv/fabro"));
+    }
+
+    #[test]
+    fn storage_dir_resolves_env_interpolated_root() {
+        let settings = parse_v2(
+            r#"
+_version = 1
+
+[server.storage]
+root = "{{ env.FABRO_STORAGE_ROOT }}"
+"#,
+        );
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::var_os("FABRO_STORAGE_ROOT");
+        std::env::set_var("FABRO_STORAGE_ROOT", temp.path());
+        let _guard = scopeguard::guard(original, |original| match original {
+            Some(value) => std::env::set_var("FABRO_STORAGE_ROOT", value),
+            None => std::env::remove_var("FABRO_STORAGE_ROOT"),
+        });
+
+        assert_eq!(storage_dir(&settings).unwrap(), temp.path());
     }
 }

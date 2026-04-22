@@ -12,10 +12,33 @@ use std::process::Stdio;
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
+use fabro_config::{Storage, envfile};
 use fabro_test::{
     apply_test_isolation, fabro_snapshot, isolated_storage_dir, server_log_files, stop_pid,
     test_context, wait_for_log_line, wait_for_path,
 };
+use fabro_util::dev_token;
+
+const TEST_DEV_TOKEN: &str =
+    "fabro_dev_abababababababababababababababababababababababababababababababab";
+
+fn write_dev_token_server_settings(config_path: &std::path::Path, rest: &str) {
+    std::fs::write(
+        config_path,
+        format!("_version = 1\n\n[server.auth]\nmethods = [\"dev-token\"]\n\n{rest}"),
+    )
+    .unwrap();
+}
+
+fn provision_dev_token_auth(home_dir: &std::path::Path, storage_dir: &std::path::Path) {
+    let server_env_path = Storage::new(storage_dir).server_state().env_path();
+    envfile::merge_env_file(&server_env_path, [("FABRO_DEV_TOKEN", TEST_DEV_TOKEN)]).unwrap();
+    dev_token::write_dev_token(
+        &home_dir.join(".fabro").join("dev-token"),
+        TEST_DEV_TOKEN,
+    )
+    .unwrap();
+}
 
 #[test]
 fn help() {
@@ -80,6 +103,8 @@ fn start_already_running_exits_with_error() {
     let context = test_context!();
     let storage_root = isolated_storage_dir();
     let storage_dir = storage_root.path().join("storage");
+    context.write_home(".fabro/settings.toml", "[server.auth]\nmethods = [\"dev-token\"]\n");
+    provision_dev_token_auth(&context.home_dir, &storage_dir);
 
     let sock_dir = tempfile::tempdir_in("/tmp").unwrap();
     let bind_addr = sock_dir.path().join("test.sock");
@@ -170,7 +195,8 @@ fn foreground_start_writes_tracing_to_storage_server_log() {
     let socket_path = storage_root.path().join("foreground.sock");
     let config_dir = tempfile::tempdir_in("/tmp").unwrap();
     let config_path = config_dir.path().join("settings.toml");
-    std::fs::write(&config_path, "_version = 1\n").unwrap();
+    write_dev_token_server_settings(&config_path, "");
+    provision_dev_token_auth(home_dir.path(), &storage_dir);
     let storage_log_path = storage_dir.join("logs").join("server.log");
     std::fs::create_dir_all(storage_log_path.parent().unwrap()).unwrap();
     std::fs::write(&storage_log_path, "stale pre-start log entry\n").unwrap();
@@ -277,7 +303,8 @@ fn daemon_start_writes_tracing_to_storage_server_log() {
     let socket_path = storage_root.path().join("daemon.sock");
     let config_dir = tempfile::tempdir_in("/tmp").unwrap();
     let config_path = config_dir.path().join("settings.toml");
-    std::fs::write(&config_path, "_version = 1\n").unwrap();
+    write_dev_token_server_settings(&config_path, "");
+    provision_dev_token_auth(&context.home_dir, &storage_dir);
     let storage_log_path = storage_dir.join("logs").join("server.log");
     std::fs::create_dir_all(storage_log_path.parent().unwrap()).unwrap();
     std::fs::write(&storage_log_path, "stale pre-start log entry\n").unwrap();
@@ -351,7 +378,8 @@ fn start_errors_when_only_a_legacy_running_server_record_exists() {
     let socket_path = home_dir.path().join("legacy.sock");
     let config_dir = tempfile::tempdir_in("/tmp").unwrap();
     let config_path = config_dir.path().join("settings.toml");
-    std::fs::write(&config_path, "_version = 1\n").unwrap();
+    write_dev_token_server_settings(&config_path, "");
+    provision_dev_token_auth(home_dir.path(), &storage_dir);
 
     let start_output = {
         let mut start = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
@@ -431,7 +459,8 @@ fn concurrent_foreground_start_does_not_retruncate_storage_server_log() {
     let second_socket_path = storage_root.path().join("foreground-second.sock");
     let config_dir = tempfile::tempdir_in("/tmp").unwrap();
     let config_path = config_dir.path().join("settings.toml");
-    std::fs::write(&config_path, "_version = 1\n").unwrap();
+    write_dev_token_server_settings(&config_path, "");
+    provision_dev_token_auth(home_dir.path(), &storage_dir);
 
     let storage_log_path = storage_dir.join("logs").join("server.log");
     std::fs::create_dir_all(storage_log_path.parent().unwrap()).unwrap();
@@ -670,6 +699,8 @@ fn start_without_bind_uses_home_socket_instead_of_storage_socket() {
     let context = test_context!();
     let storage_root = isolated_storage_dir();
     let storage_dir = storage_root.path().join("storage");
+    context.write_home(".fabro/settings.toml", "[server.auth]\nmethods = [\"dev-token\"]\n");
+    provision_dev_token_auth(&context.home_dir, &storage_dir);
     let expected_socket = context.home_dir.join(".fabro").join("fabro.sock");
     let storage_socket = storage_dir.join("fabro.sock");
 
@@ -709,17 +740,14 @@ fn start_without_bind_uses_configured_tcp_listen_address() {
     let storage_dir = storage_root.path().join("storage");
     let config_dir = tempfile::tempdir_in("/tmp").unwrap();
     let config_path = config_dir.path().join("settings.toml");
-    std::fs::write(
+    write_dev_token_server_settings(
         &config_path,
-        r#"
-_version = 1
-
-[server.listen]
+        r#"[server.listen]
 type = "tcp"
 address = "127.0.0.1:0"
 "#,
-    )
-    .unwrap();
+    );
+    provision_dev_token_auth(&context.home_dir, &storage_dir);
 
     let mut cmd = context.command();
     cmd.env("FABRO_STORAGE_DIR", &storage_dir);
@@ -766,6 +794,8 @@ fn start_with_tcp_host_only_bind_resolves_to_host_and_port() {
     let context = test_context!();
     let storage_root = isolated_storage_dir();
     let storage_dir = storage_root.path().join("storage");
+    context.write_home(".fabro/settings.toml", "[server.auth]\nmethods = [\"dev-token\"]\n");
+    provision_dev_token_auth(&context.home_dir, &storage_dir);
 
     let mut cmd = context.command();
     cmd.env("FABRO_STORAGE_DIR", &storage_dir);
@@ -816,6 +846,7 @@ fn start_with_tcp_host_only_bind_warns_and_falls_back_when_default_port_is_unava
     let context = test_context!();
     let storage_root = isolated_storage_dir();
     let storage_dir = storage_root.path().join("storage");
+    context.write_home(".fabro/settings.toml", "[server.auth]\nmethods = [\"dev-token\"]\n");
     let occupied = match std::net::TcpListener::bind(("127.0.0.1", 32276)) {
         Ok(listener) => listener,
         Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
@@ -827,10 +858,7 @@ fn start_with_tcp_host_only_bind_warns_and_falls_back_when_default_port_is_unava
     let mut filters = context.filters();
     filters.push((r"pid \d+".to_string(), "pid [PID]".to_string()));
     filters.push((r"127\.0\.0\.1:\d+".to_string(), "[TCP_BIND]".to_string()));
-    filters.push((
-        r"fabro_dev_[0-9a-f]{64}".to_string(),
-        "fabro_dev_[DEV_TOKEN]".to_string(),
-    ));
+    provision_dev_token_auth(&context.home_dir, &storage_dir);
 
     let mut cmd = context.command();
     cmd.env("FABRO_STORAGE_DIR", &storage_dir);
@@ -844,8 +872,6 @@ fn start_with_tcp_host_only_bind_warns_and_falls_back_when_default_port_is_unava
     Server started (pid [PID]) on [TCP_BIND]
     Web UI: http://[TCP_BIND]
     Auth: dev-token
-    Dev token: fabro_dev_[DEV_TOKEN]
-    Token file: [HOME_DIR]/.fabro/dev-token
     ");
 
     let output = context
@@ -928,6 +954,7 @@ fn default_test_context_server_keeps_object_store_off_disk() {
 #[test]
 fn isolated_server_switches_context_to_separate_daemon() {
     let mut context = test_context!();
+    context.write_home(".fabro/settings.toml", "[server.auth]\nmethods = [\"dev-token\"]\n");
     let shared_storage_dir = context.storage_dir.clone();
     let shared_status = context
         .command()
@@ -1004,7 +1031,7 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
     std::fs::write(
         &config_path,
         format!(
-            "_version = 1\n\n[server.storage]\nroot = \"{}\"\n\n[cli.target]\ntype = \"unix\"\npath = \"{}\"\n",
+            "_version = 1\n\n[server.auth]\nmethods = [\"dev-token\"]\n\n[server.storage]\nroot = \"{}\"\n\n[cli.target]\ntype = \"unix\"\npath = \"{}\"\n",
             storage_dir.display(),
             socket_path.display()
         ),
@@ -1012,6 +1039,8 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
     .unwrap();
     let home_a = tempfile::tempdir_in("/tmp").unwrap();
     let home_b = tempfile::tempdir_in("/tmp").unwrap();
+    provision_dev_token_auth(home_a.path(), &storage_dir);
+    provision_dev_token_auth(home_b.path(), &storage_dir);
     let temp_a = tempfile::tempdir_in("/tmp").unwrap();
     let temp_b = tempfile::tempdir_in("/tmp").unwrap();
 

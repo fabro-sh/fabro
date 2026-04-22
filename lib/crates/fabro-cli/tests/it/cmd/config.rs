@@ -138,6 +138,9 @@ fn server_settings_layer_fixture() -> SettingsLayer {
         r#"
 _version = 1
 
+[server.auth]
+methods = ["dev-token"]
+
 [server.storage]
 root = "/srv/fabro-server"
 
@@ -207,6 +210,9 @@ SHARED = "cli"
 [run.sandbox.daytona.labels]
 cli_only = "1"
 shared = "cli"
+
+[server.auth]
+methods = ["dev-token"]
 "#,
     );
 
@@ -310,6 +316,9 @@ fn setup_external_workflow_fixture(
         format!(
             r#"
 _version = 1
+
+[server.auth]
+methods = ["dev-token"]
 
 [server.storage]
 root = "{}"
@@ -533,6 +542,7 @@ fn settings_local_explicit_workflow_path_uses_workflow_project_layers() {
 fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
     let mut context = test_context!();
     let (project, storage_dir) = setup_external_workflow_fixture(&mut context);
+    context.ensure_home_server_auth_methods();
     let cwd = tempfile::tempdir().unwrap();
     let workflow = project.path().join("workflow.toml");
     let run_id = unique_run_id();
@@ -672,11 +682,9 @@ name = "legacy-model"
         .assert()
         .success();
 
-    assert!(
-        assert.get_output().stderr.is_empty(),
-        "settings should not warn about legacy config files: {}",
-        String::from_utf8_lossy(&assert.get_output().stderr)
-    );
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("warning: server config:"));
+    assert!(stderr.contains("server.auth.methods"));
 
     let cfg = parse_settings(&assert.get_output().stdout);
     assert_eq!(cfg["cli"]["output"]["verbosity"].as_str(), Some("normal"));
@@ -711,11 +719,9 @@ name = "legacy-model"
         .assert()
         .success();
 
-    assert!(
-        assert.get_output().stderr.is_empty(),
-        "settings should not warn about legacy config files: {}",
-        String::from_utf8_lossy(&assert.get_output().stderr)
-    );
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("warning: server config:"));
+    assert!(stderr.contains("server.auth.methods"));
 
     let cfg = parse_settings(&assert.get_output().stdout);
     assert_eq!(cfg["cli"]["output"]["verbosity"].as_str(), Some("normal"));
@@ -750,11 +756,9 @@ name = "legacy-model"
         .assert()
         .success();
 
-    assert!(
-        assert.get_output().stderr.is_empty(),
-        "settings should not warn about legacy config files: {}",
-        String::from_utf8_lossy(&assert.get_output().stderr)
-    );
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("warning: server config:"));
+    assert!(stderr.contains("server.auth.methods"));
 
     let cfg = parse_settings(&assert.get_output().stdout);
     assert_eq!(cfg["cli"]["output"]["verbosity"].as_str(), Some("normal"));

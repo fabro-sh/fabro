@@ -24,6 +24,12 @@ use crate::support::{fabro_json_snapshot, unique_run_id};
 
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+fn auth_context() -> fabro_test::TestContext {
+    let context = test_context!();
+    context.ensure_home_server_auth_methods();
+    context
+}
+
 fn stored_worker_events(run_dir: &std::path::Path) -> Vec<RunEvent> {
     run_events(run_dir).iter().map(run_event).collect()
 }
@@ -180,7 +186,7 @@ fn help() {
 
 #[test]
 fn runner_uses_cached_graph_after_source_deleted() {
-    let context = test_context!();
+    let context = auth_context();
     let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("workflow.fabro");
 
@@ -236,7 +242,7 @@ digraph CachedGraph {
 
 #[test]
 fn runner_uses_snapshotted_app_id_for_github_credentials() {
-    let context = test_context!();
+    let context = auth_context();
     let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("workflow.fabro");
 
@@ -244,6 +250,9 @@ fn runner_uses_snapshotted_app_id_for_github_credentials() {
         ".fabro/settings.toml",
         "\
 _version = 1
+
+[server.auth]
+methods = [\"dev-token\"]
 
 [server.integrations.github]
 app_id = \"snapshotted-app-id\"
@@ -312,7 +321,7 @@ digraph GitHubApp {
 
 #[test]
 fn runner_runs_without_run_json_when_run_id_is_explicit() {
-    let context = test_context!();
+    let context = auth_context();
     let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("workflow.fabro");
 
@@ -366,7 +375,7 @@ digraph DetachedStoreOnly {
 
 #[test]
 fn runner_resume_rejects_completed_run_without_mutating_it() {
-    let context = test_context!();
+    let context = auth_context();
     context.write_temp(
         "workflow.fabro",
         "\
@@ -466,7 +475,7 @@ digraph Test {
 
 #[test]
 fn runner_reports_missing_run_spec_without_prefetching_events() {
-    let context = test_context!();
+    let context = auth_context();
     let server = MockServer::start();
     let run_id = unique_run_id();
     let run_dir = tempfile::tempdir().expect("temp run dir should exist");
@@ -538,7 +547,7 @@ fn runner_reports_missing_run_spec_without_prefetching_events() {
 
 #[test]
 fn detached_run_answers_pending_question_without_interview_scratch_files() {
-    let context = test_context!();
+    let context = auth_context();
     let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("human-gate.fabro");
 
@@ -631,7 +640,7 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
 
 #[test]
 fn worker_exits_with_retro_enabled_even_when_stdin_stays_open() {
-    let context = test_context!();
+    let context = auth_context();
     let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("retro-success.fabro");
 
@@ -703,7 +712,7 @@ retros = true
 #[cfg(unix)]
 #[test]
 fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
-    let context = test_context!();
+    let context = auth_context();
     let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("cancel-gated.fabro");
     let _gate = write_gated_workflow(&workflow_path, "cancel_gated", "Wait for cancellation");

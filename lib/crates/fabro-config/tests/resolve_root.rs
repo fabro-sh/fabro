@@ -7,16 +7,16 @@ fn parse(source: &str) -> SettingsLayer {
 }
 
 #[test]
-fn resolves_root_settings_defaults() {
-    let settings =
-        fabro_config::resolve(&SettingsLayer::default()).expect("empty settings should resolve");
+fn resolves_root_settings_require_explicit_server_auth_methods() {
+    let errors =
+        fabro_config::resolve(&SettingsLayer::default()).expect_err("empty settings should fail");
 
-    assert_eq!(settings.project.directory, ".");
-    assert_eq!(settings.workflow.graph, "workflow.fabro");
-    assert!(settings.run.execution.retros);
-    assert!(settings.cli.updates.check);
-    assert_eq!(settings.server.scheduler.max_concurrent_runs, 5);
-    assert!(!settings.features.session_sandboxes);
+    assert!(errors.iter().any(|error| {
+        matches!(
+            error,
+            fabro_config::ResolveError::Missing { path } if path == "server.auth.methods"
+        )
+    }));
 }
 
 #[test]
@@ -79,6 +79,9 @@ _version = 1
 
 [server.storage]
 root = "/srv/fabro"
+
+[server.auth]
+methods = ["dev-token"]
 
 [run.model]
 provider = "openai"

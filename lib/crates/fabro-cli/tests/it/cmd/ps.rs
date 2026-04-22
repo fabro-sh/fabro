@@ -1,9 +1,25 @@
+use fabro_config::{Storage, envfile};
 use fabro_test::{fabro_snapshot, test_context};
+use fabro_util::dev_token;
 use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{local_dev_token, setup_completed_fast_dry_run, setup_created_fast_dry_run};
 use crate::support::unique_run_id;
+
+const TEST_DEV_TOKEN: &str =
+    "fabro_dev_abababababababababababababababababababababababababababababababab";
+
+fn provision_local_server_auth(context: &fabro_test::TestContext, storage_dir: &std::path::Path) {
+    context.ensure_home_server_auth_methods();
+    let server_env_path = Storage::new(storage_dir).server_state().env_path();
+    envfile::merge_env_file(&server_env_path, [("FABRO_DEV_TOKEN", TEST_DEV_TOKEN)]).unwrap();
+    dev_token::write_dev_token(
+        &context.home_dir.join(".fabro").join("dev-token"),
+        TEST_DEV_TOKEN,
+    )
+    .unwrap();
+}
 
 #[test]
 fn help() {
@@ -41,6 +57,7 @@ fn ps_explicit_local_tcp_server_target_requires_explicit_auth() {
     let storage_root = tempfile::tempdir_in("/tmp").unwrap();
     let storage_dir = storage_root.path().join("storage");
     std::fs::create_dir_all(&storage_dir).unwrap();
+    provision_local_server_auth(&context, &storage_dir);
 
     context
         .command()
@@ -97,6 +114,7 @@ fn ps_explicit_local_tcp_server_target_accepts_explicit_dev_token() {
     let storage_root = tempfile::tempdir_in("/tmp").unwrap();
     let storage_dir = storage_root.path().join("storage");
     std::fs::create_dir_all(&storage_dir).unwrap();
+    provision_local_server_auth(&context, &storage_dir);
 
     context
         .command()

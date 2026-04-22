@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::{Duration, Instant};
 
-use fabro_config::Storage;
+use fabro_config::{Storage, envfile};
 use fabro_server::bind::Bind;
 use fabro_store::EventEnvelope;
 use fabro_test::{TestContext, expect_reqwest_status};
@@ -660,22 +660,16 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
 
 #[derive(Debug, serde::Deserialize)]
 struct TestServerRecord {
-    bind:           Bind,
-    #[serde(default)]
-    dev_token_path: Option<PathBuf>,
+    bind: Bind,
 }
 
 pub(crate) fn local_dev_token(storage_dir: &Path) -> Option<String> {
     let server_state = Storage::new(storage_dir).server_state();
 
-    fabro_util::dev_token::read_dev_token_file(&server_state.dev_token_path()).or_else(|| {
-        std::fs::read_to_string(server_state.record_path())
-            .ok()
-            .and_then(|content| serde_json::from_str::<TestServerRecord>(&content).ok())
-            .and_then(|record| record.dev_token_path)
-            .as_deref()
-            .and_then(fabro_util::dev_token::read_dev_token_file)
-    })
+    envfile::read_env_file(&server_state.env_path())
+        .ok()
+        .and_then(|entries| entries.get("FABRO_DEV_TOKEN").cloned())
+        .or_else(|| fabro_util::dev_token::read_dev_token_file(&server_state.dev_token_path()))
 }
 
 pub(crate) fn server_endpoint(storage_dir: &Path) -> Option<(fabro_http::HttpClient, String)> {

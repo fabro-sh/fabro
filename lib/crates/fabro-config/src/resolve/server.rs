@@ -17,6 +17,24 @@ use fabro_util::Home;
 use super::{ResolveError, default_interp, parse_socket_addr, require_interp};
 use crate::user::default_storage_dir;
 
+pub fn resolve_storage_root(file: &fabro_types::settings::SettingsLayer) -> InterpString {
+    let file = crate::apply_builtin_defaults(file.clone());
+    file.server
+        .as_ref()
+        .and_then(|server| server.storage.as_ref())
+        .and_then(|storage| storage.root.clone())
+        .unwrap_or_else(|| default_interp(default_storage_dir()))
+}
+
+pub fn dev_token_auth_enabled(layer: &fabro_types::settings::SettingsLayer) -> bool {
+    layer
+        .server
+        .as_ref()
+        .and_then(|server| server.auth.as_ref())
+        .and_then(|auth| auth.methods.as_ref())
+        .is_some_and(|methods| methods.contains(&ServerAuthMethod::DevToken))
+}
+
 pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> ServerSettings {
     let storage = resolve_storage(layer.storage.as_ref());
     let listen = resolve_listen(layer.listen.as_ref(), errors);
@@ -106,16 +124,24 @@ fn resolve_auth(
     layer: Option<&ServerAuthLayer>,
     errors: &mut Vec<ResolveError>,
 ) -> ServerAuthSettings {
-    let mut methods = layer
-        .and_then(|auth| auth.methods.clone())
-        .unwrap_or_else(|| vec![ServerAuthMethod::DevToken]);
-    if methods.is_empty() {
-        errors.push(ResolveError::Invalid {
-            path:   "server.auth.methods".to_string(),
-            reason: "must not be empty".to_string(),
-        });
-    }
-    methods.dedup();
+    let methods = match layer.and_then(|auth| auth.methods.clone()) {
+        Some(mut methods) => {
+            if methods.is_empty() {
+                errors.push(ResolveError::Invalid {
+                    path:   "server.auth.methods".to_string(),
+                    reason: "must not be empty".to_string(),
+                });
+            }
+            methods.dedup();
+            methods
+        }
+        None => {
+            errors.push(ResolveError::Missing {
+                path: "server.auth.methods".to_string(),
+            });
+            Vec::new()
+        }
+    };
 
     let github = layer
         .and_then(|auth| auth.github.as_ref())

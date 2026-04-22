@@ -90,12 +90,15 @@ fn apply_builtin_defaults_materializes_expected_layer() {
 }
 
 #[test]
-fn resolve_empty_settings_still_produces_valid_defaults() {
-    let settings = resolve(&SettingsLayer::default()).expect("empty settings should resolve");
+fn resolve_empty_settings_requires_explicit_server_auth_methods() {
+    let errors = resolve(&SettingsLayer::default()).expect_err("empty settings should fail");
 
-    assert_eq!(settings.project.directory, ".");
-    assert_eq!(settings.workflow.graph, "workflow.fabro");
-    assert_eq!(settings.run.execution.mode, RunMode::Normal);
+    assert!(errors.iter().any(|error| {
+        matches!(
+            error,
+            fabro_config::ResolveError::Missing { path } if path == "server.auth.methods"
+        )
+    }));
 }
 
 #[test]
@@ -103,6 +106,9 @@ fn higher_precedence_values_override_builtin_defaults() {
     let layer = parse(
         r#"
 _version = 1
+
+[server.auth]
+methods = ["dev-token"]
 
 [run.execution]
 mode = "dry_run"

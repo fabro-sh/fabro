@@ -15,7 +15,7 @@ use fabro_types::settings::{
 pub use features::resolve_features;
 pub use project::resolve_project;
 pub use run::resolve_run;
-pub use server::resolve_server;
+pub use server::{dev_token_auth_enabled, resolve_server, resolve_storage_root};
 pub use workflow::resolve_workflow;
 
 use crate::apply_builtin_defaults;
@@ -47,33 +47,81 @@ pub fn resolve(file: &SettingsLayer) -> Result<Settings, Vec<ResolveError>> {
 }
 
 pub fn resolve_cli_from_file(file: &SettingsLayer) -> Result<CliSettings, Vec<ResolveError>> {
-    resolve(file).map(|settings| settings.cli)
+    let file = apply_builtin_defaults(file.clone());
+    let mut errors = Vec::new();
+    let cli_layer = file.cli.clone().unwrap_or_default();
+    let cli = resolve_cli(&cli_layer, &mut errors);
+    if errors.is_empty() {
+        Ok(cli)
+    } else {
+        Err(errors)
+    }
 }
 
 pub fn resolve_server_from_file(file: &SettingsLayer) -> Result<ServerSettings, Vec<ResolveError>> {
-    resolve(file).map(|settings| settings.server)
+    let file = apply_builtin_defaults(file.clone());
+    let mut errors = Vec::new();
+    let server_layer = file.server.clone().unwrap_or_default();
+    let server = resolve_server(&server_layer, &mut errors);
+    if errors.is_empty() {
+        Ok(server)
+    } else {
+        Err(errors)
+    }
 }
 
 pub fn resolve_project_from_file(
     file: &SettingsLayer,
 ) -> Result<ProjectSettings, Vec<ResolveError>> {
-    resolve(file).map(|settings| settings.project)
+    let file = apply_builtin_defaults(file.clone());
+    let mut errors = Vec::new();
+    let project_layer = file.project.clone().unwrap_or_default();
+    let project = resolve_project(&project_layer, &mut errors);
+    if errors.is_empty() {
+        Ok(project)
+    } else {
+        Err(errors)
+    }
 }
 
 pub fn resolve_features_from_file(
     file: &SettingsLayer,
 ) -> Result<FeaturesSettings, Vec<ResolveError>> {
-    resolve(file).map(|settings| settings.features)
+    let file = apply_builtin_defaults(file.clone());
+    let mut errors = Vec::new();
+    let features_layer = file.features.clone().unwrap_or_default();
+    let features = resolve_features(&features_layer, &mut errors);
+    if errors.is_empty() {
+        Ok(features)
+    } else {
+        Err(errors)
+    }
 }
 
 pub fn resolve_run_from_file(file: &SettingsLayer) -> Result<RunSettings, Vec<ResolveError>> {
-    resolve(file).map(|settings| settings.run)
+    let file = apply_builtin_defaults(file.clone());
+    let mut errors = Vec::new();
+    let run_layer = file.run.clone().unwrap_or_default();
+    let run = resolve_run(&run_layer, &mut errors);
+    if errors.is_empty() {
+        Ok(run)
+    } else {
+        Err(errors)
+    }
 }
 
 pub fn resolve_workflow_from_file(
     file: &SettingsLayer,
 ) -> Result<WorkflowSettings, Vec<ResolveError>> {
-    resolve(file).map(|settings| settings.workflow)
+    let file = apply_builtin_defaults(file.clone());
+    let mut errors = Vec::new();
+    let workflow_layer = file.workflow.clone().unwrap_or_default();
+    let workflow = resolve_workflow(&workflow_layer, &mut errors);
+    if errors.is_empty() {
+        Ok(workflow)
+    } else {
+        Err(errors)
+    }
 }
 
 pub(crate) fn require_interp(
@@ -125,6 +173,9 @@ mod tests {
         let settings = parse_settings_layer(
             r#"
 _version = 1
+
+[server.auth]
+methods = ["dev-token"]
 
 [run.agent.mcps.stdio]
 type = "stdio"

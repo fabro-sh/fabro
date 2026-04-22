@@ -131,15 +131,6 @@ fn format_config_toml() -> String {
     toml::to_string_pretty(&doc).expect("default server config should serialize")
 }
 
-fn settings_enable_dev_token_auth(settings_toml: &str) -> bool {
-    fabro_config::parse_settings_layer(settings_toml)
-        .ok()
-        .and_then(|layer| layer.server)
-        .and_then(|srv| srv.auth)
-        .and_then(|auth| auth.methods)
-        .is_some_and(|methods| methods.contains(&ServerAuthMethod::DevToken))
-}
-
 // ---------------------------------------------------------------------------
 // Binary detection
 // ---------------------------------------------------------------------------
@@ -1585,9 +1576,14 @@ async fn run_install_github_inner(
                     .and_then(|srv| srv.auth)
                     .and_then(|auth| auth.methods)
                     .unwrap_or_default();
-                let token = dev_token::read_dev_token_file(
-                    &Storage::new(&storage_dir).server_state().dev_token_path(),
-                );
+                let token = methods
+                    .contains(&ServerAuthMethod::DevToken)
+                    .then(|| {
+                        dev_token::read_dev_token_file(
+                            &Storage::new(&storage_dir).server_state().dev_token_path(),
+                        )
+                    })
+                    .flatten();
                 print_auth_status(&methods, token.as_deref(), &s, printer);
                 fabro_util::printerr!(printer, "");
             }
@@ -1802,6 +1798,13 @@ async fn run_install_inner(
         toml::to_string_pretty(&doc)?
     };
 
+    let install_settings = user_config::apply_storage_dir_override(
+        fabro_config::parse_settings_layer(&settings_toml)
+            .context("failed to parse generated settings.toml")?,
+        args.storage_dir.as_deref(),
+    );
+    fabro_config::resolve_server_from_file(&install_settings).map_err(render_server_resolve_errors)?;
+
     // Secrets and auth material
     {
         let session_secret = session_secret::generate_session_secret();
@@ -1818,8 +1821,8 @@ async fn run_install_inner(
             s.green.apply_to("✔")
         );
 
-        let dev_token = if settings_enable_dev_token_auth(&settings_toml) {
-            let token = dev_token::load_or_create_dev_token(
+        let dev_token = if fabro_config::dev_token_auth_enabled(&install_settings) {
+            let token = dev_token::read_or_mint_dev_token_for_install(
                 &fabro_util::Home::from_env().dev_token_path(),
             )?;
             dev_token::write_dev_token(
@@ -1862,11 +1865,6 @@ async fn run_install_inner(
         server_was_running,
     )
     .await?;
-    let install_settings = user_config::apply_storage_dir_override(
-        fabro_config::parse_settings_layer(&settings_toml)
-            .context("failed to parse generated settings.toml")?,
-        args.storage_dir.as_deref(),
-    );
     if let Err(err) = write_artifact_store_metadata(&install_settings, FABRO_VERSION).await {
         fabro_util::printerr!(
             printer,
@@ -1910,9 +1908,14 @@ async fn run_install_inner(
                 .and_then(|auth| auth.methods.as_ref())
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            let token = dev_token::read_dev_token_file(
-                &Storage::new(&storage_dir).server_state().dev_token_path(),
-            );
+            let token = methods
+                .contains(&ServerAuthMethod::DevToken)
+                .then(|| {
+                    dev_token::read_dev_token_file(
+                        &Storage::new(&storage_dir).server_state().dev_token_path(),
+                    )
+                })
+                .flatten();
             print_auth_status(methods, token.as_deref(), &s, printer);
             fabro_util::printerr!(printer, "");
             true
@@ -2177,47 +2180,59 @@ name = "custom"
         );
     }
 
+    fn parse_install_settings(source: &str) -> SettingsLayer {
+        fabro_config::parse_settings_layer(source).expect("install settings fixture should parse")
+    }
+
     #[test]
-    fn settings_enable_dev_token_auth_when_methods_include_dev_token() {
-        let toml = r#"
+    fn dev_token_auth_enabled_when_methods_include_dev_token() {
+        let settings = parse_install_settings(
+            r#"
 _version = 1
 
 [server.auth]
 methods = ["dev-token"]
-"#;
-        assert!(settings_enable_dev_token_auth(toml));
+"#,
+        );
+        assert!(fabro_config::dev_token_auth_enabled(&settings));
     }
 
     #[test]
-    fn settings_enable_dev_token_auth_when_mixed_with_github() {
-        let toml = r#"
+    fn dev_token_auth_enabled_when_mixed_with_github() {
+        let settings = parse_install_settings(
+            r#"
 _version = 1
 
 [server.auth]
 methods = ["dev-token", "github"]
-"#;
-        assert!(settings_enable_dev_token_auth(toml));
+"#,
+        );
+        assert!(fabro_config::dev_token_auth_enabled(&settings));
     }
 
     #[test]
-    fn settings_enable_dev_token_auth_false_for_github_only() {
-        let toml = r#"
+    fn dev_token_auth_enabled_false_for_github_only() {
+        let settings = parse_install_settings(
+            r#"
 _version = 1
 
 [server.auth]
 methods = ["github"]
-"#;
-        assert!(!settings_enable_dev_token_auth(toml));
+"#,
+        );
+        assert!(!fabro_config::dev_token_auth_enabled(&settings));
     }
 
     #[test]
-    fn settings_enable_dev_token_auth_false_when_methods_absent() {
-        let toml = "
+    fn dev_token_auth_enabled_false_when_methods_absent() {
+        let settings = parse_install_settings(
+            "
 _version = 1
 
 [server.auth]
-";
-        assert!(!settings_enable_dev_token_auth(toml));
+",
+        );
+        assert!(!fabro_config::dev_token_auth_enabled(&settings));
     }
 
     #[test]

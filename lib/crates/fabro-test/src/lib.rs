@@ -13,7 +13,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use assert_cmd::Command;
-use fabro_config::Storage;
+use fabro_config::{Storage, envfile};
 use fabro_types::RunId;
 use regex::Regex;
 use serde_json::{Map, Value, json};
@@ -79,6 +79,8 @@ const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
 const SESSION_LOCK_TIMEOUT: Duration = Duration::from_secs(20);
 const TEST_SESSION_SECRET: &str =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const TEST_DEV_TOKEN: &str =
+    "fabro_dev_abababababababababababababababababababababababababababababababab";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TestMode {
@@ -617,11 +619,27 @@ fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
     std::fs::write(
         path,
         format!(
-            "_version = 1\n\n[server.storage]\nroot = \"{}\"\n\n{rest}",
+            "_version = 1\n\n[server.storage]\nroot = \"{}\"\n\n[server.auth]\nmethods = [\"dev-token\"]\n\n{rest}",
             storage_dir.display()
         ),
     )
     .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
+}
+
+fn write_test_server_dev_token(storage_dir: &Path) {
+    let server_env_path = Storage::new(storage_dir).server_state().env_path();
+    envfile::merge_env_file(&server_env_path, [("FABRO_DEV_TOKEN", TEST_DEV_TOKEN)])
+        .unwrap_or_else(|err| panic!("failed to write {}: {err}", server_env_path.display()));
+}
+
+fn write_test_home_dev_token(settings_path: &Path) {
+    let home_dir = settings_path
+        .parent()
+        .unwrap_or_else(|| panic!("expected {} to have a parent", settings_path.display()));
+    let dev_token_path = home_dir.join("dev-token");
+    ensure_parent_dir(&dev_token_path);
+    std::fs::write(&dev_token_path, TEST_DEV_TOKEN)
+        .unwrap_or_else(|err| panic!("failed to write {}: {err}", dev_token_path.display()));
 }
 
 fn parse_settings_table(contents: &str, source: &Path) -> TomlMap<String, TomlValue> {
@@ -695,6 +713,8 @@ fn sync_home_settings(
     socket_path: &Path,
     force_server_target: bool,
 ) {
+    write_test_home_dev_token(settings_path);
+
     let (mut table, had_explicit_storage, had_explicit_target) =
         match std::fs::read_to_string(settings_path) {
             Ok(contents) => {
@@ -751,6 +771,64 @@ fn sync_home_settings(
     }
 
     write_settings_table(settings_path, &table);
+}
+
+fn has_explicit_server_auth_methods(table: &TomlMap<String, TomlValue>) -> bool {
+    table
+        .get("server")
+        .and_then(TomlValue::as_table)
+        .and_then(|server| server.get("auth"))
+        .and_then(TomlValue::as_table)
+        .and_then(|auth| auth.get("methods"))
+        .is_some()
+}
+
+fn set_server_auth_methods(table: &mut TomlMap<String, TomlValue>, methods: &[&str]) {
+    let server_entry = table
+        .entry("server".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    let Some(server_table) = server_entry.as_table_mut() else {
+        panic!("expected [server] to be a TOML table");
+    };
+    let auth_entry = server_table
+        .entry("auth".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    let Some(auth_table) = auth_entry.as_table_mut() else {
+        panic!("expected [server.auth] to be a TOML table");
+    };
+    auth_table.insert(
+        "methods".to_string(),
+        TomlValue::Array(
+            methods
+                .iter()
+                .map(|method| TomlValue::String((*method).to_string()))
+                .collect(),
+        ),
+    );
+}
+
+fn ensure_home_server_auth_methods(
+    settings_path: &Path,
+    storage_dir: &Path,
+    socket_path: &Path,
+    force_server_target: bool,
+) {
+    let mut table = match std::fs::read_to_string(settings_path) {
+        Ok(contents) => parse_settings_table(&contents, settings_path),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => TomlMap::new(),
+        Err(err) => panic!("failed to read {}: {err}", settings_path.display()),
+    };
+
+    if has_explicit_server_auth_methods(&table) {
+        return;
+    }
+
+    table
+        .entry("_version".to_string())
+        .or_insert(TomlValue::Integer(1));
+    set_server_auth_methods(&mut table, &["dev-token"]);
+    write_settings_table(settings_path, &table);
+    sync_home_settings(settings_path, storage_dir, socket_path, force_server_target);
 }
 
 fn has_explicit_storage_root(table: &TomlMap<String, TomlValue>) -> bool {
@@ -850,6 +928,7 @@ fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &P
     ensure_parent_dir(config_path);
     std::fs::create_dir_all(&server.storage_dir)
         .unwrap_or_else(|err| panic!("failed to create {}: {err}", server.storage_dir.display()));
+    write_test_server_dev_token(&server.storage_dir);
     let _ = std::fs::remove_file(server_record_path(&server.storage_dir));
     let _ = std::fs::remove_file(&server.socket_path);
 
@@ -1201,6 +1280,7 @@ impl TestContext {
 
     /// Build a `run` subcommand.
     pub fn run_cmd(&self) -> Command {
+        self.ensure_home_server_auth_methods();
         let mut cmd = self.command();
         cmd.arg("run");
         self.append_test_labels(&mut cmd);
@@ -1209,6 +1289,7 @@ impl TestContext {
 
     /// Build a `create` subcommand with per-test labels attached.
     pub fn create_cmd(&self) -> Command {
+        self.ensure_home_server_auth_methods();
         let mut cmd = self.command();
         cmd.arg("create");
         self.append_test_labels(&mut cmd);
@@ -1400,6 +1481,17 @@ impl TestContext {
         self
     }
 
+    pub fn ensure_home_server_auth_methods(&self) -> &Self {
+        let settings_path = home_settings_path(&self.home_dir);
+        ensure_home_server_auth_methods(
+            &settings_path,
+            &self.storage_dir,
+            &self.active_socket_path,
+            self.isolated_server.is_some(),
+        );
+        self
+    }
+
     pub fn server_target(&self) -> String {
         self.active_socket_path.display().to_string()
     }
@@ -1435,6 +1527,7 @@ impl TestContext {
     pub fn manage_storage_dir(&mut self, path: impl AsRef<Path>) -> &mut Self {
         let path = path.as_ref().to_path_buf();
         if path != self.storage_dir && !self.managed_storage_dirs.contains(&path) {
+            write_test_server_dev_token(&path);
             self.managed_storage_dirs.push(path);
         }
         self

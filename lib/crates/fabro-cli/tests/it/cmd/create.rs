@@ -199,6 +199,7 @@ fn create_cli_server_target_overrides_configured_server_target() {
 #[test]
 fn create_persists_directory_workflow_slug_and_cached_graph() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("sluggy/workflow.fabro");
 
@@ -255,6 +256,7 @@ digraph BarBaz {
 #[test]
 fn create_persists_file_stem_slug_for_standalone_file() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("alpha.fabro");
 
@@ -311,6 +313,7 @@ digraph FooWorkflow {
 #[test]
 fn create_persists_requested_overrides_into_store() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let workflow = fixture("simple.fabro");
     let mut cmd = context.command();
     cmd.args([
@@ -411,6 +414,7 @@ fn create_persists_requested_overrides_into_store() {
 #[test]
 fn create_json_does_not_imply_auto_approve() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let workflow = fixture("simple.fabro");
     let output = context
         .command()

@@ -815,7 +815,8 @@ async fn post_install_finish(
                 description: None,
             });
             let home = state.home.clone().unwrap_or_else(Home::from_env);
-            let token = match dev_token::load_or_create_dev_token(&home.dev_token_path()) {
+            let token = match dev_token::read_or_mint_dev_token_for_install(&home.dev_token_path())
+            {
                 Ok(value) => value,
                 Err(err) => {
                     return install_error_response(

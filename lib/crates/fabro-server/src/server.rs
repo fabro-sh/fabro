@@ -62,7 +62,10 @@ use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
 use fabro_types::settings::run::RunMode;
-use fabro_types::settings::server::{GithubIntegrationSettings, GithubIntegrationStrategy};
+use fabro_types::settings::server::{
+    GithubIntegrationSettings, GithubIntegrationStrategy, ServerAuthLayer, ServerAuthMethod,
+    ServerLayer,
+};
 use fabro_types::settings::{
     InterpString, ServerSettings as ResolvedServerSettings, SettingsLayer,
 };
@@ -2546,6 +2549,7 @@ fn default_test_app_state_config(
     max_concurrent_runs: usize,
     env_lookup: EnvLookup,
 ) -> AppStateConfig {
+    ensure_test_auth_methods(&settings);
     let (store, artifact_store) = test_store_bundle();
     let vault_path = test_secret_store_path();
     let server_env_path = vault_path.with_file_name("server.env");
@@ -2560,6 +2564,21 @@ fn default_test_app_state_config(
         local_daemon_mode: false,
         env_lookup,
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+    }
+}
+
+fn ensure_test_auth_methods(settings: &Arc<RwLock<SettingsLayer>>) {
+    let mut settings = settings.write().expect("test settings lock poisoned");
+    if settings
+        .server
+        .as_ref()
+        .and_then(|server| server.auth.as_ref())
+        .and_then(|auth| auth.methods.as_ref())
+        .is_none()
+    {
+        let server = settings.server.get_or_insert_with(ServerLayer::default);
+        let auth = server.auth.get_or_insert_with(ServerAuthLayer::default);
+        auth.methods = Some(vec![ServerAuthMethod::DevToken]);
     }
 }
 
@@ -3785,8 +3804,16 @@ fn worker_command(
         .stderr(Stdio::piped());
 
     cmd.env_remove("FABRO_JSON");
-    if let Some(token) = std::env::var_os("FABRO_DEV_TOKEN") {
-        cmd.env("FABRO_DEV_TOKEN", token);
+    cmd.env_remove("FABRO_DEV_TOKEN");
+    if state
+        .server_settings()
+        .auth
+        .methods
+        .contains(&ServerAuthMethod::DevToken)
+    {
+        if let Some(token) = state.server_secret("FABRO_DEV_TOKEN") {
+            cmd.env("FABRO_DEV_TOKEN", token);
+        }
     }
 
     #[cfg(unix)]
@@ -7753,6 +7780,88 @@ type = "http"
             secrets.get("GITHUB_APP_CLIENT_SECRET").as_deref(),
             Some("file-client")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_injects_dev_token_only_when_enabled() {
+        let github_only = tempfile::tempdir().unwrap();
+        let github_state = worker_command_test_state(github_only.path(), &["github"], Some(TEST_DEV_TOKEN));
+        let github_cmd = worker_command(
+            github_state.as_ref(),
+            RunId::new(),
+            RunExecutionMode::Start,
+            github_only.path(),
+        )
+        .unwrap();
+        assert_eq!(command_env_value(&github_cmd, "FABRO_DEV_TOKEN"), Some(None));
+
+        let dev_token = tempfile::tempdir().unwrap();
+        let dev_token_state =
+            worker_command_test_state(dev_token.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
+        let dev_token_cmd = worker_command(
+            dev_token_state.as_ref(),
+            RunId::new(),
+            RunExecutionMode::Start,
+            dev_token.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            command_env_value(&dev_token_cmd, "FABRO_DEV_TOKEN"),
+            Some(Some(TEST_DEV_TOKEN.to_string()))
+        );
+    }
+
+    fn worker_command_test_state(
+        storage_dir: &Path,
+        methods: &[&str],
+        dev_token: Option<&str>,
+    ) -> Arc<AppState> {
+        let dev_token = dev_token.map(str::to_owned);
+        std::fs::create_dir_all(storage_dir).unwrap();
+        let settings = fabro_config::parse_settings_layer(&format!(
+            r#"
+_version = 1
+
+[server.storage]
+root = "{}"
+
+[server.auth]
+methods = [{}]
+
+[server.auth.github]
+allowed_usernames = ["octocat"]
+"#,
+            storage_dir.display(),
+            methods
+                .iter()
+                .map(|method| format!("\"{method}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+        .unwrap();
+        let record_path = Storage::new(storage_dir).server_state().record_path();
+        std::fs::create_dir_all(record_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &record_path,
+            serde_json::to_string(&json!({
+                "bind": Bind::Tcp("127.0.0.1:32276".parse::<std::net::SocketAddr>().unwrap()),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        create_app_state_with_env_lookup(settings, 5, move |name| match name {
+            "FABRO_DEV_TOKEN" => dev_token.clone(),
+            _ => None,
+        })
+    }
+
+    #[cfg(unix)]
+    fn command_env_value(cmd: &Command, key: &str) -> Option<Option<String>> {
+        cmd.as_std().get_envs().find_map(|(name, value)| {
+            (name.to_str() == Some(key)).then(|| value.map(|value| value.to_string_lossy().into_owned()))
+        })
     }
 
     #[test]

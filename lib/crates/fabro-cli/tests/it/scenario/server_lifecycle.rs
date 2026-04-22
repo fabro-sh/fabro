@@ -6,6 +6,21 @@ fn start_status_stop_lifecycle() {
     let storage_root = tempfile::tempdir_in("/tmp").unwrap();
     let storage_dir = storage_root.path().join("storage");
     std::fs::create_dir_all(&storage_dir).unwrap();
+    context.write_home(".fabro/settings.toml", "[server.auth]\nmethods = [\"dev-token\"]\n");
+    let server_env_path = fabro_config::Storage::new(&storage_dir).server_state().env_path();
+    fabro_config::envfile::merge_env_file(
+        &server_env_path,
+        [(
+            "FABRO_DEV_TOKEN",
+            "fabro_dev_abababababababababababababababababababababababababababababababab",
+        )],
+    )
+    .unwrap();
+    fabro_util::dev_token::write_dev_token(
+        &context.home_dir.join(".fabro").join("dev-token"),
+        "fabro_dev_abababababababababababababababababababababababababababababababab",
+    )
+    .unwrap();
 
     let sock_dir = tempfile::tempdir_in("/tmp").unwrap();
     let bind_addr = sock_dir.path().join("test.sock");
@@ -33,8 +48,6 @@ fn start_status_stop_lifecycle() {
     ----- stderr -----
     Server started (pid [PID]) on [SOCKET_PATH]
     Auth: dev-token
-    Dev token: fabro_dev_[DEV_TOKEN]
-    Token file: [HOME_DIR]/.fabro/dev-token
     ");
 
     let mut cmd = context.command();

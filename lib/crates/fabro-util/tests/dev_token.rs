@@ -7,7 +7,8 @@ use std::fs;
 
 use fabro_util::Home;
 use fabro_util::dev_token::{
-    DEV_TOKEN_PREFIX, generate_dev_token, load_or_create_dev_token, validate_dev_token_format,
+    DEV_TOKEN_PREFIX, generate_dev_token, read_dev_token_or_err,
+    read_or_mint_dev_token_for_install, validate_dev_token_format,
 };
 
 #[test]
@@ -53,11 +54,11 @@ fn validate_format_rejects_wrong_prefix() {
 }
 
 #[test]
-fn load_or_create_creates_file() {
+fn read_or_mint_for_install_creates_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("dev-token");
 
-    let token = load_or_create_dev_token(&path).unwrap();
+    let token = read_or_mint_dev_token_for_install(&path).unwrap();
 
     assert!(validate_dev_token_format(&token));
     assert_eq!(fs::read_to_string(&path).unwrap(), token);
@@ -71,26 +72,36 @@ fn load_or_create_creates_file() {
 }
 
 #[test]
-fn load_or_create_reads_existing() {
+fn read_or_mint_for_install_reads_existing() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("dev-token");
     let token = format!("{DEV_TOKEN_PREFIX}{}", "cd".repeat(32));
     fs::write(&path, &token).unwrap();
 
-    let loaded = load_or_create_dev_token(&path).unwrap();
+    let loaded = read_or_mint_dev_token_for_install(&path).unwrap();
 
     assert_eq!(loaded, token);
 }
 
 #[test]
-fn load_or_create_rejects_malformed_file() {
+fn read_dev_token_or_err_rejects_malformed_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("dev-token");
     fs::write(&path, "not-a-token").unwrap();
 
-    let error = load_or_create_dev_token(&path).unwrap_err();
+    let error = read_dev_token_or_err(&path).unwrap_err();
 
     assert!(error.to_string().contains("invalid"));
+}
+
+#[test]
+fn read_dev_token_or_err_reports_missing_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing-dev-token");
+
+    let error = read_dev_token_or_err(&path).unwrap_err();
+
+    assert!(error.to_string().contains("read dev token"));
 }
 
 #[test]

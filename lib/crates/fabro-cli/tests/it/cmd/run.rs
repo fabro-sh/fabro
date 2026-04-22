@@ -275,6 +275,7 @@ fn detach_uses_configured_server_target_without_server_flag() {
 #[test]
 fn run_uses_vault_credentials_for_worker_execution() {
     let mut context = test_context!();
+    context.write_home(".fabro/settings.toml", "[server.auth]\nmethods = [\"dev-token\"]\n");
     context.isolated_server();
     let run_id = unique_run_id();
     let llm_server = MockServer::start();
@@ -733,6 +734,7 @@ fn dry_run_rejects_goal_and_goal_file_together() {
 #[test]
 fn dry_run_persists_event_history_in_store() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let run_id = unique_run_id();
     let workflow = context.install_fixture("simple.fabro");
 
@@ -832,6 +834,7 @@ fn dry_run_persists_event_history_in_store() {
 #[test]
 fn run_id_passthrough_uses_provided_ulid() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let run_id = unique_run_id();
     let workflow = context.install_fixture("simple.fabro");
 
@@ -854,6 +857,7 @@ fn run_id_passthrough_uses_provided_ulid() {
 #[test]
 fn json_run_requires_manual_input_for_human_gates_without_auto_approve() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let workflow = context.temp_dir.join("human-gate.fabro");
     context.write_temp(
         "human-gate.fabro",

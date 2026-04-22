@@ -38,9 +38,6 @@ check = true
 enabled = true
 url = "http://localhost:3000"
 
-[server.auth]
-methods = ["dev-token"]
-
 [server.scheduler]
 max_concurrent_runs = 5
 

@@ -2,18 +2,39 @@ use fabro_config::parse_settings_layer;
 use fabro_config::user::default_storage_dir;
 use fabro_types::settings::server::{
     GithubIntegrationStrategy, IpAllowEntry, ObjectStoreSettings, ServerListenSettings,
+    ServerAuthMethod,
 };
 use fabro_types::settings::{InterpString, SettingsLayer};
 use fabro_util::Home;
 
 fn parse(source: &str) -> SettingsLayer {
-    parse_settings_layer(source).expect("fixture should parse")
+    let mut layer = parse_settings_layer(source).expect("fixture should parse");
+    if layer
+        .server
+        .as_ref()
+        .and_then(|server| server.auth.as_ref())
+        .and_then(|auth| auth.methods.as_ref())
+        .is_none()
+    {
+        let server = layer.server.get_or_insert_with(Default::default);
+        let auth = server.auth.get_or_insert_with(Default::default);
+        auth.methods = Some(vec![ServerAuthMethod::DevToken]);
+    }
+    layer
+}
+
+fn empty_settings_with_auth_methods() -> SettingsLayer {
+    parse(
+        r#"
+_version = 1
+"#,
+    )
 }
 
 #[test]
 fn resolves_server_defaults_from_empty_settings() {
-    let settings = fabro_config::resolve_server_from_file(&SettingsLayer::default())
-        .expect("empty settings should resolve");
+    let settings = fabro_config::resolve_server_from_file(&empty_settings_with_auth_methods())
+        .expect("server settings should resolve");
 
     assert_eq!(
         settings.storage.root.as_source(),
@@ -207,8 +228,8 @@ disk_cache = true
 
 #[test]
 fn resolves_empty_ip_allowlist_by_default() {
-    let settings = fabro_config::resolve_server_from_file(&SettingsLayer::default())
-        .expect("empty settings should resolve");
+    let settings = fabro_config::resolve_server_from_file(&empty_settings_with_auth_methods())
+        .expect("server settings should resolve");
 
     assert!(settings.ip_allowlist.entries.is_empty());
     assert_eq!(settings.ip_allowlist.trusted_proxy_count, 0);
@@ -444,4 +465,76 @@ entries = ["github_meta_hooks"]
     assert!(
         rendered.contains("server.integrations.github.webhooks.ip_allowlist.trusted_proxy_count")
     );
+}
+
+#[test]
+fn resolve_storage_root_defaults_without_server_auth_methods() {
+    assert_eq!(
+        fabro_config::resolve_storage_root(&SettingsLayer::default()).as_source(),
+        default_storage_dir().to_string_lossy()
+    );
+}
+
+#[test]
+fn resolve_storage_root_prefers_explicit_root() {
+    let file = parse(
+        r#"
+_version = 1
+
+[server.storage]
+root = "/srv/fabro"
+"#,
+    );
+
+    assert_eq!(fabro_config::resolve_storage_root(&file).as_source(), "/srv/fabro");
+}
+
+#[test]
+fn resolve_storage_root_preserves_env_interpolation() {
+    let file = parse(
+        r#"
+_version = 1
+
+[server.storage]
+root = "{{ env.FABRO_STORAGE_ROOT }}"
+"#,
+    );
+
+    assert_eq!(
+        fabro_config::resolve_storage_root(&file),
+        InterpString::parse("{{ env.FABRO_STORAGE_ROOT }}")
+    );
+}
+
+#[test]
+fn dev_token_auth_enabled_requires_explicit_dev_token_method() {
+    let dev_token_only = parse(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+"#,
+    );
+    let github_only = parse(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["github"]
+"#,
+    );
+    let both = parse(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token", "github"]
+"#,
+    );
+
+    assert!(fabro_config::dev_token_auth_enabled(&dev_token_only));
+    assert!(!fabro_config::dev_token_auth_enabled(&github_only));
+    assert!(fabro_config::dev_token_auth_enabled(&both));
+    assert!(!fabro_config::dev_token_auth_enabled(&SettingsLayer::default()));
 }
