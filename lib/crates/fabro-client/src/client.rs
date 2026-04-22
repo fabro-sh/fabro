@@ -13,6 +13,7 @@ use fabro_model::Model;
 use fabro_types::{
     ArtifactUpload, EventEnvelope, RunBlobId, RunEvent, RunId, RunProjection, RunSummary, StageId,
 };
+use fabro_util::exit::{ErrorExt, ExitClass};
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
@@ -336,8 +337,13 @@ impl Client {
     }
 
     async fn refresh_access_token(&self, failed_access_token: &str) -> Result<()> {
+        fn session_expired() -> anyhow::Error {
+            anyhow!("CLI session has expired. Run `fabro auth login` again.")
+                .classify(ExitClass::AuthRequired)
+        }
+
         let Some(oauth_session) = &self.oauth_session else {
-            bail!("CLI session has expired. Run `fabro auth login` again.");
+            return Err(session_expired());
         };
 
         let _guard = self.refresh_lock.lock().await;
@@ -348,12 +354,12 @@ impl Client {
 
         let Some(entry) = oauth_session.auth_store.get(&oauth_session.target)? else {
             self.rebuild_with_fallback(oauth_session).await?;
-            bail!("CLI session has expired. Run `fabro auth login` again.");
+            return Err(session_expired());
         };
         if entry.refresh_token_expires_at <= chrono::Utc::now() {
             oauth_session.auth_store.remove(&oauth_session.target)?;
             self.rebuild_with_fallback(oauth_session).await?;
-            bail!("CLI session has expired. Run `fabro auth login` again.");
+            return Err(session_expired());
         }
         ensure_refresh_target_transport(&oauth_session.target)?;
 
@@ -394,27 +400,34 @@ impl Client {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         let parsed_error = serde_json::from_str::<OAuthErrorBody>(&body).ok();
-        if parsed_error.as_ref().is_some_and(|error| {
+        let auth_recoverable = parsed_error.as_ref().is_some_and(|error| {
             matches!(
                 error.error.as_str(),
                 "refresh_token_expired" | "refresh_token_revoked"
             )
-        }) {
+        });
+        if auth_recoverable {
             oauth_session.auth_store.remove(&oauth_session.target)?;
             self.rebuild_with_fallback(oauth_session).await?;
         }
 
-        if let Some(parsed_error) = parsed_error {
+        let err = if let Some(parsed_error) = parsed_error {
             let message = parsed_error
                 .error_description
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| format!("request failed with status {status}"));
-            bail!("{message}");
-        }
-        if body.is_empty() {
-            bail!("request failed with status {status}");
-        }
-        bail!("request failed with status {status}: {body}");
+            anyhow!("{message}")
+        } else if body.is_empty() {
+            anyhow!("request failed with status {status}")
+        } else {
+            anyhow!("request failed with status {status}: {body}")
+        };
+
+        Err(if auth_recoverable {
+            err.classify(ExitClass::AuthRequired)
+        } else {
+            err
+        })
     }
 
     async fn rebuild_with_fallback(&self, oauth_session: &OAuthSession) -> Result<()> {
@@ -1333,6 +1346,10 @@ fn non_zero_u64_from_usize(value: usize) -> Option<NonZeroU64> {
 #[cfg(test)]
 mod tests {
     use chrono::Duration as ChronoDuration;
+    use fabro_util::exit;
+    use httpmock::Method::POST;
+    use httpmock::MockServer;
+    use serde_json::json;
 
     use super::*;
     use crate::AuthStore;
@@ -1387,6 +1404,108 @@ mod tests {
             err.to_string()
                 .contains("Refusing to send refresh-token credentials over plaintext HTTP")
         );
+        assert!(auth_store.get(&target).unwrap().is_some());
+    }
+
+    async fn oauth_client(
+        server: &MockServer,
+    ) -> (tempfile::TempDir, Client, AuthStore, ServerTarget) {
+        let temp = tempfile::tempdir().unwrap();
+        let auth_store = AuthStore::new(temp.path().join("auth.json"));
+        let target = ServerTarget::http_url(server.base_url()).unwrap();
+        let entry = oauth_entry("octocat");
+        auth_store.put(&target, entry.clone()).unwrap();
+
+        let client = Client::builder()
+            .target(target.clone())
+            .credential(Credential::OAuth(entry))
+            .oauth_session(OAuthSession::new(target.clone(), auth_store.clone()))
+            .transport(
+                server.base_url(),
+                fabro_http::HttpClientBuilder::new()
+                    .no_proxy()
+                    .build()
+                    .unwrap(),
+            )
+            .connect()
+            .await
+            .unwrap();
+
+        (temp, client, auth_store, target)
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_classifies_expired_refresh_tokens() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST)
+                .path("/auth/cli/refresh")
+                .header("authorization", "Bearer refresh-octocat");
+            then.status(401)
+                .header("Content-Type", "application/json")
+                .json_body(json!({
+                    "error": "refresh_token_expired",
+                    "error_description": "CLI session has expired. Run `fabro auth login` again."
+                }));
+        });
+
+        let (_temp, client, auth_store, target) = oauth_client(&server).await;
+        let err = client
+            .refresh_access_token("access-octocat")
+            .await
+            .unwrap_err();
+
+        assert_eq!(exit::exit_code_for(&err), 4);
+        assert!(auth_store.get(&target).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_keeps_server_errors_as_exit_1() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST)
+                .path("/auth/cli/refresh")
+                .header("authorization", "Bearer refresh-octocat");
+            then.status(500)
+                .header("Content-Type", "application/json")
+                .json_body(json!({
+                    "error": "server_error",
+                    "error_description": "OAuth server exploded."
+                }));
+        });
+
+        let (_temp, client, auth_store, target) = oauth_client(&server).await;
+        let err = client
+            .refresh_access_token("access-octocat")
+            .await
+            .unwrap_err();
+
+        assert_eq!(exit::exit_code_for(&err), 1);
+        assert!(auth_store.get(&target).unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_keeps_login_not_permitted_as_exit_1() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST)
+                .path("/auth/cli/refresh")
+                .header("authorization", "Bearer refresh-octocat");
+            then.status(403)
+                .header("Content-Type", "application/json")
+                .json_body(json!({
+                    "error": "unauthorized",
+                    "error_description": "Login not permitted for this user."
+                }));
+        });
+
+        let (_temp, client, auth_store, target) = oauth_client(&server).await;
+        let err = client
+            .refresh_access_token("access-octocat")
+            .await
+            .unwrap_err();
+
+        assert_eq!(exit::exit_code_for(&err), 1);
         assert!(auth_store.get(&target).unwrap().is_some());
     }
 }

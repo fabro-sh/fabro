@@ -1699,6 +1699,7 @@ dependencies = [
  "fabro-util",
  "fs2",
  "futures",
+ "httpmock",
  "libc",
  "progenitor-client",
  "rand 0.9.4",

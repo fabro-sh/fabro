@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 
 use crate::support::{
     RealAuthHarness, TEST_DEV_TOKEN, complete_login_via_browser, expire_saved_access_token,
-    no_redirect_browser_client, run_detached, saved_auth_entry,
+    fatal_error_line, no_redirect_browser_client, run_detached, saved_auth_entry,
 };
 
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -235,10 +235,10 @@ fn auth_refresh_failure_clears_local_session() {
         !system_info.status.success(),
         "system info should fail when refresh is revoked"
     );
-    assert!(
-        String::from_utf8_lossy(&system_info.stderr).contains("fabro auth login"),
-        "refresh failure should direct the user to log in again:\n{}",
-        String::from_utf8_lossy(&system_info.stderr)
+    assert_eq!(system_info.status.code(), Some(4));
+    assert_eq!(
+        fatal_error_line(&system_info.stderr),
+        "CLI session has expired. Run `fabro auth login` again."
     );
     expired_access_mock.assert();
     refresh_mock.assert();

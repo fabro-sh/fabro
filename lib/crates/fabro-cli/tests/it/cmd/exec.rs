@@ -14,6 +14,8 @@ use fabro_test::{fabro_snapshot, preserve_coverage_env, test_context};
 use httpmock::MockServer;
 use serde_json::json;
 
+use crate::support::fatal_error_line;
+
 async fn run_success_output(mut cmd: assert_cmd::Command) -> Output {
     tokio::task::spawn_blocking(move || cmd.assert().success().get_output().clone())
         .await
@@ -305,6 +307,90 @@ fn exec_server_target_uses_saved_cli_auth_without_local_api_key_resolution() {
     assert!(
         !stderr.contains("API key not set"),
         "exec should not fall back to local provider auth when stored CLI auth exists: {stderr}"
+    );
+}
+
+#[test]
+fn exec_server_target_auth_failure_exits_with_4() {
+    let context = test_context!();
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("POST").path("/api/v1/completions");
+        then.status(401)
+            .header("Content-Type", "application/json")
+            .json_body(json!({
+                "errors": [{
+                    "status": "401",
+                    "title": "Unauthorized",
+                    "detail": "Authentication required.",
+                    "code": "authentication_required"
+                }]
+            }));
+    });
+
+    let mut cmd = context.exec_cmd();
+    cmd.env_clear();
+    preserve_coverage_env!(cmd);
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
+    cmd.args([
+        "--server",
+        &format!("{}/api/v1", server.base_url()),
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-5.4-mini",
+        "test prompt",
+    ]);
+
+    let output = cmd.assert().failure().get_output().clone();
+    assert_eq!(output.status.code(), Some(4));
+    assert_eq!(
+        fatal_error_line(&output.stderr),
+        "LLM error: Authentication error for openai: Authentication required."
+    );
+}
+
+#[test]
+fn exec_direct_provider_auth_failure_stays_exit_1() {
+    let context = test_context!();
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("POST")
+            .path("/v1/messages")
+            .header("x-api-key", "test-key");
+        then.status(401)
+            .header("Content-Type", "application/json")
+            .json_body(json!({
+                "error": {
+                    "type": "authentication_error",
+                    "message": "bad key"
+                }
+            }));
+    });
+
+    let mut cmd = context.exec_cmd();
+    cmd.env_clear();
+    preserve_coverage_env!(cmd);
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled")
+        .env("ANTHROPIC_API_KEY", "test-key")
+        .env("ANTHROPIC_BASE_URL", format!("{}/v1", server.base_url()));
+    cmd.args([
+        "--provider",
+        "anthropic",
+        "--model",
+        "claude-haiku-4-5",
+        "test prompt",
+    ]);
+
+    let output = cmd.assert().failure().get_output().clone();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        fatal_error_line(&output.stderr),
+        "LLM error: Authentication error for anthropic: bad key"
     );
 }
 

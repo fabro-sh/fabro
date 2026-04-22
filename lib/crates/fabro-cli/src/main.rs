@@ -31,6 +31,7 @@ use fabro_config::merge::combine_files;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::cli::OutputVerbosity;
+use fabro_util::exit;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use rustls::crypto::ring::default_provider;
@@ -78,6 +79,7 @@ async fn main() {
 
     let (command_name, result) = Box::pin(main_inner()).await;
     let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let exit_code = result.as_ref().err().map_or(0, exit::exit_code_for);
 
     let is_error = result.is_err();
     // An empty command_name means no subcommand was invoked (landing was shown);
@@ -94,7 +96,7 @@ async fn main() {
                 "repository": repository,
                 "ci": ci,
                 "success": false,
-                "exitCode": 1,
+                "exitCode": exit_code,
             }, error);
         } else {
             fabro_telemetry::track!("CLI Executed", {
@@ -128,7 +130,7 @@ async fn main() {
                 }
             }
         }
-        std::process::exit(1);
+        std::process::exit(exit_code);
     }
 }
 

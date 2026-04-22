@@ -62,6 +62,15 @@ pub(crate) fn run_output_filters(context: &TestContext) -> Vec<(String, String)>
     filters
 }
 
+pub(crate) fn fatal_error_line(stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    console::strip_ansi_codes(&stderr)
+        .lines()
+        .rev()
+        .find_map(|line| line.strip_prefix("error: ").map(ToOwned::to_owned))
+        .expect("stderr should contain a fatal `error:` line")
+}
+
 pub(crate) fn unique_run_id() -> String {
     RunId::new().to_string()
 }

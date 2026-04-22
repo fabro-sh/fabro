@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow};
+use fabro_util::exit::{ErrorExt, ExitClass};
 use serde::de::DeserializeOwned;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,14 @@ pub fn parse_error_response_value(value: &serde_json::Value) -> (Option<String>,
     (detail, code)
 }
 
+fn classify_from_status(err: anyhow::Error, status: fabro_http::StatusCode) -> anyhow::Error {
+    if status == fabro_http::StatusCode::UNAUTHORIZED {
+        err.classify(ExitClass::AuthRequired)
+    } else {
+        err
+    }
+}
+
 pub async fn classify_api_error<E>(err: progenitor_client::Error<E>) -> StructuredApiError
 where
     E: serde::Serialize + std::fmt::Debug,
@@ -55,7 +64,7 @@ where
                 code = parsed_code;
                 if let Some(detail) = detail {
                     return StructuredApiError {
-                        error:   anyhow!("{detail}"),
+                        error:   classify_from_status(anyhow!("{detail}"), status),
                         failure: Some(ApiFailure { status, code }),
                     };
                 }
@@ -66,7 +75,7 @@ where
                 anyhow!("request failed with status {status}: {body}")
             };
             StructuredApiError {
-                error,
+                error:   classify_from_status(error, status),
                 failure: Some(ApiFailure { status, code }),
             }
         }
@@ -87,18 +96,24 @@ where
                 code = parsed_code;
                 if let Some(detail) = detail {
                     return StructuredApiError {
-                        error:   anyhow!("{detail}"),
+                        error:   classify_from_status(anyhow!("{detail}"), status),
                         failure: Some(ApiFailure { status, code }),
                     };
                 }
             }
             StructuredApiError {
-                error:   anyhow!("request failed with status {status}"),
+                error:   classify_from_status(
+                    anyhow!("request failed with status {status}"),
+                    status,
+                ),
                 failure: Some(ApiFailure { status, code }),
             }
         }
         progenitor_client::Error::UnexpectedResponse(response) => StructuredApiError {
-            error:   anyhow!("request failed with status {}", response.status()),
+            error:   classify_from_status(
+                anyhow!("request failed with status {}", response.status()),
+                response.status(),
+            ),
             failure: Some(ApiFailure {
                 status: response.status(),
                 code:   None,
@@ -122,18 +137,24 @@ pub fn raw_response_failure_error(failure: &ApiError) -> anyhow::Error {
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&failure.body) {
         let (detail, _) = parse_error_response_value(&value);
         if let Some(detail) = detail {
-            return anyhow!("{detail}");
+            return classify_from_status(anyhow!("{detail}"), failure.status);
         }
     }
 
     if failure.body.is_empty() {
-        return anyhow!("request failed with status {}", failure.status);
+        return classify_from_status(
+            anyhow!("request failed with status {}", failure.status),
+            failure.status,
+        );
     }
 
-    anyhow!(
-        "request failed with status {}: {}",
+    classify_from_status(
+        anyhow!(
+            "request failed with status {}: {}",
+            failure.status,
+            failure.body
+        ),
         failure.status,
-        failure.body
     )
 }
 
@@ -181,4 +202,88 @@ where
     TOutput: DeserializeOwned,
 {
     serde_json::from_value(serde_json::to_value(value)?).map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use fabro_util::exit;
+    use serde_json::json;
+
+    use super::{ApiError, ApiFailure, map_api_error, raw_response_failure_error};
+
+    fn error_response(
+        status: fabro_http::StatusCode,
+        detail: &str,
+        code: &str,
+    ) -> progenitor_client::Error<serde_json::Value> {
+        let response = progenitor_client::ResponseValue::new(
+            json!({
+                "errors": [{
+                    "detail": detail,
+                    "code": code,
+                }]
+            }),
+            status,
+            fabro_http::HeaderMap::new(),
+        );
+        progenitor_client::Error::ErrorResponse(response)
+    }
+
+    fn api_error(status: fabro_http::StatusCode, detail: &str, code: &str) -> ApiError {
+        ApiError {
+            status,
+            headers: fabro_http::HeaderMap::new(),
+            body: serde_json::to_string(&json!({
+                "errors": [{
+                    "detail": detail,
+                    "code": code,
+                }]
+            }))
+            .unwrap(),
+            failure: ApiFailure {
+                status,
+                code: Some(code.to_string()),
+            },
+        }
+    }
+
+    #[test]
+    fn map_api_error_marks_401_as_auth_required() {
+        let err = map_api_error(error_response(
+            fabro_http::StatusCode::UNAUTHORIZED,
+            "Authentication required.",
+            "authentication_required",
+        ));
+        assert_eq!(exit::exit_code_for(&err), 4);
+    }
+
+    #[test]
+    fn map_api_error_keeps_500_as_exit_1() {
+        let err = map_api_error(error_response(
+            fabro_http::StatusCode::INTERNAL_SERVER_ERROR,
+            "Server exploded.",
+            "server_error",
+        ));
+        assert_eq!(exit::exit_code_for(&err), 1);
+    }
+
+    #[test]
+    fn raw_response_failure_error_marks_401_as_auth_required() {
+        let err = raw_response_failure_error(&api_error(
+            fabro_http::StatusCode::UNAUTHORIZED,
+            "Authentication required.",
+            "authentication_required",
+        ));
+        assert_eq!(exit::exit_code_for(&err), 4);
+    }
+
+    #[test]
+    fn raw_response_failure_error_keeps_403_as_exit_1() {
+        let err = raw_response_failure_error(&api_error(
+            fabro_http::StatusCode::FORBIDDEN,
+            "Forbidden.",
+            "forbidden",
+        ));
+        assert_eq!(exit::exit_code_for(&err), 1);
+    }
 }

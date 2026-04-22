@@ -3,7 +3,7 @@ use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{local_dev_token, setup_completed_fast_dry_run, setup_created_fast_dry_run};
-use crate::support::unique_run_id;
+use crate::support::{fatal_error_line, unique_run_id};
 
 #[test]
 fn help() {
@@ -83,12 +83,8 @@ fn ps_explicit_local_tcp_server_target_requires_explicit_auth() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("Authentication required."),
-        "explicit local TCP target should fail with an auth error:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(4));
+    assert_eq!(fatal_error_line(&output.stderr), "Authentication required.");
 }
 
 #[test]

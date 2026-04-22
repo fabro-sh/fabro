@@ -16,6 +16,7 @@ use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
 use fabro_types::settings::run::McpEntryLayer;
 use fabro_types::settings::{CliSettings, InterpString};
+use fabro_util::exit::{ErrorExt, ExitClass};
 use fabro_util::printer::Printer;
 use futures::stream;
 use serde::Deserialize;
@@ -209,6 +210,25 @@ fn transport_error(provider: &str, err: &anyhow::Error) -> LlmError {
     LlmError::Configuration {
         message,
         source: None,
+    }
+}
+
+fn classify_server_agent_auth(err: anyhow::Error) -> anyhow::Error {
+    let is_auth = err.chain().any(|cause| {
+        cause
+            .downcast_ref::<fabro_agent::Error>()
+            .is_some_and(|error| {
+                matches!(
+                    error,
+                    fabro_agent::Error::Llm(llm)
+                        if llm.provider_kind() == Some(ProviderErrorKind::Authentication)
+                )
+            })
+    });
+    if is_auth {
+        err.classify(ExitClass::AuthRequired)
+    } else {
+        err
     }
 }
 
@@ -430,7 +450,9 @@ pub(crate) async fn execute(
             .register_provider(adapter)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to register fabro server adapter: {e}"))?;
-        run_with_args_and_client(args.agent, Some(client), mcp_servers).await?;
+        run_with_args_and_client(args.agent, Some(client), mcp_servers)
+            .await
+            .map_err(classify_server_agent_auth)?;
     } else {
         tracing::info!(transport = "direct", "Agent session starting");
         run_with_args(args.agent, mcp_servers).await?;
