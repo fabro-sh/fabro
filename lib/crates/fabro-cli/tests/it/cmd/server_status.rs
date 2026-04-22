@@ -54,11 +54,19 @@ fn status_errors_when_only_a_legacy_running_server_record_exists() {
     let socket_path = home_dir.path().join("legacy.sock");
     let config_dir = tempfile::tempdir_in("/tmp").unwrap();
     let config_path = config_dir.path().join("settings.toml");
-    std::fs::write(&config_path, "_version = 1\n").unwrap();
+    std::fs::write(
+        &config_path,
+        "_version = 1\n\n[server.auth]\nmethods = [\"dev-token\"]\n",
+    )
+    .unwrap();
 
     let start_output = {
         let mut start = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
         fabro_test::apply_test_isolation(&mut start, home_dir.path());
+        start.env(
+            "FABRO_DEV_TOKEN",
+            "fabro_dev_abababababababababababababababababababababababababababababababab",
+        );
         start
             .args(["server", "start", "--bind"])
             .arg(&socket_path)

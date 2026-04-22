@@ -184,6 +184,7 @@ fn graph_json_without_output_is_rejected() {
 #[test]
 fn graph_json_with_output_reports_file() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let output_path = context.temp_dir.join("graph.svg");
     let workflow = fixture("simple.fabro");
 

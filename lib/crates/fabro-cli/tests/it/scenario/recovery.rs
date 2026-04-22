@@ -184,6 +184,7 @@ digraph Recovery {
 #[test]
 fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let repo_dir = tempfile::tempdir().unwrap();
     let source_run_id = unique_run_id();
 

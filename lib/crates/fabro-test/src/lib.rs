@@ -1275,6 +1275,7 @@ impl TestContext {
 
     /// Build a `validate` subcommand.
     pub fn validate(&self) -> Command {
+        self.ensure_home_server_auth_methods();
         let mut cmd = self.command();
         cmd.arg("validate");
         cmd

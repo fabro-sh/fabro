@@ -113,6 +113,7 @@ fn local_run_lifecycle() {
 #[test]
 fn dry_run_create_start_attach_works_with_default_run_lookup() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let run_id = unique_run_id();
     let workflow = context.install_fixture("simple.fabro");
 
@@ -161,6 +162,7 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
 #[test]
 fn dry_run_detach_attach_works_with_default_run_lookup() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let run_id = unique_run_id();
     let workflow = context.install_fixture("simple.fabro");
 
@@ -205,6 +207,7 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
 #[test]
 fn completed_run_can_be_attached_by_workflow_slug() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let project = tempfile::tempdir().unwrap();
     let workflow_dir = project.path().join("workflows").join("sluggy");
     let workflow_path = workflow_dir.join("workflow.fabro");
@@ -277,6 +280,7 @@ digraph BarBaz {
 #[test]
 fn completed_run_can_be_attached_by_file_stem() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let workflow_dir = tempfile::tempdir().unwrap();
     let workflow_path = workflow_dir.path().join("alpha.fabro");
     let run_id = unique_run_id();

@@ -3013,6 +3013,9 @@ client_id = "client-id"
             r#"
 _version = 1
 
+[server.auth]
+methods = ["dev-token"]
+
 [server.storage]
 root = "{}"
 "#,

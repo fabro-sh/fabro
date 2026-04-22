@@ -124,6 +124,7 @@ fn wait_for_output_signal(
 #[test]
 fn attach_replays_completed_detached_run() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let run_id = unique_run_id();
     let workflow = context.install_fixture("simple.fabro");
 
@@ -172,6 +173,7 @@ fn attach_replays_completed_detached_run() {
 )]
 fn attach_before_completion_streams_to_finished_state() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
 
     let mut run_cmd = context.command();
@@ -276,6 +278,7 @@ fn attach_before_completion_streams_to_finished_state() {
 )]
 fn attach_json_errors_without_prompting_for_human_input() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let workflow = context.temp_dir.join("human-gate.fabro");
     context.write_temp(
         "human-gate.fabro",

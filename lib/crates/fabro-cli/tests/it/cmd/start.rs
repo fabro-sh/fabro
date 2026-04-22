@@ -36,6 +36,7 @@ fn help() {
 #[test]
 fn start_by_run_id_starts_created_run() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let run_id = unique_run_id();
     let workflow = context.install_fixture("simple.fabro");
 
@@ -87,6 +88,7 @@ fn start_by_run_id_starts_created_run() {
 #[test]
 fn start_by_run_id_starts_created_run_without_run_json_or_status_json() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let run_id = unique_run_id();
     let workflow = context.install_fixture("simple.fabro");
 
@@ -132,6 +134,7 @@ fn start_by_run_id_starts_created_run_without_run_json_or_status_json() {
 #[test]
 fn start_rejects_already_active_or_completed_run() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
 
     let mut create_cmd = context.command();
@@ -189,6 +192,7 @@ fn start_rejects_already_active_or_completed_run() {
 #[test]
 fn start_runs_under_server_ownership_without_launcher_record() {
     let context = test_context!();
+    context.ensure_home_server_auth_methods();
     let gate = write_gated_workflow(
         &context.temp_dir.join("owned-by-server.fabro"),
         "owned-by-server",
