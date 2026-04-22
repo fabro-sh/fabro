@@ -91,3 +91,4 @@ async-trait.workspace = true
 tokio-util.workspace = true
 fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }
 fabro-test = { workspace = true }
+fabro-types = { path = "../fabro-types", features = ["test-support"] }

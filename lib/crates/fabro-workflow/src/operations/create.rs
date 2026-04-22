@@ -463,9 +463,7 @@ mod tests {
     }
 
     fn test_default_settings() -> SettingsLayer {
-        let mut layer = SettingsLayer::default();
-        ensure_fixture_auth_methods(&mut layer);
-        layer
+        SettingsLayer::test_default()
     }
 
     fn validate_dot(dot_source: &str, settings: SettingsLayer) -> Validated {
@@ -798,7 +796,7 @@ mod tests {
                     }),
                     ..SettingsLayer::default()
                 };
-                ensure_fixture_auth_methods(&mut layer);
+                layer.ensure_test_auth_methods();
                 layer
             },
             cwd: dir.path().to_path_buf(),
@@ -895,7 +893,7 @@ mod tests {
                     }),
                     ..SettingsLayer::default()
                 };
-                ensure_fixture_auth_methods(&mut layer);
+                layer.ensure_test_auth_methods();
                 layer
             },
             cwd: dir.path().to_path_buf(),
@@ -970,25 +968,8 @@ mod tests {
             }),
             ..SettingsLayer::default()
         };
-        ensure_fixture_auth_methods(&mut layer);
+        layer.ensure_test_auth_methods();
         layer
-    }
-
-    pub(super) fn ensure_fixture_auth_methods(layer: &mut SettingsLayer) {
-        use fabro_types::settings::server::{ServerAuthLayer, ServerAuthMethod, ServerLayer};
-
-        if layer
-            .server
-            .as_ref()
-            .and_then(|server| server.auth.as_ref())
-            .and_then(|auth| auth.methods.as_ref())
-            .is_some()
-        {
-            return;
-        }
-        let server = layer.server.get_or_insert_with(ServerLayer::default);
-        let auth = server.auth.get_or_insert_with(ServerAuthLayer::default);
-        auth.methods = Some(vec![ServerAuthMethod::DevToken]);
     }
 
     fn dry_run_with_storage(storage_dir: &Path) -> SettingsLayer {
@@ -1010,7 +991,7 @@ mod tests {
             }),
             ..SettingsLayer::default()
         };
-        ensure_fixture_auth_methods(&mut layer);
+        layer.ensure_test_auth_methods();
         layer
     }
 

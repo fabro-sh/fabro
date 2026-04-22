@@ -32,3 +32,36 @@ pub struct SettingsLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub features: Option<FeaturesLayer>,
 }
+
+#[cfg(any(test, feature = "test-support"))]
+impl SettingsLayer {
+    /// A default layer that resolves cleanly: populates `server.auth.methods`
+    /// with `["dev-token"]`. Use anywhere a test needs a starter
+    /// `SettingsLayer` that the strict resolver will accept.
+    #[must_use]
+    pub fn test_default() -> Self {
+        let mut layer = Self::default();
+        layer.ensure_test_auth_methods();
+        layer
+    }
+
+    /// If `server.auth.methods` is unset, populate it with `["dev-token"]`.
+    /// Existing methods (set by a fixture) are preserved. Use to make a
+    /// parsed-from-TOML layer resolve cleanly without overriding test intent.
+    pub fn ensure_test_auth_methods(&mut self) {
+        use super::server::{ServerAuthLayer, ServerAuthMethod, ServerLayer as ServerLayerTy};
+
+        if self
+            .server
+            .as_ref()
+            .and_then(|server| server.auth.as_ref())
+            .and_then(|auth| auth.methods.as_ref())
+            .is_some()
+        {
+            return;
+        }
+        let server = self.server.get_or_insert_with(ServerLayerTy::default);
+        let auth = server.auth.get_or_insert_with(ServerAuthLayer::default);
+        auth.methods = Some(vec![ServerAuthMethod::DevToken]);
+    }
+}

@@ -912,30 +912,7 @@ mod tests {
 
     fn parse_settings(source: &str) -> SettingsLayer {
         let mut layer = parse_settings_layer(source).expect("v2 fixture should parse");
-        ensure_fixture_auth_methods(&mut layer);
-        layer
-    }
-
-    fn ensure_fixture_auth_methods(layer: &mut SettingsLayer) {
-        use fabro_types::settings::server::{ServerAuthLayer, ServerAuthMethod, ServerLayer};
-
-        if layer
-            .server
-            .as_ref()
-            .and_then(|server| server.auth.as_ref())
-            .and_then(|auth| auth.methods.as_ref())
-            .is_some()
-        {
-            return;
-        }
-        let server = layer.server.get_or_insert_with(ServerLayer::default);
-        let auth = server.auth.get_or_insert_with(ServerAuthLayer::default);
-        auth.methods = Some(vec![ServerAuthMethod::DevToken]);
-    }
-
-    fn default_settings() -> SettingsLayer {
-        let mut layer = SettingsLayer::default();
-        ensure_fixture_auth_methods(&mut layer);
+        layer.ensure_test_auth_methods();
         layer
     }
 
@@ -1031,7 +1008,8 @@ enabled = false
 
     #[test]
     fn resolve_bind_request_from_settings_defaults_to_socket_when_listen_is_absent() {
-        let bind = resolve_bind_request_from_settings(&default_settings(), None).expect("bind");
+        let bind =
+            resolve_bind_request_from_settings(&SettingsLayer::test_default(), None).expect("bind");
 
         assert_eq!(bind, BindRequest::Unix(Home::from_env().socket_path()));
     }
@@ -1073,7 +1051,7 @@ address = "127.0.0.1:32276"
 
     #[test]
     fn resolve_bind_request_from_settings_preserves_host_only_cli_bind() {
-        let settings = default_settings();
+        let settings = SettingsLayer::test_default();
 
         let bind = resolve_bind_request_from_settings(&settings, Some("127.0.0.1")).expect("bind");
 

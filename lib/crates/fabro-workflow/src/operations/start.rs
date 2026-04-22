@@ -1020,23 +1020,6 @@ mod tests {
         ))
     }
 
-    fn ensure_fixture_auth_methods(layer: &mut SettingsLayer) {
-        use fabro_types::settings::server::{ServerAuthLayer, ServerAuthMethod, ServerLayer};
-
-        if layer
-            .server
-            .as_ref()
-            .and_then(|server| server.auth.as_ref())
-            .and_then(|auth| auth.methods.as_ref())
-            .is_some()
-        {
-            return;
-        }
-        let server = layer.server.get_or_insert_with(ServerLayer::default);
-        let auth = server.auth.get_or_insert_with(ServerAuthLayer::default);
-        auth.methods = Some(vec![ServerAuthMethod::DevToken]);
-    }
-
     async fn persisted_workflow(dot: &str, run_dir: &Path) -> (Persisted, Arc<Database>) {
         let store = memory_store();
         let created = crate::operations::create(&store, crate::operations::CreateRunInput {
@@ -1055,7 +1038,7 @@ mod tests {
                     }),
                     ..SettingsLayer::default()
                 };
-                ensure_fixture_auth_methods(&mut layer);
+                layer.ensure_test_auth_methods();
                 layer
             },
             cwd: run_dir
@@ -1238,7 +1221,7 @@ mod tests {
                     }),
                     ..SettingsLayer::default()
                 };
-                ensure_fixture_auth_methods(&mut layer);
+                layer.ensure_test_auth_methods();
                 layer
             },
             cwd: temp.path().to_path_buf(),

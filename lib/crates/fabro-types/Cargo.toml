@@ -12,6 +12,7 @@ doctest = false
 [features]
 default = []
 clap = ["dep:clap"]
+test-support = []
 
 [lints]
 workspace = true

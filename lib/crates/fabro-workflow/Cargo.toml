@@ -75,3 +75,4 @@ assert_cmd = "2"
 predicates = "3"
 fabro-macros = { path = "../fabro-macros" }
 fabro-test = { workspace = true }
+fabro-types = { path = "../fabro-types", features = ["test-support"] }

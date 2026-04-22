@@ -1,34 +1,19 @@
 use fabro_config::parse_settings_layer;
 use fabro_config::user::default_storage_dir;
 use fabro_types::settings::server::{
-    GithubIntegrationStrategy, IpAllowEntry, ObjectStoreSettings, ServerAuthMethod,
-    ServerListenSettings,
+    GithubIntegrationStrategy, IpAllowEntry, ObjectStoreSettings, ServerListenSettings,
 };
 use fabro_types::settings::{InterpString, SettingsLayer};
 use fabro_util::Home;
 
 fn parse(source: &str) -> SettingsLayer {
     let mut layer = parse_settings_layer(source).expect("fixture should parse");
-    if layer
-        .server
-        .as_ref()
-        .and_then(|server| server.auth.as_ref())
-        .and_then(|auth| auth.methods.as_ref())
-        .is_none()
-    {
-        let server = layer.server.get_or_insert_with(Default::default);
-        let auth = server.auth.get_or_insert_with(Default::default);
-        auth.methods = Some(vec![ServerAuthMethod::DevToken]);
-    }
+    layer.ensure_test_auth_methods();
     layer
 }
 
 fn empty_settings_with_auth_methods() -> SettingsLayer {
-    parse(
-        r"
-_version = 1
-",
-    )
+    SettingsLayer::test_default()
 }
 
 #[test]

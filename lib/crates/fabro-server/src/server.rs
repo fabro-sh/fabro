@@ -63,8 +63,7 @@ use fabro_store::{
 };
 use fabro_types::settings::run::RunMode;
 use fabro_types::settings::server::{
-    GithubIntegrationSettings, GithubIntegrationStrategy, ServerAuthLayer, ServerAuthMethod,
-    ServerLayer,
+    GithubIntegrationSettings, GithubIntegrationStrategy, ServerAuthMethod,
 };
 use fabro_types::settings::{
     InterpString, ServerSettings as ResolvedServerSettings, SettingsLayer,
@@ -2581,18 +2580,10 @@ fn default_test_app_state_config(
 }
 
 fn ensure_test_auth_methods(settings: &Arc<RwLock<SettingsLayer>>) {
-    let mut settings = settings.write().expect("test settings lock poisoned");
-    if settings
-        .server
-        .as_ref()
-        .and_then(|server| server.auth.as_ref())
-        .and_then(|auth| auth.methods.as_ref())
-        .is_none()
-    {
-        let server = settings.server.get_or_insert_with(ServerLayer::default);
-        let auth = server.auth.get_or_insert_with(ServerAuthLayer::default);
-        auth.methods = Some(vec![ServerAuthMethod::DevToken]);
-    }
+    settings
+        .write()
+        .expect("test settings lock poisoned")
+        .ensure_test_auth_methods();
 }
 
 pub fn create_app_state_with_store(
