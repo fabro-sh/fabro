@@ -1505,7 +1505,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-agent"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-api"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "chrono",
  "fabro-types",
@@ -1560,7 +1560,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-auth"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1581,7 +1581,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-checkpoint"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "chrono",
  "fabro-store",
@@ -1596,7 +1596,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-cli"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1687,7 +1687,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-client"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1714,7 +1714,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-config"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1735,7 +1735,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-core"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "async-trait",
  "fabro-types",
@@ -1750,7 +1750,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-devcontainer"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "fabro-http",
  "fabro-util",
@@ -1766,7 +1766,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-github"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "base64",
  "chrono",
@@ -1782,7 +1782,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-graphviz"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "fabro-types",
@@ -1795,7 +1795,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-hooks"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "async-trait",
  "fabro-agent",
@@ -1818,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-http"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "http",
  "reqwest 0.13.2",
@@ -1827,7 +1827,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-install"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1841,7 +1841,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-interview"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "async-trait",
  "dialoguer",
@@ -1855,7 +1855,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-llm"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1884,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-macros"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1893,7 +1893,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-mcp"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "fabro-config",
@@ -1909,7 +1909,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-model"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "insta",
  "serde",
@@ -1918,7 +1918,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-oauth"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "axum",
  "base64",
@@ -1937,7 +1937,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-proc"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "cc",
  "libc",
@@ -1946,7 +1946,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-retro"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1964,7 +1964,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-sandbox"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1995,7 +1995,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-server"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2070,7 +2070,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-slack"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "fabro-http",
  "fabro-interview",
@@ -2089,14 +2089,14 @@ dependencies = [
 
 [[package]]
 name = "fabro-spa"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "rust-embed",
 ]
 
 [[package]]
 name = "fabro-store"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2122,7 +2122,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-telemetry"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-template"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "fabro-util",
@@ -2159,7 +2159,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-test"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "assert_cmd",
  "axum",
@@ -2180,7 +2180,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-tracker"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "async-trait",
  "fabro-github",
@@ -2193,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-types"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "chrono",
  "clap",
@@ -2213,7 +2213,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-util"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2234,7 +2234,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-validate"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "fabro-graphviz",
  "fabro-model",
@@ -2244,7 +2244,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-vault"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "chrono",
  "serde",
@@ -2255,7 +2255,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-workflow"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -6870,7 +6870,7 @@ dependencies = [
 
 [[package]]
 name = "twin-github"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "axum",
  "base64",
@@ -6889,7 +6889,7 @@ dependencies = [
 
 [[package]]
 name = "twin-openai"
-version = "0.210.0-nightly.0"
+version = "0.211.0-nightly.0"
 dependencies = [
  "anyhow",
  "async-stream",
