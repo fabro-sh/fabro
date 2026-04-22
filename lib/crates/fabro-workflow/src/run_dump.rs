@@ -402,14 +402,10 @@ fn replace_blob_refs_in_value(
 }
 
 fn artifact_dump_path(stage_id: &StageId, filename: &str) -> Result<PathBuf> {
-    let node_id_segment = validate_single_path_segment("node id", stage_id.node_id())?;
+    validate_single_path_segment("node id", stage_id.node_id())?;
     let filename_path = validate_relative_path("artifact filename", filename)?;
     Ok(PathBuf::from("artifacts")
-        .join(format!(
-            "{}@{}",
-            node_id_segment.display(),
-            stage_id.visit()
-        ))
+        .join(stage_id.to_string())
         .join(filename_path))
 }
 
