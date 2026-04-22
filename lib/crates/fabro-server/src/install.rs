@@ -13,6 +13,7 @@ use axum::{Json, Router, middleware};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD};
 use fabro_auth::{AuthCredential, AuthDetails, credential_id_for};
+use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::{Storage, resolve_server_from_file};
 use fabro_install::{
     InstallListenConfig, PendingSettingsWrite, VaultSecretWrite, generate_jwt_keypair,
@@ -32,7 +33,6 @@ use tokio::time::sleep;
 use tower::service_fn;
 use tracing::{error, info, warn};
 
-use crate::bind::{Bind, BindRequest};
 use crate::error::ApiError;
 use crate::serve::{self, DEFAULT_TCP_PORT};
 use crate::{security_headers, static_files};
@@ -827,7 +827,7 @@ async fn post_install_finish(
             };
             if let Err(err) = dev_token::write_dev_token(
                 &Storage::new(state.storage_dir.as_ref())
-                    .runtime_state()
+                    .runtime_directory()
                     .dev_token_path(),
                 &token,
             ) {

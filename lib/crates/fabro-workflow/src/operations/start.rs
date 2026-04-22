@@ -333,12 +333,12 @@ impl RunSession {
             .map(InterpString::as_source)
             .filter(|value| !value.is_empty());
 
-        let provider_enum: Provider = provider
-            .as_deref()
-            .map(str::parse::<Provider>)
-            .transpose()
-            .map_err(|err| Error::Precondition(err.clone()))?
-            .unwrap_or_else(|| Provider::default_for_configured(&configured));
+        let provider_enum: Provider = match provider.as_deref() {
+            Some(value) => value
+                .parse::<Provider>()
+                .map_err(|_| Error::Precondition(format!("unknown provider: {value}")))?,
+            None => Provider::default_for_configured(&configured),
+        };
 
         let fallback_chain = resolve_fallback_chain(provider_enum, &model, &resolved.model);
         let mcp_servers = resolved

@@ -495,16 +495,16 @@ async fn prepare_server_bootstrap(
     let settings =
         user_config::load_settings_with_config_and_storage_dir(config_path, storage_dir)?;
     let storage_dir = local_server::storage_dir(&settings)?;
-    let runtime_state = fabro_config::ServerRuntimeState::new(storage_dir.clone());
+    let runtime_directory = fabro_config::RuntimeDirectory::new(storage_dir.clone());
     let foreground_server_log_bootstrap = if foreground {
-        Some(commands::server::start::prepare_foreground_server_log(&storage_dir).await?)
+        Some(commands::server::start::prepare_foreground_server_log(&runtime_directory).await?)
     } else {
         None
     };
 
     Ok(PreTracingBootstrap {
         sink: logging::InternalLogSink::Server {
-            path: runtime_state.log_path(),
+            path: runtime_directory.log_path(),
         },
         config_log_level: local_server::config_log_level(&settings),
         foreground_server_log_bootstrap,
@@ -743,16 +743,12 @@ level = "warn"
         let config_dir = tempfile::tempdir().unwrap();
         let config_path = config_dir.path().join("settings.toml");
         write_test_settings(&config_path);
-        let record_path = storage_dir.path().join("server.json");
-
         let cli = Cli::try_parse_from([
             "fabro",
             "server",
             "__serve",
             "--storage-dir",
             storage_dir.path().to_str().unwrap(),
-            "--record-path",
-            record_path.to_str().unwrap(),
             "--config",
             config_path.to_str().unwrap(),
         ])

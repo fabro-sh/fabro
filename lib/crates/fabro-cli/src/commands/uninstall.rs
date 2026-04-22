@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use fabro_config::Storage;
+use fabro_config::daemon::ServerDaemon;
 use fabro_types::settings::CliSettings;
 use fabro_types::settings::cli::OutputFormat;
 use fabro_util::Home;
@@ -21,7 +23,7 @@ use serde::Serialize;
 use tracing::warn;
 
 use crate::args::UninstallArgs;
-use crate::commands::server;
+use crate::commands::server::stop;
 use crate::shared::{format_size, print_json_pretty, tilde_path};
 use crate::{local_server, user_config};
 
@@ -87,7 +89,8 @@ pub(crate) async fn run_uninstall(
 
 fn build_inventory(home_root: &Path, storage_dir: &Path) -> Result<Inventory> {
     let home_size = dir_size(home_root);
-    let server_running = server::record::active_server_record_details(storage_dir)?.is_some();
+    let server_running =
+        ServerDaemon::load_running(&Storage::new(storage_dir).runtime_directory())?.is_some();
     let shell_configs = find_shell_configs_with_sentinel();
     let (binary_path, binary_is_managed) = resolve_binary(home_root);
 
@@ -264,7 +267,7 @@ async fn execute_uninstall(inventory: &Inventory, json: bool, printer: Printer) 
 
     // Unit 3a: Server stop
     if inventory.server_running {
-        server::stop::execute(&inventory.storage_dir, Duration::from_secs(5), printer).await?;
+        stop::execute(&inventory.storage_dir, Duration::from_secs(5), printer).await?;
         result.server_stopped = true;
     }
 

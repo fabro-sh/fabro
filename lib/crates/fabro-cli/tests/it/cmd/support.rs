@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::{Duration, Instant};
 
+use fabro_config::bind::Bind;
+use fabro_config::daemon::ServerDaemon;
 use fabro_config::{Storage, envfile};
-use fabro_server::bind::Bind;
 use fabro_store::EventEnvelope;
 use fabro_test::{TestContext, expect_reqwest_status};
 use fabro_types::RunId;
@@ -667,13 +668,8 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         .block_on(future)
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct TestServerRecord {
-    bind: Bind,
-}
-
 pub(crate) fn local_dev_token(storage_dir: &Path) -> Option<String> {
-    let server_state = Storage::new(storage_dir).runtime_state();
+    let server_state = Storage::new(storage_dir).runtime_directory();
 
     envfile::read_env_file(&server_state.env_path())
         .ok()
@@ -682,10 +678,8 @@ pub(crate) fn local_dev_token(storage_dir: &Path) -> Option<String> {
 }
 
 pub(crate) fn server_endpoint(storage_dir: &Path) -> Option<(fabro_http::HttpClient, String)> {
-    let record_path = Storage::new(storage_dir).runtime_state().record_path();
-    let record = std::fs::read_to_string(record_path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<TestServerRecord>(&content).ok())?;
+    let runtime_directory = Storage::new(storage_dir).runtime_directory();
+    let daemon = ServerDaemon::read(&runtime_directory).ok().flatten()?;
     let mut headers = fabro_http::HeaderMap::new();
     if let Some(token) = local_dev_token(storage_dir) {
         headers.insert(
@@ -694,7 +688,7 @@ pub(crate) fn server_endpoint(storage_dir: &Path) -> Option<(fabro_http::HttpCli
                 .expect("local dev token should build an authorization header"),
         );
     }
-    match record.bind {
+    match daemon.bind {
         Bind::Unix(path) if path.exists() => Some((
             fabro_http::HttpClientBuilder::new()
                 .unix_socket(path)
@@ -717,15 +711,11 @@ pub(crate) fn server_endpoint(storage_dir: &Path) -> Option<(fabro_http::HttpCli
 }
 
 pub(crate) fn server_target(storage_dir: &Path) -> String {
-    let record_path = Storage::new(storage_dir).runtime_state().record_path();
-    let record = std::fs::read_to_string(record_path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<TestServerRecord>(&content).ok())
+    let runtime_directory = Storage::new(storage_dir).runtime_directory();
+    let daemon = ServerDaemon::read(&runtime_directory)
+        .expect("server record should parse")
         .expect("server record should exist");
-    match record.bind {
-        Bind::Unix(path) => path.to_string_lossy().to_string(),
-        Bind::Tcp(addr) => format!("http://{addr}"),
-    }
+    daemon.bind.to_target()
 }
 
 async fn get_server_json<T: serde::de::DeserializeOwned>(run_dir: &Path, path: &str) -> T {

@@ -9,6 +9,7 @@ AI coding agents are powerful but unpredictable. You either babysit every step o
 [![Rust](https://github.com/fabro-sh/fabro/actions/workflows/rust.yml/badge.svg)](https://github.com/fabro-sh/fabro/actions/workflows/rust.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE.md)
 [![docs](https://img.shields.io/badge/docs-fabro.sh-357F9E)](https://docs.fabro.sh)
+![Discord](https://img.shields.io/discord/1256822430505373696)
 
 ```bash
 # With Claude Code

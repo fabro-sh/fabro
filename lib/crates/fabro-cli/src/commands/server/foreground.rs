@@ -1,29 +1,27 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use chrono::Utc;
-use fabro_config::ServerRuntimeState;
-use fabro_server::bind::BindRequest;
+use fabro_config::RuntimeDirectory;
+use fabro_config::bind::BindRequest;
+use fabro_config::daemon::ServerDaemon;
 use fabro_server::serve;
 use fabro_server::serve::ServeArgs;
-use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
-use super::record;
-
-pub(crate) async fn execute(
-    record_path: PathBuf,
+/// Run `serve::serve_command` with scopeguards that write/remove the server
+/// daemon record and clean up a Unix socket on exit. Used by both
+/// `fabro server serve` and `fabro server start --foreground`.
+pub(crate) async fn serve_with_daemon_record(
     mut serve_args: ServeArgs,
     bind: BindRequest,
     storage_dir: PathBuf,
     styles: &'static Styles,
-    printer: Printer,
 ) -> Result<()> {
-    let _ = printer;
     serve_args.bind = Some(bind.to_string());
 
-    let _record_guard = scopeguard::guard(record_path.clone(), |path| {
-        record::remove_server_record(&path);
+    let runtime_directory = RuntimeDirectory::new(&storage_dir);
+    let _record_guard = scopeguard::guard(runtime_directory.clone(), |dir| {
+        ServerDaemon::remove(&dir);
     });
 
     let _socket_guard = if let BindRequest::Unix(ref path) = bind {
@@ -35,20 +33,16 @@ pub(crate) async fn execute(
         None
     };
 
-    let log_path = ServerRuntimeState::new(&storage_dir).log_path();
+    let log_path = runtime_directory.log_path();
     let pid = std::process::id();
+    let daemon_dir = runtime_directory;
 
     Box::pin(serve::serve_command(
         serve_args,
         styles,
         Some(storage_dir),
         move |resolved_bind| {
-            record::write_server_record(&record_path, &record::ServerRecord {
-                pid,
-                bind: resolved_bind.clone(),
-                log_path: log_path.clone(),
-                started_at: Utc::now(),
-            })
+            ServerDaemon::new(pid, resolved_bind.clone(), log_path.clone()).write(&daemon_dir)
         },
     ))
     .await

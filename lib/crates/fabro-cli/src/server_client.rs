@@ -9,7 +9,7 @@ use fabro_client::{
     apply_bearer_token_auth,
 };
 pub(crate) use fabro_client::{Client, RunEventStream};
-use fabro_server::bind::Bind;
+use fabro_config::bind::Bind;
 pub(crate) use fabro_types::RunProjection;
 use fabro_types::settings::SettingsLayer;
 use fabro_util::dev_token::validate_dev_token_format;

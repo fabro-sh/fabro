@@ -411,8 +411,21 @@ pub struct RateLimitInfo {
 
 // --- 3.8 ReasoningEffort ---
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum ReasoningEffort {
     Low,
     Medium,
@@ -423,35 +436,7 @@ pub enum ReasoningEffort {
 
 impl ReasoningEffort {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-            Self::XHigh => "xhigh",
-            Self::Max => "max",
-        }
-    }
-}
-
-impl std::fmt::Display for ReasoningEffort {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for ReasoningEffort {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "low" => Ok(Self::Low),
-            "medium" => Ok(Self::Medium),
-            "high" => Ok(Self::High),
-            "xhigh" => Ok(Self::XHigh),
-            "max" => Ok(Self::Max),
-            other => Err(format!(
-                "invalid reasoning_effort: {other:?} (expected low, medium, high, xhigh, or max)"
-            )),
-        }
+        (*self).into()
     }
 }
 
@@ -1318,12 +1303,8 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_effort_from_str_rejects_unknown_with_updated_error() {
+    fn reasoning_effort_from_str_rejects_unknown() {
         use std::str::FromStr;
-        let err = ReasoningEffort::from_str("bogus").expect_err("should reject");
-        assert!(
-            err.contains("low, medium, high, xhigh, or max"),
-            "error should list all accepted levels, got: {err}"
-        );
+        assert!(ReasoningEffort::from_str("bogus").is_err());
     }
 }

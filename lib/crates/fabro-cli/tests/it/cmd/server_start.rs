@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 use fabro_config::{Storage, envfile};
 use fabro_test::{
-    apply_test_isolation, fabro_snapshot, isolated_storage_dir, server_log_files, stop_pid,
-    test_context, wait_for_log_line, wait_for_path,
+    apply_test_isolation, fabro_snapshot, isolated_storage_dir, server_log_files, test_context,
+    wait_for_log_line, wait_for_path,
 };
 use fabro_util::dev_token;
 
@@ -31,7 +31,7 @@ fn write_dev_token_server_settings(config_path: &std::path::Path, rest: &str) {
 }
 
 fn provision_dev_token_auth(home_dir: &std::path::Path, storage_dir: &std::path::Path) {
-    let server_env_path = Storage::new(storage_dir).runtime_state().env_path();
+    let server_env_path = Storage::new(storage_dir).runtime_directory().env_path();
     envfile::merge_env_file(&server_env_path, [("FABRO_DEV_TOKEN", TEST_DEV_TOKEN)])
         .expect("merging FABRO_DEV_TOKEN into server.env");
     dev_token::write_dev_token(&home_dir.join(".fabro").join("dev-token"), TEST_DEV_TOKEN)
@@ -364,86 +364,6 @@ fn daemon_start_writes_tracing_to_storage_server_log() {
     assert!(
         home_server_logs.is_empty(),
         "expected daemonized server start to avoid home server logs, found: {home_server_logs:?}"
-    );
-}
-
-#[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "This integration test moves a live daemon record on disk to simulate an unsupported legacy daemon upgrade."
-)]
-fn start_errors_when_only_a_legacy_running_server_record_exists() {
-    let home_dir = tempfile::tempdir_in("/tmp").unwrap();
-    let fabro_home = home_dir.path().join(".fabro");
-    let storage_dir = fabro_home.join("storage");
-    let socket_path = home_dir.path().join("legacy.sock");
-    let config_dir = tempfile::tempdir_in("/tmp").unwrap();
-    let config_path = config_dir.path().join("settings.toml");
-    write_dev_token_server_settings(&config_path, "");
-    provision_dev_token_auth(home_dir.path(), &storage_dir);
-
-    let start_output = {
-        let mut start = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
-        apply_test_isolation(&mut start, home_dir.path());
-        start
-            .args(["server", "start", "--bind"])
-            .arg(&socket_path)
-            .arg("--config")
-            .arg(&config_path)
-            .output()
-            .expect("server start should run")
-    };
-    assert!(
-        start_output.status.success(),
-        "server start should succeed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&start_output.stdout),
-        String::from_utf8_lossy(&start_output.stderr)
-    );
-
-    let current_record = storage_dir.join("server.json");
-    wait_for_path(&current_record);
-    let legacy_record = fabro_home.join("server.json");
-    std::fs::rename(&current_record, &legacy_record).unwrap();
-
-    let retry_output = {
-        let mut retry = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
-        apply_test_isolation(&mut retry, home_dir.path());
-        retry
-            .args(["server", "start", "--bind"])
-            .arg(home_dir.path().join("new.sock"))
-            .arg("--config")
-            .arg(&config_path)
-            .output()
-            .expect("server start retry should run")
-    };
-
-    let pid_u64 = serde_json::from_str::<serde_json::Value>(
-        &std::fs::read_to_string(&legacy_record).unwrap(),
-    )
-    .unwrap()["pid"]
-        .as_u64()
-        .unwrap();
-    let pid = u32::try_from(pid_u64).expect("pid fits in u32");
-    stop_pid(pid);
-    let _ = std::fs::remove_file(&legacy_record);
-    let _ = std::fs::remove_file(&socket_path);
-
-    assert!(
-        !retry_output.status.success(),
-        "server start should fail when only the legacy record exists"
-    );
-    let stderr = String::from_utf8_lossy(&retry_output.stderr);
-    assert!(
-        stderr.contains(&legacy_record.display().to_string()),
-        "expected stderr to mention the legacy record path, got:\n{stderr}"
-    );
-    assert!(
-        stderr.contains(&current_record.display().to_string()),
-        "expected stderr to mention the current record path, got:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("legacy Fabro CLI"),
-        "expected stderr to instruct manual cleanup, got:\n{stderr}"
     );
 }
 

@@ -1,9 +1,9 @@
-use std::fmt;
-use std::str::FromStr;
+use strum::{Display, EnumString};
 
 /// Fidelity mode controlling how much prior context is provided to LLM
 /// sessions.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display, EnumString)]
+#[strum(serialize_all = "lowercase")]
 pub enum Fidelity {
     /// Complete context, no summarization — sessions share a thread.
     Full,
@@ -13,10 +13,13 @@ pub enum Fidelity {
     #[default]
     Compact,
     /// Brief textual summary (~600 token target).
+    #[strum(serialize = "summary:low")]
     SummaryLow,
     /// Moderate textual summary (~1500 token target).
+    #[strum(serialize = "summary:medium")]
     SummaryMedium,
     /// Detailed per-stage Markdown report.
+    #[strum(serialize = "summary:high")]
     SummaryHigh,
 }
 
@@ -27,36 +30,6 @@ impl Fidelity {
         match self {
             Self::Full => Self::SummaryHigh,
             other => other,
-        }
-    }
-}
-
-impl fmt::Display for Fidelity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Self::Full => "full",
-            Self::Truncate => "truncate",
-            Self::Compact => "compact",
-            Self::SummaryLow => "summary:low",
-            Self::SummaryMedium => "summary:medium",
-            Self::SummaryHigh => "summary:high",
-        };
-        write!(f, "{s}")
-    }
-}
-
-impl FromStr for Fidelity {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "full" => Ok(Self::Full),
-            "truncate" => Ok(Self::Truncate),
-            "compact" => Ok(Self::Compact),
-            "summary:low" => Ok(Self::SummaryLow),
-            "summary:medium" => Ok(Self::SummaryMedium),
-            "summary:high" => Ok(Self::SummaryHigh),
-            other => Err(format!("unknown fidelity mode: {other}")),
         }
     }
 }

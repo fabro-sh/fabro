@@ -39,6 +39,7 @@ pub use fabro_api::types::{
     SystemInfoResponse, SystemRunCounts, WriteBlobResponse,
 };
 use fabro_auth::parse_credential_secret;
+use fabro_config::daemon::ServerDaemon;
 use fabro_config::{Storage, resolve_server_from_file};
 use fabro_interview::{
     Answer, ControlInterviewer, Interviewer, Question, QuestionType, WorkerControlEnvelope,
@@ -112,7 +113,6 @@ use tracing::{debug, error, info, warn};
 use ulid::Ulid;
 
 use crate::auth::{self, GithubEndpoints, auth_translation_middleware, demo_routing_middleware};
-use crate::bind::Bind;
 use crate::canonical_origin::resolve_canonical_origin;
 use crate::error::ApiError;
 use crate::github_webhooks::{
@@ -1538,21 +1538,23 @@ async fn attach_events(
     };
 
     let stream =
-        BroadcastStream::new(state.global_event_tx.subscribe()).filter_map(move |result| {
-            match result {
-                Ok(event) => {
-                    if !event_matches_run_filter(&event, run_filter.as_ref()) {
-                        return None;
-                    }
-                    sse_event_from_store(&event).map(Ok::<Event, std::convert::Infallible>)
-                }
-                Err(_) => None,
-            }
+        filtered_global_events(state.global_event_tx.subscribe(), run_filter).filter_map(|event| {
+            sse_event_from_store(&event).map(Ok::<Event, std::convert::Infallible>)
         });
 
     Sse::new(stream)
         .keep_alive(KeepAlive::default())
         .into_response()
+}
+
+fn filtered_global_events(
+    event_rx: broadcast::Receiver<EventEnvelope>,
+    run_filter: Option<HashSet<RunId>>,
+) -> impl tokio_stream::Stream<Item = EventEnvelope> {
+    BroadcastStream::new(event_rx).filter_map(move |result| match result {
+        Ok(event) if event_matches_run_filter(&event, run_filter.as_ref()) => Some(event),
+        Ok(_) | Err(_) => None,
+    })
 }
 
 struct PrunePlan {
@@ -1571,7 +1573,7 @@ fn build_disk_usage_response(
     verbose: bool,
 ) -> anyhow::Result<DiskUsageResponse> {
     let scratch_base_dir = scratch_base(storage_dir);
-    let logs_base_dir = Storage::new(storage_dir).runtime_state().logs_dir();
+    let logs_base_dir = Storage::new(storage_dir).runtime_directory().logs_dir();
     let runs = scan_runs_with_summaries(summaries, &scratch_base_dir)?;
 
     let mut active_count = 0u64;
@@ -3774,33 +3776,6 @@ async fn append_worker_exit_failure(
     }
 }
 
-#[derive(serde::Deserialize)]
-struct WorkerServerRecord {
-    bind: Bind,
-}
-
-fn current_server_target(storage_dir: &std::path::Path) -> anyhow::Result<String> {
-    let record_path = Storage::new(storage_dir).runtime_state().record_path();
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "sync helper invoked from worker_command (sync) via spawn_blocking at the async \
-                  boundary in execute_run_subprocess; see commit 9d1c0d98c"
-    )]
-    let content = std::fs::read_to_string(&record_path)
-        .map_err(|err| anyhow::anyhow!("failed to read {}: {err}", record_path.display()))?;
-    let record: WorkerServerRecord = serde_json::from_str(&content).map_err(|err| {
-        anyhow::anyhow!(
-            "failed to parse server record {}: {err}",
-            record_path.display()
-        )
-    })?;
-
-    Ok(match record.bind {
-        Bind::Unix(path) => path.to_string_lossy().to_string(),
-        Bind::Tcp(addr) => format!("http://{addr}"),
-    })
-}
-
 fn worker_command(
     state: &AppState,
     run_id: RunId,
@@ -3810,7 +3785,14 @@ fn worker_command(
     let current_exe = std::env::current_exe().context("reading current executable path")?;
     let exe = std::env::var_os("CARGO_BIN_EXE_fabro").map_or(current_exe, PathBuf::from);
     let storage_dir = state.server_storage_dir();
-    let server_target = current_server_target(&storage_dir)?;
+    let runtime_directory = Storage::new(&storage_dir).runtime_directory();
+    let daemon = ServerDaemon::read(&runtime_directory)?.with_context(|| {
+        format!(
+            "server record {} is missing",
+            runtime_directory.record_path().display()
+        )
+    })?;
+    let server_target = daemon.bind.to_target();
     let artifact_upload_token = state
         .issue_artifact_upload_token(&run_id)
         .map_err(|_| anyhow::anyhow!("failed to sign artifact upload token"))?;
@@ -6817,7 +6799,13 @@ async fn list_models(
     let provider = match params.provider.as_deref() {
         Some(value) => match fabro_model::Provider::from_str(value) {
             Ok(provider) => Some(provider),
-            Err(err) => return ApiError::new(StatusCode::BAD_REQUEST, err).into_response(),
+            Err(_) => {
+                return ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    format!("unknown provider: {value}"),
+                )
+                .into_response();
+            }
         },
         None => None,
     };
@@ -6865,7 +6853,13 @@ async fn test_model(
     let mode = match params.mode.as_deref() {
         Some(value) => match ModelTestMode::from_str(value) {
             Ok(mode) => mode,
-            Err(err) => return ApiError::new(StatusCode::BAD_REQUEST, err).into_response(),
+            Err(_) => {
+                return ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    format!("invalid model test mode: {value}"),
+                )
+                .into_response();
+            }
         },
         None => ModelTestMode::Basic,
     };
@@ -7390,11 +7384,14 @@ mod tests {
 
     use axum::body::Body;
     use axum::http::{Request, header};
+    use chrono::Utc;
+    use fabro_config::bind::Bind;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
     use fabro_model::Provider;
     use fabro_types::settings::ServerAuthMethod;
     use fabro_types::{InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunId, fixtures};
     use serde_json::json;
+    use tokio_stream::StreamExt as _;
     use tower::ServiceExt;
 
     use super::*;
@@ -7949,15 +7946,13 @@ allowed_usernames = ["octocat"]
                 .join(", ")
         ))
         .unwrap();
-        let record_path = Storage::new(storage_dir).runtime_state().record_path();
-        std::fs::create_dir_all(record_path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &record_path,
-            serde_json::to_string(&json!({
-                "bind": Bind::Tcp("127.0.0.1:32276".parse::<std::net::SocketAddr>().unwrap()),
-            }))
-            .unwrap(),
+        let runtime_directory = Storage::new(storage_dir).runtime_directory();
+        ServerDaemon::new(
+            std::process::id(),
+            Bind::Tcp("127.0.0.1:32276".parse::<std::net::SocketAddr>().unwrap()),
+            runtime_directory.log_path(),
         )
+        .write(&runtime_directory)
         .unwrap();
 
         create_app_state_with_env_lookup(settings, 5, move |name| match name {
@@ -8183,6 +8178,27 @@ allowed_usernames = ["octocat"]
         )
         .unwrap();
         run_store.append_event(&payload).await.unwrap();
+    }
+
+    fn test_event_envelope(seq: u32, run_id: RunId, body: EventBody) -> EventEnvelope {
+        EventEnvelope {
+            seq,
+            event: RunEvent {
+                id: format!("evt-{seq}"),
+                ts: Utc::now(),
+                run_id,
+                node_id: None,
+                node_label: None,
+                stage_id: None,
+                parallel_group_id: None,
+                parallel_branch_id: None,
+                session_id: None,
+                parent_session_id: None,
+                tool_call_id: None,
+                actor: None,
+                body,
+            },
+        }
     }
 
     #[tokio::test]
@@ -11267,6 +11283,36 @@ timeout = "30s"
             .as_str()
             .expect("paged item should still include sandbox metadata");
         assert!(matches!(sandbox_id, "sb-first" | "sb-second"));
+    }
+
+    #[tokio::test]
+    async fn filtered_global_events_streams_only_matching_run_ids() {
+        let run_one = fixtures::RUN_1;
+        let run_two = fixtures::RUN_2;
+        let (event_tx, _) = broadcast::channel(8);
+
+        let stream = filtered_global_events(event_tx.subscribe(), Some(HashSet::from([run_one])));
+
+        event_tx
+            .send(test_event_envelope(
+                1,
+                run_two,
+                EventBody::RunQueued(fabro_types::run_event::RunStatusEffectProps::default()),
+            ))
+            .unwrap();
+        event_tx
+            .send(test_event_envelope(
+                2,
+                run_one,
+                EventBody::RunQueued(fabro_types::run_event::RunStatusEffectProps::default()),
+            ))
+            .unwrap();
+        drop(event_tx);
+
+        let events = stream.collect::<Vec<_>>().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].seq, 2);
+        assert_eq!(events[0].event.run_id, run_one);
     }
 
     #[test]

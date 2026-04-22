@@ -395,7 +395,7 @@ async fn token_install_finish_persists_settings_env_and_vault() {
 
     let server_env = std::fs::read_to_string(
         fabro_config::Storage::new(temp_dir.path())
-            .runtime_state()
+            .runtime_directory()
             .env_path(),
     )
     .unwrap();
@@ -556,7 +556,8 @@ async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
     );
 
     let server_env =
-        std::fs::read_to_string(Storage::new(temp_dir.path()).runtime_state().env_path()).unwrap();
+        std::fs::read_to_string(Storage::new(temp_dir.path()).runtime_directory().env_path())
+            .unwrap();
     assert!(!server_env.contains("FABRO_DEV_TOKEN="));
 
     assert!(
@@ -565,7 +566,7 @@ async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
     );
     assert!(
         !Storage::new(temp_dir.path())
-            .runtime_state()
+            .runtime_directory()
             .dev_token_path()
             .exists(),
         "storage dev token file should not be created for App installs"
@@ -1372,7 +1373,7 @@ async fn install_finish_failure_restores_settings_and_vault_but_leaves_env_keys(
         "{ not valid json"
     );
 
-    let server_env = std::fs::read_to_string(storage.runtime_state().env_path()).unwrap();
+    let server_env = std::fs::read_to_string(storage.runtime_directory().env_path()).unwrap();
     assert!(server_env.contains("SESSION_SECRET="));
     assert!(server_env.contains("FABRO_DEV_TOKEN="));
     assert!(!callback_invoked.load(Ordering::Acquire));
@@ -1441,10 +1442,10 @@ async fn install_finish_failure_leaves_home_dev_token_mirror_written() {
     let home_dev_token = dev_token::read_dev_token_file(&home.dev_token_path())
         .expect("home dev token should exist");
     let storage_dev_token =
-        dev_token::read_dev_token_file(&storage.runtime_state().dev_token_path())
+        dev_token::read_dev_token_file(&storage.runtime_directory().dev_token_path())
             .expect("storage dev token should exist");
     assert_eq!(home_dev_token, storage_dev_token);
 
-    let server_env = std::fs::read_to_string(storage.runtime_state().env_path()).unwrap();
+    let server_env = std::fs::read_to_string(storage.runtime_directory().env_path()).unwrap();
     assert!(server_env.contains(&format!("FABRO_DEV_TOKEN={home_dev_token}")));
 }

@@ -26,6 +26,16 @@ impl Bind {
             Self::Unix(_) => None,
         }
     }
+
+    /// Fabro server target string — an `http://` URL for TCP or a socket path
+    /// for Unix, matching the form accepted by `--target` / `ServerTarget`.
+    #[must_use]
+    pub fn to_target(&self) -> String {
+        match self {
+            Self::Unix(path) => path.to_string_lossy().into_owned(),
+            Self::Tcp(addr) => format!("http://{addr}"),
+        }
+    }
 }
 
 impl fmt::Display for Bind {
@@ -152,5 +162,17 @@ mod tests {
     fn display_tcp_host_request() {
         let bind = BindRequest::TcpHost(IpAddr::V4(Ipv4Addr::LOCALHOST));
         assert_eq!(bind.to_string(), "127.0.0.1");
+    }
+
+    #[test]
+    fn tcp_target_is_http_url() {
+        let bind = Bind::Tcp("127.0.0.1:3000".parse().unwrap());
+        assert_eq!(bind.to_target(), "http://127.0.0.1:3000");
+    }
+
+    #[test]
+    fn unix_target_is_socket_path() {
+        let bind = Bind::Unix(PathBuf::from("/run/fabro.sock"));
+        assert_eq!(bind.to_target(), "/run/fabro.sock");
     }
 }

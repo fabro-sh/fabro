@@ -9,7 +9,7 @@ pub struct Storage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ServerRuntimeState {
+pub struct RuntimeDirectory {
     root: PathBuf,
 }
 
@@ -48,8 +48,8 @@ impl Storage {
     }
 
     #[must_use]
-    pub fn runtime_state(&self) -> ServerRuntimeState {
-        ServerRuntimeState::new(self.root.clone())
+    pub fn runtime_directory(&self) -> RuntimeDirectory {
+        RuntimeDirectory::new(self.root.clone())
     }
 
     #[must_use]
@@ -78,7 +78,7 @@ impl Storage {
     }
 }
 
-impl ServerRuntimeState {
+impl RuntimeDirectory {
     #[must_use]
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -163,12 +163,12 @@ mod tests {
     use chrono::Local;
     use fabro_types::RunId;
 
-    use super::{RunScratch, ServerRuntimeState, Storage};
+    use super::{RunScratch, RuntimeDirectory, Storage};
 
     #[test]
     fn storage_accessors_are_relative_to_root() {
         let storage = Storage::new("/tmp/fabro-data");
-        let runtime = ServerRuntimeState::new("/tmp/fabro-data");
+        let runtime = RuntimeDirectory::new("/tmp/fabro-data");
 
         assert_eq!(storage.root(), std::path::Path::new("/tmp/fabro-data"));
         assert_eq!(

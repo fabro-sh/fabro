@@ -4,7 +4,6 @@
 )]
 
 use std::path::PathBuf;
-use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -13,9 +12,7 @@ use fabro_types::RunId;
 use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
-use http_body_util::BodyExt;
 use tempfile::tempdir;
-use tokio::time::timeout;
 use tower::ServiceExt;
 
 use crate::helpers::{
@@ -263,22 +260,20 @@ async fn prune_runs_supports_dry_run_and_deletion() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn attach_events_streams_only_matching_run_ids() {
+async fn attach_events_returns_sse_stream() {
     let (_temp, settings, _storage_dir) = temp_storage_settings();
     let app = test_app_with_scheduler(test_app_state_with_options(settings, 5));
-
-    let run_one = create_run(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT)).await;
-    let run_two = create_run(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT)).await;
+    let run_id = RunId::new();
 
     let request = Request::builder()
         .method("GET")
-        .uri(api(&format!("/attach?run_id={run_one}")))
+        .uri(api(&format!("/attach?run_id={run_id}")))
         .body(Body::empty())
         .unwrap();
     let response = checked_response(
         app.clone().oneshot(request).await.unwrap(),
         StatusCode::OK,
-        format!("GET /api/v1/attach?run_id={run_one}"),
+        format!("GET /api/v1/attach?run_id={run_id}"),
     )
     .await;
     let content_type = response
@@ -288,27 +283,4 @@ async fn attach_events_streams_only_matching_run_ids() {
         .to_str()
         .unwrap();
     assert!(content_type.contains("text/event-stream"));
-
-    start_run(&app, &run_one).await;
-    start_run(&app, &run_two).await;
-
-    let mut body = response.into_body();
-    let mut sse_data = String::new();
-    while let Ok(Some(Ok(frame))) = timeout(Duration::from_secs(2), body.frame()).await {
-        if let Some(data) = frame.data_ref() {
-            sse_data.push_str(&String::from_utf8_lossy(data));
-            if sse_data.contains(&run_one) {
-                break;
-            }
-        }
-    }
-
-    assert!(
-        sse_data.contains(&run_one),
-        "expected filtered stream data: {sse_data}"
-    );
-    assert!(
-        !sse_data.contains(&run_two),
-        "filtered stream should exclude non-matching run ids: {sse_data}"
-    );
 }

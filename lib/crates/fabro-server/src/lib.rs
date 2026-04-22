@@ -9,7 +9,6 @@
 )]
 
 pub mod auth;
-pub mod bind;
 mod canonical_origin;
 pub mod csp;
 #[allow(

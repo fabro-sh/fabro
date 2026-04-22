@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use fabro_server::bind::BindRequest;
+use fabro_config::bind::BindRequest;
 use fabro_server::serve::resolve_bind_request_from_settings;
 use fabro_types::settings::{ServerAuthMethod, SettingsLayer};
 

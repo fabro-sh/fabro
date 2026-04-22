@@ -13,7 +13,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use assert_cmd::Command;
-use fabro_config::{Storage, envfile};
+use fabro_config::daemon::ServerDaemon;
+use fabro_config::{RuntimeDirectory, Storage, envfile};
 use fabro_types::RunId;
 use fabro_util::browser;
 use regex::Regex;
@@ -629,7 +630,7 @@ fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
 }
 
 fn write_test_server_dev_token(storage_dir: &Path) {
-    let server_env_path = Storage::new(storage_dir).runtime_state().env_path();
+    let server_env_path = Storage::new(storage_dir).runtime_directory().env_path();
     envfile::merge_env_file(&server_env_path, [("FABRO_DEV_TOKEN", TEST_DEV_TOKEN)])
         .unwrap_or_else(|err| panic!("failed to write {}: {err}", server_env_path.display()));
 }
@@ -875,25 +876,15 @@ fn clear_server_storage(table: &mut TomlMap<String, TomlValue>) {
     }
 }
 
-fn server_record_path(storage_dir: &Path) -> PathBuf {
-    storage_dir.join("server.json")
-}
-
-fn server_record_pid(storage_dir: &Path) -> Option<u32> {
-    let record_path = server_record_path(storage_dir);
-    let Ok(content) = std::fs::read_to_string(&record_path) else {
-        return None;
-    };
-    let Ok(record) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return None;
-    };
-    record["pid"]
-        .as_u64()
-        .and_then(|pid| u32::try_from(pid).ok())
+fn server_runtime_directory(server: &ServerPaths) -> RuntimeDirectory {
+    Storage::new(&server.storage_dir).runtime_directory()
 }
 
 fn server_running(server: &ServerPaths) -> bool {
-    server_record_pid(&server.storage_dir).is_some_and(fabro_proc::process_running)
+    ServerDaemon::load_running(&server_runtime_directory(server))
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 #[expect(
@@ -931,7 +922,7 @@ fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &P
     std::fs::create_dir_all(&server.storage_dir)
         .unwrap_or_else(|err| panic!("failed to create {}: {err}", server.storage_dir.display()));
     write_test_server_dev_token(&server.storage_dir);
-    let _ = std::fs::remove_file(server_record_path(&server.storage_dir));
+    ServerDaemon::remove(&server_runtime_directory(server));
     let _ = std::fs::remove_file(&server.socket_path);
 
     let mut bootstrap = std::process::Command::new(fabro_bin);
@@ -965,28 +956,28 @@ fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &P
     reason = "This sync test helper polls child shutdown during cleanup without requiring a Tokio runtime."
 )]
 fn stop_test_server(server: &ServerPaths) {
-    let record_path = server_record_path(&server.storage_dir);
-    let Some(pid) = server_record_pid(&server.storage_dir) else {
+    let runtime_directory = server_runtime_directory(server);
+    let Some(daemon) = ServerDaemon::read(&runtime_directory).ok().flatten() else {
         let _ = std::fs::remove_file(&server.socket_path);
-        let _ = std::fs::remove_file(&record_path);
+        ServerDaemon::remove(&runtime_directory);
         return;
     };
 
-    fabro_proc::sigterm(pid);
+    fabro_proc::sigterm(daemon.pid);
 
     let poll = std::time::Duration::from_millis(50);
     let timeout = test_server_stop_timeout();
     let mut elapsed = std::time::Duration::ZERO;
-    while elapsed < timeout && fabro_proc::process_running(pid) {
+    while elapsed < timeout && fabro_proc::process_running(daemon.pid) {
         std::thread::sleep(poll);
         elapsed += poll;
     }
-    if fabro_proc::process_running(pid) {
-        fabro_proc::sigkill(pid);
+    if fabro_proc::process_running(daemon.pid) {
+        fabro_proc::sigkill(daemon.pid);
     }
 
     let _ = std::fs::remove_file(&server.socket_path);
-    let _ = std::fs::remove_file(&record_path);
+    ServerDaemon::remove(&runtime_directory);
 }
 
 fn test_server_stop_timeout() -> std::time::Duration {

@@ -1,5 +1,4 @@
 pub(crate) mod foreground;
-pub(crate) mod record;
 pub(crate) mod start;
 pub(crate) mod status;
 pub(crate) mod stop;
@@ -9,8 +8,8 @@ use std::time::Duration;
 use anyhow::Result;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use fabro_config::bind::{self, Bind, BindRequest};
 use fabro_config::user::{FABRO_CONFIG_ENV, active_settings_path, default_storage_dir};
-use fabro_server::bind::{self, Bind, BindRequest};
 use fabro_server::install::{self, InstallAppState};
 use fabro_server::serve::{self, ServeArgs};
 use fabro_util::browser;
@@ -124,7 +123,6 @@ pub(crate) async fn dispatch(
         }
         ServerCommand::Serve(ServerServeArgs {
             storage_dir,
-            record_path,
             serve_args,
         }) => {
             let settings = user_config::load_settings_with_config_and_storage_dir(
@@ -139,9 +137,9 @@ pub(crate) async fn dispatch(
             );
             let storage_dir = local_server::storage_dir(&settings)?;
             let bind_addr = local_server::bind_request(&settings, serve_args.bind.as_deref())?;
+            let _ = printer;
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            Box::pin(foreground::execute(
-                record_path,
+            Box::pin(foreground::serve_with_daemon_record(
                 ServeArgs {
                     config: active_config_path,
                     ..serve_args
@@ -149,7 +147,6 @@ pub(crate) async fn dispatch(
                 bind_addr,
                 storage_dir,
                 styles,
-                printer,
             ))
             .await
         }

@@ -160,7 +160,6 @@ impl fmt::Display for RunStatus {
         }
     }
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct InvalidTransition {
     pub from: RunStatus,
@@ -298,7 +297,6 @@ impl From<TerminalStatus> for RunStatus {
         }
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockedReason {

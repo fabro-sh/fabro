@@ -1,6 +1,5 @@
-use std::str::FromStr;
-
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString, IntoStaticStr};
 
 use crate::{Model, Provider};
 
@@ -96,8 +95,21 @@ impl PricePerMTok {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum Speed {
     Standard,
     Fast,
@@ -106,28 +118,7 @@ pub enum Speed {
 impl Speed {
     #[must_use]
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Standard => "standard",
-            Self::Fast => "fast",
-        }
-    }
-}
-
-impl FromStr for Speed {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "standard" => Ok(Self::Standard),
-            "fast" => Ok(Self::Fast),
-            other => Err(format!("unknown speed: {other}")),
-        }
-    }
-}
-
-impl std::fmt::Display for Speed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+        self.into()
     }
 }
 

@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::Args;
+use fabro_config::bind::{self, Bind, BindRequest};
 use fabro_config::merge::combine_files;
 use fabro_config::user::load_settings_config;
 use fabro_config::{Storage, resolve_server_from_file};
@@ -26,7 +27,6 @@ use tokio::sync::watch;
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
-use crate::bind::{self, Bind, BindRequest};
 use crate::canonical_origin::resolve_canonical_origin;
 use crate::github_webhooks::{TailscaleFunnelManager, WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV};
 use crate::ip_allowlist::{GitHubMetaResolver, IpAllowlistConfig, resolve_ip_allowlist_config};
@@ -470,7 +470,7 @@ where
     };
     let storage = Storage::new(&data_dir);
     let vault_path = storage.secrets_path();
-    let server_env_path = storage.runtime_state().env_path();
+    let server_env_path = storage.runtime_directory().env_path();
     let server_secrets = ServerSecrets::load(server_env_path.clone())?;
     let webhook_secret_present = server_secrets.get(WEBHOOK_SECRET_ENV).is_some();
 
@@ -897,6 +897,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
+    use fabro_config::bind::{Bind, BindRequest};
     use fabro_config::parse_settings_layer;
     use fabro_types::settings::SettingsLayer;
     use fabro_util::Home;
@@ -908,7 +909,6 @@ mod tests {
         resolve_server_settings, resolve_startup_github_webhook_ip_allowlist, router_web_enabled,
         server_bind_title, server_title,
     };
-    use crate::bind::{Bind, BindRequest};
 
     fn parse_settings(source: &str) -> SettingsLayer {
         let mut layer = parse_settings_layer(source).expect("v2 fixture should parse");

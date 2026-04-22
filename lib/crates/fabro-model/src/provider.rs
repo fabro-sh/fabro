@@ -1,25 +1,39 @@
-use std::fmt;
-use std::str::FromStr;
-
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString, IntoStaticStr};
 
 // ---------------------------------------------------------------------------
 // Provider enum — compile-time safe provider identity
 // ---------------------------------------------------------------------------
 
 /// Known LLM provider variants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum Provider {
     Anthropic,
     #[serde(rename = "openai", alias = "open_ai")]
+    #[strum(to_string = "openai", serialize = "open_ai")]
     OpenAi,
     Gemini,
     Kimi,
     Zai,
     Minimax,
+    #[strum(to_string = "inception", serialize = "inception_labs")]
     Inception,
     #[serde(rename = "openai_compatible", alias = "open_ai_compatible")]
+    #[strum(to_string = "openai_compatible", serialize = "open_ai_compatible")]
     OpenAiCompatible,
 }
 
@@ -106,40 +120,7 @@ impl Provider {
     /// adapter names, and other serialization boundaries.
     #[must_use]
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Anthropic => "anthropic",
-            Self::OpenAi => "openai",
-            Self::Gemini => "gemini",
-            Self::Kimi => "kimi",
-            Self::Zai => "zai",
-            Self::Minimax => "minimax",
-            Self::Inception => "inception",
-            Self::OpenAiCompatible => "openai_compatible",
-        }
-    }
-}
-
-impl fmt::Display for Provider {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for Provider {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "anthropic" => Ok(Self::Anthropic),
-            "openai" | "open_ai" => Ok(Self::OpenAi),
-            "gemini" => Ok(Self::Gemini),
-            "kimi" => Ok(Self::Kimi),
-            "zai" => Ok(Self::Zai),
-            "minimax" => Ok(Self::Minimax),
-            "inception" | "inception_labs" => Ok(Self::Inception),
-            "openai_compatible" => Ok(Self::OpenAiCompatible),
-            other => Err(format!("unknown provider: {other}")),
-        }
+        self.into()
     }
 }
 

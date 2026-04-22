@@ -2,19 +2,19 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Result;
-use fabro_server::bind::Bind;
+use fabro_config::RuntimeDirectory;
+use fabro_config::bind::Bind;
+use fabro_config::daemon::ServerDaemon;
 use fabro_util::printer::Printer;
 use tokio::time;
 
-use super::record;
-
 pub(crate) async fn stop_server(storage_dir: &Path, timeout: Duration) -> Result<bool> {
-    let Some(active) = record::active_server_record_details(storage_dir)? else {
+    let runtime_directory = RuntimeDirectory::new(storage_dir);
+    let Some(daemon) = ServerDaemon::load_running(&runtime_directory)? else {
         return Ok(false);
     };
-    let record = active.record;
 
-    fabro_proc::sigterm(record.pid);
+    fabro_proc::sigterm(daemon.pid);
 
     // Use the zombie-aware predicate here: this loop is commonly driven
     // against a child of the calling process (tests, install/uninstall
@@ -26,21 +26,21 @@ pub(crate) async fn stop_server(storage_dir: &Path, timeout: Duration) -> Result
     let poll_interval = Duration::from_millis(100);
     let mut elapsed = Duration::ZERO;
     while elapsed < timeout {
-        if !fabro_proc::process_running_strict(record.pid) {
+        if !fabro_proc::process_running_strict(daemon.pid) {
             break;
         }
         time::sleep(poll_interval).await;
         elapsed += poll_interval;
     }
 
-    if fabro_proc::process_running_strict(record.pid) {
-        fabro_proc::sigkill(record.pid);
+    if fabro_proc::process_running_strict(daemon.pid) {
+        fabro_proc::sigkill(daemon.pid);
         time::sleep(Duration::from_millis(100)).await;
     }
 
-    record::remove_server_record(&active.record_path);
+    ServerDaemon::remove(&runtime_directory);
 
-    if let Bind::Unix(ref path) = record.bind {
+    if let Bind::Unix(ref path) = daemon.bind {
         let _ = std::fs::remove_file(path);
     }
 

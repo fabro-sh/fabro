@@ -120,10 +120,13 @@ impl RunDump {
         }
 
         if let Some(prompt) = state.retro_prompt.as_ref() {
-            entries.push(RunDumpEntry::text("retro/prompt.md", prompt.clone()));
+            entries.push(RunDumpEntry::text("stages/retro/prompt.md", prompt.clone()));
         }
         if let Some(response) = state.retro_response.as_ref() {
-            entries.push(RunDumpEntry::text("retro/response.md", response.clone()));
+            entries.push(RunDumpEntry::text(
+                "stages/retro/response.md",
+                response.clone(),
+            ));
         }
 
         Self { entries }
@@ -399,12 +402,10 @@ fn replace_blob_refs_in_value(
 }
 
 fn artifact_dump_path(stage_id: &StageId, filename: &str) -> Result<PathBuf> {
-    let node_id_segment = validate_single_path_segment("node id", stage_id.node_id())?;
+    validate_single_path_segment("node id", stage_id.node_id())?;
     let filename_path = validate_relative_path("artifact filename", filename)?;
     Ok(PathBuf::from("artifacts")
-        .join("nodes")
-        .join(node_id_segment)
-        .join(format!("visit-{}", stage_id.visit()))
+        .join(stage_id.to_string())
         .join(filename_path))
 }
 
@@ -542,8 +543,8 @@ mod tests {
 
         assert!(paths.contains(&"run.json"));
         assert!(paths.contains(&"graph.fabro"));
-        assert!(paths.contains(&"retro/prompt.md"));
-        assert!(paths.contains(&"retro/response.md"));
+        assert!(paths.contains(&"stages/retro/prompt.md"));
+        assert!(paths.contains(&"stages/retro/response.md"));
         assert!(paths.contains(&"stages/build@2/prompt.md"));
         assert!(paths.contains(&"stages/build@2/response.md"));
         assert!(paths.contains(&"stages/build@2/status.json"));

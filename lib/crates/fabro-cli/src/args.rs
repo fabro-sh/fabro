@@ -1301,10 +1301,6 @@ pub(crate) struct ServerServeArgs {
     #[command(flatten)]
     pub(crate) storage_dir: StorageDirArgs,
 
-    /// Path to the server record file
-    #[arg(long)]
-    pub(crate) record_path: PathBuf,
-
     #[command(flatten)]
     pub(crate) serve_args: ServeArgs,
 }

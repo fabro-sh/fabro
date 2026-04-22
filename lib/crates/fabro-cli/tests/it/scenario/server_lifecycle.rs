@@ -11,7 +11,7 @@ fn start_status_stop_lifecycle() {
         "[server.auth]\nmethods = [\"dev-token\"]\n",
     );
     let server_env_path = fabro_config::Storage::new(&storage_dir)
-        .runtime_state()
+        .runtime_directory()
         .env_path();
     fabro_config::envfile::merge_env_file(&server_env_path, [(
         "FABRO_DEV_TOKEN",

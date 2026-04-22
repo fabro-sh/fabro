@@ -111,6 +111,20 @@ When interpolating values into shell command strings (in `fabro-workflow`), alwa
 - **Functions**: import the parent module, call as `module::function()` — `use fabro_workflow::operations; operations::create(...)`
 - **No glob imports** in production code (`use foo::*`). Globs are acceptable in test modules and preludes. Enforced by clippy `wildcard_imports` lint.
 
+## Enum string/int conversions (strum)
+
+For any enum where a variant maps to a fixed string or integer, derive it with `strum` instead of hand-writing `impl Display`, `impl FromStr`, `as_str()`, `fn all()`, or `const ALL: &[Self]`. Hand-written variant→string maps drift across the three impls on every rename.
+
+- `strum::Display` replaces hand-written `impl fmt::Display` whose body is a match over string literals.
+- `strum::EnumString` replaces hand-written `impl FromStr`. The `Err` type becomes `strum::ParseError` — adjust callers that assumed `Err = String`.
+- `strum::IntoStaticStr` replaces `impl From<E> for &'static str`. When an existing `as_str(self) -> &'static str` is on the public API, keep it as a one-line wrapper: `pub fn as_str(self) -> &'static str { self.into() }`.
+- `strum::EnumIter`, `strum::VariantArray`, `strum::VariantNames` replace hand-written `fn all()` / `const ALL` / `&[&'static str]` arrays. Do NOT use these if the hand-written list intentionally excludes variants (e.g. `Provider::ALL` skips `OpenAiCompatible`).
+- `strum::FromRepr` replaces `fn from_u8`/`from_i32`. Note: it returns `Option<Self>`, so don't adopt it when the existing conversion has a `_ => default` fallback — that's a behavior change, not a cleanup.
+
+Align strum with serde. When the enum also derives `Serialize`/`Deserialize` with `#[serde(rename_all = "...")]`, add the matching `#[strum(serialize_all = "...")]`. For variant aliases, use `#[strum(to_string = "canonical", serialize = "alias")]` — strum picks the last `serialize` for `Display`/`IntoStaticStr` otherwise, so `to_string` is needed to pin the canonical form.
+
+Skip strum when parsing is fuzzy (URL/path detection, structured IDs, multi-token formats), when a variant carries a `String` catch-all, or when `Display` does dynamic formatting.
+
 ## Snapshot tests (insta)
 
 Many CLI tests use `insta` inline snapshots. When a snapshot needs updating:

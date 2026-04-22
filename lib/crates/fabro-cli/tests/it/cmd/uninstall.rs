@@ -5,7 +5,7 @@
 
 use std::fs;
 
-use fabro_test::{fabro_snapshot, stop_pid, test_context, wait_for_path};
+use fabro_test::{fabro_snapshot, test_context};
 use serde_json::Value;
 
 #[test]
@@ -168,98 +168,4 @@ fn not_installed_json() {
     let value: Value = serde_json::from_str(&stdout).expect("uninstall --json should parse");
 
     assert_eq!(value["status"].as_str(), Some("not_installed"));
-}
-
-#[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "This integration test moves a live daemon record on disk to simulate an unsupported legacy daemon upgrade."
-)]
-fn uninstall_yes_fails_when_only_a_legacy_running_server_record_exists() {
-    let home_dir = tempfile::tempdir_in("/tmp").unwrap();
-    let fabro_home = home_dir.path().join(".fabro");
-    let storage_dir = fabro_home.join("storage");
-    let socket_path = home_dir.path().join("legacy.sock");
-    let config_dir = tempfile::tempdir_in("/tmp").unwrap();
-    let config_path = config_dir.path().join("settings.toml");
-    std::fs::write(
-        &config_path,
-        "_version = 1\n\n[server.auth]\nmethods = [\"dev-token\"]\n",
-    )
-    .unwrap();
-    std::fs::create_dir_all(&fabro_home).unwrap();
-    std::fs::write(
-        fabro_home.join("settings.toml"),
-        "_version = 1\n\n[server.auth]\nmethods = [\"dev-token\"]\n",
-    )
-    .unwrap();
-
-    let start_output = {
-        let mut start = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
-        fabro_test::apply_test_isolation(&mut start, home_dir.path());
-        start.env(
-            "FABRO_DEV_TOKEN",
-            "fabro_dev_abababababababababababababababababababababababababababababababab",
-        );
-        start
-            .args(["server", "start", "--bind"])
-            .arg(&socket_path)
-            .arg("--config")
-            .arg(&config_path)
-            .output()
-            .expect("server start should run")
-    };
-    assert!(
-        start_output.status.success(),
-        "server start should succeed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&start_output.stdout),
-        String::from_utf8_lossy(&start_output.stderr)
-    );
-
-    let current_record = storage_dir.join("server.json");
-    wait_for_path(&current_record);
-    let legacy_record = fabro_home.join("server.json");
-    std::fs::rename(&current_record, &legacy_record).unwrap();
-    let pid_u64 = serde_json::from_str::<serde_json::Value>(
-        &std::fs::read_to_string(&legacy_record).unwrap(),
-    )
-    .unwrap()["pid"]
-        .as_u64()
-        .unwrap();
-    let pid = u32::try_from(pid_u64).expect("pid fits in u32");
-
-    let uninstall_output = {
-        let mut uninstall = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
-        fabro_test::apply_test_isolation(&mut uninstall, home_dir.path());
-        uninstall
-            .args(["uninstall", "--yes"])
-            .output()
-            .expect("uninstall should run")
-    };
-
-    stop_pid(pid);
-    let _ = std::fs::remove_file(&legacy_record);
-    let _ = std::fs::remove_file(&socket_path);
-
-    assert!(
-        !uninstall_output.status.success(),
-        "uninstall --yes should fail when only the legacy record exists"
-    );
-    let stderr = String::from_utf8_lossy(&uninstall_output.stderr);
-    assert!(
-        stderr.contains(&legacy_record.display().to_string()),
-        "expected stderr to mention the legacy record path, got:\n{stderr}"
-    );
-    assert!(
-        stderr.contains(&current_record.display().to_string()),
-        "expected stderr to mention the current record path, got:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("legacy Fabro CLI"),
-        "expected stderr to instruct manual cleanup, got:\n{stderr}"
-    );
-    assert!(
-        fabro_home.exists(),
-        "uninstall should not remove ~/.fabro when the legacy daemon detector fires"
-    );
 }

@@ -2,12 +2,13 @@ use std::path::Path;
 
 use anyhow::Result;
 use chrono::Utc;
+use fabro_config::RuntimeDirectory;
+use fabro_config::daemon::ServerDaemon;
 use fabro_util::printer::Printer;
 
-use super::record;
-
 pub(crate) fn execute(storage_dir: &Path, json: bool, printer: Printer) -> Result<()> {
-    let Some(record) = record::active_server_record(storage_dir)? else {
+    let runtime_directory = RuntimeDirectory::new(storage_dir);
+    let Some(daemon) = ServerDaemon::load_running(&runtime_directory)? else {
         if json {
             fabro_util::printout!(printer, r#"{{"status":"stopped"}}"#);
         } else {
@@ -17,22 +18,22 @@ pub(crate) fn execute(storage_dir: &Path, json: bool, printer: Printer) -> Resul
     };
 
     if json {
-        let uptime_seconds = (Utc::now() - record.started_at).num_seconds().max(0);
+        let uptime_seconds = (Utc::now() - daemon.started_at).num_seconds().max(0);
         let output = serde_json::json!({
             "status": "running",
-            "pid": record.pid,
-            "bind": record.bind.to_string(),
-            "started_at": record.started_at.to_rfc3339(),
+            "pid": daemon.pid,
+            "bind": daemon.bind.to_string(),
+            "started_at": daemon.started_at.to_rfc3339(),
             "uptime_seconds": uptime_seconds,
         });
         fabro_util::printout!(printer, "{}", serde_json::to_string_pretty(&output)?);
     } else {
-        let uptime = format_uptime(Utc::now() - record.started_at);
+        let uptime = format_uptime(Utc::now() - daemon.started_at);
         fabro_util::printerr!(
             printer,
             "Server running (pid {}) on {}, started {} ago",
-            record.pid,
-            record.bind,
+            daemon.pid,
+            daemon.bind,
             uptime
         );
     }
