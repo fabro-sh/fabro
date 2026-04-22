@@ -31,6 +31,7 @@ use fabro_config::merge::combine_files;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::cli::OutputVerbosity;
+use fabro_util::exit::ExitClass;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::{browser, exit};
@@ -129,6 +130,17 @@ async fn main() {
                     eprintln!("  > {line}");
                 }
             }
+        }
+        let json_mode = raw_args.iter().any(|a| a == "--json");
+        if !json_mode && exit::exit_class_for(&err) == Some(ExitClass::AuthRequired) {
+            let hint_style = console::Style::new().cyan().bold();
+            let cmd_style = console::Style::new().bold();
+            eprintln!();
+            eprintln!(
+                "{} Run {} to authenticate.",
+                hint_style.apply_to("hint:"),
+                cmd_style.apply_to("`fabro auth login`"),
+            );
         }
         std::process::exit(exit_code);
     }

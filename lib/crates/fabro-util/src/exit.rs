@@ -54,11 +54,17 @@ pub fn exit_code_for(err: &Error) -> i32 {
         })
 }
 
+pub fn exit_class_for(err: &Error) -> Option<ExitClass> {
+    err.chain()
+        .find_map(|cause| cause.downcast_ref::<Classified>())
+        .map(Classified::class)
+}
+
 #[cfg(test)]
 mod tests {
     use anyhow::anyhow;
 
-    use super::{ErrorExt, ExitClass, exit_code_for};
+    use super::{ErrorExt, ExitClass, exit_class_for, exit_code_for};
 
     #[test]
     fn unclassified_errors_default_to_exit_1() {
@@ -99,5 +105,24 @@ mod tests {
             .classify(ExitClass::AuthRequired)
             .context("while y");
         assert_eq!(exit_code_for(&err), 4);
+    }
+
+    #[test]
+    fn exit_class_for_returns_none_for_unclassified() {
+        assert_eq!(exit_class_for(&anyhow!("boom")), None);
+    }
+
+    #[test]
+    fn exit_class_for_returns_auth_required() {
+        let err = anyhow!("boom").classify(ExitClass::AuthRequired);
+        assert_eq!(exit_class_for(&err), Some(ExitClass::AuthRequired));
+    }
+
+    #[test]
+    fn exit_class_for_resolves_through_context() {
+        let err = anyhow!("boom")
+            .classify(ExitClass::AuthRequired)
+            .context("while y");
+        assert_eq!(exit_class_for(&err), Some(ExitClass::AuthRequired));
     }
 }

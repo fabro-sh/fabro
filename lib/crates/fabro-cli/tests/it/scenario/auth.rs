@@ -269,6 +269,84 @@ fn auth_refresh_failure_clears_local_session() {
 }
 
 #[test]
+fn auth_required_error_suggests_auth_login() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let target = server_target(&server);
+
+    let auth_required_mock = server.mock(|when, then| {
+        when.method(GET).path("/api/v1/system/info");
+        then.status(401)
+            .header("Content-Type", "application/json")
+            .json_body(json!({
+                "errors": [{
+                    "status": "401",
+                    "title": "Unauthorized",
+                    "detail": "Authentication required.",
+                    "code": "authentication_required"
+                }]
+            }));
+    });
+
+    let output = context
+        .command()
+        .args(["system", "info", "--server", &target])
+        .output()
+        .expect("system info should run");
+
+    assert_eq!(output.status.code(), Some(4));
+    auth_required_mock.assert();
+
+    let stderr = console::strip_ansi_codes(&String::from_utf8_lossy(&output.stderr)).into_owned();
+    assert!(
+        stderr.contains("Authentication required."),
+        "stderr should surface the auth error, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Run `fabro auth login` to authenticate."),
+        "stderr should suggest `fabro auth login`, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn auth_required_hint_is_suppressed_in_json_mode() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let target = server_target(&server);
+
+    server.mock(|when, then| {
+        when.method(GET).path("/api/v1/system/info");
+        then.status(401)
+            .header("Content-Type", "application/json")
+            .json_body(json!({
+                "errors": [{
+                    "status": "401",
+                    "title": "Unauthorized",
+                    "detail": "Authentication required.",
+                    "code": "authentication_required"
+                }]
+            }));
+    });
+
+    let output = context
+        .command()
+        .args(["--json", "system", "info", "--server", &target])
+        .output()
+        .expect("system info should run");
+
+    assert_eq!(output.status.code(), Some(4));
+    let stderr = console::strip_ansi_codes(&String::from_utf8_lossy(&output.stderr)).into_owned();
+    assert!(
+        stderr.contains("Authentication required."),
+        "stderr should still surface the auth error in --json mode, got:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("fabro auth login"),
+        "stderr should not include the hint in --json mode, got:\n{stderr}"
+    );
+}
+
+#[test]
 fn auth_login_rejects_unix_socket_target() {
     let context = test_context!();
     let socket_path = context.temp_dir.join("fabro.sock");
