@@ -5,7 +5,7 @@
 
 use std::future::Future;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -57,7 +57,7 @@ use crate::shared::provider_auth::{
     ApiKeySource, authenticate_provider, authenticate_provider_with_api_key_source,
     authenticate_provider_with_method, prompt_confirm, prompt_password, provider_display_name,
 };
-use crate::{server_client, user_config};
+use crate::{local_server, server_client, user_config};
 
 const GITHUB_TOKEN_SECRET_KEY: &str = "GITHUB_TOKEN";
 const GITHUB_APP_PRIVATE_KEY_KEY: &str = "GITHUB_APP_PRIVATE_KEY";
@@ -1292,22 +1292,6 @@ fn render_server_resolve_errors(errors: Vec<ResolveError>) -> anyhow::Error {
     )
 }
 
-fn resolved_server_storage_dir(settings: &SettingsLayer) -> Result<PathBuf> {
-    let resolved =
-        fabro_config::resolve_server_from_file(settings).map_err(render_server_resolve_errors)?;
-    let resolved_root = resolved
-        .storage
-        .root
-        .resolve(|name| std::env::var(name).ok())
-        .map_err(|err| {
-            anyhow::anyhow!(
-                "failed to resolve {}: {err}",
-                resolved.storage.root.as_source()
-            )
-        })?;
-    Ok(PathBuf::from(resolved_root.value))
-}
-
 async fn write_artifact_store_metadata(
     settings: &SettingsLayer,
     fabro_version: &str,
@@ -1510,9 +1494,7 @@ async fn run_install_github_inner(
             .context("failed to parse existing settings.toml")?,
         args.storage_dir.as_deref(),
     );
-    // Install is a documented server-host exception: it may read [server.*]
-    // directly.
-    let storage_dir = resolved_server_storage_dir(&parsed_settings).unwrap_or_else(|_| {
+    let storage_dir = local_server::storage_dir(&parsed_settings).unwrap_or_else(|_| {
         args.storage_dir
             .clone_path()
             .unwrap_or_else(default_storage_dir)
@@ -1659,9 +1641,7 @@ async fn run_install_inner(
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
     let cli_settings = user_config::load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    // Install is a documented server-host exception: it may read [server.*]
-    // directly.
-    let storage_dir = resolved_server_storage_dir(&cli_settings)?;
+    let storage_dir = local_server::storage_dir(&cli_settings)?;
     let server_was_running = record::active_server_record(&storage_dir)?.is_some();
     let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
     let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);

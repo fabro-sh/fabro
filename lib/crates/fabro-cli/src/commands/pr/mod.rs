@@ -47,8 +47,6 @@ fn load_github_credentials_required(
     printer: Printer,
 ) -> Result<GitHubCredentials> {
     let ctx = CommandContext::base(printer, cli.clone(), cli_layer)?;
-    // boundary-exempt(pr-api): remove with follow-up #1 when PR ops move
-    // server-side.
     let server_settings =
         fabro_config::resolve_server_from_file(ctx.machine_settings()).map_err(|errors| {
             anyhow!(
@@ -60,8 +58,6 @@ fn load_github_credentials_required(
                     .join("\n")
             )
         })?;
-    // boundary-exempt(pr-api): remove with follow-up #1 when PR ops move
-    // server-side.
     let vault = user_config::storage_dir(ctx.machine_settings())
         .ok()
         .and_then(|dir| fabro_vault::Vault::load(Storage::new(&dir).secrets_path()).ok());

@@ -17,9 +17,7 @@ use fabro_workflow::records::Conclusion;
 use indicatif::HumanDuration;
 
 use crate::server_client;
-use crate::shared::{
-    format_tokens_human, format_usd_micros, print_diagnostics, relative_path, tilde_path,
-};
+use crate::shared::{format_tokens_human, format_usd_micros, print_diagnostics, relative_path};
 
 pub(crate) fn print_preflight_workflow_summary(
     workflow: &types::PreflightWorkflowSummary,
@@ -151,7 +149,6 @@ pub(crate) async fn print_run_summary_with_client(
         &conclusion,
         run_id,
         None,
-        None,
         pr_url.as_deref(),
         styles,
         printer,
@@ -166,7 +163,6 @@ pub(crate) async fn print_run_summary_with_client(
 pub(crate) fn print_run_conclusion(
     conclusion: &Conclusion,
     run_id: impl std::fmt::Display,
-    run_dir: Option<&Path>,
     pushed_branch: Option<&str>,
     pr_url: Option<&str>,
     styles: &Styles,
@@ -246,16 +242,6 @@ pub(crate) fn print_run_conclusion(
                     .apply_to(format!("Toks:      {}", format_tokens_human(total_tokens)))
             );
         }
-    }
-
-    if let Some(run_dir) = run_dir {
-        fabro_util::printerr!(
-            printer,
-            "{}",
-            styles
-                .dim
-                .apply_to(format!("Run:       {}", tilde_path(run_dir)))
-        );
     }
 
     if let Some(ref failure) = conclusion.failure_reason {

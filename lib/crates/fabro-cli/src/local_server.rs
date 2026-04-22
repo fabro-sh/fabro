@@ -7,7 +7,6 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use fabro_config::ServerRuntimeState;
 use fabro_server::bind::BindRequest;
 use fabro_server::serve::resolve_bind_request_from_settings;
 use fabro_types::settings::{ServerAuthMethod, SettingsLayer};
@@ -37,10 +36,6 @@ pub(crate) fn storage_dir(settings: &SettingsLayer) -> Result<PathBuf> {
             )
         })?;
     Ok(PathBuf::from(resolved_root.value))
-}
-
-pub(crate) fn runtime_state(settings: &SettingsLayer) -> Result<ServerRuntimeState> {
-    Ok(ServerRuntimeState::new(storage_dir(settings)?))
 }
 
 pub(crate) fn bind_request(

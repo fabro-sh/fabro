@@ -105,8 +105,6 @@ pub(super) async fn create_command(
         );
     }
 
-    // boundary-exempt(pr-api): remove with follow-up #1 when PR ops move
-    // server-side.
     let vault = user_config::storage_dir(ctx.machine_settings())
         .ok()
         .and_then(|dir| Vault::load(Storage::new(&dir).secrets_path()).ok())

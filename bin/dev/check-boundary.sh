@@ -6,7 +6,6 @@ cd "$(dirname "$0")/../.."
 symbol_allowlist=(
   "lib/crates/fabro-cli/src/local_server.rs"
   "lib/crates/fabro-cli/src/commands/install.rs"
-  "lib/crates/fabro-cli/src/commands/uninstall.rs"
   "lib/crates/fabro-cli/src/commands/run/runner.rs"
   "lib/crates/fabro-cli/src/commands/pr/mod.rs"
   "lib/crates/fabro-cli/src/commands/pr/create.rs"

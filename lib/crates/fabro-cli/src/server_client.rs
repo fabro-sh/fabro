@@ -140,16 +140,6 @@ async fn connect_local_api_client_bundle(
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "Retained for pending storage-backed internal callers and referenced in existing design docs."
-)]
-pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::ApiClient> {
-    connect_local_api_client_bundle(storage_dir, &user_config::active_settings_path(None))
-        .await
-        .map(|client| client.api_client())
-}
-
 async fn connect_target_api_client_bundle(target: &ServerTarget) -> Result<Client> {
     let credential = resolve_target_credential(target, None, local_dev_token_fallback(target))?;
     let oauth_session = refreshable_oauth(target, credential.as_ref());
