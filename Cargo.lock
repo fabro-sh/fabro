@@ -2070,6 +2070,7 @@ dependencies = [
  "url",
  "uuid",
  "walkdir",
+ "zeroize",
 ]
 
 [[package]]

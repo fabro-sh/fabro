@@ -25,5 +25,13 @@ export interface ErrorResponse {
      * List of error entries.
      */
     'errors': Array<ErrorResponseEntry>;
+    /**
+     * Optional list of runtime env keys that were written before an install failure. Currently populated by `POST /install/finish` failure responses only.
+     */
+    'leftover_env_keys'?: Array<string>;
+    /**
+     * Optional list of runtime env keys that were actually removed before an install failure. Currently populated by `POST /install/finish` failure responses only.
+     */
+    'removed_env_keys'?: Array<string>;
 }
 

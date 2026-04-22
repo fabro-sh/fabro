@@ -83,6 +83,9 @@ models/install-llm-summary-providers-inner.ts
 models/install-llm-summary.ts
 models/install-llm-test-input.ts
 models/install-llm-validation-response.ts
+models/install-object-store-input.ts
+models/install-object-store-summary.ts
+models/install-object-store-validation-response.ts
 models/install-prefill.ts
 models/install-server-config-input.ts
 models/install-session-response.ts

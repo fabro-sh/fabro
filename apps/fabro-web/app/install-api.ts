@@ -4,6 +4,8 @@ import type {
   InstallGithubAppManifestResponse,
   InstallGithubAppOwner,
   InstallLlmProviderInput,
+  InstallObjectStoreInput,
+  InstallObjectStoreSummary,
   InstallSessionResponse,
 } from "@qltysh/fabro-api-client";
 
@@ -13,6 +15,8 @@ export type {
   InstallGithubAppManifestResponse,
   InstallGithubAppOwner,
   InstallLlmProviderInput,
+  InstallObjectStoreInput,
+  InstallObjectStoreSummary,
   InstallSessionResponse,
 };
 
@@ -108,6 +112,38 @@ export async function putInstallServer(token: string, canonicalUrl: string): Pro
   });
   if (!response.ok) {
     throw new Error(await readInstallError(response, "install server request failed"));
+  }
+}
+
+export async function testInstallObjectStore(
+  token: string,
+  input: InstallObjectStoreInput,
+): Promise<void> {
+  const response = await installFetch("/install/object-store/test", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(
+      await readInstallError(response, "install object store validation failed"),
+    );
+  }
+}
+
+export async function putInstallObjectStore(
+  token: string,
+  input: InstallObjectStoreInput,
+): Promise<void> {
+  const response = await installFetch("/install/object-store", token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(
+      await readInstallError(response, "install object store request failed"),
+    );
   }
 }
 

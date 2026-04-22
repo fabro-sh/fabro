@@ -21,6 +21,9 @@ import type { InstallGithubSummary } from './install-github-summary';
 import type { InstallLlmSummary } from './install-llm-summary';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { InstallObjectStoreSummary } from './install-object-store-summary';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { InstallPrefill } from './install-prefill';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -33,6 +36,7 @@ export interface InstallSessionResponse {
     'completed_steps': Array<string>;
     'llm'?: InstallLlmSummary | null;
     'server'?: InstallServerConfigInput | null;
+    'object_store'?: InstallObjectStoreSummary | null;
     'github'?: InstallGithubSummary | null;
     'prefill': InstallPrefill;
 }

@@ -16,22 +16,29 @@ use fabro_auth::{AuthCredential, AuthDetails, credential_id_for};
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::{Storage, resolve_server_from_file};
 use fabro_install::{
-    InstallListenConfig, PendingSettingsWrite, VaultSecretWrite, generate_jwt_keypair,
-    merge_server_settings, persist_install_outputs_direct, write_github_app_settings,
+    InstallListenConfig, OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV,
+    PendingSettingsWrite, VaultSecretWrite, generate_jwt_keypair, merge_server_settings,
+    persist_install_outputs_direct, write_github_app_settings, write_object_store_settings,
     write_token_settings,
 };
 use fabro_model::Provider;
 use fabro_store::ArtifactStore;
 use fabro_types::settings::SettingsLayer;
+use fabro_types::settings::interp::InterpString;
+use fabro_types::settings::server::ObjectStoreSettings;
 use fabro_util::version::FABRO_VERSION;
 use fabro_util::{Home, dev_token, session_secret};
 use fabro_vault::SecretType as VaultSecretType;
+use object_store::aws::resolve_bucket_region;
+use object_store::path::Path as ObjectStorePath;
+use object_store::{ClientOptions, RetryConfig};
 use serde::{Deserialize, Serialize};
 use tokio::net::{TcpListener, UnixListener};
 use tokio::sync::watch;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use tower::service_fn;
 use tracing::{error, info, warn};
+use zeroize::Zeroizing;
 
 use crate::error::ApiError;
 use crate::serve::{self, DEFAULT_TCP_PORT};
@@ -68,6 +75,10 @@ const DEFAULT_INSTALL_TCP_LISTEN_ADDRESS: &str = "127.0.0.1:32276";
 const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com/v1";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
+const REDACTED_SECRET_VALUE: &str = "[REDACTED]";
+const VALIDATION_TIMEOUT: Duration = Duration::from_secs(20);
+const VALIDATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const AWS_SESSION_TOKEN_ENV: &str = "AWS_SESSION_TOKEN";
 
 impl InstallAppState {
     #[must_use]
@@ -162,6 +173,7 @@ struct InstallTokenQuery {
 struct PendingInstall {
     llm:                Option<LlmProvidersInput>,
     server:             Option<ServerConfigInput>,
+    object_store:       Option<InstallObjectStoreState>,
     github:             Option<GithubInstallState>,
     pending_github_app: Option<PendingGithubApp>,
 }
@@ -180,6 +192,156 @@ struct LlmProviderInput {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct ServerConfigInput {
     canonical_url: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum InstallObjectStoreProvider {
+    Local,
+    S3,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum InstallObjectStoreCredentialMode {
+    Runtime,
+    AccessKey,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct InstallObjectStoreInput {
+    provider:          InstallObjectStoreProvider,
+    bucket:            Option<String>,
+    region:            Option<String>,
+    credential_mode:   Option<InstallObjectStoreCredentialMode>,
+    access_key_id:     Option<String>,
+    secret_access_key: Option<String>,
+}
+
+#[derive(Clone)]
+struct InstallSecret(Zeroizing<String>);
+
+impl InstallSecret {
+    fn new(value: impl Into<String>) -> Self {
+        Self(Zeroizing::new(value.into()))
+    }
+
+    fn expose_secret(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for InstallSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(REDACTED_SECRET_VALUE)
+    }
+}
+
+impl std::fmt::Display for InstallSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(REDACTED_SECRET_VALUE)
+    }
+}
+
+impl Serialize for InstallSecret {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(REDACTED_SECRET_VALUE)
+    }
+}
+
+#[derive(Clone)]
+struct InstallAwsCredentialPair {
+    access_key_id:     InstallSecret,
+    secret_access_key: InstallSecret,
+}
+
+impl InstallAwsCredentialPair {
+    fn new(access_key_id: impl Into<String>, secret_access_key: impl Into<String>) -> Self {
+        Self {
+            access_key_id:     InstallSecret::new(access_key_id),
+            secret_access_key: InstallSecret::new(secret_access_key),
+        }
+    }
+}
+
+impl std::fmt::Debug for InstallAwsCredentialPair {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InstallAwsCredentialPair")
+            .field("access_key_id", &self.access_key_id)
+            .field("secret_access_key", &self.secret_access_key)
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug)]
+enum InstallObjectStoreState {
+    Local,
+    S3 {
+        bucket:             String,
+        region:             String,
+        credential_mode:    InstallObjectStoreCredentialMode,
+        manual_credentials: Option<InstallAwsCredentialPair>,
+    },
+}
+
+impl InstallObjectStoreState {
+    fn as_session_value(&self) -> serde_json::Value {
+        match self {
+            Self::Local => serde_json::json!({
+                "provider": "local",
+            }),
+            Self::S3 {
+                bucket,
+                region,
+                credential_mode,
+                manual_credentials,
+            } => serde_json::json!({
+                "provider": "s3",
+                "bucket": bucket,
+                "region": region,
+                "credential_mode": match credential_mode {
+                    InstallObjectStoreCredentialMode::Runtime => "runtime",
+                    InstallObjectStoreCredentialMode::AccessKey => "access_key",
+                },
+                "manual_credentials_saved": matches!(
+                    credential_mode,
+                    InstallObjectStoreCredentialMode::AccessKey
+                ) && manual_credentials.is_some(),
+            }),
+        }
+    }
+
+    fn to_persistence_selection(&self) -> fabro_install::InstallObjectStoreSelection {
+        match self {
+            Self::Local => fabro_install::InstallObjectStoreSelection::Local,
+            Self::S3 {
+                bucket,
+                region,
+                credential_mode,
+                manual_credentials,
+            } => fabro_install::InstallObjectStoreSelection::S3 {
+                bucket:            bucket.clone(),
+                region:            region.clone(),
+                credential_mode:   match credential_mode {
+                    InstallObjectStoreCredentialMode::Runtime => {
+                        fabro_install::InstallObjectStoreCredentialMode::Runtime
+                    }
+                    InstallObjectStoreCredentialMode::AccessKey => {
+                        fabro_install::InstallObjectStoreCredentialMode::AccessKey
+                    }
+                },
+                access_key_id:     manual_credentials
+                    .as_ref()
+                    .map(|credentials| credentials.access_key_id.expose_secret().to_string()),
+                secret_access_key: manual_credentials
+                    .as_ref()
+                    .map(|credentials| credentials.secret_access_key.expose_secret().to_string()),
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -326,6 +488,14 @@ pub async fn build_install_router(state: InstallAppState) -> Router {
             get(render_install_shell).put(put_install_server),
         )
         .route(
+            "/install/object-store/test",
+            post(post_install_object_store_test),
+        )
+        .route(
+            "/install/object-store",
+            get(render_install_shell).put(put_install_object_store),
+        )
+        .route(
             "/install/github/token/test",
             post(post_install_github_token_test),
         )
@@ -458,6 +628,7 @@ async fn get_install_session(
         "completed_steps": completed_steps(&pending_install),
         "llm": redacted_llm(&pending_install),
         "server": pending_install.server,
+        "object_store": redacted_object_store(&pending_install),
         "github": redacted_github(&pending_install),
         "prefill": {
             "canonical_url": detect_canonical_url(&headers),
@@ -564,6 +735,331 @@ async fn put_install_server(
     lock_unpoisoned(&state.pending_install, "install session").server = Some(input);
     info!(step = "server", "install step completed");
     StatusCode::NO_CONTENT.into_response()
+}
+
+async fn post_install_object_store_test(
+    State(state): State<InstallAppState>,
+    headers: HeaderMap,
+    Query(query): Query<InstallTokenQuery>,
+    Json(input): Json<InstallObjectStoreInput>,
+) -> Response {
+    if let Some(response) = require_valid_token(&state, &headers, query.token.as_deref()) {
+        return response;
+    }
+    observe_operator(&state, &headers);
+
+    let selection = {
+        let pending_install = lock_unpoisoned(&state.pending_install, "install session");
+        match resolve_install_object_store_state(pending_install.object_store.as_ref(), input) {
+            Ok(selection) => selection,
+            Err(err) => return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err),
+        }
+    };
+
+    match validate_install_object_store_selection(&state, &selection).await {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(err) => {
+            warn!(error = %err, "install object store validation failed");
+            install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err)
+        }
+    }
+}
+
+async fn put_install_object_store(
+    State(state): State<InstallAppState>,
+    headers: HeaderMap,
+    Query(query): Query<InstallTokenQuery>,
+    Json(input): Json<InstallObjectStoreInput>,
+) -> Response {
+    if let Some(response) = require_valid_token(&state, &headers, query.token.as_deref()) {
+        return response;
+    }
+    observe_operator(&state, &headers);
+
+    let mut pending_install = lock_unpoisoned(&state.pending_install, "install session");
+    let selection =
+        match resolve_install_object_store_state(pending_install.object_store.as_ref(), input) {
+            Ok(selection) => selection,
+            Err(err) => return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err),
+        };
+
+    pending_install.object_store = Some(selection);
+    info!(step = "object_store", "install step completed");
+    StatusCode::NO_CONTENT.into_response()
+}
+
+fn trim_install_field(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_install_object_store_state(
+    current: Option<&InstallObjectStoreState>,
+    input: InstallObjectStoreInput,
+) -> Result<InstallObjectStoreState, String> {
+    let bucket = trim_install_field(input.bucket);
+    let region = trim_install_field(input.region);
+    let access_key_id = trim_install_field(input.access_key_id);
+    let secret_access_key = trim_install_field(input.secret_access_key);
+
+    match input.provider {
+        InstallObjectStoreProvider::Local => {
+            if bucket.is_some()
+                || region.is_some()
+                || input.credential_mode.is_some()
+                || access_key_id.is_some()
+                || secret_access_key.is_some()
+            {
+                return Err(
+                    "Local disk does not accept S3 bucket, region, or AWS credential fields."
+                        .to_string(),
+                );
+            }
+
+            Ok(InstallObjectStoreState::Local)
+        }
+        InstallObjectStoreProvider::S3 => {
+            let bucket = bucket.ok_or_else(|| "Bucket is required.".to_string())?;
+            let region = region
+                .ok_or_else(|| "Region is required. Use a value like us-east-1.".to_string())?;
+            let credential_mode = input
+                .credential_mode
+                .ok_or_else(|| "Choose how Fabro should authenticate to AWS.".to_string())?;
+
+            let manual_credentials = match credential_mode {
+                InstallObjectStoreCredentialMode::Runtime => {
+                    if access_key_id.is_some() || secret_access_key.is_some() {
+                        return Err(
+                            "AWS access key fields are only allowed when using manual AWS access key credentials."
+                                .to_string(),
+                        );
+                    }
+                    None
+                }
+                InstallObjectStoreCredentialMode::AccessKey => {
+                    match (access_key_id, secret_access_key) {
+                        (Some(access_key_id), Some(secret_access_key)) => Some(
+                            InstallAwsCredentialPair::new(access_key_id, secret_access_key),
+                        ),
+                        (None, None) => current.and_then(|state| match state {
+                            InstallObjectStoreState::S3 {
+                                credential_mode: InstallObjectStoreCredentialMode::AccessKey,
+                                manual_credentials,
+                                ..
+                            } => manual_credentials.clone(),
+                            InstallObjectStoreState::Local
+                            | InstallObjectStoreState::S3 {
+                                credential_mode: InstallObjectStoreCredentialMode::Runtime,
+                                ..
+                            } => None,
+                        }),
+                        (Some(_), None) | (None, Some(_)) => {
+                            return Err(
+                            "Enter both AWS access key fields or switch to runtime credentials."
+                                .to_string(),
+                        );
+                        }
+                    }
+                }
+            };
+
+            if matches!(credential_mode, InstallObjectStoreCredentialMode::AccessKey)
+                && manual_credentials.is_none()
+            {
+                return Err(
+                    "Enter both AWS access key fields or switch to runtime credentials."
+                        .to_string(),
+                );
+            }
+
+            Ok(InstallObjectStoreState::S3 {
+                bucket,
+                region,
+                credential_mode,
+                manual_credentials,
+            })
+        }
+    }
+}
+
+fn object_store_validation_settings(
+    selection: &InstallObjectStoreState,
+) -> Option<ObjectStoreSettings> {
+    match selection {
+        InstallObjectStoreState::Local => None,
+        InstallObjectStoreState::S3 { bucket, region, .. } => Some(ObjectStoreSettings::S3 {
+            bucket:     InterpString::parse(bucket),
+            region:     InterpString::parse(region),
+            endpoint:   None,
+            path_style: false,
+        }),
+    }
+}
+
+fn install_object_store_lookup<'a>(
+    server_secrets: &'a crate::server_secrets::ServerSecrets,
+    manual_credentials: Option<&'a InstallAwsCredentialPair>,
+) -> impl Fn(&str) -> Option<String> + 'a {
+    move |name| match (manual_credentials, name) {
+        (Some(credentials), OBJECT_STORE_ACCESS_KEY_ID_ENV) => {
+            Some(credentials.access_key_id.expose_secret().to_string())
+        }
+        (Some(credentials), OBJECT_STORE_SECRET_ACCESS_KEY_ENV) => {
+            Some(credentials.secret_access_key.expose_secret().to_string())
+        }
+        (Some(_), AWS_SESSION_TOKEN_ENV) => None,
+        _ => server_secrets.get(name),
+    }
+}
+
+async fn validate_install_object_store_selection(
+    state: &InstallAppState,
+    selection: &InstallObjectStoreState,
+) -> Result<(), String> {
+    let Some(settings) = object_store_validation_settings(selection) else {
+        return Ok(());
+    };
+
+    let (bucket, region, manual_credentials) = match selection {
+        InstallObjectStoreState::Local => return Ok(()),
+        InstallObjectStoreState::S3 {
+            bucket,
+            region,
+            credential_mode: _,
+            manual_credentials,
+        } => (
+            bucket.as_str(),
+            region.as_str(),
+            manual_credentials.as_ref(),
+        ),
+    };
+
+    let client_options = ClientOptions::new()
+        .with_connect_timeout(VALIDATION_CONNECT_TIMEOUT)
+        .with_timeout(VALIDATION_TIMEOUT);
+    match timeout(
+        VALIDATION_TIMEOUT,
+        resolve_bucket_region(bucket, &client_options),
+    )
+    .await
+    {
+        Ok(Ok(actual_region)) if actual_region != region => {
+            return Err(format!(
+                "Bucket {bucket} is in region {actual_region}, not {region}. Use the bucket's AWS region and try again."
+            ));
+        }
+        Ok(Err(err)) => {
+            let rendered = err.to_string();
+            if rendered.contains("not found") {
+                return Err(format!("Bucket {bucket} was not found."));
+            }
+        }
+        Err(_) => {
+            return Err(
+                "Timed out while checking S3 access. Verify the bucket, region, and network path, then try again."
+                    .to_string(),
+            );
+        }
+        Ok(Ok(_)) => {}
+    }
+
+    let server_env_path = Storage::new(state.storage_dir.as_ref())
+        .runtime_directory()
+        .env_path();
+    let server_secrets = crate::server_secrets::ServerSecrets::load(server_env_path)
+        .map_err(|err| err.to_string())?;
+    let build_options = serve::ObjectStoreBuildOptions {
+        client_options,
+        retry_config: RetryConfig {
+            max_retries: 0,
+            retry_timeout: VALIDATION_TIMEOUT,
+            ..RetryConfig::default()
+        },
+    };
+    let env_lookup = install_object_store_lookup(&server_secrets, manual_credentials);
+    let object_store = serve::build_object_store_from_settings_with_lookup(
+        &settings,
+        &env_lookup,
+        Some(&build_options),
+    )
+    .map_err(|err| err.to_string())?;
+
+    let prefixes = ["artifacts", "slatedb"];
+    let probe = async {
+        for (index, prefix) in prefixes.iter().enumerate() {
+            let path = ObjectStorePath::from(*prefix);
+            if let Err(err) = object_store.list_with_delimiter(Some(&path)).await {
+                return Err((index, err));
+            }
+        }
+        Ok::<(), (usize, object_store::Error)>(())
+    };
+
+    match timeout(VALIDATION_TIMEOUT, probe).await {
+        Ok(Ok(())) => Ok(()),
+        Err(_) => Err(
+            "Timed out while checking S3 access. Verify the bucket, region, and network path, then try again."
+                .to_string(),
+        ),
+        Ok(Err((index, err))) => Err(classify_object_store_validation_error(
+            bucket,
+            region,
+            index,
+            &err,
+        )),
+    }
+}
+
+fn classify_object_store_validation_error(
+    bucket: &str,
+    region: &str,
+    prefix_index: usize,
+    err: &object_store::Error,
+) -> String {
+    match err {
+        object_store::Error::PermissionDenied { .. }
+        | object_store::Error::Unauthenticated { .. } => {
+            if prefix_index == 0 {
+                format!(
+                    "Could not access bucket {bucket} in region {region} with the selected credentials."
+                )
+            } else {
+                "Fabro reached the bucket but could not verify access to slatedb/ and artifacts/. Validation requires bucket list access plus object access under both prefixes."
+                    .to_string()
+            }
+        }
+        object_store::Error::NotFound { .. } => format!("Bucket {bucket} was not found."),
+        object_store::Error::Generic { .. } => {
+            let rendered = err.to_string();
+            if rendered.contains("incorrectly configured region") {
+                format!(
+                    "Bucket {bucket} is not reachable in region {region}. Verify the AWS region and try again."
+                )
+            } else if rendered.contains("not found") {
+                format!("Bucket {bucket} was not found.")
+            } else if prefix_index == 0 {
+                format!(
+                    "Could not access bucket {bucket} in region {region} with the selected credentials."
+                )
+            } else {
+                "Fabro reached the bucket but could not verify access to slatedb/ and artifacts/. Validation requires bucket list access plus object access under both prefixes."
+                    .to_string()
+            }
+        }
+        object_store::Error::NotSupported { .. }
+        | object_store::Error::AlreadyExists { .. }
+        | object_store::Error::Precondition { .. }
+        | object_store::Error::NotModified { .. }
+        | object_store::Error::InvalidPath { .. }
+        | object_store::Error::NotImplemented { .. }
+        | object_store::Error::UnknownConfigurationKey { .. } => {
+            "Fabro reached the bucket but could not verify access to slatedb/ and artifacts/. Validation requires bucket list access plus object access under both prefixes."
+                .to_string()
+        }
+        _ => "Fabro reached the bucket but could not verify access to slatedb/ and artifacts/. Validation requires bucket list access plus object access under both prefixes."
+            .to_string(),
+    }
 }
 
 async fn post_install_github_token_test(
@@ -758,11 +1254,14 @@ async fn post_install_finish(
 
     let pending_install = lock_unpoisoned(&state.pending_install, "install session").clone();
 
-    let Some(llm) = pending_install.llm else {
-        return missing_step_response("llm");
-    };
     let Some(server) = pending_install.server else {
         return missing_step_response("server");
+    };
+    let Some(object_store) = pending_install.object_store else {
+        return missing_step_response("object_store");
+    };
+    let Some(llm) = pending_install.llm else {
+        return missing_step_response("llm");
     };
     let Some(github) = pending_install.github else {
         return missing_step_response("github");
@@ -775,6 +1274,15 @@ async fn post_install_finish(
     {
         return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
     }
+    let object_store_env_plan = match write_object_store_settings(
+        &mut settings_doc,
+        &object_store.to_persistence_selection(),
+    ) {
+        Ok(plan) => plan,
+        Err(err) => {
+            return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
+        }
+    };
     let mut vault_secrets = Vec::new();
     for provider in llm.providers {
         let credential = AuthCredential {
@@ -801,7 +1309,13 @@ async fn post_install_finish(
         });
     }
 
-    let mut server_env_secrets = Vec::new();
+    let make_env_write = |key: &str, value: String| fabro_config::envfile::EnvFileUpdate {
+        key: key.to_string(),
+        value,
+        comment: None,
+    };
+    let mut server_env_writes = object_store_env_plan.writes;
+    let server_env_removals = object_store_env_plan.removals;
     let mut dev_token: Option<String> = None;
     match github {
         GithubInstallState::Token(github) => {
@@ -845,13 +1359,16 @@ async fn post_install_finish(
             ) {
                 return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
             }
-            server_env_secrets.push((
-                "GITHUB_APP_PRIVATE_KEY".to_string(),
+            server_env_writes.push(make_env_write(
+                "GITHUB_APP_PRIVATE_KEY",
                 BASE64_STANDARD.encode(github.pem.as_bytes()),
             ));
-            server_env_secrets.push(("GITHUB_APP_CLIENT_SECRET".to_string(), github.client_secret));
+            server_env_writes.push(make_env_write(
+                "GITHUB_APP_CLIENT_SECRET",
+                github.client_secret,
+            ));
             if let Some(secret) = github.webhook_secret {
-                server_env_secrets.push(("GITHUB_APP_WEBHOOK_SECRET".to_string(), secret));
+                server_env_writes.push(make_env_write("GITHUB_APP_WEBHOOK_SECRET", secret));
             }
         }
     }
@@ -870,19 +1387,19 @@ async fn post_install_finish(
             return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
         }
     };
-    server_env_secrets.extend([
-        (
-            "FABRO_JWT_PRIVATE_KEY".to_string(),
+    server_env_writes.extend([
+        make_env_write(
+            "FABRO_JWT_PRIVATE_KEY",
             BASE64_STANDARD.encode(jwt_private_pem.as_bytes()),
         ),
-        (
-            "FABRO_JWT_PUBLIC_KEY".to_string(),
+        make_env_write(
+            "FABRO_JWT_PUBLIC_KEY",
             BASE64_STANDARD.encode(jwt_public_pem.as_bytes()),
         ),
-        ("SESSION_SECRET".to_string(), session_secret),
+        make_env_write("SESSION_SECRET", session_secret),
     ]);
     if let Some(token) = dev_token.as_ref() {
-        server_env_secrets.push(("FABRO_DEV_TOKEN".to_string(), token.clone()));
+        server_env_writes.push(make_env_write("FABRO_DEV_TOKEN", token.clone()));
     }
 
     #[expect(
@@ -894,7 +1411,8 @@ async fn post_install_finish(
 
     if let Err(err) = persist_install_outputs_direct(
         state.storage_dir.as_ref(),
-        &server_env_secrets,
+        &server_env_writes,
+        &server_env_removals,
         &vault_secrets,
         Some(&PendingSettingsWrite {
             path:              state.config_path.as_ref(),
@@ -906,10 +1424,19 @@ async fn post_install_finish(
         let status = StatusCode::INTERNAL_SERVER_ERROR;
         let detail = err.to_string();
         let title = status.canonical_reason().unwrap_or("Unknown").to_string();
-        let leftover_env_keys: Vec<String> = server_env_secrets
-            .iter()
-            .map(|(key, _)| key.clone())
-            .collect();
+        let leftover_env_keys: Vec<String> = if err.server_env_applied {
+            server_env_writes
+                .iter()
+                .map(|write| write.key.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let removed_env_keys: Vec<String> = if err.server_env_applied {
+            err.removed_env_keys.clone()
+        } else {
+            Vec::new()
+        };
         return (
             status,
             Json(serde_json::json!({
@@ -919,6 +1446,7 @@ async fn post_install_finish(
                     "detail": detail,
                 }],
                 "leftover_env_keys": leftover_env_keys,
+                "removed_env_keys": removed_env_keys,
             })),
         )
             .into_response();
@@ -928,6 +1456,19 @@ async fn post_install_finish(
         if let Err(err) = write_artifact_store_metadata(&settings, state.storage_dir.as_ref()).await
         {
             warn!(error = %err, "failed to write artifact store metadata after install");
+        }
+    }
+    if let Some(pending_object_store) = lock_unpoisoned(&state.pending_install, "install session")
+        .object_store
+        .as_mut()
+    {
+        if let InstallObjectStoreState::S3 {
+            credential_mode: InstallObjectStoreCredentialMode::AccessKey,
+            manual_credentials,
+            ..
+        } = pending_object_store
+        {
+            *manual_credentials = None;
         }
     }
 
@@ -1054,11 +1595,14 @@ fn detect_canonical_url(headers: &HeaderMap) -> String {
 
 fn completed_steps(pending_install: &PendingInstall) -> Vec<&'static str> {
     let mut steps = Vec::new();
-    if pending_install.llm.is_some() {
-        steps.push("llm");
-    }
     if pending_install.server.is_some() {
         steps.push("server");
+    }
+    if pending_install.object_store.is_some() {
+        steps.push("object_store");
+    }
+    if pending_install.llm.is_some() {
+        steps.push("llm");
     }
     if pending_install.github.is_some() {
         steps.push("github");
@@ -1096,6 +1640,13 @@ fn redacted_github(pending_install: &PendingInstall) -> serde_json::Value {
                 "allowed_username": github.allowed_username,
             }),
         },
+    )
+}
+
+fn redacted_object_store(pending_install: &PendingInstall) -> serde_json::Value {
+    pending_install.object_store.as_ref().map_or_else(
+        || serde_json::Value::Null,
+        InstallObjectStoreState::as_session_value,
     )
 }
 
@@ -1436,14 +1987,21 @@ async fn wait_for_shutdown(mut shutdown_rx: watch::Receiver<bool>) {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
 
     use axum::http::HeaderMap;
+    use fabro_install::{OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV};
+    use object_store::Error as ObjectStoreError;
+    use serde_json::json;
 
     use super::{
-        DEFAULT_INSTALL_GITHUB_API_BASE_URL, InstallAppState, InstallFinishGuard, PendingInstall,
-        detect_canonical_url, lock_unpoisoned, token_is_valid,
+        AWS_SESSION_TOKEN_ENV, DEFAULT_INSTALL_GITHUB_API_BASE_URL, InstallAppState,
+        InstallAwsCredentialPair, InstallFinishGuard, InstallObjectStoreCredentialMode,
+        InstallObjectStoreInput, InstallObjectStoreProvider, PendingInstall,
+        classify_object_store_validation_error, detect_canonical_url, install_object_store_lookup,
+        lock_unpoisoned, resolve_install_object_store_state, token_is_valid,
     };
 
     #[test]
@@ -1514,5 +2072,111 @@ mod tests {
             DEFAULT_INSTALL_GITHUB_API_BASE_URL,
             "https://api.github.com"
         );
+    }
+
+    #[test]
+    fn resolve_install_object_store_state_rejects_local_with_s3_fields() {
+        let err = resolve_install_object_store_state(None, InstallObjectStoreInput {
+            provider:          InstallObjectStoreProvider::Local,
+            bucket:            Some("fabro-data".to_string()),
+            region:            None,
+            credential_mode:   None,
+            access_key_id:     None,
+            secret_access_key: None,
+        })
+        .expect_err("local mode should reject S3-only fields");
+
+        assert_eq!(
+            err,
+            "Local disk does not accept S3 bucket, region, or AWS credential fields."
+        );
+    }
+
+    #[test]
+    fn resolve_install_object_store_state_rejects_runtime_with_submitted_access_keys() {
+        let err = resolve_install_object_store_state(None, InstallObjectStoreInput {
+            provider:          InstallObjectStoreProvider::S3,
+            bucket:            Some("fabro-data".to_string()),
+            region:            Some("us-east-1".to_string()),
+            credential_mode:   Some(InstallObjectStoreCredentialMode::Runtime),
+            access_key_id:     Some("AKIA_FAKE_VALUE".to_string()),
+            secret_access_key: Some("fake-secret-value".to_string()),
+        })
+        .expect_err("runtime mode should reject submitted access keys");
+
+        assert_eq!(
+            err,
+            "AWS access key fields are only allowed when using manual AWS access key credentials."
+        );
+    }
+
+    #[test]
+    fn install_object_store_lookup_overrides_static_keys_and_suppresses_session_token() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let env_path = temp_dir.path().join("server.env");
+        std::fs::write(
+            &env_path,
+            "\
+AWS_ACCESS_KEY_ID=ambient-access\n\
+AWS_SECRET_ACCESS_KEY=ambient-secret\n\
+AWS_SESSION_TOKEN=ambient-session\n\
+AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/fabro-web-identity-token\n",
+        )
+        .unwrap();
+        let server_secrets =
+            crate::server_secrets::ServerSecrets::with_env_lookup(env_path.clone(), |_| None)
+                .unwrap();
+        let manual_credentials =
+            InstallAwsCredentialPair::new("submitted-access", "submitted-secret");
+
+        let lookup = install_object_store_lookup(&server_secrets, Some(&manual_credentials));
+
+        assert_eq!(
+            lookup(OBJECT_STORE_ACCESS_KEY_ID_ENV).as_deref(),
+            Some("submitted-access")
+        );
+        assert_eq!(
+            lookup(OBJECT_STORE_SECRET_ACCESS_KEY_ENV).as_deref(),
+            Some("submitted-secret")
+        );
+        assert_eq!(lookup(AWS_SESSION_TOKEN_ENV), None);
+        assert_eq!(
+            lookup("AWS_WEB_IDENTITY_TOKEN_FILE").as_deref(),
+            Some("/tmp/fabro-web-identity-token")
+        );
+    }
+
+    #[test]
+    fn classify_object_store_validation_error_reports_region_mismatch() {
+        let err = ObjectStoreError::Generic {
+            store:  "AmazonS3",
+            source: Box::new(io::Error::other(
+                "Received redirect without LOCATION, this normally indicates an incorrectly configured region",
+            )),
+        };
+
+        assert_eq!(
+            classify_object_store_validation_error("fabro-data", "us-east-1", 0, &err),
+            "Bucket fabro-data is not reachable in region us-east-1. Verify the AWS region and try again."
+        );
+    }
+
+    #[test]
+    fn install_secret_debug_display_and_json_are_redacted() {
+        let manual_credentials =
+            InstallAwsCredentialPair::new("AKIA_STRUCTURALLY_REALISTIC", "secret-value-123");
+
+        let debug = format!("{manual_credentials:?}");
+        let rendered = json!({
+            "access_key_id": &manual_credentials.access_key_id,
+            "secret_access_key": &manual_credentials.secret_access_key,
+        })
+        .to_string();
+
+        assert!(!debug.contains("AKIA_STRUCTURALLY_REALISTIC"));
+        assert!(!debug.contains("secret-value-123"));
+        assert!(!rendered.contains("AKIA_STRUCTURALLY_REALISTIC"));
+        assert!(!rendered.contains("secret-value-123"));
+        assert!(rendered.contains("[REDACTED]"));
     }
 }

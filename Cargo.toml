@@ -81,6 +81,7 @@ minijinja = "2"
 fabro-http = { path = "lib/crates/fabro-http" }
 graphviz-sys = { git = "https://github.com/fabro-sh/graphviz-sys" }
 strum = { version = "0.28", features = ["derive"] }
+zeroize = "1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

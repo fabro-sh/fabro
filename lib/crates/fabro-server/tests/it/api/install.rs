@@ -3,13 +3,15 @@
     reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
 )]
 
-use std::sync::Arc;
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_config::{Storage, parse_settings_layer, resolve_server_from_file};
+use fabro_install::OBJECT_STORE_MANAGED_COMMENT;
 use fabro_model::Provider;
 use fabro_server::install::{InstallAppState, build_install_router};
 use fabro_util::{Home, dev_token};
@@ -17,11 +19,81 @@ use fabro_vault::Vault;
 use httpmock::MockServer;
 use tokio::time::sleep;
 use tower::ServiceExt;
+use tracing::field::{Field, Visit};
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, SubscriberExt};
+use tracing_subscriber::{Layer, Registry};
 
 use crate::helpers::{checked_response, response_json, response_status, response_text};
 
-async fn configure_token_install(app: &axum::Router, token: &str) {
-    let llm_response = app
+#[derive(Default)]
+struct EventCapture {
+    fields: Vec<(String, String)>,
+}
+
+impl Visit for EventCapture {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.fields
+            .push((field.name().to_string(), format!("{value:?}")));
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.fields
+            .push((field.name().to_string(), value.to_string()));
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.fields
+            .push((field.name().to_string(), value.to_string()));
+    }
+}
+
+struct CaptureLayer {
+    lines: Arc<StdMutex<Vec<String>>>,
+}
+
+impl<S: Subscriber> Layer<S> for CaptureLayer {
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        if !event
+            .metadata()
+            .target()
+            .starts_with("fabro_server::install")
+        {
+            return;
+        }
+
+        let mut capture = EventCapture::default();
+        event.record(&mut capture);
+
+        let mut line = event.metadata().level().to_string();
+        for (field, value) in capture.fields {
+            let _ = write!(line, " {field}={value}");
+        }
+        self.lines.lock().unwrap().push(line);
+    }
+}
+
+async fn put_install_server(app: &axum::Router, token: &str, canonical_url: &str) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/install/server")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(format!(
+                    r#"{{"canonical_url":"{canonical_url}"}}"#
+                )))
+                .expect("server install request should build"),
+        )
+        .await
+        .unwrap();
+    response_status(response, StatusCode::NO_CONTENT, "PUT /install/server").await;
+}
+
+async fn put_install_llm(app: &axum::Router, token: &str) {
+    let response = app
         .clone()
         .oneshot(
             Request::builder()
@@ -36,31 +108,11 @@ async fn configure_token_install(app: &axum::Router, token: &str) {
         )
         .await
         .unwrap();
-    response_status(llm_response, StatusCode::NO_CONTENT, "PUT /install/llm").await;
+    response_status(response, StatusCode::NO_CONTENT, "PUT /install/llm").await;
+}
 
-    let server_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/install/server")
-                .header("authorization", format!("Bearer {token}"))
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"canonical_url":"https://fabro.example.com"}"#,
-                ))
-                .expect("server install request should build"),
-        )
-        .await
-        .unwrap();
-    response_status(
-        server_response,
-        StatusCode::NO_CONTENT,
-        "PUT /install/server",
-    )
-    .await;
-
-    let github_response = app
+async fn put_install_github_token(app: &axum::Router, token: &str, username: &str) {
+    let response = app
         .clone()
         .oneshot(
             Request::builder()
@@ -68,19 +120,52 @@ async fn configure_token_install(app: &axum::Router, token: &str) {
                 .uri("/install/github/token")
                 .header("authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"token":"ghp_test_token","username":"brynary"}"#,
-                ))
+                .body(Body::from(format!(
+                    r#"{{"token":"ghp_test_token","username":"{username}"}}"#
+                )))
                 .expect("GitHub token install request should build"),
         )
         .await
         .unwrap();
     response_status(
-        github_response,
+        response,
         StatusCode::NO_CONTENT,
         "PUT /install/github/token",
     )
     .await;
+}
+
+async fn put_install_object_store(app: &axum::Router, token: &str, body: &str) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/install/object-store")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("object-store install request should build"),
+        )
+        .await
+        .unwrap();
+    response_status(
+        response,
+        StatusCode::NO_CONTENT,
+        "PUT /install/object-store",
+    )
+    .await;
+}
+
+async fn put_install_object_store_local(app: &axum::Router, token: &str) {
+    put_install_object_store(app, token, r#"{"provider":"local"}"#).await;
+}
+
+async fn configure_token_install(app: &axum::Router, token: &str) {
+    put_install_server(app, token, "https://fabro.example.com").await;
+    put_install_object_store_local(app, token).await;
+    put_install_llm(app, token).await;
+    put_install_github_token(app, token, "brynary").await;
 }
 
 #[tokio::test]
@@ -197,6 +282,16 @@ async fn install_endpoints_reject_missing_and_wrong_tokens() {
         ),
         (
             "POST",
+            "/install/object-store/test",
+            Some(r#"{"provider":"local"}"#),
+        ),
+        (
+            "PUT",
+            "/install/object-store",
+            Some(r#"{"provider":"local"}"#),
+        ),
+        (
+            "POST",
             "/install/github/token/test",
             Some(r#"{"token":"ghp_test_token"}"#),
         ),
@@ -280,7 +375,124 @@ async fn install_endpoints_accept_query_token_when_authorization_header_is_wrong
 }
 
 #[tokio::test]
-async fn token_install_finish_persists_settings_env_and_vault() {
+async fn object_store_local_validation_and_save_update_install_session() {
+    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+
+    let validation_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/object-store/test")
+                .header("authorization", "Bearer test-install-token")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"provider":"local"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let validation_body = response_json(
+        validation_response,
+        StatusCode::OK,
+        "POST /install/object-store/test",
+    )
+    .await;
+    assert_eq!(validation_body["ok"], true);
+
+    put_install_object_store_local(&app, "test-install-token").await;
+
+    let session_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/install/session")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_body =
+        response_json(session_response, StatusCode::OK, "GET /install/session").await;
+    assert_eq!(session_body["object_store"]["provider"], "local");
+    assert!(
+        session_body["completed_steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "object_store")
+    );
+}
+
+#[tokio::test]
+async fn object_store_validation_rejects_runtime_mode_access_keys_without_echoing_secrets() {
+    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let access_key_id = "AKIA_RUNTIME_SHOULD_NOT_LEAK";
+    let secret_access_key = "runtime-secret-should-not-leak";
+
+    let validation_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/object-store/test")
+                .header("authorization", "Bearer test-install-token")
+                .header("content-type", "application/json")
+                .body(Body::from(format!(
+                    r#"{{"provider":"s3","bucket":"fabro-data","region":"us-east-1","credential_mode":"runtime","access_key_id":"{access_key_id}","secret_access_key":"{secret_access_key}"}}"#
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let validation_body = response_json(
+        validation_response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "POST /install/object-store/test",
+    )
+    .await;
+
+    assert_eq!(
+        validation_body["errors"][0]["detail"],
+        "AWS access key fields are only allowed when using manual AWS access key credentials."
+    );
+    let rendered = validation_body.to_string();
+    assert!(!rendered.contains(access_key_id));
+    assert!(!rendered.contains(secret_access_key));
+}
+
+#[tokio::test]
+async fn install_finish_requires_object_store_step() {
+    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+
+    put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_llm(&app, "test-install-token").await;
+    put_install_github_token(&app, "test-install-token", "brynary").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let finish_body = response_json(
+        finish_response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "POST /install/finish",
+    )
+    .await;
+    assert_eq!(
+        finish_body["errors"][0]["detail"],
+        "install step 'object_store' is incomplete"
+    );
+}
+
+#[tokio::test]
+async fn manual_object_store_session_is_redacted_and_blank_resubmit_preserves_credentials() {
     let temp_dir = tempfile::tempdir().unwrap();
     let config_path = temp_dir.path().join("settings.toml");
     let app = build_install_router(InstallAppState::for_test_with_paths(
@@ -290,66 +502,219 @@ async fn token_install_finish_persists_settings_env_and_vault() {
     ))
     .await;
 
-    let llm_response = app
+    put_install_object_store(
+        &app,
+        "test-install-token",
+        r#"{"provider":"s3","bucket":"fabro-data","region":"us-east-1","credential_mode":"access_key","access_key_id":"AKIA_TEST_VALUE","secret_access_key":"secret-test-value"}"#,
+    )
+    .await;
+
+    let session_response = app
         .clone()
         .oneshot(
             Request::builder()
-                .method("PUT")
-                .uri("/install/llm")
+                .method("GET")
+                .uri("/install/session")
                 .header("authorization", "Bearer test-install-token")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"providers":[{"provider":"anthropic","api_key":"anthropic-test-key"}]}"#,
-                ))
+                .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    response_status(llm_response, StatusCode::NO_CONTENT, "PUT /install/llm").await;
+    let session_body =
+        response_json(session_response, StatusCode::OK, "GET /install/session").await;
+    assert_eq!(session_body["object_store"]["provider"], "s3");
+    assert_eq!(session_body["object_store"]["bucket"], "fabro-data");
+    assert_eq!(session_body["object_store"]["region"], "us-east-1");
+    assert_eq!(
+        session_body["object_store"]["credential_mode"],
+        "access_key"
+    );
+    assert_eq!(
+        session_body["object_store"]["manual_credentials_saved"],
+        true
+    );
+    let rendered_session = session_body.to_string();
+    assert!(!rendered_session.contains("AKIA_TEST_VALUE"));
+    assert!(!rendered_session.contains("secret-test-value"));
 
-    let server_response = app
-        .clone()
+    put_install_object_store(
+        &app,
+        "test-install-token",
+        r#"{"provider":"s3","bucket":"fabro-data","region":"us-east-1","credential_mode":"access_key"}"#,
+    )
+    .await;
+    put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_llm(&app, "test-install-token").await;
+    put_install_github_token(&app, "test-install-token", "brynary").await;
+
+    let finish_response = app
         .oneshot(
             Request::builder()
-                .method("PUT")
-                .uri("/install/server")
+                .method("POST")
+                .uri("/install/finish")
                 .header("authorization", "Bearer test-install-token")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"canonical_url":"https://fabro.example.com"}"#,
-                ))
+                .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
     response_status(
-        server_response,
-        StatusCode::NO_CONTENT,
-        "PUT /install/server",
+        finish_response,
+        StatusCode::ACCEPTED,
+        "POST /install/finish",
     )
     .await;
 
-    let github_response = app
+    let server_env =
+        std::fs::read_to_string(Storage::new(temp_dir.path()).runtime_directory().env_path())
+            .unwrap();
+    assert!(server_env.contains("AWS_ACCESS_KEY_ID=AKIA_TEST_VALUE"));
+    assert!(server_env.contains("AWS_SECRET_ACCESS_KEY=secret-test-value"));
+}
+
+#[tokio::test]
+async fn switching_object_store_from_manual_to_runtime_clears_saved_manual_credentials() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join("settings.toml");
+    let app = build_install_router(InstallAppState::for_test_with_paths(
+        "test-install-token",
+        temp_dir.path(),
+        &config_path,
+    ))
+    .await;
+
+    put_install_object_store(
+        &app,
+        "test-install-token",
+        r#"{"provider":"s3","bucket":"fabro-data","region":"us-east-1","credential_mode":"access_key","access_key_id":"AKIA_SWITCH_ME","secret_access_key":"switch-secret-value"}"#,
+    )
+    .await;
+    put_install_object_store(
+        &app,
+        "test-install-token",
+        r#"{"provider":"s3","bucket":"fabro-data","region":"us-east-1","credential_mode":"runtime"}"#,
+    )
+    .await;
+
+    let session_response = app
         .clone()
         .oneshot(
             Request::builder()
-                .method("PUT")
-                .uri("/install/github/token")
+                .method("GET")
+                .uri("/install/session")
                 .header("authorization", "Bearer test-install-token")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"token":"ghp_test_token","username":"brynary"}"#,
-                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_body =
+        response_json(session_response, StatusCode::OK, "GET /install/session").await;
+    assert_eq!(session_body["object_store"]["provider"], "s3");
+    assert_eq!(session_body["object_store"]["credential_mode"], "runtime");
+    assert_eq!(
+        session_body["object_store"]["manual_credentials_saved"],
+        false
+    );
+    let rendered_session = session_body.to_string();
+    assert!(!rendered_session.contains("AKIA_SWITCH_ME"));
+    assert!(!rendered_session.contains("switch-secret-value"));
+
+    put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_llm(&app, "test-install-token").await;
+    put_install_github_token(&app, "test-install-token", "brynary").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
     response_status(
-        github_response,
-        StatusCode::NO_CONTENT,
-        "PUT /install/github/token",
+        finish_response,
+        StatusCode::ACCEPTED,
+        "POST /install/finish",
     )
     .await;
+
+    let server_env =
+        std::fs::read_to_string(Storage::new(temp_dir.path()).runtime_directory().env_path())
+            .unwrap();
+    assert!(!server_env.contains("AWS_ACCESS_KEY_ID="));
+    assert!(!server_env.contains("AWS_SECRET_ACCESS_KEY="));
+}
+
+#[tokio::test]
+async fn runtime_object_store_finish_removes_managed_aws_keys_but_keeps_unmarked_entries() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join("settings.toml");
+    let storage = Storage::new(temp_dir.path());
+    std::fs::write(
+        storage.runtime_directory().env_path(),
+        format!(
+            "AWS_ACCESS_KEY_ID=operator-id\n# {OBJECT_STORE_MANAGED_COMMENT}\nAWS_SECRET_ACCESS_KEY=managed-secret\nKEEP_ME=1\n"
+        ),
+    )
+    .unwrap();
+
+    let app = build_install_router(InstallAppState::for_test_with_paths(
+        "test-install-token",
+        temp_dir.path(),
+        &config_path,
+    ))
+    .await;
+
+    put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_object_store(
+        &app,
+        "test-install-token",
+        r#"{"provider":"s3","bucket":"fabro-data","region":"us-east-1","credential_mode":"runtime"}"#,
+    )
+    .await;
+    put_install_llm(&app, "test-install-token").await;
+    put_install_github_token(&app, "test-install-token", "brynary").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    response_status(
+        finish_response,
+        StatusCode::ACCEPTED,
+        "POST /install/finish",
+    )
+    .await;
+
+    let server_env = std::fs::read_to_string(storage.runtime_directory().env_path()).unwrap();
+    assert!(server_env.contains("AWS_ACCESS_KEY_ID=operator-id"));
+    assert!(!server_env.contains("managed-secret"));
+    assert!(server_env.contains("KEEP_ME=1"));
+}
+
+#[tokio::test]
+async fn token_install_finish_persists_settings_env_and_vault() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join("settings.toml");
+    let app = build_install_router(InstallAppState::for_test_with_paths(
+        "test-install-token",
+        temp_dir.path(),
+        &config_path,
+    ))
+    .await;
+    configure_token_install(&app, "test-install-token").await;
 
     let finish_response = app
         .oneshot(
@@ -403,6 +768,8 @@ async fn token_install_finish_persists_settings_env_and_vault() {
     assert!(server_env.contains("FABRO_JWT_PUBLIC_KEY="));
     assert!(server_env.contains("SESSION_SECRET="));
     assert!(server_env.contains("FABRO_DEV_TOKEN="));
+    assert!(!server_env.contains("AWS_ACCESS_KEY_ID="));
+    assert!(!server_env.contains("AWS_SECRET_ACCESS_KEY="));
 
     let vault = Vault::load(fabro_config::Storage::new(temp_dir.path()).secrets_path()).unwrap();
     assert!(vault.get("anthropic").is_some());
@@ -479,6 +846,8 @@ async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
         "PUT /install/server",
     )
     .await;
+
+    put_install_object_store_local(&app, "test-install-token").await;
 
     let manifest_response = app
         .clone()
@@ -1398,6 +1767,146 @@ async fn install_finish_failure_restores_settings_and_vault_but_leaves_env_keys(
             .iter()
             .any(|value| value == "github")
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn install_finish_failure_with_manual_credentials_does_not_leak_values() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join("settings.toml");
+    std::fs::write(&config_path, "_version = 1\n[project]\nname = \"keep\"\n").unwrap();
+
+    let storage = Storage::new(temp_dir.path());
+    let vault_path = storage.secrets_path();
+    std::fs::create_dir_all(vault_path.parent().unwrap()).unwrap();
+    std::fs::write(&vault_path, "{ not valid json").unwrap();
+
+    let app = build_install_router(InstallAppState::for_test_with_paths(
+        "test-install-token",
+        temp_dir.path(),
+        &config_path,
+    ))
+    .await;
+
+    let access_key_id = "AKIA_FINISH_SHOULD_NOT_LEAK";
+    let secret_access_key = "finish-secret-should-not-leak";
+
+    put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_object_store(
+        &app,
+        "test-install-token",
+        &format!(
+            r#"{{"provider":"s3","bucket":"fabro-data","region":"us-east-1","credential_mode":"access_key","access_key_id":"{access_key_id}","secret_access_key":"{secret_access_key}"}}"#
+        ),
+    )
+    .await;
+    put_install_llm(&app, "test-install-token").await;
+    put_install_github_token(&app, "test-install-token", "brynary").await;
+
+    let lines = Arc::new(StdMutex::new(Vec::new()));
+    let subscriber = Registry::default().with(CaptureLayer {
+        lines: Arc::clone(&lines),
+    });
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let finish_body = response_json(
+        finish_response,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "POST /install/finish",
+    )
+    .await;
+
+    let rendered = finish_body.to_string();
+    assert!(!rendered.contains(access_key_id));
+    assert!(!rendered.contains(secret_access_key));
+
+    let captured = lines.lock().unwrap().join("\n");
+    assert!(
+        captured.contains("install persistence failed"),
+        "expected finish failure logs to be captured, got: {captured}"
+    );
+    assert!(!captured.contains(access_key_id));
+    assert!(!captured.contains(secret_access_key));
+}
+
+#[tokio::test]
+async fn install_finish_failure_reports_only_env_keys_actually_removed() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join("settings.toml");
+    std::fs::write(&config_path, "_version = 1\n[project]\nname = \"keep\"\n").unwrap();
+
+    let storage = Storage::new(temp_dir.path());
+    let env_path = storage.runtime_directory().env_path();
+    std::fs::create_dir_all(env_path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &env_path,
+        format!(
+            "#{OBJECT_STORE_MANAGED_COMMENT}\nAWS_SECRET_ACCESS_KEY=managed-secret\nKEEP_ME=1\n"
+        ),
+    )
+    .unwrap();
+
+    let vault_path = storage.secrets_path();
+    std::fs::create_dir_all(vault_path.parent().unwrap()).unwrap();
+    std::fs::write(&vault_path, "{ not valid json").unwrap();
+
+    let app = build_install_router(InstallAppState::for_test_with_paths(
+        "test-install-token",
+        temp_dir.path(),
+        &config_path,
+    ))
+    .await;
+
+    put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_object_store(
+        &app,
+        "test-install-token",
+        r#"{"provider":"s3","bucket":"fabro-data","region":"us-east-1","credential_mode":"runtime"}"#,
+    )
+    .await;
+    put_install_llm(&app, "test-install-token").await;
+    put_install_github_token(&app, "test-install-token", "brynary").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let finish_body = response_json(
+        finish_response,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "POST /install/finish",
+    )
+    .await;
+
+    assert_eq!(
+        finish_body["removed_env_keys"]
+            .as_array()
+            .expect("removed_env_keys should be present"),
+        &vec![serde_json::Value::String(
+            "AWS_SECRET_ACCESS_KEY".to_string()
+        )]
+    );
+
+    let server_env = std::fs::read_to_string(env_path).unwrap();
+    assert!(!server_env.contains("AWS_SECRET_ACCESS_KEY=managed-secret"));
+    assert!(server_env.contains("KEEP_ME=1"));
 }
 
 #[tokio::test]

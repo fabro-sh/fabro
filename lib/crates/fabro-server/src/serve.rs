@@ -9,6 +9,7 @@ use fabro_config::bind::{self, Bind, BindRequest};
 use fabro_config::merge::combine_files;
 use fabro_config::user::load_settings_config;
 use fabro_config::{Storage, resolve_server_from_file};
+use fabro_install::{OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV};
 use fabro_sandbox::SandboxProvider;
 use fabro_types::settings::server::{
     GithubIntegrationStrategy, ServerLayer, ServerListenLayer, WebhookStrategy,
@@ -18,10 +19,10 @@ use fabro_types::settings::{
     ServerSettings as ResolvedServerSettings, SettingsLayer,
 };
 use fabro_util::terminal::Styles;
-use object_store::ObjectStore;
-use object_store::aws::AmazonS3Builder;
+use object_store::aws::{AmazonS3Builder, AmazonS3ConfigKey};
 use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
+use object_store::{ClientOptions, ObjectStore, RetryConfig};
 use tokio::net::{TcpListener, UnixListener};
 use tokio::sync::watch;
 use tokio::time::interval;
@@ -38,8 +39,24 @@ use crate::server::{
 use crate::server_secrets::ServerSecrets;
 
 const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
+const AWS_SESSION_TOKEN_ENV: &str = "AWS_SESSION_TOKEN";
 pub const DEFAULT_TCP_PORT: u16 = 32276;
 type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+#[derive(Debug, Clone)]
+pub(crate) struct ObjectStoreBuildOptions {
+    pub client_options: ClientOptions,
+    pub retry_config:   RetryConfig,
+}
+
+impl Default for ObjectStoreBuildOptions {
+    fn default() -> Self {
+        Self {
+            client_options: ClientOptions::new(),
+            retry_config:   RetryConfig::default(),
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 enum ServerTitlePhase {
@@ -320,13 +337,82 @@ fn build_local_object_store_with_preference(
     Ok(Arc::new(LocalFileSystem::new_with_prefix(store_path)?))
 }
 
-fn build_object_store_from_settings(
+fn configure_s3_builder_from_env_lookup<F>(
+    mut builder: AmazonS3Builder,
+    env_lookup: &F,
+    build_options: &ObjectStoreBuildOptions,
+) -> anyhow::Result<AmazonS3Builder>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    builder = builder
+        .with_client_options(build_options.client_options.clone())
+        .with_retry(build_options.retry_config.clone());
+
+    let access_key_id = env_lookup(OBJECT_STORE_ACCESS_KEY_ID_ENV);
+    let secret_access_key = env_lookup(OBJECT_STORE_SECRET_ACCESS_KEY_ENV);
+    let session_token = env_lookup(AWS_SESSION_TOKEN_ENV);
+    match (access_key_id, secret_access_key) {
+        (Some(access_key_id), Some(secret_access_key)) => {
+            builder = builder
+                .with_access_key_id(access_key_id)
+                .with_secret_access_key(secret_access_key);
+            if let Some(session_token) = session_token {
+                builder = builder.with_token(session_token);
+            }
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            anyhow::bail!(
+                "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must both be set when using static AWS credentials"
+            );
+        }
+        (None, None) => {}
+    }
+
+    for (name, key) in [
+        (
+            "AWS_WEB_IDENTITY_TOKEN_FILE",
+            AmazonS3ConfigKey::WebIdentityTokenFile,
+        ),
+        ("AWS_ROLE_ARN", AmazonS3ConfigKey::RoleArn),
+        ("AWS_ROLE_SESSION_NAME", AmazonS3ConfigKey::RoleSessionName),
+        ("AWS_ENDPOINT_URL_STS", AmazonS3ConfigKey::StsEndpoint),
+        (
+            "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+            AmazonS3ConfigKey::ContainerCredentialsRelativeUri,
+        ),
+        (
+            "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+            AmazonS3ConfigKey::ContainerCredentialsFullUri,
+        ),
+        (
+            "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+            AmazonS3ConfigKey::ContainerAuthorizationTokenFile,
+        ),
+        ("AWS_METADATA_ENDPOINT", AmazonS3ConfigKey::MetadataEndpoint),
+        ("AWS_IMDSV1_FALLBACK", AmazonS3ConfigKey::ImdsV1Fallback),
+    ] {
+        if let Some(value) = env_lookup(name) {
+            builder = builder.with_config(key, value);
+        }
+    }
+
+    Ok(builder)
+}
+
+pub(crate) fn build_object_store_from_settings_with_lookup<F>(
     settings: &ObjectStoreSettings,
-) -> anyhow::Result<Arc<dyn ObjectStore>> {
+    env_lookup: &F,
+    build_options: Option<&ObjectStoreBuildOptions>,
+) -> anyhow::Result<Arc<dyn ObjectStore>>
+where
+    F: Fn(&str) -> Option<String>,
+{
     if use_in_memory_store() {
         return Ok(Arc::new(InMemory::new()));
     }
 
+    let build_options = build_options.cloned().unwrap_or_default();
     match settings {
         ObjectStoreSettings::Local { root } => {
             build_local_object_store_with_preference(&resolve_interp_path(root)?, false)
@@ -337,13 +423,14 @@ fn build_object_store_from_settings(
             endpoint,
             path_style,
         } => {
-            let mut builder = AmazonS3Builder::from_env()
+            let mut builder = AmazonS3Builder::new()
                 .with_bucket_name(resolve_interp(bucket)?)
                 .with_region(resolve_interp(region)?)
                 .with_virtual_hosted_style_request(!*path_style);
             if let Some(endpoint) = endpoint.as_ref() {
                 builder = builder.with_endpoint(resolve_interp(endpoint)?);
             }
+            builder = configure_s3_builder_from_env_lookup(builder, env_lookup, &build_options)?;
             Ok(Arc::new(builder.build()?))
         }
     }
@@ -417,25 +504,58 @@ fn resolve_interp_path(value: &InterpString) -> anyhow::Result<PathBuf> {
     Ok(PathBuf::from(resolve_interp(value)?))
 }
 
-pub fn build_artifact_object_store(
+fn load_server_secrets_for_settings(
     settings: &ResolvedServerSettings,
+) -> anyhow::Result<ServerSecrets> {
+    let storage_root = resolve_interp_path(&settings.storage.root)?;
+    let server_env_path = Storage::new(&storage_root).runtime_directory().env_path();
+    ServerSecrets::load(server_env_path).map_err(anyhow::Error::from)
+}
+
+pub(crate) fn build_artifact_object_store_with_server_secrets(
+    settings: &ResolvedServerSettings,
+    server_secrets: &ServerSecrets,
 ) -> anyhow::Result<(Arc<dyn ObjectStore>, String)> {
     let prefix = resolve_interp(&settings.artifacts.prefix)?;
-    let object_store = build_object_store_from_settings(&settings.artifacts.store)?;
+    let object_store = build_object_store_from_settings_with_lookup(
+        &settings.artifacts.store,
+        &|name| server_secrets.get(name),
+        None,
+    )?;
     Ok((object_store, prefix))
 }
 
-fn build_slatedb_store(
+pub fn build_artifact_object_store(
     settings: &ResolvedServerSettings,
+) -> anyhow::Result<(Arc<dyn ObjectStore>, String)> {
+    let server_secrets = load_server_secrets_for_settings(settings)?;
+    build_artifact_object_store_with_server_secrets(settings, &server_secrets)
+}
+
+fn build_slatedb_store_with_server_secrets(
+    settings: &ResolvedServerSettings,
+    server_secrets: &ServerSecrets,
 ) -> anyhow::Result<(Arc<dyn ObjectStore>, String, Duration, bool)> {
     let prefix = resolve_interp(&settings.slatedb.prefix)?;
-    let object_store = build_object_store_from_settings(&settings.slatedb.store)?;
+    let object_store = build_object_store_from_settings_with_lookup(
+        &settings.slatedb.store,
+        &|name| server_secrets.get(name),
+        None,
+    )?;
     Ok((
         object_store,
         prefix,
         settings.slatedb.flush_interval,
         settings.slatedb.disk_cache,
     ))
+}
+
+#[cfg(test)]
+fn build_slatedb_store(
+    settings: &ResolvedServerSettings,
+) -> anyhow::Result<(Arc<dyn ObjectStore>, String, Duration, bool)> {
+    let server_secrets = load_server_secrets_for_settings(settings)?;
+    build_slatedb_store_with_server_secrets(settings, &server_secrets)
 }
 
 /// Start the HTTP API server.
@@ -493,7 +613,7 @@ where
     let github_meta_resolver = GitHubMetaResolver::from_cache_dir(&storage.cache_dir())?;
 
     let (object_store, slatedb_prefix, flush_interval, disk_cache) =
-        build_slatedb_store(&resolved_server_settings)?;
+        build_slatedb_store_with_server_secrets(&resolved_server_settings, &server_secrets)?;
     let cache_path = if disk_cache {
         Some(storage.slatedb_cache_dir())
     } else {
@@ -507,8 +627,10 @@ where
     ));
     let auth_code_store = store.auth_codes().await?;
     let auth_token_store = store.refresh_tokens().await?;
-    let (artifact_object_store, artifact_prefix) =
-        build_artifact_object_store(&resolved_server_settings)?;
+    let (artifact_object_store, artifact_prefix) = build_artifact_object_store_with_server_secrets(
+        &resolved_server_settings,
+        &server_secrets,
+    )?;
     let artifact_store = fabro_store::ArtifactStore::new(artifact_object_store, artifact_prefix);
     let env_lookup: EnvLookup = Arc::new(|name| std::env::var(name).ok());
     resolve_canonical_origin(&resolved_server_settings, &env_lookup).map_err(anyhow::Error::msg)?;
@@ -900,11 +1022,14 @@ mod tests {
     use fabro_config::bind::{Bind, BindRequest};
     use fabro_config::parse_settings_layer;
     use fabro_types::settings::SettingsLayer;
+    use fabro_types::settings::interp::InterpString;
+    use fabro_types::settings::server::ObjectStoreSettings;
     use fabro_util::Home;
 
     use super::{
         GitHubMetaResolver, ServeArgs, ServerTitlePhase, apply_runtime_settings,
-        bind_tcp_host_with_fallback, build_local_object_store_with_preference, build_slatedb_store,
+        bind_tcp_host_with_fallback, build_local_object_store_with_preference,
+        build_object_store_from_settings_with_lookup, build_slatedb_store,
         resolve_bind_request_from_settings, resolve_github_webhook_ip_allowlist,
         resolve_server_settings, resolve_startup_github_webhook_ip_allowlist, router_web_enabled,
         server_bind_title, server_title,
@@ -1162,6 +1287,81 @@ disk_cache = true
             build_slatedb_store(&resolved).expect("slatedb store should build");
 
         assert!(disk_cache);
+    }
+
+    #[test]
+    fn build_object_store_from_settings_uses_injected_static_credentials() {
+        let settings = ObjectStoreSettings::S3 {
+            bucket:     InterpString::parse("fabro-data"),
+            region:     InterpString::parse("us-east-1"),
+            endpoint:   None,
+            path_style: false,
+        };
+
+        let store = build_object_store_from_settings_with_lookup(
+            &settings,
+            &|name| match name {
+                "AWS_ACCESS_KEY_ID" => Some("AKIA_TEST_VALUE".to_string()),
+                "AWS_SECRET_ACCESS_KEY" => Some("secret-test-value".to_string()),
+                _ => None,
+            },
+            None,
+        );
+
+        assert!(store.is_ok(), "injected static credentials should build");
+    }
+
+    #[test]
+    fn build_object_store_from_settings_rejects_partial_static_credentials() {
+        let settings = ObjectStoreSettings::S3 {
+            bucket:     InterpString::parse("fabro-data"),
+            region:     InterpString::parse("us-east-1"),
+            endpoint:   None,
+            path_style: false,
+        };
+
+        let err = build_object_store_from_settings_with_lookup(
+            &settings,
+            &|name| match name {
+                "AWS_ACCESS_KEY_ID" => Some("AKIA_TEST_VALUE".to_string()),
+                _ => None,
+            },
+            None,
+        )
+        .expect_err("partial static credentials must fail");
+
+        assert!(
+            err.to_string()
+                .contains("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must both be set")
+        );
+    }
+
+    #[test]
+    fn build_object_store_from_settings_ignores_endpoint_override_env_vars() {
+        let settings = ObjectStoreSettings::S3 {
+            bucket:     InterpString::parse("fabro-data"),
+            region:     InterpString::parse("us-east-1"),
+            endpoint:   None,
+            path_style: false,
+        };
+
+        let store = build_object_store_from_settings_with_lookup(
+            &settings,
+            &|name| match name {
+                "AWS_ACCESS_KEY_ID" => Some("AKIA_TEST_VALUE".to_string()),
+                "AWS_SECRET_ACCESS_KEY" => Some("secret-test-value".to_string()),
+                "AWS_ENDPOINT" | "AWS_ENDPOINT_URL_S3" => {
+                    Some("://not-a-valid-endpoint".to_string())
+                }
+                _ => None,
+            },
+            None,
+        );
+
+        assert!(
+            store.is_ok(),
+            "unsupported endpoint env vars should be ignored"
+        );
     }
 
     #[tokio::test]

@@ -56,8 +56,17 @@ strategy = "tailscale_funnel"
 [server.storage]
 root = "/var/lib/fabro"
 
+[server.artifacts]
+provider = "s3"
+prefix = "artifacts"
+
+[server.artifacts.s3]
+bucket = "my-fabro-data"
+region = "us-east-1"
+
 [server.slatedb]
 provider = "s3"
+prefix = "slatedb"
 disk_cache = true
 
 [server.slatedb.s3]
@@ -182,6 +191,20 @@ bucket = "{{ env.SLATEDB_BUCKET }}"
 region = "us-east-1"
 ```
 
+The browser install wizard's `Object store` step manages both `[server.slatedb]` and
+`[server.artifacts]` together. `Local disk` leaves both sections implicit and keeps the built-in
+local defaults. `AWS S3` writes one shared bucket with fixed prefixes `slatedb` and `artifacts`.
+
+The wizard only covers AWS S3 bucket/region plus one of:
+
+- runtime credentials already supplied by the deployment environment
+- manually-entered `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+
+Advanced S3-compatible settings such as custom `endpoint` or `path_style` remain a manual
+configuration path. If you need MinIO, R2, or another S3-compatible backend, configure
+`[server.slatedb]` and `[server.artifacts]` directly in `settings.toml`. The runtime still
+honors those hand-edited values even though the browser wizard does not manage them.
+
 ### Run defaults
 
 The `[run.*]` sections in `settings.toml` act as defaults for every run.
@@ -277,6 +300,8 @@ For the auth model above, the main server runtime secrets are:
 - `FABRO_DEV_TOKEN` when `"dev-token"` auth is enabled
 - `GITHUB_APP_CLIENT_SECRET` when `"github"` auth is enabled
 - `FABRO_JWT_PRIVATE_KEY` / `FABRO_JWT_PUBLIC_KEY`, provisioned during install for future CLI login flows
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` when the install wizard or a manual config uses
+  static S3 object-store credentials
 
 Fabro no longer auto-loads `.env` files. Provider API keys are required for the models you want to use; everything else is optional.
 
@@ -310,6 +335,32 @@ Fabro resolves these from `process env -> server.env`.
 | `FABRO_JWT_PRIVATE_KEY` | Ed25519 private key (base64-encoded PEM) for JWT signing |
 | `FABRO_JWT_PUBLIC_KEY` | Ed25519 public key (base64-encoded PEM) for JWT verification |
 | `SESSION_SECRET` | Session encryption secret (64-character hex string) |
+
+### Object store runtime secrets (optional)
+
+Fabro resolves these from `process env -> server.env`.
+
+| Variable | Description |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | Static AWS access key ID for S3-backed `[server.slatedb]` / `[server.artifacts]` |
+| `AWS_SECRET_ACCESS_KEY` | Matching static AWS secret access key |
+
+The browser install wizard can write these into `server.env` for the AWS S3 manual-credential
+path. It does not support manual STS/session-token input; use runtime credentials instead for ECS,
+EC2 instance profiles, IRSA, or web-identity flows.
+
+For the narrowest production policy, scope access to one bucket and the `slatedb/` and
+`artifacts/` prefixes with `s3:ListBucket` plus `s3:GetObject`, `s3:PutObject`, and
+`s3:DeleteObject`. Prefer a dedicated IAM user or role for Fabro instead of reusing broad AWS
+credentials.
+
+If `POST /install/finish` fails after mutating `server.env`, the error response may include
+`leftover_env_keys` or `removed_env_keys`. For AWS object-store keys, treat `removed_env_keys` as
+informational: the prior managed key path was already cleared, so complete the retry before
+restart. If `leftover_env_keys` includes `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY`, retry the
+install or remove the managed object-store lines from `server.env` before abandoning the host.
+Rotation is not required solely because finish failed after an atomic `0600` rewrite, but it
+remains the fallback if you no longer trust the host boundary.
 
 ### GitHub integration (optional)
 

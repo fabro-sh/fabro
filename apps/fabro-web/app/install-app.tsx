@@ -1,5 +1,5 @@
-import { startTransition, useEffect, useMemo, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent, ReactNode, Ref } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router";
 import {
   ArrowLeftIcon,
@@ -18,6 +18,7 @@ import {
   type InstallFinishResponse,
   type InstallGithubAppOwner,
   type InstallLlmProviderInput,
+  type InstallObjectStoreInput,
   type InstallSessionResponse,
   createInstallGithubAppManifest,
   finishInstall,
@@ -25,10 +26,12 @@ import {
   persistInstallToken,
   putInstallGithubToken,
   putInstallLlm,
+  putInstallObjectStore,
   putInstallServer,
   readStoredInstallToken,
   testInstallGithubToken,
   testInstallLlm,
+  testInstallObjectStore,
 } from "./install-api";
 import { INSTALL_PROVIDERS } from "./install-config";
 import { shouldRedirectAfterHealthPoll } from "./install-flow";
@@ -49,6 +52,7 @@ import { LoadingState } from "./components/state";
 const INSTALL_STEPS = [
   { id: "welcome", label: "Welcome", href: "/install/welcome" },
   { id: "server", label: "Server", href: "/install/server" },
+  { id: "object_store", label: "Object store", href: "/install/object-store" },
   { id: "llm", label: "LLMs", href: "/install/llm" },
   { id: "github", label: "GitHub", href: "/install/github" },
   { id: "review", label: "Review", href: "/install/review" },
@@ -76,6 +80,17 @@ type AppForm = {
 };
 
 type ProviderSelection = Record<string, { apiKey: string }>;
+type ObjectStoreProvider = "local" | "s3";
+type ObjectStoreCredentialMode = "runtime" | "access_key";
+type ObjectStoreForm = {
+  provider: ObjectStoreProvider;
+  bucket: string;
+  region: string;
+  credentialMode: ObjectStoreCredentialMode;
+  accessKeyId: string;
+  secretAccessKey: string;
+  manualCredentialsSaved: boolean;
+};
 
 export default function InstallApp() {
   const navigate = useNavigate();
@@ -89,6 +104,9 @@ export default function InstallApp() {
   const [llmSelection, setLlmSelection] = useState<ProviderSelection>(() =>
     defaultProviderSelection(),
   );
+  const [objectStoreForm, setObjectStoreForm] = useState<ObjectStoreForm>(() =>
+    defaultObjectStoreForm(),
+  );
   const [canonicalUrl, setCanonicalUrl] = useState("");
   const [githubStrategy, setGithubStrategy] = useState<GithubStrategy>("token");
   const [tokenForm, setTokenForm] = useState<TokenForm>({ token: "", username: "" });
@@ -101,6 +119,11 @@ export default function InstallApp() {
   const [submitting, setSubmitting] = useState(false);
   const [finishState, setFinishState] = useState<FinishState>(null);
   const [timedOut, setTimedOut] = useState(false);
+  const canonicalUrlInputRef = useRef<HTMLInputElement>(null);
+  const bucketInputRef = useRef<HTMLInputElement>(null);
+  const regionInputRef = useRef<HTMLInputElement>(null);
+  const accessKeyIdInputRef = useRef<HTMLInputElement>(null);
+  const secretAccessKeyInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const { token, sanitizedUrl } = consumeInstallTokenFromUrl(window.location.href);
@@ -138,6 +161,7 @@ export default function InstallApp() {
         setCanonicalUrl((current) =>
           current || nextSession.server?.canonical_url || nextSession.prefill.canonical_url,
         );
+        setObjectStoreForm(hydrateObjectStoreForm(nextSession));
         setLlmSelection((current) =>
           hydrateProviderSelection(current, nextSession),
         );
@@ -224,6 +248,7 @@ export default function InstallApp() {
   }, [finishState]);
 
   const currentStep = useMemo<StepId>(() => {
+    if (location.pathname.startsWith("/install/object-store")) return "object_store";
     if (location.pathname.startsWith("/install/llm")) return "llm";
     if (location.pathname.startsWith("/install/server")) return "server";
     if (location.pathname.startsWith("/install/github")) return "github";
@@ -300,7 +325,7 @@ export default function InstallApp() {
           description="Each key you enter is validated before it's saved. Skip a provider by leaving it blank."
           error={saveError}
           submitting={submitting}
-          backHref="/install/server"
+          backHref="/install/object-store"
           onSubmit={async () => {
             const providers = INSTALL_PROVIDERS.map(({ id }) => {
               const current = llmSelection[id] ?? { apiKey: "" };
@@ -346,6 +371,7 @@ export default function InstallApp() {
           onSubmit={async () => {
             if (!canonicalUrl.trim()) {
               setSaveError("Enter the canonical server URL before continuing.");
+              focusInput(canonicalUrlInputRef);
               return;
             }
             setSubmitting(true);
@@ -354,7 +380,7 @@ export default function InstallApp() {
               await putInstallServer(installToken, canonicalUrl.trim());
               const nextSession = await getInstallSession(installToken);
               setSessionState({ status: "ready", data: nextSession });
-              navigate("/install/llm");
+              navigate("/install/object-store");
             } catch (error) {
               setSaveError(
                 error instanceof Error ? error.message : "Failed to save server settings.",
@@ -371,6 +397,7 @@ export default function InstallApp() {
             <input
               type="url"
               name="canonical_url"
+              ref={canonicalUrlInputRef}
               value={canonicalUrl}
               onChange={(event) => setCanonicalUrl(event.target.value)}
               className={INPUT_CLASS}
@@ -379,6 +406,176 @@ export default function InstallApp() {
               spellCheck={false}
             />
           </Field>
+        </StepPanel>
+      ) : location.pathname === "/install/object-store" ? (
+        <StepPanel
+          title="Choose the shared object store"
+          description="This configures the shared backend for both SlateDB and run artifacts. Fabro still keeps its local storage root on disk."
+          error={saveError}
+          submitting={submitting}
+          submittingLabel={
+            objectStoreForm.provider === "s3" ? "Checking access..." : "Saving..."
+          }
+          backHref="/install/server"
+          onSubmit={async () => {
+            if (objectStoreForm.provider === "s3") {
+              if (!objectStoreForm.bucket.trim()) {
+                setSaveError("Enter the S3 bucket before continuing.");
+                focusInput(bucketInputRef);
+                return;
+              }
+              if (!objectStoreForm.region.trim()) {
+                setSaveError("Enter the AWS region before continuing.");
+                focusInput(regionInputRef);
+                return;
+              }
+              if (objectStoreForm.credentialMode === "access_key") {
+                const accessKeyId = objectStoreForm.accessKeyId.trim();
+                const secretAccessKey = objectStoreForm.secretAccessKey.trim();
+                const keepStoredCredentials =
+                  objectStoreForm.manualCredentialsSaved &&
+                  !accessKeyId &&
+                  !secretAccessKey;
+                if (!keepStoredCredentials && !accessKeyId) {
+                  setSaveError("Enter the AWS access key ID before continuing.");
+                  focusInput(accessKeyIdInputRef);
+                  return;
+                }
+                if (!keepStoredCredentials && !secretAccessKey) {
+                  setSaveError("Enter the AWS secret access key before continuing.");
+                  focusInput(secretAccessKeyInputRef);
+                  return;
+                }
+              }
+            }
+
+            const payload = buildObjectStorePayload(objectStoreForm);
+            setSubmitting(true);
+            setSaveError(null);
+            try {
+              if (objectStoreForm.provider === "s3") {
+                await testInstallObjectStore(installToken, payload);
+              }
+              await putInstallObjectStore(installToken, payload);
+              const nextSession = await getInstallSession(installToken);
+              setSessionState({ status: "ready", data: nextSession });
+              navigate("/install/llm");
+            } catch (error) {
+              setSaveError(
+                error instanceof Error
+                  ? error.message
+                  : "Failed to save object-store settings.",
+              );
+            } finally {
+              setSubmitting(false);
+            }
+          }}
+        >
+          <ObjectStoreProviderPicker
+            provider={objectStoreForm.provider}
+            onChange={(provider) => {
+              setObjectStoreForm((current) => ({ ...current, provider }));
+              if (provider === "s3") {
+                focusInput(bucketInputRef);
+              }
+            }}
+          />
+          {objectStoreForm.provider === "s3" ? (
+            <div className="space-y-5">
+              <Field label="Bucket">
+                <input
+                  ref={bucketInputRef}
+                  name="object_store_bucket"
+                  value={objectStoreForm.bucket}
+                  onChange={(event) =>
+                    setObjectStoreForm((current) => ({
+                      ...current,
+                      bucket: event.target.value,
+                    }))
+                  }
+                  className={`${INPUT_CLASS} font-mono`}
+                  placeholder="my-fabro-data"
+                  spellCheck={false}
+                  autoCapitalize="off"
+                />
+              </Field>
+              <Field label="Region">
+                <input
+                  ref={regionInputRef}
+                  name="object_store_region"
+                  value={objectStoreForm.region}
+                  onChange={(event) =>
+                    setObjectStoreForm((current) => ({
+                      ...current,
+                      region: event.target.value,
+                    }))
+                  }
+                  className={`${INPUT_CLASS} font-mono`}
+                  placeholder="us-east-1"
+                  spellCheck={false}
+                  autoCapitalize="off"
+                />
+              </Field>
+              <ObjectStoreCredentialModePicker
+                credentialMode={objectStoreForm.credentialMode}
+                onChange={(credentialMode) => {
+                  setObjectStoreForm((current) => ({ ...current, credentialMode }));
+                  if (credentialMode === "access_key") {
+                    focusInput(accessKeyIdInputRef);
+                  }
+                }}
+              />
+              {objectStoreForm.credentialMode === "access_key" ? (
+                <div className="space-y-5">
+                  <Field label="AWS access key ID">
+                    <PasswordInput
+                      inputRef={accessKeyIdInputRef}
+                      id="aws_access_key_id"
+                      name="aws_access_key_id"
+                      value={objectStoreForm.accessKeyId}
+                      onChange={(value) =>
+                        setObjectStoreForm((current) => ({
+                          ...current,
+                          accessKeyId: value,
+                        }))
+                      }
+                      placeholder="AKIA..."
+                    />
+                  </Field>
+                  <Field label="AWS secret access key">
+                    <PasswordInput
+                      inputRef={secretAccessKeyInputRef}
+                      id="aws_secret_access_key"
+                      name="aws_secret_access_key"
+                      value={objectStoreForm.secretAccessKey}
+                      onChange={(value) =>
+                        setObjectStoreForm((current) => ({
+                          ...current,
+                          secretAccessKey: value,
+                        }))
+                      }
+                      placeholder="Secret access key"
+                    />
+                  </Field>
+                  {objectStoreForm.manualCredentialsSaved ? (
+                    <p className="text-xs text-fg-muted">
+                      Credentials saved. Leave both fields blank to keep them, or
+                      enter both fields to replace them.
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="text-xs/5 text-fg-muted">
+                  Fabro will use AWS credentials already provided by the runtime,
+                  such as EC2, ECS, or IRSA-based auth.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="rounded-lg bg-overlay px-4 py-3 text-sm/6 text-fg-3 outline-1 -outline-offset-1 outline-white/10">
+              Fabro will keep using local disk for both SlateDB and run artifacts.
+            </p>
+          )}
         </StepPanel>
       ) : location.pathname === "/install/github/done" ? (
         <GithubAppDoneScreen github={session?.github} />
@@ -389,7 +586,7 @@ export default function InstallApp() {
           error={saveError}
           submitting={submitting}
           submitLabel={githubStrategy === "app" ? "Continue on GitHub" : "Continue"}
-          backHref="/install/server"
+          backHref="/install/llm"
           onSubmit={async () => {
             setSubmitting(true);
             setSaveError(null);
@@ -778,13 +975,17 @@ function WelcomeScreen() {
         Set up your Fabro server
       </h1>
       <p className="mt-4 max-w-[56ch] text-base/7 text-fg-3 text-pretty sm:text-[0.9375rem]/7">
-        A short walkthrough to validate your LLM credentials, confirm the public
-        server URL, and connect GitHub. When you finish, Fabro restarts into
-        normal mode.
+        A short walkthrough to confirm the public server URL, choose the shared
+        object store, validate your LLM credentials, and connect GitHub. When
+        you finish, Fabro restarts into normal mode.
       </p>
       <ol role="list" className="mt-10 divide-y divide-line border-y border-line">
         {[
           ["Server URL", "Confirm where operators will reach Fabro."],
+          [
+            "Object store",
+            "Choose local disk or AWS S3 for SlateDB and artifacts.",
+          ],
           ["LLMs", "Validate API keys for Anthropic, OpenAI, or Gemini."],
           ["GitHub", "Choose a personal access token or a GitHub App."],
           ["Review", "Double-check the plan, then write the files."],
@@ -820,6 +1021,7 @@ function StepPanel({
   error,
   submitting,
   submitLabel = "Continue",
+  submittingLabel = "Saving...",
   backHref,
   onSubmit,
 }: {
@@ -829,6 +1031,7 @@ function StepPanel({
   error: string | null;
   submitting: boolean;
   submitLabel?: string;
+  submittingLabel?: string;
   backHref?: string;
   onSubmit: () => Promise<void>;
 }) {
@@ -864,7 +1067,7 @@ function StepPanel({
           {submitting ? (
             <>
               <Spinner />
-              Saving
+              {submittingLabel}
             </>
           ) : (
             <>
@@ -913,13 +1116,14 @@ function ReviewScreen({
         </p>
       </header>
       <dl className="divide-y divide-line border-y border-line">
-        <SummaryRow label="LLM providers" value={providers || "Not configured"} />
         <SummaryRow
           label="Server URL"
           value={serverUrl}
           mono
           action={<CopyButton value={serverUrl} label="Copy server URL" />}
         />
+        {renderObjectStoreSummaryRows(session?.object_store)}
+        <SummaryRow label="LLM providers" value={providers || "Not configured"} />
         {renderGithubSummaryRows(session?.github)}
       </dl>
       {error ? <ErrorMessage message={error} /> : null}
@@ -1070,6 +1274,84 @@ function GithubStrategyPicker({
           <OptionCard
             key={option.id}
             selected={strategy === option.id}
+            onSelect={() => onChange(option.id)}
+            title={option.title}
+            body={option.body}
+          />
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+function ObjectStoreProviderPicker({
+  provider,
+  onChange,
+}: {
+  provider: ObjectStoreProvider;
+  onChange: (value: ObjectStoreProvider) => void;
+}) {
+  const options: Array<{ id: ObjectStoreProvider; title: string; body: string }> = [
+    {
+      id: "local",
+      title: "Local disk",
+      body: "Uses the host filesystem for SlateDB and run artifacts.",
+    },
+    {
+      id: "s3",
+      title: "AWS S3",
+      body: "Uses one S3 bucket with fixed slatedb/ and artifacts/ prefixes.",
+    },
+  ];
+  return (
+    <fieldset>
+      <legend className="text-sm font-medium text-fg">Object store</legend>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        {options.map((option) => (
+          <OptionCard
+            key={option.id}
+            selected={provider === option.id}
+            onSelect={() => onChange(option.id)}
+            title={option.title}
+            body={option.body}
+          />
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+function ObjectStoreCredentialModePicker({
+  credentialMode,
+  onChange,
+}: {
+  credentialMode: ObjectStoreCredentialMode;
+  onChange: (value: ObjectStoreCredentialMode) => void;
+}) {
+  const options: Array<{
+    id: ObjectStoreCredentialMode;
+    title: string;
+    body: string;
+  }> = [
+    {
+      id: "runtime",
+      title: "Use AWS runtime credentials",
+      body: "Use credentials already supplied by the deployment environment.",
+    },
+    {
+      id: "access_key",
+      title: "Enter AWS access key credentials",
+      body: "Store an access key pair in server.env for startup and validation.",
+    },
+  ];
+  return (
+    <fieldset>
+      <legend className="text-sm font-medium text-fg">Credentials</legend>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        {options.map((option) => (
+          <OptionCard
+            key={option.id}
+            selected={credentialMode === option.id}
             onSelect={() => onChange(option.id)}
             title={option.title}
             body={option.body}
@@ -1253,17 +1535,20 @@ function PasswordInput({
   value,
   onChange,
   placeholder,
+  inputRef,
 }: {
   id?: string;
   name: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  inputRef?: Ref<HTMLInputElement>;
 }) {
   const [visible, setVisible] = useState(false);
   return (
     <div className="relative">
       <input
+        ref={inputRef}
         type={visible ? "text" : "password"}
         id={id}
         name={name}
@@ -1386,6 +1671,18 @@ function defaultProviderSelection(): ProviderSelection {
   );
 }
 
+function defaultObjectStoreForm(): ObjectStoreForm {
+  return {
+    provider: "local",
+    bucket: "",
+    region: "",
+    credentialMode: "runtime",
+    accessKeyId: "",
+    secretAccessKey: "",
+    manualCredentialsSaved: false,
+  };
+}
+
 function hydrateProviderSelection(
   current: ProviderSelection,
   session: InstallSessionResponse,
@@ -1398,6 +1695,50 @@ function hydrateProviderSelection(
     next[provider.provider] = { apiKey: "" };
   }
   return next;
+}
+
+function hydrateObjectStoreForm(session: InstallSessionResponse): ObjectStoreForm {
+  const summary = session.object_store;
+  if (!summary || summary.provider === "local") {
+    return defaultObjectStoreForm();
+  }
+  return {
+    provider: "s3",
+    bucket: summary.bucket ?? "",
+    region: summary.region ?? "",
+    credentialMode: summary.credential_mode === "access_key" ? "access_key" : "runtime",
+    accessKeyId: "",
+    secretAccessKey: "",
+    manualCredentialsSaved: Boolean(summary.manual_credentials_saved),
+  };
+}
+
+function buildObjectStorePayload(form: ObjectStoreForm): InstallObjectStoreInput {
+  if (form.provider === "local") {
+    return { provider: "local" };
+  }
+
+  const payload: InstallObjectStoreInput = {
+    provider: "s3",
+    bucket: form.bucket.trim(),
+    region: form.region.trim(),
+    credential_mode: form.credentialMode,
+  };
+  const accessKeyId = form.accessKeyId.trim();
+  const secretAccessKey = form.secretAccessKey.trim();
+  if (form.credentialMode === "access_key") {
+    if (accessKeyId) {
+      payload.access_key_id = accessKeyId;
+    }
+    if (secretAccessKey) {
+      payload.secret_access_key = secretAccessKey;
+    }
+  }
+  return payload;
+}
+
+function focusInput(ref: { current: HTMLInputElement | null }): void {
+  window.setTimeout(() => ref.current?.focus(), 0);
 }
 
 function describeProvider(id: string): string {
@@ -1436,6 +1777,33 @@ function renderGithubSummaryRows(
   );
 }
 
+function renderObjectStoreSummaryRows(
+  objectStore: InstallSessionResponse["object_store"],
+): ReactNode {
+  if (!objectStore) {
+    return <SummaryRow label="Object store" value="Not configured" />;
+  }
+  if (objectStore.provider === "local") {
+    return <SummaryRow label="Object store" value="Local disk" />;
+  }
+  return (
+    <>
+      <SummaryRow label="Object store" value="AWS S3" />
+      <SummaryRow label="Bucket" value={objectStore.bucket ?? "Not set"} mono />
+      <SummaryRow label="Region" value={objectStore.region ?? "Not set"} mono />
+      <SummaryRow
+        label="Credentials"
+        value={
+          objectStore.credential_mode === "access_key"
+            ? "Access key"
+            : "Runtime credentials"
+        }
+      />
+      <SummaryRow label="Prefixes" value="slatedb/, artifacts/" mono />
+    </>
+  );
+}
+
 function describeGithubAppOwner(
   owner: InstallGithubAppOwner | undefined,
 ): string {
@@ -1468,4 +1836,3 @@ function submitGithubManifest(
   document.body.appendChild(form);
   form.submit();
 }
-

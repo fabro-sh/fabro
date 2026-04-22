@@ -24,6 +24,10 @@ pub struct PendingSettingsWrite<'a> {
     pub previous_contents: Option<&'a str>,
 }
 
+pub const OBJECT_STORE_MANAGED_COMMENT: &str = "managed by fabro-install: object-store";
+pub const OBJECT_STORE_ACCESS_KEY_ID_ENV: &str = "AWS_ACCESS_KEY_ID";
+pub const OBJECT_STORE_SECRET_ACCESS_KEY_ENV: &str = "AWS_SECRET_ACCESS_KEY";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultSecretWrite {
     pub name:        String,
@@ -36,6 +40,59 @@ pub struct VaultSecretWrite {
 pub enum InstallListenConfig {
     Tcp(String),
     Unix(PathBuf),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallObjectStoreCredentialMode {
+    Runtime,
+    AccessKey,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstallObjectStoreSelection {
+    Local,
+    S3 {
+        bucket:            String,
+        region:            String,
+        credential_mode:   InstallObjectStoreCredentialMode,
+        access_key_id:     Option<String>,
+        secret_access_key: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstallObjectStoreEnvPlan {
+    pub writes:   Vec<envfile::EnvFileUpdate>,
+    pub removals: Vec<envfile::EnvFileRemoval>,
+}
+
+#[derive(Debug)]
+pub struct PersistInstallOutputsError {
+    source:                 anyhow::Error,
+    pub server_env_applied: bool,
+    pub removed_env_keys:   Vec<String>,
+}
+
+impl PersistInstallOutputsError {
+    fn new(source: anyhow::Error, server_env_applied: bool, removed_env_keys: Vec<String>) -> Self {
+        Self {
+            source,
+            server_env_applied,
+            removed_env_keys,
+        }
+    }
+}
+
+impl std::fmt::Display for PersistInstallOutputsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(f)
+    }
+}
+
+impl std::error::Error for PersistInstallOutputsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source.source()
+    }
 }
 
 fn pem_encode(label: &str, bytes: &[u8]) -> String {
@@ -239,6 +296,107 @@ pub fn write_github_app_settings(
     Ok(())
 }
 
+fn object_store_env_removals() -> Vec<envfile::EnvFileRemoval> {
+    [
+        OBJECT_STORE_ACCESS_KEY_ID_ENV,
+        OBJECT_STORE_SECRET_ACCESS_KEY_ENV,
+    ]
+    .into_iter()
+    .map(|key| envfile::EnvFileRemoval {
+        key:     key.to_string(),
+        comment: Some(OBJECT_STORE_MANAGED_COMMENT.to_string()),
+    })
+    .collect()
+}
+
+fn write_s3_store_settings(
+    server: &mut toml::Table,
+    domain: &str,
+    prefix: &str,
+    bucket: &str,
+    region: &str,
+) -> Result<()> {
+    let store = ensure_table(server, domain)?;
+    store.insert(
+        "provider".to_string(),
+        toml::Value::String("s3".to_string()),
+    );
+    store.insert(
+        "prefix".to_string(),
+        toml::Value::String(prefix.to_string()),
+    );
+    let s3 = ensure_table(store, "s3")?;
+    s3.insert(
+        "bucket".to_string(),
+        toml::Value::String(bucket.to_string()),
+    );
+    s3.insert(
+        "region".to_string(),
+        toml::Value::String(region.to_string()),
+    );
+    Ok(())
+}
+
+pub fn write_object_store_settings(
+    doc: &mut toml::Value,
+    selection: &InstallObjectStoreSelection,
+) -> Result<InstallObjectStoreEnvPlan> {
+    match selection {
+        InstallObjectStoreSelection::Local => Ok(InstallObjectStoreEnvPlan {
+            writes:   Vec::new(),
+            removals: object_store_env_removals(),
+        }),
+        InstallObjectStoreSelection::S3 {
+            bucket,
+            region,
+            credential_mode,
+            access_key_id,
+            secret_access_key,
+        } => {
+            let bucket = bucket.trim();
+            anyhow::ensure!(!bucket.is_empty(), "bucket is required");
+            let region = region.trim();
+            anyhow::ensure!(!region.is_empty(), "region is required");
+
+            let root = root_table_mut(doc)?;
+            let server = ensure_table(root, "server")?;
+            write_s3_store_settings(server, "artifacts", "artifacts", bucket, region)?;
+            write_s3_store_settings(server, "slatedb", "slatedb", bucket, region)?;
+
+            let removals = object_store_env_removals();
+            let writes = match credential_mode {
+                InstallObjectStoreCredentialMode::Runtime => Vec::new(),
+                InstallObjectStoreCredentialMode::AccessKey => {
+                    let access_key_id = access_key_id
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .context("access_key_id is required for manual credentials")?;
+                    let secret_access_key = secret_access_key
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .context("secret_access_key is required for manual credentials")?;
+                    vec![
+                        envfile::EnvFileUpdate {
+                            key:     OBJECT_STORE_ACCESS_KEY_ID_ENV.to_string(),
+                            value:   access_key_id.to_string(),
+                            comment: Some(OBJECT_STORE_MANAGED_COMMENT.to_string()),
+                        },
+                        envfile::EnvFileUpdate {
+                            key:     OBJECT_STORE_SECRET_ACCESS_KEY_ENV.to_string(),
+                            value:   secret_access_key.to_string(),
+                            comment: Some(OBJECT_STORE_MANAGED_COMMENT.to_string()),
+                        },
+                    ]
+                }
+            };
+
+            Ok(InstallObjectStoreEnvPlan { writes, removals })
+        }
+    }
+}
+
 fn restore_optional_file(path: &Path, previous_contents: Option<&str>) -> Result<()> {
     match previous_contents {
         Some(contents) => {
@@ -261,15 +419,25 @@ fn restore_optional_file(path: &Path, previous_contents: Option<&str>) -> Result
     Ok(())
 }
 
-fn persist_server_env_secrets(storage_dir: &Path, secrets: &[(String, String)]) -> Result<()> {
-    if secrets.is_empty() {
-        return Ok(());
+fn persist_server_env_secrets(
+    storage_dir: &Path,
+    writes: &[envfile::EnvFileUpdate],
+    removals: &[envfile::EnvFileRemoval],
+) -> Result<envfile::EnvFileUpdateReport> {
+    if writes.is_empty() && removals.is_empty() {
+        return Ok(envfile::EnvFileUpdateReport {
+            entries:      std::collections::HashMap::new(),
+            removed_keys: Vec::new(),
+        });
     }
 
     let env_path = Storage::new(storage_dir).runtime_directory().env_path();
-    envfile::merge_env_file(&env_path, secrets.iter().cloned())
-        .with_context(|| format!("merging server env secrets into {}", env_path.display()))?;
-    Ok(())
+    envfile::update_env_file_with_report(
+        &env_path,
+        removals.iter().cloned(),
+        writes.iter().cloned(),
+    )
+    .with_context(|| format!("updating server env file {}", env_path.display()))
 }
 
 fn persist_vault_secrets_direct(storage_dir: &Path, secrets: &[VaultSecretWrite]) -> Result<()> {
@@ -294,19 +462,27 @@ fn persist_vault_secrets_direct(storage_dir: &Path, secrets: &[VaultSecretWrite]
 
 pub fn persist_install_outputs_direct(
     storage_dir: &Path,
-    server_env_secrets: &[(String, String)],
+    server_env_writes: &[envfile::EnvFileUpdate],
+    server_env_removals: &[envfile::EnvFileRemoval],
     vault_secrets: &[VaultSecretWrite],
     settings_write: Option<&PendingSettingsWrite<'_>>,
-) -> Result<()> {
-    persist_server_env_secrets(storage_dir, server_env_secrets)?;
+) -> std::result::Result<(), PersistInstallOutputsError> {
+    let server_env_report =
+        persist_server_env_secrets(storage_dir, server_env_writes, server_env_removals)
+            .map_err(|err| PersistInstallOutputsError::new(err, false, Vec::new()))?;
+    let removed_env_keys = server_env_report.removed_keys;
 
     if let Some(write) = settings_write {
         if let Some(parent) = write.path.parent() {
             std::fs::create_dir_all(parent)
-                .with_context(|| format!("creating settings directory {}", parent.display()))?;
+                .with_context(|| format!("creating settings directory {}", parent.display()))
+                .map_err(|err| {
+                    PersistInstallOutputsError::new(err, true, removed_env_keys.clone())
+                })?;
         }
         std::fs::write(write.path, write.contents)
-            .with_context(|| format!("writing settings file {}", write.path.display()))?;
+            .with_context(|| format!("writing settings file {}", write.path.display()))
+            .map_err(|err| PersistInstallOutputsError::new(err, true, removed_env_keys.clone()))?;
     }
 
     let vault_path = Storage::new(storage_dir).secrets_path();
@@ -330,7 +506,11 @@ pub fn persist_install_outputs_direct(
                 rollback_failures.join("; ")
             ))
         };
-        return Err(error);
+        return Err(PersistInstallOutputsError::new(
+            error,
+            true,
+            removed_env_keys,
+        ));
     }
 
     Ok(())
@@ -342,8 +522,11 @@ mod tests {
     use fabro_vault::{SecretType as VaultSecretType, Vault};
 
     use super::{
-        InstallListenConfig, PendingSettingsWrite, VaultSecretWrite, default_web_url,
-        merge_server_settings, persist_install_outputs_direct, write_github_app_settings,
+        InstallListenConfig, InstallObjectStoreCredentialMode, InstallObjectStoreSelection,
+        OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_MANAGED_COMMENT,
+        OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite, VaultSecretWrite,
+        default_web_url, merge_server_settings, persist_install_outputs_direct,
+        write_github_app_settings, write_object_store_settings,
     };
 
     fn format_config_toml() -> String {
@@ -476,7 +659,12 @@ name = "custom"
 
         let result = persist_install_outputs_direct(
             dir.path(),
-            &[("SESSION_SECRET".to_string(), "session".to_string())],
+            &[envfile::EnvFileUpdate {
+                key:     "SESSION_SECRET".to_string(),
+                value:   "session".to_string(),
+                comment: None,
+            }],
+            &[],
             &[VaultSecretWrite {
                 name:        "bad-secret-name".to_string(),
                 value:       "boom".to_string(),
@@ -533,5 +721,172 @@ name = "custom"
                 panic!("expected tcp listen settings");
             }
         }
+    }
+
+    #[test]
+    fn write_object_store_settings_keeps_local_defaults_and_removes_managed_keys() {
+        let mut doc = toml::Value::Table(toml::Table::default());
+        let plan = write_object_store_settings(&mut doc, &InstallObjectStoreSelection::Local)
+            .expect("local object store selection should succeed");
+
+        assert!(
+            doc.get("server")
+                .and_then(toml::Value::as_table)
+                .and_then(|server| server.get("artifacts"))
+                .is_none()
+        );
+        assert!(plan.writes.is_empty());
+        assert_eq!(plan.removals.len(), 2);
+    }
+
+    #[test]
+    fn write_object_store_settings_configures_s3_runtime_credentials() {
+        let mut doc = toml::Value::Table(toml::Table::default());
+        let plan = write_object_store_settings(&mut doc, &InstallObjectStoreSelection::S3 {
+            bucket:            "fabro-data".to_string(),
+            region:            "us-east-1".to_string(),
+            credential_mode:   InstallObjectStoreCredentialMode::Runtime,
+            access_key_id:     None,
+            secret_access_key: None,
+        })
+        .expect("runtime-credential object store selection should succeed");
+
+        let server = doc
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .expect("server table should exist");
+        assert_eq!(
+            server
+                .get("artifacts")
+                .and_then(toml::Value::as_table)
+                .and_then(|artifacts| artifacts.get("prefix"))
+                .and_then(toml::Value::as_str),
+            Some("artifacts")
+        );
+        assert_eq!(
+            server
+                .get("slatedb")
+                .and_then(toml::Value::as_table)
+                .and_then(|slatedb| slatedb.get("prefix"))
+                .and_then(toml::Value::as_str),
+            Some("slatedb")
+        );
+        assert!(plan.writes.is_empty());
+    }
+
+    #[test]
+    fn write_object_store_settings_configures_s3_manual_credentials() {
+        let mut doc = toml::Value::Table(toml::Table::default());
+        let plan = write_object_store_settings(&mut doc, &InstallObjectStoreSelection::S3 {
+            bucket:            "fabro-data".to_string(),
+            region:            "us-east-1".to_string(),
+            credential_mode:   InstallObjectStoreCredentialMode::AccessKey,
+            access_key_id:     Some("AKIA_TEST".to_string()),
+            secret_access_key: Some("secret-test".to_string()),
+        })
+        .expect("manual-credential object store selection should succeed");
+
+        assert_eq!(plan.writes.len(), 2);
+        assert!(
+            plan.writes
+                .iter()
+                .all(|write| write.comment.as_deref() == Some(OBJECT_STORE_MANAGED_COMMENT))
+        );
+        assert_eq!(
+            plan.writes
+                .iter()
+                .find(|write| write.key == OBJECT_STORE_ACCESS_KEY_ID_ENV)
+                .map(|write| write.value.as_str()),
+            Some("AKIA_TEST")
+        );
+        assert_eq!(
+            plan.writes
+                .iter()
+                .find(|write| write.key == OBJECT_STORE_SECRET_ACCESS_KEY_ENV)
+                .map(|write| write.value.as_str()),
+            Some("secret-test")
+        );
+    }
+
+    #[test]
+    fn persist_install_outputs_direct_only_removes_marked_object_store_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        let env_path = storage.runtime_directory().env_path();
+        std::fs::create_dir_all(env_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &env_path,
+            format!(
+                "{OBJECT_STORE_ACCESS_KEY_ID_ENV}=operator-access\n# {OBJECT_STORE_MANAGED_COMMENT}\n{OBJECT_STORE_ACCESS_KEY_ID_ENV}=managed-access\n{OBJECT_STORE_SECRET_ACCESS_KEY_ENV}=operator-secret\nKEEP_ME=1\n"
+            ),
+        )
+        .unwrap();
+
+        persist_install_outputs_direct(
+            dir.path(),
+            &[],
+            &[envfile::EnvFileRemoval {
+                key:     OBJECT_STORE_ACCESS_KEY_ID_ENV.to_string(),
+                comment: Some(OBJECT_STORE_MANAGED_COMMENT.to_string()),
+            }],
+            &[],
+            None,
+        )
+        .expect("env-only persistence should succeed");
+
+        let server_env = envfile::read_env_file(&env_path).unwrap();
+        assert_eq!(
+            server_env
+                .get(OBJECT_STORE_ACCESS_KEY_ID_ENV)
+                .map(String::as_str),
+            Some("operator-access")
+        );
+        assert_eq!(
+            server_env
+                .get(OBJECT_STORE_SECRET_ACCESS_KEY_ENV)
+                .map(String::as_str),
+            Some("operator-secret")
+        );
+        assert_eq!(server_env.get("KEEP_ME").map(String::as_str), Some("1"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persist_install_outputs_direct_writes_private_server_env_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        let env_path = storage.runtime_directory().env_path();
+
+        persist_install_outputs_direct(
+            dir.path(),
+            &[envfile::EnvFileUpdate {
+                key:     "SESSION_SECRET".to_string(),
+                value:   "first".to_string(),
+                comment: None,
+            }],
+            &[],
+            &[],
+            None,
+        )
+        .expect("initial env write should succeed");
+        let create_mode = std::fs::metadata(&env_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(create_mode, 0o600);
+
+        persist_install_outputs_direct(
+            dir.path(),
+            &[envfile::EnvFileUpdate {
+                key:     "SESSION_SECRET".to_string(),
+                value:   "second".to_string(),
+                comment: None,
+            }],
+            &[],
+            &[],
+            None,
+        )
+        .expect("rewrite env write should succeed");
+        let update_mode = std::fs::metadata(&env_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(update_mode, 0o600);
     }
 }
