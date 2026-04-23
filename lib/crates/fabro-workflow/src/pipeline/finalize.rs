@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
-use fabro_types::BilledTokenCounts;
+use fabro_types::{BilledTokenCounts, EventBody};
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
 use crate::error::Error;
@@ -13,7 +13,7 @@ use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 use crate::run_status::{FailureReason, RunStatus, SuccessReason};
 use crate::runtime_store::RunStoreHandle;
-use crate::sandbox_git::git_push_host;
+use crate::sandbox_git::{git_diff_with_timeout, git_push_host};
 
 fn emit_run_notice(
     emitter: &Emitter,
@@ -101,12 +101,18 @@ fn build_conclusion_from_parts(
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
-    let (stages, billing, total_retries) = if let Some(cp) = checkpoint {
+    // Looping workflows revisit nodes; `completed_nodes` accumulates duplicates
+    // while the other checkpoint maps are keyed by node_id. Dedupe to one row
+    // per node so the stages table matches the deduped billing total.
+    let (stages, total_retries) = if let Some(cp) = checkpoint {
         let mut stages = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         let mut retries_sum: u32 = 0;
-        let mut billed_usage = Vec::new();
 
         for node_id in &cp.completed_nodes {
+            if !seen.insert(node_id.as_str()) {
+                continue;
+            }
             let outcome = cp.node_outcomes.get(node_id);
             let retries = cp
                 .node_retries
@@ -115,10 +121,6 @@ fn build_conclusion_from_parts(
                 .unwrap_or(1)
                 .saturating_sub(1);
             retries_sum += retries;
-
-            if let Some(usage) = outcome.and_then(|o| o.usage.as_ref()) {
-                billed_usage.push(usage.clone());
-            }
 
             stages.push(StageSummary {
                 stage_id: node_id.clone(),
@@ -130,13 +132,9 @@ fn build_conclusion_from_parts(
                 retries,
             });
         }
-        (
-            stages,
-            (!billed_usage.is_empty()).then(|| BilledTokenCounts::from_billed_usage(&billed_usage)),
-            retries_sum,
-        )
+        (stages, retries_sum)
     } else {
-        (vec![], None, 0)
+        (vec![], 0)
     };
 
     Conclusion {
@@ -146,16 +144,18 @@ fn build_conclusion_from_parts(
         failure_reason,
         final_git_commit_sha,
         stages,
-        billing,
+        billing: checkpoint.and_then(billing_from_checkpoint),
         total_retries,
     }
 }
 
-/// Write a finalize projection snapshot commit to the metadata branch.
-///
-/// This captures the final `run.json` projection state, including conclusion
-/// and retro data. Best-effort: errors are logged as warnings.
-pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &RunStoreHandle) {
+/// `conclusion` is injected because the terminal event hasn't been emitted
+/// yet — the run store's `projection.conclusion` is still `None` at this point.
+pub async fn write_finalize_commit(
+    run_options: &RunOptions,
+    run_store: &RunStoreHandle,
+    conclusion: &Conclusion,
+) {
     let (Some(meta_branch), Some(repo_path)) = (
         run_options
             .git
@@ -168,9 +168,12 @@ pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &RunStor
 
     let git_author = run_options.git_author();
     let store = MetadataStore::new(repo_path, &git_author);
-    let Ok(store_state) = run_store.state().await else {
+    let Ok(mut store_state) = run_store.state().await else {
         return;
     };
+    if store_state.conclusion.is_none() {
+        store_state.conclusion = Some(conclusion.clone());
+    }
     let dump = RunDump::from_projection(&store_state);
     if let Err(e) =
         dump.write_to_metadata_store(&store, &run_options.run_id.to_string(), "finalize run")
@@ -187,6 +190,101 @@ pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &RunStor
         "finalize metadata",
     )
     .await;
+}
+
+/// Failed and cancelled runs use a shorter diff timeout so a corrupted
+/// workspace can't stall downstream consumers waiting on the terminal event.
+async fn compute_final_patch(
+    run_options: &RunOptions,
+    sandbox: &dyn fabro_agent::Sandbox,
+    status: StageStatus,
+    emitter: &Emitter,
+) -> Option<String> {
+    let base_sha = run_options.git.as_ref().and_then(|g| g.base_sha.clone())?;
+    let timeout_ms = match status {
+        StageStatus::Success | StageStatus::PartialSuccess => 30_000,
+        _ => 10_000,
+    };
+    match git_diff_with_timeout(sandbox, &base_sha, timeout_ms).await {
+        Ok(patch) if !patch.is_empty() => Some(patch),
+        Ok(_) => None,
+        Err(err) => {
+            emit_run_notice(
+                emitter,
+                RunNoticeLevel::Warn,
+                "git_diff_failed",
+                format!("final diff failed: {err}"),
+            );
+            None
+        }
+    }
+}
+
+/// Iterates `node_outcomes.values()` rather than `completed_nodes` to avoid
+/// over-counting the last visit's usage on looping workflows.
+pub(crate) fn billing_from_checkpoint(cp: &Checkpoint) -> Option<BilledTokenCounts> {
+    let usage: Vec<_> = cp
+        .node_outcomes
+        .values()
+        .filter_map(|o| o.usage.clone())
+        .collect();
+    (!usage.is_empty()).then(|| BilledTokenCounts::from_billed_usage(&usage))
+}
+
+pub(crate) fn build_terminal_event(
+    outcome: &Result<Outcome, Error>,
+    duration_ms: u64,
+    artifact_count: usize,
+    final_git_commit_sha: Option<String>,
+    final_patch: Option<String>,
+    billing: Option<BilledTokenCounts>,
+) -> Event {
+    if matches!(outcome, Err(Error::Cancelled)) {
+        return Event::WorkflowRunFailed {
+            error: Error::Cancelled,
+            duration_ms,
+            reason: FailureReason::Cancelled,
+            git_commit_sha: final_git_commit_sha,
+            final_patch,
+        };
+    }
+
+    let outcome_status = outcome
+        .as_ref()
+        .map_or(StageStatus::Fail, |o| o.status.clone());
+
+    if outcome_status == StageStatus::Success || outcome_status == StageStatus::PartialSuccess {
+        let total_usd_micros = billing.as_ref().and_then(|b| b.total_usd_micros);
+        return Event::WorkflowRunCompleted {
+            duration_ms,
+            artifact_count,
+            status: outcome_status.to_string(),
+            reason: match outcome_status {
+                StageStatus::PartialSuccess => SuccessReason::PartialSuccess,
+                _ => SuccessReason::Completed,
+            },
+            total_usd_micros,
+            final_git_commit_sha,
+            final_patch,
+            billing,
+        };
+    }
+
+    let error = match outcome {
+        Err(err) => err.clone(),
+        Ok(o) => Error::engine(
+            o.failure
+                .as_ref()
+                .map_or_else(|| "run failed".to_string(), |f| f.message.clone()),
+        ),
+    };
+    Event::WorkflowRunFailed {
+        error,
+        duration_ms,
+        reason: FailureReason::WorkflowError,
+        git_commit_sha: final_git_commit_sha,
+        final_patch,
+    }
 }
 
 async fn run_hooks(
@@ -219,7 +317,11 @@ async fn cleanup_sandbox(
     Ok(())
 }
 
-/// FINALIZE phase: classify outcome, build conclusion, persist terminal state.
+/// FINALIZE phase: build conclusion, write the meta branch, emit the terminal
+/// `WorkflowRunCompleted`/`WorkflowRunFailed` event.
+///
+/// The terminal event is emitted here (not from `on_run_end`) so observers
+/// can't act on "done" before the meta branch writes are flushed.
 ///
 /// # Errors
 ///
@@ -238,16 +340,41 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
     } = retroed;
 
     let (final_status, failure_reason, _run_status) = classify_engine_result(&outcome);
-    let conclusion = build_conclusion_from_store(
-        &options.run_store,
-        final_status,
+
+    let events = options.run_store.list_events().await.unwrap_or_default();
+    let stage_durations = crate::extract_stage_durations_from_events(&events);
+    let artifact_count = events
+        .iter()
+        .filter(|envelope| matches!(envelope.event.body, EventBody::ArtifactCaptured(_)))
+        .count();
+    let checkpoint = options
+        .run_store
+        .state()
+        .await
+        .ok()
+        .and_then(|state| state.checkpoint);
+    let conclusion = build_conclusion_from_parts(
+        checkpoint.as_ref(),
+        &stage_durations,
+        final_status.clone(),
         failure_reason,
         duration_ms,
         options.last_git_sha.clone(),
-    )
-    .await;
+    );
 
-    write_finalize_commit(&run_options, &options.run_store).await;
+    let final_patch = compute_final_patch(&run_options, &*sandbox, final_status, &emitter).await;
+
+    write_finalize_commit(&run_options, &options.run_store, &conclusion).await;
+
+    let terminal_event = build_terminal_event(
+        &outcome,
+        duration_ms,
+        artifact_count,
+        options.last_git_sha.clone(),
+        final_patch,
+        conclusion.billing.clone(),
+    );
+    emitter.emit(&terminal_event);
 
     if options.preserve_sandbox {
         let info = sandbox.sandbox_info();

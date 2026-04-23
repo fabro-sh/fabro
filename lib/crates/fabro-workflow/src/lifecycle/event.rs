@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -11,12 +10,11 @@ use fabro_core::lifecycle::{
 };
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
-use fabro_types::{BilledTokenCounts, FailureReason, RunId, SuccessReason};
+use fabro_types::RunId;
 
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
 use crate::context::WorkflowContext;
-use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::outcome::{BilledModelUsage, FailureCategory, FailureDetail, Outcome, StageStatus};
@@ -31,25 +29,23 @@ type FailureSignatureSnapshot = (
 
 /// Sub-lifecycle responsible for emitting workflow run events.
 pub(crate) struct EventLifecycle {
-    pub emitter:                 Arc<Emitter>,
-    pub graph_name:              String,
-    pub run_id:                  RunId,
-    pub run_start:               Mutex<Instant>,
+    pub emitter:               Arc<Emitter>,
+    pub graph_name:            String,
+    pub run_id:                RunId,
+    pub run_start:             Mutex<Instant>,
     /// Set in on_edge_selected when loop_restart approved; emitted+cleared in
     /// on_run_start.
-    pub restarted_from:          Arc<Mutex<Option<(String, String)>>>,
+    pub restarted_from:        Arc<Mutex<Option<(String, String)>>>,
     // Config for WorkflowRunStarted payload
-    pub base_branch:             Option<String>,
-    pub base_sha:                Option<String>,
-    pub run_branch:              Option<String>,
-    pub worktree_dir:            Option<String>,
-    pub goal:                    Option<String>,
-    pub captured_artifact_count: Arc<AtomicUsize>,
-    // Cross-lifecycle data
-    pub checkpoint_git_result:   Arc<Mutex<Option<GitCheckpointResult>>>,
-    pub last_git_sha:            Arc<Mutex<Option<String>>>,
-    pub final_patch:             Arc<Mutex<Option<String>>>,
-    pub circuit_breaker:         Arc<CircuitBreakerLifecycle>,
+    pub base_branch:           Option<String>,
+    pub base_sha:              Option<String>,
+    pub run_branch:            Option<String>,
+    pub worktree_dir:          Option<String>,
+    pub goal:                  Option<String>,
+    /// Shared git checkpoint result (written by GitLifecycle, read by
+    /// EventLifecycle when emitting CheckpointCompleted).
+    pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
+    pub circuit_breaker:       Arc<CircuitBreakerLifecycle>,
 }
 
 fn snapshot_failure_signatures(
@@ -414,76 +410,5 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         }
 
         Ok(())
-    }
-
-    async fn on_run_end(&self, outcome: &Outcome, state: &WfRunState) {
-        let duration_ms = crate::millis_u64(self.run_start.lock().unwrap().elapsed());
-        let artifact_count = self.captured_artifact_count.load(Ordering::Relaxed);
-        let last_sha = self.last_git_sha.lock().unwrap().clone();
-        let final_patch = self.final_patch.lock().unwrap().clone();
-        let run_billing_entries = state
-            .node_outcomes
-            .values()
-            .filter_map(|o| o.usage.clone())
-            .collect::<Vec<_>>();
-        let run_billing = (!run_billing_entries.is_empty())
-            .then(|| BilledTokenCounts::from_billed_usage(&run_billing_entries));
-        let total_usd_micros = run_billing
-            .as_ref()
-            .and_then(|billing| billing.total_usd_micros)
-            .or_else(|| {
-                let mut total = 0_i64;
-                let mut has_total = false;
-                for usage in state
-                    .node_outcomes
-                    .values()
-                    .filter_map(|o| o.usage.as_ref())
-                {
-                    if let Some(value) = usage.total_usd_micros {
-                        total += value;
-                        has_total = true;
-                    }
-                }
-                has_total.then_some(total)
-            });
-
-        if state.cancelled {
-            self.emitter.emit(&Event::WorkflowRunFailed {
-                error: Error::Cancelled,
-                duration_ms,
-                reason: FailureReason::Cancelled,
-                git_commit_sha: last_sha,
-                final_patch: final_patch.clone(),
-            });
-            return;
-        }
-
-        if outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess {
-            self.emitter.emit(&Event::WorkflowRunCompleted {
-                duration_ms,
-                artifact_count,
-                status: outcome.status.to_string(),
-                reason: match outcome.status {
-                    StageStatus::PartialSuccess => SuccessReason::PartialSuccess,
-                    _ => SuccessReason::Completed,
-                },
-                total_usd_micros,
-                final_git_commit_sha: last_sha,
-                final_patch,
-                billing: run_billing,
-            });
-        } else {
-            let error_msg = outcome
-                .failure
-                .as_ref()
-                .map_or_else(|| "run failed".to_string(), |f| f.message.clone());
-            self.emitter.emit(&Event::WorkflowRunFailed {
-                error: Error::engine(error_msg),
-                duration_ms,
-                reason: FailureReason::WorkflowError,
-                git_commit_sha: last_sha,
-                final_patch,
-            });
-        }
     }
 }

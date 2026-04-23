@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -34,22 +33,17 @@ const ARTIFACT_UPLOAD_RETRY_DELAYS: [Duration; 3] = [
 
 /// Sub-lifecycle responsible for artifact collection, offloading, and syncing.
 pub(crate) struct ArtifactLifecycle {
-    pub sandbox:                 Arc<dyn fabro_sandbox::Sandbox>,
-    pub run_store:               RunStoreHandle,
-    pub emitter:                 Arc<Emitter>,
-    pub run_id:                  RunId,
-    pub artifact_globs:          Vec<String>,
-    pub artifact_sink:           Option<ArtifactSink>,
-    pub captured_artifact_count: Arc<AtomicUsize>,
+    pub sandbox:         Arc<dyn fabro_sandbox::Sandbox>,
+    pub run_store:       RunStoreHandle,
+    pub emitter:         Arc<Emitter>,
+    pub run_id:          RunId,
+    pub artifact_globs:  Vec<String>,
+    pub artifact_sink:   Option<ArtifactSink>,
     /// Per-attempt state: epoch seconds when the attempt started.
-    attempt_start_epoch:         std::sync::Mutex<Option<f64>>,
+    attempt_start_epoch: std::sync::Mutex<Option<f64>>,
 }
 
 impl ArtifactLifecycle {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "Artifact capture setup needs the run-scoped collaborators up front."
-    )]
     pub(crate) fn new(
         sandbox: Arc<dyn fabro_sandbox::Sandbox>,
         run_store: RunStoreHandle,
@@ -57,7 +51,6 @@ impl ArtifactLifecycle {
         run_id: RunId,
         artifact_globs: Vec<String>,
         artifact_sink: Option<ArtifactSink>,
-        captured_artifact_count: Arc<AtomicUsize>,
     ) -> Self {
         Self {
             sandbox,
@@ -66,7 +59,6 @@ impl ArtifactLifecycle {
             run_id,
             artifact_globs,
             artifact_sink,
-            captured_artifact_count,
             attempt_start_epoch: std::sync::Mutex::new(None),
         }
     }
@@ -75,7 +67,6 @@ impl ArtifactLifecycle {
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
-        self.captured_artifact_count.store(0, Ordering::Relaxed);
         *self.attempt_start_epoch.lock().unwrap() = None;
         Ok(())
     }
@@ -139,7 +130,6 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
                 }
                 let scope = stage_scope_for(state, node_id);
                 for asset in &summary.captured_assets {
-                    self.captured_artifact_count.fetch_add(1, Ordering::Relaxed);
                     self.emitter.emit_scoped(
                         &Event::ArtifactCaptured {
                             node_id:        node_id.to_string(),

@@ -916,8 +916,8 @@ retros = true
         .position(|event| matches!(&event.body, EventBody::RetroCompleted(_)))
         .expect("retro.completed should be present");
     assert!(
-        run_completed_index < retro_completed_index,
-        "retro should still run after run.completed"
+        retro_completed_index < run_completed_index,
+        "retro.completed must precede run.completed"
     );
 }
 

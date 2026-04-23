@@ -14,11 +14,11 @@ use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::MetadataStore;
 use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::lifecycle::event::stage_scope_for;
-use crate::outcome::{BilledModelUsage, Outcome, StageStatus};
+use crate::outcome::BilledModelUsage;
 use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 use crate::runtime_store::RunStoreHandle;
-use crate::sandbox_git::{git_checkpoint, git_diff, git_diff_with_timeout, git_push_host};
+use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -71,7 +71,6 @@ pub(crate) struct GitLifecycle {
     // Cross-lifecycle data (shared with EventLifecycle)
     pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
     pub last_git_sha:          Arc<Mutex<Option<String>>>,
-    pub final_patch:           Arc<Mutex<Option<String>>>,
 }
 
 #[async_trait]
@@ -80,7 +79,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         // Reset last_git_sha (diff base parity)
         *self.last_git_sha.lock().unwrap() = None;
         *self.checkpoint_git_result.lock().unwrap() = None;
-        *self.final_patch.lock().unwrap() = None;
 
         // Init metadata branch (best-effort)
         if let (Some(_), Some(repo_path)) = (
@@ -320,44 +318,5 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         }
 
         Ok(())
-    }
-
-    async fn on_run_end(&self, outcome: &Outcome, _state: &WfRunState) {
-        // Capture the final diff for event/store projection.
-        //
-        // Success/PartialSuccess uses the standard 30 s timeout. Failed runs
-        // use a shorter 10 s timeout: a pathological workspace (FS locks,
-        // corrupted index) must not stall terminal event emission downstream
-        // (Slack notifier, SSE RunFailed, CI hooks).
-        if self.run_options.git.is_none() {
-            return;
-        }
-        let timeout_ms = match outcome.status {
-            StageStatus::Success | StageStatus::PartialSuccess => 30_000,
-            _ => 10_000,
-        };
-        if let Some(base_sha) = self
-            .run_options
-            .git
-            .as_ref()
-            .and_then(|g| g.base_sha.clone())
-        {
-            match git_diff_with_timeout(&*self.sandbox, &base_sha, timeout_ms).await {
-                Ok(patch) if !patch.is_empty() => {
-                    *self.final_patch.lock().unwrap() = Some(patch.clone());
-                }
-                Ok(_) => {
-                    *self.final_patch.lock().unwrap() = None;
-                }
-                Err(err) => {
-                    *self.final_patch.lock().unwrap() = None;
-                    self.emitter.emit(&Event::RunNotice {
-                        level:   RunNoticeLevel::Warn,
-                        code:    "git_diff_failed".to_string(),
-                        message: format!("final diff failed: {err}"),
-                    });
-                }
-            }
-        }
     }
 }
