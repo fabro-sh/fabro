@@ -9,6 +9,8 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+use crate::parse::{ParseError, parse_settings};
+
 use super::cli::CliLayer;
 use super::features::FeaturesLayer;
 use super::project::ProjectLayer;
@@ -36,10 +38,10 @@ pub(crate) struct SettingsLayer {
 }
 
 impl FromStr for SettingsLayer {
-    type Err = toml::de::Error;
+    type Err = ParseError;
 
     fn from_str(source: &str) -> Result<Self, Self::Err> {
-        toml::from_str(source)
+        parse_settings(source)
     }
 }
 
@@ -103,7 +105,7 @@ impl SettingsLayer {
     /// with `["dev-token"]`. Use anywhere a test needs a starter
     /// `SettingsLayer` that the strict resolver will accept.
     #[must_use]
-    pub fn test_default() -> Self {
+    pub(crate) fn test_default() -> Self {
         let mut layer = Self::default();
         layer.ensure_test_auth_methods();
         layer
@@ -112,7 +114,7 @@ impl SettingsLayer {
     /// If `server.auth.methods` is unset, populate it with `["dev-token"]`.
     /// Existing methods (set by a fixture) are preserved. Use to make a
     /// parsed-from-TOML layer resolve cleanly without overriding test intent.
-    pub fn ensure_test_auth_methods(&mut self) {
+    pub(crate) fn ensure_test_auth_methods(&mut self) {
         use fabro_types::settings::ServerAuthMethod;
 
         use super::server::{ServerAuthLayer, ServerLayer as ServerLayerTy};

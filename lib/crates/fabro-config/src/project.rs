@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn parse_minimal_config() {
-        let config = crate::parse_settings_layer("_version = 1\n").unwrap();
+        let config = "_version = 1\n".parse::<crate::SettingsLayer>().unwrap();
         assert_eq!(config.version, Some(1));
         assert!(config.project.is_none());
     }
@@ -429,14 +429,13 @@ directory = "custom/"
 
     #[test]
     fn parse_with_run_execution_retros() {
-        let config = crate::parse_settings_layer(
-            "
+        let config = "
 _version = 1
 
 [run.execution]
 retros = true
-",
-        )
+"
+        .parse::<crate::SettingsLayer>()
         .unwrap();
         assert_eq!(
             config
@@ -450,7 +449,8 @@ retros = true
 
     #[test]
     fn parse_rejects_legacy_llm_section() {
-        let err = crate::parse_settings_layer("_version = 1\n[llm]\nprovider = \"openai\"\n")
+        let err = "_version = 1\n[llm]\nprovider = \"openai\"\n"
+            .parse::<crate::SettingsLayer>()
             .unwrap_err();
         let text = format!("{err:#}");
         assert!(
@@ -461,7 +461,7 @@ retros = true
 
     #[test]
     fn parse_higher_version_errors() {
-        let err = crate::parse_settings_layer("_version = 2\n").unwrap_err();
+        let err = "_version = 2\n".parse::<crate::SettingsLayer>().unwrap_err();
         let chain = format!("{err:#}");
         assert!(
             chain.contains("Upgrade") || chain.to_lowercase().contains("version"),

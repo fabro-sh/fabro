@@ -1,8 +1,9 @@
 use std::sync::LazyLock;
 
-use crate::{SettingsLayer, parse_settings_layer};
+use crate::SettingsLayer;
 
 pub(crate) static DEFAULTS_LAYER: LazyLock<SettingsLayer> = LazyLock::new(|| {
-    parse_settings_layer(include_str!("defaults.toml"))
+    include_str!("defaults.toml")
+        .parse::<SettingsLayer>()
         .expect("embedded defaults.toml must parse as a valid SettingsLayer")
 });

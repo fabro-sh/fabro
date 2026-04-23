@@ -6,7 +6,6 @@ use fabro_types::{ServerSettings, UserSettings, WorkflowSettings};
 
 use crate::defaults::DEFAULTS_LAYER;
 use crate::load::load_settings_path;
-use crate::parse::parse_settings_layer;
 use crate::resolve::{
     ResolveError, resolve_cli, resolve_features, resolve_project, resolve_run, resolve_server,
     resolve_workflow,
@@ -73,7 +72,8 @@ impl ServerSettingsBuilder {
     }
 
     pub fn from_toml(source: &str) -> Result<ServerSettings> {
-        let layer = parse_settings_layer(source)
+        let layer = source
+            .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
         Self::from_layer(&layer)
     }
@@ -115,13 +115,15 @@ impl UserSettingsBuilder {
     }
 
     pub fn from_toml(source: &str) -> Result<UserSettings> {
-        let layer = parse_settings_layer(source)
+        let layer = source
+            .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
         Self::from_layer(&layer)
     }
 
     pub fn from_toml_with_cli_overrides(source: &str, cli: &CliLayer) -> Result<UserSettings> {
-        let layer = parse_settings_layer(source)
+        let layer = source
+            .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
         Self::from_layer_with_cli_overrides(&layer, cli)
     }
@@ -166,7 +168,8 @@ impl RunSettingsBuilder {
     }
 
     pub fn from_toml(source: &str) -> Result<RunNamespace> {
-        let layer = parse_settings_layer(source)
+        let layer = source
+            .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
         Self::from_layer(&layer)
     }
@@ -211,7 +214,8 @@ pub fn server_runtime_settings_from_toml(
     run_overrides: Option<RunLayer>,
     server_overrides: Option<ServerLayer>,
 ) -> Result<ServerRuntimeSettings> {
-    let layer = parse_settings_layer(source)
+    let layer = source
+        .parse::<SettingsLayer>()
         .map_err(|err| Error::parse("Failed to parse settings file", err))?;
     resolve_server_runtime_settings(layer, run_overrides, server_overrides)
 }
@@ -261,7 +265,8 @@ impl WorkflowSettingsBuilder {
     }
 
     pub fn from_toml(source: &str) -> Result<WorkflowSettings> {
-        let layer = parse_settings_layer(source)
+        let layer = source
+            .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
         Self::from_layer(&layer)
             .map_err(|errors| Error::resolve("failed to resolve workflow settings", errors.into()))
@@ -288,7 +293,8 @@ impl WorkflowSettingsBuilder {
     }
 
     pub fn workflow_toml(self, source: &str) -> Result<Self> {
-        let layer = parse_settings_layer(source)
+        let layer = source
+            .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
         Ok(self.workflow_layer(layer))
     }
@@ -304,7 +310,8 @@ impl WorkflowSettingsBuilder {
     }
 
     pub fn project_toml(self, source: &str) -> Result<Self> {
-        let layer = parse_settings_layer(source)
+        let layer = source
+            .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
         Ok(self.project_layer(layer))
     }
@@ -320,7 +327,8 @@ impl WorkflowSettingsBuilder {
     }
 
     pub fn user_toml(self, source: &str) -> Result<Self> {
-        let layer = parse_settings_layer(source)
+        let layer = source
+            .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
         Ok(self.user_layer(layer))
     }

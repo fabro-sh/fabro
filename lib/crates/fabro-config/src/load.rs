@@ -7,12 +7,12 @@ use std::path::{Path, PathBuf};
 
 use fabro_types::settings::InterpString;
 
-use crate::parse::parse_settings_layer;
 use crate::{Error, Result, RunGoalLayer, SettingsLayer};
 
 pub(crate) fn load_settings_path(path: &Path) -> Result<SettingsLayer> {
     let content = std::fs::read_to_string(path).map_err(|source| Error::read_file(path, source))?;
-    let mut layer = parse_settings_layer(&content)
+    let mut layer = content
+        .parse::<SettingsLayer>()
         .map_err(|err| Error::parse_file("Failed to parse settings file", path, err))?;
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
     resolve_goal_file_paths(&mut layer, base_dir);

@@ -12,10 +12,10 @@ use temp_env::with_var;
 
 use crate::resolve::dev_token_auth_enabled;
 use crate::user::default_storage_dir;
-use crate::{ServerSettingsBuilder, SettingsLayer, parse_settings_layer};
+use crate::{ServerSettingsBuilder, SettingsLayer};
 
 fn parse(source: &str) -> SettingsLayer {
-    let mut layer = parse_settings_layer(source).expect("fixture should parse");
+    let mut layer = source.parse::<SettingsLayer>().expect("fixture should parse");
     layer.ensure_test_auth_methods();
     layer
 }
@@ -37,7 +37,7 @@ fn resolve_errors(error: fabro_config::Error) -> Vec<fabro_config::ResolveError>
     }
 }
 
-fn render_resolve_errors(error: fabro_config::Error) -> String {
+fn render_resolve_error_lines(error: fabro_config::Error) -> String {
     resolve_errors(error)
         .into_iter()
         .map(|error| error.to_string())
@@ -154,8 +154,7 @@ session_sandboxes = true
 
 #[test]
 fn parsing_rejects_inbound_listener_tls_configuration() {
-    let err = parse_settings_layer(
-        r#"
+    let err = r#"
 _version = 1
 
 [server.listen]
@@ -164,8 +163,8 @@ address = "127.0.0.1:32276"
 
 [server.listen.tls]
 cert = "/etc/fabro/server.pem"
-"#,
-    )
+"#
+    .parse::<SettingsLayer>()
     .expect_err("listener TLS should be rejected at parse time");
 
     assert!(err.to_string().contains("unknown field `tls`"));
@@ -185,7 +184,7 @@ endpoint = "{{ env.S3_ENDPOINT }}"
 "#,
     );
 
-    let rendered = render_resolve_errors(
+    let rendered = render_resolve_error_lines(
         ServerSettingsBuilder::from_layer(&file)
             .expect_err("s3 config without bucket/region should fail"),
     );
@@ -391,7 +390,7 @@ strategy = "server_url"
 "#,
     );
 
-    let rendered = render_resolve_errors(
+    let rendered = render_resolve_error_lines(
         ServerSettingsBuilder::from_layer(&file)
             .expect_err("server_url webhook strategy should require server.api.url"),
     );
@@ -413,7 +412,7 @@ strategy = "tailscale_funnel"
 "#,
     );
 
-    let rendered = render_resolve_errors(ServerSettingsBuilder::from_layer(&file).expect_err(
+    let rendered = render_resolve_error_lines(ServerSettingsBuilder::from_layer(&file).expect_err(
         "configured webhook strategy should require server.integrations.github.app_id",
     ));
 
@@ -431,7 +430,7 @@ entries = ["10.0.0.0/33"]
 "#,
     );
 
-    let rendered = render_resolve_errors(
+    let rendered = render_resolve_error_lines(
         ServerSettingsBuilder::from_layer(&file).expect_err("invalid CIDR should fail"),
     );
 
@@ -449,7 +448,7 @@ entries = ["github_meta_hooks"]
 "#,
     );
 
-    let rendered = render_resolve_errors(
+    let rendered = render_resolve_error_lines(
         ServerSettingsBuilder::from_layer(&file)
             .expect_err("github_meta_hooks should be rejected outside github webhooks"),
     );
@@ -472,7 +471,7 @@ entries = ["10.0.0.0/8"]
 "#,
     );
 
-    let rendered = render_resolve_errors(
+    let rendered = render_resolve_error_lines(
         ServerSettingsBuilder::from_layer(&file)
             .expect_err("unix allowlist without trusted proxies should fail"),
     );
@@ -495,7 +494,7 @@ entries = ["github_meta_hooks"]
 "#,
     );
 
-    let rendered = render_resolve_errors(
+    let rendered = render_resolve_error_lines(
         ServerSettingsBuilder::from_layer(&file)
             .expect_err("unix github webhook allowlist without trusted proxies should fail"),
     );

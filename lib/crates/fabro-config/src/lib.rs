@@ -52,7 +52,6 @@ pub use layers::{
 };
 pub(crate) use layers::{Combine, SettingsLayer};
 pub use parse::ParseError;
-pub(crate) use parse::parse_settings_layer;
 pub use resolve::{
     ResolveError, resolve_cli, resolve_features, resolve_project, resolve_run, resolve_server,
     resolve_workflow,

@@ -58,12 +58,11 @@ mod tests {
 
     use fabro_types::settings::run::{HookType, McpTransport, TlsMode};
 
-    use crate::{WorkflowSettingsBuilder, parse_settings_layer};
+    use crate::{SettingsLayer, WorkflowSettingsBuilder};
 
     #[test]
     fn resolve_preserves_source_templates_for_mcp_and_hook_strings() {
-        let settings = parse_settings_layer(
-            r#"
+        let settings = r#"
 _version = 1
 
 [server.auth]
@@ -98,8 +97,8 @@ url = "https://hooks.example.com"
 
 [run.hooks.headers]
 Authorization = "Bearer {{ env.HOOK_TOKEN }}"
-"#,
-        )
+"#
+        .parse::<SettingsLayer>()
         .expect("settings fixture should parse");
 
         let resolved = WorkflowSettingsBuilder::from_layer(&settings)
