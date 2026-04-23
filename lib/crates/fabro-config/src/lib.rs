@@ -36,9 +36,8 @@ pub use load::{
 };
 pub use parse::{ParseError, parse_settings_layer};
 pub use resolve::{
-    ResolveError, dev_token_auth_enabled, resolve_cli, resolve_cli_from_file, resolve_features,
-    resolve_features_from_file, resolve_project, resolve_run, resolve_server,
-    resolve_server_from_file, resolve_workflow,
+    ResolveError, dev_token_auth_enabled, resolve_cli, resolve_features, resolve_project,
+    resolve_run, resolve_server, resolve_server_from_file, resolve_workflow,
 };
 use serde::de::DeserializeOwned;
 pub use storage::{RunScratch, RuntimeDirectory, Storage};

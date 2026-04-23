@@ -94,16 +94,12 @@ session_sandboxes = true
 
     let context = fabro_config::ServerSettingsBuilder::from_layer(&settings)
         .expect("settings should resolve");
+    let user_settings = fabro_config::UserSettingsBuilder::from_layer(&settings)
+        .expect("user settings should resolve");
 
-    assert_eq!(
-        context.server,
-        fabro_config::resolve_server_from_file(&settings).expect("server namespace should resolve")
-    );
-    assert_eq!(
-        context.features,
-        fabro_config::resolve_features_from_file(&settings)
-            .expect("features namespace should resolve")
-    );
+    assert_eq!(context.server.storage.root.as_source(), "/srv/fabro");
+    assert!(context.features.session_sandboxes);
+    assert_eq!(context.features, user_settings.features);
 }
 
 #[test]

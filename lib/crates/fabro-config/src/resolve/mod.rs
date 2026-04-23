@@ -8,9 +8,7 @@ mod workflow;
 
 pub use cli::resolve_cli;
 pub use error::ResolveError;
-use fabro_types::settings::{
-    CliNamespace, FeaturesNamespace, InterpString, ServerNamespace, SettingsLayer,
-};
+use fabro_types::settings::{InterpString, ServerNamespace, SettingsLayer};
 pub use features::resolve_features;
 pub use project::resolve_project;
 pub use run::resolve_run;
@@ -19,28 +17,12 @@ pub use workflow::resolve_workflow;
 
 use crate::apply_builtin_defaults;
 
-pub fn resolve_cli_from_file(file: &SettingsLayer) -> Result<CliNamespace, Vec<ResolveError>> {
-    let layer = apply_builtin_defaults(file.clone());
-    let mut errors = Vec::new();
-    let value = resolve_cli(&layer.cli.clone().unwrap_or_default(), &mut errors);
-    finish(value, errors)
-}
-
 pub fn resolve_server_from_file(
     file: &SettingsLayer,
 ) -> Result<ServerNamespace, Vec<ResolveError>> {
     let layer = apply_builtin_defaults(file.clone());
     let mut errors = Vec::new();
     let value = resolve_server(&layer.server.clone().unwrap_or_default(), &mut errors);
-    finish(value, errors)
-}
-
-pub fn resolve_features_from_file(
-    file: &SettingsLayer,
-) -> Result<FeaturesNamespace, Vec<ResolveError>> {
-    let layer = apply_builtin_defaults(file.clone());
-    let mut errors = Vec::new();
-    let value = resolve_features(&layer.features.clone().unwrap_or_default(), &mut errors);
     finish(value, errors)
 }
 
