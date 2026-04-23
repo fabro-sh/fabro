@@ -8,17 +8,15 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use fabro_config::Storage;
+use fabro_config::{Storage, WorkflowSettings};
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_store::Database;
 use fabro_template::{TemplateContext, render as render_template};
+use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::RunMode;
-use fabro_types::settings::{
-    InterpString, ProjectNamespace, RunNamespace, SettingsLayer, WorkflowNamespace,
-};
 use fabro_types::{RunId, RunProvenance};
 use fabro_util::json::normalize_json_value;
 use tokio::task::spawn_blocking;
@@ -60,13 +58,6 @@ pub struct CreatedRun {
     pub dot_path:  Option<PathBuf>,
 }
 
-struct ResolvedSettingsTree {
-    server_storage_root: InterpString,
-    project:             ProjectNamespace,
-    workflow:            WorkflowNamespace,
-    run:                 RunNamespace,
-}
-
 struct PersistCreateOptions {
     settings:             SettingsLayer,
     run_id:               Option<RunId>,
@@ -82,7 +73,11 @@ struct PersistCreateOptions {
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.
-pub async fn create(store: &Database, request: CreateRunInput) -> Result<CreatedRun, Error> {
+pub async fn create(
+    store: &Database,
+    request: CreateRunInput,
+    storage_root: PathBuf,
+) -> Result<CreatedRun, Error> {
     let resolved = resolve_workflow(ResolveWorkflowInput {
         workflow: request.workflow,
         settings: request.settings,
@@ -113,18 +108,10 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
     } = request;
 
     let settings = resolved.settings.clone();
-    let resolved_settings = resolve_settings_tree(&settings)?;
+    let resolved_settings = WorkflowSettings::from_layer(&settings)
+        .map_err(|errors| Error::Precondition(fabro_config::render_resolve_errors(&errors)))?;
     let run_id = run_id.unwrap_or_else(RunId::new);
-    let storage_root = resolved_settings
-        .server_storage_root
-        .resolve(|name| std::env::var(name).ok())
-        .map_err(|err| {
-            Error::Precondition(format!(
-                "failed to resolve {}: {err}",
-                resolved_settings.server_storage_root.as_source()
-            ))
-        })?;
-    let storage = Storage::new(storage_root.value);
+    let storage = Storage::new(storage_root);
     let run_dir = storage.run_scratch(&run_id).root().to_path_buf();
     let working_directory = resolved.working_directory.clone();
     let host_repo_path =
@@ -163,7 +150,7 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
                 run_id: Some(run_id),
                 run_dir: Some(persisted_run_dir),
                 workflow_slug: workflow_slug.or(resolved_workflow_slug),
-                labels: combined_labels(&resolved_settings),
+                labels: resolved_settings.combined_labels(),
                 base_branch,
                 working_directory,
                 host_repo_path,
@@ -282,25 +269,6 @@ async fn persist_created_run(
 
 fn store_error(err: impl std::fmt::Display) -> Error {
     Error::engine(err.to_string())
-}
-
-fn resolve_settings_tree(settings: &SettingsLayer) -> Result<ResolvedSettingsTree, Error> {
-    let resolver = fabro_config::Resolver::from_layer(settings);
-    let to_error =
-        |errors: Vec<_>| Error::Precondition(fabro_config::render_resolve_errors(&errors));
-    Ok(ResolvedSettingsTree {
-        server_storage_root: resolver.storage_root(),
-        project:             resolver.project().map_err(to_error)?,
-        workflow:            resolver.workflow().map_err(to_error)?,
-        run:                 resolver.run().map_err(to_error)?,
-    })
-}
-
-fn combined_labels(settings: &ResolvedSettingsTree) -> HashMap<String, String> {
-    let mut labels = settings.project.metadata.clone();
-    labels.extend(settings.workflow.metadata.clone());
-    labels.extend(settings.run.metadata.clone());
-    labels
 }
 
 fn validate_sandbox_provider(settings: &SettingsLayer) -> Result<(), Error> {
@@ -735,25 +703,30 @@ mod tests {
             work [label="Work"]
         }"#;
         let dir = tempfile::tempdir().unwrap();
+        let storage_root = dir.path().join("storage");
         let store = memory_store();
-        let err = create(&store, CreateRunInput {
-            workflow: WorkflowInput::DotSource {
-                source:   dot.to_string(),
-                base_dir: None,
+        let err = create(
+            &store,
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source:   dot.to_string(),
+                    base_dir: None,
+                },
+                settings: test_default_settings(),
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: None,
+                workflow_path: None,
+                workflow_bundle: None,
+                submitted_manifest_bytes: None,
+                run_id: None,
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                provenance: None,
+                configured_providers: Vec::new(),
             },
-            settings: test_default_settings(),
-            cwd: dir.path().to_path_buf(),
-            workflow_slug: None,
-            workflow_path: None,
-            workflow_bundle: None,
-            submitted_manifest_bytes: None,
-            run_id: None,
-            host_repo_path: None,
-            repo_origin_url: None,
-            base_branch: None,
-            provenance: None,
-            configured_providers: Vec::new(),
-        })
+            storage_root,
+        )
         .await
         .unwrap_err();
 
@@ -766,56 +739,120 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_reports_workflow_settings_errors_with_rendered_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage_root = dir.path().join("storage");
+        let store = memory_store();
+        let err = create(
+            &store,
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source:   MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: {
+                    use fabro_types::settings::run::{
+                        RunExecutionLayer, RunLayer, RunMode, RunSandboxLayer,
+                    };
+                    let mut layer = SettingsLayer {
+                        run: Some(RunLayer {
+                            execution: Some(RunExecutionLayer {
+                                mode: Some(RunMode::DryRun),
+                                ..RunExecutionLayer::default()
+                            }),
+                            sandbox: Some(RunSandboxLayer {
+                                provider: Some("not-a-provider".to_string()),
+                                ..RunSandboxLayer::default()
+                            }),
+                            ..RunLayer::default()
+                        }),
+                        ..SettingsLayer::default()
+                    };
+                    layer.ensure_test_auth_methods();
+                    layer
+                },
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: None,
+                workflow_path: None,
+                workflow_bundle: None,
+                submitted_manifest_bytes: None,
+                run_id: None,
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                provenance: None,
+                configured_providers: Vec::new(),
+            },
+            storage_root,
+        )
+        .await
+        .unwrap_err();
+
+        match err {
+            Error::Precondition(message) => {
+                assert!(message.contains("run.sandbox.provider"));
+                assert!(!message.contains('\n'));
+            }
+            other => panic!("expected Precondition, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn create_persists_normalized_config_and_initial_state() {
         let dir = tempfile::tempdir().unwrap();
+        let storage_root = dir.path().join("storage");
         let store = memory_store();
-        let created = create(&store, CreateRunInput {
-            workflow: WorkflowInput::DotSource {
-                source:   MINIMAL_DOT.to_string(),
-                base_dir: None,
+        let created = create(
+            &store,
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source:   MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: {
+                    use fabro_types::settings::run::{
+                        RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer,
+                        RunPullRequestLayer,
+                    };
+                    let mut metadata = HashMap::new();
+                    metadata.insert("env".to_string(), "test".to_string());
+                    let mut layer = SettingsLayer {
+                        run: Some(RunLayer {
+                            goal: Some(RunGoalLayer::Inline(InterpString::parse("override goal"))),
+                            metadata,
+                            model: Some(RunModelLayer {
+                                name: Some(InterpString::parse("sonnet")),
+                                ..RunModelLayer::default()
+                            }),
+                            pull_request: Some(RunPullRequestLayer {
+                                enabled: Some(false),
+                                ..RunPullRequestLayer::default()
+                            }),
+                            execution: Some(RunExecutionLayer {
+                                mode: Some(RunMode::DryRun),
+                                ..RunExecutionLayer::default()
+                            }),
+                            ..RunLayer::default()
+                        }),
+                        ..SettingsLayer::default()
+                    };
+                    layer.ensure_test_auth_methods();
+                    layer
+                },
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: Some("slug".to_string()),
+                workflow_path: None,
+                workflow_bundle: None,
+                submitted_manifest_bytes: None,
+                run_id: Some(fixtures::RUN_1),
+                host_repo_path: Some(dir.path().display().to_string()),
+                repo_origin_url: None,
+                base_branch: Some("main".to_string()),
+                provenance: None,
+                configured_providers: Vec::new(),
             },
-            settings: {
-                use fabro_types::settings::run::{
-                    RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer,
-                    RunPullRequestLayer,
-                };
-                let mut metadata = HashMap::new();
-                metadata.insert("env".to_string(), "test".to_string());
-                let mut layer = SettingsLayer {
-                    run: Some(RunLayer {
-                        goal: Some(RunGoalLayer::Inline(InterpString::parse("override goal"))),
-                        metadata,
-                        model: Some(RunModelLayer {
-                            name: Some(InterpString::parse("sonnet")),
-                            ..RunModelLayer::default()
-                        }),
-                        pull_request: Some(RunPullRequestLayer {
-                            enabled: Some(false),
-                            ..RunPullRequestLayer::default()
-                        }),
-                        execution: Some(RunExecutionLayer {
-                            mode: Some(RunMode::DryRun),
-                            ..RunExecutionLayer::default()
-                        }),
-                        ..RunLayer::default()
-                    }),
-                    ..SettingsLayer::default()
-                };
-                layer.ensure_test_auth_methods();
-                layer
-            },
-            cwd: dir.path().to_path_buf(),
-            workflow_slug: Some("slug".to_string()),
-            workflow_path: None,
-            workflow_bundle: None,
-            submitted_manifest_bytes: None,
-            run_id: Some(fixtures::RUN_1),
-            host_repo_path: Some(dir.path().display().to_string()),
-            repo_origin_url: None,
-            base_branch: Some("main".to_string()),
-            provenance: None,
-            configured_providers: Vec::new(),
-        })
+            storage_root.clone(),
+        )
         .await
         .unwrap();
 
@@ -869,7 +906,13 @@ mod tests {
             run_store.state().await.unwrap().status.unwrap(),
             crate::run_status::RunStatus::Submitted
         );
-        assert_eq!(created.run_dir, default_run_dir(&fixtures::RUN_1));
+        assert_eq!(
+            created.run_dir,
+            Storage::new(&storage_root)
+                .run_scratch(&fixtures::RUN_1)
+                .root()
+                .to_path_buf()
+        );
         assert!(created.run_dir.is_dir());
     }
 
@@ -878,41 +921,46 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let workspace = dir.path().join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
+        let storage_root = dir.path().join("storage");
 
         let store = memory_store();
-        let created = create(&store, CreateRunInput {
-            workflow: WorkflowInput::DotSource {
-                source:   MINIMAL_DOT.to_string(),
-                base_dir: None,
-            },
-            settings: {
-                use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
-                let mut layer = SettingsLayer {
-                    run: Some(RunLayer {
-                        working_dir: Some(InterpString::parse("workspace")),
-                        execution: Some(RunExecutionLayer {
-                            mode: Some(RunMode::DryRun),
-                            ..RunExecutionLayer::default()
+        let created = create(
+            &store,
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source:   MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: {
+                    use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
+                    let mut layer = SettingsLayer {
+                        run: Some(RunLayer {
+                            working_dir: Some(InterpString::parse("workspace")),
+                            execution: Some(RunExecutionLayer {
+                                mode: Some(RunMode::DryRun),
+                                ..RunExecutionLayer::default()
+                            }),
+                            ..RunLayer::default()
                         }),
-                        ..RunLayer::default()
-                    }),
-                    ..SettingsLayer::default()
-                };
-                layer.ensure_test_auth_methods();
-                layer
+                        ..SettingsLayer::default()
+                    };
+                    layer.ensure_test_auth_methods();
+                    layer
+                },
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: None,
+                workflow_path: None,
+                workflow_bundle: None,
+                submitted_manifest_bytes: None,
+                run_id: Some(fixtures::RUN_2),
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                provenance: None,
+                configured_providers: Vec::new(),
             },
-            cwd: dir.path().to_path_buf(),
-            workflow_slug: None,
-            workflow_path: None,
-            workflow_bundle: None,
-            submitted_manifest_bytes: None,
-            run_id: Some(fixtures::RUN_2),
-            host_repo_path: None,
-            repo_origin_url: None,
-            base_branch: None,
-            provenance: None,
-            configured_providers: Vec::new(),
-        })
+            storage_root,
+        )
         .await
         .unwrap();
 
@@ -933,25 +981,30 @@ mod tests {
     #[tokio::test]
     async fn create_persists_repo_origin_url_from_request() {
         let dir = tempfile::tempdir().unwrap();
+        let storage_root = dir.path().join("storage");
         let store = memory_store();
-        let created = create(&store, CreateRunInput {
-            workflow: WorkflowInput::DotSource {
-                source:   MINIMAL_DOT.to_string(),
-                base_dir: None,
+        let created = create(
+            &store,
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source:   MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: dry_run_only_settings(),
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: None,
+                workflow_path: None,
+                workflow_bundle: None,
+                submitted_manifest_bytes: None,
+                run_id: Some(fixtures::RUN_2),
+                host_repo_path: None,
+                repo_origin_url: Some("https://github.com/acme/widgets".to_string()),
+                base_branch: None,
+                provenance: None,
+                configured_providers: Vec::new(),
             },
-            settings: dry_run_only_settings(),
-            cwd: dir.path().to_path_buf(),
-            workflow_slug: None,
-            workflow_path: None,
-            workflow_bundle: None,
-            submitted_manifest_bytes: None,
-            run_id: Some(fixtures::RUN_2),
-            host_repo_path: None,
-            repo_origin_url: Some("https://github.com/acme/widgets".to_string()),
-            base_branch: None,
-            provenance: None,
-            configured_providers: Vec::new(),
-        })
+            storage_root,
+        )
         .await
         .unwrap();
 
@@ -1013,24 +1066,28 @@ mod tests {
             Duration::from_millis(1),
             None,
         ));
-        let created = create(store.as_ref(), CreateRunInput {
-            workflow: WorkflowInput::DotSource {
-                source:   MINIMAL_DOT.to_string(),
-                base_dir: None,
+        let created = create(
+            store.as_ref(),
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source:   MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: dry_run_with_storage(&storage_dir),
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: Some("slug".to_string()),
+                workflow_path: None,
+                workflow_bundle: None,
+                submitted_manifest_bytes: None,
+                run_id: Some(fixtures::RUN_3),
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                provenance: None,
+                configured_providers: Vec::new(),
             },
-            settings: dry_run_with_storage(&storage_dir),
-            cwd: dir.path().to_path_buf(),
-            workflow_slug: Some("slug".to_string()),
-            workflow_path: None,
-            workflow_bundle: None,
-            submitted_manifest_bytes: None,
-            run_id: Some(fixtures::RUN_3),
-            host_repo_path: None,
-            repo_origin_url: None,
-            base_branch: None,
-            provenance: None,
-            configured_providers: Vec::new(),
-        })
+            storage_dir.clone(),
+        )
         .await
         .unwrap();
         let run_store = store.open_run_reader(&created.run_id).await.unwrap();
@@ -1052,37 +1109,41 @@ mod tests {
             Duration::from_millis(1),
             None,
         ));
-        let created = create(store.as_ref(), CreateRunInput {
-            workflow: WorkflowInput::DotSource {
-                source:   MINIMAL_DOT.to_string(),
-                base_dir: None,
+        let created = create(
+            store.as_ref(),
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source:   MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: dry_run_with_storage(&storage_dir),
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: Some("slug".to_string()),
+                workflow_path: None,
+                workflow_bundle: None,
+                submitted_manifest_bytes: None,
+                run_id: Some(fixtures::RUN_64),
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                provenance: Some(fabro_types::RunProvenance {
+                    server:  Some(fabro_types::RunServerProvenance {
+                        version: "0.9.0".to_string(),
+                    }),
+                    client:  Some(fabro_types::RunClientProvenance {
+                        user_agent: Some("fabro-cli/0.9.0".to_string()),
+                        name:       Some("fabro-cli".to_string()),
+                        version:    Some("0.9.0".to_string()),
+                    }),
+                    subject: Some(fabro_types::RunSubjectProvenance {
+                        login:       None,
+                        auth_method: fabro_types::RunAuthMethod::Disabled,
+                    }),
+                }),
+                configured_providers: Vec::new(),
             },
-            settings: dry_run_with_storage(&storage_dir),
-            cwd: dir.path().to_path_buf(),
-            workflow_slug: Some("slug".to_string()),
-            workflow_path: None,
-            workflow_bundle: None,
-            submitted_manifest_bytes: None,
-            run_id: Some(fixtures::RUN_64),
-            host_repo_path: None,
-            repo_origin_url: None,
-            base_branch: None,
-            provenance: Some(fabro_types::RunProvenance {
-                server:  Some(fabro_types::RunServerProvenance {
-                    version: "0.9.0".to_string(),
-                }),
-                client:  Some(fabro_types::RunClientProvenance {
-                    user_agent: Some("fabro-cli/0.9.0".to_string()),
-                    name:       Some("fabro-cli".to_string()),
-                    version:    Some("0.9.0".to_string()),
-                }),
-                subject: Some(fabro_types::RunSubjectProvenance {
-                    login:       None,
-                    auth_method: fabro_types::RunAuthMethod::Disabled,
-                }),
-            }),
-            configured_providers: Vec::new(),
-        })
+            storage_dir,
+        )
         .await
         .unwrap();
 

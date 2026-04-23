@@ -1,4 +1,5 @@
 use fabro_config::parse_settings_layer;
+use fabro_types::settings::run::RunMode;
 use fabro_types::settings::{InterpString, SettingsLayer};
 
 fn parse(source: &str) -> SettingsLayer {
@@ -101,4 +102,93 @@ name = "gpt-5"
         run.model.name.as_ref().map(InterpString::as_source),
         Some("gpt-5".to_string())
     );
+}
+
+#[test]
+fn workflow_settings_resolve_defaults_and_expose_fields() {
+    let settings = SettingsLayer::default();
+    let resolved =
+        fabro_config::WorkflowSettings::from_layer(&settings).expect("defaults should resolve");
+
+    assert_eq!(resolved.project.directory, ".");
+    assert_eq!(resolved.workflow.graph, "workflow.fabro");
+    assert_eq!(resolved.run.execution.mode, RunMode::Normal);
+}
+
+#[test]
+fn workflow_settings_combine_labels_with_later_namespaces_winning() {
+    let settings = parse(
+        r#"
+_version = 1
+
+[project.metadata]
+project = "yes"
+shared = "project"
+
+[workflow.metadata]
+workflow = "yes"
+shared = "workflow"
+
+[run.metadata]
+run = "yes"
+shared = "run"
+"#,
+    );
+
+    let labels = fabro_config::WorkflowSettings::from_layer(&settings)
+        .expect("workflow settings should resolve")
+        .combined_labels();
+
+    assert_eq!(labels.get("project").map(String::as_str), Some("yes"));
+    assert_eq!(labels.get("workflow").map(String::as_str), Some("yes"));
+    assert_eq!(labels.get("run").map(String::as_str), Some("yes"));
+    assert_eq!(labels.get("shared").map(String::as_str), Some("run"));
+}
+
+#[test]
+fn workflow_settings_report_invalid_run_sandbox_provider() {
+    let settings = parse(
+        r#"
+_version = 1
+
+[run.sandbox]
+provider = "not-a-provider"
+"#,
+    );
+
+    let errors = fabro_config::WorkflowSettings::from_layer(&settings)
+        .expect_err("invalid workflow settings should fail");
+
+    assert!(errors.iter().any(|error| {
+        matches!(
+            error,
+            fabro_config::ResolveError::Invalid { path, .. } if path == "run.sandbox.provider"
+        )
+    }));
+}
+
+#[test]
+fn workflow_settings_accumulate_multiple_run_errors() {
+    let settings = parse(
+        r#"
+_version = 1
+
+[run.sandbox]
+provider = "not-a-provider"
+
+[[run.prepare.steps]]
+script = "echo hi"
+command = ["echo", "hi"]
+"#,
+    );
+
+    let rendered = fabro_config::WorkflowSettings::from_layer(&settings)
+        .expect_err("invalid workflow settings should fail")
+        .into_iter()
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("run.sandbox.provider"));
+    assert!(rendered.contains("run.prepare.steps[0]"));
 }

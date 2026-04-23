@@ -1,7 +1,7 @@
 ---
 title: "refactor: collapse settings resolve indirection layer"
 type: refactor
-status: active
+status: completed
 date: 2026-04-23
 ---
 
@@ -105,7 +105,7 @@ None directly applicable. The original `Resolver` commit (52d24531d) explicitly 
 
 ## Implementation Units
 
-- [ ] **Unit 1: Add `WorkflowSettings` to `fabro-config::context`**
+- [x] **Unit 1: Add `WorkflowSettings` to `fabro-config::context`**
 
 **Goal:** New consumer bundle for workflow ops, sibling to `ServerSettings`/`UserSettings`. Workflow-only namespaces.
 
@@ -145,7 +145,7 @@ None directly applicable. The original `Resolver` commit (52d24531d) explicitly 
 
 ---
 
-- [ ] **Unit 2: Delete `Resolver`; rewrite `*Settings::from_layer` and `resolve_*_from_file` to not depend on it**
+- [x] **Unit 2: Delete `Resolver`; rewrite `*Settings::from_layer` and `resolve_*_from_file` to not depend on it**
 
 **Goal:** Remove the `Resolver` indirection. Each consumer-bundle constructor and each standalone helper inlines `apply_builtin_defaults` + the per-namespace resolve.
 
@@ -186,7 +186,7 @@ None directly applicable. The original `Resolver` commit (52d24531d) explicitly 
 
 ---
 
-- [ ] **Unit 3: Migrate `create_run` to `WorkflowSettings`; add `storage_root` parameter; delete `ResolvedSettingsTree` + `resolve_settings_tree` + `combined_labels` free fn**
+- [x] **Unit 3: Migrate `create_run` to `WorkflowSettings`; add `storage_root` parameter; delete `ResolvedSettingsTree` + `resolve_settings_tree` + `combined_labels` free fn**
 
 **Goal:** `create_run` consumes `WorkflowSettings` for workflow-owned config and `storage_root` from the caller for deployment-owned config. `WorkflowSettings::from_layer` failures keep today's `; `-joined `render_resolve_errors` format (R6). Storage-root interpolation failures move out to the HTTP handler with new error attribution (R5).
 
@@ -247,7 +247,7 @@ None directly applicable. The original `Resolver` commit (52d24531d) explicitly 
 
 ---
 
-- [ ] **Unit 4: Workspace build + lint sweep**
+- [x] **Unit 4: Workspace build + lint sweep**
 
 **Goal:** Confirm no caller across the workspace still references deleted symbols.
 

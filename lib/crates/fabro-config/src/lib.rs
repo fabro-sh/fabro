@@ -2,8 +2,9 @@
     clippy::disallowed_methods,
     reason = "sync config loading utilities used at startup; not on a Tokio path"
 )]
-//! Resolved settings entrypoints: [`ServerSettings`] for the running server and
-//! [`UserSettings`] for the CLI/user perspective.
+//! Resolved settings entrypoints: [`ServerSettings`] for the running server,
+//! [`UserSettings`] for the CLI/user perspective, and [`WorkflowSettings`] for
+//! workflow execution.
 
 extern crate self as fabro_config;
 
@@ -27,7 +28,7 @@ pub mod user;
 
 use std::path::Path;
 
-pub use context::{ServerSettings, UserSettings};
+pub use context::{ServerSettings, UserSettings, WorkflowSettings};
 pub use defaults::{apply_builtin_defaults, defaults_layer};
 pub use error::{Error, Result};
 pub use fabro_util::path::expand_tilde;
@@ -37,7 +38,7 @@ pub use load::{
 };
 pub use parse::{ParseError, parse_settings_layer};
 pub use resolve::{
-    ResolveError, Resolver, dev_token_auth_enabled, render_resolve_errors, resolve_cli,
+    ResolveError, dev_token_auth_enabled, render_resolve_errors, resolve_cli,
     resolve_cli_from_file, resolve_features, resolve_features_from_file, resolve_project,
     resolve_project_from_file, resolve_run, resolve_run_from_file, resolve_server,
     resolve_server_from_file, resolve_storage_root, resolve_workflow, resolve_workflow_from_file,

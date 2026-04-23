@@ -1003,42 +1003,55 @@ mod tests {
         ))
     }
 
-    async fn persisted_workflow(dot: &str, run_dir: &Path) -> (Persisted, Arc<Database>) {
+    fn storage_root_and_run_dir(temp: &tempfile::TempDir) -> (PathBuf, PathBuf) {
+        let storage_root = temp.path().join("storage");
+        let run_dir = fabro_config::Storage::new(&storage_root)
+            .run_scratch(&fixtures::RUN_1)
+            .root()
+            .to_path_buf();
+        (storage_root, run_dir)
+    }
+
+    async fn persisted_workflow(dot: &str, storage_root: &Path) -> (Persisted, Arc<Database>) {
         let store = memory_store();
-        let created = crate::operations::create(&store, crate::operations::CreateRunInput {
-            workflow: crate::operations::WorkflowInput::DotSource {
-                source:   dot.to_string(),
-                base_dir: None,
-            },
-            settings: {
-                let mut layer = SettingsLayer {
-                    run: Some(RunLayer {
-                        execution: Some(RunExecutionLayer {
-                            mode: Some(RunMode::DryRun),
-                            ..RunExecutionLayer::default()
+        let created = crate::operations::create(
+            &store,
+            crate::operations::CreateRunInput {
+                workflow: crate::operations::WorkflowInput::DotSource {
+                    source:   dot.to_string(),
+                    base_dir: None,
+                },
+                settings: {
+                    let mut layer = SettingsLayer {
+                        run: Some(RunLayer {
+                            execution: Some(RunExecutionLayer {
+                                mode: Some(RunMode::DryRun),
+                                ..RunExecutionLayer::default()
+                            }),
+                            ..RunLayer::default()
                         }),
-                        ..RunLayer::default()
-                    }),
-                    ..SettingsLayer::default()
-                };
-                layer.ensure_test_auth_methods();
-                layer
+                        ..SettingsLayer::default()
+                    };
+                    layer.ensure_test_auth_methods();
+                    layer
+                },
+                cwd: storage_root
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .to_path_buf(),
+                workflow_slug: Some("test".to_string()),
+                workflow_path: None,
+                workflow_bundle: None,
+                submitted_manifest_bytes: None,
+                run_id: Some(fixtures::RUN_1),
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                provenance: None,
+                configured_providers: Vec::new(),
             },
-            cwd: run_dir
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf(),
-            workflow_slug: Some("test".to_string()),
-            workflow_path: None,
-            workflow_bundle: None,
-            submitted_manifest_bytes: None,
-            run_id: Some(fixtures::RUN_1),
-            host_repo_path: None,
-            repo_origin_url: None,
-            base_branch: None,
-            provenance: None,
-            configured_providers: Vec::new(),
-        })
+            storage_root.to_path_buf(),
+        )
         .await
         .unwrap();
         (created.persisted, store)
@@ -1078,7 +1091,7 @@ mod tests {
     #[tokio::test]
     async fn start_captures_checkpoint_git_sha_in_conclusion() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join("run");
+        let (storage_root, run_dir) = storage_root_and_run_dir(&temp);
         let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
         let injected = Arc::new(AtomicBool::new(false));
@@ -1113,7 +1126,7 @@ mod tests {
             });
         }
 
-        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &storage_root).await;
         let started = start(
             &run_dir,
             test_start_services(&store, &run_dir, emitter, registry).await,
@@ -1132,11 +1145,11 @@ mod tests {
     #[tokio::test]
     async fn start_loads_persisted_from_run_dir() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join("run");
+        let (storage_root, run_dir) = storage_root_and_run_dir(&temp);
         let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &storage_root).await;
 
         let started = start(
             &run_dir,
@@ -1153,7 +1166,7 @@ mod tests {
     #[tokio::test]
     async fn start_can_run_bundle_backed_child_workflow_without_workflow_bundle_json() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join("run");
+        let (storage_root, run_dir) = storage_root_and_run_dir(&temp);
         let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
         let store = memory_store();
@@ -1187,39 +1200,43 @@ mod tests {
             }),
         ]));
 
-        crate::operations::create(&store, crate::operations::CreateRunInput {
-            workflow: crate::operations::WorkflowInput::Bundled(
-                workflow_bundle
-                    .workflow(Path::new("workflow.fabro"))
-                    .unwrap()
-                    .clone(),
-            ),
-            settings: {
-                let mut layer = SettingsLayer {
-                    run: Some(RunLayer {
-                        execution: Some(RunExecutionLayer {
-                            mode: Some(RunMode::DryRun),
-                            ..RunExecutionLayer::default()
+        crate::operations::create(
+            &store,
+            crate::operations::CreateRunInput {
+                workflow: crate::operations::WorkflowInput::Bundled(
+                    workflow_bundle
+                        .workflow(Path::new("workflow.fabro"))
+                        .unwrap()
+                        .clone(),
+                ),
+                settings: {
+                    let mut layer = SettingsLayer {
+                        run: Some(RunLayer {
+                            execution: Some(RunExecutionLayer {
+                                mode: Some(RunMode::DryRun),
+                                ..RunExecutionLayer::default()
+                            }),
+                            ..RunLayer::default()
                         }),
-                        ..RunLayer::default()
-                    }),
-                    ..SettingsLayer::default()
-                };
-                layer.ensure_test_auth_methods();
-                layer
+                        ..SettingsLayer::default()
+                    };
+                    layer.ensure_test_auth_methods();
+                    layer
+                },
+                cwd: temp.path().to_path_buf(),
+                workflow_slug: Some("bundle-child".to_string()),
+                workflow_path: Some(PathBuf::from("workflow.fabro")),
+                workflow_bundle: Some(workflow_bundle),
+                submitted_manifest_bytes: None,
+                run_id: Some(fixtures::RUN_1),
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                provenance: None,
+                configured_providers: Vec::new(),
             },
-            cwd: temp.path().to_path_buf(),
-            workflow_slug: Some("bundle-child".to_string()),
-            workflow_path: Some(PathBuf::from("workflow.fabro")),
-            workflow_bundle: Some(workflow_bundle),
-            submitted_manifest_bytes: None,
-            run_id: Some(fixtures::RUN_1),
-            host_repo_path: None,
-            repo_origin_url: None,
-            base_branch: None,
-            provenance: None,
-            configured_providers: Vec::new(),
-        })
+            storage_root,
+        )
         .await
         .unwrap();
 
@@ -1236,12 +1253,12 @@ mod tests {
     #[tokio::test]
     async fn start_invokes_on_node_callback_before_execution() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join("run");
+        let (storage_root, run_dir) = storage_root_and_run_dir(&temp);
         let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
         let visited = Arc::new(Mutex::new(Vec::new()));
 
-        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &storage_root).await;
 
         let started = start(&run_dir, StartServices {
             on_node: Some(Arc::new({
@@ -1262,11 +1279,11 @@ mod tests {
     #[tokio::test]
     async fn start_errors_when_checkpoint_exists() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join("run");
+        let (storage_root, run_dir) = storage_root_and_run_dir(&temp);
         let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &storage_root).await;
         let services = test_start_services(&store, &run_dir, emitter, registry).await;
 
         // Seed an authoritative checkpoint event so start() sees it
@@ -1331,11 +1348,11 @@ mod tests {
     #[tokio::test]
     async fn resume_errors_when_checkpoint_missing() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join("run");
+        let (storage_root, run_dir) = storage_root_and_run_dir(&temp);
         let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &storage_root).await;
 
         let result = resume(
             &run_dir,
@@ -1353,12 +1370,12 @@ mod tests {
     #[tokio::test]
     async fn resume_errors_when_run_already_finished_successfully() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join("run");
+        let (storage_root, run_dir) = storage_root_and_run_dir(&temp);
         std::fs::create_dir_all(&run_dir).unwrap();
         let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &storage_root).await;
 
         let checkpoint = Checkpoint::from_context(
             &Context::new(),

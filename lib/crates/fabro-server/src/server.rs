@@ -4016,7 +4016,23 @@ async fn create_run(
     create_input.provenance = Some(run_provenance(&headers, &subject));
     create_input.submitted_manifest_bytes = Some(body.to_vec());
 
-    let created = match Box::pin(operations::create(state.store.as_ref(), create_input)).await {
+    let storage_root = match resolve_interp_string(&state.server_settings().server.storage.root) {
+        Ok(path) => PathBuf::from(path),
+        Err(err) => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to resolve server storage root: {err}"),
+            )
+            .into_response();
+        }
+    };
+    let created = match Box::pin(operations::create(
+        state.store.as_ref(),
+        create_input,
+        storage_root,
+    ))
+    .await
+    {
         Ok(created) => created,
         Err(WorkflowError::ValidationFailed { .. } | WorkflowError::Parse(_)) => {
             return ApiError::bad_request("Validation failed").into_response();
