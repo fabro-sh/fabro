@@ -154,8 +154,7 @@ mod tests {
     use std::collections::HashMap;
 
     use chrono::{TimeZone, Utc};
-    use fabro_types::settings::SettingsLayer;
-    use fabro_types::{Graph, fixtures};
+    use fabro_types::{Graph, WorkflowSettings, fixtures};
 
     use super::*;
 
@@ -185,7 +184,7 @@ mod tests {
     fn test_run_spec(run_id: fabro_types::RunId) -> RunSpec {
         RunSpec {
             run_id,
-            settings: SettingsLayer::default(),
+            settings: WorkflowSettings::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
             working_directory: PathBuf::from("/tmp"),

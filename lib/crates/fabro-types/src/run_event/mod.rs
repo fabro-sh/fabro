@@ -800,8 +800,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::settings::SettingsLayer;
-    use crate::{Edge, Graph, Node, RunBlobId, fixtures};
+    use crate::{Edge, Graph, Node, RunBlobId, WorkflowSettings, fixtures};
 
     #[test]
     fn run_event_round_trips_json() {
@@ -850,7 +849,7 @@ mod tests {
 
     #[test]
     fn run_event_deserializes_adjacent_layout() {
-        let settings = SettingsLayer::default();
+        let settings = WorkflowSettings::default();
         let graph = Graph {
             name:  "test".to_string(),
             nodes: HashMap::from([("start".to_string(), Node {
@@ -892,7 +891,7 @@ mod tests {
             "run_id": fixtures::RUN_1,
             "event": "run.created",
             "properties": {
-                "settings": SettingsLayer::default(),
+                "settings": WorkflowSettings::default(),
                 "graph": Graph::new("test"),
                 "labels": {},
                 "run_dir": "/tmp/run",
