@@ -1,5 +1,4 @@
-use fabro_config::load::load_settings_user;
-use fabro_config::user::active_settings_path;
+use fabro_config::user::{active_settings_path, load_settings_config};
 use fabro_types::RunId;
 use fabro_util::terminal::Styles;
 
@@ -42,7 +41,7 @@ pub(crate) async fn create_run(
         args_layer: cli_args_config,
         args: run_manifest_args(args),
         run_id,
-        user_layer: load_settings_user()?,
+        user_layer: load_settings_config(None)?,
         user_settings_path: Some(active_settings_path(None)),
     })?;
     let client = ctx.server().await?;

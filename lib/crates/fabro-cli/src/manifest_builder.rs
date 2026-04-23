@@ -8,7 +8,6 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use fabro_api::types;
-use fabro_config::load::load_settings_for_workflow;
 use fabro_config::parse_settings_layer;
 use fabro_config::project::{self, discover_project_config, resolve_workflow_path};
 use fabro_config::run::resolve_run_goal;
@@ -30,7 +29,7 @@ pub(crate) struct ManifestBuildInput {
     pub args:               Option<types::ManifestArgs>,
     pub run_id:             Option<RunId>,
     /// User-level settings layer. Production callers load via
-    /// `load_settings_user()`; tests pass `SettingsLayer::default()`.
+    /// `load_settings_config(None)`; tests pass `SettingsLayer::default()`.
     pub user_layer:         SettingsLayer,
     /// Path to the user settings file (for inclusion in
     /// `RunManifest.configs`). `None` skips the user config entry.
@@ -57,14 +56,35 @@ struct WorkflowScanInput {
 }
 
 pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
-    let workflow_layer = load_settings_for_workflow(&input.workflow, &input.cwd)?;
+    let root_resolution = resolve_workflow_path(&input.workflow, &input.cwd)?;
+    if root_resolution.workflow_config.is_none()
+        && !root_resolution.resolved_workflow_path.is_file()
+    {
+        return Err(fabro_config::Error::WorkflowNotFound(
+            root_resolution.resolved_workflow_path.display().to_string(),
+        )
+        .into());
+    }
+    let workflow_parent = root_resolution
+        .resolved_workflow_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let project_config = discover_project_config(workflow_parent)?;
+    let workflow_layer = root_resolution
+        .workflow_config
+        .clone()
+        .unwrap_or_default()
+        .combine(
+            project_config
+                .as_ref()
+                .map(|(_, config)| config.clone())
+                .unwrap_or_default(),
+        );
     let merged_settings = input
         .args_layer
         .clone()
         .combine(workflow_layer)
         .combine(input.user_layer);
-
-    let root_resolution = resolve_workflow_path(&input.workflow, &input.cwd)?;
     let target_path = root_resolution.dot_path.clone();
     let target_logical_path = to_logical_path(&target_path, &input.cwd)?;
     let target_logical_path_string = logical_path_string(&target_logical_path);
@@ -83,12 +103,7 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
         .ok_or_else(|| anyhow!("root workflow missing from manifest bundle"))?;
 
     let mut configs = Vec::new();
-    if let Some((path, _config)) = discover_project_config(
-        root_resolution
-            .resolved_workflow_path
-            .parent()
-            .unwrap_or_else(|| Path::new(".")),
-    )? {
+    if let Some((path, _config)) = project_config {
         let source = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
         configs.push(types::ManifestConfig {

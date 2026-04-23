@@ -14,7 +14,7 @@ pub mod daemon;
 pub mod envfile;
 pub mod error;
 pub mod home;
-pub mod load;
+mod load;
 pub mod parse;
 pub mod project;
 pub mod resolve;
@@ -31,9 +31,6 @@ pub(crate) use defaults::apply_builtin_defaults;
 pub use error::{Error, Result};
 pub use fabro_util::path::expand_tilde;
 pub use home::Home;
-pub use load::{
-    load_settings_for_workflow, load_settings_path, load_settings_project, load_settings_user,
-};
 pub use parse::{ParseError, parse_settings_layer};
 pub use resolve::{
     ResolveError, dev_token_auth_enabled, resolve_cli, resolve_features, resolve_project,
