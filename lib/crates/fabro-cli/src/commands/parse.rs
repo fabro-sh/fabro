@@ -21,7 +21,7 @@ pub(crate) fn run(args: &ParseArgs) -> anyhow::Result<()> {
 }
 
 fn run_to(args: &ParseArgs, mut out: impl Write) -> anyhow::Result<()> {
-    let (dot_path, _cfg) = resolve_workflow(&args.workflow)?;
+    let dot_path = resolve_workflow(&args.workflow)?;
     let source = read_workflow_file(&dot_path)?;
     let ast = parse_ast(&source)?;
     serde_json::to_writer_pretty(&mut out, &ast)?;

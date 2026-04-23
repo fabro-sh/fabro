@@ -14,7 +14,7 @@ use crate::resolve::{
     resolve_workflow,
 };
 use crate::user::load_settings_config;
-use crate::{Error, Result};
+use crate::{Error, Result, run};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolveErrors(pub Vec<ResolveError>);
@@ -186,16 +186,28 @@ impl WorkflowSettingsBuilder {
         self
     }
 
+    pub fn workflow_file(self, path: &Path) -> Result<Self> {
+        Ok(self.workflow_layer(run::load_run_config(path)?))
+    }
+
     #[must_use]
     pub fn project_layer(mut self, layer: SettingsLayer) -> Self {
         self.project = layer;
         self
     }
 
+    pub fn project_file(self, path: &Path) -> Result<Self> {
+        Ok(self.project_layer(load_settings_path(path)?))
+    }
+
     #[must_use]
     pub fn user_layer(mut self, layer: SettingsLayer) -> Self {
         self.user = layer;
         self
+    }
+
+    pub fn user_file(self, path: &Path) -> Result<Self> {
+        Ok(self.user_layer(load_settings_path(path)?))
     }
 
     #[must_use]

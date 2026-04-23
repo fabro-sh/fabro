@@ -28,9 +28,6 @@ pub(crate) struct ManifestBuildInput {
     pub args_layer:         SettingsLayer,
     pub args:               Option<types::ManifestArgs>,
     pub run_id:             Option<RunId>,
-    /// User-level settings layer. Production callers load via
-    /// `load_settings_config(None)`; tests pass `SettingsLayer::default()`.
-    pub user_layer:         SettingsLayer,
     /// Path to the user settings file (for inclusion in
     /// `RunManifest.configs`). `None` skips the user config entry.
     pub user_settings_path: Option<PathBuf>,
@@ -57,7 +54,7 @@ struct WorkflowScanInput {
 
 pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
     let root_resolution = resolve_workflow_path(&input.workflow, &input.cwd)?;
-    if root_resolution.workflow_config.is_none()
+    if root_resolution.workflow_toml_path.is_none()
         && !root_resolution.resolved_workflow_path.is_file()
     {
         return Err(fabro_config::Error::WorkflowNotFound(
@@ -70,16 +67,22 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
         .parent()
         .unwrap_or_else(|| Path::new("."));
     let project_config = discover_project_config(workflow_parent)?;
-    let workflow_layer = root_resolution.workflow_config.clone().unwrap_or_default();
-    let project_layer = project_config
+    let mut workflow_settings_builder =
+        WorkflowSettingsBuilder::new().args_layer(input.args_layer.clone());
+    if let Some(path) = root_resolution.workflow_toml_path.as_ref() {
+        workflow_settings_builder = workflow_settings_builder.workflow_file(path)?;
+    }
+    if let Some(path) = project_config.as_ref() {
+        workflow_settings_builder = workflow_settings_builder.project_file(path)?;
+    }
+    if let Some(path) = input
+        .user_settings_path
         .as_ref()
-        .map(|(_, config)| config.clone())
-        .unwrap_or_default();
-    let workflow_settings = WorkflowSettingsBuilder::new()
-        .args_layer(input.args_layer.clone())
-        .workflow_layer(workflow_layer.clone())
-        .project_layer(project_layer)
-        .user_layer(input.user_layer.clone())
+        .filter(|path| path.is_file())
+    {
+        workflow_settings_builder = workflow_settings_builder.user_file(path)?;
+    }
+    let workflow_settings = workflow_settings_builder
         .build()
         .map_err(|errors| anyhow!("failed to resolve manifest settings: {errors}"))?;
     let target_path = root_resolution.dot_path.clone();
@@ -100,7 +103,7 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
         .ok_or_else(|| anyhow!("root workflow missing from manifest bundle"))?;
 
     let mut configs = Vec::new();
-    if let Some((path, _config)) = project_config {
+    if let Some(path) = project_config {
         let source = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
         configs.push(types::ManifestConfig {
@@ -624,7 +627,6 @@ mod tests {
             args_layer:         SettingsLayer::default(),
             args:               None,
             run_id:             None,
-            user_layer:         SettingsLayer::default(),
             user_settings_path: None,
         })
         .unwrap();
@@ -704,7 +706,6 @@ file = "prompts/goal.md"
             args_layer:         SettingsLayer::default(),
             args:               None,
             run_id:             None,
-            user_layer:         SettingsLayer::default(),
             user_settings_path: None,
         })
         .unwrap();
@@ -757,7 +758,6 @@ file = "prompts/goal.md"
             args_layer:         SettingsLayer::default(),
             args:               None,
             run_id:             None,
-            user_layer:         SettingsLayer::default(),
             user_settings_path: None,
         })
         .unwrap();

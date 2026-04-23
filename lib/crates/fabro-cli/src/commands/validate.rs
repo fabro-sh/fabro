@@ -1,6 +1,5 @@
 use anyhow::bail;
-use fabro_config::user::{active_settings_path, load_settings_config};
-use fabro_types::settings::SettingsLayer;
+use fabro_config::user::active_settings_path;
 use fabro_util::terminal::Styles;
 
 use crate::args::ValidateArgs;
@@ -19,10 +18,9 @@ pub(crate) async fn run(
     let built = build_run_manifest(ManifestBuildInput {
         workflow:           args.workflow.clone(),
         cwd:                ctx.cwd().to_path_buf(),
-        args_layer:         SettingsLayer::default(),
+        args_layer:         Default::default(),
         args:               None,
         run_id:             None,
-        user_layer:         load_settings_config(None)?,
         user_settings_path: Some(active_settings_path(None)),
     })?;
     let client = ctx.server().await?;

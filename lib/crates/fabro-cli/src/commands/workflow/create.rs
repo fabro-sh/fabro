@@ -16,14 +16,14 @@ pub(super) fn create_command(args: &WorkflowCreateArgs, base_ctx: &CommandContex
     let printer = base_ctx.printer();
     let cwd = std::env::current_dir()?;
 
-    let Some((config_path, config)) = discover_project_config(&cwd)? else {
+    let Some(config_path) = discover_project_config(&cwd)? else {
         bail!(
             "No .fabro/project.toml found in {cwd} or any parent directory",
             cwd = cwd.display()
         );
     };
 
-    let fabro_root = resolve_fabro_root(&config_path, &config);
+    let fabro_root = resolve_fabro_root(&config_path);
     let created = write_workflow_scaffold(args, &fabro_root)?;
 
     if base_ctx.json_output() {
