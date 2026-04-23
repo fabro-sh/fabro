@@ -16,7 +16,7 @@ use fabro_sandbox::daytona::detect_repo_info;
 use fabro_store::Database;
 use fabro_template::{TemplateContext, render as render_template};
 use fabro_types::settings::SettingsLayer;
-use fabro_types::settings::run::RunMode;
+use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{RunId, RunProvenance};
 use fabro_util::json::normalize_json_value;
 use tokio::task::spawn_blocking;
@@ -84,11 +84,12 @@ pub async fn create(
         cwd:      request.cwd,
     })
     .map_err(|err| Error::Parse(err.to_string()))?;
+    let settings = resolved.settings.clone();
+    let resolved_settings = WorkflowSettingsBuilder::from_layer(&settings)
+        .map_err(|errors| Error::Precondition(errors.to_string()))?;
 
-    if WorkflowSettingsBuilder::from_layer(&resolved.settings).map_or(true, |settings| {
-        settings.run.execution.mode != RunMode::DryRun
-    }) {
-        validate_sandbox_provider(&resolved.settings)?;
+    if resolved_settings.run.execution.mode != RunMode::DryRun {
+        validate_sandbox_provider(&resolved_settings.run)?;
     }
 
     let CreateRunInput {
@@ -107,9 +108,6 @@ pub async fn create(
         configured_providers,
     } = request;
 
-    let settings = resolved.settings.clone();
-    let resolved_settings = WorkflowSettingsBuilder::from_layer(&settings)
-        .map_err(|errors| Error::Precondition(errors.to_string()))?;
     let run_id = run_id.unwrap_or_else(RunId::new);
     let storage = Storage::new(storage_root);
     let run_dir = storage.run_scratch(&run_id).root().to_path_buf();
@@ -271,12 +269,8 @@ fn store_error(err: impl std::fmt::Display) -> Error {
     Error::engine(err.to_string())
 }
 
-fn validate_sandbox_provider(settings: &SettingsLayer) -> Result<(), Error> {
-    let resolved = WorkflowSettingsBuilder::from_layer(settings)
-        .map_err(|errors| Error::Precondition(errors.to_string()))?;
-    resolved
-        .run
-        .sandbox
+fn validate_sandbox_provider(run: &RunNamespace) -> Result<(), Error> {
+    run.sandbox
         .provider
         .parse::<SandboxProvider>()
         .map_err(|err| Error::Precondition(format!("Invalid sandbox provider: {err}")))?;
