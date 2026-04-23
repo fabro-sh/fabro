@@ -1,5 +1,4 @@
 use anyhow::Result;
-use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::terminal::Styles;
 
 use crate::args::{AttachArgs, RunCommands, RunWorkerArgs, StartArgs};
@@ -62,7 +61,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, base_ctx: &CommandContext) -> Res
                 false,
                 styles,
                 json,
-                ctx.user_settings().cli.output.verbosity == OutputVerbosity::Verbose,
+                ctx.verbose(),
                 printer,
             ))
             .await?;

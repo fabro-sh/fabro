@@ -1,5 +1,4 @@
 use anyhow::Result;
-use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::terminal::Styles;
 
 use crate::args::RunArgs;
@@ -10,8 +9,7 @@ pub(crate) async fn execute(mut args: RunArgs, base_ctx: &CommandContext) -> Res
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
     let printer = base_ctx.printer();
     let ctx = base_ctx.with_target(&args.target)?;
-    args.verbose =
-        args.verbose || ctx.user_settings().cli.output.verbosity == OutputVerbosity::Verbose;
+    args.verbose = args.verbose || ctx.verbose();
 
     let quiet = args.detach;
     let prevent_idle_sleep = ctx.user_settings().cli.exec.prevent_idle_sleep;
@@ -49,7 +47,7 @@ pub(crate) async fn execute(mut args: RunArgs, base_ctx: &CommandContext) -> Res
             true,
             styles,
             json,
-            ctx.user_settings().cli.output.verbosity == OutputVerbosity::Verbose,
+            ctx.verbose(),
             printer,
         ))
         .await?;

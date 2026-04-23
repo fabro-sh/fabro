@@ -1,7 +1,6 @@
 use anyhow::bail;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
-use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::terminal::Styles;
 
 use crate::args::PreflightArgs;
@@ -20,8 +19,7 @@ pub(crate) async fn execute(
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
     let printer = base_ctx.printer();
     let ctx = base_ctx.with_target(&args.target)?;
-    args.verbose =
-        args.verbose || ctx.user_settings().cli.output.verbosity == OutputVerbosity::Verbose;
+    args.verbose = args.verbose || ctx.verbose();
 
     let manifest = build_run_manifest(ManifestBuildInput {
         workflow:           args.workflow.clone(),

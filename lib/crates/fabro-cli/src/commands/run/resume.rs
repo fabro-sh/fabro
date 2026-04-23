@@ -1,4 +1,3 @@
-use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::terminal::Styles;
 
 use crate::args::ResumeArgs;
@@ -36,7 +35,7 @@ pub(crate) async fn resume_command(
             true,
             styles,
             json,
-            ctx.user_settings().cli.output.verbosity == OutputVerbosity::Verbose,
+            ctx.verbose(),
             printer,
         ))
         .await?;
