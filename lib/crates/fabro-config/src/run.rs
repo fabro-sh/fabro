@@ -68,17 +68,6 @@ impl std::error::Error for ResolveRunGoalError {
     }
 }
 
-pub(crate) fn resolve_run_goal(
-    settings: &SettingsLayer,
-    base_dir: &Path,
-) -> std::result::Result<Option<ResolvedRunGoal>, ResolveRunGoalError> {
-    let Some(goal) = settings.run.as_ref().and_then(|run| run.goal.as_ref()) else {
-        return Ok(None);
-    };
-
-    resolve_layer_goal(goal, base_dir).map(Some)
-}
-
 pub fn resolve_run_goal_from_layer(
     run: &RunLayer,
     base_dir: &Path,

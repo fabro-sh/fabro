@@ -5,12 +5,12 @@
 
 use fabro_types::settings::InterpString;
 use fabro_types::settings::server::{
-    GithubIntegrationStrategy, IpAllowEntry, ObjectStoreSettings, ServerListenSettings,
+    GithubIntegrationStrategy, IpAllowEntry, ObjectStoreSettings, ServerAuthMethod,
+    ServerListenSettings, ServerNamespace,
 };
 use fabro_util::Home;
 use temp_env::with_var;
 
-use crate::resolve::dev_token_auth_enabled;
 use crate::user::default_storage_dir;
 use crate::{ServerSettingsBuilder, SettingsLayer};
 
@@ -26,7 +26,16 @@ fn empty_settings_with_auth_methods() -> SettingsLayer {
     SettingsLayer::test_default()
 }
 
-fn resolve_server(file: &SettingsLayer) -> fabro_types::settings::ServerNamespace {
+fn dev_token_auth_enabled(layer: &SettingsLayer) -> bool {
+    layer
+        .server
+        .as_ref()
+        .and_then(|server| server.auth.as_ref())
+        .and_then(|auth| auth.methods.as_ref())
+        .is_some_and(|methods| methods.contains(&ServerAuthMethod::DevToken))
+}
+
+fn resolve_server(file: &SettingsLayer) -> ServerNamespace {
     ServerSettingsBuilder::from_layer(file)
         .expect("server settings should resolve")
         .server

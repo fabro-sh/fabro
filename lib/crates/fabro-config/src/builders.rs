@@ -32,6 +32,15 @@ impl ResolveErrors {
     }
 }
 
+impl<'a> IntoIterator for &'a ResolveErrors {
+    type Item = &'a ResolveError;
+    type IntoIter = std::slice::Iter<'a, ResolveError>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 impl fmt::Display for ResolveErrors {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let rendered = self
@@ -425,15 +434,6 @@ impl WorkflowSettingsBuilder {
         let mut errors = Vec::new();
         let workflow = resolve_workflow(&layer.workflow.clone().unwrap_or_default(), &mut errors);
         finish_dense_result(workflow, errors)
-    }
-
-    pub(crate) fn run_from_layer(
-        layer: &SettingsLayer,
-    ) -> std::result::Result<RunNamespace, ResolveErrors> {
-        let layer = layer.clone().combine(DEFAULTS_LAYER.clone());
-        let mut errors = Vec::new();
-        let run = resolve_run(&layer.run.clone().unwrap_or_default(), &mut errors);
-        finish_dense_result(run, errors)
     }
 }
 

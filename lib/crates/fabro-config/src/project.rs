@@ -12,7 +12,7 @@
 use std::fmt::Write;
 use std::path::{Component, Path, PathBuf};
 
-use fabro_types::settings::RunNamespace;
+use fabro_types::settings::{InterpString, RunNamespace};
 use serde::Serialize;
 
 use crate::load::load_settings_path;
@@ -108,15 +108,8 @@ pub fn resolve_workflow_path(workflow_path: &Path, cwd: &Path) -> Result<Workflo
     }
 }
 
-pub(crate) fn resolve_working_directory(settings: &SettingsLayer, caller_cwd: &Path) -> PathBuf {
-    let Some(run_settings) = WorkflowSettingsBuilder::run_from_layer(settings).ok() else {
-        return caller_cwd.to_path_buf();
-    };
-    resolve_working_directory_from_run(&run_settings, caller_cwd)
-}
-
 pub fn resolve_working_directory_from_run(run: &RunNamespace, caller_cwd: &Path) -> PathBuf {
-    let Some(work_dir) = run.working_dir.as_ref().map(|value| value.as_source()) else {
+    let Some(work_dir) = run.working_dir.as_ref().map(InterpString::as_source) else {
         return caller_cwd.to_path_buf();
     };
     let path = PathBuf::from(work_dir);
@@ -588,9 +581,9 @@ file = "prompts/goal.md"
     fn resolve_working_directory_from_run_joins_relative_path() {
         let cwd = Path::new("/tmp/workspace");
         let resolved = resolve_working_directory_from_run(
-            &fabro_types::settings::RunNamespace {
-                working_dir: Some(fabro_types::settings::InterpString::parse("repo")),
-                ..fabro_types::settings::RunNamespace::default()
+            &RunNamespace {
+                working_dir: Some(InterpString::parse("repo")),
+                ..RunNamespace::default()
             },
             cwd,
         );

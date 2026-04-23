@@ -16,17 +16,8 @@ use crate::{
     IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer,
     ServerArtifactsLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerIpAllowlistLayer,
     ServerIpAllowlistOverrideLayer, ServerLayer, ServerListenLayer, ServerSlateDbLayer,
-    ServerStorageLayer, ServerWebLayer, SettingsLayer,
+    ServerStorageLayer, ServerWebLayer,
 };
-
-pub(crate) fn dev_token_auth_enabled(layer: &SettingsLayer) -> bool {
-    layer
-        .server
-        .as_ref()
-        .and_then(|server| server.auth.as_ref())
-        .and_then(|auth| auth.methods.as_ref())
-        .is_some_and(|methods| methods.contains(&ServerAuthMethod::DevToken))
-}
 
 pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> ServerNamespace {
     let storage = resolve_storage(layer.storage.as_ref());

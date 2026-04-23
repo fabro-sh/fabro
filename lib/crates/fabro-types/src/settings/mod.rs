@@ -1,26 +1,23 @@
 //! Namespaced settings schema.
 //!
 //! Top-level schema is strictly namespaced with `_version`, `[project]`,
-//! `[workflow]`, `[run]`, `[cli]`, `[server]`, and `[features]`.
-//! Value-language helpers live alongside the tree: durations, byte sizes,
-//! model references, env interpolation, and splice-capable arrays.
+//! `[workflow]`, `[run]`, `[cli]`, `[server]`, and `[features]`. Value-language
+//! helpers live alongside the tree: durations, byte sizes, model references,
+//! and env interpolation.
 //!
 //! Stage 6.5b promoted these modules up out of the transitional
 //! `settings/v2/` subdirectory, so the `::v2::` path prefix no longer
 //! exists.
 
 pub mod cli;
-mod combine;
 pub mod duration;
 pub mod features;
 pub mod interp;
-mod maps;
 pub mod model_ref;
 pub mod project;
 pub mod run;
 pub mod server;
 pub mod size;
-mod splice_array;
 pub mod workflow;
 
 pub use cli::{

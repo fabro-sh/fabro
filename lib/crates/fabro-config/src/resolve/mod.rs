@@ -12,8 +12,6 @@ use fabro_types::settings::InterpString;
 pub use features::resolve_features;
 pub use project::resolve_project;
 pub use run::resolve_run;
-#[cfg(test)]
-pub(crate) use server::dev_token_auth_enabled;
 pub use server::resolve_server;
 pub use workflow::resolve_workflow;
 
