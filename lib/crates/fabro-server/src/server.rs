@@ -69,7 +69,7 @@ use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, ServerAuthLayer, ServerAuthMethod,
     ServerLayer,
 };
-use fabro_types::settings::{InterpString, SettingsLayer};
+use fabro_types::settings::{InterpString, RunNamespace, SettingsLayer};
 use fabro_types::{
     ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId,
     RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance,
@@ -576,6 +576,7 @@ pub struct AppState {
     pub(super) server_secrets:       ServerSecrets,
     pub(crate) provider_credentials: ProviderCredentials,
     manifest_defaults:               RwLock<Arc<SettingsLayer>>,
+    manifest_run_settings:           RwLock<std::result::Result<RunNamespace, String>>,
     pub(crate) server_settings:      RwLock<Arc<ServerSettings>>,
     pub(crate) env_lookup:           EnvLookup,
     http_client:                     Option<fabro_http::HttpClient>,
@@ -657,6 +658,13 @@ impl AppState {
                 .read()
                 .expect("server settings lock poisoned"),
         )
+    }
+
+    pub(crate) fn manifest_run_settings(&self) -> std::result::Result<RunNamespace, String> {
+        self.manifest_run_settings
+            .read()
+            .expect("manifest run settings lock poisoned")
+            .clone()
     }
 
     fn http_client(&self) -> Result<fabro_http::HttpClient, fabro_http::HttpClientBuildError> {
@@ -794,12 +802,17 @@ impl AppState {
     pub(crate) fn replace_settings(&self, settings: SettingsLayer) -> anyhow::Result<()> {
         let resolved = Arc::new(ServerSettingsBuilder::from_layer(&settings)?);
         let manifest_defaults = Arc::new(run_manifest::manifest_defaults_layer(&settings));
+        let manifest_run_settings = resolve_manifest_run_settings(manifest_defaults.as_ref());
         resolve_canonical_origin(&resolved.server, &self.env_lookup).map_err(anyhow::Error::msg)?;
 
         *self
             .manifest_defaults
             .write()
             .expect("manifest defaults lock poisoned") = manifest_defaults;
+        *self
+            .manifest_run_settings
+            .write()
+            .expect("manifest run settings lock poisoned") = manifest_run_settings;
         *self
             .server_settings
             .write()
@@ -1330,7 +1343,7 @@ async fn get_system_info(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let manifest_defaults = state.manifest_defaults();
+    let manifest_run_settings = state.manifest_run_settings();
     let server_settings = state.server_settings();
     let (total_runs, active_runs) = {
         let runs = state.runs.lock().expect("runs lock poisoned");
@@ -1364,10 +1377,10 @@ async fn get_system_info(
             total:  Some(to_i64(total_runs)),
             active: Some(to_i64(active_runs)),
         }),
-        sandbox_provider: Some(system_sandbox_provider(manifest_defaults.as_ref())),
+        sandbox_provider: Some(system_sandbox_provider(&manifest_run_settings)),
         features:         Some(system_features(
             server_settings.as_ref(),
-            manifest_defaults.as_ref(),
+            &manifest_run_settings,
         )),
     };
     (StatusCode::OK, Json(response)).into_response()
@@ -1375,11 +1388,12 @@ async fn get_system_info(
 
 fn system_features(
     server_settings: &ServerSettings,
-    manifest_defaults: &SettingsLayer,
+    manifest_run_settings: &std::result::Result<RunNamespace, String>,
 ) -> SystemFeatures {
     let session_sandboxes = server_settings.features.session_sandboxes;
-    let retros = WorkflowSettingsBuilder::from_layer(manifest_defaults)
-        .is_ok_and(|s| s.run.execution.retros);
+    let retros = manifest_run_settings
+        .as_ref()
+        .is_ok_and(|settings| settings.execution.retros);
     SystemFeatures {
         session_sandboxes: Some(session_sandboxes),
         retros:            Some(retros),
@@ -1671,10 +1685,20 @@ fn build_prune_plan(
     })
 }
 
-fn system_sandbox_provider(manifest_defaults: &SettingsLayer) -> String {
-    WorkflowSettingsBuilder::from_layer(manifest_defaults).map_or_else(
+fn resolve_manifest_run_settings(
+    manifest_defaults: &SettingsLayer,
+) -> std::result::Result<RunNamespace, String> {
+    WorkflowSettingsBuilder::from_layer(manifest_defaults)
+        .map(|settings| settings.run)
+        .map_err(|err| err.to_string())
+}
+
+fn system_sandbox_provider(
+    manifest_run_settings: &std::result::Result<RunNamespace, String>,
+) -> String {
+    manifest_run_settings.as_ref().map_or_else(
         |_| SandboxProvider::default().to_string(),
-        |settings| settings.run.sandbox.provider,
+        |settings| settings.sandbox.provider.clone(),
     )
 }
 
@@ -2599,11 +2623,13 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         move |name| env_lookup(name)
     });
     let (global_event_tx, _) = broadcast::channel(4096);
-    let (current_server_settings, current_manifest_defaults) = {
+    let (current_server_settings, current_manifest_defaults, current_manifest_run_settings) = {
         let settings = settings.read().expect("settings lock poisoned");
+        let manifest_defaults = Arc::new(run_manifest::manifest_defaults_layer(&settings));
         (
             Arc::new(ServerSettingsBuilder::from_layer(&settings)?),
-            Arc::new(run_manifest::manifest_defaults_layer(&settings)),
+            Arc::clone(&manifest_defaults),
+            resolve_manifest_run_settings(manifest_defaults.as_ref()),
         )
     };
     let slack_service = {
@@ -2645,6 +2671,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         server_secrets,
         provider_credentials,
         manifest_defaults: RwLock::new(current_manifest_defaults),
+        manifest_run_settings: RwLock::new(current_manifest_run_settings),
         server_settings: RwLock::new(current_server_settings),
         env_lookup: Arc::clone(&env_lookup),
         http_client,
@@ -7516,6 +7543,14 @@ root = "/srv/new"
             state.server_settings().server.storage.root.as_source(),
             "/srv/new"
         );
+        assert_eq!(
+            state
+                .manifest_run_settings()
+                .expect("manifest run settings should resolve")
+                .execution
+                .mode,
+            RunMode::DryRun
+        );
         let manifest_defaults = state.manifest_defaults();
         assert_eq!(manifest_defaults.version, Some(1));
         assert_eq!(
@@ -7527,6 +7562,51 @@ root = "/srv/new"
             Some(RunMode::DryRun)
         );
         assert!(manifest_defaults.server.is_none());
+    }
+
+    #[test]
+    fn replace_settings_caches_invalid_manifest_run_settings_tolerantly() {
+        let state = create_app_state_with_options(
+            fabro_config::parse_settings_layer(
+                r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.web]
+url = "http://old.example.com"
+"#,
+            )
+            .expect("settings fixture should parse"),
+            5,
+        );
+
+        let updated = fabro_config::parse_settings_layer(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.web]
+url = "http://new.example.com"
+
+[run.sandbox]
+provider = "invalid-provider"
+"#,
+        )
+        .expect("settings fixture should parse");
+
+        state
+            .replace_settings(updated)
+            .expect("invalid run defaults should not block replace");
+
+        assert_eq!(state.canonical_origin().unwrap(), "http://new.example.com");
+        assert!(
+            state.manifest_run_settings().is_err(),
+            "manifest run settings should stay tolerant for invalid defaults"
+        );
     }
 
     #[test]
@@ -7548,8 +7628,36 @@ retros = false
         .expect("settings fixture should parse");
         let server_settings =
             ServerSettingsBuilder::from_layer(&settings).expect("server settings should resolve");
-        let manifest_defaults = run_manifest::manifest_defaults_layer(&settings);
-        let features = system_features(&server_settings, &manifest_defaults);
+        let manifest_run_settings =
+            resolve_manifest_run_settings(&run_manifest::manifest_defaults_layer(&settings));
+        let features = system_features(&server_settings, &manifest_run_settings);
+
+        assert_eq!(features.session_sandboxes, Some(true));
+        assert_eq!(features.retros, Some(false));
+    }
+
+    #[test]
+    fn system_features_default_retros_when_manifest_run_settings_do_not_resolve() {
+        let settings = fabro_config::parse_settings_layer(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[features]
+session_sandboxes = true
+
+[run.sandbox]
+provider = "invalid-provider"
+"#,
+        )
+        .expect("settings fixture should parse");
+        let server_settings =
+            ServerSettingsBuilder::from_layer(&settings).expect("server settings should resolve");
+        let manifest_run_settings =
+            resolve_manifest_run_settings(&run_manifest::manifest_defaults_layer(&settings));
+        let features = system_features(&server_settings, &manifest_run_settings);
 
         assert_eq!(features.session_sandboxes, Some(true));
         assert_eq!(features.retros, Some(false));
@@ -7566,10 +7674,29 @@ provider = "daytona"
 "#,
         )
         .expect("settings fixture should parse");
+        let manifest_run_settings =
+            resolve_manifest_run_settings(&run_manifest::manifest_defaults_layer(&settings));
+
+        assert_eq!(system_sandbox_provider(&manifest_run_settings), "daytona");
+    }
+
+    #[test]
+    fn system_sandbox_provider_defaults_when_manifest_run_settings_do_not_resolve() {
+        let settings = fabro_config::parse_settings_layer(
+            r#"
+_version = 1
+
+[run.sandbox]
+provider = "invalid-provider"
+"#,
+        )
+        .expect("settings fixture should parse");
+        let manifest_run_settings =
+            resolve_manifest_run_settings(&run_manifest::manifest_defaults_layer(&settings));
 
         assert_eq!(
-            system_sandbox_provider(&run_manifest::manifest_defaults_layer(&settings)),
-            "daytona"
+            system_sandbox_provider(&manifest_run_settings),
+            SandboxProvider::default().to_string()
         );
     }
 
