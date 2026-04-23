@@ -25,8 +25,7 @@ where
 impl Credential {
     pub fn bearer_token(&self) -> &str {
         match self {
-            Self::DevToken(token) => token,
-            Self::Worker(token) => token,
+            Self::DevToken(token) | Self::Worker(token) => token,
             Self::OAuth(entry) => &entry.access_token,
         }
     }

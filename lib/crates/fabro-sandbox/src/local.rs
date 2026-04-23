@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use async_trait::async_trait;
+use fabro_util::env::WORKER_SECRET_ENV_DENYLIST;
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio::task::spawn_blocking;
@@ -57,7 +58,7 @@ impl LocalSandbox {
         if Self::ENV_SAFELIST.contains(&key) {
             return false;
         }
-        if fabro_util::env::WORKER_SECRET_ENV_DENYLIST.contains(&key) {
+        if WORKER_SECRET_ENV_DENYLIST.contains(&key) {
             return true;
         }
         let lower = key.to_lowercase();

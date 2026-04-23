@@ -4219,7 +4219,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     }
 
     if state.registry_factory_override.is_some() {
-        execute_run_in_process(state, run_id).await;
+        Box::pin(execute_run_in_process(state, run_id)).await;
         return;
     }
 
@@ -7348,10 +7348,10 @@ mod tests {
         body["id"].as_str().unwrap().parse().unwrap()
     }
 
-    fn bearer_request(method: Method, path: String, bearer: &str, body: Body) -> Request<Body> {
+    fn bearer_request(method: Method, path: &str, bearer: &str, body: Body) -> Request<Body> {
         Request::builder()
             .method(method)
-            .uri(api(&path))
+            .uri(api(path))
             .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
             .body(body)
             .unwrap()
@@ -7860,7 +7860,7 @@ root = "/srv/new"
         let (store, artifact_store) = test_store_bundle();
         let vault_path = test_secret_store_path();
         let server_env_path = vault_path.with_file_name("server.env");
-        let err = match build_app_state(AppStateConfig {
+        let Err(err) = build_app_state(AppStateConfig {
             settings,
             registry_factory_override: None,
             max_concurrent_runs: 5,
@@ -7872,9 +7872,8 @@ root = "/srv/new"
             http_client: Some(
                 fabro_http::test_http_client().expect("test HTTP client should build"),
             ),
-        }) {
-            Ok(_) => panic!("build_app_state should require SESSION_SECRET"),
-            Err(err) => err,
+        }) else {
+            panic!("build_app_state should require SESSION_SECRET")
         };
 
         assert!(err.to_string().contains(
@@ -9202,7 +9201,7 @@ slug = "fabro"
             .clone()
             .oneshot(bearer_request(
                 Method::GET,
-                format!("/runs/{run_id}/state"),
+                &format!("/runs/{run_id}/state"),
                 &worker_token,
                 Body::empty(),
             ))
@@ -9241,7 +9240,7 @@ slug = "fabro"
             .clone()
             .oneshot(bearer_request(
                 Method::GET,
-                format!("/runs/{run_id}/events"),
+                &format!("/runs/{run_id}/events"),
                 &worker_token,
                 Body::empty(),
             ))
@@ -9253,7 +9252,7 @@ slug = "fabro"
             .clone()
             .oneshot(bearer_request(
                 Method::POST,
-                format!("/runs/{run_id}/blobs"),
+                &format!("/runs/{run_id}/blobs"),
                 &worker_token,
                 Body::from("worker blob"),
             ))
@@ -9265,7 +9264,7 @@ slug = "fabro"
             .clone()
             .oneshot(bearer_request(
                 Method::GET,
-                format!("/runs/{run_id}/blobs/{blob_id}"),
+                &format!("/runs/{run_id}/blobs/{blob_id}"),
                 &worker_token,
                 Body::empty(),
             ))
@@ -9277,7 +9276,7 @@ slug = "fabro"
             .clone()
             .oneshot(bearer_request(
                 Method::GET,
-                format!("/runs/{run_id}/state"),
+                &format!("/runs/{run_id}/state"),
                 &user_jwt,
                 Body::empty(),
             ))
@@ -9289,7 +9288,7 @@ slug = "fabro"
             .clone()
             .oneshot(bearer_request(
                 Method::GET,
-                format!("/runs/{run_id}/state"),
+                &format!("/runs/{run_id}/state"),
                 &other_worker_token,
                 Body::empty(),
             ))
@@ -9430,7 +9429,7 @@ slug = "fabro"
                 .clone()
                 .oneshot(bearer_request(
                     method.clone(),
-                    path.clone(),
+                    &path,
                     &worker_token,
                     Body::empty(),
                 ))
@@ -9450,7 +9449,7 @@ slug = "fabro"
             .clone()
             .oneshot(bearer_request(
                 Method::GET,
-                format!("/runs/{run_id}/blobs/{blob_id}"),
+                &format!("/runs/{run_id}/blobs/{blob_id}"),
                 &worker_token,
                 Body::empty(),
             ))

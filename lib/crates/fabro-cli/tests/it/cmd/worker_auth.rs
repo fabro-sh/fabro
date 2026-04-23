@@ -6,6 +6,10 @@
     clippy::disallowed_types,
     reason = "These regressions intentionally own Child processes to exercise the real server-dispatched worker path."
 )]
+#![expect(
+    clippy::unwrap_used,
+    reason = "Integration-test setup for real-subprocess auth harness; panic-on-failure is the desired behavior."
+)]
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -113,7 +117,7 @@ client_id = "github-client-id"
         format!("{}/api/v1", self.api_base_url)
     }
 
-    async fn shutdown(mut self) {
+    fn shutdown(mut self) {
         let mut stop = Command::new(env!("CARGO_BIN_EXE_fabro"));
         apply_test_isolation(&mut stop, self.home_root.path());
         stop.env("FABRO_HOME", &self.worker_home);
@@ -372,7 +376,7 @@ async fn github_only_server_dispatched_worker_succeeds_without_worker_auth_store
     assert!(!server.worker_home.join("auth.json").exists());
     assert!(!server.worker_home.join("auth.lock").exists());
 
-    server.shutdown().await;
+    server.shutdown();
 }
 
 #[test]
@@ -461,6 +465,6 @@ fn runner_rejects_bogus_worker_token_against_github_only_server() {
         assert!(!auth_file.exists());
         assert!(!auth_file.with_extension("lock").exists());
 
-        server.shutdown().await;
+        server.shutdown();
     });
 }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{FromRequestParts, Path};
+use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use fabro_types::{RunBlobId, RunId, StageId};
@@ -78,7 +79,7 @@ pub(crate) fn issue_worker_token(
     };
     jsonwebtoken::encode(&Header::new(Algorithm::HS256), &claims, &keys.encoding).map_err(|err| {
         ApiError::new(
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::INTERNAL_SERVER_ERROR,
             format!("failed to sign worker token: {err}"),
         )
     })
@@ -239,7 +240,7 @@ mod tests {
         if let Some(authorization) = authorization {
             builder = builder.header(header::AUTHORIZATION, authorization);
         }
-        let (parts, _) = builder.body(()).unwrap().into_parts();
+        let (parts, ()) = builder.body(()).unwrap().into_parts();
         parts
     }
 

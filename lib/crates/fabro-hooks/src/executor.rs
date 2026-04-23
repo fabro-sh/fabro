@@ -855,9 +855,8 @@ mod tests {
         let removed = cmd
             .as_std()
             .get_envs()
-            .filter_map(|(name, value)| {
-                (value.is_none()).then(|| name.to_string_lossy().into_owned())
-            })
+            .filter(|(_, value)| value.is_none())
+            .map(|(name, _)| name.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
 
         for key in WORKER_SECRET_ENV_DENYLIST {
