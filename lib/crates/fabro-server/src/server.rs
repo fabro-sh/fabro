@@ -576,6 +576,7 @@ pub struct AppState {
     pub(super) server_secrets:       ServerSecrets,
     pub(crate) provider_credentials: ProviderCredentials,
     pub(crate) settings:             Arc<RwLock<SettingsLayer>>,
+    manifest_defaults:               RwLock<Arc<SettingsLayer>>,
     pub(crate) server_settings:      RwLock<Arc<ServerSettings>>,
     pub(crate) env_lookup:           EnvLookup,
     http_client:                     Option<fabro_http::HttpClient>,
@@ -641,6 +642,15 @@ fn accumulate_model_billing(entry: &mut ModelBillingTotals, usage: &BilledModelU
 }
 
 impl AppState {
+    pub(crate) fn manifest_defaults(&self) -> Arc<SettingsLayer> {
+        Arc::clone(
+            &self
+                .manifest_defaults
+                .read()
+                .expect("manifest defaults lock poisoned"),
+        )
+    }
+
     pub(crate) fn server_settings(&self) -> Arc<ServerSettings> {
         Arc::clone(
             &self
@@ -784,9 +794,14 @@ impl AppState {
 
     pub(crate) fn replace_settings(&self, settings: SettingsLayer) -> anyhow::Result<()> {
         let resolved = Arc::new(ServerSettingsBuilder::from_layer(&settings)?);
+        let manifest_defaults = Arc::new(run_manifest::manifest_defaults_layer(&settings));
         resolve_canonical_origin(&resolved.server, &self.env_lookup).map_err(anyhow::Error::msg)?;
 
         *self.settings.write().expect("settings lock poisoned") = settings;
+        *self
+            .manifest_defaults
+            .write()
+            .expect("manifest defaults lock poisoned") = manifest_defaults;
         *self
             .server_settings
             .write()
@@ -2584,9 +2599,12 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         move |name| env_lookup(name)
     });
     let (global_event_tx, _) = broadcast::channel(4096);
-    let current_server_settings = {
+    let (current_server_settings, current_manifest_defaults) = {
         let settings = settings.read().expect("settings lock poisoned");
-        Arc::new(ServerSettingsBuilder::from_layer(&settings)?)
+        (
+            Arc::new(ServerSettingsBuilder::from_layer(&settings)?),
+            Arc::new(run_manifest::manifest_defaults_layer(&settings)),
+        )
     };
     let slack_service = {
         current_server_settings
@@ -2627,6 +2645,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         server_secrets,
         provider_credentials,
         settings,
+        manifest_defaults: RwLock::new(current_manifest_defaults),
         server_settings: RwLock::new(current_server_settings),
         env_lookup: Arc::clone(&env_lookup),
         http_client,
@@ -4018,10 +4037,8 @@ async fn create_run(
         Ok(req) => req,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let prepared = match run_manifest::prepare_manifest(
-        &state.settings.read().expect("settings lock poisoned"),
-        &req,
-    ) {
+    let manifest_defaults = state.manifest_defaults();
+    let prepared = match run_manifest::prepare_manifest(manifest_defaults.as_ref(), &req) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -4139,10 +4156,8 @@ async fn run_preflight(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RunManifest>,
 ) -> Response {
-    let prepared = match run_manifest::prepare_manifest(
-        &state.settings.read().expect("settings lock poisoned"),
-        &req,
-    ) {
+    let manifest_defaults = state.manifest_defaults();
+    let prepared = match run_manifest::prepare_manifest(manifest_defaults.as_ref(), &req) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -4168,10 +4183,8 @@ async fn render_graph_from_manifest(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RenderWorkflowGraphRequest>,
 ) -> Response {
-    let prepared = match run_manifest::prepare_manifest(
-        &state.settings.read().expect("settings lock poisoned"),
-        &req.manifest,
-    ) {
+    let manifest_defaults = state.manifest_defaults();
+    let prepared = match run_manifest::prepare_manifest(manifest_defaults.as_ref(), &req.manifest) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -7486,6 +7499,9 @@ methods = ["dev-token"]
 [server.web]
 url = "http://new.example.com"
 
+[run.execution]
+mode = "dry_run"
+
 [server.storage]
 root = "/srv/new"
 "#,
@@ -7501,6 +7517,17 @@ root = "/srv/new"
             state.server_settings().server.storage.root.as_source(),
             "/srv/new"
         );
+        let manifest_defaults = state.manifest_defaults();
+        assert_eq!(manifest_defaults.version, Some(1));
+        assert_eq!(
+            manifest_defaults
+                .run
+                .as_ref()
+                .and_then(|run| run.execution.as_ref())
+                .and_then(|execution| execution.mode),
+            Some(RunMode::DryRun)
+        );
+        assert!(manifest_defaults.server.is_none());
 
         let layer_root = state
             .settings
