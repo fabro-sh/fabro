@@ -140,6 +140,13 @@ impl WorkflowSettingsBuilder {
         Self::default()
     }
 
+    pub fn from_toml(source: &str) -> Result<WorkflowSettings> {
+        let layer = parse_settings_layer(source)
+            .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        Self::from_layer(&layer)
+            .map_err(|errors| Error::resolve("failed to resolve workflow settings", errors.into()))
+    }
+
     #[must_use]
     pub fn args_layer(mut self, layer: SettingsLayer) -> Self {
         self.args = layer;

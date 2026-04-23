@@ -376,7 +376,7 @@ mod tests {
     use axum::{Json, Router};
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use fabro_config::{Error as ConfigError, ServerSettingsBuilder, parse_settings_layer};
+    use fabro_config::{Error as ConfigError, ServerSettingsBuilder};
     use fabro_types::IdpIdentity;
     use fabro_types::settings::ServerAuthMethod;
     use tower::ServiceExt;
@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn fails_when_auth_methods_empty() {
-        let file = parse_settings_layer(
+        let ConfigError::Resolve { errors, .. } = ServerSettingsBuilder::from_toml(
             r"
 _version = 1
 
@@ -557,10 +557,7 @@ _version = 1
 methods = []
 ",
         )
-        .expect("fixture should parse");
-        let ConfigError::Resolve { errors, .. } =
-            ServerSettingsBuilder::from_layer(&file).expect_err("empty auth methods should fail")
-        else {
+        .expect_err("empty auth methods should fail") else {
             panic!("expected settings resolution error");
         };
         assert!(errors.iter().any(|err| matches!(

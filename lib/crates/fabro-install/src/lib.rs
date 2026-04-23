@@ -657,13 +657,11 @@ name = "custom"
         )
         .unwrap();
 
-        let settings = fabro_config::parse_settings_layer(
+        let resolved = ServerSettingsBuilder::from_toml(
             &toml::to_string_pretty(&doc).expect("settings should serialize"),
         )
-        .expect("settings should parse");
-        let resolved = ServerSettingsBuilder::from_layer(&settings)
-            .expect("settings should resolve")
-            .server;
+        .expect("settings should resolve")
+        .server;
         match resolved.listen {
             ServerListenSettings::Tcp { address, .. } => {
                 assert_eq!(address.to_string(), "0.0.0.0:32276");

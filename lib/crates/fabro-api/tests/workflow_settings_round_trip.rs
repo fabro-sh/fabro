@@ -1,7 +1,7 @@
 use std::any::{TypeId, type_name};
 
 use fabro_api::types::WorkflowSettings as ApiWorkflowSettings;
-use fabro_config::{WorkflowSettingsBuilder, parse_settings_layer};
+use fabro_config::WorkflowSettingsBuilder;
 use fabro_types::WorkflowSettings;
 
 #[test]
@@ -11,7 +11,7 @@ fn workflow_settings_family_reuses_domain_types() {
 
 #[test]
 fn workflow_settings_json_matches_openapi_shape() {
-    let layer = parse_settings_layer(
+    let settings = WorkflowSettingsBuilder::from_toml(
         r#"
 _version = 1
 
@@ -29,8 +29,7 @@ goal = "Ship it"
 approval = "auto"
 "#,
     )
-    .expect("settings fixture should parse");
-    let settings = WorkflowSettingsBuilder::from_layer(&layer).expect("settings should resolve");
+    .expect("settings should resolve");
 
     let json = serde_json::to_value(&settings).expect("workflow settings should serialize");
     assert_eq!(json["project"]["directory"], "workspace");

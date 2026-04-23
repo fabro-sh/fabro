@@ -21,7 +21,7 @@ const DEV_TOKEN: &str =
 const SESSION_SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn dev_token_enabled_auth_mode() -> AuthMode {
-    let settings = parse_settings_layer(
+    let resolved = ServerSettingsBuilder::from_toml(
         r#"
 _version = 1
 
@@ -29,10 +29,8 @@ _version = 1
 methods = ["dev-token"]
 "#,
     )
-    .expect("settings fixture should parse");
-    let resolved = ServerSettingsBuilder::from_layer(&settings)
-        .expect("settings should resolve")
-        .server;
+    .expect("settings should resolve")
+    .server;
     resolve_auth_mode_with_lookup(&resolved, |name| match name {
         "SESSION_SECRET" => Some(SESSION_SECRET.to_string()),
         "FABRO_DEV_TOKEN" => Some(DEV_TOKEN.to_string()),

@@ -4,7 +4,7 @@ use fabro_api::types::{
     FeaturesNamespace as ApiFeaturesNamespace, ObjectStoreSettings as ApiObjectStoreSettings,
     ServerNamespace as ApiServerNamespace, ServerSettings as ApiServerSettings,
 };
-use fabro_config::{ServerSettingsBuilder, parse_settings_layer};
+use fabro_config::ServerSettingsBuilder;
 use fabro_types::ServerSettings;
 use fabro_types::settings::server::ObjectStoreSettings;
 use fabro_types::settings::{FeaturesNamespace, ServerNamespace};
@@ -19,7 +19,7 @@ fn server_settings_family_reuses_domain_types() {
 
 #[test]
 fn server_settings_json_matches_openapi_shape() {
-    let layer = parse_settings_layer(
+    let settings = ServerSettingsBuilder::from_toml(
         r#"
 _version = 1
 
@@ -54,8 +54,7 @@ slug = "fabro-dev"
 session_sandboxes = true
 "#,
     )
-    .expect("settings fixture should parse");
-    let settings = ServerSettingsBuilder::from_layer(&layer).expect("settings should resolve");
+    .expect("settings should resolve");
 
     let json = serde_json::to_value(&settings).expect("server settings should serialize");
     assert_eq!(json["server"]["listen"]["type"], "tcp");
