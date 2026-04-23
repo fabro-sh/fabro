@@ -3,7 +3,6 @@ use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_api::types as api_types;
 use fabro_model::{Catalog, Model, Provider};
-use fabro_types::settings::cli::OutputFormat;
 use fabro_util::terminal::Styles;
 use serde::Serialize;
 
@@ -50,12 +49,7 @@ pub(crate) async fn execute(
     let ctx = base_ctx.with_target(target_args)?;
     let server = ctx.server().await?;
 
-    run_models(
-        command,
-        &server,
-        ctx.user_settings().cli.output.format == OutputFormat::Json,
-    )
-    .await
+    run_models(command, &server, ctx.json_output()).await
 }
 
 fn format_context_window(tokens: i64) -> String {

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
+use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::terminal::Styles;
 
 use crate::args::RunArgs;
@@ -35,7 +35,7 @@ pub(crate) async fn execute(mut args: RunArgs, base_ctx: &CommandContext) -> Res
     let client = ctx.server().await?;
     super::start::start_run_with_client(&client, &created_run.run_id, false).await?;
 
-    let json = ctx.user_settings().cli.output.format == OutputFormat::Json;
+    let json = ctx.json_output();
     if args.detach {
         if json {
             print_json_pretty(&serde_json::json!({ "run_id": created_run.run_id }))?;

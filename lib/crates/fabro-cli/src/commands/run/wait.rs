@@ -11,7 +11,6 @@ use std::io::Write;
 
 use anyhow::{Result, bail};
 use fabro_types::RunId;
-use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_workflow::records::Conclusion;
@@ -57,7 +56,7 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, base_ctx: &CommandCont
 
     let conclusion = client.get_run_state(&run_id).await?.conclusion;
 
-    if ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if ctx.json_output() {
         let json_value = build_json_output(final_status, &run_id, conclusion.as_ref());
         let mut out = std::io::stdout().lock();
         serde_json::to_writer_pretty(&mut out, &json_value)?;

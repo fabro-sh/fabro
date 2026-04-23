@@ -1,7 +1,6 @@
 use anyhow::Result;
 use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
-use fabro_types::settings::cli::OutputFormat;
 use fabro_util::terminal::Styles;
 use futures::future::join_all;
 use serde::Serialize;
@@ -36,7 +35,7 @@ pub(super) async fn list_command(args: PrListArgs, base_ctx: &CommandContext) ->
     }
 
     if entries.is_empty() {
-        if ctx.user_settings().cli.output.format == OutputFormat::Json {
+        if ctx.json_output() {
             print_json_pretty(&Vec::<PrRow>::new())?;
             return Ok(());
         }
@@ -98,7 +97,7 @@ pub(super) async fn list_command(args: PrListArgs, base_ctx: &CommandContext) ->
             .collect()
     };
 
-    if ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if ctx.json_output() {
         print_json_pretty(&rows)?;
         return Ok(());
     }

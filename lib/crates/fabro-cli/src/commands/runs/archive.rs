@@ -1,5 +1,4 @@
 use anyhow::{Result, bail};
-use fabro_types::settings::cli::OutputFormat;
 
 use super::short_run_id;
 use crate::args::{RunsArchiveArgs, RunsUnarchiveArgs};
@@ -16,7 +15,7 @@ pub(crate) async fn archive_command(
         Action::Archive,
         &args.runs,
         ctx.server().await?.as_ref(),
-        ctx.user_settings().cli.output.format == OutputFormat::Json,
+        ctx.json_output(),
         ctx.printer(),
     )
     .await
@@ -31,7 +30,7 @@ pub(crate) async fn unarchive_command(
         Action::Unarchive,
         &args.runs,
         ctx.server().await?.as_ref(),
-        ctx.user_settings().cli.output.format == OutputFormat::Json,
+        ctx.json_output(),
         ctx.printer(),
     )
     .await

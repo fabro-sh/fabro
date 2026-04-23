@@ -1,5 +1,4 @@
 use anyhow::Result;
-use fabro_types::settings::cli::OutputFormat;
 use tracing::info;
 
 use crate::args::PrViewArgs;
@@ -24,7 +23,7 @@ pub(super) async fn view_command(args: PrViewArgs, base_ctx: &CommandContext) ->
 
     info!(number = detail.number, owner = %record.owner, repo = %record.repo, "Viewing pull request");
 
-    if base_ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if base_ctx.json_output() {
         print_json_pretty(&detail)?;
         return Ok(());
     }

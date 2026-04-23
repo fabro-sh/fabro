@@ -1,5 +1,4 @@
 use anyhow::Result;
-use fabro_types::settings::cli::OutputFormat;
 use tracing::info;
 
 use crate::args::PrMergeArgs;
@@ -24,7 +23,7 @@ pub(super) async fn merge_command(args: PrMergeArgs, base_ctx: &CommandContext) 
     .map_err(|err| anyhow::anyhow!("{err}"))?;
 
     info!(number = record.number, owner = %record.owner, repo = %record.repo, method = %args.method, "Merged pull request");
-    if base_ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if base_ctx.json_output() {
         print_json_pretty(&serde_json::json!({
             "number": record.number,
             "html_url": record.html_url,

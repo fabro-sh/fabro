@@ -14,7 +14,6 @@ use fabro_api::types;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
 use fabro_types::settings::SettingsLayer;
-use fabro_types::settings::cli::OutputFormat;
 use fabro_util::terminal::Styles;
 use tracing::debug;
 
@@ -70,7 +69,7 @@ pub(crate) async fn run(
     if let Some(ref output_path) = args.output {
         std::fs::write(output_path, &rendered)
             .with_context(|| format!("writing rendered graph to {}", output_path.display()))?;
-        if ctx.user_settings().cli.output.format == OutputFormat::Json {
+        if ctx.json_output() {
             print_json_pretty(&serde_json::json!({
                 "path": absolute_or_current(output_path),
                 "format": args.format.to_string(),

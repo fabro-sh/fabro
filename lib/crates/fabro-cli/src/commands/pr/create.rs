@@ -5,7 +5,6 @@ use fabro_auth::configured_providers_from_process_env;
 use fabro_config::Storage;
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
-use fabro_types::settings::cli::OutputFormat;
 use fabro_vault::Vault;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::pull_request::maybe_open_pull_request;
@@ -130,14 +129,14 @@ pub(super) async fn create_command(args: PrCreateArgs, base_ctx: &CommandContext
     match pull_request {
         Some(record) => {
             info!(pr_url = %record.html_url, "Pull request created");
-            if ctx.user_settings().cli.output.format == OutputFormat::Json {
+            if ctx.json_output() {
                 print_json_pretty(&record)?;
             } else {
                 fabro_util::printout!(printer, "{}", record.html_url);
             }
         }
         None => {
-            if ctx.user_settings().cli.output.format == OutputFormat::Json {
+            if ctx.json_output() {
                 print_json_pretty(&serde_json::Value::Null)?;
             } else {
                 fabro_util::printout!(printer, "No pull request created (empty diff).");

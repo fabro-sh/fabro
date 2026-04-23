@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use fabro_api::types as api_types;
 use fabro_config::user::active_settings_path;
-use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
+use fabro_types::settings::cli::OutputVerbosity;
 pub(crate) use fabro_util::check_report::{
     CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
 };
@@ -147,7 +147,7 @@ pub(crate) async fn run_doctor(
         args.verbose || base_ctx.user_settings().cli.output.verbosity == OutputVerbosity::Verbose;
     let printer = base_ctx.printer();
     let styles = Styles::detect_stdout();
-    let json = base_ctx.user_settings().cli.output.format == OutputFormat::Json;
+    let json = base_ctx.json_output();
     let spinner = if json {
         None
     } else {

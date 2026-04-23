@@ -6,7 +6,6 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use fabro_types::settings::cli::OutputFormat;
 use tokio::process::Command as TokioCommand;
 use tokio::task::spawn_blocking;
 
@@ -76,7 +75,7 @@ draft = true
     let green = console::Style::new().green();
     let bold = console::Style::new().bold();
     let dim = console::Style::new().dim();
-    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
+    if !base_ctx.json_output() {
         fabro_util::printerr!(
             printer,
             "  {} {}",
@@ -109,7 +108,7 @@ draft = true
     )
     .with_context(|| format!("failed to write {}", dot_path.display()))?;
     created.push(".fabro/workflows/hello/workflow.fabro".to_string());
-    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
+    if !base_ctx.json_output() {
         fabro_util::printerr!(
             printer,
             "  {} {}",
@@ -126,7 +125,7 @@ draft = true
     )
     .with_context(|| format!("failed to write {}", toml_path.display()))?;
     created.push(".fabro/workflows/hello/workflow.toml".to_string());
-    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
+    if !base_ctx.json_output() {
         fabro_util::printerr!(
             printer,
             "  {} {}",
@@ -135,7 +134,7 @@ draft = true
         );
     }
 
-    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
+    if !base_ctx.json_output() {
         fabro_util::printerr!(
             printer,
             "\n{} Run a workflow with:\n\n  {}",
@@ -147,7 +146,7 @@ draft = true
         );
     }
 
-    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
+    if !base_ctx.json_output() {
         check_github_app_installation(&args.target, base_ctx).await;
     }
 

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail};
 use fabro_api::types;
-use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 use tracing::{debug, info};
 
@@ -24,11 +23,7 @@ pub(super) async fn prune_command(args: &RunsPruneArgs, base_ctx: &CommandContex
             workflow:   args.filter.workflow.clone(),
         })
         .await?;
-    prune_from(
-        &response,
-        ctx.user_settings().cli.output.format == OutputFormat::Json,
-        printer,
-    )
+    prune_from(&response, ctx.json_output(), printer)
 }
 
 pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {

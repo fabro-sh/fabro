@@ -13,7 +13,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_types::settings::cli::OutputFormat;
 use fabro_util::json::normalize_json_value;
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::terminal::Styles;
@@ -52,7 +51,7 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, base_ctx: &CommandCont
     let stdout = io::stdout();
     let is_tty = stdout.is_terminal();
     let mut out = stdout.lock();
-    let pretty = args.pretty && ctx.user_settings().cli.output.format != OutputFormat::Json;
+    let pretty = args.pretty && !ctx.json_output();
 
     for line in &filtered {
         if pretty {

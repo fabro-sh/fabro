@@ -1,4 +1,4 @@
-use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
+use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::terminal::Styles;
 
 use crate::args::ResumeArgs;
@@ -22,7 +22,7 @@ pub(crate) async fn resume_command(
 
     super::start::start_run_with_client(client.as_ref(), &run_id, true).await?;
 
-    let json = ctx.user_settings().cli.output.format == OutputFormat::Json;
+    let json = ctx.json_output();
     if args.detach {
         if json {
             print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;

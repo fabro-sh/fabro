@@ -11,7 +11,6 @@ use std::io::Write;
 
 use fabro_api::types::ServerSettings;
 use fabro_config::UserSettings;
-use fabro_types::settings::cli::OutputFormat;
 use serde::Serialize;
 
 use crate::args::SettingsArgs;
@@ -40,7 +39,7 @@ async fn rendered_config(
 
 pub(crate) async fn execute(args: &SettingsArgs, base_ctx: &CommandContext) -> anyhow::Result<()> {
     let config = Box::pin(rendered_config(args, base_ctx)).await?;
-    if base_ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if base_ctx.json_output() {
         print_json_pretty(&config)?;
         return Ok(());
     }

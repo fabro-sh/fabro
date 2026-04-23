@@ -1,5 +1,5 @@
 use anyhow::Result;
-use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
+use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::terminal::Styles;
 
 use crate::args::{AttachArgs, RunCommands, RunWorkerArgs, StartArgs};
@@ -33,7 +33,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, base_ctx: &CommandContext) -> Res
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let ctx = base_ctx.with_target(&args.target)?;
             let created_run = Box::pin(create::create_run(&ctx, &args, styles, true)).await?;
-            if ctx.user_settings().cli.output.format == OutputFormat::Json {
+            if ctx.json_output() {
                 print_json_pretty(&serde_json::json!({ "run_id": created_run.run_id }))?;
             } else {
                 fabro_util::printout!(printer, "{}", created_run.run_id);
@@ -45,7 +45,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, base_ctx: &CommandContext) -> Res
             let client = ctx.server().await?;
             let run_id = client.resolve_run(&run).await?.run_id;
             start::start_run_with_client(client.as_ref(), &run_id, false).await?;
-            if ctx.user_settings().cli.output.format == OutputFormat::Json {
+            if ctx.json_output() {
                 print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
             }
             Ok(())
@@ -55,7 +55,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, base_ctx: &CommandContext) -> Res
             let ctx = base_ctx.with_target(&server)?;
             let client = ctx.server().await?;
             let run_id = client.resolve_run(&run).await?.run_id;
-            let json = ctx.user_settings().cli.output.format == OutputFormat::Json;
+            let json = ctx.json_output();
             let exit_code = Box::pin(attach::attach_run_with_client(
                 client.as_ref(),
                 &run_id,

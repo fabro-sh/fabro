@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use fabro_types::settings::cli::OutputFormat;
 use tracing::info;
 
 use crate::args::PreviewArgs;
@@ -24,7 +23,7 @@ pub(crate) async fn run(args: PreviewArgs, base_ctx: &CommandContext) -> Result<
 
     info!(run_id = %args.run, port = args.port, "Generating preview URL");
 
-    let json = ctx.user_settings().cli.output.format == OutputFormat::Json;
+    let json = ctx.json_output();
     if json {
         match response.token {
             Some(token) => {

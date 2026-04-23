@@ -2,7 +2,6 @@ use anyhow::bail;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
 use fabro_types::settings::SettingsLayer;
-use fabro_types::settings::cli::OutputFormat;
 use fabro_util::terminal::Styles;
 
 use crate::args::ValidateArgs;
@@ -31,7 +30,7 @@ pub(crate) async fn run(
     let response = client.run_preflight(built.manifest).await?;
     let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);
 
-    if ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if ctx.json_output() {
         print_json_pretty(&serde_json::json!({
             "workflow_name": response.workflow.name,
             "nodes": response.workflow.nodes,

@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use fabro_checkpoint::git::Store;
-use fabro_types::settings::cli::OutputFormat;
 use fabro_util::terminal::Styles;
 use fabro_workflow::operations::{ForkRunInput, RewindTarget, build_timeline_or_rebuild, fork};
 use git2::Repository;
@@ -27,7 +26,7 @@ pub(crate) async fn run(args: &ForkArgs, styles: &Styles, base_ctx: &CommandCont
     let timeline = build_timeline_or_rebuild(&store, Some(&run_store), &run_id).await?;
 
     if args.list {
-        if ctx.user_settings().cli.output.format == OutputFormat::Json {
+        if ctx.json_output() {
             print_json_pretty(&super::rewind::timeline_entries_json(&timeline))?;
             return Ok(());
         }
@@ -49,7 +48,7 @@ pub(crate) async fn run(args: &ForkArgs, styles: &Styles, base_ctx: &CommandCont
     let run_id_string = run_id.to_string();
     let new_run_id_string = new_run_id.to_string();
 
-    if ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if ctx.json_output() {
         let target = args.target.clone().unwrap_or_else(|| "latest".to_string());
         print_json_pretty(&serde_json::json!({
             "source_run_id": run_id_string,

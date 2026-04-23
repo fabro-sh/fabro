@@ -6,7 +6,6 @@
 use std::io::IsTerminal;
 
 use anyhow::Result;
-use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 use serde_json::{Map, Value, json};
 
@@ -44,7 +43,7 @@ pub(crate) async fn version_command(args: &VersionArgs, base_ctx: &CommandContex
         },
     };
 
-    if ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if ctx.json_output() {
         print_json_pretty(&json_output(&client, &server_info))?;
         return Ok(());
     }

@@ -1,5 +1,4 @@
 use anyhow::{Result, bail};
-use fabro_types::settings::cli::OutputFormat;
 use tracing::info;
 
 use crate::args::SshArgs;
@@ -20,7 +19,7 @@ pub(crate) async fn run(args: SshArgs, base_ctx: &CommandContext) -> Result<()> 
     info!(run_id = %args.run, ttl_minutes = args.ttl, "Creating SSH access");
 
     if args.print {
-        if ctx.user_settings().cli.output.format == OutputFormat::Json {
+        if ctx.json_output() {
             print_json_pretty(&serde_json::json!({ "command": ssh.command }))?;
         } else {
             {

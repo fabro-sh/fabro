@@ -1,7 +1,6 @@
 use anyhow::Result;
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
-use fabro_types::settings::cli::OutputFormat;
 use fabro_util::terminal::Styles;
 
 use crate::args::ArtifactListArgs;
@@ -18,7 +17,7 @@ pub(super) async fn list_command(args: &ArtifactListArgs, base_ctx: &CommandCont
     )
     .await?;
 
-    if base_ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if base_ctx.json_output() {
         fabro_util::printout!(printer, "{}", serde_json::to_string_pretty(&entries)?);
         return Ok(());
     }

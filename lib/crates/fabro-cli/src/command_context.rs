@@ -5,7 +5,7 @@ use anyhow::{Context as _, Result, bail};
 use fabro_config::UserSettings;
 use fabro_config::merge::combine_files;
 use fabro_types::settings::SettingsLayer;
-use fabro_types::settings::cli::CliLayer;
+use fabro_types::settings::cli::{CliLayer, OutputFormat};
 use fabro_util::printer::Printer;
 use tokio::sync::OnceCell;
 
@@ -152,6 +152,10 @@ impl CommandContext {
 
     pub(crate) fn user_settings(&self) -> &UserSettings {
         &self.user_settings
+    }
+
+    pub(crate) fn json_output(&self) -> bool {
+        self.user_settings.cli.output.format == OutputFormat::Json
     }
 
     pub(crate) async fn server(&self) -> Result<Arc<Client>> {

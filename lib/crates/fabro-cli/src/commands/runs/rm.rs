@@ -1,5 +1,4 @@
 use anyhow::{Result, bail};
-use fabro_types::settings::cli::OutputFormat;
 
 use super::short_run_id;
 use crate::args::RunsRemoveArgs;
@@ -12,7 +11,7 @@ pub(crate) async fn remove_command(args: &RunsRemoveArgs, base_ctx: &CommandCont
     remove_from(
         args,
         ctx.server().await?.as_ref(),
-        ctx.user_settings().cli.output.format == OutputFormat::Json,
+        ctx.json_output(),
         ctx.printer(),
     )
     .await

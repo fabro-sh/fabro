@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_types::settings::cli::OutputFormat;
 use tokio::fs;
 use tracing::{debug, info};
 
@@ -44,7 +43,7 @@ pub(crate) async fn cp_command(args: CpArgs, base_ctx: &CommandContext) -> Resul
                 None
             };
 
-            if base_ctx.user_settings().cli.output.format == OutputFormat::Json {
+            if base_ctx.json_output() {
                 let mut value = serde_json::json!({
                     "direction": "download",
                     "recursive": args.recursive,
@@ -75,7 +74,7 @@ pub(crate) async fn cp_command(args: CpArgs, base_ctx: &CommandContext) -> Resul
                 None
             };
 
-            if base_ctx.user_settings().cli.output.format == OutputFormat::Json {
+            if base_ctx.json_output() {
                 let mut value = serde_json::json!({
                     "direction": "upload",
                     "recursive": args.recursive,

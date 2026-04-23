@@ -3,7 +3,6 @@ use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_checkpoint::git::Store;
 use fabro_types::run_event::{CheckpointCompletedProps, RunRewoundProps, RunSubmittedProps};
-use fabro_types::settings::cli::OutputFormat;
 use fabro_types::{EventBody, RunEvent};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -52,7 +51,7 @@ pub(crate) async fn run(
     let timeline = build_timeline_or_rebuild(&store, Some(&run_store), &run_id).await?;
 
     if args.list || args.target.is_none() {
-        if ctx.user_settings().cli.output.format == OutputFormat::Json {
+        if ctx.json_output() {
             print_json_pretty(&timeline_entries_json(&timeline))?;
             return Ok(());
         }
@@ -77,7 +76,7 @@ pub(crate) async fn run(
 
     let run_id_string = run_id.to_string();
 
-    if ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if ctx.json_output() {
         print_json_pretty(&serde_json::json!({
             "run_id": run_id_string,
             "target": target_arg,

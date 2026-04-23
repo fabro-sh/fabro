@@ -1,5 +1,4 @@
 use anyhow::Result;
-use fabro_types::settings::cli::OutputFormat;
 
 use crate::args::SystemInfoArgs;
 use crate::command_context::CommandContext;
@@ -10,7 +9,7 @@ pub(super) async fn info_command(args: &SystemInfoArgs, base_ctx: &CommandContex
     let server = ctx.server().await?;
     let response = server.get_system_info().await?;
 
-    if ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if ctx.json_output() {
         print_json_pretty(&response)?;
         return Ok(());
     }

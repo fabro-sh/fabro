@@ -3,7 +3,6 @@ use chrono::{DateTime, Utc};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_api::types;
-use fabro_types::settings::cli::OutputFormat;
 
 use crate::args::DfArgs;
 use crate::command_context::CommandContext;
@@ -12,7 +11,7 @@ use crate::shared::{format_size, print_json_pretty};
 pub(super) async fn df_command(args: &DfArgs, base_ctx: &CommandContext) -> Result<()> {
     let ctx = base_ctx.with_connection(&args.connection)?;
     let server = ctx.server().await?;
-    let json = ctx.user_settings().cli.output.format == OutputFormat::Json;
+    let json = ctx.json_output();
 
     let (output, storage_dir) = if json {
         (server.get_system_disk_usage(args.verbose).await?, None)

@@ -11,7 +11,6 @@ use bytes::Bytes;
 #[cfg(test)]
 use fabro_store::{ArtifactStore, RunDatabase};
 use fabro_store::{EventEnvelope, RunProjection, StageId};
-use fabro_types::settings::cli::OutputFormat;
 use fabro_types::{RunBlobId, RunId};
 use futures::future::BoxFuture;
 #[cfg(test)]
@@ -32,7 +31,7 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, base_ctx: &CommandContext
     let state = client.get_run_state(&run_id).await?;
     let source = ServerDumpSource::new(client.as_ref(), &run_id);
     let file_count = export_run_from_source(&source, &state, &args.output).await?;
-    if ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if ctx.json_output() {
         print_json_pretty(&serde_json::json!({
             "run_id": run_id,
             "output_dir": absolute_or_current(&args.output),

@@ -1,6 +1,5 @@
 use anyhow::Result;
 use fabro_client::sse;
-use fabro_types::settings::cli::OutputFormat;
 use futures::StreamExt;
 
 use crate::args::SystemEventsArgs;
@@ -15,7 +14,7 @@ pub(super) async fn events_command(
     let mut stream = server.attach_events(&args.run_ids).await?;
     let mut pending = Vec::new();
 
-    let json = ctx.user_settings().cli.output.format == OutputFormat::Json;
+    let json = ctx.json_output();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|err| anyhow::anyhow!("{err}"))?;
         pending.extend_from_slice(&chunk);

@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, bail};
-use fabro_types::settings::cli::OutputFormat;
 
 use crate::command_context::CommandContext;
 
@@ -21,7 +20,7 @@ pub(crate) fn run_deinit(base_ctx: &CommandContext) -> Result<Vec<String>> {
     std::fs::remove_dir_all(&fabro_dir)
         .with_context(|| format!("failed to remove {}", fabro_dir.display()))?;
     removed.push(".fabro/".to_string());
-    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
+    if !base_ctx.json_output() {
         fabro_util::printerr!(
             printer,
             "  {} {}",
@@ -30,7 +29,7 @@ pub(crate) fn run_deinit(base_ctx: &CommandContext) -> Result<Vec<String>> {
         );
     }
 
-    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
+    if !base_ctx.json_output() {
         fabro_util::printerr!(
             printer,
             "\n{}",

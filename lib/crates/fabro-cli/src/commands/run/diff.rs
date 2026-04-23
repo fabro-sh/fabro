@@ -10,7 +10,6 @@
 use std::io::{self, IsTerminal, Write};
 
 use anyhow::{Context, Result, bail};
-use fabro_types::settings::cli::OutputFormat;
 use tracing::{debug, info};
 
 use crate::args::DiffArgs;
@@ -27,7 +26,7 @@ pub(crate) async fn run(args: DiffArgs, base_ctx: &CommandContext) -> Result<()>
 
     let patch = resolve_diff(&state, &args)?;
 
-    if ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if ctx.json_output() {
         let value = serde_json::json!({
             "run_id": run_id,
             "node": args.node,
