@@ -2,9 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
-use fabro_config::{RunSettingsBuilder, ServerSettingsBuilder, UserSettingsBuilder};
+use fabro_types::settings::RunNamespace;
 use fabro_types::settings::cli::{CliLayer, OutputFormat, OutputVerbosity};
-use fabro_types::settings::{Combine, RunNamespace, SettingsLayer};
 use fabro_types::{ServerSettings, UserSettings};
 use fabro_util::printer::Printer;
 use tokio::sync::OnceCell;
@@ -13,6 +12,7 @@ use crate::args::{
     ServerConnectionArgs, ServerTargetArgs, printer_from_verbosity, require_no_json_override,
 };
 use crate::server_client::Client;
+use crate::user_config::LoadedSettings;
 use crate::{server_client, user_config};
 
 #[derive(Clone, Debug)]
@@ -185,42 +185,28 @@ fn load_merged_settings(
     cli_layer: &CliLayer,
     server_mode: &ServerMode,
 ) -> Result<ResolvedCommandSettings> {
-    let disk_settings = match server_mode {
-        ServerMode::None | ServerMode::ByTarget { .. } => user_config::load_settings()?,
+    let loaded_settings = match server_mode {
+        ServerMode::None | ServerMode::ByTarget { .. } => {
+            user_config::load_resolved_settings(None, None, Some(cli_layer))?
+        }
         ServerMode::ByStorageDir {
             storage_dir_override,
             ..
-        } => user_config::load_settings_with_storage_dir(storage_dir_override.as_deref())?,
+        } => user_config::load_resolved_settings(
+            None,
+            storage_dir_override.as_deref(),
+            Some(cli_layer),
+        )?,
     };
-    merge_settings_layer(disk_settings, cli_layer)
+    resolve_command_settings(loaded_settings)
 }
 
-fn merge_settings_layer(
-    disk_settings: SettingsLayer,
-    cli_layer: &CliLayer,
-) -> Result<ResolvedCommandSettings> {
-    let storage_dir = crate::local_server::storage_dir(&disk_settings)?;
-    let run_settings = RunSettingsBuilder::from_layer(&disk_settings).map_err(|err| {
-        // Keep command context tolerant even when unrelated run defaults
-        // do not resolve cleanly.
-        err.to_string()
-    });
-    let server_settings = ServerSettingsBuilder::from_layer(&disk_settings).map_err(|err| {
-        // Keep storage-dir and CLI-target resolution tolerant even when full
-        // server resolution would reject a partial local settings file.
-        err.to_string()
-    });
-    let merged_settings = SettingsLayer {
-        cli: Some(cli_layer.clone()),
-        ..SettingsLayer::default()
-    }
-    .combine(disk_settings);
-    let user_settings = UserSettingsBuilder::from_layer(&merged_settings)?;
+fn resolve_command_settings(loaded_settings: LoadedSettings) -> Result<ResolvedCommandSettings> {
     Ok(ResolvedCommandSettings {
-        storage_dir,
-        run_settings,
-        server_settings,
-        user_settings,
+        storage_dir:     loaded_settings.storage_dir,
+        run_settings:    loaded_settings.run_settings,
+        server_settings: loaded_settings.server_settings,
+        user_settings:   loaded_settings.user_settings,
     })
 }
 
@@ -228,14 +214,12 @@ fn merge_settings_layer(
 mod tests {
     use std::path::PathBuf;
 
-    use fabro_config::parse_settings_layer;
-    use fabro_types::settings::InterpString;
     use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputFormat, OutputVerbosity};
-    use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
     use fabro_util::printer::Printer;
     use tokio::sync::OnceCell;
 
-    use super::{CommandContext, ServerMode, merge_settings_layer};
+    use super::{CommandContext, ServerMode, resolve_command_settings};
+    use crate::user_config;
 
     fn cli_layer_with_json_and_verbose() -> CliLayer {
         CliLayer {
@@ -249,9 +233,11 @@ mod tests {
 
     fn synthetic_context(process_local_json: bool, printer: Printer) -> CommandContext {
         let cli_layer = cli_layer_with_json_and_verbose();
-        let resolved_settings =
-            merge_settings_layer(parse_settings_layer("_version = 1\n").unwrap(), &cli_layer)
-                .expect("settings should merge");
+        let resolved_settings = resolve_command_settings(
+            user_config::load_resolved_settings_from_toml("_version = 1\n", None, Some(&cli_layer))
+                .expect("settings should resolve"),
+        )
+        .expect("settings should merge");
         CommandContext {
             printer,
             process_local_json,
@@ -265,18 +251,6 @@ mod tests {
             server_mode: ServerMode::None,
             server: OnceCell::new(),
         }
-    }
-
-    fn with_storage_dir_override(
-        mut layer: fabro_types::settings::SettingsLayer,
-        path: &std::path::Path,
-    ) -> fabro_types::settings::SettingsLayer {
-        let server = layer.server.get_or_insert_with(ServerLayer::default);
-        let storage = server
-            .storage
-            .get_or_insert_with(ServerStorageLayer::default);
-        storage.root = Some(InterpString::parse(&path.display().to_string()));
-        layer
     }
 
     #[test]
@@ -295,24 +269,34 @@ mod tests {
     #[test]
     fn storage_dir_override_only_changes_storage_root_in_merged_settings() {
         let cli_layer = cli_layer_with_json_and_verbose();
-        let base_disk_settings = parse_settings_layer(
-            r#"
+        let base_settings = resolve_command_settings(
+            user_config::load_resolved_settings_from_toml(
+                r#"
 _version = 1
 
 [server.storage]
 root = "/srv/fabro/default"
 "#,
+                None,
+                Some(&cli_layer),
+            )
+            .expect("base settings should resolve"),
         )
-        .expect("settings fixture should parse");
-        let override_disk_settings = with_storage_dir_override(
-            base_disk_settings.clone(),
-            std::path::Path::new("/srv/fabro/override"),
-        );
+        .expect("base settings should merge");
+        let connection_settings = resolve_command_settings(
+            user_config::load_resolved_settings_from_toml(
+                r#"
+_version = 1
 
-        let base_settings = merge_settings_layer(base_disk_settings, &cli_layer)
-            .expect("base settings should merge");
-        let connection_settings = merge_settings_layer(override_disk_settings, &cli_layer)
-            .expect("connection settings should merge");
+[server.storage]
+root = "/srv/fabro/default"
+"#,
+                Some(std::path::Path::new("/srv/fabro/override")),
+                Some(&cli_layer),
+            )
+            .expect("connection settings should resolve"),
+        )
+        .expect("connection settings should merge");
 
         assert_eq!(
             base_settings.user_settings,
@@ -341,17 +325,18 @@ root = "/srv/fabro/default"
 
     #[test]
     fn storage_dir_stays_available_when_server_settings_do_not_resolve() {
-        let resolved = merge_settings_layer(
-            parse_settings_layer(
+        let resolved = resolve_command_settings(
+            user_config::load_resolved_settings_from_toml(
                 r#"
 _version = 1
 
 [server.storage]
 root = "/srv/fabro"
 "#,
+                None,
+                Some(&CliLayer::default()),
             )
-            .expect("settings fixture should parse"),
-            &CliLayer::default(),
+            .expect("settings should resolve"),
         )
         .expect("settings should merge");
 
@@ -362,8 +347,8 @@ root = "/srv/fabro"
 
     #[test]
     fn run_settings_include_run_agent_mcps() {
-        let resolved = merge_settings_layer(
-            parse_settings_layer(
+        let resolved = resolve_command_settings(
+            user_config::load_resolved_settings_from_toml(
                 r#"
 _version = 1
 
@@ -371,9 +356,10 @@ _version = 1
 type = "stdio"
 command = ["demo-mcp"]
 "#,
+                None,
+                Some(&CliLayer::default()),
             )
-            .expect("settings fixture should parse"),
-            &CliLayer::default(),
+            .expect("settings should resolve"),
         )
         .expect("settings should merge");
 

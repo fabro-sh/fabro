@@ -1,52 +1,101 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::Result;
 pub(crate) use fabro_client::ServerTarget;
 pub(crate) use fabro_config::user::{active_settings_path, default_storage_dir};
 use fabro_config::user::{default_socket_path, load_settings_config};
-use fabro_types::UserSettings;
-use fabro_types::settings::cli::CliTargetSettings;
-use fabro_types::settings::{CliNamespace, SettingsLayer};
+use fabro_config::{RunSettingsBuilder, ServerSettingsBuilder, UserSettingsBuilder};
+use fabro_types::settings::cli::{CliLayer, CliTargetSettings};
+use fabro_types::settings::{CliNamespace, Combine, RunNamespace, SettingsLayer};
+use fabro_types::{ServerSettings, UserSettings};
 use fabro_util::version::FABRO_VERSION;
 use tracing::debug;
 
 use crate::args::ServerTargetArgs;
 
-pub(crate) fn load_settings() -> anyhow::Result<SettingsLayer> {
-    load_settings_with_config_and_storage_dir(None, None)
+pub(crate) struct LoadedSettings {
+    pub(crate) storage_dir:      PathBuf,
+    pub(crate) config_log_level: Option<String>,
+    pub(crate) run_settings:     std::result::Result<RunNamespace, String>,
+    pub(crate) server_settings:  std::result::Result<ServerSettings, String>,
+    pub(crate) user_settings:    UserSettings,
 }
 
-pub(crate) fn load_settings_with_storage_dir(
-    storage_dir: Option<&Path>,
-) -> anyhow::Result<SettingsLayer> {
-    load_settings_with_config_and_storage_dir(None, storage_dir)
-}
-
-pub(crate) fn load_settings_with_config_and_storage_dir(
+pub(crate) fn load_resolved_settings(
     config_path: Option<&Path>,
     storage_dir: Option<&Path>,
-) -> anyhow::Result<SettingsLayer> {
+    cli_layer: Option<&CliLayer>,
+) -> anyhow::Result<LoadedSettings> {
     let layer = load_settings_config(config_path)?;
-    Ok(apply_storage_dir_override(layer, storage_dir))
+    resolve_loaded_settings(layer, storage_dir, cli_layer)
 }
 
-fn apply_storage_dir_override(
-    mut layer: SettingsLayer,
+fn resolve_loaded_settings(
+    layer: SettingsLayer,
     storage_dir: Option<&Path>,
-) -> SettingsLayer {
-    use fabro_types::settings::InterpString;
-    use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
+    cli_layer: Option<&CliLayer>,
+) -> anyhow::Result<LoadedSettings> {
+    let storage_override = storage_dir.map(Path::to_path_buf);
+    let storage_dir = storage_dir_from_layer(&layer, storage_dir)?;
+    let config_log_level = layer
+        .server
+        .as_ref()
+        .and_then(|server| server.logging.as_ref())
+        .and_then(|logging| logging.level.clone());
+    let run_settings = RunSettingsBuilder::from_layer(&layer).map_err(|err| err.to_string());
+    let server_settings = ServerSettingsBuilder::from_layer(&layer)
+        .map(|settings| match storage_override.as_deref() {
+            Some(dir) => settings.with_storage_override(dir),
+            None => settings,
+        })
+        .map_err(|err| err.to_string());
+    let user_settings_layer = if let Some(cli_layer) = cli_layer {
+        SettingsLayer {
+            cli: Some(cli_layer.clone()),
+            ..SettingsLayer::default()
+        }
+        .combine(layer.clone())
+    } else {
+        layer.clone()
+    };
+    let user_settings = UserSettingsBuilder::from_layer(&user_settings_layer)?;
 
+    Ok(LoadedSettings {
+        storage_dir,
+        config_log_level,
+        run_settings,
+        server_settings,
+        user_settings,
+    })
+}
+
+fn storage_dir_from_layer(
+    layer: &SettingsLayer,
+    storage_dir: Option<&Path>,
+) -> anyhow::Result<PathBuf> {
+    storage_dir_from_layer_with_lookup(layer, storage_dir, &|name| std::env::var(name).ok())
+}
+
+fn storage_dir_from_layer_with_lookup(
+    layer: &SettingsLayer,
+    storage_dir: Option<&Path>,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> anyhow::Result<PathBuf> {
     if let Some(dir) = storage_dir {
-        let server = layer.server.get_or_insert_with(ServerLayer::default);
-        let storage = server
-            .storage
-            .get_or_insert_with(ServerStorageLayer::default);
-        storage.root = Some(InterpString::parse(&dir.display().to_string()));
+        return Ok(dir.to_path_buf());
     }
 
-    layer
+    let storage_root = layer
+        .server
+        .as_ref()
+        .and_then(|server| server.storage.as_ref())
+        .and_then(|storage| storage.root.clone())
+        .unwrap_or_else(|| {
+            fabro_types::settings::InterpString::parse(&default_storage_dir().to_string_lossy())
+        });
+    let resolved_root = storage_root.resolve(lookup)?;
+    Ok(PathBuf::from(resolved_root.value))
 }
 
 /// Pull the resolved CLI target configuration out of `[cli.target]`.
@@ -103,16 +152,26 @@ pub(crate) fn cli_http_client_builder() -> fabro_http::HttpClientBuilder {
 }
 
 #[cfg(test)]
+pub(crate) fn load_resolved_settings_from_toml(
+    source: &str,
+    storage_dir: Option<&Path>,
+    cli_layer: Option<&CliLayer>,
+) -> anyhow::Result<LoadedSettings> {
+    let layer: SettingsLayer = toml::from_str(source)
+        .map_err(|err| anyhow::anyhow!("failed to parse settings file: {err}"))?;
+    resolve_loaded_settings(layer, storage_dir, cli_layer)
+}
+
+#[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
+    use fabro_config::UserSettingsBuilder;
     use fabro_config::user::default_storage_dir;
-    use fabro_config::{UserSettingsBuilder, parse_settings_layer};
     use fabro_types::UserSettings;
 
     use super::*;
     use crate::args::ServerTargetArgs;
-    use crate::local_server;
 
     fn server_target_args(value: Option<&str>) -> ServerTargetArgs {
         ServerTargetArgs {
@@ -122,10 +181,6 @@ mod tests {
 
     fn parse_user_settings(source: &str) -> UserSettings {
         UserSettingsBuilder::from_toml(source).expect("fixture should resolve")
-    }
-
-    fn parse_layer(source: &str) -> SettingsLayer {
-        parse_settings_layer(source).expect("fixture should parse")
     }
 
     #[test]
@@ -234,45 +289,47 @@ url = "https://config.example.com"
 
     #[test]
     fn storage_dir_defaults_without_server_auth_methods() {
-        let settings = SettingsLayer::default();
+        let layer = SettingsLayer::default();
 
         assert_eq!(
-            local_server::storage_dir(&settings).unwrap(),
+            storage_dir_from_layer(&layer, None).unwrap(),
             default_storage_dir()
         );
     }
 
     #[test]
     fn storage_dir_uses_explicit_server_storage_root() {
-        let settings = parse_layer(
+        let layer: SettingsLayer = toml::from_str(
             r#"
 _version = 1
 
 [server.storage]
 root = "/srv/fabro"
 "#,
-        );
+        )
+        .expect("fixture should parse");
 
         assert_eq!(
-            local_server::storage_dir(&settings).unwrap(),
+            storage_dir_from_layer(&layer, None).unwrap(),
             PathBuf::from("/srv/fabro")
         );
     }
 
     #[test]
     fn storage_dir_resolves_env_interpolated_root() {
-        let settings = parse_layer(
+        let layer: SettingsLayer = toml::from_str(
             r#"
 _version = 1
 
 [server.storage]
 root = "{{ env.FABRO_STORAGE_ROOT }}"
 "#,
-        );
+        )
+        .expect("fixture should parse");
         let temp = tempfile::tempdir().unwrap();
 
         assert_eq!(
-            local_server::storage_dir_with_lookup(&settings, &|name| {
+            storage_dir_from_layer_with_lookup(&layer, None, &|name| {
                 (name == "FABRO_STORAGE_ROOT").then(|| temp.path().display().to_string())
             })
             .unwrap(),

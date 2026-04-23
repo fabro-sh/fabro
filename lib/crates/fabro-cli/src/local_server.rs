@@ -1,14 +1,9 @@
 //! Helpers for CLI code that manages the local Fabro server on this host.
-//!
-//! This module is the only generic CLI lifecycle surface allowed to read
-//! `[server.*]` settings. User-facing CLI commands outside same-host server
-//! lifecycle should not call into it.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use fabro_config::bind::BindRequest;
-use fabro_config::{ServerSettingsBuilder, parse_settings_layer};
 use fabro_types::ServerSettings;
 use fabro_types::settings::{ServerAuthMethod, SettingsLayer};
 
@@ -23,34 +18,27 @@ pub(crate) struct LocalServerConfig {
 
 impl LocalServerConfig {
     pub(crate) fn load(config_path: Option<&Path>, storage_dir: Option<&Path>) -> Result<Self> {
-        let settings =
-            user_config::load_settings_with_config_and_storage_dir(config_path, storage_dir)?;
-        Self::from_layer(&settings)
+        let settings = user_config::load_resolved_settings(config_path, storage_dir, None)?;
+        Ok(Self::from_loaded_settings(settings))
     }
 
     pub(crate) fn load_with_storage_dir(storage_dir: Option<&Path>) -> Result<Self> {
-        let settings = user_config::load_settings_with_storage_dir(storage_dir)?;
-        Self::from_layer(&settings)
+        let settings = user_config::load_resolved_settings(None, storage_dir, None)?;
+        Ok(Self::from_loaded_settings(settings))
     }
 
-    fn from_layer(settings: &SettingsLayer) -> Result<Self> {
-        let storage_dir = storage_dir(settings)?;
-        let config_log_level = settings
-            .server
-            .as_ref()
-            .and_then(|server| server.logging.as_ref())
-            .and_then(|logging| logging.level.clone());
-        let server_settings = resolved_server_settings(settings).map_err(|err| err.to_string());
+    fn from_loaded_settings(settings: user_config::LoadedSettings) -> Self {
+        let server_settings = settings.server_settings;
         let auth_methods = server_settings
             .as_ref()
             .map(|resolved| resolved.server.auth.methods.clone())
             .unwrap_or_default();
-        Ok(Self {
-            storage_dir,
+        Self {
+            storage_dir: settings.storage_dir,
             auth_methods,
-            config_log_level,
+            config_log_level: settings.config_log_level,
             server_settings,
-        })
+        }
     }
 
     pub(crate) fn storage_dir(&self) -> &Path {
@@ -75,20 +63,16 @@ impl LocalServerConfig {
 }
 
 pub(crate) fn storage_dir_from_toml(source: &str) -> Result<PathBuf> {
-    let settings = parse_settings_layer(source)
-        .map_err(|err| anyhow::anyhow!("failed to parse settings file: {err}"))?;
-    storage_dir(&settings)
+    storage_dir_from_toml_with_lookup(source, &|name| std::env::var(name).ok())
 }
 
-pub(crate) fn storage_dir(settings: &SettingsLayer) -> Result<PathBuf> {
-    storage_dir_with_lookup(settings, &|name| std::env::var(name).ok())
-}
-
-pub(crate) fn storage_dir_with_lookup(
-    settings: &SettingsLayer,
+fn storage_dir_from_toml_with_lookup(
+    source: &str,
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Result<PathBuf> {
-    let storage_root = settings
+    let layer: SettingsLayer = toml::from_str(source)
+        .map_err(|err| anyhow::anyhow!("failed to parse settings file: {err}"))?;
+    let storage_root = layer
         .server
         .as_ref()
         .and_then(|server| server.storage.as_ref())
@@ -104,15 +88,11 @@ pub(crate) fn storage_dir_with_lookup(
     Ok(PathBuf::from(resolved_root.value))
 }
 
-fn resolved_server_settings(settings: &SettingsLayer) -> Result<ServerSettings> {
-    ServerSettingsBuilder::from_layer(settings).map_err(Into::into)
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use super::storage_dir_from_toml;
+    use super::{storage_dir_from_toml, storage_dir_from_toml_with_lookup};
 
     #[test]
     fn storage_dir_from_toml_reads_explicit_root_without_full_server_resolution() {
@@ -134,5 +114,21 @@ root = "/srv/fabro"
         let path = storage_dir_from_toml("_version = 1\n").expect("default storage dir");
 
         assert_eq!(path, fabro_config::user::default_storage_dir());
+    }
+
+    #[test]
+    fn storage_dir_from_toml_resolves_env_interpolation() {
+        let path = storage_dir_from_toml_with_lookup(
+            r#"
+_version = 1
+
+[server.storage]
+root = "{{ env.FABRO_STORAGE_ROOT }}"
+"#,
+            &|name| (name == "FABRO_STORAGE_ROOT").then_some("/srv/fabro".to_string()),
+        )
+        .expect("storage root should resolve");
+
+        assert_eq!(path, PathBuf::from("/srv/fabro"));
     }
 }
