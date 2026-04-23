@@ -8117,9 +8117,9 @@ async fn hook_config_merge_run_overrides_by_name() {
 }
 
 // The legacy `Settings`-based TOML parsing tests were deleted in Stage
-// 6.3b. Hook TOML parsing now flows through the v2 `SettingsLayer` path,
-// with coverage in `fabro-types::settings::layer::tests` and the
-// fabro-cli integration tests under `cmd::config`.
+// 6.3b. Hook TOML parsing now flows through the v2 config parser path,
+// with coverage in fabro-config unit tests and the fabro-cli integration
+// tests under `cmd::config`.
 
 // --- Blocking vs non-blocking behavior ---
 

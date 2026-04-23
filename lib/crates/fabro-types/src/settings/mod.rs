@@ -14,7 +14,6 @@ mod combine;
 pub mod duration;
 pub mod features;
 pub mod interp;
-mod layer;
 mod maps;
 pub mod model_ref;
 pub mod project;
