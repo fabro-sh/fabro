@@ -29,7 +29,7 @@ pub(crate) async fn run(
     styles: &Styles,
     base_ctx: &CommandContext,
 ) -> anyhow::Result<()> {
-    if base_ctx.explicit_json_requested() && args.output.is_none() {
+    if args.output.is_none() {
         base_ctx.require_no_json_override()?;
     }
 

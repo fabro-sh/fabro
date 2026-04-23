@@ -7,8 +7,7 @@ use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 
 pub(super) async fn close_command(args: PrCloseArgs, base_ctx: &CommandContext) -> Result<()> {
-    let ctx = base_ctx.with_target(&args.server)?;
-    let printer = ctx.printer();
+    let printer = base_ctx.printer();
     let (record, _run_id) = super::load_pr_record(&args.server, &args.run_id, base_ctx).await?;
 
     let creds = super::load_github_credentials_required(base_ctx)?;
@@ -24,7 +23,7 @@ pub(super) async fn close_command(args: PrCloseArgs, base_ctx: &CommandContext) 
     .map_err(|err| anyhow::anyhow!("{err}"))?;
 
     info!(number = record.number, owner = %record.owner, repo = %record.repo, "Closed pull request");
-    if ctx.user_settings().cli.output.format == OutputFormat::Json {
+    if base_ctx.user_settings().cli.output.format == OutputFormat::Json {
         print_json_pretty(&serde_json::json!({
             "number": record.number,
             "html_url": record.html_url,

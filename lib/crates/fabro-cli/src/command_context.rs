@@ -228,25 +228,6 @@ mod tests {
         }
     }
 
-    fn synthetic_context(process_local_json: bool, printer: Printer) -> CommandContext {
-        let cli_layer = cli_layer_with_json_and_verbose();
-        let (machine_settings, user_settings) =
-            merge_settings_layer(parse_settings_layer("_version = 1\n").unwrap(), &cli_layer)
-                .expect("settings should merge");
-
-        CommandContext {
-            printer,
-            process_local_json,
-            cwd: PathBuf::from("/tmp/workspace"),
-            base_config_path: PathBuf::from("/tmp/settings.toml"),
-            cli_layer,
-            machine_settings,
-            user_settings,
-            server_mode: ServerMode::None,
-            server: OnceCell::new(),
-        }
-    }
-
     fn synthetic_context_with_settings(
         process_local_json: bool,
         printer: Printer,
@@ -266,6 +247,21 @@ mod tests {
             server_mode,
             server: OnceCell::new(),
         }
+    }
+
+    fn synthetic_context(process_local_json: bool, printer: Printer) -> CommandContext {
+        let cli_layer = cli_layer_with_json_and_verbose();
+        let (machine_settings, user_settings) =
+            merge_settings_layer(parse_settings_layer("_version = 1\n").unwrap(), &cli_layer)
+                .expect("settings should merge");
+        synthetic_context_with_settings(
+            process_local_json,
+            printer,
+            cli_layer,
+            machine_settings,
+            user_settings,
+            ServerMode::None,
+        )
     }
 
     #[test]

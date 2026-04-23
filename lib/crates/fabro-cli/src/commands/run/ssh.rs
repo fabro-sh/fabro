@@ -7,7 +7,7 @@ use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 
 pub(crate) async fn run(args: SshArgs, base_ctx: &CommandContext) -> Result<()> {
-    if base_ctx.explicit_json_requested() && !args.print {
+    if !args.print {
         base_ctx.require_no_json_override()?;
     }
 
