@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::Result;
@@ -10,6 +12,7 @@ use fabro_util::version::FABRO_VERSION;
 use tracing::debug;
 
 use crate::args::ServerTargetArgs;
+#[cfg(test)]
 use crate::local_server;
 
 pub(crate) fn load_settings() -> anyhow::Result<SettingsLayer> {
@@ -55,6 +58,7 @@ pub(crate) fn default_server_target() -> ServerTarget {
 #[deprecated(
     note = "use local_server::storage_dir for lifecycle; PR commands must move to server-side API"
 )]
+#[cfg(test)]
 pub(crate) fn storage_dir(settings: &SettingsLayer) -> anyhow::Result<PathBuf> {
     local_server::storage_dir(settings)
 }

@@ -1,6 +1,13 @@
-use fabro_test::{fabro_snapshot, test_context};
+#![allow(
+    clippy::absolute_paths,
+    reason = "This test module prefers explicit type paths over extra imports."
+)]
 
-use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run, setup_failed_run};
+use fabro_test::{fabro_snapshot, test_context};
+use httpmock::MockServer;
+
+use super::support::setup_completed_fast_dry_run;
+use crate::support::unique_run_id;
 
 #[test]
 fn help() {
@@ -33,39 +40,7 @@ fn help() {
 }
 
 #[test]
-fn pr_create_unfinished_run_errors_before_network() {
-    let context = test_context!();
-    let run = setup_created_fast_dry_run(&context);
-    let mut cmd = context.command();
-    cmd.args(["pr", "create", &run.run_id]);
-
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
-    ----- stdout -----
-    ----- stderr -----
-    error: Failed to load start record from store
-    ");
-}
-
-#[test]
-fn pr_create_completed_dry_run_without_run_branch_errors() {
-    let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
-    let mut cmd = context.command();
-    cmd.args(["pr", "create", &run.run_id]);
-
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
-    ----- stdout -----
-    ----- stderr -----
-    error: Run has no run_branch — was it run with git push enabled?
-    ");
-}
-
-#[test]
-fn pr_create_uses_store_run_spec_without_run_json() {
+fn pr_create_nongit_run_reports_missing_repo_origin() {
     let context = test_context!();
     let run = setup_completed_fast_dry_run(&context);
 
@@ -77,38 +52,167 @@ fn pr_create_uses_store_run_spec_without_run_json() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: Run has no run_branch — was it run with git push enabled?
+    error: Run has no repo origin URL — pull request creation requires git metadata.
     ");
 }
 
 #[test]
-fn pr_create_failed_run_rejects_without_force() {
+fn pr_create_uses_server_endpoint_and_prints_url() {
     let context = test_context!();
-    let run = setup_failed_run(&context);
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+
+    let resolve_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", "nightly-build");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(serde_json::json!({
+                "run_id": run_id,
+                "workflow_name": "Nightly Build",
+                "workflow_slug": "nightly-build",
+                "goal": "Nightly run",
+                "title": "Nightly run",
+                "labels": {},
+                "host_repo_path": null,
+                "repository": { "name": "unknown" },
+                "start_time": "2026-04-05T12:00:00Z",
+                "created_at": "2026-04-05T12:00:00Z",
+                "status": {
+                    "kind": "succeeded",
+                    "reason": "completed"
+                },
+                "pending_control": null,
+                "duration_ms": 123,
+                "elapsed_secs": 0,
+                "total_usd_micros": null
+            }));
+    });
+    let create_mock = server.mock(|when, then| {
+        when.method("POST")
+            .path(format!("/api/v1/runs/{run_id}/pull_request"))
+            .header("content-type", "application/json")
+            .json_body(serde_json::json!({
+                "force": false
+            }));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(serde_json::json!({
+                "html_url": "https://github.com/fabro-sh/fabro/pull/123",
+                "number": 123,
+                "owner": "fabro-sh",
+                "repo": "fabro",
+                "base_branch": "main",
+                "head_branch": "fabro/run/demo",
+                "title": "Map the constellations"
+            }));
+    });
+
     let mut cmd = context.command();
-    cmd.args(["pr", "create", &run.run_id]);
+    cmd.args([
+        "pr",
+        "create",
+        "--server",
+        &server.base_url(),
+        "nightly-build",
+    ]);
 
     fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
+    success: true
+    exit_code: 0
     ----- stdout -----
+    https://github.com/fabro-sh/fabro/pull/123
     ----- stderr -----
-    error: Run status is 'fail', expected success or partial_success
     ");
+
+    resolve_mock.assert();
+    create_mock.assert();
 }
 
 #[test]
-fn pr_create_failed_run_proceeds_with_force() {
+fn pr_create_passes_force_and_model_to_server() {
     let context = test_context!();
-    let run = setup_failed_run(&context);
-    let mut cmd = context.command();
-    cmd.args(["pr", "create", "--force", &run.run_id]);
+    let server = MockServer::start();
+    let run_id = unique_run_id();
 
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
+    let resolve_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", "nightly-build");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(serde_json::json!({
+                "run_id": run_id,
+                "workflow_name": "Nightly Build",
+                "workflow_slug": "nightly-build",
+                "goal": "Nightly run",
+                "title": "Nightly run",
+                "labels": {},
+                "host_repo_path": null,
+                "repository": { "name": "unknown" },
+                "start_time": "2026-04-05T12:00:00Z",
+                "created_at": "2026-04-05T12:00:00Z",
+                "status": {
+                    "kind": "succeeded",
+                    "reason": "completed"
+                },
+                "pending_control": null,
+                "duration_ms": 123,
+                "elapsed_secs": 0,
+                "total_usd_micros": null
+            }));
+    });
+    let create_mock = server.mock(|when, then| {
+        when.method("POST")
+            .path(format!("/api/v1/runs/{run_id}/pull_request"))
+            .header("content-type", "application/json")
+            .json_body(serde_json::json!({
+                "force": true,
+                "model": "gpt-5.2"
+            }));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(serde_json::json!({
+                "html_url": "https://github.com/fabro-sh/fabro/pull/123",
+                "number": 123,
+                "owner": "fabro-sh",
+                "repo": "fabro",
+                "base_branch": "main",
+                "head_branch": "fabro/run/demo",
+                "title": "Map the constellations"
+            }));
+    });
+
+    let mut cmd = context.command();
+    cmd.args([
+        "pr",
+        "create",
+        "--json",
+        "--force",
+        "--model",
+        "gpt-5.2",
+        "--server",
+        &server.base_url(),
+        "nightly-build",
+    ]);
+
+    fabro_snapshot!(context.filters(), cmd, @r#"
+    success: true
+    exit_code: 0
     ----- stdout -----
+    {
+      "html_url": "https://github.com/fabro-sh/fabro/pull/123",
+      "number": 123,
+      "owner": "fabro-sh",
+      "repo": "fabro",
+      "base_branch": "main",
+      "head_branch": "fabro/run/demo",
+      "title": "Map the constellations"
+    }
     ----- stderr -----
-    error: Run has no run_branch — was it run with git push enabled?
-    ");
+    "#);
+
+    resolve_mock.assert();
+    create_mock.assert();
 }

@@ -405,6 +405,7 @@ pub struct AutoMergeOptions {
 pub async fn maybe_open_pull_request(
     creds: &GitHubCredentials,
     origin_url: &str,
+    base_url: &str,
     base_branch: &str,
     head_branch: &str,
     goal: &str,
@@ -437,7 +438,7 @@ pub async fn maybe_open_pull_request(
         &title,
         &body,
         draft,
-        &github_app::github_api_base_url(),
+        base_url,
     )
     .await?;
 
@@ -455,7 +456,7 @@ pub async fn maybe_open_pull_request(
             &repo,
             &created.node_id,
             merge_method,
-            &github_app::github_api_base_url(),
+            base_url,
         )
         .await
         {
@@ -529,6 +530,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                     match maybe_open_pull_request(
                         creds,
                         origin,
+                        &github_app::github_api_base_url(),
                         base_branch,
                         run_branch,
                         graph.goal(),
@@ -1349,6 +1351,7 @@ mod tests {
         let result = maybe_open_pull_request(
             &creds,
             "https://github.com/owner/repo.git",
+            &github_app::github_api_base_url(),
             "main",
             "fabro/run/123",
             "Fix bug",

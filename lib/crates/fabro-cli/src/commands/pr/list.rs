@@ -2,7 +2,7 @@ use anyhow::Result;
 use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_util::terminal::Styles;
-use futures::future::join_all;
+use futures::stream::{self, StreamExt};
 use serde::Serialize;
 use tracing::info;
 
@@ -14,8 +14,9 @@ use crate::shared::{color_if, print_json_pretty};
 #[derive(Serialize)]
 struct PrRow {
     run_id: String,
-    number: u64,
+    number: i64,
     state:  String,
+    merged: bool,
     title:  String,
     url:    String,
 }
@@ -43,51 +44,61 @@ pub(super) async fn list_command(args: PrListArgs, base_ctx: &CommandContext) ->
         return Ok(());
     }
 
-    let creds = super::load_github_credentials_required(base_ctx)?;
-
-    let futures: Vec<_> = entries
-        .iter()
+    let client = lookup.client().clone_for_reuse();
+    let all_rows = stream::iter(entries)
         .map(|(run_id, record)| {
-            let creds = creds.clone();
-            let run_id = run_id.clone();
-            let record = record.clone();
+            let client = client.clone_for_reuse();
             async move {
-                match fabro_github::get_pull_request(
-                    &creds,
-                    &record.owner,
-                    &record.repo,
-                    record.number,
-                    &fabro_github::github_api_base_url(),
-                )
-                .await
+                match client
+                    .get_run_pull_request(&run_id.parse().expect("run id should parse"))
+                    .await
                 {
-                    Ok(detail) => PrRow {
-                        run_id,
-                        number: detail.number,
-                        state: if detail.draft {
+                    Ok(detail) => {
+                        let state = if detail.merged {
+                            "merged".to_string()
+                        } else if detail.draft {
                             "draft".to_string()
+                        } else if detail.state == "open" {
+                            "open".to_string()
+                        } else if detail.state == "closed" {
+                            "closed".to_string()
                         } else {
-                            detail.state
-                        },
-                        title: detail.title,
-                        url: detail.html_url,
-                    },
-                    Err(err) => {
-                        tracing::warn!(run_id, error = %err, "Failed to fetch PR state");
-                        PrRow {
+                            "unknown".to_string()
+                        };
+                        Ok(PrRow {
                             run_id,
-                            number: record.number,
+                            number: detail.number,
+                            state,
+                            merged: detail.merged,
+                            title: detail.title,
+                            url: detail.html_url,
+                        })
+                    }
+                    Err(err) => {
+                        let message = err.to_string();
+                        if message.contains("GitHub integration unavailable on server.") {
+                            return Err(err);
+                        }
+
+                        tracing::warn!(run_id, error = %message, "Failed to fetch PR state");
+                        Ok(PrRow {
+                            run_id,
+                            number: i64::try_from(record.number)
+                                .expect("stored pull request number should fit in i64"),
                             state: "unknown".to_string(),
+                            merged: false,
                             title: record.title,
                             url: record.html_url,
-                        }
+                        })
                     }
                 }
             }
         })
-        .collect();
-
-    let all_rows = join_all(futures).await;
+        .buffer_unordered(10)
+        .collect::<Vec<Result<PrRow>>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<PrRow>>>()?;
     let rows: Vec<_> = if args.all {
         all_rows
     } else {

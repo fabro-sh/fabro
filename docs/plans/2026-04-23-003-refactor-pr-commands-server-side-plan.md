@@ -1,7 +1,7 @@
 ---
 title: Move fabro pr commands server-side
 type: refactor
-status: active
+status: completed
 date: 2026-04-23
 deepened: 2026-04-23
 ---
@@ -212,7 +212,7 @@ Each `pr/*.rs` file collapses to: parse args → call `client.<method>()` → pr
 
 ## Implementation Units
 
-- [ ] **Unit 1: Add `pr view` endpoint + rewrite CLI**
+- [x] **Unit 1: Add `pr view` endpoint + rewrite CLI**
 
 **Goal:** Simplest endpoint establishes the pattern. Server-side GitHub call replaces client-side GitHub call.
 
@@ -267,7 +267,7 @@ Each `pr/*.rs` file collapses to: parse args → call `client.<method>()` → pr
 
 ---
 
-- [ ] **Unit 2: Add `pr merge` endpoint + rewrite CLI**
+- [x] **Unit 2: Add `pr merge` endpoint + rewrite CLI**
 
 **Goal:** Same pattern as view, mutating. GitHub call only — no events, no state updates.
 
@@ -306,7 +306,7 @@ Each `pr/*.rs` file collapses to: parse args → call `client.<method>()` → pr
 
 ---
 
-- [ ] **Unit 3: Add `pr close` endpoint + rewrite CLI**
+- [x] **Unit 3: Add `pr close` endpoint + rewrite CLI**
 
 **Goal:** Mirrors Unit 2's shape. GitHub call only — no events, no state updates.
 
@@ -343,7 +343,7 @@ Each `pr/*.rs` file collapses to: parse args → call `client.<method>()` → pr
 
 ---
 
-- [ ] **Unit 4: Rewrite `pr list` CLI to compose from existing operations**
+- [x] **Unit 4: Rewrite `pr list` CLI to compose from existing operations**
 
 **Goal:** `pr list` becomes pure CLI composition — no new server endpoint. Takes the cheap path: only runs that already have a stored `pull_request` record trigger a live GitHub call. Runs without a stored record are skipped before any GitHub probe.
 
@@ -386,7 +386,7 @@ Each `pr/*.rs` file collapses to: parse args → call `client.<method>()` → pr
 
 ---
 
-- [ ] **Unit 5: Add `pr create` endpoint + rewrite CLI**
+- [x] **Unit 5: Add `pr create` endpoint + rewrite CLI**
 
 **Goal:** The worst offender. Server owns the entire create flow.
 
@@ -453,7 +453,7 @@ Each `pr/*.rs` file collapses to: parse args → call `client.<method>()` → pr
 
 ---
 
-- [ ] **Unit 6: Delete client-side PR infrastructure**
+- [x] **Unit 6: Delete client-side PR infrastructure**
 
 **Goal:** Remove the dead client-side helpers and the `boundary-exempt` annotations they carry.
 

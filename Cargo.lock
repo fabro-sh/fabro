@@ -1693,6 +1693,7 @@ dependencies = [
  "bytes",
  "chrono",
  "fabro-api",
+ "fabro-github",
  "fabro-http",
  "fabro-model",
  "fabro-types",
@@ -1779,6 +1780,7 @@ dependencies = [
  "jsonwebtoken",
  "serde",
  "serde_json",
+ "strum",
  "tokio",
  "tracing",
 ]

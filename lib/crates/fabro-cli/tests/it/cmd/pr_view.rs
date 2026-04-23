@@ -6,8 +6,10 @@
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::run_event::PullRequestCreatedProps;
 use fabro_types::{EventBody, RunEvent, RunId};
+use httpmock::MockServer;
 
 use super::support::{server_endpoint, setup_completed_fast_dry_run};
+use crate::support::unique_run_id;
 
 #[test]
 fn help() {
@@ -105,6 +107,114 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: GitHub credentials required — run `fabro install` or set GITHUB_TOKEN
+    error: GitHub integration unavailable on server.
     ");
+}
+
+#[test]
+fn pr_view_uses_server_pull_request_endpoint_and_renders_merged_state() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+
+    let resolve_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", "nightly-build");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "run_id": run_id,
+                    "workflow_name": "Nightly Build",
+                    "workflow_slug": "nightly-build",
+                    "goal": "Nightly run",
+                    "title": "Nightly run",
+                    "labels": {},
+                    "host_repo_path": null,
+                    "repository": { "name": "unknown" },
+                    "start_time": "2026-04-05T12:00:00Z",
+                    "created_at": "2026-04-05T12:00:00Z",
+                    "status": {
+                        "kind": "succeeded",
+                        "reason": "completed"
+                    },
+                    "pending_control": null,
+                    "duration_ms": 123,
+                    "elapsed_secs": 0,
+                    "total_usd_micros": null
+                })
+                .to_string(),
+            );
+    });
+    let detail_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/pull_request"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "record": {
+                        "html_url": "https://github.com/fabro-sh/fabro/pull/123",
+                        "number": 123,
+                        "owner": "fabro-sh",
+                        "repo": "fabro",
+                        "base_branch": "main",
+                        "head_branch": "fabro/run/demo",
+                        "title": "Map the constellations"
+                    },
+                    "number": 123,
+                    "title": "Map the constellations",
+                    "body": "Detailed description",
+                    "state": "closed",
+                    "draft": false,
+                    "merged": true,
+                    "merged_at": "2026-04-06T12:30:00Z",
+                    "mergeable": false,
+                    "additions": 10,
+                    "deletions": 3,
+                    "changed_files": 2,
+                    "html_url": "https://github.com/fabro-sh/fabro/pull/123",
+                    "user": {
+                        "login": "testuser"
+                    },
+                    "head": {
+                        "ref_name": "fabro/run/demo"
+                    },
+                    "base": {
+                        "ref_name": "main"
+                    },
+                    "created_at": "2026-04-05T12:00:00Z",
+                    "updated_at": "2026-04-06T12:30:00Z"
+                })
+                .to_string(),
+            );
+    });
+
+    let mut cmd = context.command();
+    cmd.args([
+        "pr",
+        "view",
+        "--server",
+        &server.base_url(),
+        "nightly-build",
+    ]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    #123 Map the constellations
+    State:   merged
+    URL:     https://github.com/fabro-sh/fabro/pull/123
+    Branch:  fabro/run/demo -> main
+    Author:  testuser
+    Changes: +10 -3 (2 files)
+
+    Detailed description
+    ----- stderr -----
+    ");
+
+    resolve_mock.assert();
+    detail_mock.assert();
 }

@@ -571,6 +571,31 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_pull_request_created_without_stage_scope() {
+        let event = Event::PullRequestCreated {
+            pr_url:      "https://github.com/acme/widgets/pull/42".into(),
+            pr_number:   42,
+            owner:       "acme".into(),
+            repo:        "widgets".into(),
+            base_branch: "main".into(),
+            head_branch: "fabro/run/42".into(),
+            title:       "Ship the server-side PR".into(),
+            draft:       true,
+        };
+
+        let stored = to_run_event(&fixtures::RUN_1, &event);
+        assert!(stored.node_id.is_none());
+        assert!(stored.stage_id.is_none());
+
+        let parsed = from_run_event(&stored).unwrap();
+        assert!(matches!(
+            parsed,
+            ProgressEvent::PullRequestCreated { pr_url, draft }
+                if pr_url == "https://github.com/acme/widgets/pull/42" && draft
+        ));
+    }
+
+    #[test]
     fn parse_tool_call_timestamps_from_jsonl() {
         let started = from_json_line(
             &serde_json::json!({

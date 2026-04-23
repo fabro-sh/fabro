@@ -6,22 +6,17 @@ use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 
 pub(super) async fn view_command(args: PrViewArgs, base_ctx: &CommandContext) -> Result<()> {
-    let (ctx, record, _run_id) =
-        super::load_pr_record(&args.server, &args.run_id, base_ctx).await?;
+    let ctx = base_ctx.with_target(&args.server)?;
+    let client = ctx.server().await?;
+    let run_id = client.resolve_run(&args.run_id).await?.run_id;
+    let detail = client.get_run_pull_request(&run_id).await?;
 
-    let creds = super::load_github_credentials_required(&ctx)?;
-
-    let detail = fabro_github::get_pull_request(
-        &creds,
-        &record.owner,
-        &record.repo,
-        record.number,
-        &fabro_github::github_api_base_url(),
-    )
-    .await
-    .map_err(|err| anyhow::anyhow!("{err}"))?;
-
-    info!(number = detail.number, owner = %record.owner, repo = %record.repo, "Viewing pull request");
+    info!(
+        number = detail.number,
+        owner = %detail.record.owner,
+        repo = %detail.record.repo,
+        "Viewing pull request"
+    );
 
     if ctx.json_output() {
         print_json_pretty(&detail)?;
@@ -30,7 +25,13 @@ pub(super) async fn view_command(args: PrViewArgs, base_ctx: &CommandContext) ->
 
     let printer = ctx.printer();
     fabro_util::printout!(printer, "#{} {}", detail.number, detail.title);
-    let state_display = if detail.draft { "draft" } else { &detail.state };
+    let state_display = if detail.merged {
+        "merged"
+    } else if detail.draft {
+        "draft"
+    } else {
+        &detail.state
+    };
     fabro_util::printout!(printer, "State:   {state_display}");
     fabro_util::printout!(printer, "URL:     {}", detail.html_url);
     fabro_util::printout!(

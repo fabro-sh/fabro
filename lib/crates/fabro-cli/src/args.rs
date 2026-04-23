@@ -748,6 +748,23 @@ pub(crate) struct PrViewArgs {
     pub(crate) run_id: String,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(crate) enum PrMergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+impl From<PrMergeMethod> for fabro_github::AutoMergeMethod {
+    fn from(value: PrMergeMethod) -> Self {
+        match value {
+            PrMergeMethod::Merge => Self::Merge,
+            PrMergeMethod::Squash => Self::Squash,
+            PrMergeMethod::Rebase => Self::Rebase,
+        }
+    }
+}
+
 #[derive(Args)]
 pub(crate) struct PrMergeArgs {
     #[command(flatten)]
@@ -756,8 +773,8 @@ pub(crate) struct PrMergeArgs {
     /// Run ID or prefix
     pub(crate) run_id: String,
     /// Merge method: merge, squash, or rebase
-    #[arg(long, default_value = "squash")]
-    pub(crate) method: String,
+    #[arg(long, value_enum, default_value_t = PrMergeMethod::Squash)]
+    pub(crate) method: PrMergeMethod,
 }
 
 #[derive(Args)]

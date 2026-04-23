@@ -914,6 +914,182 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/pull_request:
+    post:
+      operationId: createRunPullRequest
+      tags: [Runs]
+      summary: Create Run Pull Request
+      description: Creates a pull request for a completed run on GitHub and persists the record on the server.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRunPullRequestRequest"
+      responses:
+        "200":
+          description: Pull request created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullRequestRecord"
+        "400":
+          description: Pull request creation does not apply to this run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Pull request already exists for this run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: GitHub rejected the pull request creation request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: GitHub integration is unavailable on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: getRunPullRequest
+      tags: [Runs]
+      summary: Get Run Pull Request
+      description: Returns the stored pull request record for a run plus live GitHub details.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Pull request detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullRequestDetail"
+        "400":
+          description: Pull request lookup does not apply to this run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run or stored pull request record not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Stored pull request record exists but GitHub could not find it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: GitHub integration is unavailable on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/pull_request/merge:
+    post:
+      operationId: mergeRunPullRequest
+      tags: [Runs]
+      summary: Merge Run Pull Request
+      description: Merges the stored pull request for a run on GitHub.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MergeRunPullRequestRequest"
+      responses:
+        "200":
+          description: Pull request merged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeRunPullRequestResponse"
+        "400":
+          description: Pull request merge does not apply to this run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run or stored pull request record not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: GitHub rejected the merge request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: GitHub integration is unavailable on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/pull_request/close:
+    post:
+      operationId: closeRunPullRequest
+      tags: [Runs]
+      summary: Close Run Pull Request
+      description: Closes the stored pull request for a run on GitHub.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Pull request closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloseRunPullRequestResponse"
+        "400":
+          description: Pull request close does not apply to this run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run or stored pull request record not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: GitHub rejected the close request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: GitHub integration is unavailable on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/events:
     get:
       operationId: listRunEvents
@@ -4251,6 +4427,203 @@ components:
           description: CI check run results.
           items:
             $ref: "#/components/schemas/CheckRun"
+
+    PullRequestRecord:
+      description: Persisted record of a pull request created for a run.
+      type: object
+      required:
+        - html_url
+        - number
+        - owner
+        - repo
+        - base_branch
+        - head_branch
+        - title
+      properties:
+        html_url:
+          type: string
+          format: uri
+          example: https://github.com/fabro-sh/fabro/pull/123
+        number:
+          type: integer
+          example: 123
+        owner:
+          type: string
+          example: fabro-sh
+        repo:
+          type: string
+          example: fabro
+        base_branch:
+          type: string
+          example: main
+        head_branch:
+          type: string
+          example: fabro/run/demo
+        title:
+          type: string
+          example: Move PR commands server-side
+
+    PullRequestUser:
+      description: GitHub user summary for a pull request.
+      type: object
+      required:
+        - login
+      properties:
+        login:
+          type: string
+          example: octocat
+
+    PullRequestRef:
+      description: Git reference summary for a pull request.
+      type: object
+      required:
+        - ref_name
+      properties:
+        ref_name:
+          type: string
+          example: fabro/run/demo
+
+    PullRequestDetail:
+      description: Stored pull request record plus live GitHub fields.
+      type: object
+      required:
+        - record
+        - number
+        - title
+        - state
+        - draft
+        - merged
+        - additions
+        - deletions
+        - changed_files
+        - html_url
+        - user
+        - head
+        - base
+        - created_at
+        - updated_at
+      properties:
+        record:
+          $ref: "#/components/schemas/PullRequestRecord"
+        number:
+          type: integer
+          example: 123
+        title:
+          type: string
+          example: Move PR commands server-side
+        body:
+          type: ["string", "null"]
+          example: |
+            ## Summary
+            - Move PR commands server-side
+        state:
+          type: string
+          example: open
+        draft:
+          type: boolean
+          example: false
+        merged:
+          type: boolean
+          example: false
+        merged_at:
+          type: ["string", "null"]
+          format: date-time
+          example: "2026-04-23T15:45:00Z"
+        mergeable:
+          type: ["boolean", "null"]
+          example: true
+        additions:
+          type: integer
+          example: 234
+        deletions:
+          type: integer
+          example: 67
+        changed_files:
+          type: integer
+          example: 5
+        html_url:
+          type: string
+          format: uri
+          example: https://github.com/fabro-sh/fabro/pull/123
+        user:
+          $ref: "#/components/schemas/PullRequestUser"
+        head:
+          $ref: "#/components/schemas/PullRequestRef"
+        base:
+          $ref: "#/components/schemas/PullRequestRef"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-04-23T15:40:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-04-23T15:45:00Z"
+
+    CreateRunPullRequestRequest:
+      description: Request body for creating a run pull request.
+      type: object
+      required:
+        - force
+      properties:
+        force:
+          type: boolean
+          description: Create the pull request even if the run did not finish with success or partial_success.
+          example: false
+        model:
+          type: ["string", "null"]
+          description: Optional model override for generating the pull request description.
+          example: claude-sonnet-4-6
+
+    MergeMethod:
+      description: GitHub merge method for a pull request.
+      type: string
+      enum:
+        - merge
+        - squash
+        - rebase
+
+    MergeRunPullRequestRequest:
+      description: Request body for merging a run pull request.
+      type: object
+      required:
+        - method
+      properties:
+        method:
+          $ref: "#/components/schemas/MergeMethod"
+
+    MergeRunPullRequestResponse:
+      description: Response body for merging a run pull request.
+      type: object
+      required:
+        - number
+        - html_url
+        - method
+      properties:
+        number:
+          type: integer
+          example: 123
+        html_url:
+          type: string
+          format: uri
+          example: https://github.com/fabro-sh/fabro/pull/123
+        method:
+          $ref: "#/components/schemas/MergeMethod"
+
+    CloseRunPullRequestResponse:
+      description: Response body for closing a run pull request.
+      type: object
+      required:
+        - number
+        - html_url
+      properties:
+        number:
+          type: integer
+          example: 123
+        html_url:
+          type: string
+          format: uri
+          example: https://github.com/fabro-sh/fabro/pull/123
 
     RunTimings:
       description: Timing information for a run.

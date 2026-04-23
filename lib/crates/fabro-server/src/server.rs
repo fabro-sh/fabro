@@ -37,7 +37,7 @@ pub use fabro_api::types::{
     StageStatus as ApiStageStatus, StartRunRequest, SubmitAnswerRequest, SystemFeatures,
     SystemInfoResponse, SystemRunCounts, WriteBlobResponse,
 };
-use fabro_auth::parse_credential_secret;
+use fabro_auth::{configured_providers_from_process_env, parse_credential_secret};
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{ServerSettings, Storage, envfile};
 use fabro_interview::{
@@ -49,7 +49,7 @@ use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest, Role, ToolChoice,
     ToolDefinition,
 };
-use fabro_model::{BilledModelUsage, BilledTokenCounts};
+use fabro_model::{BilledModelUsage, BilledTokenCounts, Catalog};
 use fabro_sandbox::daytona::DaytonaSandbox;
 use fabro_sandbox::reconnect::reconnect;
 use fabro_sandbox::{Sandbox, SandboxProvider};
@@ -70,25 +70,24 @@ use fabro_types::settings::server::{
 };
 use fabro_types::settings::{InterpString, SettingsLayer};
 use fabro_types::{
-    ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId,
-    RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance,
-    RunSubjectProvenance,
+    ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, PullRequestRecord,
+    RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
+    RunServerProvenance, RunSubjectProvenance,
 };
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::text::strip_goal_decoration;
 use fabro_util::version::FABRO_VERSION;
 use fabro_vault::{Error as VaultError, SecretType, Vault};
-use fabro_workflow::Error as WorkflowError;
 use fabro_workflow::artifact_upload::ArtifactSink;
 use fabro_workflow::event::{self as workflow_event, Emitter};
 use fabro_workflow::handler::HandlerRegistry;
-use fabro_workflow::operations::{self};
 use fabro_workflow::pipeline::Persisted;
 use fabro_workflow::records::Checkpoint;
 use fabro_workflow::run_lookup::{
     RunInfo, StatusFilter, filter_runs, scan_runs_with_summaries, scratch_base,
 };
 use fabro_workflow::run_status::{FailureReason, RunStatus, SuccessReason};
+use fabro_workflow::{Error as WorkflowError, operations, pull_request};
 use object_store::memory::InMemory as MemoryObjectStore;
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
@@ -183,6 +182,17 @@ struct EventListParams {
     since_seq: Option<u32>,
     #[serde(default)]
     limit:     Option<usize>,
+}
+
+#[derive(serde::Deserialize)]
+struct MergeRunPullRequestRequest {
+    method: String,
+}
+
+#[derive(serde::Deserialize)]
+struct CreateRunPullRequestRequest {
+    force: bool,
+    model: Option<String>,
 }
 
 impl EventListParams {
@@ -557,6 +567,7 @@ pub struct AppState {
     pub(crate) settings:             Arc<RwLock<SettingsLayer>>,
     pub(crate) server_settings:      RwLock<Arc<ServerSettings>>,
     pub(crate) env_lookup:           EnvLookup,
+    pub(crate) github_api_base_url:  String,
     http_client:                     Option<fabro_http::HttpClient>,
     shutting_down:                   AtomicBool,
     registry_factory_override:       Option<Box<RegistryFactoryOverride>>,
@@ -573,6 +584,7 @@ pub(crate) struct AppStateConfig {
     pub(crate) vault_path:                PathBuf,
     pub(crate) server_secrets:            ServerSecrets,
     pub(crate) env_lookup:                EnvLookup,
+    pub(crate) github_api_base_url:       Option<String>,
     pub(crate) http_client:               Option<fabro_http::HttpClient>,
 }
 
@@ -1071,6 +1083,18 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/questions", get(get_questions))
         .route("/runs/{id}/questions/{qid}/answer", post(submit_answer))
         .route("/runs/{id}/state", get(get_run_state))
+        .route(
+            "/runs/{id}/pull_request",
+            get(get_run_pull_request).post(create_run_pull_request),
+        )
+        .route(
+            "/runs/{id}/pull_request/merge",
+            post(merge_run_pull_request),
+        )
+        .route(
+            "/runs/{id}/pull_request/close",
+            post(close_run_pull_request),
+        )
         .route(
             "/runs/{id}/events",
             get(list_run_events).post(append_run_event),
@@ -2370,6 +2394,7 @@ pub(crate) fn create_test_app_state_with_session_key(
         vault_path,
         server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
         env_lookup,
+        github_api_base_url: None,
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
     })
     .expect("test app state should build")
@@ -2405,6 +2430,7 @@ fn default_test_app_state_config(
         vault_path,
         server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
         env_lookup,
+        github_api_base_url: None,
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
     }
 }
@@ -2494,6 +2520,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         vault_path,
         server_secrets,
         env_lookup,
+        github_api_base_url,
         http_client,
     } = config;
 
@@ -2532,6 +2559,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             })
     };
     let worker_tokens = worker_token_keys_from_server_secrets(&server_secrets)?;
+    let github_api_base_url = github_api_base_url.unwrap_or_else(fabro_github::github_api_base_url);
     Ok(Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
         aggregate_billing: Mutex::new(BillingAccumulator::default()),
@@ -2549,6 +2577,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         settings,
         server_settings: RwLock::new(current_server_settings),
         env_lookup: Arc::clone(&env_lookup),
+        github_api_base_url,
         http_client,
         shutting_down: AtomicBool::new(false),
         registry_factory_override,
@@ -4987,6 +5016,472 @@ async fn get_run_state(
     }
 }
 
+fn parse_github_owner_repo_from_url(url: &str, kind: &str) -> Result<(String, String), ApiError> {
+    let parsed = fabro_http::Url::parse(url)
+        .map_err(|err| ApiError::bad_request(format!("Invalid {kind}: {err}")))?;
+    match parsed.host_str() {
+        Some("github.com") => {}
+        Some(host) => {
+            return Err(ApiError::with_code(
+                StatusCode::BAD_REQUEST,
+                format!("Pull request operations support github.com only (got {host})."),
+                "unsupported_host",
+            ));
+        }
+        None => {
+            return Err(ApiError::bad_request(format!(
+                "Invalid {kind}: missing host"
+            )));
+        }
+    }
+
+    fabro_github::parse_github_owner_repo(url).map_err(ApiError::bad_request)
+}
+
+fn load_server_github_credentials(
+    state: &AppState,
+) -> Result<fabro_github::GitHubCredentials, ApiError> {
+    let settings = state.server_settings();
+    match state.github_credentials(&settings.server.integrations.github) {
+        Ok(Some(creds)) => Ok(creds),
+        Ok(None) => {
+            warn!("GitHub integration unavailable on server: credentials not configured");
+            Err(ApiError::with_code(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "GitHub integration unavailable on server.",
+                "integration_unavailable",
+            ))
+        }
+        Err(err) => {
+            warn!(error = %err, "GitHub integration unavailable on server");
+            Err(ApiError::with_code(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "GitHub integration unavailable on server.",
+                "integration_unavailable",
+            ))
+        }
+    }
+}
+
+fn no_stored_pull_request_error(run_id: &RunId) -> ApiError {
+    ApiError::with_code(
+        StatusCode::NOT_FOUND,
+        format!("No pull request found in store. Create one first with: fabro pr create {run_id}"),
+        "no_stored_record",
+    )
+}
+
+fn github_pull_request_not_found_error(record: &PullRequestRecord) -> ApiError {
+    ApiError::with_code(
+        StatusCode::BAD_GATEWAY,
+        format!("Pull request #{} was deleted on GitHub.", record.number),
+        "github_not_found",
+    )
+}
+
+fn invalid_merge_method_error(method: &str) -> ApiError {
+    ApiError::with_code(
+        StatusCode::BAD_REQUEST,
+        format!("Invalid merge method: {method}"),
+        "invalid_merge_method",
+    )
+}
+
+fn pull_request_already_exists_error(record: &PullRequestRecord) -> ApiError {
+    ApiError::with_code(
+        StatusCode::CONFLICT,
+        format!("Pull request already exists at {}", record.html_url),
+        "pull_request_exists",
+    )
+}
+
+fn missing_repo_origin_error() -> ApiError {
+    ApiError::with_code(
+        StatusCode::BAD_REQUEST,
+        "Run has no repo origin URL — pull request creation requires git metadata.",
+        "missing_repo_origin",
+    )
+}
+
+fn missing_base_branch_error() -> ApiError {
+    ApiError::with_code(
+        StatusCode::BAD_REQUEST,
+        "Run has no base branch — pull request creation requires git metadata.",
+        "missing_base_branch",
+    )
+}
+
+fn missing_run_branch_error() -> ApiError {
+    ApiError::with_code(
+        StatusCode::BAD_REQUEST,
+        "Run has no run_branch — was it run with git push enabled?",
+        "missing_run_branch",
+    )
+}
+
+fn run_not_finished_error() -> ApiError {
+    ApiError::with_code(
+        StatusCode::BAD_REQUEST,
+        "Run is not finished yet.",
+        "run_not_finished",
+    )
+}
+
+fn empty_pull_request_diff_error() -> ApiError {
+    ApiError::with_code(
+        StatusCode::BAD_REQUEST,
+        "Stored diff is empty — nothing to create a PR for",
+        "empty_diff",
+    )
+}
+
+fn run_not_successful_error(status: &fabro_types::StageStatus) -> ApiError {
+    ApiError::with_code(
+        StatusCode::BAD_REQUEST,
+        format!("Run status is '{status}', expected success or partial_success"),
+        "run_not_successful",
+    )
+}
+
+fn missing_remote_branch_error(run_branch: &str) -> ApiError {
+    ApiError::with_code(
+        StatusCode::BAD_REQUEST,
+        format!(
+            "Branch '{run_branch}' not found on GitHub. Was it pushed? Try: git push origin {run_branch}"
+        ),
+        "missing_remote_branch",
+    )
+}
+
+fn pull_request_detail_json(
+    record: &PullRequestRecord,
+    detail: &fabro_github::PullRequestDetail,
+) -> serde_json::Value {
+    serde_json::json!({
+        "record": record,
+        "number": detail.number,
+        "title": detail.title,
+        "body": detail.body,
+        "state": detail.state,
+        "draft": detail.draft,
+        "merged": detail.merged,
+        "merged_at": detail.merged_at,
+        "mergeable": detail.mergeable,
+        "additions": detail.additions,
+        "deletions": detail.deletions,
+        "changed_files": detail.changed_files,
+        "html_url": detail.html_url,
+        "user": {
+            "login": detail.user.login,
+        },
+        "head": {
+            "ref_name": detail.head.ref_name,
+        },
+        "base": {
+            "ref_name": detail.base.ref_name,
+        },
+        "created_at": detail.created_at,
+        "updated_at": detail.updated_at,
+    })
+}
+
+async fn create_run_pull_request(
+    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateRunPullRequestRequest>,
+) -> Response {
+    let Ok(run_store) = state.store.open_run(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+
+    let run_state = match run_store.state().await {
+        Ok(run_state) => run_state,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    if let Some(record) = run_state.pull_request.as_ref() {
+        return pull_request_already_exists_error(record).into_response();
+    }
+
+    let Some(run_spec) = run_state.spec.as_ref() else {
+        return ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Run spec missing from store.",
+        )
+        .into_response();
+    };
+
+    let Some(origin_url) = run_spec.repo_origin_url.as_deref() else {
+        return missing_repo_origin_error().into_response();
+    };
+    let Some(base_branch) = run_spec.base_branch.as_deref() else {
+        return missing_base_branch_error().into_response();
+    };
+    let Some(run_branch) = run_state
+        .start
+        .as_ref()
+        .and_then(|start| start.run_branch.as_deref())
+    else {
+        return missing_run_branch_error().into_response();
+    };
+
+    let Some(diff) = run_state.final_patch.as_deref() else {
+        return empty_pull_request_diff_error().into_response();
+    };
+    if diff.trim().is_empty() {
+        return empty_pull_request_diff_error().into_response();
+    }
+
+    let Some(conclusion) = run_state.conclusion.as_ref() else {
+        return run_not_finished_error().into_response();
+    };
+    if !body.force
+        && !matches!(
+            conclusion.status,
+            fabro_types::StageStatus::Success | fabro_types::StageStatus::PartialSuccess
+        )
+    {
+        return run_not_successful_error(&conclusion.status).into_response();
+    }
+
+    let normalized_origin = fabro_github::ssh_url_to_https(origin_url);
+    let (owner, repo) =
+        match parse_github_owner_repo_from_url(&normalized_origin, "repo origin URL") {
+            Ok(owner_repo) => owner_repo,
+            Err(err) => return err.into_response(),
+        };
+    let creds = match load_server_github_credentials(state.as_ref()) {
+        Ok(creds) => creds,
+        Err(err) => return err.into_response(),
+    };
+
+    let branch_exists = match fabro_github::branch_exists(
+        &creds,
+        &owner,
+        &repo,
+        run_branch,
+        state.github_api_base_url.as_str(),
+    )
+    .await
+    {
+        Ok(branch_exists) => branch_exists,
+        Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+    };
+    if !branch_exists {
+        return missing_remote_branch_error(run_branch).into_response();
+    }
+
+    let configured = configured_providers_from_process_env(Some(&state.vault)).await;
+    let model = body.model.unwrap_or_else(|| {
+        Catalog::builtin()
+            .default_for_configured(&configured)
+            .id
+            .clone()
+    });
+
+    let pull_request = match pull_request::maybe_open_pull_request(
+        &creds,
+        &normalized_origin,
+        state.github_api_base_url.as_str(),
+        base_branch,
+        run_branch,
+        run_spec.graph.goal(),
+        diff,
+        &model,
+        true,
+        None,
+        &run_store.clone().into(),
+        Some(conclusion),
+    )
+    .await
+    {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Pull request creation returned no record unexpectedly.",
+            )
+            .into_response();
+        }
+        Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+    };
+
+    let event = workflow_event::Event::PullRequestCreated {
+        pr_url:      pull_request.html_url.clone(),
+        pr_number:   pull_request.number,
+        owner:       pull_request.owner.clone(),
+        repo:        pull_request.repo.clone(),
+        base_branch: pull_request.base_branch.clone(),
+        head_branch: pull_request.head_branch.clone(),
+        title:       pull_request.title.clone(),
+        draft:       true,
+    };
+    if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    Json(pull_request).into_response()
+}
+
+async fn get_run_pull_request(
+    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let Ok(run_store) = state.store.open_run_reader(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+
+    let run_state = match run_store.state().await {
+        Ok(run_state) => run_state,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    let Some(record) = run_state.pull_request else {
+        return no_stored_pull_request_error(&id).into_response();
+    };
+
+    let (owner, repo) = match parse_github_owner_repo_from_url(&record.html_url, "pull request URL")
+    {
+        Ok(owner_repo) => owner_repo,
+        Err(err) => return err.into_response(),
+    };
+
+    let creds = match load_server_github_credentials(state.as_ref()) {
+        Ok(creds) => creds,
+        Err(err) => return err.into_response(),
+    };
+
+    match fabro_github::get_pull_request(
+        &creds,
+        &owner,
+        &repo,
+        record.number,
+        state.github_api_base_url.as_str(),
+    )
+    .await
+    {
+        Ok(detail) => Json(pull_request_detail_json(&record, &detail)).into_response(),
+        Err(err) if err.contains("not found") => {
+            github_pull_request_not_found_error(&record).into_response()
+        }
+        Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+    }
+}
+
+async fn merge_run_pull_request(
+    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<MergeRunPullRequestRequest>,
+) -> Response {
+    let Ok(run_store) = state.store.open_run_reader(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+
+    let run_state = match run_store.state().await {
+        Ok(run_state) => run_state,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    let Some(record) = run_state.pull_request else {
+        return no_stored_pull_request_error(&id).into_response();
+    };
+
+    let Ok(method) = body.method.parse::<fabro_github::AutoMergeMethod>() else {
+        return invalid_merge_method_error(&body.method).into_response();
+    };
+    let (owner, repo) = match parse_github_owner_repo_from_url(&record.html_url, "pull request URL")
+    {
+        Ok(owner_repo) => owner_repo,
+        Err(err) => return err.into_response(),
+    };
+    let creds = match load_server_github_credentials(state.as_ref()) {
+        Ok(creds) => creds,
+        Err(err) => return err.into_response(),
+    };
+
+    match fabro_github::merge_pull_request(
+        &creds,
+        &owner,
+        &repo,
+        record.number,
+        method.as_str(),
+        state.github_api_base_url.as_str(),
+    )
+    .await
+    {
+        Ok(()) => Json(serde_json::json!({
+            "number": record.number,
+            "html_url": record.html_url,
+            "method": method.as_str(),
+        }))
+        .into_response(),
+        Err(err) if err.contains("not found") => {
+            github_pull_request_not_found_error(&record).into_response()
+        }
+        Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+    }
+}
+
+async fn close_run_pull_request(
+    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let Ok(run_store) = state.store.open_run_reader(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+
+    let run_state = match run_store.state().await {
+        Ok(run_state) => run_state,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    let Some(record) = run_state.pull_request else {
+        return no_stored_pull_request_error(&id).into_response();
+    };
+
+    let (owner, repo) = match parse_github_owner_repo_from_url(&record.html_url, "pull request URL")
+    {
+        Ok(owner_repo) => owner_repo,
+        Err(err) => return err.into_response(),
+    };
+    let creds = match load_server_github_credentials(state.as_ref()) {
+        Ok(creds) => creds,
+        Err(err) => return err.into_response(),
+    };
+
+    match fabro_github::close_pull_request(
+        &creds,
+        &owner,
+        &repo,
+        record.number,
+        state.github_api_base_url.as_str(),
+    )
+    .await
+    {
+        Ok(()) => Json(serde_json::json!({
+            "number": record.number,
+            "html_url": record.html_url,
+        }))
+        .into_response(),
+        Err(err) if err.contains("not found") => {
+            github_pull_request_not_found_error(&record).into_response()
+        }
+        Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+    }
+}
+
 async fn append_run_event(
     AuthorizeRunScoped(id): AuthorizeRunScoped,
     State(state): State<Arc<AppState>>,
@@ -7147,23 +7642,36 @@ async fn get_graph(
     reason = "server unit tests stage fixtures with sync std::fs writes"
 )]
 mod tests {
+    use std::collections::HashMap;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     #[cfg(unix)]
     use std::path::{Path, PathBuf};
     #[cfg(unix)]
     use std::process::Stdio;
+    use std::sync::Once;
 
     use axum::body::Body;
     use axum::http::{Method, Request, header};
     use chrono::{Duration as ChronoDuration, Utc};
     use fabro_config::bind::Bind;
+    use fabro_config::parse_settings_layer;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
+    use fabro_llm::Error as LlmError;
+    use fabro_llm::client::Client as LlmClient;
+    use fabro_llm::generate::set_default_client;
+    use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
+    use fabro_llm::types::{
+        FinishReason, Message, Request as LlmRequest, Response as LlmResponse, StreamEvent,
+        TokenCounts,
+    };
     use fabro_model::Provider;
     use fabro_types::settings::ServerAuthMethod;
     use fabro_types::{
-        InterviewQuestionRecord, InterviewQuestionType, RunAuthMethod, RunBlobId, RunId, fixtures,
+        AttrValue, Graph, InterviewQuestionRecord, InterviewQuestionType, RunAuthMethod, RunBlobId,
+        RunId, RunSpec, fixtures,
     };
+    use httpmock::MockServer;
     use serde_json::json;
     use tokio_stream::StreamExt as _;
     use tower::ServiceExt;
@@ -7869,6 +8377,7 @@ root = "/srv/new"
             vault_path,
             server_secrets: ServerSecrets::load(server_env_path, HashMap::new()).unwrap(),
             env_lookup: default_env_lookup(),
+            github_api_base_url: None,
             http_client: Some(
                 fabro_http::test_http_client().expect("test HTTP client should build"),
             ),
@@ -8146,6 +8655,215 @@ allowed_usernames = ["octocat"]
         )
         .unwrap();
         run_store.append_event(&payload).await.unwrap();
+    }
+
+    fn github_token_settings() -> SettingsLayer {
+        parse_settings_layer(
+            r#"
+_version = 1
+
+[server.integrations.github]
+strategy = "token"
+"#,
+        )
+        .expect("github token settings fixture should parse")
+    }
+
+    fn create_github_token_app_state(
+        token: Option<&str>,
+        github_api_base_url: Option<String>,
+    ) -> Arc<AppState> {
+        let settings = Arc::new(RwLock::new(github_token_settings()));
+        ensure_test_auth_methods(&settings);
+        let env_lookup: EnvLookup = Arc::new(|_| None);
+        let mut config = default_test_app_state_config(settings, 5, env_lookup);
+        config.github_api_base_url = github_api_base_url;
+        let state = build_app_state(config).expect("test app state should build");
+        if let Some(token) = token {
+            state
+                .vault
+                .try_write()
+                .expect("test vault should not already be locked")
+                .set("GITHUB_TOKEN", token, SecretType::Credential, None)
+                .expect("test github token should be writable");
+        }
+        state
+    }
+
+    async fn create_run_with_pull_request_record(
+        state: &Arc<AppState>,
+        run_id: RunId,
+        pr_url: &str,
+        pr_number: u64,
+        title: &str,
+    ) {
+        create_durable_run_with_events(state, run_id, &[
+            workflow_event::Event::PullRequestCreated {
+                pr_url: pr_url.to_string(),
+                pr_number,
+                owner: "acme".to_string(),
+                repo: "widgets".to_string(),
+                base_branch: "main".to_string(),
+                head_branch: "feature".to_string(),
+                title: title.to_string(),
+                draft: false,
+            },
+        ])
+        .await;
+    }
+
+    struct MockLlmProvider {
+        response_text: String,
+    }
+
+    impl MockLlmProvider {
+        fn new(text: &str) -> Self {
+            Self {
+                response_text: text.to_string(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProviderAdapter for MockLlmProvider {
+        fn name(&self) -> &str {
+            "anthropic"
+        }
+
+        async fn complete(&self, _request: &LlmRequest) -> Result<LlmResponse, LlmError> {
+            Ok(LlmResponse {
+                id:            "resp_1".into(),
+                model:         "mock-model".into(),
+                provider:      "anthropic".into(),
+                message:       Message::assistant(&self.response_text),
+                finish_reason: FinishReason::Stop,
+                usage:         TokenCounts {
+                    input_tokens: 10,
+                    output_tokens: 20,
+                    ..Default::default()
+                },
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
+            })
+        }
+
+        async fn stream(&self, _request: &LlmRequest) -> Result<StreamEventStream, LlmError> {
+            let text = self.response_text.clone();
+            let response = LlmResponse {
+                id:            "resp_1".into(),
+                model:         "mock-model".into(),
+                provider:      "anthropic".into(),
+                message:       Message::assistant(&text),
+                finish_reason: FinishReason::Stop,
+                usage:         TokenCounts {
+                    input_tokens: 10,
+                    output_tokens: 20,
+                    ..Default::default()
+                },
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
+            };
+            Ok(Box::pin(tokio_stream::iter(vec![
+                Ok(StreamEvent::text_delta(&text, Some("t1".into()))),
+                Ok(StreamEvent::finish(
+                    FinishReason::Stop,
+                    TokenCounts {
+                        input_tokens: 10,
+                        output_tokens: 20,
+                        ..Default::default()
+                    },
+                    response,
+                )),
+            ])))
+        }
+    }
+
+    fn install_mock_llm() {
+        static INIT: Once = Once::new();
+
+        INIT.call_once(|| {
+            let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
+            providers.insert(
+                "anthropic".to_string(),
+                Arc::new(MockLlmProvider::new("Narrative from mock.")),
+            );
+            set_default_client(LlmClient::new(
+                providers,
+                Some("anthropic".to_string()),
+                vec![],
+            ));
+        });
+    }
+
+    async fn create_completed_run_ready_for_pull_request(
+        state: &Arc<AppState>,
+        run_id: RunId,
+        repo_origin_url: Option<&str>,
+        base_branch: Option<&str>,
+        run_branch: Option<&str>,
+        final_patch: &str,
+    ) {
+        let mut graph = Graph::new("test");
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("Ship the server-side PR".to_string()),
+        );
+        let run_spec = RunSpec {
+            run_id,
+            settings: SettingsLayer::default(),
+            graph,
+            workflow_slug: Some("test".to_string()),
+            working_directory: PathBuf::from("/tmp/project"),
+            host_repo_path: Some("/tmp/project".to_string()),
+            repo_origin_url: repo_origin_url.map(str::to_string),
+            base_branch: base_branch.map(str::to_string),
+            labels: HashMap::new(),
+            provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
+        };
+
+        create_durable_run_with_events(state, run_id, &[
+            workflow_event::Event::RunCreated {
+                run_id,
+                settings: serde_json::to_value(&run_spec.settings).unwrap(),
+                graph: serde_json::to_value(&run_spec.graph).unwrap(),
+                workflow_source: None,
+                workflow_config: None,
+                labels: run_spec.labels.clone().into_iter().collect(),
+                run_dir: run_spec.working_directory.display().to_string(),
+                working_directory: run_spec.working_directory.display().to_string(),
+                host_repo_path: run_spec.host_repo_path.clone(),
+                repo_origin_url: run_spec.repo_origin_url.clone(),
+                base_branch: run_spec.base_branch.clone(),
+                workflow_slug: run_spec.workflow_slug.clone(),
+                db_prefix: None,
+                provenance: run_spec.provenance.clone(),
+                manifest_blob: None,
+            },
+            workflow_event::Event::WorkflowRunStarted {
+                name: "test".to_string(),
+                run_id,
+                base_branch: base_branch.map(str::to_string),
+                base_sha: None,
+                run_branch: run_branch.map(str::to_string),
+                worktree_dir: None,
+                goal: Some("Ship the server-side PR".to_string()),
+            },
+            workflow_event::Event::WorkflowRunCompleted {
+                duration_ms:          1,
+                artifact_count:       0,
+                status:               "success".to_string(),
+                reason:               SuccessReason::Completed,
+                total_usd_micros:     None,
+                final_git_commit_sha: None,
+                final_patch:          Some(final_patch.to_string()),
+                billing:              None,
+            },
+        ])
+        .await;
     }
 
     fn test_event_envelope(seq: u32, run_id: RunId, body: EventBody) -> EventEnvelope {
@@ -8705,6 +9423,428 @@ slug = "fabro"
         let response = app.oneshot(req).await.unwrap();
         let body = response_json!(response, StatusCode::OK).await;
         assert!(body["nodes"].is_object());
+    }
+
+    #[tokio::test]
+    async fn get_run_pull_request_returns_live_detail_from_github() {
+        let github = MockServer::start();
+        let github_mock = github.mock(|when, then| {
+            when.method("GET")
+                .path("/repos/acme/widgets/pulls/42")
+                .header("authorization", "Bearer ghu_test");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    json!({
+                        "number": 42,
+                        "title": "Fix the bug",
+                        "body": "Detailed description",
+                        "state": "closed",
+                        "draft": false,
+                        "merged": true,
+                        "merged_at": "2026-04-23T15:45:00Z",
+                        "mergeable": false,
+                        "additions": 10,
+                        "deletions": 3,
+                        "changed_files": 2,
+                        "html_url": "https://github.com/acme/widgets/pull/42",
+                        "user": { "login": "testuser" },
+                        "head": { "ref": "feature" },
+                        "base": { "ref": "main" },
+                        "created_at": "2026-04-23T15:40:00Z",
+                        "updated_at": "2026-04-23T15:45:00Z"
+                    })
+                    .to_string(),
+                );
+        });
+        let state =
+            create_github_token_app_state(Some("ghu_test"), Some(github.base_url().to_string()));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = fixtures::RUN_1;
+
+        create_run_with_pull_request_record(
+            &state,
+            run_id,
+            "https://github.com/acme/widgets/pull/42",
+            42,
+            "Fix the bug",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api(&format!("/runs/{run_id}/pull_request")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::OK).await;
+
+        assert_eq!(body["record"]["number"], 42);
+        assert_eq!(body["record"]["owner"], "acme");
+        assert_eq!(body["state"], "closed");
+        assert_eq!(body["merged"], true);
+        assert_eq!(body["head"]["ref_name"], "feature");
+        assert_eq!(body["base"]["ref_name"], "main");
+        github_mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_run_pull_request_returns_not_found_when_record_missing() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = create_run(&app, MINIMAL_DOT).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api(&format!("/runs/{run_id}/pull_request")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::NOT_FOUND).await;
+
+        assert_eq!(body["errors"][0]["code"], "no_stored_record");
+    }
+
+    #[tokio::test]
+    async fn get_run_pull_request_rejects_non_github_record_url() {
+        let state = create_github_token_app_state(Some("ghu_test"), None);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = fixtures::RUN_1;
+
+        create_run_with_pull_request_record(
+            &state,
+            run_id,
+            "https://gitlab.com/acme/widgets/-/merge_requests/42",
+            42,
+            "Fix the bug",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api(&format!("/runs/{run_id}/pull_request")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+
+        assert_eq!(body["errors"][0]["code"], "unsupported_host");
+    }
+
+    #[tokio::test]
+    async fn get_run_pull_request_returns_service_unavailable_without_github_credentials() {
+        let state = create_github_token_app_state(None, None);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = fixtures::RUN_1;
+
+        create_run_with_pull_request_record(
+            &state,
+            run_id,
+            "https://github.com/acme/widgets/pull/42",
+            42,
+            "Fix the bug",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api(&format!("/runs/{run_id}/pull_request")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::SERVICE_UNAVAILABLE).await;
+
+        assert_eq!(body["errors"][0]["code"], "integration_unavailable");
+    }
+
+    #[tokio::test]
+    async fn get_run_pull_request_returns_bad_gateway_when_github_pr_is_missing() {
+        let github = MockServer::start();
+        let github_mock = github.mock(|when, then| {
+            when.method("GET")
+                .path("/repos/acme/widgets/pulls/42")
+                .header("authorization", "Bearer ghu_test");
+            then.status(404)
+                .header("content-type", "application/json")
+                .body(json!({ "message": "Not Found" }).to_string());
+        });
+        let state =
+            create_github_token_app_state(Some("ghu_test"), Some(github.base_url().to_string()));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = fixtures::RUN_1;
+
+        create_run_with_pull_request_record(
+            &state,
+            run_id,
+            "https://github.com/acme/widgets/pull/42",
+            42,
+            "Fix the bug",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api(&format!("/runs/{run_id}/pull_request")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::BAD_GATEWAY).await;
+
+        assert_eq!(body["errors"][0]["code"], "github_not_found");
+        github_mock.assert();
+    }
+
+    #[tokio::test]
+    async fn create_run_pull_request_creates_and_persists_record() {
+        install_mock_llm();
+
+        let github = MockServer::start();
+        let branch_mock = github.mock(|when, then| {
+            when.method("GET")
+                .path("/repos/acme/widgets/branches/fabro/run/42")
+                .header("authorization", "Bearer ghu_test");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(json!({ "name": "fabro/run/42" }).to_string());
+        });
+        let create_mock = github.mock(|when, then| {
+            when.method("POST")
+                .path("/repos/acme/widgets/pulls")
+                .header("authorization", "Bearer ghu_test");
+            then.status(201)
+                .header("content-type", "application/json")
+                .body(
+                    json!({
+                        "html_url": "https://github.com/acme/widgets/pull/42",
+                        "number": 42,
+                        "node_id": "PR_kwDOAA"
+                    })
+                    .to_string(),
+                );
+        });
+        let state =
+            create_github_token_app_state(Some("ghu_test"), Some(github.base_url().to_string()));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = fixtures::RUN_1;
+
+        create_completed_run_ready_for_pull_request(
+            &state,
+            run_id,
+            Some("git@github.com:acme/widgets.git"),
+            Some("main"),
+            Some("fabro/run/42"),
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
+        )
+        .await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(api(&format!("/runs/{run_id}/pull_request")))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "force": false,
+                            "model": "claude-sonnet-4-6"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::OK).await;
+
+        assert_eq!(body["number"], 42);
+        assert_eq!(body["owner"], "acme");
+        assert_eq!(body["repo"], "widgets");
+        assert_eq!(body["html_url"], "https://github.com/acme/widgets/pull/42");
+
+        let state_response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api(&format!("/runs/{run_id}/state")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let state_body = response_json!(state_response, StatusCode::OK).await;
+        assert_eq!(state_body["pull_request"]["number"], 42);
+        assert!(state_body["pull_request"]["title"].as_str().is_some());
+
+        branch_mock.assert();
+        create_mock.assert();
+    }
+
+    #[tokio::test]
+    async fn create_run_pull_request_returns_conflict_when_record_exists() {
+        let state = create_github_token_app_state(None, None);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = fixtures::RUN_1;
+
+        create_run_with_pull_request_record(
+            &state,
+            run_id,
+            "https://github.com/acme/widgets/pull/42",
+            42,
+            "Fix the bug",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(api(&format!("/runs/{run_id}/pull_request")))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({ "force": false, "model": null }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::CONFLICT).await;
+
+        assert_eq!(body["errors"][0]["code"], "pull_request_exists");
+    }
+
+    #[tokio::test]
+    async fn create_run_pull_request_rejects_missing_repo_origin() {
+        let state = create_github_token_app_state(None, None);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = fixtures::RUN_1;
+
+        create_completed_run_ready_for_pull_request(
+            &state,
+            run_id,
+            None,
+            Some("main"),
+            Some("fabro/run/42"),
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(api(&format!("/runs/{run_id}/pull_request")))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "force": false,
+                            "model": "claude-sonnet-4-6"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+
+        assert_eq!(body["errors"][0]["code"], "missing_repo_origin");
+    }
+
+    #[tokio::test]
+    async fn create_run_pull_request_returns_service_unavailable_without_github_credentials() {
+        let state = create_github_token_app_state(None, None);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = fixtures::RUN_1;
+
+        create_completed_run_ready_for_pull_request(
+            &state,
+            run_id,
+            Some("https://github.com/acme/widgets.git"),
+            Some("main"),
+            Some("fabro/run/42"),
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(api(&format!("/runs/{run_id}/pull_request")))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "force": false,
+                            "model": "claude-sonnet-4-6"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::SERVICE_UNAVAILABLE).await;
+
+        assert_eq!(body["errors"][0]["code"], "integration_unavailable");
+    }
+
+    #[tokio::test]
+    async fn create_run_pull_request_rejects_non_github_origin_url() {
+        let state = create_github_token_app_state(Some("ghu_test"), None);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = fixtures::RUN_1;
+
+        create_completed_run_ready_for_pull_request(
+            &state,
+            run_id,
+            Some("https://gitlab.com/acme/widgets.git"),
+            Some("main"),
+            Some("fabro/run/42"),
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(api(&format!("/runs/{run_id}/pull_request")))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "force": false,
+                            "model": "claude-sonnet-4-6"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+
+        assert_eq!(body["errors"][0]["code"], "unsupported_host");
     }
 
     #[tokio::test]

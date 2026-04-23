@@ -302,6 +302,7 @@ fn main() {
             "fabro_types::settings::server::WebhookStrategy",
             &[],
         ),
+        ("PullRequestRecord", "fabro_types::PullRequestRecord", &[]),
     ];
     for (name, path, impls) in replacements {
         settings.with_replacement(*name, *path, impls.iter().copied());

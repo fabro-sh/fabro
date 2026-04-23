@@ -23,6 +23,10 @@ pub struct PullRequestDetail {
     pub body:          Option<String>,
     pub state:         String,
     pub draft:         bool,
+    #[serde(default)]
+    pub merged:        bool,
+    #[serde(default)]
+    pub merged_at:     Option<String>,
     pub mergeable:     Option<bool>,
     pub additions:     u64,
     pub deletions:     u64,
@@ -551,7 +555,20 @@ pub async fn create_pull_request(
 }
 
 /// GitHub GraphQL merge method for auto-merge.
-#[derive(Clone, Copy, Debug)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum AutoMergeMethod {
     Merge,
     Squash,
@@ -559,6 +576,10 @@ pub enum AutoMergeMethod {
 }
 
 impl AutoMergeMethod {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+
     fn as_graphql_value(self) -> &'static str {
         match self {
             Self::Merge => "MERGE",
@@ -1811,6 +1832,8 @@ mod tests {
             "body": "Detailed description",
             "state": "open",
             "draft": false,
+            "merged": false,
+            "merged_at": null,
             "mergeable": true,
             "additions": 10,
             "deletions": 3,
@@ -1858,6 +1881,8 @@ mod tests {
         assert_eq!(detail.number, 42);
         assert_eq!(detail.title, "Fix the bug");
         assert_eq!(detail.state, "open");
+        assert!(!detail.merged);
+        assert_eq!(detail.merged_at, None);
         assert_eq!(detail.additions, 10);
         assert_eq!(detail.deletions, 3);
         assert_eq!(detail.changed_files, 2);

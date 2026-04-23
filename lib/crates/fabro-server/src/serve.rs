@@ -672,6 +672,7 @@ where
         vault_path,
         server_secrets,
         env_lookup,
+        github_api_base_url: None,
         http_client: None,
     })?;
     let reconciled = reconcile_incomplete_runs_on_startup(&state).await?;
