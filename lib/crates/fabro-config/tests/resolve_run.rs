@@ -1,4 +1,4 @@
-use fabro_config::parse_settings_layer;
+use fabro_config::{WorkflowSettingsBuilder, parse_settings_layer};
 use fabro_types::settings::run::{ApprovalMode, RunGoal, RunMode, WorktreeMode};
 use fabro_types::settings::{InterpString, SettingsLayer};
 
@@ -8,8 +8,9 @@ fn parse(source: &str) -> SettingsLayer {
 
 #[test]
 fn resolves_run_defaults_from_empty_settings() {
-    let settings = fabro_config::resolve_run_from_file(&SettingsLayer::default())
-        .expect("empty settings should resolve");
+    let settings = WorkflowSettingsBuilder::from_layer(&SettingsLayer::default())
+        .expect("empty settings should resolve")
+        .run;
 
     assert_eq!(settings.execution.mode, RunMode::Normal);
     assert_eq!(settings.execution.approval, ApprovalMode::Prompt);
@@ -38,7 +39,9 @@ name = "sonnet"
 "#,
     );
 
-    let settings = fabro_config::resolve_run_from_file(&file).expect("run settings should resolve");
+    let settings = WorkflowSettingsBuilder::from_layer(&file)
+        .expect("run settings should resolve")
+        .run;
 
     match settings.goal {
         Some(RunGoal::File(path)) => {

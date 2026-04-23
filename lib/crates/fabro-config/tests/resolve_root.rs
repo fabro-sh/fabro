@@ -1,4 +1,4 @@
-use fabro_config::parse_settings_layer;
+use fabro_config::{ServerSettingsBuilder, WorkflowSettingsBuilder, parse_settings_layer};
 use fabro_types::settings::run::RunMode;
 use fabro_types::settings::{InterpString, SettingsLayer};
 
@@ -83,23 +83,30 @@ name = "gpt-5"
 "#,
     );
 
-    let project = fabro_config::resolve_project_from_file(&settings)
-        .expect("project settings should resolve");
-    let workflow = fabro_config::resolve_workflow_from_file(&settings)
-        .expect("workflow settings should resolve");
+    let workflow_settings =
+        WorkflowSettingsBuilder::from_layer(&settings).expect("workflow settings should resolve");
     let server =
-        fabro_config::resolve_server_from_file(&settings).expect("server settings should resolve");
-    let run = fabro_config::resolve_run_from_file(&settings).expect("run settings should resolve");
+        ServerSettingsBuilder::from_layer(&settings).expect("server settings should resolve");
 
-    assert_eq!(project.directory, ".fabro");
-    assert_eq!(workflow.graph, "graphs/workflow.dot");
-    assert_eq!(server.storage.root.as_source(), "/srv/fabro");
+    assert_eq!(workflow_settings.project.directory, ".fabro");
+    assert_eq!(workflow_settings.workflow.graph, "graphs/workflow.dot");
+    assert_eq!(server.server.storage.root.as_source(), "/srv/fabro");
     assert_eq!(
-        run.model.provider.as_ref().map(InterpString::as_source),
+        workflow_settings
+            .run
+            .model
+            .provider
+            .as_ref()
+            .map(InterpString::as_source),
         Some("openai".to_string())
     );
     assert_eq!(
-        run.model.name.as_ref().map(InterpString::as_source),
+        workflow_settings
+            .run
+            .model
+            .name
+            .as_ref()
+            .map(InterpString::as_source),
         Some("gpt-5".to_string())
     );
 }

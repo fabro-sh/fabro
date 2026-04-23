@@ -1,7 +1,9 @@
 use std::fmt;
 use std::path::Path;
 
-use fabro_types::settings::{CliLayer, Combine, RunLayer, SettingsLayer};
+use fabro_types::settings::{
+    CliLayer, Combine, ProjectNamespace, RunLayer, RunNamespace, SettingsLayer, WorkflowNamespace,
+};
 use fabro_types::{ServerSettings, UserSettings, WorkflowSettings};
 
 use crate::load::load_settings_path;
@@ -223,6 +225,33 @@ impl WorkflowSettingsBuilder {
             },
             errors,
         )
+    }
+
+    pub(crate) fn project_from_layer(
+        layer: &SettingsLayer,
+    ) -> std::result::Result<ProjectNamespace, ResolveErrors> {
+        let layer = apply_builtin_defaults(layer.clone());
+        let mut errors = Vec::new();
+        let project = resolve_project(&layer.project.clone().unwrap_or_default(), &mut errors);
+        finish_dense_result(project, errors)
+    }
+
+    pub(crate) fn workflow_from_layer(
+        layer: &SettingsLayer,
+    ) -> std::result::Result<WorkflowNamespace, ResolveErrors> {
+        let layer = apply_builtin_defaults(layer.clone());
+        let mut errors = Vec::new();
+        let workflow = resolve_workflow(&layer.workflow.clone().unwrap_or_default(), &mut errors);
+        finish_dense_result(workflow, errors)
+    }
+
+    pub(crate) fn run_from_layer(
+        layer: &SettingsLayer,
+    ) -> std::result::Result<RunNamespace, ResolveErrors> {
+        let layer = apply_builtin_defaults(layer.clone());
+        let mut errors = Vec::new();
+        let run = resolve_run(&layer.run.clone().unwrap_or_default(), &mut errors);
+        finish_dense_result(run, errors)
     }
 }
 

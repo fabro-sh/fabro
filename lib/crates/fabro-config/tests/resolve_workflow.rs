@@ -1,11 +1,13 @@
-use fabro_config::{parse_settings_layer, resolve_workflow_from_file};
+use fabro_config::{WorkflowSettingsBuilder, parse_settings_layer};
 use fabro_types::settings::SettingsLayer;
 
 #[test]
 fn resolves_workflow_defaults_from_empty_settings() {
     let settings = SettingsLayer::default();
 
-    let workflow = resolve_workflow_from_file(&settings).expect("empty settings should resolve");
+    let workflow = WorkflowSettingsBuilder::from_layer(&settings)
+        .expect("empty settings should resolve")
+        .workflow;
 
     assert_eq!(workflow.graph, "workflow.fabro");
     assert!(workflow.name.is_none());
@@ -30,7 +32,9 @@ tier = "gold"
     )
     .expect("fixture should parse");
 
-    let workflow = resolve_workflow_from_file(&settings).expect("workflow settings should resolve");
+    let workflow = WorkflowSettingsBuilder::from_layer(&settings)
+        .expect("workflow settings should resolve")
+        .workflow;
 
     assert_eq!(workflow.name.as_deref(), Some("Ship"));
     assert_eq!(workflow.description.as_deref(), Some("Primary flow"));

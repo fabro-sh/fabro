@@ -16,11 +16,7 @@ use fabro_types::settings::SettingsLayer;
 use serde::Serialize;
 
 use crate::load::load_settings_path;
-use crate::parse::parse_settings_layer;
-use crate::{
-    Error, Result, resolve_project_from_file, resolve_run_from_file, resolve_workflow_from_file,
-    run,
-};
+use crate::{Error, Result, WorkflowSettingsBuilder, run};
 
 const CONFIG_FILENAME: &str = ".fabro/project.toml";
 #[derive(Clone, Debug)]
@@ -32,19 +28,14 @@ pub struct WorkflowPathResolution {
     pub workflow_slug:          Option<String>,
 }
 
-/// Parse a project config from a TOML string.
-pub fn parse_project_config(content: &str) -> Result<SettingsLayer> {
-    parse_settings_layer(content).map_err(|err| Error::parse("Failed to parse project config", err))
-}
-
 /// Load a project config from a file path.
 ///
 /// Goes through [`load_settings_path`] so that relative `run.goal.file`
 /// paths are anchored at the directory of `path` at load time.
 pub fn load_project_config(path: &Path) -> Result<SettingsLayer> {
     let config = load_settings_path(path)?;
-    let root = resolve_project_from_file(&config)
-        .map_err(|errors| Error::resolve("Failed to resolve project settings", errors))?
+    let root = WorkflowSettingsBuilder::project_from_layer(&config)
+        .map_err(|errors| Error::resolve("Failed to resolve project settings", errors.into()))?
         .directory;
     tracing::debug!(path = %path.display(), root = %root, "Loaded project config");
     Ok(config)
@@ -94,9 +85,10 @@ pub fn resolve_workflow_path(workflow_path: &Path, cwd: &Path) -> Result<Workflo
     if path.extension().is_some_and(|ext| ext == "toml") {
         match run::load_run_config(&path) {
             Ok(cfg) => {
-                let workflow = resolve_workflow_from_file(&cfg).map_err(|errors| {
-                    Error::resolve("Failed to resolve workflow settings", errors)
-                })?;
+                let workflow =
+                    WorkflowSettingsBuilder::workflow_from_layer(&cfg).map_err(|errors| {
+                        Error::resolve("Failed to resolve workflow settings", errors.into())
+                    })?;
                 let dot_path = run::resolve_graph_path(&path, &workflow.graph);
                 Ok(WorkflowPathResolution {
                     resolved_workflow_path: path.clone(),
@@ -121,7 +113,7 @@ pub fn resolve_workflow_path(workflow_path: &Path, cwd: &Path) -> Result<Workflo
 }
 
 pub fn resolve_working_directory(settings: &SettingsLayer, caller_cwd: &Path) -> PathBuf {
-    let Some(work_dir) = resolve_run_from_file(settings)
+    let Some(work_dir) = WorkflowSettingsBuilder::run_from_layer(settings)
         .ok()
         .and_then(|settings| settings.working_dir)
         .map(|value| value.as_source())
@@ -392,7 +384,7 @@ pub fn resolve_fabro_root(config_path: &Path, config: &SettingsLayer) -> PathBuf
     let project_dir = config_path
         .parent()
         .expect("config_path should have a parent directory");
-    let root = resolve_project_from_file(config)
+    let root = WorkflowSettingsBuilder::project_from_layer(config)
         .expect("project settings should resolve")
         .directory;
     normalize_joined_path(project_dir, Path::new(&root))
@@ -408,14 +400,14 @@ mod tests {
 
     #[test]
     fn parse_minimal_config() {
-        let config = parse_project_config("_version = 1\n").unwrap();
+        let config = crate::parse_settings_layer("_version = 1\n").unwrap();
         assert_eq!(config.version, Some(1));
         assert!(config.project.is_none());
     }
 
     #[test]
     fn parse_with_project_directory() {
-        let config = parse_project_config(
+        let config = crate::parse_settings_layer(
             r#"
 _version = 1
 
@@ -425,14 +417,16 @@ directory = "custom/"
         )
         .unwrap();
         assert_eq!(
-            resolve_project_from_file(&config).unwrap().directory,
+            WorkflowSettingsBuilder::project_from_layer(&config)
+                .unwrap()
+                .directory,
             "custom/"
         );
     }
 
     #[test]
     fn parse_with_run_execution_retros() {
-        let config = parse_project_config(
+        let config = crate::parse_settings_layer(
             "
 _version = 1
 
@@ -453,7 +447,8 @@ retros = true
 
     #[test]
     fn parse_rejects_legacy_llm_section() {
-        let err = parse_project_config("_version = 1\n[llm]\nprovider = \"openai\"\n").unwrap_err();
+        let err = crate::parse_settings_layer("_version = 1\n[llm]\nprovider = \"openai\"\n")
+            .unwrap_err();
         let text = format!("{err:#}");
         assert!(
             text.contains("run.model") || text.contains("llm"),
@@ -463,7 +458,7 @@ retros = true
 
     #[test]
     fn parse_higher_version_errors() {
-        let err = parse_project_config("_version = 2\n").unwrap_err();
+        let err = crate::parse_settings_layer("_version = 2\n").unwrap_err();
         let chain = format!("{err:#}");
         assert!(
             chain.contains("Upgrade") || chain.to_lowercase().contains("version"),
