@@ -9,11 +9,10 @@
 //! stanzas in `.fabro/project.toml` and `workflow.toml` remain schema-valid but
 //! inert.
 
-use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::{RunExecutionLayer, RunLayer};
 use fabro_types::settings::server::ServerLayer;
+use fabro_types::settings::{Combine, SettingsLayer};
 
-use crate::merge::combine_files;
 use crate::{Error, Result, apply_builtin_defaults};
 
 #[derive(Clone, Debug, Default)]
@@ -86,13 +85,11 @@ pub fn materialize_settings_layer(
     server_defaults.cli = None;
     server_defaults.server = None;
 
-    let combined = combine_files(
-        combine_files(
-            combine_files(combine_files(server_defaults, user), project),
-            workflow,
-        ),
-        args,
-    );
+    let combined = args
+        .combine(workflow)
+        .combine(project)
+        .combine(user)
+        .combine(server_defaults);
     let settings = enforce_server_authority(combined, server_settings);
 
     Ok(apply_builtin_defaults(settings))

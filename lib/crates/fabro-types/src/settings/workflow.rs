@@ -7,6 +7,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::maps::ReplaceMap;
+
 /// A structurally resolved `[workflow]` view for consumers.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct WorkflowNamespace {
@@ -17,7 +19,7 @@ pub struct WorkflowNamespace {
 }
 
 /// A sparse `[workflow]` layer as it appears in a single settings file.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -27,6 +29,6 @@ pub struct WorkflowLayer {
     /// Optional override for the default `workflow.fabro` graph path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph:       Option<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub metadata:    HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "ReplaceMap::is_empty")]
+    pub metadata:    ReplaceMap<String>,
 }

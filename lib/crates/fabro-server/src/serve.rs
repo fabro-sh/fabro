@@ -6,7 +6,6 @@ use std::time::Duration;
 use anyhow::Context;
 use clap::Args;
 use fabro_config::bind::{self, Bind, BindRequest};
-use fabro_config::merge::combine_files;
 use fabro_config::user::{apply_storage_dir_override, load_settings_config};
 use fabro_config::{ServerSettings, Storage};
 use fabro_install::{OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV};
@@ -15,7 +14,7 @@ use fabro_types::settings::server::{
     GithubIntegrationStrategy, ServerLayer, ServerListenLayer, WebhookStrategy,
 };
 use fabro_types::settings::{
-    GithubIntegrationSettings, InterpString, ObjectStoreSettings, ServerListenSettings,
+    Combine, GithubIntegrationSettings, InterpString, ObjectStoreSettings, ServerListenSettings,
     ServerNamespace, SettingsLayer,
 };
 use fabro_util::terminal::Styles;
@@ -481,7 +480,7 @@ pub fn resolve_bind_request_from_settings(
 ) -> anyhow::Result<BindRequest> {
     let effective_settings = match explicit_bind.map(bind::parse_bind).transpose()? {
         Some(BindRequest::TcpHost(host)) => return Ok(BindRequest::TcpHost(host)),
-        Some(bind) => combine_files(settings.clone(), bind_override_layer(bind)),
+        Some(bind) => bind_override_layer(bind).combine(settings.clone()),
         None => settings.clone(),
     };
     let resolved = resolve_server_settings(&effective_settings)?;

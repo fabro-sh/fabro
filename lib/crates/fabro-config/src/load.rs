@@ -6,9 +6,8 @@
 use std::path::{Path, PathBuf};
 
 use fabro_types::settings::run::RunGoalLayer;
-use fabro_types::settings::{InterpString, SettingsLayer};
+use fabro_types::settings::{Combine, InterpString, SettingsLayer};
 
-use crate::merge::combine_files;
 use crate::parse::parse_settings_layer;
 use crate::{Error, Result, project, user};
 
@@ -39,7 +38,7 @@ pub fn load_settings_for_workflow(path: &Path, cwd: &Path) -> Result<SettingsLay
     .map(|(_, config)| config)
     .unwrap_or_default();
 
-    Ok(combine_files(project_config, workflow_config))
+    Ok(workflow_config.combine(project_config))
 }
 
 pub fn load_settings_project(start: &Path) -> Result<SettingsLayer> {

@@ -810,6 +810,7 @@ mod tests {
                     base_dir: None,
                 },
                 settings: {
+                    use fabro_types::settings::ReplaceMap;
                     use fabro_types::settings::run::{
                         RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer,
                         RunPullRequestLayer,
@@ -819,7 +820,7 @@ mod tests {
                     let mut layer = SettingsLayer {
                         run: Some(RunLayer {
                             goal: Some(RunGoalLayer::Inline(InterpString::parse("override goal"))),
-                            metadata,
+                            metadata: ReplaceMap::from(metadata),
                             model: Some(RunModelLayer {
                                 name: Some(InterpString::parse("sonnet")),
                                 ..RunModelLayer::default()

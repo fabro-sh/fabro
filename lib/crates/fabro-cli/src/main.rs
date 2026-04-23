@@ -27,10 +27,9 @@ use args::{
     global_args_cli_layer, printer_from_verbosity, require_no_json_override,
 };
 use clap::{CommandFactory, Parser};
-use fabro_config::merge::combine_files;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
-use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::cli::OutputVerbosity;
+use fabro_types::settings::{Combine, SettingsLayer};
 use fabro_util::exit::ExitClass;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -169,10 +168,11 @@ async fn main_inner() -> (String, Result<()>) {
         Ok(settings) => settings,
         Err(err) => return (command_name, Err(err)),
     };
-    let combined_settings = combine_files(user_settings, SettingsLayer {
+    let combined_settings = SettingsLayer {
         cli: Some(cli_layer.clone()),
         ..SettingsLayer::default()
-    });
+    }
+    .combine(user_settings);
     let cli_settings = match fabro_config::UserSettings::from_layer(&combined_settings) {
         Ok(settings) => settings.cli,
         Err(err) => return (command_name, Err(err.into())),

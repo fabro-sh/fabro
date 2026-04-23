@@ -18,7 +18,6 @@ pub mod envfile;
 pub mod error;
 pub mod home;
 pub mod load;
-pub mod merge;
 pub mod parse;
 pub mod project;
 pub mod resolve;

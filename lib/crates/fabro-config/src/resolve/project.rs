@@ -10,6 +10,6 @@ pub fn resolve_project(layer: &ProjectLayer, _errors: &mut Vec<ResolveError>) ->
             .directory
             .clone()
             .expect("defaults.toml should provide project.directory"),
-        metadata:    layer.metadata.clone(),
+        metadata:    layer.metadata.clone().into_inner(),
     }
 }

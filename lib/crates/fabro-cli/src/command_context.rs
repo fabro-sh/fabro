@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
 use fabro_config::UserSettings;
-use fabro_config::merge::combine_files;
-use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::cli::CliLayer;
+use fabro_types::settings::{Combine, SettingsLayer};
 use fabro_util::printer::Printer;
 use tokio::sync::OnceCell;
 
@@ -83,10 +82,11 @@ impl CommandContext {
                 ..
             } => user_config::load_settings_with_storage_dir(storage_dir_override.as_deref())?,
         };
-        let machine_settings = combine_files(disk_settings, SettingsLayer {
+        let machine_settings = SettingsLayer {
             cli: Some(cli_layer.clone()),
             ..SettingsLayer::default()
-        });
+        }
+        .combine(disk_settings);
         let user_settings = fabro_config::UserSettings::from_layer(&machine_settings)?;
 
         Ok(Self {

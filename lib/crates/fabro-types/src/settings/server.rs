@@ -15,6 +15,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::duration::Duration as DurationLayer;
 use super::interp::InterpString;
+use super::maps::StickyMap;
 
 /// A structurally resolved `[server]` view for consumers.
 ///
@@ -306,7 +307,7 @@ where
 }
 
 /// A sparse `[server]` layer as it appears in a single settings file.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -358,7 +359,7 @@ pub struct ServerApiLayer {
 }
 
 /// `[server.web]` — web surface settings.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerWebLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -372,7 +373,7 @@ pub struct ServerWebLayer {
 /// When absent or resolved to no enabled API or web auth configuration, the
 /// default server startup posture is fail-closed. Demo and test helpers may
 /// explicitly opt in to insecure configurations.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerAuthLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -388,7 +389,7 @@ pub struct ServerAuthGithubLayer {
     pub allowed_usernames: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerIpAllowlistLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -397,7 +398,7 @@ pub struct ServerIpAllowlistLayer {
     pub trusted_proxy_count: Option<u32>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerIpAllowlistOverrideLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -407,7 +408,7 @@ pub struct ServerIpAllowlistOverrideLayer {
 }
 
 /// `[server.storage]` — single managed local disk root.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerStorageLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -415,7 +416,7 @@ pub struct ServerStorageLayer {
 }
 
 /// `[server.artifacts]` — object-store-backed artifact storage.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerArtifactsLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -429,7 +430,7 @@ pub struct ServerArtifactsLayer {
 }
 
 /// `[server.slatedb]` — SlateDB bottomless storage plus tunables.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerSlateDbLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -478,7 +479,7 @@ pub struct ObjectStoreS3Layer {
 }
 
 /// `[server.scheduler]` — server-managed execution policy.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerSchedulerLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -497,7 +498,7 @@ pub struct ServerLoggingLayer {
 /// platforms and git providers (GitHub App, webhooks, etc.). First-pass
 /// integrations enumerate known providers rather than using a flatten-HashMap
 /// shape so strict unknown-field validation still holds.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerIntegrationsLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -512,7 +513,7 @@ pub struct ServerIntegrationsLayer {
 
 /// `[server.integrations.github]` — GitHub App, credentials, and inbound
 /// webhooks.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct GithubIntegrationLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -525,14 +526,14 @@ pub struct GithubIntegrationLayer {
     pub client_id:   Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slug:        Option<InterpString>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub permissions: HashMap<String, InterpString>,
+    #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
+    pub permissions: StickyMap<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhooks:    Option<IntegrationWebhooksLayer>,
 }
 
 /// `[server.integrations.slack]` — Slack workspace credentials and defaults.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct SlackIntegrationLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -542,7 +543,7 @@ pub struct SlackIntegrationLayer {
 }
 
 /// `[server.integrations.discord]` — Discord workspace configuration.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct DiscordIntegrationLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -550,14 +551,14 @@ pub struct DiscordIntegrationLayer {
 }
 
 /// `[server.integrations.teams]` — Microsoft Teams configuration.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct TeamsIntegrationLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct IntegrationWebhooksLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]

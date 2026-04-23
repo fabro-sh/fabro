@@ -13,6 +13,6 @@ pub fn resolve_workflow(
             .graph
             .clone()
             .expect("defaults.toml should provide workflow.graph"),
-        metadata:    layer.metadata.clone(),
+        metadata:    layer.metadata.clone().into_inner(),
     }
 }

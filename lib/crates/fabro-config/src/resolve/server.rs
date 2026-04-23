@@ -463,7 +463,7 @@ fn resolve_integrations(
                 app_id:      github.app_id.clone(),
                 client_id:   github.client_id.clone(),
                 slug:        github.slug.clone(),
-                permissions: github.permissions.clone(),
+                permissions: github.permissions.clone().into_inner(),
                 webhooks:    github.webhooks.as_ref().map(|webhooks| {
                     resolve_github_webhooks(webhooks, "server.integrations.github.webhooks", errors)
                 }),

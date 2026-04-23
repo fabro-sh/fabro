@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Ident, ItemFn, LitStr, Token, parenthesized, parse_macro_input};
+use syn::{DeriveInput, Ident, ItemFn, LitStr, Token, parenthesized, parse_macro_input};
 
 enum E2eRequirement {
     Twin,
@@ -142,6 +142,49 @@ pub fn e2e_test(attr: TokenStream, item: TokenStream) -> TokenStream {
             #env_guards
 
             #block
+        }
+    }
+    .into()
+}
+
+#[proc_macro_derive(Combine)]
+pub fn derive_combine(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    impl_combine(&input)
+}
+
+fn impl_combine(ast: &DeriveInput) -> TokenStream {
+    let name = &ast.ident;
+    let fields = match ast.data {
+        syn::Data::Struct(syn::DataStruct {
+            fields: syn::Fields::Named(ref fields),
+            ..
+        }) => &fields.named,
+        _ => {
+            return syn::Error::new_spanned(
+                ast,
+                "Combine can only be derived for structs with named fields",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+
+    let combines = fields.iter().map(|field| {
+        let name = &field.ident;
+        quote! {
+            #name: crate::settings::Combine::combine(self.#name, other.#name)
+        }
+    });
+
+    quote! {
+        impl #impl_generics crate::settings::Combine for #name #ty_generics #where_clause {
+            fn combine(self, other: Self) -> Self {
+                Self {
+                    #(#combines),*
+                }
+            }
         }
     }
     .into()

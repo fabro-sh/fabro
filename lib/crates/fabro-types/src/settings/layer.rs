@@ -15,7 +15,7 @@ use super::server::ServerLayer;
 use super::workflow::WorkflowLayer;
 
 /// A sparse settings layer before merge/resolve.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 pub struct SettingsLayer {
     #[serde(default, rename = "_version", skip_serializing_if = "Option::is_none")]
     pub version:  Option<u32>,

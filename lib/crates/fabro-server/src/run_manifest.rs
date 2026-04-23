@@ -5,7 +5,6 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow, bail};
 use fabro_api::types;
 use fabro_config::effective_settings::EffectiveSettingsLayers;
-use fabro_config::merge::combine_files;
 use fabro_config::project::resolve_working_directory;
 use fabro_config::run::parse_run_config;
 use fabro_config::{effective_settings, parse_settings_layer};
@@ -26,7 +25,7 @@ use fabro_types::settings::run::{
     RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer, RunNamespace,
     RunSandboxLayer,
 };
-use fabro_types::settings::{ServerNamespace, SettingsLayer};
+use fabro_types::settings::{Combine, ReplaceMap, ServerNamespace, SettingsLayer};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::Error as WorkflowError;
@@ -75,14 +74,14 @@ pub(crate) fn prepare_manifest(
         .iter()
         .filter(|config| config.type_ == types::ManifestConfigType::Project)
         .try_fold(SettingsLayer::default(), |layer, config| {
-            Ok::<_, anyhow::Error>(combine_files(layer, parse_manifest_config(config)?))
+            Ok::<_, anyhow::Error>(parse_manifest_config(config)?.combine(layer))
         })?;
     let user_layer = manifest
         .configs
         .iter()
         .filter(|config| config.type_ == types::ManifestConfigType::User)
         .try_fold(SettingsLayer::default(), |layer, config| {
-            Ok::<_, anyhow::Error>(combine_files(layer, parse_manifest_config(config)?))
+            Ok::<_, anyhow::Error>(parse_manifest_config(config)?.combine(layer))
         })?;
     let mut settings = effective_settings::materialize_settings_layer(
         EffectiveSettingsLayers::new(args_layer, workflow_layer, project_layer, user_layer),
@@ -250,7 +249,7 @@ fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> SettingsLayer {
         model,
         sandbox,
         execution,
-        metadata: parse_labels(&args.label),
+        metadata: ReplaceMap::from(parse_labels(&args.label)),
         ..RunLayer::default()
     });
 

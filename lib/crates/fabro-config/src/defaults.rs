@@ -1,8 +1,7 @@
 use std::sync::LazyLock;
 
-use fabro_types::settings::SettingsLayer;
+use fabro_types::settings::{Combine, SettingsLayer};
 
-use crate::merge::combine_files;
 use crate::parse_settings_layer;
 
 static DEFAULTS_LAYER: LazyLock<SettingsLayer> = LazyLock::new(|| {
@@ -17,5 +16,5 @@ pub fn defaults_layer() -> &'static SettingsLayer {
 
 #[must_use]
 pub fn apply_builtin_defaults(layer: SettingsLayer) -> SettingsLayer {
-    combine_files(defaults_layer().clone(), layer)
+    layer.combine(defaults_layer().clone())
 }

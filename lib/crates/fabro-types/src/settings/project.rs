@@ -7,6 +7,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::maps::ReplaceMap;
+
 /// A structurally resolved `[project]` view for consumers.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct ProjectNamespace {
@@ -17,7 +19,7 @@ pub struct ProjectNamespace {
 }
 
 /// A sparse `[project]` layer as it appears in a single settings file.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -28,6 +30,6 @@ pub struct ProjectLayer {
     /// `.` after layering when unspecified.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory:   Option<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub metadata:    HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "ReplaceMap::is_empty")]
+    pub metadata:    ReplaceMap<String>,
 }

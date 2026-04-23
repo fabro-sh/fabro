@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use fabro_sandbox::SandboxProvider;
-use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
     ApprovalMode, RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer,
     RunSandboxLayer,
 };
+use fabro_types::settings::{ReplaceMap, SettingsLayer};
 
 use crate::args::{PreflightArgs, RunArgs};
 
@@ -133,7 +133,7 @@ pub(crate) fn run_args_layer(args: &RunArgs) -> Result<SettingsLayer> {
 
     let run = RunLayer {
         goal,
-        metadata: parse_labels(&args.label),
+        metadata: ReplaceMap::from(parse_labels(&args.label)),
         model,
         sandbox,
         execution,

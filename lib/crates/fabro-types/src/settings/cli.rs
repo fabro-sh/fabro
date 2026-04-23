@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::interp::InterpString;
+use super::maps::StickyMap;
 use super::run::{AgentPermissions, McpEntryLayer, McpServerSettings};
 
 /// A structurally resolved `[cli]` view for consumers.
@@ -71,7 +72,7 @@ pub struct CliLoggingSettings {
 }
 
 /// A sparse `[cli]` layer as it appears in a single settings file.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct CliLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -119,7 +120,7 @@ pub enum CliAuthStrategy {
 }
 
 /// `[cli.exec]` — `fabro exec` defaults.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct CliExecLayer {
     /// Prevent idle sleep on macOS while an exec run is in flight.
@@ -131,7 +132,7 @@ pub struct CliExecLayer {
     pub agent:              Option<CliExecAgentLayer>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct CliExecModelLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -140,18 +141,18 @@ pub struct CliExecModelLayer {
     pub name:     Option<InterpString>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct CliExecAgentLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<AgentPermissions>,
     /// Agent-scoped MCP entries for `fabro exec`.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub mcps:        HashMap<String, McpEntryLayer>,
+    #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
+    pub mcps:        StickyMap<McpEntryLayer>,
 }
 
 /// `[cli.output]` — generic CLI output defaults.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct CliOutputLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,7 +179,7 @@ pub enum OutputVerbosity {
 }
 
 /// `[cli.updates]` — upgrade check toggle.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct CliUpdatesLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]

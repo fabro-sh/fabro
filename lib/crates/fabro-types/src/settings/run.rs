@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use super::duration::Duration;
 use super::interp::InterpString;
+use super::maps::{MergeMap, ReplaceMap, StickyMap};
 use super::model_ref::ModelRef;
 
 /// A structurally resolved `[run]` view for consumers.
@@ -417,7 +418,7 @@ pub struct ArtifactsSettings {
 }
 
 /// A sparse `[run]` layer as it appears in a single settings file.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct RunLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -425,8 +426,8 @@ pub struct RunLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir:   Option<InterpString>,
     /// Flat string-to-string map. Replaces wholesale across layers.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub metadata:      HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "ReplaceMap::is_empty")]
+    pub metadata:      ReplaceMap<String>,
     /// Run inputs: typed scalar values. Replaces wholesale across layers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inputs:        Option<HashMap<String, toml::Value>>,
@@ -442,8 +443,8 @@ pub struct RunLayer {
     pub checkpoint:    Option<RunCheckpointLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox:       Option<RunSandboxLayer>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub notifications: HashMap<String, NotificationRouteLayer>,
+    #[serde(default, skip_serializing_if = "MergeMap::is_empty")]
+    pub notifications: MergeMap<NotificationRouteLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interviews:    Option<InterviewsLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -508,7 +509,7 @@ pub enum ResolvedGoalSource {
 }
 
 /// `[run.model]` — provider-neutral default model selection.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct RunModelLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -550,14 +551,14 @@ impl<'de> Deserialize<'de> for ModelRefOrSplice {
 }
 
 /// `[run.git]` — local git behavior such as commit author.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct RunGitLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<GitAuthorLayer>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct GitAuthorLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -591,7 +592,7 @@ pub struct PrepareStep {
 }
 
 /// `[run.execution]` — run posture knobs.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct RunExecutionLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -626,7 +627,7 @@ pub struct RunCheckpointLayer {
 }
 
 /// `[run.sandbox]` — sandbox selection and execution-environment surface.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct RunSandboxLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -636,8 +637,8 @@ pub struct RunSandboxLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub devcontainer: Option<bool>,
     /// Sticky merge-by-key across layers.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub env:          HashMap<String, InterpString>,
+    #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
+    pub env:          StickyMap<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local:        Option<LocalSandboxLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -661,14 +662,14 @@ pub enum WorktreeMode {
     Never,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct DaytonaSandboxLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_stop_interval: Option<i32>,
     /// Sticky merge-by-key (provider-native labels).
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub labels:             HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
+    pub labels:             StickyMap<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot:           Option<DaytonaSnapshotLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -708,7 +709,7 @@ pub enum DaytonaNetworkLayer {
 }
 
 /// `[run.notifications.<name>]` — a keyed notification route.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct NotificationRouteLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -763,7 +764,7 @@ pub struct NotificationProviderLayer {
 }
 
 /// `[run.interviews]` — external interview delivery.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct InterviewsLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -784,14 +785,14 @@ pub struct InterviewProviderLayer {
 }
 
 /// `[run.agent]` — agent knobs only (permissions, MCPs).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct RunAgentLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<AgentPermissions>,
     /// Agent-scoped MCP server entries, keyed by name.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub mcps:        HashMap<String, McpEntryLayer>,
+    #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
+    pub mcps:        StickyMap<McpEntryLayer>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -935,7 +936,7 @@ pub enum HookEvent {
 }
 
 /// `[run.scm]` — remote SCM host/provider behavior.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct RunScmLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -957,7 +958,7 @@ pub struct RunScmLayer {
 pub struct ScmGitHubLayer;
 
 /// `[run.pull_request]` — provider-neutral PR behavior.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct RunPullRequestLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -19,7 +19,7 @@ pub fn resolve_run(layer: &RunLayer, errors: &mut Vec<ResolveError>) -> RunNames
     RunNamespace {
         goal:          resolve_goal(layer.goal.as_ref()),
         working_dir:   layer.working_dir.clone(),
-        metadata:      layer.metadata.clone(),
+        metadata:      layer.metadata.clone().into_inner(),
         inputs:        layer.inputs.clone().unwrap_or_default(),
         model:         resolve_model(layer.model.as_ref()),
         git:           resolve_git(layer.git.as_ref()),
@@ -164,7 +164,7 @@ fn resolve_sandbox(
         devcontainer: sandbox
             .devcontainer
             .expect("defaults.toml should provide run.sandbox.devcontainer"),
-        env: sandbox.env.clone(),
+        env: sandbox.env.clone().into_inner(),
         local: resolve_local_sandbox(sandbox),
         daytona: sandbox.daytona.as_ref().map(resolve_daytona),
     }
@@ -186,7 +186,7 @@ fn resolve_local_sandbox(sandbox: &RunSandboxLayer) -> LocalSandboxSettings {
 fn resolve_daytona(daytona: &DaytonaSandboxLayer) -> DaytonaSettings {
     DaytonaSettings {
         auto_stop_interval: daytona.auto_stop_interval,
-        labels:             daytona.labels.clone(),
+        labels:             daytona.labels.clone().into_inner(),
         snapshot:           daytona.snapshot.as_ref().and_then(|snapshot| {
             snapshot.name.as_ref().map(|name| DaytonaSnapshotSettings {
                 name:       name.clone(),

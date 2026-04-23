@@ -10,10 +10,12 @@
 //! exists.
 
 pub mod cli;
+pub mod combine;
 pub mod duration;
 pub mod features;
 pub mod interp;
 pub mod layer;
+pub mod maps;
 pub mod model_ref;
 pub mod project;
 pub mod run;
@@ -26,10 +28,12 @@ pub use cli::{
     CliAuthSettings, CliExecAgentSettings, CliExecModelSettings, CliExecSettings, CliLayer,
     CliLoggingSettings, CliNamespace, CliOutputSettings, CliTargetSettings, CliUpdatesSettings,
 };
+pub use combine::Combine;
 pub use duration::{Duration, ParseDurationError};
 pub use features::{FeaturesLayer, FeaturesNamespace};
 pub use interp::{InterpString, Provenance, ResolveEnvError, Resolved};
 pub use layer::SettingsLayer;
+pub use maps::{MergeMap, ReplaceMap, StickyMap};
 pub use model_ref::{
     AmbiguousModelRef, ModelRef, ModelRegistry, ParseModelRefError, ResolvedModelRef,
 };

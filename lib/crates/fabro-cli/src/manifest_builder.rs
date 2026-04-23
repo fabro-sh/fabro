@@ -9,15 +9,14 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use fabro_api::types;
 use fabro_config::load::load_settings_for_workflow;
-use fabro_config::merge::combine_files;
 use fabro_config::project::{self, discover_project_config, resolve_workflow_path};
 use fabro_config::run::{parse_run_config, resolve_run_goal};
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_types::RunId;
-use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::{DaytonaDockerfileLayer, ResolvedGoalSource, ResolvedRunGoal};
+use fabro_types::settings::{Combine, SettingsLayer};
 use fabro_workflow::git::{GitSyncStatus, head_sha, sync_status};
 
 use crate::args::{PreflightArgs, RunArgs};
@@ -58,10 +57,11 @@ struct WorkflowScanInput {
 
 pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
     let workflow_layer = load_settings_for_workflow(&input.workflow, &input.cwd)?;
-    let merged_settings = combine_files(
-        combine_files(input.user_layer, workflow_layer),
-        input.args_layer.clone(),
-    );
+    let merged_settings = input
+        .args_layer
+        .clone()
+        .combine(workflow_layer)
+        .combine(input.user_layer);
 
     let root_resolution = resolve_workflow_path(&input.workflow, &input.cwd)?;
     let target_path = root_resolution.dot_path.clone();
