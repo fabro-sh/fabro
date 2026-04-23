@@ -11,9 +11,7 @@ use fabro_config::{ServerSettingsBuilder, Storage};
 use fabro_install::{OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV};
 use fabro_sandbox::SandboxProvider;
 use fabro_types::ServerSettings;
-use fabro_types::settings::server::{
-    GithubIntegrationStrategy, ServerLayer, ServerStorageLayer, WebhookStrategy,
-};
+use fabro_types::settings::server::{GithubIntegrationStrategy, WebhookStrategy};
 use fabro_types::settings::{
     GithubIntegrationSettings, InterpString, ObjectStoreSettings, ServerListenSettings,
     ServerNamespace, SettingsLayer,
@@ -185,23 +183,6 @@ fn apply_serve_overrides(base: &SettingsLayer, args: &ServeArgs) -> SettingsLaye
         let sandbox_layer = run.sandbox.get_or_insert_with(RunSandboxLayer::default);
         sandbox_layer.provider = Some(sandbox.to_string());
     }
-    settings
-}
-
-fn apply_runtime_settings(
-    base: &SettingsLayer,
-    args: &ServeArgs,
-    data_dir: &Path,
-) -> SettingsLayer {
-    apply_storage_dir_override(apply_serve_overrides(base, args), data_dir)
-}
-
-fn apply_storage_dir_override(mut settings: SettingsLayer, data_dir: &Path) -> SettingsLayer {
-    let server = settings.server.get_or_insert_with(ServerLayer::default);
-    let storage = server
-        .storage
-        .get_or_insert_with(ServerStorageLayer::default);
-    storage.root = Some(InterpString::parse(&data_dir.display().to_string()));
     settings
 }
 
@@ -479,27 +460,15 @@ where
     }
 }
 
-fn resolve_server_settings(file: &SettingsLayer) -> anyhow::Result<ServerNamespace> {
-    ServerSettingsBuilder::from_layer(file)
-        .map(|settings| settings.server)
-        .map_err(anyhow::Error::from)
-}
-
 pub fn resolve_runtime_server_settings_for_start(
     args: &ServeArgs,
     data_dir: &Path,
 ) -> anyhow::Result<ServerNamespace> {
     let disk_settings = load_settings_config(args.config.as_deref())?;
-    let effective_settings = apply_runtime_settings(&disk_settings, args, data_dir);
-    resolve_server_settings(&effective_settings)
-}
-
-pub fn resolve_bind_request_from_settings(
-    settings: &SettingsLayer,
-    explicit_bind: Option<&str>,
-) -> anyhow::Result<BindRequest> {
-    let resolved = ServerSettingsBuilder::from_layer(settings).map_err(anyhow::Error::from)?;
-    resolve_bind_request_from_server_settings(&resolved, explicit_bind)
+    let effective_settings = apply_serve_overrides(&disk_settings, args);
+    let mut resolved = resolve_app_state_settings(&effective_settings)?;
+    resolved.server_settings = resolved.server_settings.with_storage_override(data_dir);
+    Ok(resolved.server_settings.server)
 }
 
 pub fn resolve_bind_request_from_server_settings(
@@ -609,7 +578,7 @@ where
     let watch_web = args.watch_web;
     let config_path = args.config.clone();
     let disk_settings = load_settings_config(config_path.as_deref())?;
-    let disk_server_settings = resolve_server_settings(&disk_settings)?;
+    let disk_server_settings = ServerSettingsBuilder::from_layer(&disk_settings)?.server;
     let data_dir = match storage_dir_override {
         Some(path) => path,
         None => resolve_interp_path(&disk_server_settings.storage.root)?,
@@ -618,8 +587,11 @@ where
     let vault_path = storage.secrets_path();
     let server_env_path = storage.runtime_directory().env_path();
     // Shared config for live reloading
-    let effective_settings = apply_runtime_settings(&disk_settings, &args, &data_dir);
-    let resolved_app_settings = resolve_app_state_settings(&effective_settings)?;
+    let effective_settings = apply_serve_overrides(&disk_settings, &args);
+    let mut resolved_app_settings = resolve_app_state_settings(&effective_settings)?;
+    resolved_app_settings.server_settings = resolved_app_settings
+        .server_settings
+        .with_storage_override(&data_dir);
     let resolved_server_settings = resolved_app_settings.server_settings.server.clone();
     let (auth_mode, server_secrets) = resolve_startup(
         &server_env_path,
@@ -745,11 +717,7 @@ where
             interval.tick().await;
             match load_settings_config(config_path_for_poll.as_deref()) {
                 Ok(new_disk_settings) => {
-                    let effective = apply_runtime_settings(
-                        &new_disk_settings,
-                        &args_for_poll,
-                        &data_dir_for_poll,
-                    );
+                    let effective = apply_serve_overrides(&new_disk_settings, &args_for_poll);
                     let changed = {
                         let cfg = shared_settings_for_poll
                             .read()
@@ -757,7 +725,14 @@ where
                         *cfg != effective
                     };
                     if changed {
-                        match resolve_app_state_settings(&effective)
+                        let resolved =
+                            resolve_app_state_settings(&effective).map(|mut resolved| {
+                                resolved.server_settings = resolved
+                                    .server_settings
+                                    .with_storage_override(&data_dir_for_poll);
+                                resolved
+                            });
+                        match resolved
                             .and_then(|resolved| state_for_poll.replace_runtime_settings(resolved))
                         {
                             Ok(()) => {
@@ -1052,21 +1027,20 @@ mod tests {
     use std::time::Duration;
 
     use fabro_config::bind::{Bind, BindRequest};
-    use fabro_config::parse_settings_layer;
+    use fabro_config::{ServerSettingsBuilder, parse_settings_layer};
     use fabro_types::settings::SettingsLayer;
     use fabro_types::settings::interp::InterpString;
     use fabro_types::settings::server::ObjectStoreSettings;
     use fabro_util::Home;
 
     use super::{
-        GitHubMetaResolver, ServeArgs, ServerTitlePhase, apply_runtime_settings,
+        GitHubMetaResolver, ServeArgs, ServerTitlePhase, apply_serve_overrides,
         bind_tcp_host_with_fallback, build_local_object_store_with_preference,
         build_object_store_from_settings_with_lookup, build_slatedb_store,
-        resolve_bind_request_from_settings, resolve_github_webhook_ip_allowlist,
-        resolve_server_settings, resolve_startup_github_webhook_ip_allowlist, server_bind_title,
-        server_title,
+        resolve_bind_request_from_server_settings, resolve_github_webhook_ip_allowlist,
+        resolve_startup_github_webhook_ip_allowlist, server_bind_title, server_title,
     };
-    use crate::server::create_app_state_with_options;
+    use crate::server::resolve_app_state_settings;
 
     fn parse_settings(source: &str) -> SettingsLayer {
         let mut layer = parse_settings_layer(source).expect("v2 fixture should parse");
@@ -1074,9 +1048,15 @@ mod tests {
         layer
     }
 
+    fn resolved_server_settings(layer: &SettingsLayer) -> fabro_types::settings::ServerNamespace {
+        ServerSettingsBuilder::from_layer(layer)
+            .expect("settings should resolve")
+            .server
+    }
+
     #[test]
-    fn apply_runtime_settings_preserves_storage_dir() {
-        let base = SettingsLayer::default();
+    fn runtime_server_settings_preserve_storage_dir_override() {
+        let base = parse_settings("_version = 1\n");
         let args = ServeArgs {
             bind: None,
             model: None,
@@ -1090,19 +1070,20 @@ mod tests {
             watch_web: false,
         };
 
-        let resolved = apply_runtime_settings(&base, &args, &PathBuf::from("/srv/fabro-storage"));
+        let mut resolved =
+            resolve_app_state_settings(&apply_serve_overrides(&base, &args)).expect("settings");
+        resolved.server_settings = resolved
+            .server_settings
+            .with_storage_override(&PathBuf::from("/srv/fabro-storage"));
 
-        let storage_root = resolved
-            .server
-            .as_ref()
-            .and_then(|server| server.storage.as_ref())
-            .and_then(|storage| storage.root.as_ref())
-            .map(fabro_types::settings::InterpString::as_source);
-        assert_eq!(storage_root.as_deref(), Some("/srv/fabro-storage"));
+        assert_eq!(
+            resolved.server_settings.server.storage.root.as_source(),
+            "/srv/fabro-storage"
+        );
     }
 
     #[test]
-    fn app_state_server_settings_use_effective_runtime_layer_storage_override() {
+    fn runtime_server_settings_keep_disk_defaults_out_of_manifest_defaults() {
         let base = parse_settings(
             r#"
 _version = 1
@@ -1124,16 +1105,19 @@ root = "/srv/from-disk"
             watch_web: false,
         };
 
-        let effective = apply_runtime_settings(&base, &args, &PathBuf::from("/srv/from-runtime"));
-        let state = create_app_state_with_options(effective, 5);
+        let mut resolved =
+            resolve_app_state_settings(&apply_serve_overrides(&base, &args)).expect("settings");
+        resolved.server_settings = resolved
+            .server_settings
+            .with_storage_override(&PathBuf::from("/srv/from-runtime"));
 
         assert_eq!(
-            state.server_settings().server.storage.root.as_source(),
+            resolved.server_settings.server.storage.root.as_source(),
             "/srv/from-runtime"
         );
         assert_eq!(
-            state.server_storage_dir(),
-            PathBuf::from("/srv/from-runtime")
+            resolved.manifest_defaults.server, None,
+            "manifest defaults should stay free of server-only overrides"
         );
     }
 
@@ -1160,7 +1144,7 @@ enabled = false
             watch_web: false,
         };
 
-        let resolved = apply_runtime_settings(&base, &args, &PathBuf::from("/srv/fabro"));
+        let resolved = apply_serve_overrides(&base, &args);
 
         assert_eq!(
             resolved
@@ -1188,7 +1172,7 @@ enabled = false
             watch_web: false,
         };
 
-        let resolved = apply_runtime_settings(&base, &args, &PathBuf::from("/srv/fabro"));
+        let resolved = apply_serve_overrides(&base, &args);
 
         assert_eq!(
             resolved
@@ -1201,15 +1185,20 @@ enabled = false
     }
 
     #[test]
-    fn resolve_bind_request_from_settings_defaults_to_socket_when_listen_is_absent() {
-        let bind =
-            resolve_bind_request_from_settings(&SettingsLayer::test_default(), None).expect("bind");
+    fn resolve_bind_request_from_server_settings_defaults_to_socket_when_listen_is_absent() {
+        let bind = resolve_bind_request_from_server_settings(
+            &ServerSettingsBuilder::from_layer(&SettingsLayer::test_default())
+                .expect("settings should resolve"),
+            None,
+        )
+        .expect("bind");
 
         assert_eq!(bind, BindRequest::Unix(Home::from_env().socket_path()));
     }
 
     #[test]
-    fn resolve_bind_request_from_settings_uses_configured_tcp_when_no_explicit_bind_is_given() {
+    fn resolve_bind_request_from_server_settings_uses_configured_tcp_when_no_explicit_bind_is_given()
+     {
         let settings = parse_settings(
             r#"
 _version = 1
@@ -1220,13 +1209,17 @@ address = "127.0.0.1:0"
 "#,
         );
 
-        let bind = resolve_bind_request_from_settings(&settings, None).expect("bind");
+        let bind = resolve_bind_request_from_server_settings(
+            &ServerSettingsBuilder::from_layer(&settings).expect("settings should resolve"),
+            None,
+        )
+        .expect("bind");
 
         assert_eq!(bind, BindRequest::Tcp("127.0.0.1:0".parse().unwrap()));
     }
 
     #[test]
-    fn resolve_bind_request_from_settings_prefers_explicit_bind_over_config() {
+    fn resolve_bind_request_from_server_settings_prefers_explicit_bind_over_config() {
         let settings = parse_settings(
             r#"
 _version = 1
@@ -1237,17 +1230,22 @@ address = "127.0.0.1:32276"
 "#,
         );
 
-        let bind =
-            resolve_bind_request_from_settings(&settings, Some("/tmp/fabro.sock")).expect("bind");
+        let bind = resolve_bind_request_from_server_settings(
+            &ServerSettingsBuilder::from_layer(&settings).expect("settings should resolve"),
+            Some("/tmp/fabro.sock"),
+        )
+        .expect("bind");
 
         assert_eq!(bind, BindRequest::Unix(PathBuf::from("/tmp/fabro.sock")));
     }
 
     #[test]
-    fn resolve_bind_request_from_settings_preserves_host_only_cli_bind() {
-        let settings = SettingsLayer::test_default();
+    fn resolve_bind_request_from_server_settings_preserves_host_only_cli_bind() {
+        let settings =
+            ServerSettingsBuilder::from_layer(&SettingsLayer::test_default()).expect("settings");
 
-        let bind = resolve_bind_request_from_settings(&settings, Some("127.0.0.1")).expect("bind");
+        let bind =
+            resolve_bind_request_from_server_settings(&settings, Some("127.0.0.1")).expect("bind");
 
         assert_eq!(bind, BindRequest::TcpHost("127.0.0.1".parse().unwrap()));
     }
@@ -1266,7 +1264,7 @@ strategy = "token"
 "#,
         );
 
-        let resolved = resolve_server_settings(&base).expect("settings should resolve");
+        let resolved = resolved_server_settings(&base);
 
         assert!(resolved.web.enabled);
     }
@@ -1330,7 +1328,7 @@ root = "{}"
             root.display()
         ));
 
-        let resolved = resolve_server_settings(&settings).expect("settings should resolve");
+        let resolved = resolved_server_settings(&settings);
         let (_object_store, prefix, flush_interval, disk_cache) =
             build_slatedb_store(&resolved).expect("slatedb store should build");
 
@@ -1351,7 +1349,7 @@ disk_cache = true
 ",
         );
 
-        let resolved = resolve_server_settings(&settings).expect("settings should resolve");
+        let resolved = resolved_server_settings(&settings);
         let (_object_store, _prefix, _flush_interval, disk_cache) =
             build_slatedb_store(&resolved).expect("slatedb store should build");
 
@@ -1475,7 +1473,7 @@ disk_cache = true
 
     #[tokio::test]
     async fn resolve_github_webhook_ip_allowlist_propagates_resolution_errors() {
-        let settings = resolve_server_settings(&parse_settings(
+        let settings = resolved_server_settings(&parse_settings(
             r#"
 _version = 1
 
@@ -1490,8 +1488,7 @@ app_id = "123"
 [server.integrations.github.webhooks.ip_allowlist]
 entries = ["github_meta_hooks"]
 "#,
-        ))
-        .expect("settings should resolve");
+        ));
 
         let cache_dir = tempfile::tempdir().unwrap();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1512,7 +1509,7 @@ entries = ["github_meta_hooks"]
 
     #[tokio::test]
     async fn resolve_startup_github_webhook_ip_allowlist_skips_resolution_without_webhook_secret() {
-        let settings = resolve_server_settings(&parse_settings(
+        let settings = resolved_server_settings(&parse_settings(
             r#"
 _version = 1
 
@@ -1527,8 +1524,7 @@ app_id = "123"
 [server.integrations.github.webhooks.ip_allowlist]
 entries = ["github_meta_hooks"]
 "#,
-        ))
-        .expect("settings should resolve");
+        ));
 
         let cache_dir = tempfile::tempdir().unwrap();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
