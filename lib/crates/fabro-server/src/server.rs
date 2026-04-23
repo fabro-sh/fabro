@@ -2634,6 +2634,47 @@ pub fn create_app_state_with_env_lookup_and_server_secret_env(
     clippy::disallowed_methods,
     reason = "test helper writes a fixture server.env with sync std::fs::write"
 )]
+pub(crate) fn create_test_app_state_with_runtime_settings_and_session_key(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
+    session_secret: Option<&str>,
+) -> Arc<AppState> {
+    let vault_path = test_secret_store_path();
+    let server_env_path = vault_path
+        .parent()
+        .expect("test secrets path should have parent")
+        .join("server.env");
+    if let Some(session_secret) = session_secret {
+        std::fs::write(
+            &server_env_path,
+            format!("SESSION_SECRET={session_secret}\n"),
+        )
+        .expect("test server env should be writable");
+    }
+    let (store, artifact_store) = test_store_bundle();
+    let env_lookup = default_env_lookup();
+    build_app_state(AppStateConfig {
+        resolved_settings: resolved_runtime_settings_for_tests(
+            server_settings,
+            manifest_run_defaults,
+        ),
+        registry_factory_override: None,
+        max_concurrent_runs: 5,
+        store,
+        artifact_store,
+        vault_path,
+        server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
+        env_lookup,
+        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+    })
+    .expect("test app state should build")
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test helper writes a fixture server.env with sync std::fs::write"
+)]
 pub(crate) fn create_test_app_state_with_session_key(
     settings: SettingsLayer,
     session_secret: Option<&str>,

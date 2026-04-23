@@ -153,7 +153,8 @@ mod tests {
     use axum::routing::get;
     use axum::{Json, Router, middleware};
     use cookie::{Cookie, CookieJar};
-    use fabro_types::settings::{ServerAuthMethod, SettingsLayer};
+    use fabro_config::{RunLayer, ServerSettingsBuilder};
+    use fabro_types::settings::ServerAuthMethod;
     use fabro_types::{IdpIdentity, RunAuthMethod};
     use serde_json::json;
     use tower::ServiceExt;
@@ -221,9 +222,22 @@ mod tests {
             .layer(middleware::from_fn(demo_routing_middleware))
     }
 
+    fn test_server_settings() -> fabro_types::ServerSettings {
+        ServerSettingsBuilder::from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+"#,
+        )
+        .expect("test settings should resolve")
+    }
+
     fn test_state() -> Arc<server::AppState> {
-        server::create_test_app_state_with_session_key(
-            SettingsLayer::default(),
+        server::create_test_app_state_with_runtime_settings_and_session_key(
+            test_server_settings(),
+            RunLayer::default(),
             Some(SESSION_SECRET),
         )
     }
