@@ -1,9 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use fabro_client::{AuthEntry, AuthStore};
-use fabro_types::settings::cli::CliLayer;
 use fabro_util::dev_token::{read_dev_token_file, validate_dev_token_format};
-use fabro_util::printer::Printer;
 use serde::Serialize;
 
 use crate::args::AuthStatusArgs;
@@ -40,13 +38,8 @@ struct StatusOutput {
     dev_token: &'static str,
 }
 
-pub(super) fn status_command(
-    args: &AuthStatusArgs,
-    cli_layer: &CliLayer,
-    process_local_json: bool,
-    printer: Printer,
-) -> Result<()> {
-    let ctx = CommandContext::base(printer, cli_layer)?;
+pub(super) fn status_command(args: &AuthStatusArgs, ctx: &CommandContext) -> Result<()> {
+    let printer = ctx.printer();
     let store = AuthStore::default();
     let now = Utc::now();
     let rows = if args.server.as_deref().is_some() {
@@ -61,7 +54,7 @@ pub(super) fn status_command(
         "not_set"
     };
 
-    if process_local_json {
+    if ctx.explicit_json_requested() {
         print_json_pretty(&StatusOutput {
             servers: rows,
             dev_token,

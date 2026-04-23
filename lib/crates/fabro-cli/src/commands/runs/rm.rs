@@ -1,7 +1,5 @@
 use anyhow::{Result, bail};
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 
 use super::short_run_id;
 use crate::args::RunsRemoveArgs;
@@ -9,23 +7,23 @@ use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::shared::print_json_pretty;
 
-pub(crate) async fn remove_command(
-    args: &RunsRemoveArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
-    remove_from(args, ctx.server().await?.as_ref(), cli, printer).await
+pub(crate) async fn remove_command(args: &RunsRemoveArgs, base_ctx: &CommandContext) -> Result<()> {
+    let ctx = base_ctx.with_target(&args.server)?;
+    remove_from(
+        args,
+        ctx.server().await?.as_ref(),
+        ctx.user_settings().cli.output.format == OutputFormat::Json,
+        ctx.printer(),
+    )
+    .await
 }
 
 async fn remove_from(
     args: &RunsRemoveArgs,
     client: &server_client::Client,
-    cli: &CliNamespace,
-    printer: Printer,
+    json: bool,
+    printer: fabro_util::printer::Printer,
 ) -> Result<()> {
-    let json = cli.output.format == OutputFormat::Json;
     let mut had_errors = false;
     let mut removed = Vec::new();
     let mut errors = Vec::new();

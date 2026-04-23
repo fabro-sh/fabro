@@ -1,23 +1,16 @@
 use anyhow::{Result, bail};
 use fabro_client::{AuthEntry, AuthStore};
 use fabro_http::header::AUTHORIZATION;
-use fabro_types::settings::cli::CliLayer;
-use fabro_util::printer::Printer;
 
-use crate::args::{AuthLogoutArgs, require_no_json_override};
+use crate::args::AuthLogoutArgs;
 use crate::command_context::CommandContext;
 use crate::user_config;
 use crate::user_config::ServerTarget;
 
-pub(super) async fn logout_command(
-    args: AuthLogoutArgs,
-    cli_layer: &CliLayer,
-    process_local_json: bool,
-    printer: Printer,
-) -> Result<()> {
-    require_no_json_override(process_local_json)?;
+pub(super) async fn logout_command(args: AuthLogoutArgs, base_ctx: &CommandContext) -> Result<()> {
+    base_ctx.require_no_json_override()?;
+    let printer = base_ctx.printer();
 
-    let ctx = CommandContext::base(printer, cli_layer)?;
     let store = AuthStore::default();
     if args.all {
         let entries = store.list()?;
@@ -41,7 +34,7 @@ pub(super) async fn logout_command(
         return Ok(());
     }
 
-    let target = user_config::resolve_server_target(&args.server, ctx.machine_settings())?;
+    let target = user_config::resolve_server_target(&args.server, base_ctx.machine_settings())?;
     let Some(entry) = store.get(&target)? else {
         fabro_util::printerr!(printer, "Not logged in to {}.", target);
         return Ok(());

@@ -6,28 +6,22 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 
 use crate::args::ArtifactCpArgs;
+use crate::command_context::CommandContext;
 use crate::server_client::Client;
 use crate::shared::{print_json_pretty, split_run_path};
 
-pub(super) async fn cp_command(
-    args: &ArtifactCpArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
+pub(super) async fn cp_command(args: &ArtifactCpArgs, base_ctx: &CommandContext) -> Result<()> {
+    let printer = base_ctx.printer();
     let (run_id_selector, asset_path) = parse_source(&args.source);
     let (run_id, client, entries) = super::resolve_artifacts(
+        base_ctx,
         &args.server,
         run_id_selector,
         args.node.as_deref(),
         args.retry,
-        cli_layer,
-        printer,
     )
     .await?;
 
@@ -64,7 +58,7 @@ pub(super) async fn cp_command(
                 .unwrap_or_else(|| std::ffi::OsStr::new(&entry.relative_path)),
         );
         write_artifact_file(&client, &run_id, entry, &dest_file).await?;
-        if cli.output.format == OutputFormat::Json {
+        if base_ctx.user_settings().cli.output.format == OutputFormat::Json {
             print_json_pretty(&serde_json::json!({
                 "copied": [{
                     "relative_path": entry.relative_path,
@@ -125,7 +119,7 @@ pub(super) async fn cp_command(
         }
     }
 
-    if cli.output.format == OutputFormat::Json {
+    if base_ctx.user_settings().cli.output.format == OutputFormat::Json {
         print_json_pretty(&serde_json::json!({ "copied": copied }))?;
     } else {
         fabro_util::printout!(

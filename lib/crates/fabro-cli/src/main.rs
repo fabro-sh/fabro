@@ -30,13 +30,14 @@ use clap::{CommandFactory, Parser};
 use fabro_config::merge::combine_files;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_types::settings::SettingsLayer;
-use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::exit::ExitClass;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::{browser, exit};
 use rustls::crypto::ring::default_provider;
 use tracing::debug;
+
+use crate::command_context::CommandContext;
 
 #[derive(Parser)]
 #[command(name = "fabro", version, long_version = LONG_VERSION)]
@@ -210,51 +211,46 @@ async fn main_inner() -> (String, Result<()>) {
     };
 
     let result = Box::pin(async move {
+        let build_base_ctx = || CommandContext::base(printer, &cli_layer, process_local_json);
+
         match *command {
             Commands::Exec(args) => commands::exec::execute(args, &cli_settings, printer).await?,
             Commands::RunCmd(cmd) => {
-                Box::pin(commands::run::dispatch(
-                    cmd,
-                    &cli_settings,
-                    &cli_layer,
-                    process_local_json,
-                    printer,
-                ))
-                .await?;
+                let base_ctx = build_base_ctx()?;
+                Box::pin(commands::run::dispatch(cmd, &base_ctx)).await?;
             }
             Commands::Preflight(args) => {
-                commands::preflight::execute(args, &cli_settings, &cli_layer, printer).await?;
+                let base_ctx = build_base_ctx()?;
+                commands::preflight::execute(args, &base_ctx).await?;
             }
             Commands::Validate(args) => {
                 let styles = Styles::detect_stderr();
-                commands::validate::run(&args, &styles, &cli_settings, &cli_layer, printer).await?;
+                let base_ctx = build_base_ctx()?;
+                commands::validate::run(&args, &styles, &base_ctx).await?;
             }
             Commands::Graph(args) => {
                 let styles = Styles::detect_stderr();
-                commands::graph::run(
-                    &args,
-                    &styles,
-                    &cli_settings,
-                    &cli_layer,
-                    process_local_json,
-                    printer,
-                )
-                .await?;
+                let base_ctx = build_base_ctx()?;
+                commands::graph::run(&args, &styles, &base_ctx).await?;
             }
             Commands::Parse(args) => {
                 commands::parse::run(&args, &cli_settings, printer)?;
             }
             Commands::Artifact(ns) => {
-                commands::artifact::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
+                let base_ctx = build_base_ctx()?;
+                commands::artifact::dispatch(ns, &base_ctx).await?;
             }
             Commands::Store(ns) => {
-                commands::store::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
+                let base_ctx = build_base_ctx()?;
+                commands::store::dispatch(ns, &base_ctx).await?;
             }
             Commands::RunsCmd(cmd) => {
-                commands::runs::dispatch(cmd, &cli_settings, &cli_layer, printer).await?;
+                let base_ctx = build_base_ctx()?;
+                commands::runs::dispatch(cmd, &base_ctx).await?;
             }
             Commands::Model { command } => {
-                commands::model::execute(command, &cli_settings, &cli_layer, printer).await?;
+                let base_ctx = build_base_ctx()?;
+                commands::model::execute(command, &base_ctx).await?;
             }
             Commands::Server(ns) => {
                 Box::pin(commands::server::dispatch(
@@ -266,21 +262,13 @@ async fn main_inner() -> (String, Result<()>) {
                 .await?;
             }
             Commands::Doctor(args) => {
-                let verbose =
-                    args.verbose || cli_settings.output.verbosity == OutputVerbosity::Verbose;
-                let exit_code = Box::pin(commands::doctor::run_doctor(
-                    &args,
-                    verbose,
-                    &cli_settings,
-                    &cli_layer,
-                    printer,
-                ))
-                .await?;
+                let base_ctx = build_base_ctx()?;
+                let exit_code = Box::pin(commands::doctor::run_doctor(&args, &base_ctx)).await?;
                 std::process::exit(exit_code);
             }
             Commands::Version(args) => {
-                commands::version::version_command(&args, &cli_settings, &cli_layer, printer)
-                    .await?;
+                let base_ctx = build_base_ctx()?;
+                commands::version::version_command(&args, &base_ctx).await?;
             }
             Commands::Discord => {
                 if process_local_json {
@@ -301,7 +289,8 @@ async fn main_inner() -> (String, Result<()>) {
                 }
             }
             Commands::Repo(ns) => {
-                commands::repo::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
+                let base_ctx = build_base_ctx()?;
+                commands::repo::dispatch(ns, &base_ctx).await?;
             }
             Commands::Install { args, command } => {
                 Box::pin(commands::install::execute(
@@ -318,48 +307,36 @@ async fn main_inner() -> (String, Result<()>) {
                 commands::uninstall::run_uninstall(&args, &cli_settings, printer).await?;
             }
             Commands::Auth(ns) => {
-                commands::auth::dispatch(ns, &cli_layer, process_local_json, printer).await?;
+                let base_ctx = build_base_ctx()?;
+                commands::auth::dispatch(ns, &base_ctx).await?;
             }
             Commands::Pr(ns) => {
-                Box::pin(commands::pr::dispatch(
-                    ns,
-                    &cli_settings,
-                    &cli_layer,
-                    printer,
-                ))
-                .await?;
+                let base_ctx = build_base_ctx()?;
+                Box::pin(commands::pr::dispatch(ns, &base_ctx)).await?;
             }
             Commands::Secret(ns) => {
-                commands::secret::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
+                let base_ctx = build_base_ctx()?;
+                commands::secret::dispatch(ns, &base_ctx).await?;
             }
             Commands::Settings(args) => {
-                Box::pin(commands::config::execute(
-                    &args,
-                    &cli_settings,
-                    &cli_layer,
-                    printer,
-                ))
-                .await?;
+                let base_ctx = build_base_ctx()?;
+                Box::pin(commands::config::execute(&args, &base_ctx)).await?;
             }
             Commands::Workflow(ns) => commands::workflow::dispatch(ns, &cli_settings, printer)?,
             Commands::Upgrade(args) => {
                 commands::upgrade::run_upgrade(args, &cli_settings, printer).await?;
             }
             Commands::Provider(ns) => {
-                commands::provider::dispatch(ns, &cli_layer, process_local_json, printer).await?;
+                let base_ctx = build_base_ctx()?;
+                commands::provider::dispatch(ns, &base_ctx).await?;
             }
             Commands::Sandbox { command } => {
-                commands::sandbox::dispatch(
-                    command,
-                    &cli_settings,
-                    &cli_layer,
-                    process_local_json,
-                    printer,
-                )
-                .await?;
+                let base_ctx = build_base_ctx()?;
+                commands::sandbox::dispatch(command, &base_ctx).await?;
             }
             Commands::System(ns) => {
-                commands::system::dispatch(ns, &cli_settings, &cli_layer, printer).await?;
+                let base_ctx = build_base_ctx()?;
+                commands::system::dispatch(ns, &base_ctx).await?;
             }
             Commands::Completion(args) => {
                 require_no_json_override(process_local_json)?;

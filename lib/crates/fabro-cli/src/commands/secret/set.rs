@@ -11,8 +11,6 @@ use std::io::{IsTerminal, Read as _};
 
 use anyhow::{Context as _, Result, bail};
 use fabro_api::types;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 use tokio::task::spawn_blocking;
 
@@ -60,7 +58,7 @@ async fn resolve_value(args: &SecretSetArgs) -> Result<String> {
 pub(super) async fn set_command(
     client: &Client,
     args: &SecretSetArgs,
-    cli: &CliNamespace,
+    json_output: bool,
     printer: Printer,
 ) -> Result<()> {
     let value = resolve_value(args).await?;
@@ -72,7 +70,7 @@ pub(super) async fn set_command(
             description: args.description.clone(),
         })
         .await?;
-    if cli.output.format == OutputFormat::Json {
+    if json_output {
         print_json_pretty(&meta)?;
     } else {
         fabro_util::printerr!(printer, "Set {}", meta.name);

@@ -6,8 +6,7 @@
 use std::io::IsTerminal;
 
 use anyhow::Result;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 use serde_json::{Map, Value, json};
 
@@ -16,14 +15,10 @@ use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 use crate::user_config::{self, ServerTarget};
 
-pub(crate) async fn version_command(
-    args: &VersionArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
+pub(crate) async fn version_command(args: &VersionArgs, base_ctx: &CommandContext) -> Result<()> {
     let client = client_info();
-    let ctx = CommandContext::for_target(&args.target, printer, cli_layer)?;
+    let printer = base_ctx.printer();
+    let ctx = base_ctx.with_target(&args.target)?;
     let server_target = user_config::resolve_server_target(&args.target, ctx.machine_settings())?;
     let server_address = format_server_target(&server_target);
     let server_info = match ctx.server().await {
@@ -49,7 +44,7 @@ pub(crate) async fn version_command(
         },
     };
 
-    if cli.output.format == OutputFormat::Json {
+    if ctx.user_settings().cli.output.format == OutputFormat::Json {
         print_json_pretty(&json_output(&client, &server_info))?;
         return Ok(());
     }

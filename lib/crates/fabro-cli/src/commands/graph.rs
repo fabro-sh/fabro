@@ -13,13 +13,12 @@ use anyhow::{Context, bail};
 use fabro_api::types;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_types::settings::{CliNamespace, SettingsLayer};
-use fabro_util::printer::Printer;
+use fabro_types::settings::SettingsLayer;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::terminal::Styles;
 use tracing::debug;
 
-use crate::args::{GraphArgs, GraphDirection, require_no_json_override};
+use crate::args::{GraphArgs, GraphDirection};
 use crate::command_context::CommandContext;
 use crate::commands::run::output::api_diagnostics_to_local;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest};
@@ -28,16 +27,14 @@ use crate::shared::{absolute_or_current, print_diagnostics, print_json_pretty, r
 pub(crate) async fn run(
     args: &GraphArgs,
     styles: &Styles,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    process_local_json: bool,
-    printer: Printer,
+    base_ctx: &CommandContext,
 ) -> anyhow::Result<()> {
-    if process_local_json && args.output.is_none() {
-        require_no_json_override(process_local_json)?;
+    if base_ctx.explicit_json_requested() && args.output.is_none() {
+        base_ctx.require_no_json_override()?;
     }
 
-    let ctx = CommandContext::for_target(&args.target, printer, cli_layer)?;
+    let printer = base_ctx.printer();
+    let ctx = base_ctx.with_target(&args.target)?;
     let built = build_run_manifest(ManifestBuildInput {
         workflow:           args.workflow.clone(),
         cwd:                ctx.cwd().to_path_buf(),
@@ -73,7 +70,7 @@ pub(crate) async fn run(
     if let Some(ref output_path) = args.output {
         std::fs::write(output_path, &rendered)
             .with_context(|| format!("writing rendered graph to {}", output_path.display()))?;
-        if cli.output.format == OutputFormat::Json {
+        if ctx.user_settings().cli.output.format == OutputFormat::Json {
             print_json_pretty(&serde_json::json!({
                 "path": absolute_or_current(output_path),
                 "format": args.format.to_string(),

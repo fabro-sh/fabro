@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail};
 use fabro_api::types;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 use tracing::{debug, info};
 
@@ -11,13 +10,9 @@ use crate::args::RunsPruneArgs;
 use crate::command_context::CommandContext;
 use crate::shared::{format_size, print_json_pretty};
 
-pub(super) async fn prune_command(
-    args: &RunsPruneArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
-    let ctx = CommandContext::for_connection(&args.connection, printer, cli_layer)?;
+pub(super) async fn prune_command(args: &RunsPruneArgs, base_ctx: &CommandContext) -> Result<()> {
+    let ctx = base_ctx.with_connection(&args.connection)?;
+    let printer = ctx.printer();
     let server = ctx.server().await?;
     let response = server
         .prune_runs(types::PruneRunsRequest {
@@ -29,7 +24,11 @@ pub(super) async fn prune_command(
             workflow:   args.filter.workflow.clone(),
         })
         .await?;
-    prune_from(&response, cli.output.format == OutputFormat::Json, printer)
+    prune_from(
+        &response,
+        ctx.user_settings().cli.output.format == OutputFormat::Json,
+        printer,
+    )
 }
 
 pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {

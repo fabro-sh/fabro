@@ -11,8 +11,7 @@ use std::io::Write;
 
 use anyhow::{Result, bail};
 use fabro_types::RunId;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_workflow::records::Conclusion;
@@ -24,14 +23,9 @@ use crate::args::WaitArgs;
 use crate::command_context::CommandContext;
 use crate::shared::{format_duration_ms, format_usd_micros, run_status_kind};
 
-pub(crate) async fn run(
-    args: &WaitArgs,
-    styles: &Styles,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
+pub(crate) async fn run(args: &WaitArgs, styles: &Styles, base_ctx: &CommandContext) -> Result<()> {
+    let printer = base_ctx.printer();
+    let ctx = base_ctx.with_target(&args.server)?;
     let client = ctx.server().await?;
     let run_id = client.resolve_run(&args.run).await?.run_id;
     info!(run_id = %run_id, "Waiting for run to complete");
@@ -63,7 +57,7 @@ pub(crate) async fn run(
 
     let conclusion = client.get_run_state(&run_id).await?.conclusion;
 
-    if cli.output.format == OutputFormat::Json {
+    if ctx.user_settings().cli.output.format == OutputFormat::Json {
         let json_value = build_json_output(final_status, &run_id, conclusion.as_ref());
         let mut out = std::io::stdout().lock();
         serde_json::to_writer_pretty(&mut out, &json_value)?;

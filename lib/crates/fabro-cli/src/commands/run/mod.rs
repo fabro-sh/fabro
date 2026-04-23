@@ -1,7 +1,5 @@
 use anyhow::Result;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat, OutputVerbosity};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
 use fabro_util::terminal::Styles;
 
 use crate::args::{AttachArgs, RunCommands, RunWorkerArgs, StartArgs};
@@ -27,19 +25,15 @@ pub(crate) mod ssh;
 pub(crate) mod start;
 pub(crate) mod wait;
 
-pub(crate) async fn dispatch(
-    cmd: RunCommands,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    _process_local_json: bool,
-    printer: Printer,
-) -> Result<()> {
+pub(crate) async fn dispatch(cmd: RunCommands, base_ctx: &CommandContext) -> Result<()> {
+    let printer = base_ctx.printer();
+
     match cmd {
-        RunCommands::Run(args) => Box::pin(command::execute(args, cli, cli_layer, printer)).await,
+        RunCommands::Run(args) => Box::pin(command::execute(args, base_ctx)).await,
         RunCommands::Create(args) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let cli_defaults = load_settings_with_storage_dir(None)?;
-            let ctx = CommandContext::for_target(&args.target, printer, cli_layer)?;
+            let ctx = base_ctx.with_target(&args.target)?;
             let created_run = Box::pin(create::create_run(
                 &ctx,
                 &args,
@@ -49,7 +43,7 @@ pub(crate) async fn dispatch(
                 printer,
             ))
             .await?;
-            if cli.output.format == OutputFormat::Json {
+            if ctx.user_settings().cli.output.format == OutputFormat::Json {
                 print_json_pretty(&serde_json::json!({ "run_id": created_run.run_id }))?;
             } else {
                 fabro_util::printout!(printer, "{}", created_run.run_id);
@@ -57,26 +51,27 @@ pub(crate) async fn dispatch(
             Ok(())
         }
         RunCommands::Start(StartArgs { server, run }) => {
-            let ctx = CommandContext::for_target(&server, printer, cli_layer)?;
+            let ctx = base_ctx.with_target(&server)?;
             let client = ctx.server().await?;
             let run_id = client.resolve_run(&run).await?.run_id;
             start::start_run_with_client(client.as_ref(), &run_id, false).await?;
-            if cli.output.format == OutputFormat::Json {
+            if ctx.user_settings().cli.output.format == OutputFormat::Json {
                 print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
             }
             Ok(())
         }
         RunCommands::Attach(AttachArgs { server, run }) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let ctx = CommandContext::for_target(&server, printer, cli_layer)?;
+            let ctx = base_ctx.with_target(&server)?;
             let client = ctx.server().await?;
             let run_id = client.resolve_run(&run).await?.run_id;
+            let json = ctx.user_settings().cli.output.format == OutputFormat::Json;
             let exit_code = Box::pin(attach::attach_run_with_client(
                 client.as_ref(),
                 &run_id,
                 false,
                 styles,
-                cli.output.format == OutputFormat::Json,
+                json,
                 ctx.user_settings().cli.output.verbosity == OutputVerbosity::Verbose,
                 printer,
             ))
@@ -104,34 +99,31 @@ pub(crate) async fn dispatch(
             )
             .await
         }
-        RunCommands::Diff(args) => diff::run(args, cli, cli_layer, printer).await,
+        RunCommands::Diff(args) => diff::run(args, base_ctx).await,
         RunCommands::Logs(args) => {
             let styles = Styles::detect_stdout();
-            logs::run(&args, &styles, cli, cli_layer, printer).await
+            logs::run(&args, &styles, base_ctx).await
         }
         RunCommands::Resume(args) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
-                let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
+                let ctx = base_ctx.with_target(&args.server)?;
                 crate::sleep_inhibitor::guard(ctx.user_settings().cli.exec.prevent_idle_sleep)
             };
-            Box::pin(resume::resume_command(
-                args, styles, cli, cli_layer, printer,
-            ))
-            .await
+            Box::pin(resume::resume_command(args, styles, base_ctx)).await
         }
         RunCommands::Rewind(args) => {
             let styles = Styles::detect_stderr();
-            Box::pin(rewind::run(&args, &styles, cli, cli_layer, printer)).await
+            Box::pin(rewind::run(&args, &styles, base_ctx)).await
         }
         RunCommands::Fork(args) => {
             let styles = Styles::detect_stderr();
-            Box::pin(fork::run(&args, &styles, cli, cli_layer, printer)).await
+            Box::pin(fork::run(&args, &styles, base_ctx)).await
         }
         RunCommands::Wait(args) => {
             let styles = Styles::detect_stderr();
-            wait::run(&args, &styles, cli, cli_layer, printer).await
+            wait::run(&args, &styles, base_ctx).await
         }
     }
 }

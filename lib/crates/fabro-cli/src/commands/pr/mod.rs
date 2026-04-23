@@ -8,9 +8,7 @@ use anyhow::{Context, Result, anyhow};
 use fabro_config::Storage;
 use fabro_github::GitHubCredentials;
 use fabro_types::PullRequestRecord;
-use fabro_types::settings::cli::CliLayer;
-use fabro_types::settings::{CliNamespace, InterpString};
-use fabro_util::printer::Printer;
+use fabro_types::settings::InterpString;
 
 use crate::args::{PrCommand, PrNamespace, ServerTargetArgs};
 use crate::command_context::CommandContext;
@@ -20,20 +18,13 @@ use crate::user_config;
 const GITHUB_CREDENTIALS_REQUIRED: &str =
     "GitHub credentials required — run `fabro install` or set GITHUB_TOKEN";
 
-pub(crate) async fn dispatch(
-    ns: PrNamespace,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
+pub(crate) async fn dispatch(ns: PrNamespace, base_ctx: &CommandContext) -> Result<()> {
     match ns.command {
-        PrCommand::Create(args) => {
-            Box::pin(create::create_command(args, cli, cli_layer, printer)).await
-        }
-        PrCommand::List(args) => list::list_command(args, cli, cli_layer, printer).await,
-        PrCommand::View(args) => view::view_command(args, cli, cli_layer, printer).await,
-        PrCommand::Merge(args) => merge::merge_command(args, cli, cli_layer, printer).await,
-        PrCommand::Close(args) => close::close_command(args, cli, cli_layer, printer).await,
+        PrCommand::Create(args) => Box::pin(create::create_command(args, base_ctx)).await,
+        PrCommand::List(args) => list::list_command(args, base_ctx).await,
+        PrCommand::View(args) => view::view_command(args, base_ctx).await,
+        PrCommand::Merge(args) => merge::merge_command(args, base_ctx).await,
+        PrCommand::Close(args) => close::close_command(args, base_ctx).await,
     }
 }
 
@@ -41,14 +32,10 @@ pub(crate) async fn dispatch(
     deprecated,
     reason = "boundary-exempt(pr-api): remove with follow-up #1 when PR ops move server-side"
 )]
-fn load_github_credentials_required(
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<GitHubCredentials> {
-    let ctx = CommandContext::base(printer, cli_layer)?;
-    let server_settings = fabro_config::ServerSettings::from_layer(ctx.machine_settings())
+fn load_github_credentials_required(base_ctx: &CommandContext) -> Result<GitHubCredentials> {
+    let server_settings = fabro_config::ServerSettings::from_layer(base_ctx.machine_settings())
         .map_err(anyhow::Error::from)?;
-    let vault = user_config::storage_dir(ctx.machine_settings())
+    let vault = user_config::storage_dir(base_ctx.machine_settings())
         .ok()
         .and_then(|dir| fabro_vault::Vault::load(Storage::new(&dir).secrets_path()).ok());
     let creds = build_github_credentials(
@@ -70,10 +57,9 @@ fn load_github_credentials_required(
 pub(crate) async fn load_pr_record(
     server: &ServerTargetArgs,
     run_id: &str,
-    cli_layer: &CliLayer,
-    printer: Printer,
+    base_ctx: &CommandContext,
 ) -> Result<(PullRequestRecord, fabro_types::RunId)> {
-    let ctx = CommandContext::for_target(server, printer, cli_layer)?;
+    let ctx = base_ctx.with_target(server)?;
     let client = ctx.server().await?;
     let run_id = client.resolve_run(run_id).await?.run_id;
     let state = client.get_run_state(&run_id).await?;

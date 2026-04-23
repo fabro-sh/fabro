@@ -1,8 +1,6 @@
 use anyhow::Result;
 use fabro_client::sse;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 use futures::StreamExt;
 
 use crate::args::SystemEventsArgs;
@@ -10,16 +8,14 @@ use crate::command_context::CommandContext;
 
 pub(super) async fn events_command(
     args: &SystemEventsArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
+    base_ctx: &CommandContext,
 ) -> Result<()> {
-    let ctx = CommandContext::for_connection(&args.connection, printer, cli_layer)?;
+    let ctx = base_ctx.with_connection(&args.connection)?;
     let server = ctx.server().await?;
     let mut stream = server.attach_events(&args.run_ids).await?;
     let mut pending = Vec::new();
 
-    let json = cli.output.format == OutputFormat::Json;
+    let json = ctx.user_settings().cli.output.format == OutputFormat::Json;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|err| anyhow::anyhow!("{err}"))?;
         pending.extend_from_slice(&chunk);

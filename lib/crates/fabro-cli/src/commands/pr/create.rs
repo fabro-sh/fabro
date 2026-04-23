@@ -5,9 +5,7 @@ use fabro_auth::configured_providers_from_process_env;
 use fabro_config::Storage;
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_vault::Vault;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::pull_request::maybe_open_pull_request;
@@ -25,13 +23,9 @@ use crate::user_config;
     deprecated,
     reason = "boundary-exempt(pr-api): remove with follow-up #1 when PR ops move server-side"
 )]
-pub(super) async fn create_command(
-    args: PrCreateArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
+pub(super) async fn create_command(args: PrCreateArgs, base_ctx: &CommandContext) -> Result<()> {
+    let ctx = base_ctx.with_target(&args.server)?;
+    let printer = ctx.printer();
     let client = ctx.server().await?;
     let run_id = client.resolve_run(&args.run_id).await?.run_id;
     let events = client.list_run_events(&run_id, None, None).await?;
@@ -86,7 +80,7 @@ pub(super) async fn create_command(
     let (owner, repo) = fabro_github::parse_github_owner_repo(&https_url)
         .map_err(|err| anyhow::anyhow!("{err}"))?;
 
-    let creds = super::load_github_credentials_required(cli_layer, printer)?;
+    let creds = super::load_github_credentials_required(base_ctx)?;
 
     let branch_found = fabro_github::branch_exists(
         &creds,
@@ -136,14 +130,14 @@ pub(super) async fn create_command(
     match pull_request {
         Some(record) => {
             info!(pr_url = %record.html_url, "Pull request created");
-            if cli.output.format == OutputFormat::Json {
+            if ctx.user_settings().cli.output.format == OutputFormat::Json {
                 print_json_pretty(&record)?;
             } else {
                 fabro_util::printout!(printer, "{}", record.html_url);
             }
         }
         None => {
-            if cli.output.format == OutputFormat::Json {
+            if ctx.user_settings().cli.output.format == OutputFormat::Json {
                 print_json_pretty(&serde_json::Value::Null)?;
             } else {
                 fabro_util::printout!(printer, "No pull request created (empty diff).");

@@ -4,13 +4,12 @@ use anyhow::{Context as _, Result, bail};
 use chrono::{DateTime, Utc};
 use fabro_client::{AuthEntry, AuthStore, StoredSubject};
 use fabro_http::header::CONTENT_TYPE;
-use fabro_types::settings::cli::CliLayer;
 use fabro_util::browser;
 use fabro_util::printer::Printer;
 use serde::Deserialize;
 use tokio::time::timeout;
 
-use crate::args::{AuthLoginArgs, require_no_json_override};
+use crate::args::AuthLoginArgs;
 use crate::command_context::CommandContext;
 use crate::user_config;
 use crate::user_config::ServerTarget;
@@ -33,17 +32,13 @@ struct CliTokenSubject {
     email:       String,
 }
 
-pub(super) async fn login_command(
-    args: AuthLoginArgs,
-    cli_layer: &CliLayer,
-    process_local_json: bool,
-    printer: Printer,
-) -> Result<()> {
-    require_no_json_override(process_local_json)?;
+pub(super) async fn login_command(args: AuthLoginArgs, base_ctx: &CommandContext) -> Result<()> {
+    base_ctx.require_no_json_override()?;
+    let printer = base_ctx.printer();
 
     #[cfg(not(unix))]
     {
-        let _ = (args, cli_layer, printer);
+        let _ = (args, printer);
         bail!(
             "CLI OAuth login is not supported on Windows in this release. Use WSL, or use a dev-token server."
         );
@@ -51,8 +46,7 @@ pub(super) async fn login_command(
 
     #[cfg(unix)]
     {
-        let ctx = CommandContext::base(printer, cli_layer)?;
-        let target = user_config::resolve_server_target(&args.server, ctx.machine_settings())?;
+        let target = user_config::resolve_server_target(&args.server, base_ctx.machine_settings())?;
         let web_url = browser_origin(&target)?;
         let pkce = fabro_oauth::generate_pkce();
         let state = fabro_oauth::generate_state();

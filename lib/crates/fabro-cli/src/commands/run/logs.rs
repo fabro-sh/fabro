@@ -13,10 +13,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::json::normalize_json_value;
-use fabro_util::printer::Printer;
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::terminal::Styles;
 use tokio::time;
@@ -29,14 +27,8 @@ use crate::shared::format_usd_micros;
 
 const FOLLOW_TERMINAL_GRACE: Duration = Duration::from_millis(500);
 
-pub(crate) async fn run(
-    args: &LogsArgs,
-    styles: &Styles,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
+pub(crate) async fn run(args: &LogsArgs, styles: &Styles, base_ctx: &CommandContext) -> Result<()> {
+    let ctx = base_ctx.with_target(&args.server)?;
     let client = ctx.server().await?;
     let run_id = client.resolve_run(&args.run).await?.run_id;
     info!(run_id = %run_id, "Showing logs");
@@ -60,7 +52,7 @@ pub(crate) async fn run(
     let stdout = io::stdout();
     let is_tty = stdout.is_terminal();
     let mut out = stdout.lock();
-    let pretty = args.pretty && cli.output.format != OutputFormat::Json;
+    let pretty = args.pretty && ctx.user_settings().cli.output.format != OutputFormat::Json;
 
     for line in &filtered {
         if pretty {

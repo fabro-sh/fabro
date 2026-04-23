@@ -1,9 +1,10 @@
 use anyhow::{Context, Result, bail};
-use fabro_types::settings::CliNamespace;
 use fabro_types::settings::cli::OutputFormat;
-use fabro_util::printer::Printer;
 
-pub(crate) fn run_deinit(cli: &CliNamespace, printer: Printer) -> Result<Vec<String>> {
+use crate::command_context::CommandContext;
+
+pub(crate) fn run_deinit(base_ctx: &CommandContext) -> Result<Vec<String>> {
+    let printer = base_ctx.printer();
     let repo_root = super::init::git_repo_root()?;
     let mut removed = Vec::new();
 
@@ -20,7 +21,7 @@ pub(crate) fn run_deinit(cli: &CliNamespace, printer: Printer) -> Result<Vec<Str
     std::fs::remove_dir_all(&fabro_dir)
         .with_context(|| format!("failed to remove {}", fabro_dir.display()))?;
     removed.push(".fabro/".to_string());
-    if cli.output.format != OutputFormat::Json {
+    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
         fabro_util::printerr!(
             printer,
             "  {} {}",
@@ -29,7 +30,7 @@ pub(crate) fn run_deinit(cli: &CliNamespace, printer: Printer) -> Result<Vec<Str
         );
     }
 
-    if cli.output.format != OutputFormat::Json {
+    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
         fabro_util::printerr!(
             printer,
             "\n{}",

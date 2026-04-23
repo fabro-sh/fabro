@@ -2,10 +2,7 @@ mod cp;
 mod list;
 
 use anyhow::{Context, Result};
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::CliLayer;
 use fabro_types::{RunId, StageId};
-use fabro_util::printer::Printer;
 
 use crate::args::{ArtifactCommand, ArtifactNamespace, ServerTargetArgs};
 use crate::command_context::CommandContext;
@@ -22,14 +19,13 @@ pub(super) struct ArtifactEntry {
 }
 
 pub(super) async fn resolve_artifacts(
+    base_ctx: &CommandContext,
     server: &ServerTargetArgs,
     run_selector: &str,
     node: Option<&str>,
     retry: Option<u32>,
-    cli_layer: &CliLayer,
-    printer: Printer,
 ) -> Result<(RunId, Client, Vec<ArtifactEntry>)> {
-    let ctx = CommandContext::for_target(server, printer, cli_layer)?;
+    let ctx = base_ctx.with_target(server)?;
     let client = ctx.server().await?;
     let run_id = client.resolve_run(run_selector).await?.run_id;
     let mut entries = Vec::new();
@@ -62,14 +58,9 @@ pub(super) async fn resolve_artifacts(
     Ok((run_id, client.clone_for_reuse(), entries))
 }
 
-pub(crate) async fn dispatch(
-    ns: ArtifactNamespace,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
+pub(crate) async fn dispatch(ns: ArtifactNamespace, base_ctx: &CommandContext) -> Result<()> {
     match ns.command {
-        ArtifactCommand::List(args) => list::list_command(&args, cli, cli_layer, printer).await,
-        ArtifactCommand::Cp(args) => cp::cp_command(&args, cli, cli_layer, printer).await,
+        ArtifactCommand::List(args) => list::list_command(&args, base_ctx).await,
+        ArtifactCommand::Cp(args) => cp::cp_command(&args, base_ctx).await,
     }
 }

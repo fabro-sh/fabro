@@ -11,9 +11,7 @@ use std::io::Write;
 
 use fabro_api::types::ServerSettings;
 use fabro_config::UserSettings;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 use serde::Serialize;
 
 use crate::args::SettingsArgs;
@@ -28,10 +26,9 @@ struct RenderedConfig {
 
 async fn rendered_config(
     args: &SettingsArgs,
-    cli_layer: &CliLayer,
-    printer: Printer,
+    base_ctx: &CommandContext,
 ) -> anyhow::Result<serde_json::Value> {
-    let ctx = CommandContext::for_target(&args.target, printer, cli_layer)?;
+    let ctx = base_ctx.with_target(&args.target)?;
     let user = fabro_config::UserSettings::resolve()?;
     let server = ctx
         .server()
@@ -41,14 +38,9 @@ async fn rendered_config(
     serde_json::to_value(RenderedConfig { user, server }).map_err(Into::into)
 }
 
-pub(crate) async fn execute(
-    args: &SettingsArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> anyhow::Result<()> {
-    let config = Box::pin(rendered_config(args, cli_layer, printer)).await?;
-    if cli.output.format == OutputFormat::Json {
+pub(crate) async fn execute(args: &SettingsArgs, base_ctx: &CommandContext) -> anyhow::Result<()> {
+    let config = Box::pin(rendered_config(args, base_ctx)).await?;
+    if base_ctx.user_settings().cli.output.format == OutputFormat::Json {
         print_json_pretty(&config)?;
         return Ok(());
     }

@@ -4,9 +4,7 @@ use anyhow::Result;
 use chrono::Utc;
 use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
 use fabro_workflow::run_status::RunStatus;
@@ -20,11 +18,10 @@ use crate::shared::{color_if, format_duration_ms, run_status_kind, tilde_path};
 pub(crate) async fn list_command(
     args: &RunsListArgs,
     styles: &Styles,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
+    base_ctx: &CommandContext,
 ) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
+    let ctx = base_ctx.with_target(&args.server)?;
+    let printer = ctx.printer();
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let label_filters = parse_label_filters(&args.filter.label);
     let filtered = filter_server_runs(
@@ -35,7 +32,7 @@ pub(crate) async fn list_command(
         !args.all,
     );
 
-    if cli.output.format == OutputFormat::Json {
+    if ctx.user_settings().cli.output.format == OutputFormat::Json {
         let json_rows: Vec<_> = filtered
             .iter()
             .map(|run| {

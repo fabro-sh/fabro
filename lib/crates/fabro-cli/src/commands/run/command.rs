@@ -1,7 +1,5 @@
 use anyhow::Result;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat, OutputVerbosity};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
 use fabro_util::terminal::Styles;
 
 use crate::args::RunArgs;
@@ -9,16 +7,13 @@ use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 use crate::user_config::load_settings_with_storage_dir;
 
-pub(crate) async fn execute(
-    mut args: RunArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
+pub(crate) async fn execute(mut args: RunArgs, base_ctx: &CommandContext) -> Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let ctx = CommandContext::for_target(&args.target, printer, cli_layer)?;
+    let printer = base_ctx.printer();
+    let ctx = base_ctx.with_target(&args.target)?;
     let cli_defaults = load_settings_with_storage_dir(None)?;
-    args.verbose = args.verbose || cli.output.verbosity == OutputVerbosity::Verbose;
+    args.verbose =
+        args.verbose || ctx.user_settings().cli.output.verbosity == OutputVerbosity::Verbose;
 
     let quiet = args.detach;
     let prevent_idle_sleep = ctx.user_settings().cli.exec.prevent_idle_sleep;
@@ -50,7 +45,7 @@ pub(crate) async fn execute(
     let client = ctx.server().await?;
     super::start::start_run_with_client(&client, &created_run.run_id, false).await?;
 
-    let json = cli.output.format == OutputFormat::Json;
+    let json = ctx.user_settings().cli.output.format == OutputFormat::Json;
     if args.detach {
         if json {
             print_json_pretty(&serde_json::json!({ "run_id": created_run.run_id }))?;

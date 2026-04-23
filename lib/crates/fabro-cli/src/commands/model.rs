@@ -3,9 +3,7 @@ use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_api::types as api_types;
 use fabro_model::{Catalog, Model, Provider};
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::terminal::Styles;
 use serde::Serialize;
 
@@ -42,19 +40,22 @@ struct ModelTestOutput {
 
 pub(crate) async fn execute(
     command: Option<ModelsCommand>,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
+    base_ctx: &CommandContext,
 ) -> Result<()> {
     let command = command.unwrap_or_default();
     let target_args = match &command {
         ModelsCommand::List(args) => &args.target,
         ModelsCommand::Test(args) => &args.target,
     };
-    let ctx = CommandContext::for_target(target_args, printer, cli_layer)?;
+    let ctx = base_ctx.with_target(target_args)?;
     let server = ctx.server().await?;
 
-    run_models(command, &server, cli.output.format == OutputFormat::Json).await
+    run_models(
+        command,
+        &server,
+        ctx.user_settings().cli.output.format == OutputFormat::Json,
+    )
+    .await
 }
 
 fn format_context_window(tokens: i64) -> String {

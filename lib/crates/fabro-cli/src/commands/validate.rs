@@ -1,9 +1,8 @@
 use anyhow::bail;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_types::settings::{CliNamespace, SettingsLayer};
-use fabro_util::printer::Printer;
+use fabro_types::settings::SettingsLayer;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::terminal::Styles;
 
 use crate::args::ValidateArgs;
@@ -15,11 +14,10 @@ use crate::shared::{print_diagnostics, print_json_pretty, relative_path};
 pub(crate) async fn run(
     args: &ValidateArgs,
     styles: &Styles,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
+    base_ctx: &CommandContext,
 ) -> anyhow::Result<()> {
-    let ctx = CommandContext::for_target(&args.target, printer, cli_layer)?;
+    let printer = base_ctx.printer();
+    let ctx = base_ctx.with_target(&args.target)?;
     let built = build_run_manifest(ManifestBuildInput {
         workflow:           args.workflow.clone(),
         cwd:                ctx.cwd().to_path_buf(),
@@ -33,7 +31,7 @@ pub(crate) async fn run(
     let response = client.run_preflight(built.manifest).await?;
     let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);
 
-    if cli.output.format == OutputFormat::Json {
+    if ctx.user_settings().cli.output.format == OutputFormat::Json {
         print_json_pretty(&serde_json::json!({
             "workflow_name": response.workflow.name,
             "nodes": response.workflow.nodes,

@@ -11,10 +11,8 @@ use bytes::Bytes;
 #[cfg(test)]
 use fabro_store::{ArtifactStore, RunDatabase};
 use fabro_store::{EventEnvelope, RunProjection, StageId};
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
+use fabro_types::settings::cli::OutputFormat;
 use fabro_types::{RunBlobId, RunId};
-use fabro_util::printer::Printer;
 use futures::future::BoxFuture;
 #[cfg(test)]
 use serde::de::DeserializeOwned;
@@ -26,19 +24,15 @@ use crate::command_context::CommandContext;
 use crate::server_client::Client;
 use crate::shared::{absolute_or_current, print_json_pretty};
 
-pub(crate) async fn dump_command(
-    args: &StoreDumpArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
+pub(crate) async fn dump_command(args: &StoreDumpArgs, base_ctx: &CommandContext) -> Result<()> {
+    let ctx = base_ctx.with_target(&args.server)?;
+    let printer = ctx.printer();
     let client = ctx.server().await?;
     let run_id = client.resolve_run(&args.run).await?.run_id;
     let state = client.get_run_state(&run_id).await?;
     let source = ServerDumpSource::new(client.as_ref(), &run_id);
     let file_count = export_run_from_source(&source, &state, &args.output).await?;
-    if cli.output.format == OutputFormat::Json {
+    if ctx.user_settings().cli.output.format == OutputFormat::Json {
         print_json_pretty(&serde_json::json!({
             "run_id": run_id,
             "output_dir": absolute_or_current(&args.output),

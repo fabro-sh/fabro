@@ -6,9 +6,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 use tokio::process::Command as TokioCommand;
 use tokio::task::spawn_blocking;
 
@@ -36,10 +34,9 @@ pub(super) fn git_repo_root() -> Result<PathBuf> {
 
 pub(crate) async fn run_init(
     args: &RepoInitArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
+    base_ctx: &CommandContext,
 ) -> Result<Vec<String>> {
+    let printer = base_ctx.printer();
     let repo_root = spawn_blocking(git_repo_root)
         .await
         .context("git repo root task panicked")??;
@@ -79,7 +76,7 @@ draft = true
     let green = console::Style::new().green();
     let bold = console::Style::new().bold();
     let dim = console::Style::new().dim();
-    if cli.output.format != OutputFormat::Json {
+    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
         fabro_util::printerr!(
             printer,
             "  {} {}",
@@ -112,7 +109,7 @@ draft = true
     )
     .with_context(|| format!("failed to write {}", dot_path.display()))?;
     created.push(".fabro/workflows/hello/workflow.fabro".to_string());
-    if cli.output.format != OutputFormat::Json {
+    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
         fabro_util::printerr!(
             printer,
             "  {} {}",
@@ -129,7 +126,7 @@ draft = true
     )
     .with_context(|| format!("failed to write {}", toml_path.display()))?;
     created.push(".fabro/workflows/hello/workflow.toml".to_string());
-    if cli.output.format != OutputFormat::Json {
+    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
         fabro_util::printerr!(
             printer,
             "  {} {}",
@@ -138,7 +135,7 @@ draft = true
         );
     }
 
-    if cli.output.format != OutputFormat::Json {
+    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
         fabro_util::printerr!(
             printer,
             "\n{} Run a workflow with:\n\n  {}",
@@ -150,18 +147,15 @@ draft = true
         );
     }
 
-    if cli.output.format != OutputFormat::Json {
-        check_github_app_installation(&args.target, cli_layer, printer).await;
+    if base_ctx.user_settings().cli.output.format != OutputFormat::Json {
+        check_github_app_installation(&args.target, base_ctx).await;
     }
 
     Ok(created)
 }
 
-async fn check_github_app_installation(
-    target: &ServerTargetArgs,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) {
+async fn check_github_app_installation(target: &ServerTargetArgs, base_ctx: &CommandContext) {
+    let printer = base_ctx.printer();
     // Get the git remote origin URL
     let output = match TokioCommand::new("git")
         .args(["remote", "get-url", "origin"])
@@ -199,7 +193,7 @@ async fn check_github_app_installation(
         return; // Not a GitHub repo — skip silently
     };
 
-    let ctx = match CommandContext::for_target(target, printer, cli_layer) {
+    let ctx = match base_ctx.with_target(target) {
         Ok(ctx) => ctx,
         Err(err) => {
             fabro_util::printerr!(

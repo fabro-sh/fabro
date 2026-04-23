@@ -1,35 +1,24 @@
 use anyhow::Result;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::CliLayer;
-use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
 use crate::args::RunsCommands;
+use crate::command_context::CommandContext;
 
 pub(crate) mod archive;
 pub(crate) mod inspect;
 pub(crate) mod list;
 pub(crate) mod rm;
 
-pub(crate) async fn dispatch(
-    cmd: RunsCommands,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
+pub(crate) async fn dispatch(cmd: RunsCommands, base_ctx: &CommandContext) -> Result<()> {
     match cmd {
         RunsCommands::Ps(args) => {
             let styles = Styles::detect_stdout();
-            list::list_command(&args, &styles, cli, cli_layer, printer).await
+            list::list_command(&args, &styles, base_ctx).await
         }
-        RunsCommands::Rm(args) => rm::remove_command(&args, cli, cli_layer, printer).await,
-        RunsCommands::Inspect(args) => inspect::run(&args, cli_layer, printer).await,
-        RunsCommands::Archive(args) => {
-            archive::archive_command(&args, cli, cli_layer, printer).await
-        }
-        RunsCommands::Unarchive(args) => {
-            archive::unarchive_command(&args, cli, cli_layer, printer).await
-        }
+        RunsCommands::Rm(args) => rm::remove_command(&args, base_ctx).await,
+        RunsCommands::Inspect(args) => inspect::run(&args, base_ctx).await,
+        RunsCommands::Archive(args) => archive::archive_command(&args, base_ctx).await,
+        RunsCommands::Unarchive(args) => archive::unarchive_command(&args, base_ctx).await,
     }
 }
 

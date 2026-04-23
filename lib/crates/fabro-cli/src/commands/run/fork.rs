@@ -1,8 +1,6 @@
 use anyhow::{Context, Result};
 use fabro_checkpoint::git::Store;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 use fabro_util::terminal::Styles;
 use fabro_workflow::operations::{ForkRunInput, RewindTarget, build_timeline_or_rebuild, fork};
 use git2::Repository;
@@ -13,15 +11,10 @@ use crate::commands::store::rebuild::rebuild_run_store;
 use crate::shared::print_json_pretty;
 use crate::shared::repo::ensure_matching_repo_origin;
 
-pub(crate) async fn run(
-    args: &ForkArgs,
-    styles: &Styles,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
+pub(crate) async fn run(args: &ForkArgs, styles: &Styles, base_ctx: &CommandContext) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
+    let printer = base_ctx.printer();
+    let ctx = base_ctx.with_target(&args.server)?;
     let client = ctx.server().await?;
     let run_id = client.resolve_run(&args.run_id).await?.run_id;
     let state = client.get_run_state(&run_id).await?;
@@ -34,7 +27,7 @@ pub(crate) async fn run(
     let timeline = build_timeline_or_rebuild(&store, Some(&run_store), &run_id).await?;
 
     if args.list {
-        if cli.output.format == OutputFormat::Json {
+        if ctx.user_settings().cli.output.format == OutputFormat::Json {
             print_json_pretty(&super::rewind::timeline_entries_json(&timeline))?;
             return Ok(());
         }
@@ -56,7 +49,7 @@ pub(crate) async fn run(
     let run_id_string = run_id.to_string();
     let new_run_id_string = new_run_id.to_string();
 
-    if cli.output.format == OutputFormat::Json {
+    if ctx.user_settings().cli.output.format == OutputFormat::Json {
         let target = args.target.clone().unwrap_or_else(|| "latest".to_string());
         print_json_pretty(&serde_json::json!({
             "source_run_id": run_id_string,

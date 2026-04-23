@@ -10,9 +10,7 @@
 use std::io::{self, IsTerminal, Write};
 
 use anyhow::{Context, Result, bail};
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 use tracing::{debug, info};
 
 use crate::args::DiffArgs;
@@ -20,21 +18,16 @@ use crate::command_context::CommandContext;
 use crate::server_client::RunProjection;
 use crate::shared::print_json_pretty;
 
-pub(crate) async fn run(
-    args: DiffArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
+pub(crate) async fn run(args: DiffArgs, base_ctx: &CommandContext) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
-    let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
+    let ctx = base_ctx.with_target(&args.server)?;
     let client = ctx.server().await?;
     let run_id = client.resolve_run(&args.run).await?.run_id;
     let state = client.get_run_state(&run_id).await?;
 
     let patch = resolve_diff(&state, &args)?;
 
-    if cli.output.format == OutputFormat::Json {
+    if ctx.user_settings().cli.output.format == OutputFormat::Json {
         let value = serde_json::json!({
             "run_id": run_id,
             "node": args.node,

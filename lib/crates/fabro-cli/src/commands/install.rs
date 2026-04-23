@@ -52,6 +52,7 @@ use crate::args::{
     DoctorArgs, InstallArgs, InstallCommand, InstallGitHubStrategyArg, InstallGithubArgs,
     InstallNonInteractiveArgs, ServerTargetArgs,
 };
+use crate::command_context::CommandContext;
 use crate::commands::server::{start, stop};
 use crate::gh::GhCli;
 use crate::shared::provider_auth::{
@@ -1941,7 +1942,8 @@ async fn run_install_inner(
                 target:  ServerTargetArgs::default(),
                 verbose: false,
             };
-            doctor::run_doctor(&doctor_args, false, cli, cli_layer, printer).await
+            let base_ctx = CommandContext::base(printer, cli_layer, false)?;
+            doctor::run_doctor(&doctor_args, &base_ctx).await
         },
     )
     .await?

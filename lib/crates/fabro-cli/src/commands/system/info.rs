@@ -1,23 +1,16 @@
 use anyhow::Result;
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 
 use crate::args::SystemInfoArgs;
 use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 
-pub(super) async fn info_command(
-    args: &SystemInfoArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
-) -> Result<()> {
-    let ctx = CommandContext::for_connection(&args.connection, printer, cli_layer)?;
+pub(super) async fn info_command(args: &SystemInfoArgs, base_ctx: &CommandContext) -> Result<()> {
+    let ctx = base_ctx.with_connection(&args.connection)?;
     let server = ctx.server().await?;
     let response = server.get_system_info().await?;
 
-    if cli.output.format == OutputFormat::Json {
+    if ctx.user_settings().cli.output.format == OutputFormat::Json {
         print_json_pretty(&response)?;
         return Ok(());
     }

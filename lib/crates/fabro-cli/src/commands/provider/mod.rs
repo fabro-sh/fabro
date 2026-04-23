@@ -1,20 +1,12 @@
 mod login;
 
 use anyhow::Result;
-use fabro_types::settings::cli::CliLayer;
-use fabro_util::printer::Printer;
 
 use crate::args::{ProviderCommand, ProviderNamespace};
+use crate::command_context::CommandContext;
 
-pub(crate) async fn dispatch(
-    ns: ProviderNamespace,
-    cli_layer: &CliLayer,
-    process_local_json: bool,
-    printer: Printer,
-) -> Result<()> {
+pub(crate) async fn dispatch(ns: ProviderNamespace, base_ctx: &CommandContext) -> Result<()> {
     match ns.command {
-        ProviderCommand::Login(args) => {
-            login::login_command(args, cli_layer, process_local_json, printer).await
-        }
+        ProviderCommand::Login(args) => login::login_command(args, base_ctx).await,
     }
 }

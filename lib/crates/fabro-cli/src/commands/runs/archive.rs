@@ -1,7 +1,5 @@
 use anyhow::{Result, bail};
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::OutputFormat;
 
 use super::short_run_id;
 use crate::args::{RunsArchiveArgs, RunsUnarchiveArgs};
@@ -11,34 +9,30 @@ use crate::shared::print_json_pretty;
 
 pub(crate) async fn archive_command(
     args: &RunsArchiveArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
+    base_ctx: &CommandContext,
 ) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
+    let ctx = base_ctx.with_target(&args.server)?;
     run_bulk(
         Action::Archive,
         &args.runs,
         ctx.server().await?.as_ref(),
-        cli,
-        printer,
+        ctx.user_settings().cli.output.format == OutputFormat::Json,
+        ctx.printer(),
     )
     .await
 }
 
 pub(crate) async fn unarchive_command(
     args: &RunsUnarchiveArgs,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
+    base_ctx: &CommandContext,
 ) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
+    let ctx = base_ctx.with_target(&args.server)?;
     run_bulk(
         Action::Unarchive,
         &args.runs,
         ctx.server().await?.as_ref(),
-        cli,
-        printer,
+        ctx.user_settings().cli.output.format == OutputFormat::Json,
+        ctx.printer(),
     )
     .await
 }
@@ -66,10 +60,9 @@ async fn run_bulk(
     action: Action,
     identifiers: &[String],
     client: &server_client::Client,
-    cli: &CliNamespace,
-    printer: Printer,
+    json: bool,
+    printer: fabro_util::printer::Printer,
 ) -> Result<()> {
-    let json = cli.output.format == OutputFormat::Json;
     let mut had_errors = false;
     let mut changed = Vec::new();
     let mut errors = Vec::new();

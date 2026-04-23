@@ -1,6 +1,4 @@
-use fabro_types::settings::CliNamespace;
-use fabro_types::settings::cli::{CliLayer, OutputFormat, OutputVerbosity};
-use fabro_util::printer::Printer;
+use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
 use fabro_util::terminal::Styles;
 
 use crate::args::ResumeArgs;
@@ -15,17 +13,16 @@ use crate::shared::print_json_pretty;
 pub(crate) async fn resume_command(
     args: ResumeArgs,
     styles: &'static Styles,
-    cli: &CliNamespace,
-    cli_layer: &CliLayer,
-    printer: Printer,
+    base_ctx: &CommandContext,
 ) -> anyhow::Result<()> {
-    let ctx = CommandContext::for_target(&args.server, printer, cli_layer)?;
+    let printer = base_ctx.printer();
+    let ctx = base_ctx.with_target(&args.server)?;
     let client = ctx.server().await?;
     let run_id = client.resolve_run(&args.run).await?.run_id;
 
     super::start::start_run_with_client(client.as_ref(), &run_id, true).await?;
 
-    let json = cli.output.format == OutputFormat::Json;
+    let json = ctx.user_settings().cli.output.format == OutputFormat::Json;
     if args.detach {
         if json {
             print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
