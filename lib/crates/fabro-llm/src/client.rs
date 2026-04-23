@@ -45,13 +45,10 @@ impl Client {
     /// Returns `Error` if the source cannot resolve credentials or any provider
     /// adapter fails to initialize.
     pub async fn from_source(source: &dyn CredentialSource) -> Result<Arc<Self>, Error> {
-        let resolved = source
-            .resolve()
-            .await
-            .map_err(|err| Error::Configuration {
-                message: format!("Failed to resolve LLM credentials: {err}"),
-                source:  None,
-            })?;
+        let resolved = source.resolve().await.map_err(|err| Error::Configuration {
+            message: format!("Failed to resolve LLM credentials: {err}"),
+            source:  None,
+        })?;
         let client = Self::from_credentials(resolved.credentials).await?;
         Ok(Arc::new(client))
     }

@@ -668,8 +668,15 @@ impl HookExecutor for HookExecutorImpl {
                     ref model,
                 }),
             ) => {
-                Self::execute_prompt(definition, prompt, model.as_deref(), context, &env, llm_source)
-                    .await
+                Self::execute_prompt(
+                    definition,
+                    prompt,
+                    model.as_deref(),
+                    context,
+                    &env,
+                    llm_source,
+                )
+                .await
             }
             Some(
                 Cow::Borrowed(HookType::Agent {

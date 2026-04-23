@@ -382,15 +382,15 @@ mod tests {
 
         let retro = run_retro(
             &RetroOptions {
-                run_id:          test_run_id(),
+                run_id: test_run_id(),
                 services,
-                workflow_name:   "test".to_string(),
-                goal:            "Ship it".to_string(),
-                run_dir:         run_dir.clone(),
-                failed:          false,
+                workflow_name: "test".to_string(),
+                goal: "Ship it".to_string(),
+                run_dir: run_dir.clone(),
+                failed: false,
                 run_duration_ms: 1,
-                enabled:         true,
-                model:           "test-model".to_string(),
+                enabled: true,
+                model: "test-model".to_string(),
             },
             true,
         )

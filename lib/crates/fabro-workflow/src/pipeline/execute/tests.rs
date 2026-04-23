@@ -796,7 +796,15 @@ async fn execute_cancelled_mid_run_persists_cancelled_status() {
     let executed = execute_test_run_with_options(run_options, g, Some(Arc::new(registry))).await;
 
     assert!(matches!(executed.outcome, Err(Error::Cancelled)));
-    let status = executed.engine.run.run_store.state().await.unwrap().status.unwrap();
+    let status = executed
+        .engine
+        .run
+        .run_store
+        .state()
+        .await
+        .unwrap()
+        .status
+        .unwrap();
     assert_eq!(status, RunStatus::Failed {
         reason: FailureReason::Cancelled,
     });

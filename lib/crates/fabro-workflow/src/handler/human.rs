@@ -282,7 +282,8 @@ impl Handler for HumanHandler {
             },
             &stage_scope,
         );
-        self.tracker.interview_started(services.run.emitter.as_ref());
+        self.tracker
+            .interview_started(services.run.emitter.as_ref());
         let interview_start = Instant::now();
         let answer = self.interviewer.ask(question).await;
 
@@ -298,7 +299,8 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
-            self.tracker.interview_resolved(services.run.emitter.as_ref());
+            self.tracker
+                .interview_resolved(services.run.emitter.as_ref());
             let default_choice = node
                 .attrs
                 .get("human.default_choice")
@@ -338,7 +340,8 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
-            self.tracker.interview_resolved(services.run.emitter.as_ref());
+            self.tracker
+                .interview_resolved(services.run.emitter.as_ref());
             return Ok(unanswered_human_gate(
                 "human interaction interrupted before an answer was provided",
             ));
@@ -354,7 +357,8 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
-            self.tracker.interview_resolved(services.run.emitter.as_ref());
+            self.tracker
+                .interview_resolved(services.run.emitter.as_ref());
             return Ok(unanswered_human_gate("human skipped interaction"));
         }
 
@@ -369,7 +373,8 @@ impl Handler for HumanHandler {
             },
             &stage_scope,
         );
-        self.tracker.interview_resolved(services.run.emitter.as_ref());
+        self.tracker
+            .interview_resolved(services.run.emitter.as_ref());
 
         // 6. Try fixed-choice match
         if let Some(selected) = find_choice_match(&answer, &choices) {

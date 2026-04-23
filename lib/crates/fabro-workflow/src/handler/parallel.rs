@@ -255,8 +255,10 @@ impl Handler for ParallelHandler {
                     worktree_path:        wt_path_str.clone(),
                     skip_branch_creation: false,
                 };
-                let mut wt_sandbox = WorktreeSandbox::new(Arc::clone(&services.run.sandbox), wt_config);
-                wt_sandbox.set_event_callback(Arc::clone(&services.run.emitter).worktree_callback());
+                let mut wt_sandbox =
+                    WorktreeSandbox::new(Arc::clone(&services.run.sandbox), wt_config);
+                wt_sandbox
+                    .set_event_callback(Arc::clone(&services.run.emitter).worktree_callback());
                 wt_sandbox
                     .initialize()
                     .await

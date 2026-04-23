@@ -298,28 +298,28 @@ pub struct GenerateParams {
 impl GenerateParams {
     pub fn new(model: impl Into<String>, client: Arc<Client>) -> Self {
         Self {
-            model:            model.into(),
-            prompt:           None,
-            messages:         None,
-            system:           None,
-            tools:            None,
-            tool_choice:      None,
-            max_tool_rounds:  1,
-            response_format:  None,
-            temperature:      None,
-            top_p:            None,
-            max_tokens:       None,
-            stop_sequences:   None,
+            model: model.into(),
+            prompt: None,
+            messages: None,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            max_tool_rounds: 1,
+            response_format: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stop_sequences: None,
             reasoning_effort: None,
-            speed:            None,
-            provider:         None,
+            speed: None,
+            provider: None,
             provider_options: None,
-            metadata:         None,
-            max_retries:      2,
-            timeout:          None,
+            metadata: None,
+            max_retries: 2,
+            timeout: None,
             client,
-            abort_signal:     None,
-            stop_when:        None,
+            abort_signal: None,
+            stop_when: None,
             repair_tool_call: None,
         }
     }
@@ -1171,11 +1171,10 @@ mod tests {
 
     #[tokio::test]
     async fn generate_simple_text() {
-        let result = generate(
-            GenerateParams::new("mock-model", mock_client("Hi there!")).prompt("Hello"),
-        )
-        .await
-        .unwrap();
+        let result =
+            generate(GenerateParams::new("mock-model", mock_client("Hi there!")).prompt("Hello"))
+                .await
+                .unwrap();
 
         assert_eq!(result.text(), "Hi there!");
         assert_eq!(result.finish_reason, FinishReason::Stop);
@@ -1199,12 +1198,11 @@ mod tests {
     #[tokio::test]
     async fn generate_with_messages() {
         let result = generate(
-            GenerateParams::new("mock-model", mock_client("I'm doing well!"))
-                .messages(vec![
-                    Message::user("Hello"),
-                    Message::assistant("Hi"),
-                    Message::user("How are you?"),
-                ]),
+            GenerateParams::new("mock-model", mock_client("I'm doing well!")).messages(vec![
+                Message::user("Hello"),
+                Message::assistant("Hi"),
+                Message::user("How are you?"),
+            ]),
         )
         .await
         .unwrap();
@@ -1380,10 +1378,9 @@ mod tests {
     #[tokio::test]
     async fn stream_generate_returns_events() {
         let client = mock_client("Hello stream!");
-        let mut stream =
-            stream_generate(GenerateParams::new("mock-model", client).prompt("Hi"))
-                .await
-                .unwrap();
+        let mut stream = stream_generate(GenerateParams::new("mock-model", client).prompt("Hi"))
+            .await
+            .unwrap();
 
         let first = stream.next().await.unwrap().unwrap();
         match &first {
@@ -1512,11 +1509,11 @@ mod tests {
 
     #[test]
     fn generate_params_timeout_builder() {
-        let params = GenerateParams::new("test-model", mock_client("timeout")).timeout(
-            TimeoutOptions {
-            total:    Some(30.0),
-            per_step: Some(10.0),
-        });
+        let params =
+            GenerateParams::new("test-model", mock_client("timeout")).timeout(TimeoutOptions {
+                total:    Some(30.0),
+                per_step: Some(10.0),
+            });
         assert!(params.timeout.is_some());
         let t = params.timeout.unwrap();
         assert_eq!(t.total, Some(30.0));
@@ -1815,10 +1812,13 @@ mod tests {
         let client = mock_client("Hello stream!");
         token_clone.cancel();
 
-        let mut stream_result =
-            stream(GenerateParams::new("mock-model", client).prompt("Hi").abort_signal(token))
-                .await
-                .unwrap();
+        let mut stream_result = stream(
+            GenerateParams::new("mock-model", client)
+                .prompt("Hi")
+                .abort_signal(token),
+        )
+        .await
+        .unwrap();
 
         let first = stream_result.next().await.unwrap();
         assert!(first.is_err());

@@ -252,34 +252,34 @@ impl Handler for SubWorkflowHandler {
         // Spawn child engine
         let mut child_handle = tokio::spawn(async move {
             let initialized = Initialized {
-            graph: child_graph,
-            source: String::new(),
-            run_options: child_run_options,
-            checkpoint: None,
-            seed_context: Some(child_context),
-            on_node: None,
-            artifact_sink: Some(ArtifactSink::Store(artifact_store)),
-            run_control: None,
-            engine: Arc::new(EngineServices {
-                run: RunServices::new(
-                    run_store.into(),
-                    emitter,
-                    sandbox,
-                    hook_runner,
-                    None,
-                    fabro_llm::Provider::Anthropic,
-                    Arc::new(fabro_auth::EnvCredentialSource::new()),
-                ),
-                registry,
-                git_state: std::sync::RwLock::new(None),
-                env,
-                inputs,
-                dry_run,
-                workflow_path: child_workflow_path,
-                workflow_bundle,
-            }),
-            model: String::new(),
-        };
+                graph:         child_graph,
+                source:        String::new(),
+                run_options:   child_run_options,
+                checkpoint:    None,
+                seed_context:  Some(child_context),
+                on_node:       None,
+                artifact_sink: Some(ArtifactSink::Store(artifact_store)),
+                run_control:   None,
+                engine:        Arc::new(EngineServices {
+                    run: RunServices::new(
+                        run_store.into(),
+                        emitter,
+                        sandbox,
+                        hook_runner,
+                        None,
+                        fabro_llm::Provider::Anthropic,
+                        Arc::new(fabro_auth::EnvCredentialSource::new()),
+                    ),
+                    registry,
+                    git_state: std::sync::RwLock::new(None),
+                    env,
+                    inputs,
+                    dry_run,
+                    workflow_path: child_workflow_path,
+                    workflow_bundle,
+                }),
+                model:         String::new(),
+            };
             let executed = pipeline::execute(initialized).await;
             Ok::<_, Error>((executed.outcome?, executed.final_context))
         });

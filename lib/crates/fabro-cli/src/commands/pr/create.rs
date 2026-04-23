@@ -1,9 +1,9 @@
 use anyhow::{Context, Result, bail};
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
+use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::pull_request::maybe_open_pull_request;
 use fabro_workflow::services::RunServices;
-use fabro_workflow::outcome::StageStatus;
 use tracing::info;
 
 use crate::args::PrCreateArgs;

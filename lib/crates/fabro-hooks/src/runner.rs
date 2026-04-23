@@ -146,7 +146,13 @@ impl HookRunner {
             );
             let result = self
                 .executor
-                .execute(hook, context, sandbox.clone(), work_dir, self.llm_source.as_ref())
+                .execute(
+                    hook,
+                    context,
+                    sandbox.clone(),
+                    work_dir,
+                    self.llm_source.as_ref(),
+                )
                 .await;
             tracing::debug!(
                 hook = %hook.effective_name(),
@@ -194,7 +200,13 @@ impl HookRunner {
             );
             let result = self
                 .executor
-                .execute(hook, context, sandbox.clone(), work_dir, self.llm_source.as_ref())
+                .execute(
+                    hook,
+                    context,
+                    sandbox.clone(),
+                    work_dir,
+                    self.llm_source.as_ref(),
+                )
                 .await;
             tracing::debug!(
                 hook = %hook.effective_name(),

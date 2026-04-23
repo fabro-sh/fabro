@@ -3,14 +3,12 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
 use fabro_auth::{CredentialSource, EnvCredentialSource, VaultCredentialSource};
-use fabro_config::Storage;
-use fabro_config::UserSettings;
-use fabro_vault::Vault;
+use fabro_config::{Storage, UserSettings};
 use fabro_types::settings::cli::{CliLayer, OutputFormat, OutputVerbosity};
 use fabro_types::settings::{Combine, SettingsLayer};
 use fabro_util::printer::Printer;
-use tokio::sync::OnceCell;
-use tokio::sync::RwLock as AsyncRwLock;
+use fabro_vault::Vault;
+use tokio::sync::{OnceCell, RwLock as AsyncRwLock};
 
 use crate::args::{
     ServerConnectionArgs, ServerTargetArgs, printer_from_verbosity, require_no_json_override,
@@ -150,7 +148,9 @@ impl CommandContext {
                         Ok(storage_dir) => {
                             let vault = Vault::load(Storage::new(&storage_dir).secrets_path())
                                 .context("Failed to load vault for LLM credentials")?;
-                            Arc::new(VaultCredentialSource::new(Arc::new(AsyncRwLock::new(vault))))
+                            Arc::new(VaultCredentialSource::new(Arc::new(AsyncRwLock::new(
+                                vault,
+                            ))))
                         }
                         Err(_) => Arc::new(EnvCredentialSource::new()),
                     };

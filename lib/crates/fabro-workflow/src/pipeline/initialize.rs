@@ -334,8 +334,8 @@ async fn build_registry(
                     fallback_chain.clone(),
                     Arc::clone(&llm_source_for_api),
                 )
-                    .with_env(env.clone())
-                    .with_mcp_servers(mcp_servers.clone());
+                .with_env(env.clone())
+                .with_mcp_servers(mcp_servers.clone());
                 let cli = cli_resolver
                     .clone()
                     .map_or_else(
@@ -585,21 +585,20 @@ pub async fn initialize(
         &options.emitter,
     )
     .await?;
-    let (registry, effective_dry_run) =
-        if let Some(registry) = options.registry_override.clone() {
-            // A caller-supplied registry owns execution behavior for its handlers.
-            (registry, options.dry_run)
-        } else {
-            build_registry(
-                &options.llm,
-                Arc::clone(&options.interviewer),
-                &env,
-                &graph,
-                Arc::clone(&llm_source),
-                cli_resolver,
-            )
-            .await?
-        };
+    let (registry, effective_dry_run) = if let Some(registry) = options.registry_override.clone() {
+        // A caller-supplied registry owns execution behavior for its handlers.
+        (registry, options.dry_run)
+    } else {
+        build_registry(
+            &options.llm,
+            Arc::clone(&options.interviewer),
+            &env,
+            &graph,
+            Arc::clone(&llm_source),
+            cli_resolver,
+        )
+        .await?
+    };
     if effective_dry_run {
         use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
 
@@ -728,19 +727,19 @@ pub async fn initialize(
         Arc::clone(&llm_source),
     );
     let engine = Arc::new(EngineServices {
-        run:             Arc::clone(&run_services),
+        run: Arc::clone(&run_services),
         registry,
-        git_state:       std::sync::RwLock::new(None),
+        git_state: std::sync::RwLock::new(None),
         env,
-        inputs:          options
+        inputs: options
             .run_options
             .settings
             .run
             .as_ref()
             .and_then(|run| run.inputs.clone())
             .unwrap_or_default(),
-        dry_run:         options.dry_run,
-        workflow_path:   options.workflow_path.clone(),
+        dry_run: options.dry_run,
+        workflow_path: options.workflow_path.clone(),
         workflow_bundle: options.workflow_bundle.clone(),
     });
 
@@ -958,7 +957,10 @@ mod tests {
         );
         assert!(initialized.engine.dry_run);
         assert_eq!(initialized.model, "test-model");
-        assert_eq!(initialized.engine.run.provider, fabro_llm::Provider::Anthropic);
+        assert_eq!(
+            initialized.engine.run.provider,
+            fabro_llm::Provider::Anthropic
+        );
         assert!(
             initialized
                 .engine
@@ -988,7 +990,7 @@ mod tests {
                 .unwrap(),
                 SecretType::Credential,
                 None,
-        )
+            )
             .unwrap();
         let (graph, _) = llm_graph();
         let vault = Arc::new(AsyncRwLock::new(vault));

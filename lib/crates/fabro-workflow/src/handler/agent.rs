@@ -578,9 +578,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let mut services = EngineServices::test_default();
-        services.run = services.run.with_sandbox(std::sync::Arc::new(
-            fabro_agent::LocalSandbox::new(sandbox_dir.path().to_path_buf()),
-        ));
+        services.run =
+            services
+                .run
+                .with_sandbox(std::sync::Arc::new(fabro_agent::LocalSandbox::new(
+                    sandbox_dir.path().to_path_buf(),
+                )));
 
         let outcome = handler
             .execute(&node, &context, &graph, tmp.path(), &services)
@@ -636,9 +639,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let mut services = EngineServices::test_default();
-        services.run = services.run.with_sandbox(std::sync::Arc::new(
-            fabro_agent::LocalSandbox::new(sandbox_dir.path().to_path_buf()),
-        ));
+        services.run =
+            services
+                .run
+                .with_sandbox(std::sync::Arc::new(fabro_agent::LocalSandbox::new(
+                    sandbox_dir.path().to_path_buf(),
+                )));
 
         let outcome = handler
             .execute(&node, &context, &graph, tmp.path(), &services)
@@ -694,9 +700,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let mut services = EngineServices::test_default();
-        services.run = services.run.with_sandbox(std::sync::Arc::new(
-            fabro_agent::LocalSandbox::new(sandbox_dir.path().to_path_buf()),
-        ));
+        services.run =
+            services
+                .run
+                .with_sandbox(std::sync::Arc::new(fabro_agent::LocalSandbox::new(
+                    sandbox_dir.path().to_path_buf(),
+                )));
 
         let outcome = handler
             .execute(&node, &context, &graph, tmp.path(), &services)

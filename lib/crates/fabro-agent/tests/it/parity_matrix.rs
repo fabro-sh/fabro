@@ -9,11 +9,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fabro_agent::subagent::SessionFactory;
-use fabro_auth::EnvCredentialSource;
 use fabro_agent::{
     AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile, Session,
     SessionOptions, SubAgentManager, WebFetchSummarizer,
 };
+use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
 use fabro_llm::provider::{Provider, ProviderAdapter};
 use fabro_llm::providers::OpenAiAdapter;

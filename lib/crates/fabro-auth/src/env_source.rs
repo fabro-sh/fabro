@@ -117,7 +117,8 @@ impl EnvCredentialSource {
 
 impl std::fmt::Debug for EnvCredentialSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EnvCredentialSource").finish_non_exhaustive()
+        f.debug_struct("EnvCredentialSource")
+            .finish_non_exhaustive()
     }
 }
 
@@ -178,7 +179,9 @@ mod tests {
     async fn configured_providers_reads_injected_env() {
         let source = test_source(&[("ANTHROPIC_API_KEY", "anthropic-key")]);
 
-        assert_eq!(source.configured_providers().await, vec![Provider::Anthropic]);
+        assert_eq!(source.configured_providers().await, vec![
+            Provider::Anthropic
+        ]);
     }
 
     #[tokio::test]

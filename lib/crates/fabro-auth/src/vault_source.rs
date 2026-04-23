@@ -6,9 +6,7 @@ use fabro_vault::Vault;
 use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
-use crate::{
-    CredentialResolver, CredentialUsage, EnvLookup, ResolveError, ResolvedCredential,
-};
+use crate::{CredentialResolver, CredentialUsage, EnvLookup, ResolveError, ResolvedCredential};
 
 #[derive(Clone)]
 pub struct VaultCredentialSource {
@@ -36,7 +34,8 @@ impl VaultCredentialSource {
 
 impl std::fmt::Debug for VaultCredentialSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VaultCredentialSource").finish_non_exhaustive()
+        f.debug_struct("VaultCredentialSource")
+            .finish_non_exhaustive()
     }
 }
 
@@ -95,19 +94,19 @@ mod tests {
     fn expired_openai_credential() -> AuthCredential {
         AuthCredential {
             provider: Provider::OpenAi,
-            details: AuthDetails::CodexOAuth {
-                tokens: OAuthTokens {
-                    access_token: "expired-access".to_string(),
+            details:  AuthDetails::CodexOAuth {
+                tokens:     OAuthTokens {
+                    access_token:  "expired-access".to_string(),
                     refresh_token: Some("refresh-token".to_string()),
-                    expires_at: Utc::now() - Duration::hours(1),
+                    expires_at:    Utc::now() - Duration::hours(1),
                 },
-                config: OAuthConfig {
-                    auth_url: "https://auth.openai.com".to_string(),
-                    token_url: "http://127.0.0.1:9/oauth/token".to_string(),
-                    client_id: "client".to_string(),
-                    scopes: vec!["openid".to_string()],
+                config:     OAuthConfig {
+                    auth_url:     "https://auth.openai.com".to_string(),
+                    token_url:    "http://127.0.0.1:9/oauth/token".to_string(),
+                    client_id:    "client".to_string(),
+                    scopes:       vec!["openid".to_string()],
                     redirect_uri: Some("https://example.com/callback".to_string()),
-                    use_pkce: true,
+                    use_pkce:     true,
                 },
                 account_id: Some("acct_123".to_string()),
             },
@@ -178,9 +177,9 @@ mod tests {
         let source =
             VaultCredentialSource::with_env_lookup(Arc::new(AsyncRwLock::new(vault)), |_| None);
 
-        assert_eq!(
-            source.configured_providers().await,
-            vec![Provider::Anthropic, Provider::OpenAi]
-        );
+        assert_eq!(source.configured_providers().await, vec![
+            Provider::Anthropic,
+            Provider::OpenAi
+        ]);
     }
 }
