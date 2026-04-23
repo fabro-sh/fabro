@@ -1551,11 +1551,9 @@ async fn run_install_github_inner(
                     s.green.apply_to("✔"),
                     bind
                 );
-                let methods = fabro_config::parse_settings_layer(&settings_toml)
+                let methods = fabro_config::ServerSettingsBuilder::from_toml(&settings_toml)
                     .ok()
-                    .and_then(|layer| layer.server)
-                    .and_then(|srv| srv.auth)
-                    .and_then(|auth| auth.methods)
+                    .map(|settings| settings.server.auth.methods)
                     .unwrap_or_default();
                 let token = methods
                     .contains(&ServerAuthMethod::DevToken)
