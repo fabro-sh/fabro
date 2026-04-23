@@ -587,7 +587,7 @@ pub struct AppState {
 }
 
 pub(crate) struct AppStateConfig {
-    pub(crate) settings:                  Arc<RwLock<SettingsLayer>>,
+    pub(crate) resolved_settings:         ResolvedAppStateSettings,
     pub(crate) registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     pub(crate) max_concurrent_runs:       usize,
     pub(crate) store:                     Arc<Database>,
@@ -596,6 +596,13 @@ pub(crate) struct AppStateConfig {
     pub(crate) server_secrets:            ServerSecrets,
     pub(crate) env_lookup:                EnvLookup,
     pub(crate) http_client:               Option<fabro_http::HttpClient>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ResolvedAppStateSettings {
+    pub(crate) server_settings:       ServerSettings,
+    pub(crate) manifest_defaults:     SettingsLayer,
+    pub(crate) manifest_run_settings: std::result::Result<RunNamespace, String>,
 }
 
 fn nonzero_i64(value: i64) -> Option<i64> {
@@ -799,11 +806,19 @@ impl AppState {
         self.shutting_down.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn replace_settings(&self, settings: SettingsLayer) -> anyhow::Result<()> {
-        let resolved = Arc::new(ServerSettingsBuilder::from_layer(&settings)?);
-        let manifest_defaults = Arc::new(run_manifest::manifest_defaults_layer(&settings));
-        let manifest_run_settings = resolve_manifest_run_settings(manifest_defaults.as_ref());
-        resolve_canonical_origin(&resolved.server, &self.env_lookup).map_err(anyhow::Error::msg)?;
+    pub(crate) fn replace_runtime_settings(
+        &self,
+        resolved_settings: ResolvedAppStateSettings,
+    ) -> anyhow::Result<()> {
+        let ResolvedAppStateSettings {
+            server_settings,
+            manifest_defaults,
+            manifest_run_settings,
+        } = resolved_settings;
+        let server_settings = Arc::new(server_settings);
+        let manifest_defaults = Arc::new(manifest_defaults);
+        resolve_canonical_origin(&server_settings.server, &self.env_lookup)
+            .map_err(anyhow::Error::msg)?;
 
         *self
             .manifest_defaults
@@ -816,7 +831,7 @@ impl AppState {
         *self
             .server_settings
             .write()
-            .expect("server settings lock poisoned") = resolved;
+            .expect("server settings lock poisoned") = server_settings;
         Ok(())
     }
 }
@@ -1691,6 +1706,17 @@ fn resolve_manifest_run_settings(
     RunSettingsBuilder::from_layer(manifest_defaults).map_err(|err| err.to_string())
 }
 
+pub(crate) fn resolve_app_state_settings(
+    layer: &SettingsLayer,
+) -> anyhow::Result<ResolvedAppStateSettings> {
+    let manifest_defaults = run_manifest::manifest_defaults_layer(layer);
+    Ok(ResolvedAppStateSettings {
+        server_settings: ServerSettingsBuilder::from_layer(layer)?,
+        manifest_run_settings: resolve_manifest_run_settings(&manifest_defaults),
+        manifest_defaults,
+    })
+}
+
 fn system_sandbox_provider(
     manifest_run_settings: &std::result::Result<RunNamespace, String>,
 ) -> String {
@@ -2500,7 +2526,10 @@ pub(crate) fn create_test_app_state_with_session_key(
     let settings = Arc::new(RwLock::new(settings));
     ensure_test_auth_methods(&settings);
     build_app_state(AppStateConfig {
-        settings,
+        resolved_settings: {
+            let settings = settings.read().expect("settings lock poisoned");
+            resolve_app_state_settings(&settings).expect("test settings should resolve")
+        },
         registry_factory_override: None,
         max_concurrent_runs: 5,
         store,
@@ -2535,7 +2564,10 @@ fn default_test_app_state_config(
     let vault_path = test_secret_store_path();
     let server_env_path = vault_path.with_file_name("server.env");
     AppStateConfig {
-        settings,
+        resolved_settings: {
+            let settings = settings.read().expect("settings lock poisoned");
+            resolve_app_state_settings(&settings).expect("test settings should resolve")
+        },
         registry_factory_override: None,
         max_concurrent_runs,
         store,
@@ -2604,7 +2636,7 @@ fn load_test_server_secrets(path: PathBuf, env: HashMap<String, String>) -> Serv
 
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
-        settings,
+        resolved_settings,
         registry_factory_override,
         max_concurrent_runs,
         store,
@@ -2621,15 +2653,9 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         move |name| env_lookup(name)
     });
     let (global_event_tx, _) = broadcast::channel(4096);
-    let (current_server_settings, current_manifest_defaults, current_manifest_run_settings) = {
-        let settings = settings.read().expect("settings lock poisoned");
-        let manifest_defaults = Arc::new(run_manifest::manifest_defaults_layer(&settings));
-        (
-            Arc::new(ServerSettingsBuilder::from_layer(&settings)?),
-            Arc::clone(&manifest_defaults),
-            resolve_manifest_run_settings(manifest_defaults.as_ref()),
-        )
-    };
+    let current_server_settings = Arc::new(resolved_settings.server_settings);
+    let current_manifest_defaults = Arc::new(resolved_settings.manifest_defaults);
+    let current_manifest_run_settings = resolved_settings.manifest_run_settings;
     let slack_service = {
         current_server_settings
             .server
@@ -7477,9 +7503,10 @@ url = "{url}"
                 },
             );
 
-            let err = state
-                .replace_settings(canonical_origin_settings("{{ env.FABRO_WEB_URL }}"))
-                .expect_err("invalid canonical origin should be rejected");
+            let err =
+                resolve_app_state_settings(&canonical_origin_settings("{{ env.FABRO_WEB_URL }}"))
+                    .and_then(|resolved| state.replace_runtime_settings(resolved))
+                    .expect_err("invalid canonical origin should be rejected");
             assert!(
                 err.to_string()
                     .contains("server.web.url is required and must be an absolute http(s) URL"),
@@ -7533,7 +7560,9 @@ root = "/srv/new"
         .expect("settings fixture should parse");
 
         state
-            .replace_settings(updated)
+            .replace_runtime_settings(
+                resolve_app_state_settings(&updated).expect("updated settings should resolve"),
+            )
             .expect("valid settings should replace current state");
 
         assert_eq!(state.canonical_origin().unwrap(), "http://new.example.com");
@@ -7597,7 +7626,9 @@ provider = "invalid-provider"
         .expect("settings fixture should parse");
 
         state
-            .replace_settings(updated)
+            .replace_runtime_settings(
+                resolve_app_state_settings(&updated).expect("updated settings should resolve"),
+            )
             .expect("invalid run defaults should not block replace");
 
         assert_eq!(state.canonical_origin().unwrap(), "http://new.example.com");

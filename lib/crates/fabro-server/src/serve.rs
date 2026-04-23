@@ -34,7 +34,8 @@ use crate::github_webhooks::{TailscaleFunnelManager, WEBHOOK_ROUTE, WEBHOOK_SECR
 use crate::ip_allowlist::{GitHubMetaResolver, IpAllowlistConfig, resolve_ip_allowlist_config};
 use crate::server::{
     AppState, AppStateConfig, RouterOptions, build_app_state, build_router_with_options,
-    reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
+    reconcile_incomplete_runs_on_startup, resolve_app_state_settings, shutdown_active_workers,
+    spawn_scheduler,
 };
 use crate::server_secrets::{ServerSecrets, process_env_snapshot};
 use crate::startup::resolve_startup;
@@ -618,15 +619,18 @@ where
     let server_env_path = storage.runtime_directory().env_path();
     // Shared config for live reloading
     let effective_settings = apply_runtime_settings(&disk_settings, &args, &data_dir);
-    let resolved_server_settings = resolve_server_settings(&effective_settings)?;
+    let resolved_app_settings = resolve_app_state_settings(&effective_settings)?;
+    let resolved_server_settings = resolved_app_settings.server_settings.server.clone();
     let (auth_mode, server_secrets) = resolve_startup(
         &server_env_path,
         process_env_snapshot(),
         &resolved_server_settings,
     )?;
     let webhook_secret_present = server_secrets.get(WEBHOOK_SECRET_ENV).is_some();
-    let bind_request =
-        resolve_bind_request_from_settings(&effective_settings, args.bind.as_deref())?;
+    let bind_request = resolve_bind_request_from_server_settings(
+        &resolved_app_settings.server_settings,
+        args.bind.as_deref(),
+    )?;
     let shared_settings = Arc::new(RwLock::new(effective_settings));
     std::fs::create_dir_all(&data_dir)
         .with_context(|| format!("creating data directory {}", data_dir.display()))?;
@@ -657,7 +661,7 @@ where
     let env_lookup: EnvLookup = Arc::new(|name| std::env::var(name).ok());
     resolve_canonical_origin(&resolved_server_settings, &env_lookup).map_err(anyhow::Error::msg)?;
     let state = build_app_state(AppStateConfig {
-        settings: Arc::clone(&shared_settings),
+        resolved_settings: resolved_app_settings,
         registry_factory_override: None,
         max_concurrent_runs,
         store,
@@ -753,7 +757,9 @@ where
                         *cfg != effective
                     };
                     if changed {
-                        match state_for_poll.replace_settings(effective.clone()) {
+                        match resolve_app_state_settings(&effective)
+                            .and_then(|resolved| state_for_poll.replace_runtime_settings(resolved))
+                        {
                             Ok(()) => {
                                 *shared_settings_for_poll
                                     .write()
