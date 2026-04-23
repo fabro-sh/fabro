@@ -47,6 +47,7 @@ jobs:
         with:
           persist-credentials: false
       - run: bin/dev/check-boundary.sh
+      - run: bin/dev/check-env-mutation.sh
 
   fmt:
     name: Format

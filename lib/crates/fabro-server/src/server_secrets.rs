@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 use fabro_auth::{CredentialResolver, CredentialUsage, ResolveError, ResolvedCredential};
@@ -39,17 +39,15 @@ pub(crate) enum Error {
 }
 
 pub(crate) struct ServerSecrets {
-    path:         PathBuf,
     env_entries:  HashMap<String, String>,
     file_entries: HashMap<String, String>,
 }
 
 impl ServerSecrets {
-    pub(crate) fn load(path: PathBuf, env: &dyn EnvSource) -> Result<Self, Error> {
+    pub(crate) fn load(path: impl AsRef<Path>, env: &dyn EnvSource) -> Result<Self, Error> {
         Ok(Self {
-            env_entries: env.snapshot(),
-            file_entries: envfile::read_env_file(&path)?,
-            path,
+            env_entries:  env.snapshot(),
+            file_entries: envfile::read_env_file(path.as_ref())?,
         })
     }
 
@@ -64,7 +62,6 @@ impl ServerSecrets {
 impl std::fmt::Debug for ServerSecrets {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ServerSecrets")
-            .field("path", &self.path)
             .field("env_entries", &self.env_entries.keys().collect::<Vec<_>>())
             .field(
                 "file_entries",

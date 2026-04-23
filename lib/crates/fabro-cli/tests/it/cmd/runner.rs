@@ -13,16 +13,18 @@ use std::time::{Duration, Instant};
 
 use fabro_store::EventEnvelope;
 use fabro_test::{assert_reqwest_status, expect_reqwest_json, fabro_snapshot, test_context};
-use fabro_types::{EventBody, FailureReason, RunEvent};
+use fabro_types::{EventBody, FailureReason, RunEvent, StageId};
 use httpmock::MockServer;
 
 use super::support::{
-    local_dev_token, output_stderr, run_events, run_state, server_endpoint, server_target,
-    wait_for_event_names, wait_for_status, write_gated_workflow,
+    find_run_dir, local_dev_token, output_stderr, run_events, run_state, server_endpoint,
+    server_target, wait_for_event_names, wait_for_status, write_gated_workflow,
 };
 use crate::support::{fabro_json_snapshot, unique_run_id};
 
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const LEAKED_WORKER_PARENT_TOKEN: &str = "leak-worker-parent-token";
+const LEAKED_NEW_RELIC_LICENSE: &str = "leak-new-relic-license";
 
 fn auth_context() -> fabro_test::TestContext {
     let context = test_context!();
@@ -124,6 +126,20 @@ fn worker_command(context: &fabro_test::TestContext) -> assert_cmd::Command {
         cmd.env("FABRO_DEV_TOKEN", token);
     }
     cmd
+}
+
+fn assert_no_worker_env_leak(scope: &str, content: &str) {
+    for needle in [
+        "MY_API_TOKEN=",
+        "NEW_RELIC_LICENSE_KEY=",
+        LEAKED_WORKER_PARENT_TOKEN,
+        LEAKED_NEW_RELIC_LICENSE,
+    ] {
+        assert!(
+            !content.contains(needle),
+            "{scope} leaked {needle:?}:\n{content}"
+        );
+    }
 }
 
 async fn wait_for_server_question(
@@ -371,6 +387,120 @@ digraph DetachedStoreOnly {
         .clone();
 
     assert_worker_succeeded(&run_dir, &output);
+}
+
+#[test]
+fn server_dispatched_worker_does_not_inherit_parent_secret_env() {
+    let mut context = test_context!();
+    let server_root = tempfile::tempdir_in("/tmp").unwrap();
+    let storage_dir = server_root.path().join("storage");
+    let socket_path = server_root.path().join("fabro.sock");
+    let config_path = server_root.path().join("settings.toml");
+    context.manage_storage_dir(&storage_dir);
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"_version = 1
+
+[server.storage]
+root = "{}"
+
+[server.auth]
+methods = ["dev-token"]
+"#,
+            storage_dir.display()
+        ),
+    )
+    .expect("writing leak-probe server settings");
+
+    let start_output = context
+        .command()
+        .env("MY_API_TOKEN", LEAKED_WORKER_PARENT_TOKEN)
+        .env("NEW_RELIC_LICENSE_KEY", LEAKED_NEW_RELIC_LICENSE)
+        .args(["server", "start"])
+        .arg("--storage-dir")
+        .arg(&storage_dir)
+        .arg("--bind")
+        .arg(&socket_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("server start should execute");
+    assert!(
+        start_output.status.success(),
+        "server start failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&start_output.stdout),
+        String::from_utf8_lossy(&start_output.stderr)
+    );
+
+    let workflow_path = context.temp_dir.join("worker-leak-probe.fabro");
+    std::fs::write(
+        &workflow_path,
+        r#"digraph WorkerLeakProbe {
+  graph [goal="Verify worker subprocess env isolation", default_max_retries=0]
+  start [shape=Mdiamond, label="Start"]
+  exit  [shape=Msquare, label="Exit"]
+  probe [shape=parallelogram, label="Probe", script="echo probe-ran; for key in $(printf 'MY%s NEW%s' '_API_TOKEN' '_RELIC_LICENSE_KEY'); do value=$(printenv \"$key\" || true); if [ -n \"$value\" ]; then echo \"$key=$value\"; fi; done"]
+  start -> probe -> exit
+}
+"#,
+    )
+    .expect("writing leak-probe workflow");
+
+    let run_id = unique_run_id();
+    let dev_token = local_dev_token(&storage_dir).expect("managed server should have a dev token");
+    let run_output = context
+        .run_cmd()
+        .env("FABRO_DEV_TOKEN", dev_token)
+        .args([
+            "--server",
+            socket_path.to_str().expect("socket path should be UTF-8"),
+            "--run-id",
+            run_id.as_str(),
+            "--detach",
+            "--auto-approve",
+            "--no-retro",
+            "--sandbox",
+            "local",
+            workflow_path
+                .to_str()
+                .expect("workflow path should be UTF-8"),
+        ])
+        .output()
+        .expect("detached leak-probe run should execute");
+    assert!(
+        run_output.status.success(),
+        "detached run failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&run_output.stdout),
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let run_dir = find_run_dir(&storage_dir, &run_id).expect("leak-probe run dir should exist");
+    wait_for_status(&run_dir, &["succeeded"]);
+
+    let state = run_state(&run_dir);
+    let _probe = state
+        .node(&StageId::new("probe", 1))
+        .expect("probe node state should exist");
+    let stdout = state
+        .checkpoint
+        .as_ref()
+        .and_then(|checkpoint| checkpoint.context_values.get("command.output"))
+        .and_then(serde_json::Value::as_str)
+        .expect("probe command output should exist");
+    assert!(
+        stdout.contains("probe-ran"),
+        "probe stage should have executed, got stdout:\n{stdout}"
+    );
+    assert_no_worker_env_leak("probe stdout", stdout);
+    assert_no_worker_env_leak(
+        "run state",
+        &serde_json::to_string(&state).expect("run state should serialize"),
+    );
+
+    let server_log =
+        std::fs::read_to_string(storage_dir.join("logs/server.log")).unwrap_or_default();
+    assert_no_worker_env_leak("server log", &server_log);
 }
 
 #[test]

@@ -234,6 +234,9 @@ async fn execute_foreground(
     styles: &'static Styles,
     _printer: Printer,
 ) -> Result<()> {
+    // Foreground mode validates inside serve_command after lock/log setup so
+    // operator-visible startup failures use the same path as normal foreground
+    // boot.
     super::foreground::serve_with_daemon_record(serve_args, bind, storage_dir, styles).await
 }
 

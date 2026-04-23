@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 use fabro_config::{Storage, envfile};
 use fabro_test::{
-    apply_test_isolation, fabro_snapshot, isolated_storage_dir, server_log_files, test_context,
-    wait_for_log_line, wait_for_path,
+    TestContext, apply_test_isolation, fabro_snapshot, isolated_storage_dir, server_log_files,
+    test_context, wait_for_log_line, wait_for_path,
 };
 use fabro_util::dev_token;
 
@@ -41,6 +41,106 @@ fn provision_dev_token_auth(home_dir: &std::path::Path, storage_dir: &std::path:
     .expect("merging server auth into server.env");
     dev_token::write_dev_token(&home_dir.join(".fabro").join("dev-token"), TEST_DEV_TOKEN)
         .expect("writing home dev-token");
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ServerStartMode {
+    Foreground,
+    Daemon,
+}
+
+impl ServerStartMode {
+    const ALL: [Self; 2] = [Self::Foreground, Self::Daemon];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Foreground => "foreground",
+            Self::Daemon => "daemon",
+        }
+    }
+
+    fn add_args(self, cmd: &mut assert_cmd::Command) {
+        if matches!(self, Self::Foreground) {
+            cmd.arg("--foreground");
+        }
+    }
+}
+
+struct StartupFailureCase {
+    name:           &'static str,
+    settings:       &'static str,
+    server_env:     &'static [(&'static str, &'static str)],
+    expected_error: &'static str,
+}
+
+fn run_startup_failure(context: &TestContext, mode: ServerStartMode, case: &StartupFailureCase) {
+    let storage_root = isolated_storage_dir();
+    let storage_dir = storage_root
+        .path()
+        .join(format!("{}-{}", case.name, mode.name()));
+    let socket_path = storage_root
+        .path()
+        .join(format!("{}-{}.sock", case.name, mode.name()));
+    let config_dir = tempfile::tempdir_in("/tmp").expect("creating startup failure config dir");
+    let config_path = config_dir.path().join("settings.toml");
+    std::fs::write(&config_path, case.settings).expect("writing startup failure settings");
+    if !case.server_env.is_empty() {
+        envfile::merge_env_file(
+            &Storage::new(&storage_dir).runtime_directory().env_path(),
+            case.server_env.iter().copied(),
+        )
+        .expect("writing startup failure server.env");
+    }
+
+    let mut cmd = context.command();
+    cmd.args(["server", "start"]);
+    mode.add_args(&mut cmd);
+    cmd.arg("--storage-dir")
+        .arg(&storage_dir)
+        .arg("--bind")
+        .arg(&socket_path)
+        .arg("--config")
+        .arg(&config_path);
+    let output = cmd
+        .output()
+        .expect("server start failure command should run");
+
+    assert!(
+        !output.status.success(),
+        "server start should reject {} in {} mode\nstdout:\n{}\nstderr:\n{}",
+        case.name,
+        mode.name(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "server start rejection should not write stdout for {} in {} mode:\n{}",
+        case.name,
+        mode.name(),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        format!("error: {}\n", case.expected_error),
+        "unexpected stderr for {} in {} mode",
+        case.name,
+        mode.name()
+    );
+
+    let log_path = storage_dir.join("logs/server.log");
+    match mode {
+        ServerStartMode::Foreground => assert!(
+            log_path.exists(),
+            "foreground validation intentionally runs after log bootstrap for {}",
+            case.name
+        ),
+        ServerStartMode::Daemon => assert!(
+            !log_path.exists(),
+            "daemon validation should fail before creating server.log for {}",
+            case.name
+        ),
+    }
 }
 
 #[test]
@@ -99,6 +199,120 @@ fn help() {
               Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn start_rejects_invalid_startup_configuration_in_foreground_and_daemon() {
+    const DEV_TOKEN_SETTINGS: &str = r#"_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+"#;
+    const GITHUB_SETTINGS: &str = r#"_version = 1
+
+[server.web]
+enabled = true
+
+[server.auth]
+methods = ["github"]
+
+[server.auth.github]
+allowed_usernames = ["octocat"]
+
+[server.integrations.github]
+client_id = "Iv1.testclient"
+"#;
+    const GITHUB_WITHOUT_CLIENT_ID_SETTINGS: &str = r#"_version = 1
+
+[server.web]
+enabled = true
+
+[server.auth]
+methods = ["github"]
+
+[server.auth.github]
+allowed_usernames = ["octocat"]
+"#;
+    const GITHUB_WEB_DISABLED_SETTINGS: &str = r#"_version = 1
+
+[server.web]
+enabled = false
+
+[server.auth]
+methods = ["github"]
+
+[server.auth.github]
+allowed_usernames = ["octocat"]
+
+[server.integrations.github]
+client_id = "Iv1.testclient"
+"#;
+    const EMPTY_AUTH_METHODS_SETTINGS: &str = r"_version = 1
+
+[server.auth]
+methods = []
+";
+
+    let context = test_context!();
+    let cases = [
+        StartupFailureCase {
+            name:           "missing-session-secret",
+            settings:       DEV_TOKEN_SETTINGS,
+            server_env:     &[("FABRO_DEV_TOKEN", TEST_DEV_TOKEN)],
+            expected_error: "Fabro server refuses to start: auth is configured but SESSION_SECRET is not set.",
+        },
+        StartupFailureCase {
+            name:           "missing-dev-token",
+            settings:       DEV_TOKEN_SETTINGS,
+            server_env:     &[("SESSION_SECRET", TEST_SESSION_SECRET)],
+            expected_error: "Fabro server refuses to start: dev-token auth is enabled but FABRO_DEV_TOKEN is not set.",
+        },
+        StartupFailureCase {
+            name:           "missing-github-client-secret",
+            settings:       GITHUB_SETTINGS,
+            server_env:     &[("SESSION_SECRET", TEST_SESSION_SECRET)],
+            expected_error: "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not set.",
+        },
+        StartupFailureCase {
+            name:           "empty-auth-methods",
+            settings:       EMPTY_AUTH_METHODS_SETTINGS,
+            server_env:     &[],
+            expected_error: "failed to resolve server settings:\n  server.auth.methods: invalid value - must not be empty",
+        },
+        StartupFailureCase {
+            name:           "github-web-disabled",
+            settings:       GITHUB_WEB_DISABLED_SETTINGS,
+            server_env:     &[
+                ("SESSION_SECRET", TEST_SESSION_SECRET),
+                ("GITHUB_APP_CLIENT_SECRET", "github-client-secret"),
+            ],
+            expected_error: "Fabro server refuses to start: github auth is enabled but server.web.enabled is false.",
+        },
+        StartupFailureCase {
+            name:           "github-missing-client-id",
+            settings:       GITHUB_WITHOUT_CLIENT_ID_SETTINGS,
+            server_env:     &[
+                ("SESSION_SECRET", TEST_SESSION_SECRET),
+                ("GITHUB_APP_CLIENT_SECRET", "github-client-secret"),
+            ],
+            expected_error: "Fabro server refuses to start: github auth is enabled but server.integrations.github.client_id is not configured.",
+        },
+        StartupFailureCase {
+            name:           "invalid-dev-token",
+            settings:       DEV_TOKEN_SETTINGS,
+            server_env:     &[
+                ("SESSION_SECRET", TEST_SESSION_SECRET),
+                ("FABRO_DEV_TOKEN", "not-a-valid-dev-token"),
+            ],
+            expected_error: "Fabro server refuses to start: FABRO_DEV_TOKEN has invalid format.",
+        },
+    ];
+
+    for case in &cases {
+        for mode in ServerStartMode::ALL {
+            run_startup_failure(&context, mode, case);
+        }
+    }
 }
 
 #[test]

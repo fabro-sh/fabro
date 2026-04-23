@@ -35,7 +35,7 @@ pub(crate) fn resolve_startup(
     env: &dyn EnvSource,
     settings: &ResolvedServerSettings,
 ) -> std::result::Result<StartupResolution, StartupValidationError> {
-    let server_secrets = ServerSecrets::load(env_path.to_path_buf(), env)?;
+    let server_secrets = ServerSecrets::load(env_path, env)?;
     let auth_mode = resolve_auth_mode_with_lookup(settings, |name| server_secrets.get(name))?;
     Ok(StartupResolution {
         auth_mode,
