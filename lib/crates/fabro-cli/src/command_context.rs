@@ -37,6 +37,47 @@ pub(crate) struct CommandContext {
     server:             OnceCell<Arc<Client>>,
 }
 
+pub(crate) struct ResolvedBaseContext {
+    printer:            Printer,
+    process_local_json: bool,
+    cli_layer:          CliLayer,
+    machine_settings:   SettingsLayer,
+    user_settings:      UserSettings,
+}
+
+impl ResolvedBaseContext {
+    pub(crate) fn from_disk(cli_layer: &CliLayer, process_local_json: bool) -> Result<Self> {
+        let (machine_settings, user_settings) = load_merged_settings(cli_layer, &ServerMode::None)?;
+        let printer = crate::args::printer_from_verbosity(user_settings.cli.output.verbosity);
+
+        Ok(Self {
+            printer,
+            process_local_json,
+            cli_layer: cli_layer.clone(),
+            machine_settings,
+            user_settings,
+        })
+    }
+
+    pub(crate) fn printer(&self) -> Printer {
+        self.printer
+    }
+
+    pub(crate) fn user_settings(&self) -> &UserSettings {
+        &self.user_settings
+    }
+
+    pub(crate) fn to_context(&self) -> Result<CommandContext> {
+        CommandContext::base_with_settings(
+            self.printer,
+            &self.cli_layer,
+            self.process_local_json,
+            self.machine_settings.clone(),
+            self.user_settings.clone(),
+        )
+    }
+}
+
 impl CommandContext {
     pub(crate) fn base(
         printer: Printer,
@@ -53,7 +94,7 @@ impl CommandContext {
         )
     }
 
-    pub(crate) fn base_with_settings(
+    fn base_with_settings(
         printer: Printer,
         cli_layer: &CliLayer,
         process_local_json: bool,

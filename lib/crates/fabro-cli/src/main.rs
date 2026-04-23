@@ -24,12 +24,10 @@ use std::ffi::OsString;
 use anyhow::Result;
 use args::{
     Commands, GlobalArgs, LONG_VERSION, RunCommands, ServerCommand, ServerNamespace,
-    global_args_cli_layer, printer_from_verbosity, require_no_json_override,
+    global_args_cli_layer, require_no_json_override,
 };
 use clap::{CommandFactory, Parser};
-use fabro_config::merge::combine_files;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
-use fabro_types::settings::SettingsLayer;
 use fabro_util::exit::ExitClass;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -37,7 +35,7 @@ use fabro_util::{browser, exit};
 use rustls::crypto::ring::default_provider;
 use tracing::debug;
 
-use crate::command_context::CommandContext;
+use crate::command_context::ResolvedBaseContext;
 
 #[derive(Parser)]
 #[command(name = "fabro", version, long_version = LONG_VERSION)]
@@ -166,20 +164,12 @@ async fn main_inner() -> (String, Result<()>) {
         Err(err) => return (command_name, Err(err)),
     };
 
-    let disk_settings = match user_config::load_settings() {
-        Ok(settings) => settings,
+    let resolved_base = match ResolvedBaseContext::from_disk(&cli_layer, process_local_json) {
+        Ok(resolved) => resolved,
         Err(err) => return (command_name, Err(err)),
     };
-    let machine_settings = combine_files(disk_settings, SettingsLayer {
-        cli: Some(cli_layer.clone()),
-        ..SettingsLayer::default()
-    });
-    let user_settings = match fabro_config::UserSettings::from_layer(&machine_settings) {
-        Ok(settings) => settings,
-        Err(err) => return (command_name, Err(err.into())),
-    };
-    let cli_settings = user_settings.cli.clone();
-    let printer = printer_from_verbosity(cli_settings.output.verbosity);
+    let cli_settings = resolved_base.user_settings().cli.clone();
+    let printer = resolved_base.printer();
 
     let config_log_level = match &pre_tracing_bootstrap.sink {
         logging::InternalLogSink::Cli => cli_settings.logging.level.clone(),
@@ -212,15 +202,7 @@ async fn main_inner() -> (String, Result<()>) {
     };
 
     let result = Box::pin(async move {
-        let build_base_ctx = || {
-            CommandContext::base_with_settings(
-                printer,
-                &cli_layer,
-                process_local_json,
-                machine_settings.clone(),
-                user_settings.clone(),
-            )
-        };
+        let build_base_ctx = || resolved_base.to_context();
 
         match *command {
             Commands::Exec(args) => commands::exec::execute(args, &cli_settings, printer).await?,
