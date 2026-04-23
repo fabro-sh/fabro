@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use fabro_config::bind::BindRequest;
 use fabro_types::ServerSettings;
-use fabro_types::settings::{ServerAuthMethod, SettingsLayer};
+use fabro_types::settings::{InterpString, ServerAuthMethod};
 
 use crate::user_config;
 
@@ -70,22 +70,25 @@ fn storage_dir_from_toml_with_lookup(
     source: &str,
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Result<PathBuf> {
-    let layer: SettingsLayer = toml::from_str(source)
+    let document: toml::Value = toml::from_str(source)
         .map_err(|err| anyhow::anyhow!("failed to parse settings file: {err}"))?;
-    let storage_root = layer
-        .server
-        .as_ref()
-        .and_then(|server| server.storage.as_ref())
-        .and_then(|storage| storage.root.clone())
+    let storage_root = string_at_path(&document, &["server", "storage", "root"])
+        .map(|root| InterpString::parse(&root))
         .unwrap_or_else(|| {
-            fabro_types::settings::InterpString::parse(
-                &fabro_config::user::default_storage_dir().to_string_lossy(),
-            )
+            InterpString::parse(&fabro_config::user::default_storage_dir().to_string_lossy())
         });
     let resolved_root = storage_root
         .resolve(lookup)
         .map_err(|err| anyhow::anyhow!("failed to resolve {}: {err}", storage_root.as_source()))?;
     Ok(PathBuf::from(resolved_root.value))
+}
+
+fn string_at_path(document: &toml::Value, path: &[&str]) -> Option<String> {
+    let mut current = document;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current.as_str().map(str::to_owned)
 }
 
 #[cfg(test)]

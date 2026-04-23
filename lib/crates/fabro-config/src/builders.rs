@@ -101,15 +101,31 @@ impl UserSettingsBuilder {
         Self::from_layer(&layer)
     }
 
+    pub fn load_default_with_cli_overrides(cli: &CliLayer) -> Result<UserSettings> {
+        let layer = load_settings_config(None)?;
+        Self::from_layer_with_cli_overrides(&layer, cli)
+    }
+
     pub fn load_from(path: &Path) -> Result<UserSettings> {
         let layer = load_settings_path(path)?;
         Self::from_layer(&layer)
+    }
+
+    pub fn load_from_with_cli_overrides(path: &Path, cli: &CliLayer) -> Result<UserSettings> {
+        let layer = load_settings_path(path)?;
+        Self::from_layer_with_cli_overrides(&layer, cli)
     }
 
     pub fn from_toml(source: &str) -> Result<UserSettings> {
         let layer = parse_settings_layer(source)
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
         Self::from_layer(&layer)
+    }
+
+    pub fn from_toml_with_cli_overrides(source: &str, cli: &CliLayer) -> Result<UserSettings> {
+        let layer = parse_settings_layer(source)
+            .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        Self::from_layer_with_cli_overrides(&layer, cli)
     }
 
     pub fn from_layer(layer: &SettingsLayer) -> Result<UserSettings> {
@@ -121,6 +137,19 @@ impl UserSettingsBuilder {
             UserSettings { cli, features },
             "failed to resolve user settings",
             errors,
+        )
+    }
+
+    pub fn from_layer_with_cli_overrides(
+        layer: &SettingsLayer,
+        cli: &CliLayer,
+    ) -> Result<UserSettings> {
+        Self::from_layer(
+            &SettingsLayer {
+                cli: Some(cli.clone()),
+                ..SettingsLayer::default()
+            }
+            .combine(layer.clone()),
         )
     }
 }

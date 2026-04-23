@@ -3,11 +3,13 @@ use std::str::FromStr;
 
 use anyhow::Result;
 pub(crate) use fabro_client::ServerTarget;
+use fabro_config::user::default_socket_path;
 pub(crate) use fabro_config::user::{active_settings_path, default_storage_dir};
-use fabro_config::user::{default_socket_path, load_settings_config};
-use fabro_config::{RunSettingsBuilder, ServerSettingsBuilder, UserSettingsBuilder};
+use fabro_config::{
+    RunSettingsBuilder, ServerSettingsBuilder, UserSettingsBuilder, load_config_file,
+};
 use fabro_types::settings::cli::{CliLayer, CliTargetSettings};
-use fabro_types::settings::{CliNamespace, Combine, RunNamespace, SettingsLayer};
+use fabro_types::settings::{CliNamespace, InterpString, RunNamespace};
 use fabro_types::{ServerSettings, UserSettings};
 use fabro_util::version::FABRO_VERSION;
 use tracing::debug;
@@ -27,39 +29,18 @@ pub(crate) fn load_resolved_settings(
     storage_dir: Option<&Path>,
     cli_layer: Option<&CliLayer>,
 ) -> anyhow::Result<LoadedSettings> {
-    let layer = load_settings_config(config_path)?;
-    resolve_loaded_settings(layer, storage_dir, cli_layer)
-}
-
-fn resolve_loaded_settings(
-    layer: SettingsLayer,
-    storage_dir: Option<&Path>,
-    cli_layer: Option<&CliLayer>,
-) -> anyhow::Result<LoadedSettings> {
+    let document = load_settings_document(config_path)?;
     let storage_override = storage_dir.map(Path::to_path_buf);
-    let storage_dir = storage_dir_from_layer(&layer, storage_dir)?;
-    let config_log_level = layer
-        .server
-        .as_ref()
-        .and_then(|server| server.logging.as_ref())
-        .and_then(|logging| logging.level.clone());
-    let run_settings = RunSettingsBuilder::from_layer(&layer).map_err(|err| err.to_string());
-    let server_settings = ServerSettingsBuilder::from_layer(&layer)
+    let storage_dir = storage_dir_from_document(&document, storage_dir)?;
+    let config_log_level = config_log_level_from_document(&document);
+    let run_settings = load_run_settings(config_path).map_err(|err| err.to_string());
+    let server_settings = load_server_settings(config_path)
         .map(|settings| match storage_override.as_deref() {
             Some(dir) => settings.with_storage_override(dir),
             None => settings,
         })
         .map_err(|err| err.to_string());
-    let user_settings_layer = if let Some(cli_layer) = cli_layer {
-        SettingsLayer {
-            cli: Some(cli_layer.clone()),
-            ..SettingsLayer::default()
-        }
-        .combine(layer.clone())
-    } else {
-        layer.clone()
-    };
-    let user_settings = UserSettingsBuilder::from_layer(&user_settings_layer)?;
+    let user_settings = load_user_settings(config_path, cli_layer)?;
 
     Ok(LoadedSettings {
         storage_dir,
@@ -70,15 +51,52 @@ fn resolve_loaded_settings(
     })
 }
 
-fn storage_dir_from_layer(
-    layer: &SettingsLayer,
-    storage_dir: Option<&Path>,
-) -> anyhow::Result<PathBuf> {
-    storage_dir_from_layer_with_lookup(layer, storage_dir, &|name| std::env::var(name).ok())
+fn load_settings_document(config_path: Option<&Path>) -> anyhow::Result<toml::Value> {
+    let table: toml::Table = load_config_file(config_path, "settings.toml")?;
+    Ok(toml::Value::Table(table))
 }
 
-fn storage_dir_from_layer_with_lookup(
-    layer: &SettingsLayer,
+fn load_run_settings(config_path: Option<&Path>) -> anyhow::Result<RunNamespace> {
+    Ok(match config_path {
+        Some(path) => RunSettingsBuilder::load_from(path)?,
+        None => RunSettingsBuilder::load_default()?,
+    })
+}
+
+fn load_server_settings(config_path: Option<&Path>) -> anyhow::Result<ServerSettings> {
+    Ok(match config_path {
+        Some(path) => ServerSettingsBuilder::load_from(path)?,
+        None => ServerSettingsBuilder::load_default()?,
+    })
+}
+
+fn load_user_settings(
+    config_path: Option<&Path>,
+    cli_layer: Option<&CliLayer>,
+) -> anyhow::Result<UserSettings> {
+    Ok(match (config_path, cli_layer) {
+        (Some(path), Some(cli_layer)) => {
+            UserSettingsBuilder::load_from_with_cli_overrides(path, cli_layer)?
+        }
+        (Some(path), None) => UserSettingsBuilder::load_from(path)?,
+        (None, Some(cli_layer)) => UserSettingsBuilder::load_default_with_cli_overrides(cli_layer)?,
+        (None, None) => UserSettingsBuilder::load_default()?,
+    })
+}
+
+fn config_log_level_from_document(document: &toml::Value) -> Option<String> {
+    string_at_path(document, &["server", "logging", "level"])
+}
+
+fn storage_dir_from_document(
+    document: &toml::Value,
+    storage_dir: Option<&Path>,
+) -> anyhow::Result<PathBuf> {
+    storage_dir_from_document_with_lookup(document, storage_dir, &|name| std::env::var(name).ok())
+}
+
+fn storage_dir_from_document_with_lookup(
+    document: &toml::Value,
     storage_dir: Option<&Path>,
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> anyhow::Result<PathBuf> {
@@ -86,16 +104,19 @@ fn storage_dir_from_layer_with_lookup(
         return Ok(dir.to_path_buf());
     }
 
-    let storage_root = layer
-        .server
-        .as_ref()
-        .and_then(|server| server.storage.as_ref())
-        .and_then(|storage| storage.root.clone())
-        .unwrap_or_else(|| {
-            fabro_types::settings::InterpString::parse(&default_storage_dir().to_string_lossy())
-        });
+    let storage_root = string_at_path(document, &["server", "storage", "root"])
+        .map(|root| InterpString::parse(&root))
+        .unwrap_or_else(|| InterpString::parse(&default_storage_dir().to_string_lossy()));
     let resolved_root = storage_root.resolve(lookup)?;
     Ok(PathBuf::from(resolved_root.value))
+}
+
+fn string_at_path(document: &toml::Value, path: &[&str]) -> Option<String> {
+    let mut current = document;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current.as_str().map(str::to_owned)
 }
 
 /// Pull the resolved CLI target configuration out of `[cli.target]`.
@@ -157,9 +178,30 @@ pub(crate) fn load_resolved_settings_from_toml(
     storage_dir: Option<&Path>,
     cli_layer: Option<&CliLayer>,
 ) -> anyhow::Result<LoadedSettings> {
-    let layer: SettingsLayer = toml::from_str(source)
+    let document: toml::Value = toml::from_str(source)
         .map_err(|err| anyhow::anyhow!("failed to parse settings file: {err}"))?;
-    resolve_loaded_settings(layer, storage_dir, cli_layer)
+    let storage_override = storage_dir.map(Path::to_path_buf);
+    let storage_dir = storage_dir_from_document(&document, storage_dir)?;
+    let config_log_level = config_log_level_from_document(&document);
+    let run_settings = RunSettingsBuilder::from_toml(source).map_err(|err| err.to_string());
+    let server_settings = ServerSettingsBuilder::from_toml(source)
+        .map(|settings| match storage_override.as_deref() {
+            Some(dir) => settings.with_storage_override(dir),
+            None => settings,
+        })
+        .map_err(|err| err.to_string());
+    let user_settings = match cli_layer {
+        Some(cli_layer) => UserSettingsBuilder::from_toml_with_cli_overrides(source, cli_layer)?,
+        None => UserSettingsBuilder::from_toml(source)?,
+    };
+
+    Ok(LoadedSettings {
+        storage_dir,
+        config_log_level,
+        run_settings,
+        server_settings,
+        user_settings,
+    })
 }
 
 #[cfg(test)]
@@ -289,17 +331,17 @@ url = "https://config.example.com"
 
     #[test]
     fn storage_dir_defaults_without_server_auth_methods() {
-        let layer = SettingsLayer::default();
+        let document = toml::Value::Table(toml::Table::new());
 
         assert_eq!(
-            storage_dir_from_layer(&layer, None).unwrap(),
+            storage_dir_from_document(&document, None).unwrap(),
             default_storage_dir()
         );
     }
 
     #[test]
     fn storage_dir_uses_explicit_server_storage_root() {
-        let layer: SettingsLayer = toml::from_str(
+        let document: toml::Value = toml::from_str(
             r#"
 _version = 1
 
@@ -310,14 +352,14 @@ root = "/srv/fabro"
         .expect("fixture should parse");
 
         assert_eq!(
-            storage_dir_from_layer(&layer, None).unwrap(),
+            storage_dir_from_document(&document, None).unwrap(),
             PathBuf::from("/srv/fabro")
         );
     }
 
     #[test]
     fn storage_dir_resolves_env_interpolated_root() {
-        let layer: SettingsLayer = toml::from_str(
+        let document: toml::Value = toml::from_str(
             r#"
 _version = 1
 
@@ -329,7 +371,7 @@ root = "{{ env.FABRO_STORAGE_ROOT }}"
         let temp = tempfile::tempdir().unwrap();
 
         assert_eq!(
-            storage_dir_from_layer_with_lookup(&layer, None, &|name| {
+            storage_dir_from_document_with_lookup(&document, None, &|name| {
                 (name == "FABRO_STORAGE_ROOT").then(|| temp.path().display().to_string())
             })
             .unwrap(),
