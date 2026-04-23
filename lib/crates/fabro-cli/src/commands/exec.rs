@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use anyhow::Result as AnyResult;
 use fabro_agent::cli::{OutputFormat, run_with_args, run_with_args_and_client};
-use fabro_config::WorkflowSettingsBuilder;
 use fabro_llm::client::Client;
 use fabro_llm::error::{
     Error as LlmError, ProviderErrorDetail, ProviderErrorKind, error_from_status_code,
@@ -277,7 +276,6 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
     use fabro_types::settings::run::AgentPermissions;
 
     let cli = &ctx.user_settings().cli;
-    let raw_settings = user_config::load_settings()?;
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(cli.exec.prevent_idle_sleep);
     let provider_str = cli
@@ -309,21 +307,8 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
     let mcp_servers: Vec<McpServerSettings> = if !cli.exec.agent.mcps.is_empty() {
         cli.exec.agent.mcps.values().cloned().collect()
     } else {
-        WorkflowSettingsBuilder::from_layer(&raw_settings)
-            .map(|settings| {
-                settings
-                    .run
-                    .agent
-                    .mcps
-                    .values()
-                    .map(|server| McpServerSettings {
-                        name:                 server.name.clone(),
-                        transport:            server.transport.clone(),
-                        startup_timeout_secs: server.startup_timeout_secs,
-                        tool_timeout_secs:    server.tool_timeout_secs,
-                    })
-                    .collect()
-            })
+        ctx.run_settings()
+            .map(|settings| settings.agent.mcps.values().cloned().collect())
             .unwrap_or_default()
     };
     if let Some(target) = server_target {

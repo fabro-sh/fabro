@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
-use fabro_config::{ServerSettingsBuilder, UserSettingsBuilder};
+use fabro_config::{ServerSettingsBuilder, UserSettingsBuilder, WorkflowSettingsBuilder};
 use fabro_types::settings::cli::{CliLayer, OutputFormat, OutputVerbosity};
-use fabro_types::settings::{Combine, SettingsLayer};
+use fabro_types::settings::{Combine, RunNamespace, SettingsLayer};
 use fabro_types::{ServerSettings, UserSettings};
 use fabro_util::printer::Printer;
 use tokio::sync::OnceCell;
@@ -34,6 +34,7 @@ pub(crate) struct CommandContext {
     base_config_path:   PathBuf,
     cli_layer:          CliLayer,
     storage_dir:        PathBuf,
+    run_settings:       std::result::Result<RunNamespace, String>,
     server_settings:    std::result::Result<ServerSettings, String>,
     user_settings:      UserSettings,
     server_mode:        ServerMode,
@@ -42,6 +43,7 @@ pub(crate) struct CommandContext {
 
 struct ResolvedCommandSettings {
     storage_dir:     PathBuf,
+    run_settings:    std::result::Result<RunNamespace, String>,
     server_settings: std::result::Result<ServerSettings, String>,
     user_settings:   UserSettings,
 }
@@ -60,6 +62,7 @@ impl CommandContext {
             base_config_path,
             cli_layer: cli_layer.clone(),
             storage_dir: resolved_settings.storage_dir,
+            run_settings: resolved_settings.run_settings,
             server_settings: resolved_settings.server_settings,
             user_settings: resolved_settings.user_settings,
             server_mode: ServerMode::None,
@@ -102,6 +105,12 @@ impl CommandContext {
 
     pub(crate) fn server_settings(&self) -> Result<&ServerSettings> {
         self.server_settings
+            .as_ref()
+            .map_err(|err| anyhow::anyhow!("{err}"))
+    }
+
+    pub(crate) fn run_settings(&self) -> Result<&RunNamespace> {
+        self.run_settings
             .as_ref()
             .map_err(|err| anyhow::anyhow!("{err}"))
     }
@@ -163,6 +172,7 @@ impl CommandContext {
             base_config_path: self.base_config_path.clone(),
             cli_layer: self.cli_layer.clone(),
             storage_dir: resolved_settings.storage_dir,
+            run_settings: resolved_settings.run_settings,
             server_settings: resolved_settings.server_settings,
             user_settings: resolved_settings.user_settings,
             server_mode,
@@ -190,6 +200,13 @@ fn merge_settings_layer(
     cli_layer: &CliLayer,
 ) -> Result<ResolvedCommandSettings> {
     let storage_dir = crate::local_server::storage_dir(&disk_settings)?;
+    let run_settings = WorkflowSettingsBuilder::from_layer(&disk_settings)
+        .map(|settings| settings.run)
+        .map_err(|err| {
+            // Keep command context tolerant even when unrelated run defaults
+            // do not resolve cleanly.
+            err.to_string()
+        });
     let server_settings = ServerSettingsBuilder::from_layer(&disk_settings).map_err(|err| {
         // Keep storage-dir and CLI-target resolution tolerant even when full
         // server resolution would reject a partial local settings file.
@@ -203,6 +220,7 @@ fn merge_settings_layer(
     let user_settings = UserSettingsBuilder::from_layer(&merged_settings)?;
     Ok(ResolvedCommandSettings {
         storage_dir,
+        run_settings,
         server_settings,
         user_settings,
     })
@@ -243,6 +261,7 @@ mod tests {
             base_config_path: PathBuf::from("/tmp/settings.toml"),
             cli_layer,
             storage_dir: resolved_settings.storage_dir,
+            run_settings: resolved_settings.run_settings,
             server_settings: resolved_settings.server_settings,
             user_settings: resolved_settings.user_settings,
             server_mode: ServerMode::None,
@@ -313,6 +332,11 @@ root = "/srv/fabro/default"
             connection_settings.storage_dir,
             PathBuf::from("/srv/fabro/override")
         );
+        assert_eq!(base_settings.run_settings.unwrap().agent.mcps.len(), 0);
+        assert_eq!(
+            connection_settings.run_settings.unwrap().agent.mcps.len(),
+            0
+        );
         assert!(base_settings.server_settings.is_err());
         assert!(connection_settings.server_settings.is_err());
     }
@@ -334,7 +358,29 @@ root = "/srv/fabro"
         .expect("settings should merge");
 
         assert_eq!(resolved.storage_dir, PathBuf::from("/srv/fabro"));
+        assert!(resolved.run_settings.is_ok());
         assert!(resolved.server_settings.is_err());
+    }
+
+    #[test]
+    fn run_settings_include_run_agent_mcps() {
+        let resolved = merge_settings_layer(
+            parse_settings_layer(
+                r#"
+_version = 1
+
+[run.agent.mcps.demo]
+type = "stdio"
+command = ["demo-mcp"]
+"#,
+            )
+            .expect("settings fixture should parse"),
+            &CliLayer::default(),
+        )
+        .expect("settings should merge");
+
+        let run_settings = resolved.run_settings.expect("run settings should resolve");
+        assert!(run_settings.agent.mcps.contains_key("demo"));
     }
 
     #[test]
