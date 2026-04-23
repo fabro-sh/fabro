@@ -39,55 +39,10 @@ pub(crate) struct CommandContext {
     server:             OnceCell<Arc<Client>>,
 }
 
-pub(crate) struct ResolvedBaseContext {
-    printer:            Printer,
-    process_local_json: bool,
-    cli_layer:          CliLayer,
-    machine_settings:   SettingsLayer,
-    user_settings:      UserSettings,
-}
-
-impl ResolvedBaseContext {
+impl CommandContext {
     pub(crate) fn from_disk(cli_layer: &CliLayer, process_local_json: bool) -> Result<Self> {
         let (machine_settings, user_settings) = load_merged_settings(cli_layer, &ServerMode::None)?;
         let printer = printer_from_verbosity(user_settings.cli.output.verbosity);
-
-        Ok(Self {
-            printer,
-            process_local_json,
-            cli_layer: cli_layer.clone(),
-            machine_settings,
-            user_settings,
-        })
-    }
-
-    pub(crate) fn printer(&self) -> Printer {
-        self.printer
-    }
-
-    pub(crate) fn user_settings(&self) -> &UserSettings {
-        &self.user_settings
-    }
-
-    pub(crate) fn to_context(&self) -> Result<CommandContext> {
-        CommandContext::base_with_settings(
-            self.printer,
-            &self.cli_layer,
-            self.process_local_json,
-            self.machine_settings.clone(),
-            self.user_settings.clone(),
-        )
-    }
-}
-
-impl CommandContext {
-    fn base_with_settings(
-        printer: Printer,
-        cli_layer: &CliLayer,
-        process_local_json: bool,
-        machine_settings: SettingsLayer,
-        user_settings: UserSettings,
-    ) -> Result<Self> {
         let cwd = std::env::current_dir().context("Failed to get current directory")?;
         let base_config_path = user_config::active_settings_path(None);
 

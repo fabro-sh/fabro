@@ -35,7 +35,7 @@ use fabro_util::{browser, exit};
 use rustls::crypto::ring::default_provider;
 use tracing::debug;
 
-use crate::command_context::ResolvedBaseContext;
+use crate::command_context::CommandContext;
 
 #[derive(Parser)]
 #[command(name = "fabro", version, long_version = LONG_VERSION)]
@@ -164,14 +164,14 @@ async fn main_inner() -> (String, Result<()>) {
         Err(err) => return (command_name, Err(err)),
     };
 
-    let resolved_base = match ResolvedBaseContext::from_disk(&cli_layer, process_local_json) {
-        Ok(resolved) => resolved,
+    let base_ctx = match CommandContext::from_disk(&cli_layer, process_local_json) {
+        Ok(ctx) => ctx,
         Err(err) => return (command_name, Err(err)),
     };
-    let printer = resolved_base.printer();
+    let printer = base_ctx.printer();
 
     let config_log_level = match &pre_tracing_bootstrap.sink {
-        logging::InternalLogSink::Cli => resolved_base.user_settings().cli.logging.level.clone(),
+        logging::InternalLogSink::Cli => base_ctx.user_settings().cli.logging.level.clone(),
         logging::InternalLogSink::Server { .. } => pre_tracing_bootstrap.config_log_level.clone(),
     };
     if let Err(err) = logging::init_tracing(
@@ -195,57 +195,43 @@ async fn main_inner() -> (String, Result<()>) {
             | Commands::Repo(_)
             | Commands::Install { .. }
     ) {
-        commands::upgrade::spawn_upgrade_check(
-            resolved_base.user_settings().cli.updates.check,
-            printer,
-        )
+        commands::upgrade::spawn_upgrade_check(base_ctx.user_settings().cli.updates.check, printer)
     } else {
         None
     };
 
     let result = Box::pin(async move {
-        let build_base_ctx = || resolved_base.to_context();
-
         match *command {
             Commands::Exec(args) => {
-                let base_ctx = build_base_ctx()?;
                 commands::exec::execute(args, &base_ctx).await?;
             }
             Commands::RunCmd(cmd) => {
-                let base_ctx = build_base_ctx()?;
                 Box::pin(commands::run::dispatch(cmd, &base_ctx)).await?;
             }
             Commands::Preflight(args) => {
-                let base_ctx = build_base_ctx()?;
                 commands::preflight::execute(args, &base_ctx).await?;
             }
             Commands::Validate(args) => {
                 let styles = Styles::detect_stderr();
-                let base_ctx = build_base_ctx()?;
                 commands::validate::run(&args, &styles, &base_ctx).await?;
             }
             Commands::Graph(args) => {
                 let styles = Styles::detect_stderr();
-                let base_ctx = build_base_ctx()?;
                 commands::graph::run(&args, &styles, &base_ctx).await?;
             }
             Commands::Parse(args) => {
                 commands::parse::run(&args)?;
             }
             Commands::Artifact(ns) => {
-                let base_ctx = build_base_ctx()?;
                 commands::artifact::dispatch(ns, &base_ctx).await?;
             }
             Commands::Store(ns) => {
-                let base_ctx = build_base_ctx()?;
                 commands::store::dispatch(ns, &base_ctx).await?;
             }
             Commands::RunsCmd(cmd) => {
-                let base_ctx = build_base_ctx()?;
                 commands::runs::dispatch(cmd, &base_ctx).await?;
             }
             Commands::Model { command } => {
-                let base_ctx = build_base_ctx()?;
                 commands::model::execute(command, &base_ctx).await?;
             }
             Commands::Server(ns) => {
@@ -258,12 +244,10 @@ async fn main_inner() -> (String, Result<()>) {
                 .await?;
             }
             Commands::Doctor(args) => {
-                let base_ctx = build_base_ctx()?;
                 let exit_code = Box::pin(commands::doctor::run_doctor(&args, &base_ctx)).await?;
                 std::process::exit(exit_code);
             }
             Commands::Version(args) => {
-                let base_ctx = build_base_ctx()?;
                 commands::version::version_command(&args, &base_ctx).await?;
             }
             Commands::Discord => {
@@ -285,51 +269,39 @@ async fn main_inner() -> (String, Result<()>) {
                 }
             }
             Commands::Repo(ns) => {
-                let base_ctx = build_base_ctx()?;
                 commands::repo::dispatch(ns, &base_ctx).await?;
             }
             Commands::Install { args, command } => {
-                let base_ctx = build_base_ctx()?;
                 Box::pin(commands::install::execute(&args, command, &base_ctx)).await?;
             }
             Commands::Uninstall(args) => {
-                let base_ctx = build_base_ctx()?;
                 commands::uninstall::run_uninstall(&args, &base_ctx).await?;
             }
             Commands::Auth(ns) => {
-                let base_ctx = build_base_ctx()?;
                 commands::auth::dispatch(ns, &base_ctx).await?;
             }
             Commands::Pr(ns) => {
-                let base_ctx = build_base_ctx()?;
                 Box::pin(commands::pr::dispatch(ns, &base_ctx)).await?;
             }
             Commands::Secret(ns) => {
-                let base_ctx = build_base_ctx()?;
                 commands::secret::dispatch(ns, &base_ctx).await?;
             }
             Commands::Settings(args) => {
-                let base_ctx = build_base_ctx()?;
                 Box::pin(commands::config::execute(&args, &base_ctx)).await?;
             }
             Commands::Workflow(ns) => {
-                let base_ctx = build_base_ctx()?;
                 commands::workflow::dispatch(ns, &base_ctx)?;
             }
             Commands::Upgrade(args) => {
-                let base_ctx = build_base_ctx()?;
                 commands::upgrade::run_upgrade(args, &base_ctx).await?;
             }
             Commands::Provider(ns) => {
-                let base_ctx = build_base_ctx()?;
                 commands::provider::dispatch(ns, &base_ctx).await?;
             }
             Commands::Sandbox { command } => {
-                let base_ctx = build_base_ctx()?;
                 commands::sandbox::dispatch(command, &base_ctx).await?;
             }
             Commands::System(ns) => {
-                let base_ctx = build_base_ctx()?;
                 commands::system::dispatch(ns, &base_ctx).await?;
             }
             Commands::Completion(args) => {

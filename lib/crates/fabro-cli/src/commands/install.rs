@@ -32,8 +32,8 @@ use fabro_install::{
 use fabro_model::Provider;
 use fabro_server::serve;
 use fabro_store::ArtifactStore;
-use fabro_types::settings::server::ServerAuthMethod;
 use fabro_types::settings::SettingsLayer;
+use fabro_types::settings::server::ServerAuthMethod;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::version::FABRO_VERSION;
