@@ -47,16 +47,12 @@ pub(crate) struct PreparedManifest {
     pub working_directory: PathBuf,
 }
 
-pub(crate) fn manifest_defaults_layer(settings: &SettingsLayer) -> SettingsLayer {
-    SettingsLayer {
-        version: settings.version,
-        run: settings.run.clone(),
-        ..SettingsLayer::default()
-    }
+pub(crate) fn manifest_run_defaults(settings: &SettingsLayer) -> RunLayer {
+    settings.run.clone().unwrap_or_default()
 }
 
 pub(crate) fn prepare_manifest(
-    manifest_defaults: &SettingsLayer,
+    manifest_run_defaults: &RunLayer,
     manifest: &types::RunManifest,
 ) -> Result<PreparedManifest> {
     if manifest.version != 1 {
@@ -93,7 +89,7 @@ pub(crate) fn prepare_manifest(
         .workflow_layer(workflow_layer)
         .project_layer(project_layer)
         .user_layer(user_layer)
-        .server_layer(manifest_defaults.clone())
+        .server_run_defaults(manifest_run_defaults.clone())
         .build_layer();
     if let Some(goal) = manifest.goal.as_ref() {
         let run = settings_layer.run.get_or_insert_with(RunLayer::default);
@@ -975,7 +971,7 @@ mod tests {
 
     #[test]
     fn prepare_manifest_preserves_explicit_manifest_dry_run() {
-        let server_settings = manifest_defaults_layer(&server_settings_fixture(
+        let server_settings = manifest_run_defaults(&server_settings_fixture(
             r#"
 _version = 1
 
@@ -1009,7 +1005,7 @@ root = "/srv/fabro"
 
     #[test]
     fn prepare_manifest_prefers_bundled_settings_without_duplication() {
-        let server_settings = manifest_defaults_layer(&server_settings_fixture(
+        let server_settings = manifest_run_defaults(&server_settings_fixture(
             r#"
 _version = 1
 
@@ -1071,7 +1067,7 @@ app_id = "snapshotted-app-id"
     async fn invalid_preflight_returns_diagnostics_without_runtime_checks() {
         let state = crate::server::create_app_state();
         let prepared = prepare_manifest(
-            &manifest_defaults_layer(&default_settings_fixture()),
+            &manifest_run_defaults(&default_settings_fixture()),
             &invalid_manifest(),
         )
         .unwrap();
@@ -1110,7 +1106,7 @@ enabled = true
         });
 
         let prepared = prepare_manifest(
-            &manifest_defaults_layer(&default_settings_fixture()),
+            &manifest_run_defaults(&default_settings_fixture()),
             &manifest,
         )
         .unwrap();
@@ -1151,7 +1147,7 @@ provider = "daytona"
         });
 
         let prepared = prepare_manifest(
-            &manifest_defaults_layer(&default_settings_fixture()),
+            &manifest_run_defaults(&default_settings_fixture()),
             &manifest,
         )
         .unwrap();

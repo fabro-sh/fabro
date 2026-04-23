@@ -64,7 +64,7 @@ use fabro_store::{
 };
 #[cfg(test)]
 use fabro_types::BlockedReason;
-use fabro_types::settings::run::RunMode;
+use fabro_types::settings::run::{RunLayer, RunMode};
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, ServerAuthLayer, ServerAuthMethod,
     ServerLayer,
@@ -575,7 +575,7 @@ pub struct AppState {
     pub(crate) vault:                Arc<AsyncRwLock<Vault>>,
     pub(super) server_secrets:       ServerSecrets,
     pub(crate) provider_credentials: ProviderCredentials,
-    manifest_defaults:               RwLock<Arc<SettingsLayer>>,
+    manifest_run_defaults:           RwLock<Arc<RunLayer>>,
     manifest_run_settings:           RwLock<std::result::Result<RunNamespace, String>>,
     pub(crate) server_settings:      RwLock<Arc<ServerSettings>>,
     pub(crate) env_lookup:           EnvLookup,
@@ -601,7 +601,7 @@ pub(crate) struct AppStateConfig {
 #[derive(Clone)]
 pub(crate) struct ResolvedAppStateSettings {
     pub(crate) server_settings:       ServerSettings,
-    pub(crate) manifest_defaults:     SettingsLayer,
+    pub(crate) manifest_run_defaults: RunLayer,
     pub(crate) manifest_run_settings: std::result::Result<RunNamespace, String>,
 }
 
@@ -649,12 +649,12 @@ fn accumulate_model_billing(entry: &mut ModelBillingTotals, usage: &BilledModelU
 }
 
 impl AppState {
-    pub(crate) fn manifest_defaults(&self) -> Arc<SettingsLayer> {
+    pub(crate) fn manifest_run_defaults(&self) -> Arc<RunLayer> {
         Arc::clone(
             &self
-                .manifest_defaults
+                .manifest_run_defaults
                 .read()
-                .expect("manifest defaults lock poisoned"),
+                .expect("manifest run defaults lock poisoned"),
         )
     }
 
@@ -812,18 +812,18 @@ impl AppState {
     ) -> anyhow::Result<()> {
         let ResolvedAppStateSettings {
             server_settings,
-            manifest_defaults,
+            manifest_run_defaults,
             manifest_run_settings,
         } = resolved_settings;
         let server_settings = Arc::new(server_settings);
-        let manifest_defaults = Arc::new(manifest_defaults);
+        let manifest_run_defaults = Arc::new(manifest_run_defaults);
         resolve_canonical_origin(&server_settings.server, &self.env_lookup)
             .map_err(anyhow::Error::msg)?;
 
         *self
-            .manifest_defaults
+            .manifest_run_defaults
             .write()
-            .expect("manifest defaults lock poisoned") = manifest_defaults;
+            .expect("manifest run defaults lock poisoned") = manifest_run_defaults;
         *self
             .manifest_run_settings
             .write()
@@ -1701,19 +1701,19 @@ fn build_prune_plan(
 }
 
 fn resolve_manifest_run_settings(
-    manifest_defaults: &SettingsLayer,
+    manifest_run_defaults: &RunLayer,
 ) -> std::result::Result<RunNamespace, String> {
-    RunSettingsBuilder::from_layer(manifest_defaults).map_err(|err| err.to_string())
+    RunSettingsBuilder::from_run_layer(manifest_run_defaults).map_err(|err| err.to_string())
 }
 
 pub(crate) fn resolve_app_state_settings(
     layer: &SettingsLayer,
 ) -> anyhow::Result<ResolvedAppStateSettings> {
-    let manifest_defaults = run_manifest::manifest_defaults_layer(layer);
+    let manifest_run_defaults = run_manifest::manifest_run_defaults(layer);
     Ok(ResolvedAppStateSettings {
         server_settings: ServerSettingsBuilder::from_layer(layer)?,
-        manifest_run_settings: resolve_manifest_run_settings(&manifest_defaults),
-        manifest_defaults,
+        manifest_run_settings: resolve_manifest_run_settings(&manifest_run_defaults),
+        manifest_run_defaults,
     })
 }
 
@@ -2654,7 +2654,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     });
     let (global_event_tx, _) = broadcast::channel(4096);
     let current_server_settings = Arc::new(resolved_settings.server_settings);
-    let current_manifest_defaults = Arc::new(resolved_settings.manifest_defaults);
+    let current_manifest_run_defaults = Arc::new(resolved_settings.manifest_run_defaults);
     let current_manifest_run_settings = resolved_settings.manifest_run_settings;
     let slack_service = {
         current_server_settings
@@ -2694,7 +2694,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         vault,
         server_secrets,
         provider_credentials,
-        manifest_defaults: RwLock::new(current_manifest_defaults),
+        manifest_run_defaults: RwLock::new(current_manifest_run_defaults),
         manifest_run_settings: RwLock::new(current_manifest_run_settings),
         server_settings: RwLock::new(current_server_settings),
         env_lookup: Arc::clone(&env_lookup),
@@ -4087,8 +4087,8 @@ async fn create_run(
         Ok(req) => req,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let manifest_defaults = state.manifest_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_defaults.as_ref(), &req) {
+    let manifest_run_defaults = state.manifest_run_defaults();
+    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -4206,8 +4206,8 @@ async fn run_preflight(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RunManifest>,
 ) -> Response {
-    let manifest_defaults = state.manifest_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_defaults.as_ref(), &req) {
+    let manifest_run_defaults = state.manifest_run_defaults();
+    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -4233,11 +4233,12 @@ async fn render_graph_from_manifest(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RenderWorkflowGraphRequest>,
 ) -> Response {
-    let manifest_defaults = state.manifest_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_defaults.as_ref(), &req.manifest) {
-        Ok(prepared) => prepared,
-        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
-    };
+    let manifest_run_defaults = state.manifest_run_defaults();
+    let prepared =
+        match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req.manifest) {
+            Ok(prepared) => prepared,
+            Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+        };
     let validated = match run_manifest::validate_prepared_manifest(&prepared) {
         Ok(validated) => validated,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
@@ -7578,17 +7579,14 @@ root = "/srv/new"
                 .mode,
             RunMode::DryRun
         );
-        let manifest_defaults = state.manifest_defaults();
-        assert_eq!(manifest_defaults.version, Some(1));
+        let manifest_run_defaults = state.manifest_run_defaults();
         assert_eq!(
-            manifest_defaults
-                .run
+            manifest_run_defaults
+                .execution
                 .as_ref()
-                .and_then(|run| run.execution.as_ref())
                 .and_then(|execution| execution.mode),
             Some(RunMode::DryRun)
         );
-        assert!(manifest_defaults.server.is_none());
     }
 
     #[test]
@@ -7658,7 +7656,7 @@ retros = false
         let server_settings =
             ServerSettingsBuilder::from_layer(&settings).expect("server settings should resolve");
         let manifest_run_settings =
-            resolve_manifest_run_settings(&run_manifest::manifest_defaults_layer(&settings));
+            resolve_manifest_run_settings(&run_manifest::manifest_run_defaults(&settings));
         let features = system_features(&server_settings, &manifest_run_settings);
 
         assert_eq!(features.session_sandboxes, Some(true));
@@ -7685,7 +7683,7 @@ provider = "invalid-provider"
         let server_settings =
             ServerSettingsBuilder::from_layer(&settings).expect("server settings should resolve");
         let manifest_run_settings =
-            resolve_manifest_run_settings(&run_manifest::manifest_defaults_layer(&settings));
+            resolve_manifest_run_settings(&run_manifest::manifest_run_defaults(&settings));
         let features = system_features(&server_settings, &manifest_run_settings);
 
         assert_eq!(features.session_sandboxes, Some(true));
@@ -7704,7 +7702,7 @@ provider = "daytona"
         )
         .expect("settings fixture should parse");
         let manifest_run_settings =
-            resolve_manifest_run_settings(&run_manifest::manifest_defaults_layer(&settings));
+            resolve_manifest_run_settings(&run_manifest::manifest_run_defaults(&settings));
 
         assert_eq!(system_sandbox_provider(&manifest_run_settings), "daytona");
     }
@@ -7721,7 +7719,7 @@ provider = "invalid-provider"
         )
         .expect("settings fixture should parse");
         let manifest_run_settings =
-            resolve_manifest_run_settings(&run_manifest::manifest_defaults_layer(&settings));
+            resolve_manifest_run_settings(&run_manifest::manifest_run_defaults(&settings));
 
         assert_eq!(
             system_sandbox_provider(&manifest_run_settings),

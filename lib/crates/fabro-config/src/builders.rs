@@ -150,6 +150,13 @@ impl RunSettingsBuilder {
         let run = resolve_run(&layer.run.clone().unwrap_or_default(), &mut errors);
         finish_result(run, "failed to resolve run settings", errors)
     }
+
+    pub fn from_run_layer(run: &RunLayer) -> Result<RunNamespace> {
+        Self::from_layer(&SettingsLayer {
+            run: Some(run.clone()),
+            ..SettingsLayer::default()
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -214,6 +221,14 @@ impl WorkflowSettingsBuilder {
     pub fn server_layer(mut self, layer: SettingsLayer) -> Self {
         self.server = layer;
         self
+    }
+
+    #[must_use]
+    pub fn server_run_defaults(self, run: RunLayer) -> Self {
+        self.server_layer(SettingsLayer {
+            run: Some(run),
+            ..SettingsLayer::default()
+        })
     }
 
     #[must_use]

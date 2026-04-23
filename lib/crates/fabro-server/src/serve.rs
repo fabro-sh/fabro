@@ -1030,6 +1030,7 @@ mod tests {
     use fabro_config::{ServerSettingsBuilder, parse_settings_layer};
     use fabro_types::settings::SettingsLayer;
     use fabro_types::settings::interp::InterpString;
+    use fabro_types::settings::run::RunLayer;
     use fabro_types::settings::server::ObjectStoreSettings;
     use fabro_util::Home;
 
@@ -1116,7 +1117,8 @@ root = "/srv/from-disk"
             "/srv/from-runtime"
         );
         assert_eq!(
-            resolved.manifest_defaults.server, None,
+            resolved.manifest_run_defaults,
+            RunLayer::default(),
             "manifest defaults should stay free of server-only overrides"
         );
     }
