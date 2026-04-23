@@ -11,20 +11,21 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        let bind_addr = std::env::var("TWIN_OPENAI_BIND_ADDR")
-            .ok()
+        Self::from_lookup(&|name| std::env::var(name).ok())
+    }
+
+    pub fn from_lookup(lookup: &dyn Fn(&str) -> Option<String>) -> Result<Self> {
+        let bind_addr = lookup("TWIN_OPENAI_BIND_ADDR")
             .map(|value| value.parse().context("invalid TWIN_OPENAI_BIND_ADDR"))
             .transpose()?
             .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 3000));
 
-        let require_auth = std::env::var("TWIN_OPENAI_REQUIRE_AUTH")
-            .ok()
+        let require_auth = lookup("TWIN_OPENAI_REQUIRE_AUTH")
             .map(|value| parse_bool_env(&value, "TWIN_OPENAI_REQUIRE_AUTH"))
             .transpose()?
             .unwrap_or(true);
 
-        let enable_admin = std::env::var("TWIN_OPENAI_ENABLE_ADMIN")
-            .ok()
+        let enable_admin = lookup("TWIN_OPENAI_ENABLE_ADMIN")
             .map(|value| parse_bool_env(&value, "TWIN_OPENAI_ENABLE_ADMIN"))
             .transpose()?
             .unwrap_or(true);

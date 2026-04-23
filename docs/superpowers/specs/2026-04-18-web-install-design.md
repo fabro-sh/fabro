@@ -260,7 +260,7 @@ The web wizard produces **the same on-disk state** as the CLI install. The TOML-
 Files written:
 
 - `~/.fabro/settings.toml` — server config, auth methods, GitHub integration strategy.
-- `<storage_dir>/server.env` — `FABRO_JWT_PRIVATE_KEY`, `FABRO_JWT_PUBLIC_KEY`, `SESSION_SECRET`, `FABRO_DEV_TOKEN`, plus GitHub App env pairs (`GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`) if the App strategy was chosen.
+- `<storage_dir>/server.env` — `SESSION_SECRET`, `FABRO_DEV_TOKEN`, plus GitHub App env pairs (`GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`) if the App strategy was chosen.
 - `<storage_dir>/vaults/default/secrets.json` — vault entries for LLM API key credentials and (if Token strategy) `GITHUB_TOKEN`. Path matches `Storage::secrets_path()` at `lib/crates/fabro-config/src/storage.rs:38`.
 - `<storage_dir>/server.dev-token` — the per-storage dev token, written via `Storage::server_state().dev_token_path()` at `storage.rs:103`. The CLI install also writes a home-level mirror at `Home::from_env().dev_token_path()` (`install.rs:1994-1999`); the web flow does the same to keep parity, since the home-level file is what tooling outside the storage dir expects to find.
 - Artifact store metadata stamped with `FABRO_VERSION` via `write_artifact_store_metadata` (`install.rs:1458`).

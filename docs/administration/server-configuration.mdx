@@ -299,7 +299,6 @@ For the auth model above, the main server runtime secrets are:
 - `SESSION_SECRET` when the web UI is enabled
 - `FABRO_DEV_TOKEN` when `"dev-token"` auth is enabled
 - `GITHUB_APP_CLIENT_SECRET` when `"github"` auth is enabled
-- `FABRO_JWT_PRIVATE_KEY` / `FABRO_JWT_PUBLIC_KEY`, provisioned during install for future CLI login flows
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` when the install wizard or a manual config uses
   static S3 object-store credentials
 
@@ -332,8 +331,6 @@ Fabro resolves these from `process env -> server.env`.
 
 | Variable | Description |
 |---|---|
-| `FABRO_JWT_PRIVATE_KEY` | Ed25519 private key (base64-encoded PEM) for JWT signing |
-| `FABRO_JWT_PUBLIC_KEY` | Ed25519 public key (base64-encoded PEM) for JWT verification |
 | `SESSION_SECRET` | Session encryption secret (64-character hex string) |
 
 ### Object store runtime secrets (optional)

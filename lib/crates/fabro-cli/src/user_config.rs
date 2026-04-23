@@ -281,13 +281,13 @@ root = "{{ env.FABRO_STORAGE_ROOT }}"
 "#,
         );
         let temp = tempfile::tempdir().unwrap();
-        let original = std::env::var_os("FABRO_STORAGE_ROOT");
-        std::env::set_var("FABRO_STORAGE_ROOT", temp.path());
-        let _guard = scopeguard::guard(original, |original| match original {
-            Some(value) => std::env::set_var("FABRO_STORAGE_ROOT", value),
-            None => std::env::remove_var("FABRO_STORAGE_ROOT"),
-        });
 
-        assert_eq!(storage_dir(&settings).unwrap(), temp.path());
+        assert_eq!(
+            local_server::storage_dir_with_lookup(&settings, &|name| {
+                (name == "FABRO_STORAGE_ROOT").then(|| temp.path().display().to_string())
+            })
+            .unwrap(),
+            temp.path()
+        );
     }
 }

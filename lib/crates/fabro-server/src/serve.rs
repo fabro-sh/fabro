@@ -31,12 +31,12 @@ use tracing::{error, info, warn};
 use crate::canonical_origin::resolve_canonical_origin;
 use crate::github_webhooks::{TailscaleFunnelManager, WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV};
 use crate::ip_allowlist::{GitHubMetaResolver, IpAllowlistConfig, resolve_ip_allowlist_config};
-use crate::jwt_auth::resolve_auth_mode_with_lookup;
 use crate::server::{
     AppState, AppStateConfig, RouterOptions, build_app_state, build_router_with_options,
     reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
 };
-use crate::server_secrets::ServerSecrets;
+use crate::server_secrets::{ProcessEnv, ServerSecrets};
+use crate::startup::resolve_startup;
 
 const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
 const AWS_SESSION_TOKEN_ENV: &str = "AWS_SESSION_TOKEN";
@@ -449,6 +449,15 @@ fn resolve_server_settings(file: &SettingsLayer) -> anyhow::Result<ResolvedServe
     })
 }
 
+pub fn resolve_runtime_server_settings_for_start(
+    args: &ServeArgs,
+    data_dir: &Path,
+) -> anyhow::Result<ResolvedServerSettings> {
+    let disk_settings = load_settings(args.config.as_deref())?;
+    let effective_settings = apply_runtime_settings(&disk_settings, args, data_dir);
+    resolve_server_settings(&effective_settings)
+}
+
 pub fn resolve_bind_request_from_settings(
     settings: &SettingsLayer,
     explicit_bind: Option<&str>,
@@ -509,7 +518,7 @@ fn load_server_secrets_for_settings(
 ) -> anyhow::Result<ServerSecrets> {
     let storage_root = resolve_interp_path(&settings.storage.root)?;
     let server_env_path = Storage::new(&storage_root).runtime_directory().env_path();
-    ServerSecrets::load(server_env_path).map_err(anyhow::Error::from)
+    ServerSecrets::load(server_env_path, &ProcessEnv).map_err(anyhow::Error::from)
 }
 
 pub(crate) fn build_artifact_object_store_with_server_secrets(
@@ -591,24 +600,19 @@ where
     let storage = Storage::new(&data_dir);
     let vault_path = storage.secrets_path();
     let server_env_path = storage.runtime_directory().env_path();
-    let server_secrets = ServerSecrets::load(server_env_path.clone())?;
-    let webhook_secret_present = server_secrets.get(WEBHOOK_SECRET_ENV).is_some();
-
     // Shared config for live reloading
     let effective_settings = apply_runtime_settings(&disk_settings, &args, &data_dir);
     let resolved_server_settings = resolve_server_settings(&effective_settings)?;
+    let startup = resolve_startup(&server_env_path, &ProcessEnv, &resolved_server_settings)?;
+    let auth_mode = startup.auth_mode;
+    let server_secrets = startup.server_secrets;
+    let webhook_secret_present = server_secrets.get(WEBHOOK_SECRET_ENV).is_some();
     let bind_request =
         resolve_bind_request_from_settings(&effective_settings, args.bind.as_deref())?;
     let shared_settings = Arc::new(RwLock::new(effective_settings));
     std::fs::create_dir_all(&data_dir)
         .with_context(|| format!("creating data directory {}", data_dir.display()))?;
-    let (auth_mode, max_concurrent_runs) = {
-        let auth_mode = resolve_auth_mode_with_lookup(&resolved_server_settings, |name| {
-            server_secrets.get(name)
-        })?;
-        let max_concurrent_runs = resolved_server_settings.scheduler.max_concurrent_runs;
-        (auth_mode, max_concurrent_runs)
-    };
+    let max_concurrent_runs = resolved_server_settings.scheduler.max_concurrent_runs;
     let web_enabled = router_web_enabled(&resolved_server_settings);
     let github_meta_resolver = GitHubMetaResolver::from_cache_dir(&storage.cache_dir())?;
 
@@ -641,7 +645,7 @@ where
         store,
         artifact_store,
         vault_path,
-        server_env_path,
+        server_secrets,
         local_daemon_mode: true,
         env_lookup,
         http_client: None,

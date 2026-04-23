@@ -37,7 +37,7 @@ pub fn spawn_detached(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) 
 #[expect(
     clippy::disallowed_types,
     clippy::disallowed_methods,
-    reason = "Detaching must flush stdio synchronously before the double-fork."
+    reason = "Detaching must flush stdio synchronously before the double-fork; post-fork pre-exec env mutation is the one allowed exception to the workspace env-mutation ban."
 )]
 fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) {
     // Flush stdout/stderr before forking so the child process doesn't inherit

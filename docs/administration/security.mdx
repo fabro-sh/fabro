@@ -30,7 +30,7 @@ Fabro is single-tenant software designed for small, trusted teams. The following
 
 - **Enable authentication.** Fabro supports `dev-token` and GitHub OAuth. Do not disable auth outside of local development or controlled demos.
 - **Configure a username allowlist for GitHub OAuth.** `[server.auth.github].allowed_usernames` should contain the exact GitHub users allowed to log in. An empty list rejects everyone.
-- **Configure the session secret used by the web flow.** `SESSION_SECRET` should be provisioned with a strong value on long-lived deployments. If you also provision `FABRO_JWT_PRIVATE_KEY` and `FABRO_JWT_PUBLIC_KEY`, treat them as server runtime secrets, but they are not what currently gates browser auth.
+- **Configure the session secret used by the web flow.** `SESSION_SECRET` should be provisioned with a strong value on long-lived deployments.
 - **Terminate HTTPS or mTLS upstream when needed.** Fabro's listener is plain HTTP/Unix only. If CI, scripts, or a browser must connect over HTTPS, terminate TLS at a reverse proxy or load balancer and keep the Fabro listener on a private network.
 
 ### Secrets

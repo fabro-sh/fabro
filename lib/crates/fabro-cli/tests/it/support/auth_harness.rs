@@ -22,7 +22,8 @@ use fabro_server::auth::GithubEndpoints;
 use fabro_server::ip_allowlist::IpAllowlistConfig;
 use fabro_server::jwt_auth::resolve_auth_mode_with_lookup;
 use fabro_server::server::{
-    RouterOptions, build_router_with_options, create_app_state_with_env_lookup,
+    RouterOptions, build_router_with_options,
+    create_app_state_with_env_lookup_and_server_secret_env,
 };
 use fabro_test::{GitHubAppState, TestContext, apply_test_isolation};
 use fabro_types::RunAuthMethod;
@@ -79,12 +80,23 @@ impl RealAuthHarness {
             _ => None,
         })
         .expect("auth mode should resolve");
-        let state = create_app_state_with_env_lookup(settings, 5, move |name| match name {
-            "SESSION_SECRET" => Some(TEST_SESSION_SECRET.to_string()),
-            "GITHUB_APP_CLIENT_SECRET" => Some(github_client_secret.clone()),
-            "FABRO_DEV_TOKEN" => dev_token.clone(),
-            _ => None,
-        });
+        let state =
+            create_app_state_with_env_lookup_and_server_secret_env(settings, 5, |_| None, {
+                let mut secrets = std::collections::HashMap::from([
+                    (
+                        "SESSION_SECRET".to_string(),
+                        TEST_SESSION_SECRET.to_string(),
+                    ),
+                    (
+                        "GITHUB_APP_CLIENT_SECRET".to_string(),
+                        github_client_secret.clone(),
+                    ),
+                ]);
+                if let Some(token) = dev_token.clone() {
+                    secrets.insert("FABRO_DEV_TOKEN".to_string(), token);
+                }
+                secrets
+            });
         let github_base = github_base_url(&twin.base_url);
         let router = build_router_with_options(
             state,

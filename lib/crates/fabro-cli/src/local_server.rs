@@ -12,9 +12,16 @@ use fabro_server::serve::resolve_bind_request_from_settings;
 use fabro_types::settings::{ServerAuthMethod, SettingsLayer};
 
 pub(crate) fn storage_dir(settings: &SettingsLayer) -> Result<PathBuf> {
+    storage_dir_with_lookup(settings, &|name| std::env::var(name).ok())
+}
+
+pub(crate) fn storage_dir_with_lookup(
+    settings: &SettingsLayer,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<PathBuf> {
     let storage_root = fabro_config::resolve_storage_root(settings);
     let resolved_root = storage_root
-        .resolve(|name| std::env::var(name).ok())
+        .resolve(lookup)
         .map_err(|err| anyhow::anyhow!("failed to resolve {}: {err}", storage_root.as_source()))?;
     Ok(PathBuf::from(resolved_root.value))
 }

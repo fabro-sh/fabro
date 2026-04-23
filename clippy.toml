@@ -20,6 +20,8 @@ disallowed-methods = [
   { path = "std::fs::File::create", reason = "Blocking open; prefer tokio::fs::File::create on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
   { path = "std::fs::File::create_new", reason = "Blocking open; prefer tokio::fs::File::create_new on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
   { path = "std::fs::OpenOptions::open", reason = "Blocking open; prefer tokio::fs::OpenOptions::open on Tokio paths. OS file-lock semantics may require spawn_blocking instead. Document intentional sync I/O with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
+  { path = "std::env::set_var", reason = "Server/process env must be injected at construction or child-process spawn time, not mutated globally. See docs-internal/server-secrets-strategy.md" },
+  { path = "std::env::remove_var", reason = "Server/process env must be injected at construction or child-process spawn time, not mutated globally. See docs-internal/server-secrets-strategy.md" },
   { path = "reqwest::Client::new", reason = "Use fabro_http::http_client() or fabro_http::test_http_client()", allow-invalid = true },
   { path = "reqwest::Client::builder", reason = "Use fabro_http::HttpClientBuilder::new()", allow-invalid = true },
   { path = "reqwest::blocking::Client::new", reason = "Use fabro_http::blocking_http_client() or fabro_http::blocking_test_http_client()", allow-invalid = true },

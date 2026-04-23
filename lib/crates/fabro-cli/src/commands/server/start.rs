@@ -7,15 +7,15 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
+use fabro_config::RuntimeDirectory;
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::user::{FABRO_CONFIG_ENV, default_settings_path, load_settings_config};
-use fabro_config::{RuntimeDirectory, envfile};
 use fabro_server::jwt_auth::auth_method_name;
-use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs};
+use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs, resolve_runtime_server_settings_for_start};
+use fabro_server::{ProcessEnv, validate_startup};
 use fabro_types::settings::ServerAuthMethod;
 use fabro_util::printer::Printer;
-use fabro_util::session_secret;
 use fabro_util::terminal::Styles;
 use tokio::net::{TcpStream, UnixStream};
 use tokio::process::Command as TokioCommand;
@@ -222,33 +222,6 @@ fn configured_auth_methods(config_path: Option<&Path>) -> Vec<ServerAuthMethod> 
         .unwrap_or_default()
 }
 
-fn valid_session_secret(secret: &str) -> bool {
-    session_secret::validate_session_secret(secret).is_ok()
-}
-
-fn load_or_create_local_session_secret(runtime_directory: &RuntimeDirectory) -> Result<String> {
-    if let Some(secret) = std::env::var("SESSION_SECRET")
-        .ok()
-        .filter(|secret| valid_session_secret(secret))
-    {
-        return Ok(secret);
-    }
-
-    let server_env_path = runtime_directory.env_path();
-    if let Some(secret) = envfile::read_env_file(&server_env_path)
-        .ok()
-        .and_then(|entries| entries.get("SESSION_SECRET").cloned())
-        .filter(|secret| valid_session_secret(secret))
-    {
-        return Ok(secret);
-    }
-
-    let secret = session_secret::generate_session_secret();
-    envfile::merge_env_file(&server_env_path, [("SESSION_SECRET", secret.as_str())])
-        .with_context(|| format!("merging session secret into {}", server_env_path.display()))?;
-    Ok(secret)
-}
-
 // ---------------------------------------------------------------------------
 // Foreground mode
 // ---------------------------------------------------------------------------
@@ -261,18 +234,6 @@ async fn execute_foreground(
     styles: &'static Styles,
     _printer: Printer,
 ) -> Result<()> {
-    let session_secret = load_or_create_local_session_secret(&RuntimeDirectory::new(&storage_dir))?;
-    let prior_session_secret = std::env::var_os("SESSION_SECRET");
-    std::env::set_var("SESSION_SECRET", &session_secret);
-    let _env_guard =
-        scopeguard::guard(
-            prior_session_secret,
-            |prior_session_secret| match prior_session_secret {
-                Some(value) => std::env::set_var("SESSION_SECRET", value),
-                None => std::env::remove_var("SESSION_SECRET"),
-            },
-        );
-
     super::foreground::serve_with_daemon_record(serve_args, bind, storage_dir, styles).await
 }
 
@@ -302,6 +263,14 @@ async fn execute_daemon(
         }
         return Ok(());
     }
+
+    let resolved_settings = resolve_runtime_server_settings_for_start(serve_args, storage_dir)?;
+    validate_startup(
+        runtime_directory.env_path().as_path(),
+        &ProcessEnv,
+        &resolved_settings,
+    )
+    .map_err(anyhow::Error::from)?;
 
     let log_path = runtime_directory.log_path();
     if let Some(parent) = log_path.parent() {
@@ -347,9 +316,7 @@ async fn execute_daemon(
         cmd.arg("--watch-web");
     }
 
-    let session_secret = load_or_create_local_session_secret(&runtime_directory)?;
     cmd.arg("--storage-dir").arg(storage_dir);
-    cmd.env("SESSION_SECRET", &session_secret);
 
     cmd.env_remove("FABRO_JSON");
     cmd.stdout(stdout_log)

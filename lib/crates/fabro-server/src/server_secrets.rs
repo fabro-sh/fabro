@@ -11,6 +11,27 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
+pub trait EnvSource {
+    fn snapshot(&self) -> HashMap<String, String>;
+}
+
+pub struct ProcessEnv;
+
+impl EnvSource for ProcessEnv {
+    fn snapshot(&self) -> HashMap<String, String> {
+        std::env::vars().collect()
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct StubEnv(pub(crate) HashMap<String, String>);
+
+impl EnvSource for StubEnv {
+    fn snapshot(&self) -> HashMap<String, String> {
+        self.0.clone()
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
     #[error(transparent)]
@@ -19,28 +40,24 @@ pub(crate) enum Error {
 
 pub(crate) struct ServerSecrets {
     path:         PathBuf,
+    env_entries:  HashMap<String, String>,
     file_entries: HashMap<String, String>,
-    env_lookup:   EnvLookup,
 }
 
 impl ServerSecrets {
-    pub(crate) fn load(path: PathBuf) -> Result<Self, Error> {
-        Self::with_env_lookup(path, |name| std::env::var(name).ok())
-    }
-
-    pub(crate) fn with_env_lookup<F>(path: PathBuf, env_lookup: F) -> Result<Self, Error>
-    where
-        F: Fn(&str) -> Option<String> + Send + Sync + 'static,
-    {
+    pub(crate) fn load(path: PathBuf, env: &dyn EnvSource) -> Result<Self, Error> {
         Ok(Self {
+            env_entries: env.snapshot(),
             file_entries: envfile::read_env_file(&path)?,
             path,
-            env_lookup: Arc::new(env_lookup),
         })
     }
 
     pub(crate) fn get(&self, name: &str) -> Option<String> {
-        (self.env_lookup)(name).or_else(|| self.file_entries.get(name).cloned())
+        self.env_entries
+            .get(name)
+            .cloned()
+            .or_else(|| self.file_entries.get(name).cloned())
     }
 }
 
@@ -48,6 +65,7 @@ impl std::fmt::Debug for ServerSecrets {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ServerSecrets")
             .field("path", &self.path)
+            .field("env_entries", &self.env_entries.keys().collect::<Vec<_>>())
             .field(
                 "file_entries",
                 &self.file_entries.keys().collect::<Vec<_>>(),
@@ -149,13 +167,15 @@ impl std::fmt::Debug for ProviderCredentials {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     use fabro_auth::{AuthCredential, AuthDetails};
+    use fabro_config::envfile;
     use fabro_vault::{SecretType, Vault};
     use tokio::sync::RwLock as AsyncRwLock;
 
-    use super::ProviderCredentials;
+    use super::{ProviderCredentials, ServerSecrets, StubEnv};
     use crate::server_secrets::Provider;
 
     #[tokio::test]
@@ -197,5 +217,49 @@ mod tests {
         assert_eq!(credentials.configured_providers().await, vec![
             Provider::Anthropic
         ]);
+    }
+
+    #[test]
+    fn server_secrets_snapshot_prefers_env_over_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let env_path = dir.path().join("server.env");
+        envfile::write_env_file(
+            &env_path,
+            &HashMap::from([
+                ("SESSION_SECRET".to_string(), "file-value".to_string()),
+                (
+                    "GITHUB_APP_CLIENT_SECRET".to_string(),
+                    "file-client".to_string(),
+                ),
+            ]),
+        )
+        .unwrap();
+
+        let secrets = ServerSecrets::load(
+            env_path,
+            &StubEnv(HashMap::from([(
+                "SESSION_SECRET".to_string(),
+                "env-value".to_string(),
+            )])),
+        )
+        .unwrap();
+
+        assert_eq!(secrets.get("SESSION_SECRET").as_deref(), Some("env-value"));
+        assert_eq!(
+            secrets.get("GITHUB_APP_CLIENT_SECRET").as_deref(),
+            Some("file-client")
+        );
+    }
+
+    #[test]
+    fn server_secrets_snapshot_is_owned_after_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let env_path = dir.path().join("server.env");
+        let mut env = HashMap::from([("SESSION_SECRET".to_string(), "before".to_string())]);
+
+        let secrets = ServerSecrets::load(env_path, &StubEnv(env.clone())).unwrap();
+        env.insert("SESSION_SECRET".to_string(), "after".to_string());
+
+        assert_eq!(secrets.get("SESSION_SECRET").as_deref(), Some("before"));
     }
 }

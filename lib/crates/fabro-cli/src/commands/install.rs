@@ -26,8 +26,8 @@ use fabro_config::daemon::ServerDaemon;
 use fabro_config::user::{SETTINGS_CONFIG_FILENAME, default_storage_dir};
 use fabro_config::{ResolveError, Storage, envfile};
 use fabro_install::{
-    InstallListenConfig, generate_jwt_keypair, merge_server_settings as merge_server_settings_impl,
-    write_github_app_settings, write_token_settings,
+    InstallListenConfig, PendingSettingsWrite, merge_server_settings as merge_server_settings_impl,
+    persist_install_outputs_direct, write_github_app_settings, write_token_settings,
 };
 use fabro_model::Provider;
 use fabro_server::serve;
@@ -883,13 +883,6 @@ enum PendingGitHubSettings {
     },
 }
 
-#[derive(Clone, Copy)]
-struct PendingSettingsWrite<'a> {
-    path:              &'a Path,
-    contents:          &'a str,
-    previous_contents: Option<&'a str>,
-}
-
 async fn setup_github_app(
     s: &Styles,
     web_url: &str,
@@ -1148,15 +1141,24 @@ fn credential_secret_request(credential: &AuthCredential) -> Result<CreateSecret
     })
 }
 
-fn persist_server_env_secrets(storage_dir: &Path, secrets: &[(String, String)]) -> Result<()> {
-    if secrets.is_empty() {
-        return Ok(());
-    }
+fn server_env_updates(secrets: &[(String, String)]) -> Vec<envfile::EnvFileUpdate> {
+    secrets
+        .iter()
+        .map(|(key, value)| envfile::EnvFileUpdate {
+            key:     key.clone(),
+            value:   value.clone(),
+            comment: None,
+        })
+        .collect()
+}
 
-    let env_path = Storage::new(storage_dir).runtime_directory().env_path();
-    envfile::merge_env_file(&env_path, secrets.iter().cloned())
-        .with_context(|| format!("merging server env secrets into {}", env_path.display()))?;
-    Ok(())
+fn server_env_removals(keys: &[&'static str]) -> Vec<envfile::EnvFileRemoval> {
+    keys.iter()
+        .map(|key| envfile::EnvFileRemoval {
+            key:     (*key).to_string(),
+            comment: None,
+        })
+        .collect()
 }
 
 async fn persist_install_outputs(
@@ -1221,20 +1223,15 @@ fn persist_github_install_changes(
     let previous_vault = std::fs::read_to_string(&vault_path).ok();
 
     let result = (|| -> Result<()> {
-        let mut server_env = envfile::read_env_file(&server_env_path)
-            .with_context(|| format!("reading env file {}", server_env_path.display()))?;
-        for key in &writes.server_env_remove {
-            server_env.remove(*key);
-        }
-        for (key, value) in &writes.server_env_set {
-            server_env.insert(key.clone(), value.clone());
-        }
-        if server_env.is_empty() {
-            restore_optional_file(&server_env_path, None)?;
-        } else {
-            envfile::write_env_file(&server_env_path, &server_env)
-                .with_context(|| format!("writing env file {}", server_env_path.display()))?;
-        }
+        let server_env_writes = server_env_updates(&writes.server_env_set);
+        let server_env_removals = server_env_removals(&writes.server_env_remove);
+        persist_install_outputs_direct(
+            storage_dir,
+            &server_env_writes,
+            &server_env_removals,
+            &[],
+            Some(&writes.settings_write),
+        )?;
 
         let mut vault = Vault::load(vault_path.clone()).map_err(anyhow::Error::from)?;
         for key in &writes.vault_remove {
@@ -1249,14 +1246,6 @@ fn persist_github_install_changes(
                 .map_err(anyhow::Error::from)?;
         }
 
-        std::fs::write(writes.settings_write.path, writes.settings_write.contents).with_context(
-            || {
-                format!(
-                    "writing settings file {}",
-                    writes.settings_write.path.display()
-                )
-            },
-        )?;
         Ok(())
     })();
 
@@ -1305,12 +1294,16 @@ async fn persist_install_outputs_with_settings(
     connect_server: impl for<'a> Fn(&'a Path) -> BoxFuture<'a, Result<server_client::Client>>,
     stop_server: impl for<'a> Fn(&'a Path, Duration) -> BoxFuture<'a, bool>,
 ) -> Result<()> {
-    persist_server_env_secrets(storage_dir, server_env_secrets)?;
-
-    if let Some(write) = settings_write {
-        std::fs::write(write.path, write.contents)
-            .with_context(|| format!("writing settings file {}", write.path.display()))?;
-    }
+    let server_env_path = Storage::new(storage_dir).runtime_directory().env_path();
+    let previous_server_env = std::fs::read_to_string(&server_env_path).ok();
+    let settings_write_ref = settings_write.as_ref();
+    persist_install_outputs_direct(
+        storage_dir,
+        &server_env_updates(server_env_secrets),
+        &[],
+        &[],
+        settings_write_ref,
+    )?;
 
     let persist_result = persist_vault_secrets_with(
         storage_dir,
@@ -1322,6 +1315,7 @@ async fn persist_install_outputs_with_settings(
     .await;
 
     if let Err(err) = persist_result {
+        restore_optional_file(&server_env_path, previous_server_env.as_deref())?;
         if let Some(write) = settings_write {
             match write.previous_contents {
                 Some(previous) => std::fs::write(write.path, previous)
@@ -1820,13 +1814,6 @@ async fn run_install_inner(
             s.green.apply_to("✔")
         );
 
-        let (jwt_private_pem, jwt_public_pem) = generate_jwt_keypair()?;
-        fabro_util::printerr!(
-            printer,
-            "  {} Ed25519 JWT keypair generated",
-            s.green.apply_to("✔")
-        );
-
         let dev_token = if fabro_config::dev_token_auth_enabled(&install_settings) {
             let token = dev_token::read_or_mint_dev_token_for_install(
                 &fabro_util::Home::from_env().dev_token_path(),
@@ -1847,14 +1834,7 @@ async fn run_install_inner(
             None
         };
 
-        let jwt_private_b64 = BASE64_STANDARD.encode(jwt_private_pem.as_bytes());
-        let jwt_public_b64 = BASE64_STANDARD.encode(jwt_public_pem.as_bytes());
-
-        let mut generated_server_env_pairs = vec![
-            ("FABRO_JWT_PRIVATE_KEY".to_string(), jwt_private_b64),
-            ("FABRO_JWT_PUBLIC_KEY".to_string(), jwt_public_b64),
-            ("SESSION_SECRET".to_string(), session_secret),
-        ];
+        let mut generated_server_env_pairs = vec![("SESSION_SECRET".to_string(), session_secret)];
         if let Some(token) = dev_token {
             generated_server_env_pairs.push(("FABRO_DEV_TOKEN".to_string(), token));
         }
@@ -2037,39 +2017,6 @@ mod tests {
     fn session_secret_is_lowercase() {
         let secret = fabro_util::session_secret::generate_session_secret();
         assert!(secret.chars().all(|c| !c.is_ascii_uppercase()));
-    }
-
-    // -- JWT keypair --
-
-    #[tokio::test]
-    async fn jwt_keypair_private_pem_header() {
-        let (private, _) = generate_jwt_keypair().unwrap();
-        assert!(
-            private.starts_with("-----BEGIN PRIVATE KEY-----"),
-            "private PEM: {private}"
-        );
-    }
-
-    #[tokio::test]
-    async fn jwt_keypair_public_pem_header() {
-        let (_, public) = generate_jwt_keypair().unwrap();
-        assert!(
-            public.starts_with("-----BEGIN PUBLIC KEY-----"),
-            "public PEM: {public}"
-        );
-    }
-
-    #[tokio::test]
-    async fn jwt_keypair_public_parses() {
-        let (_, public) = generate_jwt_keypair().unwrap();
-        jsonwebtoken::DecodingKey::from_ed_pem(public.as_bytes()).expect("public key should parse");
-    }
-
-    #[tokio::test]
-    async fn jwt_keypair_private_parses() {
-        let (private, _) = generate_jwt_keypair().unwrap();
-        jsonwebtoken::EncodingKey::from_ed_pem(private.as_bytes())
-            .expect("private key should parse");
     }
 
     // -- Config TOML generation --
@@ -2524,11 +2471,8 @@ client_id = "client-id"
     #[tokio::test]
     async fn persist_install_outputs_persists_vault_secrets_via_server_when_autostarting() {
         let dir = tempfile::tempdir().unwrap();
-        let server_env_pairs = vec![
-            ("SESSION_SECRET".to_string(), "session".to_string()),
-            ("FABRO_JWT_PUBLIC_KEY".to_string(), "public-key".to_string()),
-        ];
-        let vault_secrets = vec![
+        let server_env_pairs = [("SESSION_SECRET".to_string(), "session".to_string())];
+        let vault_secrets = [
             CreateSecretRequest {
                 name:        "GITHUB_TOKEN".to_string(),
                 value:       "gh-token".to_string(),
@@ -2562,7 +2506,8 @@ client_id = "client-id"
             .await;
         let stop_called = Arc::new(AtomicBool::new(false));
 
-        persist_server_env_secrets(dir.path(), &server_env_pairs).unwrap();
+        let env_path = Storage::new(dir.path()).runtime_directory().env_path();
+        envfile::merge_env_file(&env_path, server_env_pairs.iter().cloned()).unwrap();
         persist_vault_secrets_with(
             dir.path(),
             &vault_secrets,
@@ -2589,7 +2534,6 @@ client_id = "client-id"
             std::fs::read_to_string(Storage::new(dir.path()).runtime_directory().env_path())
                 .unwrap();
         assert!(server_env.contains("SESSION_SECRET=session"));
-        assert!(server_env.contains("FABRO_JWT_PUBLIC_KEY=public-key"));
         assert_eq!(created.calls_async().await, 2);
         assert!(stop_called.load(Ordering::SeqCst));
         assert!(!Storage::new(dir.path()).secrets_path().exists());
@@ -2598,7 +2542,7 @@ client_id = "client-id"
     #[tokio::test]
     async fn persist_vault_secrets_with_leaves_running_server_up() {
         let dir = tempfile::tempdir().unwrap();
-        let vault_secrets = vec![CreateSecretRequest {
+        let vault_secrets = [CreateSecretRequest {
             name:        "GITHUB_TOKEN".to_string(),
             value:       "gh-token".to_string(),
             type_:       ApiSecretType::Environment,
@@ -2806,10 +2750,10 @@ client_id = "client-id"
     }
 
     #[tokio::test]
-    async fn persist_install_outputs_with_settings_does_not_write_settings_on_secret_failure() {
+    async fn persist_install_outputs_with_settings_rolls_back_new_files_on_secret_failure() {
         let dir = tempfile::tempdir().unwrap();
-        let server_env_pairs = vec![("SESSION_SECRET".to_string(), "session".to_string())];
-        let vault_secrets = vec![CreateSecretRequest {
+        let server_env_pairs = [("SESSION_SECRET".to_string(), "session".to_string())];
+        let vault_secrets = [CreateSecretRequest {
             name:        "GITHUB_CLI_TOKEN".to_string(),
             value:       "gh-token".to_string(),
             type_:       ApiSecretType::Environment,
@@ -2844,7 +2788,7 @@ client_id = "client-id"
 
         assert!(result.is_err());
         assert!(
-            Storage::new(dir.path())
+            !Storage::new(dir.path())
                 .runtime_directory()
                 .env_path()
                 .exists()
@@ -2856,8 +2800,8 @@ client_id = "client-id"
     #[tokio::test]
     async fn persist_install_outputs_with_settings_restores_previous_contents_on_secret_failure() {
         let dir = tempfile::tempdir().unwrap();
-        let server_env_pairs = vec![("SESSION_SECRET".to_string(), "session".to_string())];
-        let vault_secrets = vec![CreateSecretRequest {
+        let server_env_pairs = [("SESSION_SECRET".to_string(), "session".to_string())];
+        let vault_secrets = [CreateSecretRequest {
             name:        "GITHUB_CLI_TOKEN".to_string(),
             value:       "gh-token".to_string(),
             type_:       ApiSecretType::Environment,

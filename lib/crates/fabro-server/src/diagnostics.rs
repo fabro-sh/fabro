@@ -537,30 +537,6 @@ fn check_crypto(state: &AppState) -> CheckResult {
         }
     }
 
-    if let Some(raw) = state.server_secret("FABRO_JWT_PUBLIC_KEY") {
-        if let Err(err) = decode_pem_value("FABRO_JWT_PUBLIC_KEY", &raw).and_then(|pem| {
-            jsonwebtoken::DecodingKey::from_ed_pem(pem.as_bytes())
-                .map(|_| ())
-                .map_err(|e| format!("invalid JWT public key: {e}"))
-        }) {
-            errors.push(err);
-        } else {
-            details.push(CheckDetail::new("FABRO_JWT_PUBLIC_KEY valid".to_string()));
-        }
-    }
-
-    if let Some(raw) = state.server_secret("FABRO_JWT_PRIVATE_KEY") {
-        if let Err(err) = decode_pem_value("FABRO_JWT_PRIVATE_KEY", &raw).and_then(|pem| {
-            jsonwebtoken::EncodingKey::from_ed_pem(pem.as_bytes())
-                .map(|_| ())
-                .map_err(|e| format!("invalid JWT private key: {e}"))
-        }) {
-            errors.push(err);
-        } else {
-            details.push(CheckDetail::new("FABRO_JWT_PRIVATE_KEY valid".to_string()));
-        }
-    }
-
     if errors.is_empty() {
         CheckResult {
             name: "Crypto".to_string(),

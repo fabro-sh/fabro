@@ -631,8 +631,11 @@ fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
 
 fn write_test_server_dev_token(storage_dir: &Path) {
     let server_env_path = Storage::new(storage_dir).runtime_directory().env_path();
-    envfile::merge_env_file(&server_env_path, [("FABRO_DEV_TOKEN", TEST_DEV_TOKEN)])
-        .unwrap_or_else(|err| panic!("failed to write {}: {err}", server_env_path.display()));
+    envfile::merge_env_file(&server_env_path, [
+        ("FABRO_DEV_TOKEN", TEST_DEV_TOKEN),
+        ("SESSION_SECRET", TEST_SESSION_SECRET),
+    ])
+    .unwrap_or_else(|err| panic!("failed to write {}: {err}", server_env_path.display()));
 }
 
 fn write_test_home_dev_token(settings_path: &Path) {

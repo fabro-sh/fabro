@@ -500,21 +500,20 @@ mod tests {
     #[test]
     fn resolve_local_tcp_credential_does_not_fallback_to_home_dev_token() {
         let temp_home = tempfile::tempdir().unwrap();
-        std::fs::write(
-            temp_home.path().join("dev-token"),
-            "fabro_dev_abababababababababababababababababababababababababababababababab",
-        )
-        .unwrap();
-        let original_home = std::env::var_os("FABRO_HOME");
-        std::env::set_var("FABRO_HOME", temp_home.path());
-        let _guard = scopeguard::guard(original_home, |original_home| match original_home {
-            Some(value) => std::env::set_var("FABRO_HOME", value),
-            None => std::env::remove_var("FABRO_HOME"),
-        });
-
+        let token = "fabro_dev_abababababababababababababababababababababababababababababababab";
+        std::fs::write(temp_home.path().join("dev-token"), token).unwrap();
         let target = ServerTarget::http_url("http://127.0.0.1:32276").unwrap();
+        let store = AuthStore::new(temp_home.path().join("auth.json"));
+        assert_eq!(
+            load_cli_dev_token_from_sources(None, &Home::new(temp_home.path())).as_deref(),
+            Some(token)
+        );
 
-        assert!(resolve_local_tcp_credential(&target).unwrap().is_none());
+        assert!(
+            resolve_local_tcp_credential_with_store(&target, None, &store, Utc::now())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

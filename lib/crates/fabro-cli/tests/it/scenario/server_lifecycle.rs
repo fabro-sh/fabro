@@ -13,10 +13,16 @@ fn start_status_stop_lifecycle() {
     let server_env_path = fabro_config::Storage::new(&storage_dir)
         .runtime_directory()
         .env_path();
-    fabro_config::envfile::merge_env_file(&server_env_path, [(
-        "FABRO_DEV_TOKEN",
-        "fabro_dev_abababababababababababababababababababababababababababababababab",
-    )])
+    fabro_config::envfile::merge_env_file(&server_env_path, [
+        (
+            "FABRO_DEV_TOKEN",
+            "fabro_dev_abababababababababababababababababababababababababababababababab",
+        ),
+        (
+            "SESSION_SECRET",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        ),
+    ])
     .unwrap();
     fabro_util::dev_token::write_dev_token(
         &context.home_dir.join(".fabro").join("dev-token"),

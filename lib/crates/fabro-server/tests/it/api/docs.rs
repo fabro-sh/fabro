@@ -23,8 +23,12 @@ fn security_doc_does_not_require_jwt_keys_for_the_current_web_flow() {
         "security doc should still mention the session secret"
     );
     assert!(
-        !security.contains("`FABRO_JWT_PRIVATE_KEY`, `FABRO_JWT_PUBLIC_KEY`, and `SESSION_SECRET`"),
-        "security doc should not describe JWT keys as required for the current web flow"
+        !security.contains("FABRO_JWT_PRIVATE_KEY"),
+        "security doc should not mention removed JWT key settings"
+    );
+    assert!(
+        !security.contains("FABRO_JWT_PUBLIC_KEY"),
+        "security doc should not mention removed JWT key settings"
     );
 }
 

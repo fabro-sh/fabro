@@ -764,8 +764,6 @@ async fn token_install_finish_persists_settings_env_and_vault() {
             .env_path(),
     )
     .unwrap();
-    assert!(server_env.contains("FABRO_JWT_PRIVATE_KEY="));
-    assert!(server_env.contains("FABRO_JWT_PUBLIC_KEY="));
     assert!(server_env.contains("SESSION_SECRET="));
     assert!(server_env.contains("FABRO_DEV_TOKEN="));
     assert!(!server_env.contains("AWS_ACCESS_KEY_ID="));

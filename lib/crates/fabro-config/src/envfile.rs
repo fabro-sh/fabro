@@ -358,7 +358,7 @@ mod tests {
 
         let entries = merge_env_file(&path, [
             ("SESSION_SECRET", "secret"),
-            ("FABRO_JWT_PUBLIC_KEY", "jwt"),
+            ("FABRO_DEV_TOKEN", "token"),
         ])
         .unwrap();
 
@@ -368,8 +368,8 @@ mod tests {
             Some("secret")
         );
         assert_eq!(
-            entries.get("FABRO_JWT_PUBLIC_KEY").map(String::as_str),
-            Some("jwt")
+            entries.get("FABRO_DEV_TOKEN").map(String::as_str),
+            Some("token")
         );
     }
 

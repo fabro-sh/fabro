@@ -125,8 +125,9 @@ use crate::jwt_auth::{
 use crate::run_files::{FilesInFlight, list_run_files, new_files_in_flight};
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
 use crate::server_secrets::{
-    LlmClientResult, ProviderCredentials, ServerSecrets, auth_issue_message,
+    LlmClientResult, ProviderCredentials, ServerSecrets, StubEnv, auth_issue_message,
 };
+use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
 use crate::{
     demo, diagnostics, run_manifest, security_headers, settings_view, static_files, web_auth,
 };
@@ -576,7 +577,7 @@ pub struct AppState {
     pub(crate) files_in_flight: FilesInFlight,
 
     pub(crate) vault:                Arc<AsyncRwLock<Vault>>,
-    pub(crate) server_secrets:       ServerSecrets,
+    pub(super) server_secrets:       ServerSecrets,
     pub(crate) provider_credentials: ProviderCredentials,
     pub(crate) settings:             Arc<RwLock<SettingsLayer>>,
     pub(crate) server_settings:      RwLock<Arc<ResolvedServerSettings>>,
@@ -596,7 +597,7 @@ pub(crate) struct AppStateConfig {
     pub(crate) store:                     Arc<Database>,
     pub(crate) artifact_store:            ArtifactStore,
     pub(crate) vault_path:                PathBuf,
-    pub(crate) server_env_path:           PathBuf,
+    pub(crate) server_secrets:            ServerSecrets,
     pub(crate) local_daemon_mode:         bool,
     pub(crate) env_lookup:                EnvLookup,
     pub(crate) http_client:               Option<fabro_http::HttpClient>,
@@ -2490,6 +2491,21 @@ pub fn create_app_state_with_env_lookup(
     max_concurrent_runs: usize,
     env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
 ) -> Arc<AppState> {
+    create_app_state_with_env_lookup_and_server_secret_env(
+        settings,
+        max_concurrent_runs,
+        env_lookup,
+        HashMap::new(),
+    )
+}
+
+#[doc(hidden)]
+pub fn create_app_state_with_env_lookup_and_server_secret_env(
+    settings: SettingsLayer,
+    max_concurrent_runs: usize,
+    env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
+    server_secret_env: HashMap<String, String>,
+) -> Arc<AppState> {
     let (store, artifact_store) = test_store_bundle();
     let env_lookup: EnvLookup = Arc::new(env_lookup);
     let mut config = default_test_app_state_config(
@@ -2499,6 +2515,8 @@ pub fn create_app_state_with_env_lookup(
     );
     config.store = store;
     config.artifact_store = artifact_store;
+    let server_env_path = config.vault_path.with_file_name("server.env");
+    config.server_secrets = load_test_server_secrets(server_env_path, server_secret_env);
     build_app_state(config).expect("test app state should build")
 }
 
@@ -2535,7 +2553,7 @@ pub(crate) fn create_test_app_state_with_session_key(
         store,
         artifact_store,
         vault_path,
-        server_env_path,
+        server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
         local_daemon_mode,
         env_lookup,
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
@@ -2571,7 +2589,7 @@ fn default_test_app_state_config(
         store,
         artifact_store,
         vault_path,
-        server_env_path,
+        server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
         local_daemon_mode: false,
         env_lookup,
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
@@ -2628,6 +2646,10 @@ fn default_env_lookup() -> EnvLookup {
     Arc::new(|name| std::env::var(name).ok())
 }
 
+fn load_test_server_secrets(path: PathBuf, env: HashMap<String, String>) -> ServerSecrets {
+    ServerSecrets::load(path, &StubEnv(env)).expect("test server secrets should load")
+}
+
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
         settings,
@@ -2636,17 +2658,13 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         store,
         artifact_store,
         vault_path,
-        server_env_path,
+        server_secrets,
         local_daemon_mode,
         env_lookup,
         http_client,
     } = config;
 
     let vault = Arc::new(AsyncRwLock::new(Vault::load(vault_path)?));
-    let server_secrets = ServerSecrets::with_env_lookup(server_env_path, {
-        let env_lookup = Arc::clone(&env_lookup);
-        move |name| env_lookup(name)
-    })?;
     let provider_credentials = ProviderCredentials::with_env_lookup(Arc::clone(&vault), {
         let env_lookup = Arc::clone(&env_lookup);
         move |name| env_lookup(name)
@@ -3814,8 +3832,7 @@ fn worker_command(
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
 
-    cmd.env_remove("FABRO_JSON");
-    cmd.env_remove("FABRO_DEV_TOKEN");
+    apply_worker_env(&mut cmd);
     if state
         .server_settings()
         .auth
@@ -7230,9 +7247,9 @@ async fn render_dot_subprocess(
         .map_err(|err| RenderSubprocessError::SpawnFailed(err.to_string()))?;
     let exe = render_graph_subprocess_exe(exe_override)?;
     let mut cmd = Command::new(exe);
+    apply_render_graph_env(&mut cmd);
     cmd.arg("__render-graph")
         .env("FABRO_TELEMETRY", "off")
-        .env_remove("FABRO_JSON")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -7459,9 +7476,12 @@ mod tests {
     )]
     fn webhook_test_app(auth_mode: AuthMode) -> Router {
         let secret = TEST_WEBHOOK_SECRET.to_string();
-        let state = create_app_state_with_env_lookup(SettingsLayer::default(), 5, move |name| {
-            (name == WEBHOOK_SECRET_ENV).then(|| secret.clone())
-        });
+        let state = create_app_state_with_env_lookup_and_server_secret_env(
+            SettingsLayer::default(),
+            5,
+            |_| None,
+            HashMap::from([(WEBHOOK_SECRET_ENV.to_string(), secret)]),
+        );
         build_router_with_options(
             state,
             &auth_mode,
@@ -7870,12 +7890,14 @@ type = "http"
         )
         .unwrap();
 
-        let secrets =
-            ServerSecrets::with_env_lookup(dir.path().join("server.env"), |name| match name {
-                "SESSION_SECRET" => Some("env-value".to_string()),
-                _ => None,
-            })
-            .unwrap();
+        let secrets = ServerSecrets::load(
+            dir.path().join("server.env"),
+            &StubEnv(HashMap::from([(
+                "SESSION_SECRET".to_string(),
+                "env-value".to_string(),
+            )])),
+        )
+        .unwrap();
 
         assert_eq!(secrets.get("SESSION_SECRET").as_deref(), Some("env-value"));
         assert_eq!(
@@ -7899,7 +7921,7 @@ type = "http"
         .unwrap();
         assert_eq!(
             command_env_value(&github_cmd, "FABRO_DEV_TOKEN"),
-            EnvOverride::Removed
+            EnvOverride::Unchanged
         );
 
         let dev_token = tempfile::tempdir().unwrap();
@@ -7955,10 +7977,14 @@ allowed_usernames = ["octocat"]
         .write(&runtime_directory)
         .unwrap();
 
-        create_app_state_with_env_lookup(settings, 5, move |name| match name {
-            "FABRO_DEV_TOKEN" => dev_token.clone(),
-            _ => None,
-        })
+        create_app_state_with_env_lookup_and_server_secret_env(
+            settings,
+            5,
+            |_| None,
+            dev_token
+                .map(|token| HashMap::from([("FABRO_DEV_TOKEN".to_string(), token)]))
+                .unwrap_or_default(),
+        )
     }
 
     #[cfg(unix)]

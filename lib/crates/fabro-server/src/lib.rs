@@ -32,7 +32,10 @@ pub mod serve;
 pub mod server;
 mod server_secrets;
 mod settings_view;
+mod spawn_env;
+mod startup;
 pub mod static_files;
 pub mod web_auth;
 
 pub use error::{ApiError, Error, Result};
+pub use startup::{EnvSource, ProcessEnv, StartupValidationError, validate_startup};

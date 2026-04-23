@@ -6,17 +6,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_config::{Storage, envfile};
 use fabro_vault::{SecretType as VaultSecretType, Vault};
-use ring::rand::SystemRandom;
-use ring::signature::{Ed25519KeyPair, KeyPair as _};
-
-const ED25519_SPKI_PREFIX: [u8; 12] = [
-    0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x03, 0x21, 0x00,
-];
-const ED25519_PUBLIC_KEY_LEN: usize = 32;
 
 pub struct PendingSettingsWrite<'a> {
     pub path:              &'a Path,
@@ -93,47 +84,6 @@ impl std::error::Error for PersistInstallOutputsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.source.source()
     }
-}
-
-fn pem_encode(label: &str, bytes: &[u8]) -> String {
-    let body = BASE64_STANDARD.encode(bytes);
-    let mut pem = String::new();
-    pem.push_str("-----BEGIN ");
-    pem.push_str(label);
-    pem.push_str("-----\n");
-    for chunk in body.as_bytes().chunks(64) {
-        pem.push_str(std::str::from_utf8(chunk).expect("base64 output should be valid UTF-8"));
-        pem.push('\n');
-    }
-    pem.push_str("-----END ");
-    pem.push_str(label);
-    pem.push_str("-----\n");
-    pem
-}
-
-fn ed25519_public_key_spki(public_key: &[u8]) -> Result<Vec<u8>> {
-    anyhow::ensure!(
-        public_key.len() == ED25519_PUBLIC_KEY_LEN,
-        "generated Ed25519 public key had unexpected length"
-    );
-
-    let mut spki = Vec::with_capacity(ED25519_SPKI_PREFIX.len() + public_key.len());
-    spki.extend_from_slice(&ED25519_SPKI_PREFIX);
-    spki.extend_from_slice(public_key);
-    Ok(spki)
-}
-
-pub fn generate_jwt_keypair() -> Result<(String, String)> {
-    let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
-        .map_err(|_| anyhow::anyhow!("failed to generate Ed25519 keypair"))?;
-    let keypair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref())
-        .map_err(|_| anyhow::anyhow!("failed to parse generated Ed25519 keypair"))?;
-    let public_der = ed25519_public_key_spki(keypair.public_key().as_ref())?;
-
-    Ok((
-        pem_encode("PRIVATE KEY", pkcs8.as_ref()),
-        pem_encode("PUBLIC KEY", &public_der),
-    ))
 }
 
 pub fn default_web_url() -> String {
