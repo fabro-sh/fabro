@@ -48,8 +48,7 @@ pub use interview::{InterviewQuestionRecord, InterviewQuestionType};
 pub use node_status::NodeStatusRecord;
 pub use outcome::{FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageStatus};
 pub use pull_request::{
-    MergeMethod, PullRequestDetail, PullRequestGithubDetail, PullRequestRecord, PullRequestRef,
-    PullRequestUser,
+    PullRequestDetail, PullRequestGithubDetail, PullRequestRecord, PullRequestRef, PullRequestUser,
 };
 pub use retro::{
     AggregateStats, FrictionKind, FrictionPoint, Learning, LearningCategory, OpenItem,

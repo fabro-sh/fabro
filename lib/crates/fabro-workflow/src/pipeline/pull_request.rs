@@ -304,34 +304,36 @@ pub async fn build_pr_body(
     run_store: &RunStoreHandle,
     conclusion: Option<&Conclusion>,
 ) -> Result<String, String> {
+    build_pr_body_with_state(diff, goal, model, run_store, conclusion, None).await
+}
+
+async fn build_pr_body_with_state(
+    diff: &str,
+    goal: &str,
+    model: &str,
+    run_store: &RunStoreHandle,
+    conclusion: Option<&Conclusion>,
+    run_state: Option<&fabro_store::RunProjection>,
+) -> Result<String, String> {
     debug!("Building PR body");
 
-    let loaded_conclusion = if conclusion.is_none() {
+    let loaded_run_state = if run_state.is_none() {
         run_store
             .state()
             .await
             .inspect_err(|err| {
-                tracing::warn!(error = %err, "Failed to load conclusion from store for PR body");
+                tracing::warn!(error = %err, "Failed to load run state from store for PR body");
             })
             .ok()
-            .and_then(|state| state.conclusion)
     } else {
         None
     };
-    let conclusion = conclusion.or(loaded_conclusion.as_ref());
-    let run_state = run_store
-        .state()
-        .await
-        .inspect_err(|err| {
-            tracing::warn!(error = %err, "Failed to load run state from store for PR body");
-        })
-        .ok();
-    let plan_text = run_state.as_ref().and_then(read_plan_text);
-    let retro = run_state.as_ref().and_then(|state| state.retro.clone());
-    let run_spec = run_state.as_ref().and_then(|state| state.spec.clone());
-    let dot_source = run_state
-        .as_ref()
-        .and_then(|state| state.graph_source.clone());
+    let run_state = run_state.or(loaded_run_state.as_ref());
+    let conclusion = conclusion.or_else(|| run_state.and_then(|state| state.conclusion.as_ref()));
+    let plan_text = run_state.and_then(read_plan_text);
+    let retro = run_state.and_then(|state| state.retro.clone());
+    let run_spec = run_state.and_then(|state| state.spec.clone());
+    let dot_source = run_state.and_then(|state| state.graph_source.clone());
 
     // Build LLM prompt
     let system = if plan_text.is_some() {
@@ -407,41 +409,7 @@ pub struct OpenPullRequestRequest<'a> {
     pub auto_merge:  Option<AutoMergeOptions>,
     pub run_store:   &'a RunStoreHandle,
     pub conclusion:  Option<&'a Conclusion>,
-}
-
-impl<'a> OpenPullRequestRequest<'a> {
-    /// Build a draft PR request from already-validated inputs. Defaults
-    /// `draft = true` and `auto_merge = None` — the shape every
-    /// `POST /runs/{id}/pull_request` request uses.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "fields are validated upstream and named at the call site for clarity"
-    )]
-    pub fn from_run_state(
-        github: github_app::GitHubContext<'a>,
-        goal: &'a str,
-        head_branch: &'a str,
-        normalized_origin: &'a str,
-        base_branch: &'a str,
-        diff: &'a str,
-        model: &'a str,
-        run_store: &'a RunStoreHandle,
-        conclusion: &'a Conclusion,
-    ) -> Self {
-        Self {
-            github,
-            origin_url: normalized_origin,
-            base_branch,
-            head_branch,
-            goal,
-            diff,
-            model,
-            draft: true,
-            auto_merge: None,
-            run_store,
-            conclusion: Some(conclusion),
-        }
-    }
+    pub run_state:   Option<&'a fabro_store::RunProjection>,
 }
 
 /// Optionally open a pull request after a successful workflow run.
@@ -459,7 +427,15 @@ pub async fn maybe_open_pull_request(
     let https_url = ssh_url_to_https(req.origin_url);
     let (owner, repo) = github_app::parse_github_owner_repo(&https_url)?;
 
-    let body = build_pr_body(req.diff, req.goal, req.model, req.run_store, req.conclusion).await?;
+    let body = build_pr_body_with_state(
+        req.diff,
+        req.goal,
+        req.model,
+        req.run_store,
+        req.conclusion,
+        req.run_state,
+    )
+    .await?;
     let body = truncate_pr_body(&body);
 
     let title = pr_title_from_goal(req.goal);
@@ -479,17 +455,12 @@ pub async fn maybe_open_pull_request(
     info!(pr_url = %created.html_url, created.number, "Pull request created");
 
     if let Some(am_cfg) = req.auto_merge {
-        let merge_method = match am_cfg.merge_strategy {
-            MergeStrategy::Squash => fabro_types::MergeMethod::Squash,
-            MergeStrategy::Merge => fabro_types::MergeMethod::Merge,
-            MergeStrategy::Rebase => fabro_types::MergeMethod::Rebase,
-        };
         match github_app::enable_auto_merge(
             &req.github,
             &owner,
             &repo,
             &created.node_id,
-            merge_method,
+            am_cfg.merge_strategy,
         )
         .await
         {
@@ -575,20 +546,12 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                         auto_merge,
                         run_store: &options.run_store,
                         conclusion: Some(&conclusion),
+                        run_state: None,
                     })
                     .await
                     {
                         Ok(Some(record)) => {
-                            emitter.emit(&Event::PullRequestCreated {
-                                pr_url:      record.html_url.clone(),
-                                pr_number:   record.number,
-                                owner:       record.owner.clone(),
-                                repo:        record.repo.clone(),
-                                base_branch: record.base_branch.clone(),
-                                head_branch: record.head_branch.clone(),
-                                title:       record.title.clone(),
-                                draft:       pr_cfg.draft,
-                            });
+                            emitter.emit(&Event::pull_request_created(&record, pr_cfg.draft));
                             pr_url = Some(record.html_url.clone());
                         }
                         Ok(None) => {}
@@ -1395,6 +1358,7 @@ mod tests {
             auto_merge:  None,
             run_store:   &run_store.clone().into(),
             conclusion:  None,
+            run_state:   None,
         })
         .await;
         assert!(result.is_ok());

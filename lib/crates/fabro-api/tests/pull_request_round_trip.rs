@@ -1,5 +1,7 @@
 use std::any::{TypeId, type_name};
 
+use fabro_api::types::MergeRunPullRequestRequest;
+use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{PullRequestDetail, PullRequestRecord};
 use serde_json::json;
 
@@ -42,6 +44,27 @@ fn pull_request_detail_reuses_domain_record_type() {
     .expect("detail should deserialize");
 
     assert_same_type_as_pull_request_record(&detail.record);
+}
+
+#[test]
+fn merge_request_reuses_run_merge_strategy_type() {
+    let request: MergeRunPullRequestRequest = serde_json::from_value(json!({ "method": "squash" }))
+        .expect("merge request should deserialize");
+
+    assert_same_type_as_merge_strategy(&request.method);
+}
+
+#[test]
+fn merge_strategy_json_matches_openapi_shape() {
+    assert_eq!(serde_json::to_value(MergeStrategy::Merge).unwrap(), "merge");
+    assert_eq!(
+        serde_json::to_value(MergeStrategy::Squash).unwrap(),
+        "squash"
+    );
+    assert_eq!(
+        serde_json::to_value(MergeStrategy::Rebase).unwrap(),
+        "rebase"
+    );
 }
 
 #[test]
@@ -112,5 +135,15 @@ fn assert_same_type_as_pull_request_record<T: 'static>(_: &T) {
         "{} should be the same type as {}",
         type_name::<T>(),
         type_name::<PullRequestRecord>()
+    );
+}
+
+fn assert_same_type_as_merge_strategy<T: 'static>(_: &T) {
+    assert_eq!(
+        TypeId::of::<T>(),
+        TypeId::of::<MergeStrategy>(),
+        "{} should be the same type as {}",
+        type_name::<T>(),
+        type_name::<MergeStrategy>()
     );
 }

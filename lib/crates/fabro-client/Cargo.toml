@@ -17,7 +17,6 @@ anyhow.workspace = true
 bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 fabro-api = { path = "../fabro-api" }
-fabro-github = { path = "../fabro-github" }
 fabro-http.workspace = true
 fabro-model = { path = "../fabro-model" }
 fabro-types = { path = "../fabro-types" }

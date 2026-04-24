@@ -57,30 +57,3 @@ pub struct PullRequestDetail {
     #[serde(flatten)]
     pub github: PullRequestGithubDetail,
 }
-
-/// GitHub merge method for a pull request.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    strum::Display,
-    strum::EnumString,
-    strum::IntoStaticStr,
-)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
-pub enum MergeMethod {
-    Merge,
-    Squash,
-    Rebase,
-}
-
-impl MergeMethod {
-    pub fn as_str(self) -> &'static str {
-        self.into()
-    }
-}

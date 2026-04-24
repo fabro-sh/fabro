@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::{
-    ActorRef, BilledTokenCounts, BlockedReason, FailureReason, ParallelBranchId, RunBlobId,
-    RunControlAction, RunEvent, RunId, RunProvenance, StageId, StageStatus, SuccessReason,
-    run_event as fabro_types,
+    ActorRef, BilledTokenCounts, BlockedReason, FailureReason, ParallelBranchId, PullRequestRecord,
+    RunBlobId, RunControlAction, RunEvent, RunId, RunProvenance, StageId, StageStatus,
+    SuccessReason, run_event as fabro_types,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -563,6 +563,19 @@ pub enum Event {
 }
 
 impl Event {
+    pub fn pull_request_created(record: &PullRequestRecord, draft: bool) -> Self {
+        Self::PullRequestCreated {
+            pr_url: record.html_url.clone(),
+            pr_number: record.number,
+            owner: record.owner.clone(),
+            repo: record.repo.clone(),
+            base_branch: record.base_branch.clone(),
+            head_branch: record.head_branch.clone(),
+            title: record.title.clone(),
+            draft,
+        }
+    }
+
     pub fn trace(&self) {
         use tracing::{debug, error, info, warn};
         match self {

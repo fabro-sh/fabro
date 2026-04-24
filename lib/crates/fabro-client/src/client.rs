@@ -10,6 +10,7 @@ use fabro_api::types;
 use fabro_http::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
 use fabro_http::multipart::{Form, Part};
 use fabro_model::Model;
+use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
     ArtifactUpload, EventEnvelope, RunBlobId, RunEvent, RunId, RunProjection, RunSummary, StageId,
 };
@@ -845,7 +846,7 @@ impl Client {
     pub async fn merge_run_pull_request(
         &self,
         run_id: &RunId,
-        method: fabro_types::MergeMethod,
+        method: MergeStrategy,
     ) -> Result<types::MergeRunPullRequestResponse> {
         let body = types::MergeRunPullRequestRequest { method };
         let response = self

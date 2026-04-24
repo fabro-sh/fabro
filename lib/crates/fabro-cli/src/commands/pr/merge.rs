@@ -6,11 +6,9 @@ use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 
 pub(super) async fn merge_command(args: PrMergeArgs, base_ctx: &CommandContext) -> Result<()> {
-    let ctx = base_ctx.with_target(&args.server)?;
-    let client = ctx.server().await?;
-    let run_id = client.resolve_run(&args.run_id).await?.run_id;
-    let method: fabro_types::MergeMethod = args.method.into();
-    let response = client.merge_run_pull_request(&run_id, method).await?;
+    let (ctx, client, run_id) =
+        super::resolve_run_for_pr(base_ctx, &args.server, &args.run_id).await?;
+    let response = client.merge_run_pull_request(&run_id, args.method).await?;
 
     info!(
         number = response.number,

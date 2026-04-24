@@ -4,7 +4,7 @@ use fabro_github::{
     get_pull_request, merge_pull_request, resolve_authenticated_url, sign_app_jwt,
 };
 use fabro_test::{GitHubAppOptions, GitHubAppState, TwinGitHub};
-use fabro_types::MergeMethod;
+use fabro_types::settings::run::MergeStrategy;
 
 const TEST_RSA_KEY: &str = include_str!("../src/testdata/rsa_private.pem");
 
@@ -78,9 +78,15 @@ async fn create_merge_and_verify_state() {
     .await
     .unwrap();
 
-    merge_pull_request(ctx, "acme", "widgets", created.number, MergeMethod::Squash)
-        .await
-        .unwrap();
+    merge_pull_request(
+        ctx,
+        "acme",
+        "widgets",
+        created.number,
+        MergeStrategy::Squash,
+    )
+    .await
+    .unwrap();
 
     let pr = get_pull_request(ctx, "acme", "widgets", created.number)
         .await
@@ -143,7 +149,7 @@ async fn enable_auto_merge_persists() {
         "acme",
         "widgets",
         &created.node_id,
-        MergeMethod::Squash,
+        MergeStrategy::Squash,
     )
     .await
     .unwrap();

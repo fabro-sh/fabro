@@ -93,7 +93,10 @@ use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdin, Command};
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{Notify, RwLock as AsyncRwLock, Semaphore, broadcast, mpsc, oneshot};
+use tokio::sync::{
+    Mutex as AsyncMutex, Notify, OwnedMutexGuard, RwLock as AsyncRwLock, Semaphore, broadcast,
+    mpsc, oneshot,
+};
 use tokio::task::spawn_blocking;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
@@ -547,6 +550,7 @@ pub struct AppState {
     /// callers for the same run share one materialization; different runs
     /// proceed in parallel. See `crate::run_files` for semantics.
     pub(crate) files_in_flight: FilesInFlight,
+    pull_request_create_locks: PullRequestCreateLocks,
 
     pub(crate) vault:                Arc<AsyncRwLock<Vault>>,
     pub(super) server_secrets:       ServerSecrets,
@@ -561,6 +565,52 @@ pub struct AppState {
     registry_factory_override:       Option<Box<RegistryFactoryOverride>>,
     slack_service:                   Option<Arc<SlackService>>,
     slack_started:                   AtomicBool,
+}
+
+type PullRequestCreateLocks = Arc<Mutex<HashMap<RunId, Arc<AsyncMutex<()>>>>>;
+
+struct PullRequestCreateGuard {
+    locks:  PullRequestCreateLocks,
+    run_id: RunId,
+    mutex:  Arc<AsyncMutex<()>>,
+    guard:  Option<OwnedMutexGuard<()>>,
+}
+
+impl Drop for PullRequestCreateGuard {
+    fn drop(&mut self) {
+        self.guard.take();
+
+        let mut locks = self
+            .locks
+            .lock()
+            .expect("pull request create locks poisoned");
+        if locks.get(&self.run_id).is_some_and(|mutex| {
+            Arc::ptr_eq(mutex, &self.mutex) && Arc::strong_count(&self.mutex) == 2
+        }) {
+            locks.remove(&self.run_id);
+        }
+    }
+}
+
+async fn lock_pull_request_create(
+    locks: &PullRequestCreateLocks,
+    run_id: &RunId,
+) -> PullRequestCreateGuard {
+    let mutex = {
+        let mut locks = locks.lock().expect("pull request create locks poisoned");
+        Arc::clone(
+            locks
+                .entry(*run_id)
+                .or_insert_with(|| Arc::new(AsyncMutex::new(()))),
+        )
+    };
+    let guard = mutex.clone().lock_owned().await;
+    PullRequestCreateGuard {
+        locks: Arc::clone(locks),
+        run_id: *run_id,
+        mutex,
+        guard: Some(guard),
+    }
 }
 
 pub(crate) struct AppStateConfig {
@@ -2731,6 +2781,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         scheduler_notify: Notify::new(),
         global_event_tx,
         files_in_flight: new_files_in_flight(),
+        pull_request_create_locks: Arc::new(Mutex::new(HashMap::new())),
         vault,
         server_secrets,
         provider_credentials,
@@ -5214,6 +5265,24 @@ fn load_server_github_credentials(
     }
 }
 
+fn server_github_context<'a>(
+    state: &'a AppState,
+    creds: &'a fabro_github::GitHubCredentials,
+) -> Result<fabro_github::GitHubContext<'a>, ApiError> {
+    let http_client = state.http_client().map_err(|err| {
+        ApiError::with_code(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("GitHub integration unavailable on server: {err}"),
+            "integration_unavailable",
+        )
+    })?;
+    Ok(fabro_github::GitHubContext::with_http_client(
+        creds,
+        state.github_api_base_url.as_str(),
+        http_client,
+    ))
+}
+
 fn github_pull_request_not_found_error(record: &PullRequestRecord) -> ApiError {
     ApiError::with_code(
         StatusCode::BAD_GATEWAY,
@@ -5334,7 +5403,7 @@ impl<'a> RunPrInputs<'a> {
                 "run_not_successful",
             ));
         }
-        let normalized_origin = fabro_github::ssh_url_to_https(origin_url);
+        let normalized_origin = fabro_github::normalize_repo_origin_url(origin_url);
         parse_github_owner_repo_from_url(&normalized_origin, "repo origin URL")?;
         Ok(Self {
             goal: run_spec.graph.goal(),
@@ -5352,6 +5421,7 @@ async fn create_run_pull_request(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateRunPullRequestRequest>,
 ) -> Response {
+    let _create_guard = lock_pull_request_create(&state.pull_request_create_locks, &id).await;
     let Ok(run_store) = state.store.open_run(&id).await else {
         return ApiError::not_found("Run not found.").into_response();
     };
@@ -5370,6 +5440,10 @@ async fn create_run_pull_request(
         Ok(creds) => creds,
         Err(err) => return err.into_response(),
     };
+    let github = match server_github_context(state.as_ref(), &creds) {
+        Ok(ctx) => ctx,
+        Err(err) => return err.into_response(),
+    };
     let model = if let Some(model) = body.model {
         model
     } else {
@@ -5381,17 +5455,20 @@ async fn create_run_pull_request(
     };
 
     let run_store_handle = run_store.clone().into();
-    let request = pull_request::OpenPullRequestRequest::from_run_state(
-        fabro_github::GitHubContext::new(&creds, state.github_api_base_url.as_str()),
-        inputs.goal,
-        inputs.run_branch,
-        &inputs.normalized_origin,
-        inputs.base_branch,
-        inputs.diff,
-        &model,
-        &run_store_handle,
-        inputs.conclusion,
-    );
+    let request = pull_request::OpenPullRequestRequest {
+        github,
+        origin_url: &inputs.normalized_origin,
+        base_branch: inputs.base_branch,
+        head_branch: inputs.run_branch,
+        goal: inputs.goal,
+        diff: inputs.diff,
+        model: &model,
+        draft: true,
+        auto_merge: None,
+        run_store: &run_store_handle,
+        conclusion: Some(inputs.conclusion),
+        run_state: Some(&run_state),
+    };
     let pull_request = match pull_request::maybe_open_pull_request(request).await {
         Ok(Some(record)) => record,
         Ok(None) => {
@@ -5404,16 +5481,7 @@ async fn create_run_pull_request(
         Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
     };
 
-    let event = workflow_event::Event::PullRequestCreated {
-        pr_url:      pull_request.html_url.clone(),
-        pr_number:   pull_request.number,
-        owner:       pull_request.owner.clone(),
-        repo:        pull_request.repo.clone(),
-        base_branch: pull_request.base_branch.clone(),
-        head_branch: pull_request.head_branch.clone(),
-        title:       pull_request.title.clone(),
-        draft:       true,
-    };
+    let event = workflow_event::Event::pull_request_created(&pull_request, true);
     if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
@@ -5429,9 +5497,13 @@ async fn get_run_pull_request(
         Ok(ctx) => ctx,
         Err(err) => return err.into_response(),
     };
+    let github = match server_github_context(state.as_ref(), &ctx.creds) {
+        Ok(github) => github,
+        Err(err) => return err.into_response(),
+    };
 
     match fabro_github::get_pull_request(
-        &fabro_github::GitHubContext::new(&ctx.creds, state.github_api_base_url.as_str()),
+        &github,
         &ctx.record.owner,
         &ctx.record.repo,
         ctx.record.number,
@@ -5459,9 +5531,13 @@ async fn merge_run_pull_request(
         Ok(ctx) => ctx,
         Err(err) => return err.into_response(),
     };
+    let github = match server_github_context(state.as_ref(), &ctx.creds) {
+        Ok(github) => github,
+        Err(err) => return err.into_response(),
+    };
 
     match fabro_github::merge_pull_request(
-        &fabro_github::GitHubContext::new(&ctx.creds, state.github_api_base_url.as_str()),
+        &github,
         &ctx.record.owner,
         &ctx.record.repo,
         ctx.record.number,
@@ -5491,9 +5567,13 @@ async fn close_run_pull_request(
         Ok(ctx) => ctx,
         Err(err) => return err.into_response(),
     };
+    let github = match server_github_context(state.as_ref(), &ctx.creds) {
+        Ok(github) => github,
+        Err(err) => return err.into_response(),
+    };
 
     match fabro_github::close_pull_request(
-        &fabro_github::GitHubContext::new(&ctx.creds, state.github_api_base_url.as_str()),
+        &github,
         &ctx.record.owner,
         &ctx.record.repo,
         ctx.record.number,

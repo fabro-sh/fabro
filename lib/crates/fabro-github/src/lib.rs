@@ -1,6 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use fabro_types::PullRequestGithubDetail;
+use fabro_types::settings::run::MergeStrategy;
 use serde::Deserialize;
 use tokio::process::Command;
 
@@ -15,15 +16,36 @@ pub fn github_api_base_url() -> String {
 /// Bundle of GitHub credentials and the API base URL, threaded through every
 /// authenticated GitHub call. Lets call sites pass one parameter instead of
 /// two, and keeps the auth/endpoint pair from drifting apart.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct GitHubContext<'a> {
-    pub creds:    &'a GitHubCredentials,
-    pub base_url: &'a str,
+    creds:       &'a GitHubCredentials,
+    base_url:    &'a str,
+    http_client: Option<fabro_http::HttpClient>,
 }
 
 impl<'a> GitHubContext<'a> {
     pub fn new(creds: &'a GitHubCredentials, base_url: &'a str) -> Self {
-        Self { creds, base_url }
+        Self {
+            creds,
+            base_url,
+            http_client: None,
+        }
+    }
+
+    pub fn with_http_client(
+        creds: &'a GitHubCredentials,
+        base_url: &'a str,
+        http_client: fabro_http::HttpClient,
+    ) -> Self {
+        Self {
+            creds,
+            base_url,
+            http_client: Some(http_client),
+        }
+    }
+
+    fn http_client(&self) -> Result<fabro_http::HttpClient, String> {
+        self.http_client.clone().map_or_else(http_client, Ok)
     }
 }
 
@@ -480,6 +502,25 @@ pub async fn create_pull_request(
     body: &str,
     draft: bool,
 ) -> Result<CreatedPullRequest, String> {
+    let client = ctx.http_client()?;
+    create_pull_request_with_client(&client, ctx, owner, repo, base, head, title, body, draft).await
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Creating a pull request needs explicit repo, branch, and body fields."
+)]
+pub async fn create_pull_request_with_client(
+    client: &impl HttpClient,
+    ctx: &GitHubContext<'_>,
+    owner: &str,
+    repo: &str,
+    base: &str,
+    head: &str,
+    title: &str,
+    body: &str,
+    draft: bool,
+) -> Result<CreatedPullRequest, String> {
     #[derive(Deserialize)]
     struct PullRequestResponse {
         html_url: String,
@@ -487,11 +528,10 @@ pub async fn create_pull_request(
         node_id:  String,
     }
 
-    let client = http_client()?;
     let token = ctx
         .creds
         .resolve_bearer_token(
-            &client,
+            client,
             owner,
             repo,
             ctx.base_url,
@@ -512,7 +552,7 @@ pub async fn create_pull_request(
     let url = format!("{}/repos/{owner}/{repo}/pulls", ctx.base_url);
     let auth = format!("Bearer {token}");
     let resp = HttpClient::request(
-        &client,
+        client,
         HttpMethod::Post,
         &url,
         &github_headers(&auth),
@@ -555,11 +595,11 @@ pub async fn create_pull_request(
     })
 }
 
-fn merge_method_as_graphql_value(method: fabro_types::MergeMethod) -> &'static str {
+fn merge_method_as_graphql_value(method: MergeStrategy) -> &'static str {
     match method {
-        fabro_types::MergeMethod::Merge => "MERGE",
-        fabro_types::MergeMethod::Squash => "SQUASH",
-        fabro_types::MergeMethod::Rebase => "REBASE",
+        MergeStrategy::Merge => "MERGE",
+        MergeStrategy::Squash => "SQUASH",
+        MergeStrategy::Rebase => "REBASE",
     }
 }
 
@@ -572,13 +612,24 @@ pub async fn enable_auto_merge(
     owner: &str,
     repo: &str,
     pr_node_id: &str,
-    merge_method: fabro_types::MergeMethod,
+    merge_method: MergeStrategy,
 ) -> Result<(), String> {
-    let client = http_client()?;
+    let client = ctx.http_client()?;
+    enable_auto_merge_with_client(&client, ctx, owner, repo, pr_node_id, merge_method).await
+}
+
+pub async fn enable_auto_merge_with_client(
+    client: &impl HttpClient,
+    ctx: &GitHubContext<'_>,
+    owner: &str,
+    repo: &str,
+    pr_node_id: &str,
+    merge_method: MergeStrategy,
+) -> Result<(), String> {
     let token = ctx
         .creds
         .resolve_bearer_token(
-            &client,
+            client,
             owner,
             repo,
             ctx.base_url,
@@ -610,7 +661,7 @@ pub async fn enable_auto_merge(
     let auth = format!("Bearer {token}");
     let graphql_body = serde_json::json!({ "query": query });
     let resp = HttpClient::request(
-        &client,
+        client,
         HttpMethod::Post,
         &graphql_url,
         &[("Authorization", auth.as_str()), ("User-Agent", "fabro")],
@@ -700,7 +751,7 @@ pub async fn branch_exists(
     repo: &str,
     branch: &str,
 ) -> Result<bool, String> {
-    let client = http_client()?;
+    let client = ctx.http_client()?;
     branch_exists_with_client(&client, ctx, owner, repo, branch).await
 }
 
@@ -855,7 +906,7 @@ pub async fn resolve_clone_credentials(
     let token = match ctx.creds {
         GitHubCredentials::Token(token) => token.clone(),
         GitHubCredentials::App(_) => {
-            let client = http_client()?;
+            let client = ctx.http_client()?;
             ctx.creds
                 .resolve_bearer_token(
                     &client,
@@ -901,11 +952,11 @@ pub async fn get_pull_request(
     repo: &str,
     number: u64,
 ) -> Result<PullRequestGithubDetail, PullRequestApiError> {
-    let client = http_client()?;
+    let client = ctx.http_client()?;
     get_pull_request_with_client(&client, ctx, owner, repo, number).await
 }
 
-async fn get_pull_request_with_client(
+pub async fn get_pull_request_with_client(
     client: &impl HttpClient,
     ctx: &GitHubContext<'_>,
     owner: &str,
@@ -967,19 +1018,19 @@ pub async fn merge_pull_request(
     owner: &str,
     repo: &str,
     number: u64,
-    method: fabro_types::MergeMethod,
+    method: MergeStrategy,
 ) -> Result<(), PullRequestApiError> {
-    let client = http_client()?;
+    let client = ctx.http_client()?;
     merge_pull_request_with_client(&client, ctx, owner, repo, number, method).await
 }
 
-async fn merge_pull_request_with_client(
+pub async fn merge_pull_request_with_client(
     client: &impl HttpClient,
     ctx: &GitHubContext<'_>,
     owner: &str,
     repo: &str,
     number: u64,
-    method: fabro_types::MergeMethod,
+    method: MergeStrategy,
 ) -> Result<(), PullRequestApiError> {
     tracing::debug!(owner, repo, number, method = %method, "Merging pull request");
 
@@ -1034,11 +1085,11 @@ pub async fn close_pull_request(
     repo: &str,
     number: u64,
 ) -> Result<(), PullRequestApiError> {
-    let client = http_client()?;
+    let client = ctx.http_client()?;
     close_pull_request_with_client(&client, ctx, owner, repo, number).await
 }
 
-async fn close_pull_request_with_client(
+pub async fn close_pull_request_with_client(
     client: &impl HttpClient,
     ctx: &GitHubContext<'_>,
     owner: &str,
@@ -1931,7 +1982,7 @@ mod tests {
             "owner",
             "repo",
             42,
-            fabro_types::MergeMethod::Squash,
+            MergeStrategy::Squash,
         )
         .await
         .unwrap();
@@ -1965,7 +2016,7 @@ mod tests {
             "owner",
             "repo",
             42,
-            fabro_types::MergeMethod::Squash,
+            MergeStrategy::Squash,
         )
         .await
         .unwrap_err();
@@ -2000,7 +2051,7 @@ mod tests {
             "owner",
             "repo",
             42,
-            fabro_types::MergeMethod::Squash,
+            MergeStrategy::Squash,
         )
         .await
         .unwrap_err();

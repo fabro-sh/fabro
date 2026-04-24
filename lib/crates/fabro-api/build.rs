@@ -307,7 +307,11 @@ fn main() {
         ("PullRequestDetail", "fabro_types::PullRequestDetail", &[]),
         ("PullRequestUser", "fabro_types::PullRequestUser", &[]),
         ("PullRequestRef", "fabro_types::PullRequestRef", &[]),
-        ("MergeMethod", "fabro_types::MergeMethod", &[]),
+        (
+            "MergeMethod",
+            "fabro_types::settings::run::MergeStrategy",
+            &[],
+        ),
     ];
     for (name, path, impls) in replacements {
         settings.with_replacement(*name, *path, impls.iter().copied());

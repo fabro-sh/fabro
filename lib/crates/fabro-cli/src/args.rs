@@ -5,6 +5,7 @@ use clap::{Args, Subcommand, ValueEnum};
 use fabro_agent::cli::AgentArgs;
 use fabro_config::{CliLayer, CliLoggingLayer, CliOutputLayer, CliUpdatesLayer};
 use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
+use fabro_types::settings::run::MergeStrategy;
 use fabro_util::printer::Printer;
 
 pub(crate) const LONG_VERSION: &str = concat!(
@@ -737,23 +738,6 @@ pub(crate) struct PrViewArgs {
     pub(crate) run_id: String,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub(crate) enum PrMergeMethod {
-    Merge,
-    Squash,
-    Rebase,
-}
-
-impl From<PrMergeMethod> for fabro_types::MergeMethod {
-    fn from(value: PrMergeMethod) -> Self {
-        match value {
-            PrMergeMethod::Merge => Self::Merge,
-            PrMergeMethod::Squash => Self::Squash,
-            PrMergeMethod::Rebase => Self::Rebase,
-        }
-    }
-}
-
 #[derive(Args)]
 pub(crate) struct PrMergeArgs {
     #[command(flatten)]
@@ -762,8 +746,8 @@ pub(crate) struct PrMergeArgs {
     /// Run ID or prefix
     pub(crate) run_id: String,
     /// Merge method: merge, squash, or rebase
-    #[arg(long, value_enum, default_value_t = PrMergeMethod::Squash)]
-    pub(crate) method: PrMergeMethod,
+    #[arg(long, value_enum, default_value_t = MergeStrategy::Squash)]
+    pub(crate) method: MergeStrategy,
 }
 
 #[derive(Args)]
