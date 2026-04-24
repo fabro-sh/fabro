@@ -8953,6 +8953,20 @@ strategy = "token"
         (state, app, fixtures::RUN_1)
     }
 
+    /// Same as [`pr_test_app`] but creates a fresh minimal run via the
+    /// HTTP create-run endpoint instead of using fixtures::RUN_1. For
+    /// tests that exercise endpoints expecting a real on-disk run rather
+    /// than a synthetic fixture id.
+    async fn pr_test_app_with_minimal_run(
+        token: Option<&str>,
+        github_api_base_url: Option<String>,
+    ) -> (Arc<AppState>, Router, String) {
+        let state = create_github_token_app_state(token, github_api_base_url);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = create_run(&app, MINIMAL_DOT).await;
+        (state, app, run_id)
+    }
+
     async fn create_run_with_pull_request_record(
         state: &Arc<AppState>,
         run_id: RunId,
@@ -10166,9 +10180,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn merge_run_pull_request_returns_not_found_when_record_missing() {
-        let state = create_github_token_app_state(Some("ghu_test"), None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = create_run(&app, MINIMAL_DOT).await;
+        let (_state, app, run_id) = pr_test_app_with_minimal_run(Some("ghu_test"), None).await;
 
         let response = app
             .oneshot(
@@ -10274,9 +10286,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn close_run_pull_request_returns_not_found_when_record_missing() {
-        let state = create_github_token_app_state(Some("ghu_test"), None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = create_run(&app, MINIMAL_DOT).await;
+        let (_state, app, run_id) = pr_test_app_with_minimal_run(Some("ghu_test"), None).await;
 
         let response = app
             .oneshot(
