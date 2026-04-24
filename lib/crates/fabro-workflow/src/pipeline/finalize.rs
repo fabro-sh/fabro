@@ -331,9 +331,10 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
         options.last_git_sha.clone(),
     );
 
-    let final_patch = compute_final_patch(&run_options, &services, final_status).await;
-
-    write_finalize_commit(&run_options, &services.run_store, &conclusion).await;
+    let (final_patch, ()) = tokio::join!(
+        compute_final_patch(&run_options, &services, final_status),
+        write_finalize_commit(&run_options, &services.run_store, &conclusion),
+    );
 
     let terminal_event = build_terminal_event(
         &outcome,
