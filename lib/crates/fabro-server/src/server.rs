@@ -5224,8 +5224,6 @@ fn github_pull_request_not_found_error(record: &PullRequestRecord) -> ApiError {
 
 struct PullRequestGithubContext {
     record: PullRequestRecord,
-    owner:  String,
-    repo:   String,
     creds:  fabro_github::GitHubCredentials,
 }
 
@@ -5249,18 +5247,13 @@ async fn load_pull_request_github_context(
             "no_stored_record",
         )
     })?;
-    let (owner, repo) = parse_github_owner_repo_from_url(&record.html_url, "pull request URL")?;
+    parse_github_owner_repo_from_url(&record.html_url, "pull request URL")?;
     let creds = load_server_github_credentials(state.as_ref())?;
-    Ok(PullRequestGithubContext {
-        record,
-        owner,
-        repo,
-        creds,
-    })
+    Ok(PullRequestGithubContext { record, creds })
 }
 
 struct RunPrInputs<'a> {
-    run_spec:          &'a fabro_types::RunSpec,
+    goal:              &'a str,
     base_branch:       &'a str,
     run_branch:        &'a str,
     diff:              &'a str,
@@ -5344,7 +5337,7 @@ impl<'a> RunPrInputs<'a> {
         let normalized_origin = fabro_github::ssh_url_to_https(origin_url);
         parse_github_owner_repo_from_url(&normalized_origin, "repo origin URL")?;
         Ok(Self {
-            run_spec,
+            goal: run_spec.graph.goal(),
             base_branch,
             run_branch,
             diff,
@@ -5390,7 +5383,7 @@ async fn create_run_pull_request(
     let run_store_handle = run_store.clone().into();
     let request = pull_request::OpenPullRequestRequest::from_run_state(
         fabro_github::GitHubContext::new(&creds, state.github_api_base_url.as_str()),
-        inputs.run_spec,
+        inputs.goal,
         inputs.run_branch,
         &inputs.normalized_origin,
         inputs.base_branch,
@@ -5439,8 +5432,8 @@ async fn get_run_pull_request(
 
     match fabro_github::get_pull_request(
         &fabro_github::GitHubContext::new(&ctx.creds, state.github_api_base_url.as_str()),
-        &ctx.owner,
-        &ctx.repo,
+        &ctx.record.owner,
+        &ctx.record.repo,
         ctx.record.number,
     )
     .await
@@ -5469,8 +5462,8 @@ async fn merge_run_pull_request(
 
     match fabro_github::merge_pull_request(
         &fabro_github::GitHubContext::new(&ctx.creds, state.github_api_base_url.as_str()),
-        &ctx.owner,
-        &ctx.repo,
+        &ctx.record.owner,
+        &ctx.record.repo,
         ctx.record.number,
         body.method,
     )
@@ -5501,8 +5494,8 @@ async fn close_run_pull_request(
 
     match fabro_github::close_pull_request(
         &fabro_github::GitHubContext::new(&ctx.creds, state.github_api_base_url.as_str()),
-        &ctx.owner,
-        &ctx.repo,
+        &ctx.record.owner,
+        &ctx.record.repo,
         ctx.record.number,
     )
     .await

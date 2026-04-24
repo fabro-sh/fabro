@@ -410,18 +410,16 @@ pub struct OpenPullRequestRequest<'a> {
 }
 
 impl<'a> OpenPullRequestRequest<'a> {
-    /// Build a draft PR request from validated run state. Defaults
-    /// `draft = true` and `auto_merge = None` — the shape the
-    /// `POST /runs/{id}/pull_request` server endpoint always uses.
-    /// The workflow pipeline path constructs the struct directly when
-    /// it needs non-default flags.
+    /// Build a draft PR request from already-validated inputs. Defaults
+    /// `draft = true` and `auto_merge = None` — the shape every
+    /// `POST /runs/{id}/pull_request` request uses.
     #[allow(
         clippy::too_many_arguments,
         reason = "fields are validated upstream and named at the call site for clarity"
     )]
     pub fn from_run_state(
         github: github_app::GitHubContext<'a>,
-        run_spec: &'a RunSpec,
+        goal: &'a str,
         head_branch: &'a str,
         normalized_origin: &'a str,
         base_branch: &'a str,
@@ -435,7 +433,7 @@ impl<'a> OpenPullRequestRequest<'a> {
             origin_url: normalized_origin,
             base_branch,
             head_branch,
-            goal: run_spec.graph.goal(),
+            goal,
             diff,
             model,
             draft: true,
