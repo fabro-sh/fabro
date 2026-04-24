@@ -15,8 +15,8 @@ use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Password};
 use fabro_auth::{
-    ApiCredential, ApiKeyHeader, AuthContextRequest, AuthContextResponse, AuthCredential,
-    AuthMethod, codex_oauth_config, strategy_for,
+    ApiCredential, AuthContextRequest, AuthContextResponse, AuthCredential, AuthMethod,
+    codex_oauth_config, strategy_for,
 };
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
@@ -78,23 +78,10 @@ pub(crate) enum ApiKeySource {
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn validate_api_key(provider: Provider, api_key: &str) -> Result<(), String> {
-    let auth_header = if provider == Provider::Anthropic {
-        ApiKeyHeader::Custom {
-            name:  "x-api-key".to_string(),
-            value: api_key.to_string(),
-        }
-    } else {
-        ApiKeyHeader::Bearer(api_key.to_string())
-    };
-    let client = LlmClient::from_credentials(vec![ApiCredential {
+    let client = LlmClient::from_credentials(vec![ApiCredential::from_api_key(
         provider,
-        auth_header,
-        extra_headers: std::collections::HashMap::new(),
-        base_url: None,
-        codex_mode: false,
-        org_id: None,
-        project_id: None,
-    }])
+        api_key.to_string(),
+    )])
     .await
     .map_err(|e| e.to_string())?;
 

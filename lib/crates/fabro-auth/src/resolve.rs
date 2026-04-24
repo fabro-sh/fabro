@@ -37,6 +37,32 @@ pub struct ApiCredential {
     pub project_id:    Option<String>,
 }
 
+impl ApiCredential {
+    /// Build an `ApiCredential` from just an API key. Picks the right
+    /// auth header kind for the provider (Anthropic uses `x-api-key`;
+    /// everyone else uses `Authorization: Bearer`). All other fields
+    /// default to empty.
+    #[must_use]
+    pub fn from_api_key(provider: Provider, key: String) -> Self {
+        let auth_header = match provider {
+            Provider::Anthropic => ApiKeyHeader::Custom {
+                name:  "x-api-key".to_string(),
+                value: key,
+            },
+            _ => ApiKeyHeader::Bearer(key),
+        };
+        Self {
+            provider,
+            auth_header,
+            extra_headers: HashMap::new(),
+            base_url: None,
+            codex_mode: false,
+            org_id: None,
+            project_id: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliCredential {
     pub env_vars:      HashMap<String, String>,
@@ -202,7 +228,6 @@ impl CredentialResolver {
     }
 
     fn to_api_credential(&self, vault: &Vault, credential: &AuthCredential) -> ApiCredential {
-        let mut extra_headers = HashMap::new();
         let base_url = match credential.provider {
             Provider::Anthropic => self.lookup_env_or_vault(vault, "ANTHROPIC_BASE_URL"),
             Provider::OpenAi => self.lookup_env_or_vault(vault, "OPENAI_BASE_URL"),
@@ -213,32 +238,19 @@ impl CredentialResolver {
             }
         };
         match &credential.details {
-            AuthDetails::ApiKey { key } => ApiCredential {
-                provider: credential.provider,
-                auth_header: match credential.provider {
-                    Provider::Anthropic => ApiKeyHeader::Custom {
-                        name:  "x-api-key".to_string(),
-                        value: key.clone(),
-                    },
-                    _ => ApiKeyHeader::Bearer(key.clone()),
-                },
-                extra_headers,
-                base_url,
-                codex_mode: false,
-                org_id: if credential.provider == Provider::OpenAi {
-                    self.lookup_env_or_vault(vault, "OPENAI_ORG_ID")
-                } else {
-                    None
-                },
-                project_id: if credential.provider == Provider::OpenAi {
-                    self.lookup_env_or_vault(vault, "OPENAI_PROJECT_ID")
-                } else {
-                    None
-                },
-            },
+            AuthDetails::ApiKey { key } => {
+                let mut cred = ApiCredential::from_api_key(credential.provider, key.clone());
+                cred.base_url = base_url;
+                if credential.provider == Provider::OpenAi {
+                    cred.org_id = self.lookup_env_or_vault(vault, "OPENAI_ORG_ID");
+                    cred.project_id = self.lookup_env_or_vault(vault, "OPENAI_PROJECT_ID");
+                }
+                cred
+            }
             AuthDetails::CodexOAuth {
                 tokens, account_id, ..
             } => {
+                let mut extra_headers = HashMap::new();
                 if let Some(account_id) = account_id {
                     extra_headers.insert("ChatGPT-Account-Id".to_string(), account_id.clone());
                     extra_headers.insert("originator".to_string(), "fabro".to_string());

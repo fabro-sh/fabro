@@ -1,11 +1,10 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_model::Provider;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
-use crate::{ApiCredential, ApiKeyHeader, EnvLookup};
+use crate::{ApiCredential, EnvLookup};
 
 #[derive(Clone)]
 pub struct EnvCredentialSource {
@@ -33,66 +32,32 @@ impl EnvCredentialSource {
             .iter()
             .find_map(|var| self.lookup(var))?;
 
-        Some(match provider {
-            Provider::Anthropic => ApiCredential {
-                provider,
-                auth_header: ApiKeyHeader::Custom {
-                    name:  "x-api-key".to_string(),
-                    value: key,
-                },
-                extra_headers: HashMap::new(),
-                base_url: self.lookup("ANTHROPIC_BASE_URL"),
-                codex_mode: false,
-                org_id: None,
-                project_id: None,
-            },
+        let mut cred = ApiCredential::from_api_key(provider, key);
+        match provider {
+            Provider::Anthropic => {
+                cred.base_url = self.lookup("ANTHROPIC_BASE_URL");
+            }
             Provider::OpenAi => {
-                let mut extra_headers = HashMap::new();
-                let mut base_url = self.lookup("OPENAI_BASE_URL");
-                let mut codex_mode = false;
+                cred.base_url = self.lookup("OPENAI_BASE_URL");
+                cred.org_id = self.lookup("OPENAI_ORG_ID");
+                cred.project_id = self.lookup("OPENAI_PROJECT_ID");
                 if let Some(account_id) = self.lookup("CHATGPT_ACCOUNT_ID") {
-                    base_url = Some("https://chatgpt.com/backend-api/codex".to_string());
-                    codex_mode = true;
-                    extra_headers.insert("ChatGPT-Account-Id".to_string(), account_id);
-                    extra_headers.insert("originator".to_string(), "fabro".to_string());
-                }
-                ApiCredential {
-                    provider,
-                    auth_header: ApiKeyHeader::Bearer(key),
-                    extra_headers,
-                    base_url,
-                    codex_mode,
-                    org_id: self.lookup("OPENAI_ORG_ID"),
-                    project_id: self.lookup("OPENAI_PROJECT_ID"),
+                    cred.base_url = Some("https://chatgpt.com/backend-api/codex".to_string());
+                    cred.codex_mode = true;
+                    cred.extra_headers
+                        .insert("ChatGPT-Account-Id".to_string(), account_id);
+                    cred.extra_headers
+                        .insert("originator".to_string(), "fabro".to_string());
                 }
             }
-            Provider::Gemini => ApiCredential {
-                provider,
-                auth_header: ApiKeyHeader::Bearer(key),
-                extra_headers: HashMap::new(),
-                base_url: self.lookup("GEMINI_BASE_URL"),
-                codex_mode: false,
-                org_id: None,
-                project_id: None,
-            },
-            Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
-                bearer_credential(provider, key)
+            Provider::Gemini => {
+                cred.base_url = self.lookup("GEMINI_BASE_URL");
             }
+            Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {}
             // OpenAiCompatible has no api_key_env_vars, so find_map returned None above.
             Provider::OpenAiCompatible => unreachable!(),
-        })
-    }
-}
-
-fn bearer_credential(provider: Provider, key: String) -> ApiCredential {
-    ApiCredential {
-        provider,
-        auth_header: ApiKeyHeader::Bearer(key),
-        extra_headers: HashMap::new(),
-        base_url: None,
-        codex_mode: false,
-        org_id: None,
-        project_id: None,
+        }
+        Some(cred)
     }
 }
 
