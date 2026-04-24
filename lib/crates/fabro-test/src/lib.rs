@@ -629,19 +629,14 @@ fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
 }
 
 fn write_test_server_dev_token(storage_dir: &Path) {
-    let server_env_path = Storage::new(storage_dir).runtime_directory().env_path();
+    let runtime_directory = Storage::new(storage_dir).runtime_directory();
+    let server_env_path = runtime_directory.env_path();
     envfile::merge_env_file(&server_env_path, [
         ("FABRO_DEV_TOKEN", TEST_DEV_TOKEN),
         ("SESSION_SECRET", TEST_SESSION_SECRET),
     ])
     .unwrap_or_else(|err| panic!("failed to write {}: {err}", server_env_path.display()));
-}
-
-fn write_test_home_dev_token(settings_path: &Path) {
-    let home_dir = settings_path
-        .parent()
-        .unwrap_or_else(|| panic!("expected {} to have a parent", settings_path.display()));
-    let dev_token_path = home_dir.join("dev-token");
+    let dev_token_path = runtime_directory.dev_token_path();
     ensure_parent_dir(&dev_token_path);
     std::fs::write(&dev_token_path, TEST_DEV_TOKEN)
         .unwrap_or_else(|err| panic!("failed to write {}: {err}", dev_token_path.display()));
@@ -718,8 +713,6 @@ fn sync_home_settings(
     socket_path: &Path,
     force_server_target: bool,
 ) {
-    write_test_home_dev_token(settings_path);
-
     let (mut table, had_explicit_storage, had_explicit_target) =
         match std::fs::read_to_string(settings_path) {
             Ok(contents) => {

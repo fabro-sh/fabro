@@ -21,6 +21,7 @@ use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::{CreateSecretRequest, SecretType as ApiSecretType};
 use fabro_auth::{AuthCredential, AuthMethod, codex_oauth_config, credential_id_for};
+use fabro_client::{AuthEntry, AuthStore, DevTokenEntry, ServerTarget};
 use fabro_config::bind::Bind;
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::user::{SETTINGS_CONFIG_FILENAME, default_storage_dir};
@@ -1770,6 +1771,7 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
     let install_server_settings = fabro_config::ServerSettingsBuilder::from_toml(&settings_toml)?;
 
     // Secrets and auth material
+    let mut dev_token_for_auth_store = None;
     {
         let session_secret = session_secret::generate_session_secret();
         fabro_util::printerr!(
@@ -1784,15 +1786,11 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
             .methods
             .contains(&ServerAuthMethod::DevToken)
         {
-            let token = dev_token::read_or_mint_dev_token_for_install(
-                &fabro_util::Home::from_env().dev_token_path(),
-            )?;
-            dev_token::write_dev_token(
-                &Storage::new(&storage_dir)
-                    .runtime_directory()
-                    .dev_token_path(),
-                &token,
-            )?;
+            let dev_token_path = Storage::new(&storage_dir)
+                .runtime_directory()
+                .dev_token_path();
+            let token = dev_token::read_or_mint_dev_token_for_install(&dev_token_path)?;
+            dev_token_for_auth_store = Some(token.clone());
             fabro_util::printerr!(
                 printer,
                 "  {} Development token generated",
@@ -1822,6 +1820,22 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
         server_was_running,
     )
     .await?;
+    if let Some(token) = dev_token_for_auth_store {
+        let target = ServerTarget::http_url(&args.web_url)?;
+        if let Err(err) = AuthStore::default().put(
+            &target,
+            AuthEntry::DevToken(DevTokenEntry {
+                token,
+                logged_in_at: chrono::Utc::now(),
+            }),
+        ) {
+            fabro_util::printerr!(
+                printer,
+                "  {} Installed successfully, but failed to save CLI auth: {err}",
+                s.yellow.apply_to("Warning:")
+            );
+        }
+    }
     if let Err(err) = write_artifact_store_metadata(&install_server_settings, FABRO_VERSION).await {
         fabro_util::printerr!(
             printer,

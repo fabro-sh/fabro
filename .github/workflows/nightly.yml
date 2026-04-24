@@ -60,12 +60,11 @@ jobs:
 
       - name: Release nightly
         if: steps.skip.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git config user.name "fabro-releases[bot]"
           git config user.email "fabro-releases[bot]@users.noreply.github.com"
+          release_token='${{ steps.app-token.outputs.token }}'
           git remote set-url origin \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            "https://x-access-token:${release_token}@github.com/${GITHUB_REPOSITORY}.git"
+          unset release_token
           cargo dev release nightly

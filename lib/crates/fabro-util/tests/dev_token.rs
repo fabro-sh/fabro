@@ -5,7 +5,6 @@
 
 use std::fs;
 
-use fabro_util::Home;
 use fabro_util::dev_token::{
     DEV_TOKEN_PREFIX, generate_dev_token, read_dev_token_or_err,
     read_or_mint_dev_token_for_install, validate_dev_token_format,
@@ -102,14 +101,4 @@ fn read_dev_token_or_err_reports_missing_file() {
     let error = read_dev_token_or_err(&path).unwrap_err();
 
     assert!(error.to_string().contains("read dev token"));
-}
-
-#[test]
-fn home_dev_token_path_is_relative_to_root() {
-    let home = Home::new("/tmp/fabro-home");
-
-    assert_eq!(
-        home.dev_token_path(),
-        std::path::Path::new("/tmp/fabro-home/dev-token")
-    );
 }

@@ -130,7 +130,7 @@ async fn start(
             &redirect_uri,
             state_token,
             "github_not_configured",
-            "GitHub authentication is not enabled on this server",
+            "This server uses dev-token auth. Copy the token from the server and run: `fabro auth login --dev-token <TOKEN>`",
         );
     }
 

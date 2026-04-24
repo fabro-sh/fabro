@@ -8,7 +8,9 @@ pub mod session;
 pub mod sse;
 pub mod target;
 
-pub use auth_store::{AuthEntry, AuthStore, AuthStoreError, LockError, StoredSubject};
+pub use auth_store::{
+    AuthEntry, AuthStore, AuthStoreError, DevTokenEntry, LockError, OAuthEntry, StoredSubject,
+};
 pub use client::{Client, RunEventStream, TransportConnector, apply_bearer_token_auth};
 pub use credential::{Credential, CredentialFallback};
 pub use error::{

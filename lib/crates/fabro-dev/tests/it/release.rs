@@ -107,6 +107,12 @@ fn dry_run_computes_stable_version_from_date() {
         stdout.contains("git tag -a v0.100.0 -m v0.100.0"),
         "dry-run should print release tag command:\n{stdout}"
     );
+    assert!(
+        stdout.contains(
+            "unset GH_TOKEN GITHUB_TOKEN && SEGMENT_WRITE_KEY=fake-for-local-smoke cargo nextest run"
+        ),
+        "dry-run should show release tests without inherited GitHub tokens:\n{stdout}"
+    );
 }
 
 #[test]

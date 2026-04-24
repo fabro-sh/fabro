@@ -1,45 +1,32 @@
 use std::net::IpAddr;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use fabro_client::{
-    AuthStore, Credential, CredentialFallback, OAuthSession, ServerTarget, TransportConnector,
+    AuthEntry, AuthStore, Credential, OAuthSession, ServerTarget, TransportConnector,
     apply_bearer_token_auth,
 };
 pub(crate) use fabro_client::{Client, RunEventStream};
+use fabro_config::Storage;
 use fabro_config::bind::Bind;
 use fabro_static::EnvVars;
 pub(crate) use fabro_types::RunProjection;
 use fabro_types::UserSettings;
+use fabro_util::dev_token;
 use fabro_util::dev_token::validate_dev_token_format;
-use fabro_util::{Home, dev_token};
 use tokio::time::sleep;
 
 use crate::args::ServerTargetArgs;
 use crate::commands::server::start;
 use crate::user_config::{self, cli_http_client_builder};
 
-#[derive(Debug)]
-struct CliDevTokenFallback;
-
-impl CredentialFallback for CliDevTokenFallback {
-    fn resolve(&self) -> Option<Credential> {
-        load_cli_dev_token().map(Credential::DevToken)
-    }
-}
-
 fn refreshable_oauth(
     target: &ServerTarget,
     credential: Option<&Credential>,
 ) -> Option<OAuthSession> {
     if matches!(credential, Some(Credential::OAuth(_))) {
-        let session = OAuthSession::new(target.clone(), AuthStore::default());
-        if local_dev_token_fallback(target) {
-            return Some(session.with_fallback(Arc::new(CliDevTokenFallback)));
-        }
-        return Some(session);
+        return Some(OAuthSession::new(target.clone(), AuthStore::default()));
     }
     None
 }
@@ -92,22 +79,34 @@ async fn connect_managed_unix_socket_api_client_bundle(
     active_config_path: &Path,
 ) -> Result<Client> {
     let target = ServerTarget::unix_socket_path(path)?;
-    let credential = resolve_target_credential(&target, local_dev_token_fallback(&target))?;
-    let oauth_session = refreshable_oauth(&target, credential.as_ref());
-    let bearer_token = credential.as_ref().map(Credential::bearer_token);
+    let runtime_token_path = Storage::new(storage_dir)
+        .runtime_directory()
+        .dev_token_path();
+    let pre_spawn_credential = resolve_target_credential(&target)?
+        .or_else(|| dev_token::read_dev_token_file(&runtime_token_path).map(Credential::DevToken));
+    let pre_spawn_bearer = pre_spawn_credential.as_ref().map(Credential::bearer_token);
 
-    let http_client = if let Ok(http_client) =
-        try_connect_unix_socket_http_client(path, true, bearer_token).await
+    let (http_client, credential) = if let Ok(http_client) =
+        try_connect_unix_socket_http_client(path, pre_spawn_bearer).await
     {
-        http_client
+        (http_client, pre_spawn_credential)
     } else {
         start::ensure_server_running_on_socket(path, active_config_path, storage_dir)
             .await
             .with_context(|| format!("Failed to start fabro server for {}", path.display()))?;
-        connect_unix_socket_http_client(path, true, bearer_token)
+        let post_spawn_credential = match resolve_target_credential(&target)? {
+            Some(credential) => Some(credential),
+            None => Some(Credential::DevToken(
+                wait_for_runtime_dev_token(&runtime_token_path).await?,
+            )),
+        };
+        let post_spawn_bearer = post_spawn_credential.as_ref().map(Credential::bearer_token);
+        let http_client = connect_unix_socket_http_client(path, post_spawn_bearer)
             .await
-            .with_context(|| format!("Failed to connect to fabro server at {}", path.display()))?
+            .with_context(|| format!("Failed to connect to fabro server at {}", path.display()))?;
+        (http_client, post_spawn_credential)
     };
+    let oauth_session = refreshable_oauth(&target, credential.as_ref());
 
     build_client(
         target,
@@ -127,12 +126,16 @@ async fn connect_local_api_client_bundle(
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
     match bind {
         Bind::Unix(path) => {
-            let http_client = connect_unix_socket_http_client(&path, true, None).await?;
+            let runtime_token_path = Storage::new(storage_dir)
+                .runtime_directory()
+                .dev_token_path();
+            let token = wait_for_runtime_dev_token(&runtime_token_path).await?;
+            let http_client = connect_unix_socket_http_client(&path, Some(&token)).await?;
             Ok(Client::from_http_client("http://fabro", http_client))
         }
         Bind::Tcp(addr) => {
             let target = ServerTarget::http_url(format!("http://{addr}"))?;
-            let credential = resolve_local_tcp_credential(&target)?;
+            let credential = resolve_target_credential(&target)?;
             let oauth_session = refreshable_oauth(&target, credential.as_ref());
             build_client(target, credential, oauth_session, None).await
         }
@@ -140,7 +143,7 @@ async fn connect_local_api_client_bundle(
 }
 
 async fn connect_target_api_client_bundle(target: &ServerTarget) -> Result<Client> {
-    let credential = resolve_target_credential(target, local_dev_token_fallback(target))?;
+    let credential = resolve_target_credential(target)?;
     let oauth_session = refreshable_oauth(target, credential.as_ref());
     build_client(target.clone(), credential, oauth_session, None).await
 }
@@ -204,15 +207,6 @@ fn connect_cli_target_transport(
     Ok((http_client, "http://fabro".to_string()))
 }
 
-fn local_dev_token_fallback(target: &ServerTarget) -> bool {
-    target.is_unix_socket()
-}
-
-fn load_cli_dev_token() -> Option<String> {
-    let env_token = process_env_var(EnvVars::FABRO_DEV_TOKEN);
-    load_cli_dev_token_from_sources(env_token.as_deref(), &Home::from_env())
-}
-
 #[expect(
     clippy::disallowed_methods,
     reason = "Server client authentication supports the documented local dev-token env source."
@@ -221,38 +215,29 @@ fn process_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-fn load_cli_dev_token_from_sources(env_token: Option<&str>, home: &Home) -> Option<String> {
-    if let Some(token) = env_token.filter(|token| validate_dev_token_format(token)) {
-        return Some(token.to_owned());
-    }
-
-    dev_token::read_dev_token_file(&home.dev_token_path())
-}
-
-async fn wait_for_cli_dev_token() -> Result<String> {
+async fn wait_for_runtime_dev_token(path: &Path) -> Result<String> {
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
 
     while std::time::Instant::now() < deadline {
-        if let Some(token) = load_cli_dev_token() {
+        if let Some(token) = dev_token::read_dev_token_file(path) {
             return Ok(token);
         }
         sleep(Duration::from_millis(50)).await;
     }
 
-    bail!("local CLI dev token did not become available");
+    bail!(
+        "runtime dev token did not become available at {}",
+        path.display()
+    );
 }
 
-async fn build_authed_unix_socket_http_client(
+fn build_authed_unix_socket_http_client(
     path: &Path,
-    wait_for_cli_dev_token_fallback: bool,
     bearer_token: Option<&str>,
 ) -> Result<fabro_http::HttpClient> {
     let builder = cli_http_client_builder().unix_socket(path).no_proxy();
     let builder = if let Some(token) = bearer_token {
         apply_bearer_token_auth(builder, token)?
-    } else if wait_for_cli_dev_token_fallback {
-        let token = wait_for_cli_dev_token().await?;
-        apply_bearer_token_auth(builder, &token)?
     } else {
         builder
     };
@@ -272,37 +257,21 @@ fn build_unix_socket_probe_client(path: &Path) -> Result<fabro_http::HttpClient>
 
 async fn try_connect_unix_socket_http_client(
     path: &Path,
-    wait_for_cli_dev_token_fallback: bool,
     bearer_token: Option<&str>,
 ) -> Result<fabro_http::HttpClient> {
     check_server_ready(&build_unix_socket_probe_client(path)?).await?;
-    build_authed_unix_socket_http_client(path, wait_for_cli_dev_token_fallback, bearer_token).await
+    build_authed_unix_socket_http_client(path, bearer_token)
 }
 
 async fn connect_unix_socket_http_client(
     path: &Path,
-    wait_for_cli_dev_token_fallback: bool,
     bearer_token: Option<&str>,
 ) -> Result<fabro_http::HttpClient> {
     wait_for_server_ready(&build_unix_socket_probe_client(path)?).await?;
-    build_authed_unix_socket_http_client(path, wait_for_cli_dev_token_fallback, bearer_token).await
+    build_authed_unix_socket_http_client(path, bearer_token)
 }
 
-fn resolve_oauth_credential(
-    target: &ServerTarget,
-    store: &AuthStore,
-    now: chrono::DateTime<chrono::Utc>,
-) -> Result<Option<Credential>> {
-    if let Some(entry) = store.get(target)? {
-        if entry.access_token_expires_at > now || entry.refresh_token_expires_at > now {
-            return Ok(Some(Credential::OAuth(entry)));
-        }
-    }
-
-    Ok(None)
-}
-
-fn resolve_local_tcp_credential_with_store(
+fn resolve_target_credential_with_store(
     target: &ServerTarget,
     env_token: Option<&str>,
     store: &AuthStore,
@@ -312,43 +281,24 @@ fn resolve_local_tcp_credential_with_store(
         return Ok(Some(Credential::DevToken(token.to_owned())));
     }
 
-    resolve_oauth_credential(target, store, now)
+    let Some(entry) = store.get(target)? else {
+        return Ok(None);
+    };
+    match entry {
+        AuthEntry::DevToken(entry) => Ok(Some(Credential::DevToken(entry.token))),
+        AuthEntry::OAuth(entry)
+            if entry.access_token_expires_at > now || entry.refresh_token_expires_at > now =>
+        {
+            Ok(Some(Credential::OAuth(entry)))
+        }
+        AuthEntry::OAuth(_) => Ok(None),
+    }
 }
 
-fn resolve_local_tcp_credential(target: &ServerTarget) -> Result<Option<Credential>> {
+fn resolve_target_credential(target: &ServerTarget) -> Result<Option<Credential>> {
     let env_token = process_env_var(EnvVars::FABRO_DEV_TOKEN);
     let store = AuthStore::default();
-    resolve_local_tcp_credential_with_store(
-        target,
-        env_token.as_deref(),
-        &store,
-        chrono::Utc::now(),
-    )
-}
-
-fn resolve_target_credential(
-    target: &ServerTarget,
-    allow_local_dev_token_fallback: bool,
-) -> Result<Option<Credential>> {
-    let env_token = process_env_var(EnvVars::FABRO_DEV_TOKEN);
-    let store = AuthStore::default();
-    if let Some(credential) = resolve_local_tcp_credential_with_store(
-        target,
-        env_token.as_deref(),
-        &store,
-        chrono::Utc::now(),
-    )? {
-        return Ok(Some(credential));
-    }
-
-    if allow_local_dev_token_fallback {
-        return Ok(
-            load_cli_dev_token_from_sources(env_token.as_deref(), &Home::from_env())
-                .map(Credential::DevToken),
-        );
-    }
-
-    Ok(None)
+    resolve_target_credential_with_store(target, env_token.as_deref(), &store, chrono::Utc::now())
 }
 
 #[expect(
@@ -394,56 +344,20 @@ async fn wait_for_server_ready(http_client: &fabro_http::HttpClient) -> Result<(
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "server-client tests stage local dev-token fixtures with sync std::fs::write"
-)]
 mod tests {
     use chrono::{Duration as ChronoDuration, Utc};
-    use fabro_client::{AuthEntry, StoredSubject};
+    use fabro_client::{AuthEntry, DevTokenEntry, OAuthEntry, StoredSubject};
     use httpmock::Method::{GET, POST};
     use serde_json::json;
 
     use super::*;
 
     #[test]
-    fn load_cli_dev_token_prefers_env() {
-        let temp_home = tempfile::tempdir().unwrap();
-        let token_path = temp_home.path().join("dev-token");
-        std::fs::write(
-            &token_path,
-            "fabro_dev_abababababababababababababababababababababababababababababababab",
-        )
-        .unwrap();
-
-        let token = load_cli_dev_token_from_sources(
-            Some("fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"),
-            &Home::new(temp_home.path()),
-        );
-
-        assert_eq!(
-            token.as_deref(),
-            Some("fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd")
-        );
-    }
-
-    #[test]
-    fn load_cli_dev_token_reads_home_file() {
-        let temp_home = tempfile::tempdir().unwrap();
-        let token = "fabro_dev_abababababababababababababababababababababababababababababababab";
-        std::fs::write(temp_home.path().join("dev-token"), token).unwrap();
-
-        let loaded = load_cli_dev_token_from_sources(None, &Home::new(temp_home.path()));
-
-        assert_eq!(loaded.as_deref(), Some(token));
-    }
-
-    #[test]
     fn resolve_local_tcp_credential_prefers_valid_env_token() {
         let target = ServerTarget::http_url("http://127.0.0.1:32276").unwrap();
         let store = AuthStore::new(tempfile::tempdir().unwrap().path().join("auth.json"));
 
-        let credential = resolve_local_tcp_credential_with_store(
+        let credential = resolve_target_credential_with_store(
             &target,
             Some("fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"),
             &store,
@@ -452,6 +366,28 @@ mod tests {
         .unwrap();
 
         assert!(matches!(credential, Some(Credential::DevToken(_))));
+    }
+
+    #[test]
+    fn resolve_target_credential_uses_persisted_dev_token_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = ServerTarget::http_url("http://127.0.0.1:32276").unwrap();
+        let store = AuthStore::new(dir.path().join("auth.json"));
+        let token = "fabro_dev_abababababababababababababababababababababababababababababababab";
+        store
+            .put(
+                &target,
+                AuthEntry::DevToken(DevTokenEntry {
+                    token:        token.to_string(),
+                    logged_in_at: Utc::now(),
+                }),
+            )
+            .unwrap();
+
+        let credential =
+            resolve_target_credential_with_store(&target, None, &store, Utc::now()).unwrap();
+
+        assert!(matches!(credential, Some(Credential::DevToken(found)) if found == token));
     }
 
     #[test]
@@ -470,8 +406,7 @@ mod tests {
             )
             .unwrap();
 
-        let credential =
-            resolve_local_tcp_credential_with_store(&target, None, &store, now).unwrap();
+        let credential = resolve_target_credential_with_store(&target, None, &store, now).unwrap();
 
         assert!(matches!(credential, Some(Credential::OAuth(_))));
     }
@@ -492,8 +427,7 @@ mod tests {
             )
             .unwrap();
 
-        let credential =
-            resolve_local_tcp_credential_with_store(&target, None, &store, now).unwrap();
+        let credential = resolve_target_credential_with_store(&target, None, &store, now).unwrap();
 
         assert!(matches!(credential, Some(Credential::OAuth(_))));
     }
@@ -514,29 +448,9 @@ mod tests {
             )
             .unwrap();
 
-        let credential =
-            resolve_local_tcp_credential_with_store(&target, None, &store, now).unwrap();
+        let credential = resolve_target_credential_with_store(&target, None, &store, now).unwrap();
 
         assert!(credential.is_none());
-    }
-
-    #[test]
-    fn resolve_local_tcp_credential_does_not_fallback_to_home_dev_token() {
-        let temp_home = tempfile::tempdir().unwrap();
-        let token = "fabro_dev_abababababababababababababababababababababababababababababababab";
-        std::fs::write(temp_home.path().join("dev-token"), token).unwrap();
-        let target = ServerTarget::http_url("http://127.0.0.1:32276").unwrap();
-        let store = AuthStore::new(temp_home.path().join("auth.json"));
-        assert_eq!(
-            load_cli_dev_token_from_sources(None, &Home::new(temp_home.path())).as_deref(),
-            Some(token)
-        );
-
-        assert!(
-            resolve_local_tcp_credential_with_store(&target, None, &store, Utc::now())
-                .unwrap()
-                .is_none()
-        );
     }
 
     #[test]
@@ -554,18 +468,6 @@ mod tests {
         assert!(!should_bypass_proxy_for_http_target(
             "http://fabro.example.com"
         ));
-    }
-
-    #[test]
-    fn explicit_http_targets_do_not_allow_local_dev_token_fallback() {
-        let target = ServerTarget::http_url("https://fabro.example.com/api/v1").unwrap();
-        assert!(!local_dev_token_fallback(&target));
-    }
-
-    #[test]
-    fn unix_socket_targets_keep_local_dev_token_fallback() {
-        let target = ServerTarget::unix_socket_path("/tmp/fabro.sock").unwrap();
-        assert!(local_dev_token_fallback(&target));
     }
 
     #[tokio::test]
@@ -653,7 +555,7 @@ mod tests {
         access_token_expires_at: chrono::DateTime<chrono::Utc>,
         refresh_token_expires_at: chrono::DateTime<chrono::Utc>,
     ) -> AuthEntry {
-        AuthEntry {
+        AuthEntry::OAuth(OAuthEntry {
             access_token: "access-token".to_string(),
             access_token_expires_at,
             refresh_token: "refresh-token".to_string(),
@@ -666,6 +568,6 @@ mod tests {
                 email:       "octocat@example.com".to_string(),
             },
             logged_in_at: Utc::now(),
-        }
+        })
     }
 }

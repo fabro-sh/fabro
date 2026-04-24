@@ -3,14 +3,16 @@ pub(crate) mod start;
 pub(crate) mod status;
 pub(crate) mod stop;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use fabro_client::{AuthEntry, AuthStore, DevTokenEntry, ServerTarget};
 use fabro_config::bind::{self, Bind, BindRequest};
 use fabro_config::user::{active_settings_path, default_storage_dir};
-use fabro_server::install::{self, InstallAppState};
+use fabro_server::install::{self, InstallAppState, InstallFinishHook, InstallFinishInfo};
 use fabro_server::serve::{self, ServeArgs};
 use fabro_static::EnvVars;
 use fabro_util::browser;
@@ -207,12 +209,30 @@ async fn run_install_mode(bootstrap: InstallBootstrap, printer: Printer) -> Resu
         bootstrap.token,
         &bootstrap.storage_dir,
         &bootstrap.config_path,
-    );
+    )
+    .with_finish_hook(persist_install_dev_token_hook());
     install::serve_install_command(bootstrap.bind_request, state, move |bind| {
         announce_install_mode(bind, &token, styles, printer);
         Ok(())
     })
     .await
+}
+
+fn persist_install_dev_token_hook() -> InstallFinishHook {
+    Arc::new(|info: &InstallFinishInfo| {
+        let Some(token) = &info.dev_token else {
+            return Ok(());
+        };
+        let target = ServerTarget::http_url(&info.canonical_url)?;
+        AuthStore::default().put(
+            &target,
+            AuthEntry::DevToken(DevTokenEntry {
+                token:        token.clone(),
+                logged_in_at: chrono::Utc::now(),
+            }),
+        )?;
+        Ok(())
+    })
 }
 
 fn announce_install_mode(bind: &Bind, token: &str, styles: &Styles, printer: Printer) {

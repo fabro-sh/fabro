@@ -267,6 +267,8 @@ impl ReleasePlan {
 
     fn release_tests_command() -> PlannedCommand {
         PlannedCommand::new("cargo")
+            .env_remove("GH_TOKEN")
+            .env_remove("GITHUB_TOKEN")
             .env("SEGMENT_WRITE_KEY", RELEASE_TEST_SEGMENT_WRITE_KEY)
             .arg("nextest")
             .arg("run")
@@ -359,6 +361,9 @@ fn update_version(cargo_toml: &Path, current_version: &str, new_version: &str) -
 fn command(planned: &PlannedCommand) -> Command {
     let mut command = Command::new(&planned.program);
     command.args(&planned.args);
+    for key in &planned.unset_env {
+        command.env_remove(key);
+    }
     for (key, value) in &planned.env {
         command.env(key, value);
     }
@@ -366,17 +371,19 @@ fn command(planned: &PlannedCommand) -> Command {
 }
 
 struct PlannedCommand {
-    program: String,
-    args:    Vec<String>,
-    env:     Vec<(String, String)>,
+    program:   String,
+    args:      Vec<String>,
+    unset_env: Vec<String>,
+    env:       Vec<(String, String)>,
 }
 
 impl PlannedCommand {
     fn new(program: impl Into<String>) -> Self {
         Self {
-            program: program.into(),
-            args:    Vec::new(),
-            env:     Vec::new(),
+            program:   program.into(),
+            args:      Vec::new(),
+            unset_env: Vec::new(),
+            env:       Vec::new(),
         }
     }
 
@@ -390,14 +397,28 @@ impl PlannedCommand {
         self
     }
 
+    fn env_remove(mut self, key: impl Into<String>) -> Self {
+        self.unset_env.push(key.into());
+        self
+    }
+
     fn to_shell_line(&self) -> String {
-        self.env
-            .iter()
-            .map(|(key, value)| format!("{}={}", shell_arg(key), shell_arg(value)))
-            .chain(std::iter::once(shell_arg(&self.program)))
-            .chain(self.args.iter().map(shell_arg))
-            .collect::<Vec<_>>()
-            .join(" ")
+        let mut parts = Vec::new();
+
+        if !self.unset_env.is_empty() {
+            parts.push("unset".to_string());
+            parts.extend(self.unset_env.iter().map(shell_arg));
+            parts.push("&&".to_string());
+        }
+
+        parts.extend(
+            self.env
+                .iter()
+                .map(|(key, value)| format!("{}={}", shell_arg(key), shell_arg(value))),
+        );
+        parts.push(shell_arg(&self.program));
+        parts.extend(self.args.iter().map(shell_arg));
+        parts.join(" ")
     }
 }
 

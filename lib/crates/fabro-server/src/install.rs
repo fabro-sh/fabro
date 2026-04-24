@@ -58,7 +58,15 @@ pub struct InstallAppState {
     finish_in_progress: Arc<AtomicBool>,
     upstreams:          InstallUpstreamConfig,
     on_finish:          Option<Arc<dyn Fn() + Send + Sync>>,
+    finish_hook:        Option<InstallFinishHook>,
 }
+
+pub struct InstallFinishInfo {
+    pub canonical_url: String,
+    pub dev_token:     Option<String>,
+}
+
+pub type InstallFinishHook = Arc<dyn Fn(&InstallFinishInfo) -> anyhow::Result<()> + Send + Sync>;
 
 #[derive(Clone, Debug, Default)]
 struct InstallUpstreamConfig {
@@ -97,6 +105,7 @@ impl InstallAppState {
             finish_in_progress: Arc::new(AtomicBool::new(false)),
             upstreams:          InstallUpstreamConfig::default(),
             on_finish:          None,
+            finish_hook:        None,
         }
     }
 
@@ -137,6 +146,7 @@ impl InstallAppState {
             finish_in_progress: Arc::new(AtomicBool::new(false)),
             upstreams:          InstallUpstreamConfig::default(),
             on_finish:          None,
+            finish_hook:        None,
         }
     }
 
@@ -144,6 +154,14 @@ impl InstallAppState {
     pub fn with_finish_callback(self, on_finish: Arc<dyn Fn() + Send + Sync>) -> Self {
         Self {
             on_finish: Some(on_finish),
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub fn with_finish_hook(self, finish_hook: InstallFinishHook) -> Self {
+        Self {
+            finish_hook: Some(finish_hook),
             ..self
         }
     }
@@ -1356,9 +1374,10 @@ async fn post_install_finish(
                 secret_type: VaultSecretType::Environment,
                 description: None,
             });
-            let home = state.home.clone().unwrap_or_else(Home::from_env);
-            let token = match dev_token::read_or_mint_dev_token_for_install(&home.dev_token_path())
-            {
+            let dev_token_path = Storage::new(state.storage_dir.as_ref())
+                .runtime_directory()
+                .dev_token_path();
+            let token = match dev_token::read_or_mint_dev_token_for_install(&dev_token_path) {
                 Ok(value) => value,
                 Err(err) => {
                     return install_error_response(
@@ -1367,14 +1386,6 @@ async fn post_install_finish(
                     );
                 }
             };
-            if let Err(err) = dev_token::write_dev_token(
-                &Storage::new(state.storage_dir.as_ref())
-                    .runtime_directory()
-                    .dev_token_path(),
-                &token,
-            ) {
-                return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
-            }
             dev_token = Some(token);
         }
         GithubInstallState::App(github) => {
@@ -1479,6 +1490,16 @@ async fn post_install_finish(
         .as_mut()
     {
         *manual_credentials = None;
+    }
+
+    if let Some(finish_hook) = state.finish_hook.clone() {
+        let info = InstallFinishInfo {
+            canonical_url: server.canonical_url.clone(),
+            dev_token:     dev_token.clone(),
+        };
+        if let Err(err) = finish_hook(&info) {
+            warn!(error = %err, "install finish hook failed");
+        }
     }
 
     if let Some(on_finish) = state.on_finish.clone() {

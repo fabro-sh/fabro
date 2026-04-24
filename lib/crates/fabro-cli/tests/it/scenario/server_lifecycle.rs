@@ -10,9 +10,8 @@ fn start_status_stop_lifecycle() {
         ".fabro/settings.toml",
         "[server.auth]\nmethods = [\"dev-token\"]\n",
     );
-    let server_env_path = fabro_config::Storage::new(&storage_dir)
-        .runtime_directory()
-        .env_path();
+    let runtime_directory = fabro_config::Storage::new(&storage_dir).runtime_directory();
+    let server_env_path = runtime_directory.env_path();
     fabro_config::envfile::merge_env_file(&server_env_path, [
         (
             "FABRO_DEV_TOKEN",
@@ -25,7 +24,7 @@ fn start_status_stop_lifecycle() {
     ])
     .unwrap();
     fabro_util::dev_token::write_dev_token(
-        &context.home_dir.join(".fabro").join("dev-token"),
+        &runtime_directory.dev_token_path(),
         "fabro_dev_abababababababababababababababababababababababababababababababab",
     )
     .unwrap();
