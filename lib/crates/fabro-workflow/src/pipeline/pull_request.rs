@@ -605,10 +605,8 @@ mod tests {
     };
     use fabro_store::Database;
     use fabro_types::{BilledTokenCounts, RunSpec, SuccessReason, fixtures};
-    use fabro_vault::{SecretType, Vault};
+    use fabro_vault::Vault;
     use futures::stream;
-    use httpmock::Method::POST;
-    use httpmock::MockServer;
     use object_store::memory::InMemory;
     use tokio::sync::RwLock as AsyncRwLock;
 
@@ -719,30 +717,6 @@ mod tests {
                 key: key.to_string(),
             },
         }
-    }
-
-    fn openai_responses_payload(text: &str) -> serde_json::Value {
-        serde_json::json!({
-            "id": "resp_1",
-            "model": "gpt-5.4",
-            "output": [
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "output_text",
-                            "text": text
-                        }
-                    ]
-                }
-            ],
-            "status": "completed",
-            "usage": {
-                "input_tokens": 10,
-                "output_tokens": 20
-            }
-        })
     }
 
     fn make_test_conclusion() -> Conclusion {
@@ -1289,29 +1263,24 @@ mod tests {
 
     #[tokio::test]
     async fn build_pr_body_uses_vault_only_openai_codex_source() {
-        let server = MockServer::start_async().await;
-        let response_mock = server
-            .mock_async(|when, then| {
-                when.method(POST)
-                    .path("/v1/responses")
-                    .header("authorization", "Bearer vault-openai-key");
-                then.status(200)
-                    .header("content-type", "application/json")
-                    .json_body(openai_responses_payload("Narrative from vault source."));
-            })
+        let twin = fabro_test::twin_openai().await;
+        let namespace = format!("{}::{}", module_path!(), line!());
+        fabro_test::TwinScenarios::new(namespace.clone())
+            .scenario(
+                fabro_test::TwinScenario::responses("gpt-5.4").text("Narrative from vault source."),
+            )
+            .load(twin)
             .await;
 
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault
-            .set(
-                "openai_codex",
-                &serde_json::to_string(&openai_api_key_credential("vault-openai-key")).unwrap(),
-                SecretType::Credential,
-                None,
-            )
-            .unwrap();
-        let base_url = server.url("/v1");
+        fabro_auth::vault_set_credential(
+            &mut vault,
+            "openai_codex",
+            &openai_api_key_credential(&namespace),
+        )
+        .unwrap();
+        let base_url = twin.base_url.clone();
         let llm_source: Arc<dyn CredentialSource> =
             Arc::new(VaultCredentialSource::with_env_lookup(
                 Arc::new(AsyncRwLock::new(vault)),
@@ -1337,7 +1306,6 @@ mod tests {
         .unwrap();
 
         assert!(body.contains("Narrative from vault source."));
-        response_mock.assert_async().await;
     }
 
     // ── parse_dot_summary tests ─────────────────────────────────────────

@@ -8,6 +8,8 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tokio::task::spawn_blocking;
 
 use crate::credential::{ApiKeyHeader, AuthCredential, AuthDetails, credential_id_for};
+use crate::credential_source::CredentialSource;
+use crate::env_source::EnvCredentialSource;
 use crate::refresh::refresh_oauth_credential;
 use crate::vault_ext::{vault_get_credential, vault_set_credential};
 
@@ -180,8 +182,12 @@ impl CredentialResolver {
         }
     }
 
-    #[must_use]
-    pub fn configured_providers(&self, vault: &Vault) -> Vec<Provider> {
+    pub async fn configured_providers(&self) -> Vec<Provider> {
+        let vault = self.vault.read().await;
+        self.configured_providers_for_vault(&vault)
+    }
+
+    fn configured_providers_for_vault(&self, vault: &Vault) -> Vec<Provider> {
         Provider::ALL
             .iter()
             .copied()
@@ -312,20 +318,11 @@ pub async fn configured_providers_from_process_env(
 ) -> Vec<Provider> {
     match vault {
         Some(vault_arc) => {
-            let resolver = CredentialResolver::new(Arc::clone(vault_arc));
-            let guard = vault_arc.read().await;
-            resolver.configured_providers(&guard)
+            CredentialResolver::new(Arc::clone(vault_arc))
+                .configured_providers()
+                .await
         }
-        None => Provider::ALL
-            .iter()
-            .copied()
-            .filter(|provider| {
-                provider
-                    .api_key_env_vars()
-                    .iter()
-                    .any(|env_var| std::env::var(env_var).is_ok())
-            })
-            .collect(),
+        None => EnvCredentialSource::new().configured_providers().await,
     }
 }
 
@@ -726,9 +723,7 @@ mod tests {
         )
         .unwrap();
         let resolver = test_resolver(vault, Arc::new(|_| None));
-        let vault = resolver.vault.read().await;
-
-        assert_eq!(resolver.configured_providers(&vault), vec![
+        assert_eq!(resolver.configured_providers().await, vec![
             Provider::OpenAi
         ]);
     }
@@ -741,9 +736,7 @@ mod tests {
             vault,
             Arc::new(|name| (name == "OPENAI_API_KEY").then(|| "env-key".to_string())),
         );
-        let vault = resolver.vault.read().await;
-
-        assert_eq!(resolver.configured_providers(&vault), vec![
+        assert_eq!(resolver.configured_providers().await, vec![
             Provider::OpenAi
         ]);
     }

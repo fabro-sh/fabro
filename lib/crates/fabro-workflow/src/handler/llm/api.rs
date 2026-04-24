@@ -35,6 +35,18 @@ fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
     }
 }
 
+fn credential_providers(primary: Provider, fallback_chain: &[FallbackTarget]) -> Vec<Provider> {
+    let mut providers = vec![primary];
+    for target in fallback_chain {
+        if let Ok(provider) = target.provider.parse::<Provider>() {
+            if !providers.contains(&provider) {
+                providers.push(provider);
+            }
+        }
+    }
+    providers
+}
+
 /// Shared state for tracking file modifications from agent tool calls.
 struct FileTracking {
     /// Maps tool_call_id → file_path for in-flight write/edit calls.
@@ -203,7 +215,7 @@ impl AgentApiBackend {
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         mcp_servers: Vec<McpServerSettings>,
     ) -> Result<Session, Error> {
-        let client = Client::from_source(source)
+        let client = Client::from_source_for(source, &[provider])
             .await
             .map_err(|e| Error::handler(format!("Failed to create LLM client: {e}")))?;
 
@@ -286,15 +298,27 @@ impl CodergenBackend for AgentApiBackend {
         prompt: &str,
         system_prompt: Option<&str>,
     ) -> Result<CodergenResult, Error> {
-        let client = Client::from_source(self.source.as_ref())
-            .await
-            .map_err(|e| Error::handler(format!("Failed to create LLM client: {e}")))?;
-
         let model = node.model().unwrap_or(&self.model);
         let provider = node
             .provider()
             .map(String::from)
             .or_else(|| Some(self.provider.as_str().to_string()));
+
+        // Build per-request fallback chain: if the node overrides the provider,
+        // no failover is available; otherwise use the backend's.
+        let fallback_chain: &[FallbackTarget] = if node.provider().is_some() {
+            &[]
+        } else {
+            &self.fallback_chain
+        };
+        let primary_provider = provider
+            .as_deref()
+            .and_then(|provider| provider.parse::<Provider>().ok())
+            .unwrap_or(self.provider);
+        let providers = credential_providers(primary_provider, fallback_chain);
+        let client = Client::from_source_for(self.source.as_ref(), &providers)
+            .await
+            .map_err(|e| Error::handler(format!("Failed to create LLM client: {e}")))?;
 
         let max_tokens = node.max_tokens().or_else(|| {
             fabro_model::Catalog::builtin()
@@ -323,14 +347,6 @@ impl CodergenBackend for AgentApiBackend {
             stop_sequences: None,
             metadata: None,
             provider_options: None,
-        };
-
-        // Build per-request fallback chain: if the node overrides the provider,
-        // no failover is available; otherwise use the backend's.
-        let fallback_chain: &[FallbackTarget] = if node.provider().is_some() {
-            &[]
-        } else {
-            &self.fallback_chain
         };
 
         let result = client.complete(&request).await;
@@ -640,7 +656,7 @@ impl CodergenBackend for AgentApiBackend {
 mod tests {
     use fabro_agent::subagent::SessionFactory;
     use fabro_auth::{AuthCredential, AuthDetails, VaultCredentialSource};
-    use fabro_vault::{SecretType, Vault};
+    use fabro_vault::Vault;
     use tokio::sync::RwLock as AsyncRwLock;
 
     use super::*;
@@ -792,20 +808,13 @@ mod tests {
     async fn api_backend_uses_source_credentials() {
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault
-            .set(
-                "anthropic",
-                &serde_json::to_string(&AuthCredential {
-                    provider: Provider::Anthropic,
-                    details:  AuthDetails::ApiKey {
-                        key: "anthropic-key".to_string(),
-                    },
-                })
-                .unwrap(),
-                SecretType::Credential,
-                None,
-            )
-            .unwrap();
+        fabro_auth::vault_set_credential(&mut vault, "anthropic", &AuthCredential {
+            provider: Provider::Anthropic,
+            details:  AuthDetails::ApiKey {
+                key: "anthropic-key".to_string(),
+            },
+        })
+        .unwrap();
         let backend = AgentApiBackend::new(
             "claude-opus-4-6".to_string(),
             Provider::Anthropic,

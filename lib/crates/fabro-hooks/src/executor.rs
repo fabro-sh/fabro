@@ -49,7 +49,6 @@ pub trait HookExecutor: Send + Sync {
         context: &HookContext,
         sandbox: Arc<dyn Sandbox>,
         work_dir: Option<&Path>,
-        llm_source: &dyn CredentialSource,
     ) -> HookResult;
 }
 
@@ -76,9 +75,16 @@ where
 }
 
 /// Executes hooks via shell commands or HTTP POST.
-pub struct HookExecutorImpl;
+pub struct HookExecutorImpl {
+    llm_source: Arc<dyn CredentialSource>,
+}
 
 impl HookExecutorImpl {
+    #[must_use]
+    pub fn new(llm_source: Arc<dyn CredentialSource>) -> Self {
+        Self { llm_source }
+    }
+
     /// Parse a hook decision from JSON stdout and exit code.
     fn parse_decision(exit_code: i32, stdout: &str) -> HookDecision {
         if exit_code == 0 {
@@ -616,7 +622,6 @@ impl HookExecutor for HookExecutorImpl {
         context: &HookContext,
         sandbox: Arc<dyn Sandbox>,
         work_dir: Option<&Path>,
-        llm_source: &dyn CredentialSource,
     ) -> HookResult {
         use std::sync::OnceLock;
         static HTTP_CLIENTS: OnceLock<HttpClientCache> = OnceLock::new();
@@ -674,7 +679,7 @@ impl HookExecutor for HookExecutorImpl {
                     model.as_deref(),
                     context,
                     &env,
-                    llm_source,
+                    self.llm_source.as_ref(),
                 )
                 .await
             }
@@ -698,7 +703,7 @@ impl HookExecutor for HookExecutorImpl {
                     context,
                     sandbox,
                     &env,
-                    llm_source,
+                    self.llm_source.as_ref(),
                 )
                 .await
             }
@@ -816,54 +821,42 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_host_success() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::new(test_llm_source());
         let def = make_definition("exit 0");
         let ctx = make_context();
         let sandbox = make_sandbox();
-        let source = test_llm_source();
-        let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
-            .await;
+        let result = executor.execute(&def, &ctx, sandbox, None).await;
         assert_eq!(result.decision, HookDecision::Proceed);
         assert_eq!(result.hook_name.as_deref(), Some("test-hook"));
     }
 
     #[tokio::test]
     async fn command_executor_host_failure() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::new(test_llm_source());
         let def = make_definition("exit 1");
         let ctx = make_context();
         let sandbox = make_sandbox();
-        let source = test_llm_source();
-        let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
-            .await;
+        let result = executor.execute(&def, &ctx, sandbox, None).await;
         assert!(matches!(result.decision, HookDecision::Block { .. }));
     }
 
     #[tokio::test]
     async fn command_executor_host_skip_via_exit_2() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::new(test_llm_source());
         let def = make_definition("exit 2");
         let ctx = make_context();
         let sandbox = make_sandbox();
-        let source = test_llm_source();
-        let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
-            .await;
+        let result = executor.execute(&def, &ctx, sandbox, None).await;
         assert!(matches!(result.decision, HookDecision::Block { .. }));
     }
 
     #[tokio::test]
     async fn command_executor_host_json_decision() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::new(test_llm_source());
         let def = make_definition(r#"echo '{"decision": "skip", "reason": "test skip"}'"#);
         let ctx = make_context();
         let sandbox = make_sandbox();
-        let source = test_llm_source();
-        let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
-            .await;
+        let result = executor.execute(&def, &ctx, sandbox, None).await;
         assert_eq!(result.decision, HookDecision::Skip {
             reason: Some("test skip".into()),
         });
@@ -871,22 +864,19 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_env_vars_set() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::new(test_llm_source());
         // Print env vars to stdout for verification
         let def = make_definition("echo $ARC_EVENT:$ARC_RUN_ID:$ARC_WORKFLOW");
         let mut ctx = make_context();
         ctx.node_id = Some("plan".into());
         let sandbox = make_sandbox();
-        let source = test_llm_source();
-        let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
-            .await;
+        let result = executor.execute(&def, &ctx, sandbox, None).await;
         assert_eq!(result.decision, HookDecision::Proceed);
     }
 
     #[tokio::test]
     async fn no_hook_type_blocks() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::new(test_llm_source());
         let def = HookDefinition {
             name:       None,
             event:      HookEvent::StageStart,
@@ -899,10 +889,7 @@ mod tests {
         };
         let ctx = make_context();
         let sandbox = make_sandbox();
-        let source = test_llm_source();
-        let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
-            .await;
+        let result = executor.execute(&def, &ctx, sandbox, None).await;
         assert!(matches!(result.decision, HookDecision::Block { .. }));
     }
 
@@ -1276,7 +1263,7 @@ mod tests {
             })
             .await;
 
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::new(test_llm_source());
         let def = HookDefinition {
             name:       Some("http-test".into()),
             event:      HookEvent::StageStart,
@@ -1294,10 +1281,7 @@ mod tests {
         };
         let ctx = make_context();
         let sandbox = make_sandbox();
-        let source = test_llm_source();
-        let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
-            .await;
+        let result = executor.execute(&def, &ctx, sandbox, None).await;
 
         mock.assert_async().await;
         assert_eq!(result.decision, HookDecision::Proceed);

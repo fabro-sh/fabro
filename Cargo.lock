@@ -2309,7 +2309,6 @@ dependencies = [
  "futures",
  "git2",
  "hex",
- "httpmock",
  "md5",
  "mime_guess",
  "object_store",

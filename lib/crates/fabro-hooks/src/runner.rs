@@ -4,8 +4,6 @@ use std::sync::Arc;
 
 use fabro_agent::Sandbox;
 use fabro_auth::CredentialSource;
-#[cfg(test)]
-use fabro_auth::EnvCredentialSource;
 
 use crate::config::{HookDefinition, HookSettings};
 use crate::executor::{HookExecutor, HookExecutorImpl};
@@ -16,7 +14,6 @@ use crate::types::{HookContext, HookDecision};
 pub struct HookRunner {
     config:            HookSettings,
     executor:          Arc<dyn HookExecutor>,
-    llm_source:        Arc<dyn CredentialSource>,
     /// Pre-compiled regexes keyed by matcher pattern string.
     compiled_matchers: HashMap<String, regex::Regex>,
 }
@@ -27,8 +24,7 @@ impl HookRunner {
         let compiled_matchers = Self::compile_matchers(&config);
         Self {
             config,
-            executor: Arc::new(HookExecutorImpl),
-            llm_source,
+            executor: Arc::new(HookExecutorImpl::new(llm_source)),
             compiled_matchers,
         }
     }
@@ -40,7 +36,6 @@ impl HookRunner {
         Self {
             config,
             executor,
-            llm_source: Arc::new(EnvCredentialSource::new()),
             compiled_matchers,
         }
     }
@@ -146,13 +141,7 @@ impl HookRunner {
             );
             let result = self
                 .executor
-                .execute(
-                    hook,
-                    context,
-                    sandbox.clone(),
-                    work_dir,
-                    self.llm_source.as_ref(),
-                )
+                .execute(hook, context, sandbox.clone(), work_dir)
                 .await;
             tracing::debug!(
                 hook = %hook.effective_name(),
@@ -200,13 +189,7 @@ impl HookRunner {
             );
             let result = self
                 .executor
-                .execute(
-                    hook,
-                    context,
-                    sandbox.clone(),
-                    work_dir,
-                    self.llm_source.as_ref(),
-                )
+                .execute(hook, context, sandbox.clone(), work_dir)
                 .await;
             tracing::debug!(
                 hook = %hook.effective_name(),
@@ -248,7 +231,6 @@ mod tests {
             _context: &HookContext,
             _sandbox: Arc<dyn Sandbox>,
             _work_dir: Option<&Path>,
-            _llm_source: &dyn CredentialSource,
         ) -> HookResult {
             HookResult {
                 hook_name:   definition.name.clone(),

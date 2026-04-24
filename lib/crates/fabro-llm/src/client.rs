@@ -52,6 +52,28 @@ impl Client {
         Self::from_credentials(resolved.credentials).await
     }
 
+    /// Create a Client from a credential source, resolving only the requested
+    /// providers.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error` if the source cannot resolve credentials or any provider
+    /// adapter fails to initialize.
+    pub async fn from_source_for(
+        source: &dyn CredentialSource,
+        providers: &[fabro_model::Provider],
+    ) -> Result<Self, Error> {
+        let resolved =
+            source
+                .resolve_providers(providers)
+                .await
+                .map_err(|err| Error::Configuration {
+                    message: format!("Failed to resolve LLM credentials: {err}"),
+                    source:  None,
+                })?;
+        Self::from_credentials(resolved.credentials).await
+    }
+
     /// Create a Client from typed provider credentials.
     ///
     /// # Errors

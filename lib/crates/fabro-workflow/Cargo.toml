@@ -73,7 +73,6 @@ tokio = { workspace = true, features = ["test-util", "macros"] }
 object_store.workspace = true
 assert_cmd = "2"
 predicates = "3"
-httpmock = "0.8"
 fabro-macros = { path = "../fabro-macros" }
 fabro-test = { workspace = true }
 fabro-types = { path = "../fabro-types", features = ["test-support"] }

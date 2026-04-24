@@ -448,11 +448,11 @@ pub async fn run_with_args_and_source(
     mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
     let provider = parse_provider(&args)?;
-    let client = Client::from_source(llm_source.as_ref())
+    let client = Client::from_source_for(llm_source.as_ref(), &[provider])
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create LLM client: {e}"))?;
     ensure_provider_registered(&client, provider)?;
-    run_with_args_and_client(args, client, mcp_servers).await
+    run_with_resolved_provider(args, provider, client, mcp_servers).await
 }
 
 #[allow(
@@ -462,15 +462,28 @@ pub async fn run_with_args_and_source(
 )]
 pub async fn run_with_args_and_client(
     args: AgentArgs,
+    client: Client,
+    mcp_servers: Vec<McpServerSettings>,
+) -> anyhow::Result<()> {
+    let provider = parse_provider(&args)?;
+    ensure_provider_registered(&client, provider)?;
+    run_with_resolved_provider(args, provider, client, mcp_servers).await
+}
+
+#[allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "Assistant output stays on stdout while prompts and diagnostics use stderr."
+)]
+async fn run_with_resolved_provider(
+    args: AgentArgs,
+    provider: Provider,
     mut client: Client,
     mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
     // Resolve color support once, leak to get 'static lifetime for use across
     // threads
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-
-    let provider = parse_provider(&args)?;
-    ensure_provider_registered(&client, provider)?;
 
     if args.verbose {
         client.add_middleware(Arc::new(VerboseMiddleware { styles }));

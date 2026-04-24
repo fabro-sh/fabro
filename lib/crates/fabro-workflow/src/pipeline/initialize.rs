@@ -13,11 +13,10 @@ use fabro_graphviz::graph;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_sandbox::{
     ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorkdirStrategy, WorktreeOptions,
-    WorktreeSandbox,
+    WorktreeSandbox, shell_quote,
 };
 use fabro_vault::Vault;
 use futures::future::try_join_all;
-use shlex::try_quote;
 use tokio::process::Command as TokioCommand;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -384,6 +383,7 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), Error> {
                     .arg("-c")
                     .arg(&shell_command)
                     .current_dir(&cwd)
+                    .kill_on_drop(true)
                     .output(),
             )
             .await
@@ -418,7 +418,7 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), Error> {
             fabro_devcontainer::Command::Args(args) => {
                 let shell_command = args
                     .iter()
-                    .map(|arg| try_quote(arg).unwrap_or_else(|_| arg.into()).to_string())
+                    .map(|arg| shell_quote(arg))
                     .collect::<Vec<_>>()
                     .join(" ");
                 run_shell(shell_command).await?;
@@ -749,7 +749,7 @@ mod tests {
     use fabro_sandbox::SandboxSpec;
     use fabro_store::Database;
     use fabro_types::{RunId, WorkflowSettings, fixtures};
-    use fabro_vault::{SecretType, Vault};
+    use fabro_vault::Vault;
     use object_store::memory::InMemory;
     use tokio::sync::RwLock as AsyncRwLock;
 
@@ -954,20 +954,13 @@ mod tests {
     async fn build_registry_accepts_vault_only_llm_provider() {
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault
-            .set(
-                "anthropic",
-                &serde_json::to_string(&AuthCredential {
-                    provider: fabro_llm::Provider::Anthropic,
-                    details:  AuthDetails::ApiKey {
-                        key: "anthropic-key".to_string(),
-                    },
-                })
-                .unwrap(),
-                SecretType::Credential,
-                None,
-            )
-            .unwrap();
+        fabro_auth::vault_set_credential(&mut vault, "anthropic", &AuthCredential {
+            provider: fabro_llm::Provider::Anthropic,
+            details:  AuthDetails::ApiKey {
+                key: "anthropic-key".to_string(),
+            },
+        })
+        .unwrap();
         let (graph, _) = llm_graph();
         let vault = Arc::new(AsyncRwLock::new(vault));
 

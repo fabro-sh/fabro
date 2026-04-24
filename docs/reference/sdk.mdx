@@ -36,12 +36,12 @@ use std::sync::Arc;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let source = EnvCredentialSource::new();
-    let client = Client::from_source(&source).await?.as_ref().clone();
+    let client = Client::from_source(&source).await?;
     let sandbox = Arc::new(LocalSandbox::new(PathBuf::from(".")));
     let profile = Arc::new(AnthropicProfile::new("claude-sonnet-4-5"));
     let config = SessionOptions::default();
 
-    let mut session = Session::new(client, profile, sandbox, config);
+    let mut session = Session::new(client, profile, sandbox, config, None);
     session.initialize().await;
 
     // Subscribe to events before sending input
@@ -72,6 +72,7 @@ pub fn new(
     provider_profile: Arc<dyn AgentProfile>,
     sandbox: Arc<dyn Sandbox>,
     config: SessionOptions,
+    subagent_manager: Option<Arc<tokio::sync::Mutex<fabro_agent::subagent::SubAgentManager>>>,
 ) -> Self
 ```
 
@@ -447,7 +448,7 @@ You cannot use both `.prompt()` and `.messages()` on the same request — this r
 
 | Method | Type | Description |
 |---|---|---|
-| `new(model, client)` | `(impl Into<String>, Arc<Client>)` | Required. Model ID or alias plus the client to use |
+| `new(model, client)` | `(impl Into<String>, impl Into<Arc<Client>>)` | Required. Model ID or alias plus the client to use |
 | `.prompt(text)` | `impl Into<String>` | Convenience: sends a single user message |
 | `.messages(msgs)` | `Vec<Message>` | Full conversation history |
 | `.system(text)` | `impl Into<String>` | System prompt |

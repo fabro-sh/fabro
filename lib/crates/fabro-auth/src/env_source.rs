@@ -89,6 +89,22 @@ impl CredentialSource for EnvCredentialSource {
         })
     }
 
+    async fn resolve_providers(
+        &self,
+        providers: &[Provider],
+    ) -> anyhow::Result<ResolvedCredentials> {
+        let credentials = providers
+            .iter()
+            .copied()
+            .filter_map(|provider| self.credential_for(provider))
+            .collect();
+
+        Ok(ResolvedCredentials {
+            credentials,
+            auth_issues: Vec::new(),
+        })
+    }
+
     async fn configured_providers(&self) -> Vec<Provider> {
         Provider::ALL
             .iter()

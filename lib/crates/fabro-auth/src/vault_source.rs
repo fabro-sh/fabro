@@ -10,15 +10,14 @@ use crate::{CredentialResolver, CredentialUsage, EnvLookup, ResolveError, Resolv
 
 #[derive(Clone)]
 pub struct VaultCredentialSource {
-    vault:    Arc<AsyncRwLock<Vault>>,
     resolver: CredentialResolver,
 }
 
 impl VaultCredentialSource {
     #[must_use]
     pub fn new(vault: Arc<AsyncRwLock<Vault>>) -> Self {
-        let resolver = CredentialResolver::new(Arc::clone(&vault));
-        Self { vault, resolver }
+        let resolver = CredentialResolver::new(vault);
+        Self { resolver }
     }
 
     #[must_use]
@@ -27,8 +26,8 @@ impl VaultCredentialSource {
         F: Fn(&str) -> Option<String> + Send + Sync + 'static,
     {
         let env_lookup: EnvLookup = Arc::new(env_lookup);
-        let resolver = CredentialResolver::with_env_lookup(Arc::clone(&vault), env_lookup);
-        Self { vault, resolver }
+        let resolver = CredentialResolver::with_env_lookup(vault, env_lookup);
+        Self { resolver }
     }
 }
 
@@ -42,10 +41,17 @@ impl std::fmt::Debug for VaultCredentialSource {
 #[async_trait]
 impl CredentialSource for VaultCredentialSource {
     async fn resolve(&self) -> anyhow::Result<ResolvedCredentials> {
+        self.resolve_providers(Provider::ALL).await
+    }
+
+    async fn resolve_providers(
+        &self,
+        providers: &[Provider],
+    ) -> anyhow::Result<ResolvedCredentials> {
         let mut credentials = Vec::new();
         let mut auth_issues = Vec::new();
 
-        for provider in Provider::ALL {
+        for provider in providers {
             match self
                 .resolver
                 .resolve(*provider, CredentialUsage::ApiRequest)
@@ -64,8 +70,7 @@ impl CredentialSource for VaultCredentialSource {
     }
 
     async fn configured_providers(&self) -> Vec<Provider> {
-        let vault = self.vault.read().await;
-        self.resolver.configured_providers(&vault)
+        self.resolver.configured_providers().await
     }
 }
 
@@ -75,12 +80,12 @@ mod tests {
 
     use chrono::{Duration, Utc};
     use fabro_model::Provider;
-    use fabro_vault::{SecretType, Vault};
+    use fabro_vault::Vault;
     use tokio::sync::RwLock as AsyncRwLock;
 
     use super::VaultCredentialSource;
     use crate::credential::{AuthCredential, AuthDetails, OAuthConfig, OAuthTokens};
-    use crate::{CredentialSource, ResolveError};
+    use crate::{CredentialSource, ResolveError, vault_set_credential};
 
     fn api_key_credential(provider: Provider, key: &str) -> AuthCredential {
         AuthCredential {
@@ -117,23 +122,13 @@ mod tests {
     async fn resolve_returns_credentials_and_auth_issues() {
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault
-            .set(
-                "openai_codex",
-                &serde_json::to_string(&expired_openai_credential()).unwrap(),
-                SecretType::Credential,
-                None,
-            )
-            .unwrap();
-        vault
-            .set(
-                "anthropic",
-                &serde_json::to_string(&api_key_credential(Provider::Anthropic, "anthropic-key"))
-                    .unwrap(),
-                SecretType::Credential,
-                None,
-            )
-            .unwrap();
+        vault_set_credential(&mut vault, "openai_codex", &expired_openai_credential()).unwrap();
+        vault_set_credential(
+            &mut vault,
+            "anthropic",
+            &api_key_credential(Provider::Anthropic, "anthropic-key"),
+        )
+        .unwrap();
 
         let source =
             VaultCredentialSource::with_env_lookup(Arc::new(AsyncRwLock::new(vault)), |_| None);
@@ -156,24 +151,18 @@ mod tests {
     async fn configured_providers_reads_from_vault_without_refreshing() {
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault
-            .set(
-                "openai",
-                &serde_json::to_string(&api_key_credential(Provider::OpenAi, "openai-key"))
-                    .unwrap(),
-                SecretType::Credential,
-                None,
-            )
-            .unwrap();
-        vault
-            .set(
-                "anthropic",
-                &serde_json::to_string(&api_key_credential(Provider::Anthropic, "anthropic-key"))
-                    .unwrap(),
-                SecretType::Credential,
-                None,
-            )
-            .unwrap();
+        vault_set_credential(
+            &mut vault,
+            "openai",
+            &api_key_credential(Provider::OpenAi, "openai-key"),
+        )
+        .unwrap();
+        vault_set_credential(
+            &mut vault,
+            "anthropic",
+            &api_key_credential(Provider::Anthropic, "anthropic-key"),
+        )
+        .unwrap();
         let source =
             VaultCredentialSource::with_env_lookup(Arc::new(AsyncRwLock::new(vault)), |_| None);
 

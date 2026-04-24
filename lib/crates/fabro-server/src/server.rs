@@ -8014,17 +8014,15 @@ provider = "invalid-provider"
             5,
             |_| None,
         );
-        state
-            .vault
-            .write()
-            .await
-            .set(
+        {
+            let mut vault = state.vault.write().await;
+            fabro_auth::vault_set_credential(
+                &mut vault,
                 "openai_codex",
-                &serde_json::to_string(&openai_api_key_credential("vault-openai-key")).unwrap(),
-                SecretType::Credential,
-                None,
+                &openai_api_key_credential("vault-openai-key"),
             )
             .unwrap();
+        }
 
         let llm_result = state.resolve_llm_client().await.unwrap();
 
@@ -8040,17 +8038,15 @@ provider = "invalid-provider"
             5,
             |_| None,
         );
-        state
-            .vault
-            .write()
-            .await
-            .set(
+        {
+            let mut vault = state.vault.write().await;
+            fabro_auth::vault_set_credential(
+                &mut vault,
                 "openai_codex",
-                &serde_json::to_string(&openai_api_key_credential("vault-openai-key")).unwrap(),
-                SecretType::Credential,
-                None,
+                &openai_api_key_credential("vault-openai-key"),
             )
             .unwrap();
+        }
 
         assert_eq!(state.llm_source.configured_providers().await, vec![
             Provider::OpenAi
@@ -8082,17 +8078,15 @@ provider = "invalid-provider"
                 _ => None,
             },
         );
-        state
-            .vault
-            .write()
-            .await
-            .set(
+        {
+            let mut vault = state.vault.write().await;
+            fabro_auth::vault_set_credential(
+                &mut vault,
                 "openai_codex",
-                &serde_json::to_string(&openai_api_key_credential("vault-openai-key")).unwrap(),
-                SecretType::Credential,
-                None,
+                &openai_api_key_credential("vault-openai-key"),
             )
             .unwrap();
+        }
 
         let llm_result = state.resolve_llm_client().await.unwrap();
         let response = llm_result
