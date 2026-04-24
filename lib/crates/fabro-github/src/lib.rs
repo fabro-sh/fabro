@@ -842,38 +842,6 @@ pub async fn update_app_webhook_config(
     Ok(())
 }
 
-/// Check whether a GitHub App is publicly visible.
-///
-/// Calls `GET /apps/{slug}` **without** authentication. Public apps return 200,
-/// private apps return 404 to unauthenticated requests.
-pub async fn is_app_public(
-    client: &impl HttpClient,
-    slug: &str,
-    base_url: &str,
-) -> Result<bool, String> {
-    let url = format!("{base_url}/apps/{slug}");
-    let resp = client
-        .request(
-            HttpMethod::Get,
-            &url,
-            &[
-                ("Accept", "application/vnd.github+json"),
-                ("User-Agent", "fabro"),
-            ],
-            None,
-        )
-        .await
-        .map_err(|e| format!("Failed to check GitHub App visibility: {e}"))?;
-
-    match resp.status {
-        200 => Ok(true),
-        404 => Ok(false),
-        status => Err(format!(
-            "Unexpected status {status} checking GitHub App visibility"
-        )),
-    }
-}
-
 /// Resolve git clone credentials for a GitHub repository.
 ///
 /// Returns `(username, password)` for authenticated cloning.
@@ -1354,7 +1322,6 @@ mod tests {
 
     enum MockHeaderCheck {
         Equals(String),
-        Missing,
     }
 
     struct MockHttpClient {
@@ -1384,12 +1351,6 @@ mod tests {
             self
         }
 
-        fn with_req_header_missing(mut self, name: &str) -> Self {
-            self.routes.last_mut().unwrap().assert_header =
-                Some((name.to_string(), MockHeaderCheck::Missing));
-            self
-        }
-
         fn with_req_body(mut self, json_str: &str) -> Self {
             self.routes.last_mut().unwrap().assert_body_json =
                 Some(serde_json::from_str(json_str).unwrap());
@@ -1407,26 +1368,14 @@ mod tests {
         ) -> Result<HttpResponse, String> {
             for route in &self.routes {
                 if method == route.method && url.ends_with(&route.path) {
-                    if let Some((name, check)) = &route.assert_header {
-                        let found = headers.iter().find(|(k, _)| *k == name.as_str());
-                        match check {
-                            MockHeaderCheck::Equals(expected) => {
-                                let (_, v) = found.unwrap_or_else(|| {
-                                    panic!("Expected header '{name}' not found in request to {url}")
-                                });
-                                assert_eq!(
-                                    *v,
-                                    expected.as_str(),
-                                    "Header '{name}' mismatch for {url}"
-                                );
-                            }
-                            MockHeaderCheck::Missing => {
-                                assert!(
-                                    found.is_none(),
-                                    "Header '{name}' should be absent for {url}"
-                                );
-                            }
-                        }
+                    if let Some((name, MockHeaderCheck::Equals(expected))) = &route.assert_header {
+                        let (_, v) = headers
+                            .iter()
+                            .find(|(k, _)| *k == name.as_str())
+                            .unwrap_or_else(|| {
+                                panic!("Expected header '{name}' not found in request to {url}")
+                            });
+                        assert_eq!(*v, expected.as_str(), "Header '{name}' mismatch for {url}");
                     }
                     if let Some(expected_body) = &route.assert_body_json {
                         let actual = body.expect("Expected request body");
@@ -1780,46 +1729,6 @@ mod tests {
             result.unwrap_err().contains("authentication failed"),
             "expected auth error"
         );
-    }
-
-    // -----------------------------------------------------------------------
-    // is_app_public
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn is_app_public_returns_true_on_200() {
-        let mock = MockHttpClient::new().on(
-            HttpMethod::Get,
-            "/apps/my-fabro-app",
-            200,
-            r#"{"slug": "my-fabro-app"}"#,
-        );
-
-        let result = is_app_public(&mock, "my-fabro-app", "").await;
-        assert!(result.unwrap());
-    }
-
-    #[tokio::test]
-    async fn is_app_public_returns_false_on_404() {
-        let mock = MockHttpClient::new().on(HttpMethod::Get, "/apps/my-private-app", 404, "");
-
-        let result = is_app_public(&mock, "my-private-app", "").await;
-        assert!(!result.unwrap());
-    }
-
-    #[tokio::test]
-    async fn is_app_public_no_auth_header() {
-        let mock = MockHttpClient::new()
-            .on(
-                HttpMethod::Get,
-                "/apps/my-app",
-                200,
-                r#"{"slug": "my-app"}"#,
-            )
-            .with_req_header_missing("Authorization");
-
-        let result = is_app_public(&mock, "my-app", "").await;
-        assert!(result.unwrap());
     }
 
     // -----------------------------------------------------------------------
