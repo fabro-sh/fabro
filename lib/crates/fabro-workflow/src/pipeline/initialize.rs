@@ -16,6 +16,7 @@ use fabro_sandbox::{
     WorktreeSandbox,
 };
 use fabro_vault::Vault;
+use futures::future::try_join_all;
 use shlex::try_quote;
 use tokio::process::Command as TokioCommand;
 use tokio::runtime::Handle;
@@ -374,27 +375,15 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), Error> {
         .apply_devcontainer_snapshot(devcontainer_to_snapshot_config(&config));
 
     let timeout = std::time::Duration::from_mins(5);
-    for command in &config.initialize_commands {
-        let shell_commands = match command {
-            fabro_devcontainer::Command::Shell(shell) => vec![shell.clone()],
-            fabro_devcontainer::Command::Args(args) => {
-                vec![
-                    args.iter()
-                        .map(|arg| try_quote(arg).unwrap_or_else(|_| arg.into()).to_string())
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                ]
-            }
-            fabro_devcontainer::Command::Parallel(commands) => commands.values().cloned().collect(),
-        };
-
-        for shell_command in shell_commands {
+    let run_shell = |shell_command: String| {
+        let cwd = devcontainer.resolve_dir.clone();
+        async move {
             let output = tokio_timeout(
                 timeout,
                 TokioCommand::new("sh")
                     .arg("-c")
                     .arg(&shell_command)
-                    .current_dir(&devcontainer.resolve_dir)
+                    .current_dir(&cwd)
                     .output(),
             )
             .await
@@ -418,6 +407,25 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), Error> {
                 return Err(Error::engine(format!(
                     "Devcontainer initializeCommand failed (exit code {code}): {shell_command}\n{stderr}"
                 )));
+            }
+            Ok::<(), Error>(())
+        }
+    };
+
+    for command in &config.initialize_commands {
+        match command {
+            fabro_devcontainer::Command::Shell(shell) => run_shell(shell.clone()).await?,
+            fabro_devcontainer::Command::Args(args) => {
+                let shell_command = args
+                    .iter()
+                    .map(|arg| try_quote(arg).unwrap_or_else(|_| arg.into()).to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                run_shell(shell_command).await?;
+            }
+            fabro_devcontainer::Command::Parallel(commands) => {
+                let futures = commands.values().cloned().map(&run_shell);
+                try_join_all(futures).await?;
             }
         }
     }
