@@ -189,22 +189,170 @@
     "definition_blob": "8e4620be8ef1236135d34ea602e73fd9ec5f0db88681ea784df87105d9f0481a"
   },
   "graph_source": "digraph Hello {\n    graph [goal=\"Say hello and demonstrate a basic Fabro workflow\"]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    greet [label=\"Greet\", prompt=\"Print a listing of the top-level files and directories in this repo.\"]\n\n    start -> greet -> exit\n}\n",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "run_id": "01KQ0ABZ6MZFGG1T1D2VXNBJJ0",
+    "start_time": "2026-04-24T17:59:59.286780Z",
+    "run_branch": "fabro/run/01KQ0ABZ6MZFGG1T1D2VXNBJJ0",
+    "base_sha": "f99011fdb05e396deafe396066ff7df1122ff348"
   },
-  "status_updated_at": "2026-04-24T17:59:56.917193Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-04-24T17:59:59.286792Z",
   "pending_control": null,
-  "checkpoint": null,
-  "checkpoints": [],
+  "checkpoint": {
+    "timestamp": "2026-04-24T18:00:13.627297Z",
+    "current_node": "greet",
+    "completed_nodes": [
+      "start",
+      "greet"
+    ],
+    "node_retries": {},
+    "context_values": {
+      "internal.fidelity": "compact",
+      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+      "internal.retry_count.greet": 0,
+      "internal.retry_count.start": 0,
+      "current_node": "greet",
+      "thread.start.current_node": "greet",
+      "internal.run_id": "01KQ0ABZ6MZFGG1T1D2VXNBJJ0",
+      "internal.work_dir": "/Users/bhelmkamp/.fabro/storage/scratch/20260424-01KQ0ABZ6MZFGG1T1D2VXNBJJ0/worktree",
+      "last_stage": "greet",
+      "internal.node_visit_count": 1,
+      "internal.thread_id": "start",
+      "graph.rankdir": "LR",
+      "failure_class": "",
+      "failure_signature": "",
+      "last_response": "Here's a breakdown of the top-level contents of the Fabro repo:\n\n### 📁 Directories\n| Directory | Purpose |\n|-----------|---------|\n| `.ai` | AI-related config/context |\n| `.cargo` | Cargo configura",
+      "outcome": "success",
+      "response.greet": "Here's a breakdown of the top-level contents of the Fabro repo:\n\n### 📁 Directories\n| Directory | Purpose |\n|-----------|---------|\n| `.ai` | AI-related config/context |\n| `.cargo` | Cargo configuration |\n| `.claude` | Claude-specific config |\n| `.config` | General config files |\n| `.context` | Context files |\n| `.fabro` | Fabro project config (workflows, etc.) |\n| `.github` | GitHub Actions CI/CD workflows |\n| `apps` | Application frontends (fabro-web, marketing site) |\n| `bin` | Developer scripts and binaries |\n| `docker` | Docker-related files |\n| `docs` | Public documentation (OpenAPI spec, Mintlify) |\n| `docs-internal` | Internal strategy/architecture docs |\n| `evals` | Evaluation suites |\n| `files-internal` | Internal reference files (e.g. testing strategy) |\n| `installer` | Installer tooling |\n| `lib` | Core Rust crates (`lib/crates/`) and TypeScript packages (`lib/packages/`) |\n| `scripts` | Build and utility scripts |\n| `test` | Test fixtures and shared test infrastructure |\n\n### 📄 Key Files\n| File | Purpose |\n|------|---------|\n| `AGENTS.md` / `CLAUDE.md` | Agent guidance (CLAUDE.md symlinks to AGENTS.md) |\n| `Cargo.toml` / `Cargo.lock` | Rust workspace manifest and lockfile |\n| `Dockerfile` / `Dockerfile.deploy` | Container build definitions |\n| `README.md` | Project readme |\n| `CONTRIBUTING.md` | Contribution guidelines |\n| `clippy.toml` / `rustfmt.toml` | Rust linter and formatter config |\n| `docker-compose.yaml` | Local Docker Compose setup |\n| `install.sh` / `install.md` | Installer (symlinks into `apps/marketing/public/`) |\n| `bun.lock` / `package.json` | Bun/Node package lockfile and root manifest |\n| `fly.toml` / `railway.toml` / `render.yaml` | Cloud deployment configs |\n| `Caddyfile` | Caddy reverse proxy config |\n\nThis is a monorepo combining a Rust workspace (the core Fabro server/CLI/engine) with TypeScript apps (React web UI, marketing site) and supporting infrastructure."
+    },
+    "node_outcomes": {
+      "start": {
+        "status": "success",
+        "usage": null
+      },
+      "greet": {
+        "status": "success",
+        "context_updates": {
+          "last_stage": "greet",
+          "last_response": "Here's a breakdown of the top-level contents of the Fabro repo:\n\n### 📁 Directories\n| Directory | Purpose |\n|-----------|---------|\n| `.ai` | AI-related config/context |\n| `.cargo` | Cargo configura",
+          "response.greet": "Here's a breakdown of the top-level contents of the Fabro repo:\n\n### 📁 Directories\n| Directory | Purpose |\n|-----------|---------|\n| `.ai` | AI-related config/context |\n| `.cargo` | Cargo configuration |\n| `.claude` | Claude-specific config |\n| `.config` | General config files |\n| `.context` | Context files |\n| `.fabro` | Fabro project config (workflows, etc.) |\n| `.github` | GitHub Actions CI/CD workflows |\n| `apps` | Application frontends (fabro-web, marketing site) |\n| `bin` | Developer scripts and binaries |\n| `docker` | Docker-related files |\n| `docs` | Public documentation (OpenAPI spec, Mintlify) |\n| `docs-internal` | Internal strategy/architecture docs |\n| `evals` | Evaluation suites |\n| `files-internal` | Internal reference files (e.g. testing strategy) |\n| `installer` | Installer tooling |\n| `lib` | Core Rust crates (`lib/crates/`) and TypeScript packages (`lib/packages/`) |\n| `scripts` | Build and utility scripts |\n| `test` | Test fixtures and shared test infrastructure |\n\n### 📄 Key Files\n| File | Purpose |\n|------|---------|\n| `AGENTS.md` / `CLAUDE.md` | Agent guidance (CLAUDE.md symlinks to AGENTS.md) |\n| `Cargo.toml` / `Cargo.lock` | Rust workspace manifest and lockfile |\n| `Dockerfile` / `Dockerfile.deploy` | Container build definitions |\n| `README.md` | Project readme |\n| `CONTRIBUTING.md` | Contribution guidelines |\n| `clippy.toml` / `rustfmt.toml` | Rust linter and formatter config |\n| `docker-compose.yaml` | Local Docker Compose setup |\n| `install.sh` / `install.md` | Installer (symlinks into `apps/marketing/public/`) |\n| `bun.lock` / `package.json` | Bun/Node package lockfile and root manifest |\n| `fly.toml` / `railway.toml` / `render.yaml` | Cloud deployment configs |\n| `Caddyfile` | Caddy reverse proxy config |\n\nThis is a monorepo combining a Rust workspace (the core Fabro server/CLI/engine) with TypeScript apps (React web UI, marketing site) and supporting infrastructure."
+        },
+        "notes": "Stage completed: greet",
+        "usage": {
+          "input": {
+            "usage": {
+              "model": {
+                "provider": "anthropic",
+                "model_id": "claude-sonnet-4-6"
+              },
+              "tokens": {
+                "input_tokens": 2076,
+                "output_tokens": 713,
+                "reasoning_tokens": 0,
+                "cache_read_tokens": 7176,
+                "cache_write_tokens": 7523
+              }
+            },
+            "facts": {
+              "provider": "anthropic",
+              "cache_write_5m_tokens": 7523,
+              "cache_write_1h_tokens": 0
+            }
+          },
+          "total_usd_micros": 47286
+        }
+      }
+    },
+    "next_node_id": "exit",
+    "node_visits": {
+      "greet": 1,
+      "start": 1
+    }
+  },
+  "checkpoints": [
+    [
+      14,
+      {
+        "timestamp": "2026-04-24T17:59:59.294509Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.thread_id": null,
+          "failure_class": "",
+          "internal.node_visit_count": 1,
+          "outcome": "success",
+          "current_node": "start",
+          "failure_signature": "",
+          "internal.fidelity": "compact",
+          "internal.retry_count.start": 0,
+          "internal.work_dir": "/Users/bhelmkamp/.fabro/storage/scratch/20260424-01KQ0ABZ6MZFGG1T1D2VXNBJJ0/worktree",
+          "graph.rankdir": "LR",
+          "internal.run_id": "01KQ0ABZ6MZFGG1T1D2VXNBJJ0",
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "success",
+            "usage": null
+          }
+        },
+        "next_node_id": "greet",
+        "node_visits": {
+          "start": 1
+        }
+      }
+    ]
+  ],
   "conclusion": null,
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
-  "sandbox": null,
+  "sandbox": {
+    "provider": "local",
+    "working_directory": "/Users/bhelmkamp/.fabro/storage/scratch/20260424-01KQ0ABZ6MZFGG1T1D2VXNBJJ0/worktree"
+  },
   "final_patch": null,
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "nodes": {}
+  "nodes": {
+    "start@1": {
+      "prompt": null,
+      "response": null,
+      "status": {
+        "status": "success",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-04-24T17:59:59.294467Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
+    "greet@1": {
+      "prompt": null,
+      "response": null,
+      "status": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    }
+  }
 }
