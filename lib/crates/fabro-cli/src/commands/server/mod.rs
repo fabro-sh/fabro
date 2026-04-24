@@ -222,7 +222,7 @@ fn announce_install_mode(bind: &Bind, token: &str, styles: &Styles, printer: Pri
     match install_url_hint(bind, token) {
         Some(url) => {
             fabro_util::printerr!(printer, "  Open this URL in your browser to finish setup:");
-            fabro_util::printerr!(printer, "    {url}");
+            fabro_util::printerr!(printer, "    {}", styles.cyan.apply_to(&url));
             if let Err(e) = browser::try_open(&url) {
                 fabro_util::printerr!(printer, "");
                 fabro_util::printerr!(printer, "  Could not open a browser automatically: {e}");
@@ -236,6 +236,9 @@ fn announce_install_mode(bind: &Bind, token: &str, styles: &Styles, printer: Pri
             );
         }
     }
+    fabro_util::printerr!(printer, "");
+    fabro_util::printerr!(printer, "  If prompted, paste the install token:");
+    fabro_util::printerr!(printer, "    {}", styles.bold_cyan.apply_to(token));
     fabro_util::printerr!(printer, "");
     fabro_util::printerr!(
         printer,
