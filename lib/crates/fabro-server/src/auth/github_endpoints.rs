@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_types,
+    reason = "GitHub endpoint bases are public OAuth/API origins and must stay as raw URLs for redirect and request construction."
+)]
+
 use fabro_http::Url;
 
 #[doc(hidden)]

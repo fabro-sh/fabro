@@ -156,7 +156,7 @@ pub async fn git_push_host(
         )
         .await
         {
-            Ok(url) => url,
+            Ok(url) => url.raw_string(),
             Err(e) => {
                 tracing::warn!(error = %e, label, "Failed to get token for push");
                 return false;

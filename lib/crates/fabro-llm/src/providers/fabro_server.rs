@@ -1,3 +1,4 @@
+use fabro_util::redact::DisplaySafeUrl;
 use futures::stream;
 use tracing::{debug, error};
 
@@ -119,7 +120,8 @@ impl ProviderAdapter for Adapter {
 
     async fn complete(&self, request: &Request) -> Result<Response, Error> {
         let url = format!("{}/completions", self.base_url);
-        debug!(base_url = %url, provider = %self.provider_name, "Sending completion to fabro server");
+        let safe_url = redacted_url_for_log(&url);
+        debug!(base_url = %safe_url, provider = %self.provider_name, "Sending completion to fabro server");
 
         let body = build_body(request, false)?;
         let http_resp = send_request(&self.client, &url, &body, &self.provider_name).await?;
@@ -154,7 +156,8 @@ impl ProviderAdapter for Adapter {
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
         let url = format!("{}/completions", self.base_url);
-        debug!(base_url = %url, provider = %self.provider_name, "Sending completion to fabro server");
+        let safe_url = redacted_url_for_log(&url);
+        debug!(base_url = %safe_url, provider = %self.provider_name, "Sending completion to fabro server");
 
         let body = build_body(request, true)?;
         let http_resp = send_request(&self.client, &url, &body, &self.provider_name).await?;
@@ -190,6 +193,11 @@ impl ProviderAdapter for Adapter {
 
         Ok(Box::pin(stream))
     }
+}
+
+fn redacted_url_for_log(url: &str) -> String {
+    DisplaySafeUrl::parse(url)
+        .map_or_else(|_| "<invalid url>".to_string(), |url| url.redacted_string())
 }
 
 /// Parse a single SSE event block into `(event_type, data)`.
@@ -245,6 +253,14 @@ mod tests {
             metadata:         None,
             provider_options: None,
         }
+    }
+
+    #[test]
+    fn redacted_url_for_log_masks_provider_query_credentials() {
+        assert_eq!(
+            redacted_url_for_log("https://fabro.example.test?api_key=secret&project=demo"),
+            "https://fabro.example.test/?api_key=****&project=demo"
+        );
     }
 
     #[tokio::test]

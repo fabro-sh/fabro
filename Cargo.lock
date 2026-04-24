@@ -1789,12 +1789,14 @@ dependencies = [
  "fabro-static",
  "fabro-test",
  "fabro-types",
+ "fabro-util",
  "jsonwebtoken",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2263,15 +2265,18 @@ dependencies = [
  "insta",
  "open",
  "rand 0.9.4",
+ "ref-cast",
  "regex",
  "serde",
  "serde_json",
  "tempfile",
  "termimad",
+ "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

@@ -126,6 +126,10 @@ impl CanonicalUnixSocketPath {
     }
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "Server target parsing validates a configured public server URL before storing its canonical raw form."
+)]
 fn canonical_http_url(value: &str) -> Result<String> {
     let trimmed = value.trim();
     let normalized = trim_api_path_suffix(trimmed);

@@ -1640,6 +1640,10 @@ fn install_error_response(status: StatusCode, message: impl Into<String>) -> Res
     ApiError::new(status, message).into_response()
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "Install canonical_url validation parses a public origin and rejects query/fragment credentials before storage."
+)]
 fn validate_canonical_url(value: &str) -> Result<(), String> {
     let trimmed = value.trim();
     let parsed = fabro_http::Url::parse(trimmed).map_err(|err| err.to_string())?;
@@ -1694,6 +1698,10 @@ fn build_github_app_manifest(
     })
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "Install HTTP client selection parses a public upstream base URL only to decide localhost proxy behavior."
+)]
 fn install_http_client_for_url(base_url: &str) -> Result<fabro_http::HttpClient, String> {
     let mut builder = fabro_http::HttpClientBuilder::new();
     if fabro_http::Url::parse(base_url)
@@ -1717,6 +1725,10 @@ fn install_http_client_for_url(base_url: &str) -> Result<fabro_http::HttpClient,
 /// `format!` URL construction sites below. Passing every upstream URL
 /// through this parser turns it into a typed `Url` with a verified scheme
 /// and host before it is combined with a path segment.
+#[expect(
+    clippy::disallowed_types,
+    reason = "Install upstream endpoints are raw HTTP request URLs; logging uses separate redacted boundaries."
+)]
 fn parse_install_upstream_url(raw: &str) -> Result<fabro_http::Url, String> {
     let url = fabro_http::Url::parse(raw).map_err(|err| err.to_string())?;
     match url.scheme() {
@@ -1738,6 +1750,10 @@ fn parse_install_upstream_url(raw: &str) -> Result<fabro_http::Url, String> {
 /// Each segment is percent-encoded by `url`, so caller-controlled values
 /// (e.g. a GitHub manifest `code`) cannot insert additional path components,
 /// alter the host, or redirect the request to a different URL scheme.
+#[expect(
+    clippy::disallowed_types,
+    reason = "Install upstream endpoints are raw HTTP request URLs; logging uses separate redacted boundaries."
+)]
 fn install_upstream_endpoint(base_url: &str, segments: &[&str]) -> Result<fabro_http::Url, String> {
     let mut url = parse_install_upstream_url(base_url)?;
     {

@@ -1,8 +1,10 @@
 mod entropy;
 mod gitleaks;
 mod jsonl;
+mod safe_url;
 
 pub use jsonl::{redact_json_value, redact_jsonl_line};
+pub use safe_url::{DisplaySafeUrl, DisplaySafeUrlError};
 
 /// A byte range within a string that should be redacted.
 #[derive(Debug, Clone, PartialEq, Eq)]

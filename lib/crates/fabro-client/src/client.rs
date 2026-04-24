@@ -1102,6 +1102,10 @@ impl Client {
         }
     }
 
+    #[expect(
+        clippy::disallowed_types,
+        reason = "Client builds raw server API request URLs for wire transit; logging redaction is handled at log boundaries."
+    )]
     pub async fn delete_store_run(&self, run_id: &RunId, force: bool) -> Result<()> {
         let base_url = self.base_url();
         let mut url = fabro_http::Url::parse(&base_url)
@@ -1157,6 +1161,10 @@ impl Client {
         Ok(bytes)
     }
 
+    #[expect(
+        clippy::disallowed_types,
+        reason = "Client builds raw server API request URLs for wire transit; logging redaction is handled at log boundaries."
+    )]
     fn stage_artifacts_url(&self, run_id: &RunId, stage_id: &StageId) -> Result<fabro_http::Url> {
         let base_url = self.base_url();
         let mut url = fabro_http::Url::parse(&base_url)

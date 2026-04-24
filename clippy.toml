@@ -41,4 +41,6 @@ disallowed-types = [
   { path = "std::net::TcpStream", reason = "Blocking socket; prefer tokio::net::TcpStream on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },
   { path = "std::net::TcpListener", reason = "Blocking accept; prefer tokio::net::TcpListener on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },
   { path = "std::net::UdpSocket", reason = "Blocking recv/send; prefer tokio::net::UdpSocket on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },
+  { path = "url::Url", reason = "Use fabro_util::redact::DisplaySafeUrl at logging/error boundaries for URLs that may carry credentials; document intentional raw URL transit with #[expect(clippy::disallowed_types, reason = \"...\")]", allow-invalid = true },
+  { path = "reqwest::Url", reason = "Use fabro_util::redact::DisplaySafeUrl at logging/error boundaries for URLs that may carry credentials; document intentional raw URL transit with #[expect(clippy::disallowed_types, reason = \"...\")]", allow-invalid = true },
 ]

@@ -7,6 +7,7 @@ use axum::routing::get;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use fabro_util::browser;
+use fabro_util::redact::DisplaySafeUrl;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
@@ -320,8 +321,9 @@ pub async fn exchange_code(
     redirect_uri: Option<&str>,
     verifier: Option<&str>,
 ) -> Result<TokenResponse, String> {
+    let token_url = redacted_url_for_log(endpoint.token_url);
     tracing::debug!(
-        token_url = endpoint.token_url,
+        token_url = %token_url,
         "Exchanging authorization code"
     );
 
@@ -371,7 +373,8 @@ pub async fn refresh_token(
     endpoint: OAuthEndpoint<'_>,
     refresh_token: &str,
 ) -> Result<TokenResponse, String> {
-    tracing::debug!(token_url = endpoint.token_url, "Refreshing access token");
+    let token_url = redacted_url_for_log(endpoint.token_url);
+    tracing::debug!(token_url = %token_url, "Refreshing access token");
 
     let body = encode_form(&[
         ("grant_type", "refresh_token"),
@@ -433,6 +436,11 @@ fn validate_callback_path(path: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn redacted_url_for_log(url: &str) -> String {
+    DisplaySafeUrl::parse(url)
+        .map_or_else(|_| "<invalid url>".to_string(), |url| url.redacted_string())
 }
 
 fn build_redirect_uri(port: u16, path: &str) -> String {
@@ -745,6 +753,14 @@ mod tests {
         let a = generate_state();
         let b = generate_state();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn redacted_url_for_log_masks_sensitive_oauth_query_values() {
+        assert_eq!(
+            redacted_url_for_log("https://auth.example.test/oauth/token?code=abc&state=xyz&keep=1"),
+            "https://auth.example.test/oauth/token?code=****&state=****&keep=1"
+        );
     }
 
     // -----------------------------------------------------------------------

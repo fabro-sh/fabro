@@ -199,8 +199,12 @@ async fn resolve_authenticated_url_embeds_token() {
     .await
     .unwrap();
 
-    assert!(url.starts_with("https://x-access-token:ghs_"));
-    assert!(url.contains("github.com/acme/widgets.git"));
+    assert!(url.raw_string().starts_with("https://x-access-token:ghs_"));
+    assert!(url.raw_string().contains("github.com/acme/widgets.git"));
+    assert!(
+        url.redacted_string()
+            .starts_with("https://x-access-token:****@")
+    );
 
     twin.shutdown().await;
 }

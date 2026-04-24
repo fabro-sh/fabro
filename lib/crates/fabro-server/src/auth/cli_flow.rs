@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_types,
+    reason = "CLI auth validates public loopback and same-origin URLs; these values are raw redirect transit, not credential-bearing log output."
+)]
+
 use std::net;
 use std::sync::Arc;
 

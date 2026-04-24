@@ -16,8 +16,10 @@ workspace = true
 console.workspace = true
 fabro-static.workspace = true
 rand.workspace = true
+ref-cast.workspace = true
 regex.workspace = true
 termimad.workspace = true
+thiserror.workspace = true
 aho-corasick.workspace = true
 serde_json.workspace = true
 serde.workspace = true
@@ -27,6 +29,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
 open = "5"
+url.workspace = true
 
 [build-dependencies]
 toml = "0.8"

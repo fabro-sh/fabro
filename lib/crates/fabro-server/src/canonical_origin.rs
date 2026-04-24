@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_types,
+    reason = "Canonical origin validation handles the public server origin; it is not credential-bearing log output."
+)]
+
 use fabro_types::settings::ServerNamespace;
 use url::Url;
 

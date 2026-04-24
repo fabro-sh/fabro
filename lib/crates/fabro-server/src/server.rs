@@ -5251,6 +5251,10 @@ async fn get_run_state(
     }
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "Pull-request API validates public github.com URLs; these raw URLs are not credential-bearing log output."
+)]
 fn parse_github_owner_repo_from_url(url: &str, kind: &str) -> Result<(String, String), ApiError> {
     let parsed = fabro_http::Url::parse(url)
         .map_err(|err| ApiError::bad_request(format!("Invalid {kind}: {err}")))?;

@@ -351,6 +351,10 @@ fn resolve_target_credential(
     Ok(None)
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "Proxy bypass classification parses a configured raw API target and does not log credential-bearing URLs."
+)]
 fn should_bypass_proxy_for_http_target(api_url: &str) -> bool {
     let Ok(url) = fabro_http::Url::parse(api_url) else {
         return false;

@@ -81,7 +81,9 @@ minijinja = "2"
 fabro-http = { path = "lib/crates/fabro-http" }
 fabro-static = { path = "lib/crates/fabro-static" }
 graphviz-sys = { git = "https://github.com/fabro-sh/graphviz-sys" }
+ref-cast = "1"
 strum = { version = "0.28", features = ["derive"] }
+url = "2"
 zeroize = "1"
 
 [workspace.lints.rust]

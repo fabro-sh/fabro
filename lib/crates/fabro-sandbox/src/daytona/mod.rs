@@ -609,25 +609,31 @@ impl Sandbox for DaytonaSandbox {
                                 let process_svc = sandbox.process().await.ok();
                                 if let Some(ps) = process_svc {
                                     let origin = self.origin_url.get().expect("just set");
-                                    let auth_url = origin.replacen(
-                                        "https://",
-                                        &format!("https://x-access-token:{token}@"),
-                                        1,
-                                    );
-                                    let cmd = format!(
-                                        "git -c maintenance.auto=0 remote set-url origin {}",
-                                        shell_quote(&auth_url),
-                                    );
-                                    let opts = daytona_sdk::ExecuteCommandOptions {
-                                        cwd: Some(WORKING_DIRECTORY.to_string()),
-                                        ..Default::default()
-                                    };
-                                    let wrapped = wrap_bash_command(&cmd);
-                                    if let Ok(r) = ps.execute_command(&wrapped, opts).await {
-                                        if r.exit_code != 0 {
+                                    match fabro_github::embed_token_in_url(origin, &token) {
+                                        Ok(auth_url) => {
+                                            let cmd = format!(
+                                                "git -c maintenance.auto=0 remote set-url origin {}",
+                                                shell_quote(auth_url.as_raw_url().as_str()),
+                                            );
+                                            let opts = daytona_sdk::ExecuteCommandOptions {
+                                                cwd: Some(WORKING_DIRECTORY.to_string()),
+                                                ..Default::default()
+                                            };
+                                            let wrapped = wrap_bash_command(&cmd);
+                                            if let Ok(r) = ps.execute_command(&wrapped, opts).await
+                                            {
+                                                if r.exit_code != 0 {
+                                                    tracing::warn!(
+                                                        exit_code = r.exit_code,
+                                                        "Failed to set push credentials on origin"
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
                                             tracing::warn!(
-                                                exit_code = r.exit_code,
-                                                "Failed to set push credentials on origin"
+                                                error = %e,
+                                                "Failed to build authenticated origin URL"
                                             );
                                         }
                                     }
@@ -824,7 +830,7 @@ impl Sandbox for DaytonaSandbox {
 
         let cmd = format!(
             "git -c maintenance.auto=0 remote set-url origin {}",
-            shell_quote(&auth_url),
+            shell_quote(auth_url.as_raw_url().as_str()),
         );
         self.exec_command(&cmd, 10_000, None, None, None)
             .await

@@ -23,7 +23,7 @@ Six uv patterns, ordered by risk/value so each phase is individually shippable:
 | # | Phase | New crate(s) | Scope |
 |---|---|---|---|
 | 1 | `fabro-static` env var registry | `fabro-static` | Replace ~113 `env::var` string literals and 7 clap `env =` sites with constants on an `EnvVars` struct |
-| 2 | `DisplaySafeUrl` newtype | `fabro-redacted` | Add credential-redacting `Url` wrapper; migrate high-risk URL logging call sites |
+| 2 | `DisplaySafeUrl` newtype | (extend `fabro-util::redact`) | Add credential-redacting `Url` wrapper; migrate high-risk URL logging call sites |
 | 3 | Expanded snapshot helpers | (extend `fabro-test`) | Lift `fabro_json_snapshot!` into `fabro-test`; add value-shaped wrapper parallel to existing `fabro_snapshot!` |
 | 4 | `miette` CLI diagnostics | (extend `fabro-cli`) | Wrap CLI root error with `miette::Diagnostic` for styled chained errors and help footers while preserving existing exit-class hint logic |
 | 5 | `cargo dev` unified CLI | `fabro-dev` | New binary crate replacing `bin/dev/*.sh` and `scripts/*-spa*.sh`; add `dev = "run -p fabro-dev --"` alias |
@@ -82,7 +82,8 @@ None of these is a crisis today. Each is a cheap fix when done deliberately, and
 ### Relevant Code and Patterns
 
 **Existing fabro infrastructure to reuse:**
-- `lib/crates/fabro-http/src/lib.rs:12` — re-exports `url::Url` as `fabro_http::Url`. Already has `#![allow(clippy::disallowed_methods, clippy::disallowed_types)]`. DisplaySafeUrl cohabitating would be natural, but standalone `fabro-redacted` matches uv's narrower-dependency philosophy and lets leaf crates depend on it without pulling in reqwest.
+- `lib/crates/fabro-util/src/redact/` — existing redaction home. `redact_string`, `redact_json_value`, and `redact_jsonl_line` cover generic secret scanning with entropy and gitleaks rules; Phase 2 adds deterministic URL display redaction here.
+- `lib/crates/fabro-http/src/lib.rs:12` — re-exports `url::Url` as `fabro_http::Url`. Already has `#![allow(clippy::disallowed_methods, clippy::disallowed_types)]`, but URL redaction belongs in `fabro-util::redact` rather than the HTTP facade.
 - `lib/crates/fabro-util/src/env.rs` — `Env` trait with `SystemEnv` / `TestEnv` impls. Orthogonal to the name registry; keep it. The registry is about *names*; the trait is about *injection*.
 - `lib/crates/fabro-macros/src/lib.rs` — proc-macro crate with `Combine` derive and `e2e_test` attr already in place. Deps (`syn`, `quote`, `proc-macro2`) are already wired; `OptionsMetadata` macro plumbing slots in cleanly. The runtime trait/data model cannot live in this proc-macro crate; Phase 6 must add a normal crate (`fabro-options-metadata`) parallel to uv's `uv-options-metadata`.
 - `lib/crates/fabro-test/src/lib.rs:61` — `INSTA_FILTERS` with 10 pre-baked filters. Line 1716: `fabro_snapshot!` macro. Line 1214: `TestContext::add_filter`. Good foundation for JSON variant.
@@ -149,9 +150,9 @@ No existing learnings on miette, cargo-dev tooling, or CLI docs drift — those 
 ## Key Technical Decisions
 
 - **New `fabro-static` crate rather than adding `EnvVars` to `fabro-util`.** Rationale: `fabro-util` is a grab-bag; `fabro-static` mirrors uv's narrow-purpose crate and reads as a first-class convention. Leaf crates can depend on `fabro-static` without pulling in `fabro-util`'s broader surface.
-- **New `fabro-redacted` crate rather than adding `DisplaySafeUrl` to `fabro-http`.** Rationale: the redaction adapter should be usable from lower-level/internal crates without depending on `reqwest`/`fabro-http`. `fabro-http` sits above `fabro-github`/`fabro-oauth`/`fabro-llm` in the dep graph, so adding it there would work for some logging-path migrations but would block lower-level crates from using the type. Public API DTOs remain raw `String` / `url::Url` unless a separate DTO audit says otherwise. Matches uv's `uv-redacted`.
+- **`DisplaySafeUrl` lives in `fabro-util::redact` rather than `fabro-http` or a new crate.** Rationale: Fabro already has a shared redaction home for generic string/JSONL secret scanning, and URL display redaction is the same ownership domain. `fabro-http` stays a raw HTTP facade; public API DTOs remain raw `String` / `url::Url` unless a separate DTO audit says otherwise.
 - **`Debug` delegates to `Display` (fabro diverges from uv).** uv's `Debug` impl is a `debug_struct` with separate `scheme`/`username`/`password`/`host`/`port`/`path`/`query`/`fragment` fields — redacting only username/password and leaving query/path/fragment raw. That is unsafe for fabro because our token-bearing URLs put tokens in query strings (`?token=...`), not userinfo. Fabro's `Display` redacts both userinfo and query-string keys from an allowlist; `Debug` delegates to `Display` so `?url` in `tracing::debug!(?url, ...)` does not leak tokens. This is the single most important design choice in Phase 2; get it wrong and the whole phase is security theater.
-- **`DisplaySafeUrl` redacts query-string keys from an allowlist, not just userinfo.** uv's implementation only redacts the password in the URL authority. Fabro needs more: install tokens, CSRF `state` tokens, API keys, auth codes, and access tokens all ride in query strings. The allowlist at minimum: `token`, `install_token`, `access_token`, `refresh_token`, `api_key`, `apikey`, `code`, `state`, `password`, `secret`, `key`. Allowlist lives in `fabro-redacted` and is documented in `docs-internal/logging-strategy.md`.
+- **`DisplaySafeUrl` redacts query-string keys from an allowlist, not just userinfo.** uv's implementation only redacts the password in the URL authority. Fabro needs more: install tokens, CSRF `state` tokens, API keys, auth codes, and access tokens all ride in query strings. The allowlist at minimum: `token`, `install_token`, `access_token`, `refresh_token`, `api_key`, `apikey`, `code`, `state`, `password`, `secret`, `key`. Allowlist lives in `fabro-util::redact` and is documented in `docs-internal/logging-strategy.md`.
 - **Serialization must be redacted when it exists, but a blanket impl is optional.** The "display-only" redaction story is insufficient for DTO/output paths: if a JSON response contains a redacted URL type, the response body must render redacted. However, implementing `Serialize` directly on `DisplaySafeUrl` can silently persist `****` if the type leaks into config/cache/storage structs. Unit 2.1 must choose between (a) a blanket redacted `Serialize` impl plus strong persistence bans/tests, or (b) a separate output-only wrapper for JSON/schema boundaries. In both designs, no serializable redacted URL type ever serializes raw credentials.
 - **Scope of Phase 2 migration is narrowed to credential-bearing paths only.** The research surfaced ~15 URL-logging sites; many of them (`fabro-server/src/install.rs:1454`, `github_webhooks.rs:62`, `serve.rs:331`, `canonical_origin.rs:2`) log URLs that never carry credentials. Migrating them to `DisplaySafeUrl` is churn without security benefit. Phase 2 covers only sites that construct, log, or serialize URLs that can carry tokens; non-credentialed URL handling stays on `url::Url`.
 - **`DisplaySafeUrl` is a display-layer adapter, not a URL type.** The type exists at exactly three kinds of boundaries:
@@ -173,23 +174,23 @@ No existing learnings on miette, cargo-dev tooling, or CLI docs drift — those 
 - **`OptionsMetadata` lands last and is split like uv.** Rationale: the runtime metadata model is a normal crate (`fabro-options-metadata`) with `OptionsMetadata`, `Visit`, `OptionField`, and `OptionSet`; `fabro-macros` only generates impls for that trait. The proc macro is the biggest surface and depends on clap/settings structs being stable. Generating docs from it also needs the `fabro-dev` host crate to exist. Keeping it last also means cli.mdx drift catches up in one PR rather than churning twice.
 - **Clippy enforcement: workspace-wide bans with crate-level opt-outs.** `clippy.toml` is workspace-global — there is no per-crate include/exclude mechanism. Each phase ships bans with this model:
   - **Workspace-wide ban** in `clippy.toml` (with `allow-invalid = true` so the ban survives even when the facade crate isn't in scope).
-  - **Crate-level `#![allow(...)]`** only at the root of crates whose entire purpose legitimately owns/facades the banned symbol (`fabro-static`, `fabro-redacted`, `fabro-http`, test-support crates). Mixed crates that contain both sensitive and non-sensitive paths (especially `fabro-server`) do **not** get root-level allows; they use module-level allows or narrow `#[expect]` at the raw-use site.
+  - **Crate-level `#![allow(...)]`** only at the root of crates whose entire purpose legitimately owns/facades the banned symbol (`fabro-static`, `fabro-http`, test-support crates). Mixed crates that contain both sensitive and non-sensitive paths (especially `fabro-server`) do **not** get root-level allows; they use module-level allows or narrow `#[expect]` at the raw-use site. In `fabro-util`, the allowance is scoped to the `redact::safe_url` owner module.
   - **`#[expect(..., reason = "...")]`** at individual call sites within credential-handling crates where a raw reference is unavoidable.
   - Phase 1 adds `disallowed-methods` for `std::env::var`/`var_os` workspace-wide. `fabro-static` and every `build.rs` carry `#![allow(clippy::disallowed_methods)]`; dynamic resolver/facade paths such as `fabro-util::env::SystemEnv`, interpolation closures, and subprocess env allowlists carry narrow `#[expect]` or module-level allowances with reasons.
-  - Phase 2 adds `disallowed-types` for raw `url::Url`/`reqwest::Url` workspace-wide once migration is complete. `fabro-redacted` (owner), `fabro-http` (reqwest facade), and test-only support can use crate-level allowances; mixed production crates use module/call-site allowances so credential-bearing modules remain protected. Phase 2 also adds a workspace-wide `disallowed-macros` or regex-CI check against inline `format!("https://{}:{}@{}", ...)` construction (no legitimate callers).
+  - Phase 2 adds `disallowed-types` for raw `url::Url`/`reqwest::Url` workspace-wide once migration is complete. `fabro-util::redact::safe_url` (owner), `fabro-http` (reqwest facade), and test-only support can use scoped allowances; mixed production crates use module/call-site allowances so credential-bearing modules remain protected. Phase 2 also adds a workspace-wide `disallowed-macros` or regex-CI check against inline `format!("https://{}:{}@{}", ...)` construction (no legitimate callers).
   - The purpose of the bans is regression prevention, not migration gating. If a crate accumulates many `#[expect]`s, that's a signal to keep migrating — not to bake the exceptions in.
 
 ## Open Questions
 
 ### Resolved During Planning
 
-- **Where does `DisplaySafeUrl` live?** → New `fabro-redacted` crate (see Key Decisions — dep-graph rationale).
+- **Where does `DisplaySafeUrl` live?** → `fabro-util::redact`, next to the existing generic redaction helpers.
 - **Where does `EnvVars` live?** → New `fabro-static` crate.
 - **Where does `OptionsMetadata` runtime metadata live?** → New `fabro-options-metadata` crate. `fabro-macros` only owns the derive macro and emits impls against that normal crate.
 - **Miette full swap or wrap?** → Wrap-in-main (option b).
 - **Does fabro already have a snapshot-filter macro?** → Yes, `fabro_snapshot!` in `fabro-test`. Phase 3 adds a JSON/value variant, not a greenfield macro.
 - **Does `Debug` delegate to `Display`, matching uv?** → No. uv's `Debug` leaves query/path raw; fabro delegates `Debug` to `Display`. Query-string tokens are redacted in both. This is a deliberate divergence documented in Key Technical Decisions.
-- **Does `DisplaySafeUrl` redact query-string keys?** → Yes, from an allowlist maintained in `fabro-redacted`. uv's impl does not.
+- **Does `DisplaySafeUrl` redact query-string keys?** → Yes, from an allowlist maintained in `fabro-util::redact`. uv's impl does not.
 - **Does a serializable redacted URL produce the raw URL (uv parity) or the redacted form?** → Redacted form. Whether that is a blanket `Serialize` impl on `DisplaySafeUrl` or a separate output-only wrapper is deferred to Unit 2.1; either way, callers needing raw-on-wire data use `.as_raw_url()` / `.raw_string()` / `Deref`, not serialization.
 - **Do non-credentialed URL logging sites migrate to `DisplaySafeUrl`?** → No. Migration scope is narrowed to credential-bearing paths. Sites like `fabro-server/src/install.rs:1454` (public webhook URL logging) stay on `url::Url`.
 - **Do the three existing partial env var consts get per-crate decisions?** → No. Two have cross-crate importers but migration is uniform. Delete all three; update importers to reference `fabro_static::EnvVars::*` directly.
@@ -216,7 +217,7 @@ No existing learnings on miette, cargo-dev tooling, or CLI docs drift — those 
 lib/crates/
 ├── fabro-static/                  (NEW — Phase 1)
 │   └── EnvVars struct, all FABRO_* and upstream constants
-├── fabro-redacted/                (NEW — Phase 2)
+├── fabro-util/src/redact/         (MODIFIED — Phase 2)
 │   └── DisplaySafeUrl, DisplaySafeUrlError, ref-cast impls
 ├── fabro-test/                    (MODIFIED — Phase 3)
 │   └── add fabro_json_snapshot! + JSON filter set
@@ -243,7 +244,7 @@ Dependency graph between phases (TB):
 ```mermaid
 flowchart TB
     P1[Phase 1: fabro-static] --> P6[Phase 6: OptionsMetadata + generator]
-    P2[Phase 2: fabro-redacted] -.independent.-> P1
+    P2[Phase 2: DisplaySafeUrl] -.independent.-> P1
     P3[Phase 3: snapshot helpers] -.independent.-> P1
     P4[Phase 4: miette wrap] -.independent.-> P1
     P5[Phase 5: fabro-dev] --> P6
@@ -343,21 +344,21 @@ Solid arrows are real dependencies. Dashed lines show phases that are independen
 
 ---
 
-### Phase 2 — fabro-redacted DisplaySafeUrl
+### Phase 2 — fabro-util DisplaySafeUrl
 
-- [ ] **Unit 2.1: Create `fabro-redacted` crate with `DisplaySafeUrl` newtype**
+- [x] **Unit 2.1: Add `DisplaySafeUrl` to `fabro-util::redact`**
 
-**Goal:** Ship a new leaf crate providing a credential-redacting `Url` wrapper.
+**Goal:** Extend the existing redaction module with a credential-redacting `Url` wrapper.
 
 **Requirements:** R2, R7.
 
 **Dependencies:** None (independent of Phase 1; can interleave).
 
 **Files:**
-- Create: `lib/crates/fabro-redacted/Cargo.toml`
-- Create: `lib/crates/fabro-redacted/src/lib.rs`
-- Modify: `Cargo.toml` (workspace members; add `ref-cast` and `url` to workspace deps if not present — `url` is currently only in `fabro-server/Cargo.toml`, not in the workspace table)
-- Test: `lib/crates/fabro-redacted/src/lib.rs` (inline unit tests mirroring uv's)
+- Create: `lib/crates/fabro-util/src/redact/safe_url.rs`
+- Modify: `lib/crates/fabro-util/src/redact/mod.rs`
+- Modify: `lib/crates/fabro-util/Cargo.toml` and root `Cargo.toml` (add `ref-cast` and `url` workspace deps if not present)
+- Test: `lib/crates/fabro-util/src/redact/safe_url.rs` (inline unit tests mirroring uv's)
 
 **Approach:**
 - Use `/Users/bhelmkamp/p/astral-sh/uv/crates/uv-redacted/src/lib.rs` as a starting template — structure, `#[repr(transparent)]`, `RefCast`, `DisplaySafeUrlError::AmbiguousAuthority`, `has_credential_like_pattern`. But fabro **diverges in three material ways** (see Key Technical Decisions):
@@ -367,7 +368,7 @@ Solid arrows are real dependencies. Dashed lines show phases that are independen
 - `FromStr`, `Deref`, `DerefMut`; `Serialize`/`Deserialize` only if the implementation chooses the blanket redacted-serialization route after the data-loss check above. Optional `schemars` feature parity — `schemars(transparent)` so OpenAPI/JSON-schema consumers see a plain URL string, but only for an explicitly serializable redacted-output type.
 - **Explicit conversion methods**: `fn redacted_string(&self) -> String` (same output as `Display`) and `fn raw_string(&self) -> String` (same output as `self.as_raw_url().to_string()`). These exist specifically so call sites name the form they want. `as_raw_url(&self) -> &url::Url` exposes the inner URL for reqwest/shell-quote/persistence.
 - **Eq/PartialEq/Hash/Ord** are derived on the raw inner `Url` (uv parity). Two `DisplaySafeUrl` values with different credentials produce distinct hashes and comparisons — necessary for `HashMap<DisplaySafeUrl, _>` caches of authenticated remotes. Never implement these against the redacted form.
-- Document the divergences from uv (Debug delegates to Display, query-string keys are redacted from an allowlist, and any serializable redacted-output path serializes redacted rather than raw) at the top of `lib.rs` with a `// Diverges from uv: ...` comment block and in the crate-level rustdoc.
+- Document the divergences from uv (Debug delegates to Display, query-string keys are redacted from an allowlist, and any serializable redacted-output path serializes redacted rather than raw) at the top of `safe_url.rs`.
 
 **Execution note:** Mirror uv's test cases for the shared behavior, then add fabro-specific tests for the three divergences. Before coding, write an integration test in a throwaway fixture that captures `tracing` output from `debug!(?url, ...)` for a token-bearing URL — it must be empty of the token. This is the security invariant the whole crate exists to enforce.
 
@@ -396,12 +397,12 @@ Solid arrows are real dependencies. Dashed lines show phases that are independen
 - Integration (schemars, if a serializable redacted-output type exists): `schemars::schema_for!(DisplaySafeUrl)` or the output wrapper produces a schema with `type: string, format: uri` (transparent).
 
 **Verification:**
-- `cargo test -p fabro-redacted` passes.
-- `cargo doc -p fabro-redacted` produces docs without warnings.
+- `cargo test -p fabro-util safe_url` passes.
+- `cargo doc -p fabro-util --no-deps` produces docs without warnings.
 
 ---
 
-- [ ] **Unit 2.2: Migrate credential-bearing URL paths to `DisplaySafeUrl`**
+- [x] **Unit 2.2: Migrate credential-bearing URL paths to `DisplaySafeUrl`**
 
 **Goal:** Convert URL construction, logging, and serialization paths that can carry credentials to `DisplaySafeUrl`. Non-credentialed URL handling stays on `url::Url`.
 
@@ -412,7 +413,7 @@ Solid arrows are real dependencies. Dashed lines show phases that are independen
 **Files (credential-bearing — IN scope):**
 - Modify: `lib/crates/fabro-github/src/lib.rs:916-935` — `embed_token_in_url` returns `DisplaySafeUrl` (was `String`). Callers update (see shell-quote trap below).
 - Modify: `lib/crates/fabro-github/src/lib.rs:250,259,263,1442` — `format!("...{url}")` in error messages on token-embedded URLs.
-- Modify: `lib/crates/fabro-sandbox/src/daytona/mod.rs:610-614` — **inline token URL construction** (`https://x-access-token:{token}@...`). Replace the `format!` with `DisplaySafeUrl::embed_token(...)` (new helper on `fabro-redacted` or a `fabro-github` helper). Critical: this site bypasses `embed_token_in_url` today, so a `DisplaySafeUrl`-returning `embed_token_in_url` alone does not fix it.
+- Modify: `lib/crates/fabro-sandbox/src/daytona/mod.rs:610-614` — **inline token URL construction** (`https://x-access-token:{token}@...`). Replace the `format!` with a `DisplaySafeUrl`-returning `fabro-github` helper. Critical: this site bypasses `embed_token_in_url` today, so a `DisplaySafeUrl`-returning `embed_token_in_url` alone does not fix it.
 - Modify: `lib/crates/fabro-sandbox/src/daytona/mod.rs:816-826`, `lib/crates/fabro-workflow/src/sandbox_git.rs:153-174` — `resolve_authenticated_url` callers. **Shell-quote trap**: current code calls `shell_quote(&auth_url)` on a `&str`. After the migration, the correct call is `shell_quote(auth_url.as_raw_url().as_str())`, NOT `shell_quote(&auth_url.to_string())` — the latter would shell-quote the `****`-redacted form and break git. Document this trap in the unit comments.
 - Modify: `lib/crates/fabro-oauth/src/lib.rs:324,362,374,403,825` — OAuth token URLs and `format!("...{url}")` errors.
 - Modify: `lib/crates/fabro-server/src/web_auth.rs:398,419,547` — OAuth `redirect_uri` logging. Note: the `state` query param (CSRF token) is covered by Phase 2.1's query-string allowlist, so migration here is a matter of wrapping the URL type, not custom redaction.
@@ -465,7 +466,7 @@ Solid arrows are real dependencies. Dashed lines show phases that are independen
 **Verification:**
 - `rg 'format!\("https?://[^"]*:[^"]*@' lib/crates/` returns zero matches (no more inline token URL construction).
 - Tracing-capture integration tests in `fabro-github`, `fabro-oauth`, `fabro-server` (install flow) pass and assert no token substring.
-- `clippy.toml` gains workspace-wide `disallowed-types` bans on `url::Url` and `reqwest::Url`. `fabro-redacted` (owner), `fabro-http` (reqwest facade), and test-support code can carry crate-level `#![allow(clippy::disallowed_types)]`. Mixed production crates such as `fabro-server` use module-level allowances or per-site `#[expect(clippy::disallowed_types, reason = "...")]` so sensitive modules are still protected.
+- `clippy.toml` gains workspace-wide `disallowed-types` bans on `url::Url` and `reqwest::Url`. `fabro-util::redact::safe_url` (owner), `fabro-http` (reqwest facade), and test-support code can carry scoped `#[allow(clippy::disallowed_types)]`. Mixed production crates such as `fabro-server` use module-level allowances or per-site `#[expect(clippy::disallowed_types, reason = "...")]` so sensitive modules are still protected.
 - Existing `cargo nextest run` passes.
 
 ---
@@ -896,7 +897,7 @@ impl fabro_options_metadata::OptionsMetadata for RunArgs {
 
 ## System-Wide Impact
 
-- **Interaction graph:** `fabro-static`, `fabro-redacted`, and `fabro-options-metadata` are new leaf/runtime crates with no existing consumers; adding them to workspace members is safe. `fabro-cli` gains a direct dep on `miette` for the CLI boundary and an exposed metadata surface for docs generation. `fabro-dev` depends on that exposed clap/metadata surface at generator time (not in the shipped `fabro` binary runtime path).
+- **Interaction graph:** `fabro-static` and `fabro-options-metadata` are new leaf/runtime crates with no existing consumers; adding them to workspace members is safe. Phase 2 extends `fabro-util::redact`, which is already the shared redaction surface. `fabro-cli` gains a direct dep on `miette` for the CLI boundary and an exposed metadata surface for docs generation. `fabro-dev` depends on that exposed clap/metadata surface at generator time (not in the shipped `fabro` binary runtime path).
 - **Error propagation:** Phase 4 wraps at the `main` boundary; library error types unchanged. `anyhow::Error::chain()` still flows through `.context(...)` calls; only the final render changes.
 - **State lifecycle risks:** None from Phases 1, 3, 4, 5, 6 (pure refactors). Phase 2's redaction reaches Display and Debug, plus any explicitly serializable redacted-output type. Callers that need the raw URL for wire-level operations (reqwest, git CLI, subprocess args, HTTP `Location:` headers, stderr prompts the user acts on) must use `.as_raw_url()` / `.raw_string()`. `url.to_string()` on a `DisplaySafeUrl` returns the *redacted* form — an intentional trap that's neutralized by the Key Technical Decisions mitigation stack (explicit methods, clippy deny on `<DisplaySafeUrl as ToString>::to_string`, `disallowed-types` ban, and per-call-site tests in sandbox/install paths).
 - **API surface parity:** `fabro --help` output stays identical through Phase 1 (clap consts vs literals produce the same help). Phase 6 may reshape `cli.mdx` rendering but not `--help`. Phase 2 does NOT touch public API DTOs — `avatar_url`, `user_url`, and any OpenAPI-generated schemas remain `string`/`url::Url`.
@@ -914,7 +915,7 @@ impl fabro_options_metadata::OptionsMetadata for RunArgs {
 |------|------------|
 | Phase 1 churn (~113 call sites, 20 crates) produces a large diff and high merge-conflict probability against in-flight work | Ship Phase 1 alone in a dedicated PR. Coordinate timing with any other heavy refactors. Stage per-crate commits inside the PR for reviewability. |
 | Phase 2 migration misses a credential-bearing URL path; a leak survives | Tracing-capture integration tests in `fabro-github`, `fabro-oauth`, and `fabro-server` assert no token substring. Phase 2 also ships a workspace `clippy.toml` `disallowed-types` ban on raw `url::Url`/`reqwest::Url`; mixed crates use module/call-site expectations rather than root-level allows, and a `format!("https://...:...@")` guard catches inline token URL construction. |
-| Query-string-token URLs (`?token=...`, `?state=...`) not covered by uv's DisplaySafeUrl design | Fabro diverges from uv with an allowlist-based query-key redactor baked into `Display`. Allowlist lives in `fabro-redacted` and is documented in `docs-internal/logging-strategy.md`. |
+| Query-string-token URLs (`?token=...`, `?state=...`) not covered by uv's DisplaySafeUrl design | Fabro diverges from uv with an allowlist-based query-key redactor baked into `Display`. Allowlist lives in `fabro-util::redact` and is documented in `docs-internal/logging-strategy.md`. |
 | `Debug` impl diverging from uv breaks snapshot tests that asserted against `?url` or struct-shaped debug output | Audit existing snapshots before Phase 2 lands; `fabro_snapshot!` default filters can normalize URL rendering in snapshots that should be agnostic to the redaction format. |
 | `shell_quote` / `.to_string()` trap: `url.to_string()` on a `DisplaySafeUrl` returns the redacted form, silently breaking git remotes, reqwest requests, and any transport use | Multi-layered mitigation: (1) explicit `.redacted_string()` / `.raw_string()` methods encourage callers to name the form; (2) clippy `disallowed-methods` entry for `<DisplaySafeUrl as ToString>::to_string` pointing callers at the explicit methods; (3) `disallowed-types` ban on `url::Url`/`reqwest::Url` in credential-handling crates forces all URL handling through the typed API; (4) per-call-site test in the sandbox caller (`fabro-sandbox/src/daytona/mod.rs:826`, `fabro-workflow/src/sandbox_git.rs:174`) that asserts the string passed to `shell_quote` contains the raw token, not `****`. |
 | JSON DTO Serialize leaks raw tokens if serialization matches uv's transparent behavior | Fabro diverges: any serializable redacted-output path renders redacted. Unit 2.1 must decide whether that is a blanket `DisplaySafeUrl` impl or a separate output-only wrapper, and must include a data-loss test/usage audit so persistence paths do not accidentally store `****`. |
@@ -947,7 +948,7 @@ impl fabro_options_metadata::OptionsMetadata for RunArgs {
 - Unit 1.1 + Unit 1.2. Largest mechanical change; lowest semantic risk.
 - **Why first:** Foundation for hygienic env var handling; unblocks future work (e.g., registry-driven subprocess allowlist in `spawn_env.rs`, doc generation in Phase 6).
 
-### Phase 2: `fabro-redacted` DisplaySafeUrl (~1 PR)
+### Phase 2: `fabro-util::redact` DisplaySafeUrl (~1 PR)
 - Unit 2.1 + Unit 2.2. Highest security value.
 - **Why second:** Independent of Phase 1. Shipping after Phase 1 keeps the mechanical diff separate from the behavior-affecting diff.
 

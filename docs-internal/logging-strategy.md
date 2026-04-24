@@ -193,3 +193,5 @@ Some field values carry real or latent sensitivity and must not appear in `traci
 | Credential-ish strings (`api_key`, `bearer_token`, `cookie`, `session_id`, …) | Exfiltration risk. | Emit `has_credentials: true` or a fingerprint (`token_last4`) only when debugging is the only option |
 
 These prohibitions apply to every level (ERROR through TRACE). If an error path genuinely needs raw output for triage, route it through an authenticated support channel — not the default tracing subscriber.
+
+For URLs that may carry credentials, log `fabro_util::redact::DisplaySafeUrl` or a string produced by `DisplaySafeUrl::redacted_string()`. Its `Display` and `Debug` forms redact userinfo plus these query keys case-insensitively: `token`, `install_token`, `access_token`, `refresh_token`, `api_key`, `apikey`, `code`, `state`, `password`, `secret`, and `key`. Raw URL strings stay reserved for wire transit, subprocess arguments, redirects, and persistence.

@@ -3,6 +3,7 @@ use base64::engine::general_purpose::STANDARD;
 use fabro_static::EnvVars;
 use fabro_types::PullRequestGithubDetail;
 use fabro_types::settings::run::MergeStrategy;
+use fabro_util::redact::DisplaySafeUrl;
 use serde::Deserialize;
 use tokio::process::Command;
 
@@ -281,9 +282,10 @@ pub fn parse_github_owner_repo(url: &str) -> Result<(String, String), String> {
             .map(|(_, after)| format!("https://{after}"))
     });
     let url = stripped.as_deref().unwrap_or(url);
+    let display_url = redacted_url_for_error(url);
     let path = url
         .strip_prefix("https://github.com/")
-        .ok_or_else(|| format!("Not a GitHub HTTPS URL: {url}"))?;
+        .ok_or_else(|| format!("Not a GitHub HTTPS URL: {display_url}"))?;
 
     let path = path.trim_end_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
@@ -292,13 +294,18 @@ pub fn parse_github_owner_repo(url: &str) -> Result<(String, String), String> {
     let owner = parts
         .next()
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("Missing owner in GitHub URL: {url}"))?;
+        .ok_or_else(|| format!("Missing owner in GitHub URL: {display_url}"))?;
     let repo = parts
         .next()
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("Missing repo in GitHub URL: {url}"))?;
+        .ok_or_else(|| format!("Missing repo in GitHub URL: {display_url}"))?;
 
     Ok((owner.to_string(), repo.to_string()))
+}
+
+fn redacted_url_for_error(url: &str) -> String {
+    DisplaySafeUrl::parse(url)
+        .map_or_else(|_| "<invalid url>".to_string(), |url| url.redacted_string())
 }
 
 /// Create a signed JWT for GitHub App authentication (RS256).
@@ -934,8 +941,20 @@ pub async fn resolve_clone_credentials(
 ///
 /// Converts `https://github.com/owner/repo` to
 /// `https://x-access-token:<token>@github.com/owner/repo`.
-pub fn embed_token_in_url(url: &str, token: &str) -> String {
-    url.replacen("https://", &format!("https://x-access-token:{token}@"), 1)
+pub fn embed_token_in_url(url: &str, token: &str) -> Result<DisplaySafeUrl, String> {
+    let mut url =
+        DisplaySafeUrl::parse(url).map_err(|e| format!("Failed to parse GitHub HTTPS URL: {e}"))?;
+    if url.scheme() != "https" {
+        return Err(format!(
+            "GitHub clone URL must use HTTPS: {}",
+            url.redacted_string()
+        ));
+    }
+    url.set_username("x-access-token")
+        .map_err(|()| "Failed to set GitHub token username".to_string())?;
+    url.set_password(Some(token))
+        .map_err(|()| "Failed to set GitHub token password".to_string())?;
+    Ok(url)
 }
 
 /// Resolve an authenticated HTTPS URL for a GitHub repository.
@@ -945,12 +964,14 @@ pub fn embed_token_in_url(url: &str, token: &str) -> String {
 pub async fn resolve_authenticated_url(
     ctx: &GitHubContext<'_>,
     url: &str,
-) -> Result<String, String> {
+) -> Result<DisplaySafeUrl, String> {
     let (owner, repo) = parse_github_owner_repo(url)?;
     let (_username, password) = resolve_clone_credentials(ctx, &owner, &repo).await?;
     match password {
-        Some(token) => Ok(embed_token_in_url(url, &token)),
-        None => Ok(url.to_string()),
+        Some(token) => embed_token_in_url(url, &token),
+        None => {
+            DisplaySafeUrl::parse(url).map_err(|e| format!("Failed to parse GitHub HTTPS URL: {e}"))
+        }
     }
 }
 
@@ -1169,7 +1190,14 @@ pub async fn create_installation_access_token_for_projects(
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+    use std::sync::{Arc, Mutex};
+
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use tracing::{debug, subscriber};
+    use tracing_subscriber::fmt::{self as tracing_fmt, MakeWriter};
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::registry;
 
     use super::*;
 
@@ -1295,6 +1323,78 @@ mod tests {
         let result = parse_github_owner_repo("https://user:pass@gitlab.com/owner/repo");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Not a GitHub HTTPS URL"));
+    }
+
+    #[test]
+    fn embed_token_in_url_redacts_display_and_keeps_raw_access() {
+        let url = embed_token_in_url("https://github.com/acme/widgets.git", "ghs_abc123").unwrap();
+
+        assert_eq!(
+            url.redacted_string(),
+            "https://x-access-token:****@github.com/acme/widgets.git"
+        );
+        assert_eq!(
+            url.raw_string(),
+            "https://x-access-token:ghs_abc123@github.com/acme/widgets.git"
+        );
+    }
+
+    #[test]
+    fn logging_embedded_token_url_does_not_emit_token() {
+        let output = CapturedTrace::default();
+        let subscriber = registry().with(
+            tracing_fmt::layer()
+                .with_writer(output.clone())
+                .without_time()
+                .with_target(false),
+        );
+
+        subscriber::with_default(subscriber, || {
+            let url =
+                embed_token_in_url("https://github.com/acme/widgets.git", "ghs_abc123").unwrap();
+            debug!(?url, %url, "resolved authenticated GitHub URL");
+        });
+
+        let formatted = output.captured_output();
+        assert!(formatted.contains("x-access-token:****@"));
+        assert!(!formatted.contains("ghs_abc123"));
+    }
+
+    #[derive(Clone, Default)]
+    struct CapturedTrace {
+        buffer: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl CapturedTrace {
+        fn captured_output(&self) -> String {
+            let buffer = self.buffer.lock().unwrap();
+            String::from_utf8(buffer.clone()).unwrap()
+        }
+    }
+
+    impl<'writer> MakeWriter<'writer> for CapturedTrace {
+        type Writer = CapturedTraceWriter;
+
+        fn make_writer(&'writer self) -> Self::Writer {
+            CapturedTraceWriter {
+                buffer: Arc::clone(&self.buffer),
+            }
+        }
+    }
+
+    struct CapturedTraceWriter {
+        buffer: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl io::Write for CapturedTraceWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.buffer.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]

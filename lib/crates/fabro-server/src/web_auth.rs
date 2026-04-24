@@ -11,6 +11,7 @@ use fabro_static::EnvVars;
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{IdpIdentity, RunAuthMethod};
 use fabro_util::dev_token::validate_dev_token_format;
+use fabro_util::redact::DisplaySafeUrl;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -298,6 +299,11 @@ fn session_cookie_secure(state: &AppState) -> bool {
         .is_ok_and(|resolved| resolved.value.starts_with("https://"))
 }
 
+fn redacted_url_for_log(url: &str) -> String {
+    DisplaySafeUrl::parse(url)
+        .map_or_else(|_| "<invalid url>".to_string(), |url| url.redacted_string())
+}
+
 #[expect(
     clippy::disallowed_methods,
     reason = "Web auth resolves configured {{ env.* }} URLs through this process-env facade."
@@ -367,6 +373,10 @@ async fn auth_config(Extension(auth_mode): Extension<AuthMode>) -> Response {
     .into_response()
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "GitHub OAuth authorize URL is raw browser redirect transit; logs use DisplaySafeUrl."
+)]
 async fn login_github(
     State(state): State<Arc<AppState>>,
     Extension(auth_mode): Extension<AuthMode>,
@@ -410,6 +420,7 @@ async fn login_github(
     };
 
     let state_token = format!("fabro-{}", ulid::Ulid::new());
+    let redirect_uri = format!("{web_url}/auth/callback/github");
     let authorize_url = fabro_http::Url::parse_with_params(
         github_endpoints
             .oauth_base
@@ -418,14 +429,15 @@ async fn login_github(
             .as_str(),
         &[
             ("client_id", client_id.as_str()),
-            ("redirect_uri", &format!("{web_url}/auth/callback/github")),
+            ("redirect_uri", redirect_uri.as_str()),
             ("scope", "read:user user:email"),
             ("state", state_token.as_str()),
         ],
     )
     .expect("GitHub authorize URL should be valid");
 
-    debug!(redirect_uri = %format!("{web_url}/auth/callback/github"), "OAuth login redirecting to GitHub");
+    let safe_redirect_uri = redacted_url_for_log(&redirect_uri);
+    debug!(redirect_uri = %safe_redirect_uri, "OAuth login redirecting to GitHub");
 
     let mut jar = CookieJar::new();
     add_oauth_state_cookie(
@@ -858,6 +870,16 @@ mod tests {
     fn test_cookie_key() -> Key {
         auth::derive_cookie_key(b"web-auth-test-key-material-0123456789")
             .expect("test key should derive")
+    }
+
+    #[test]
+    fn redacted_url_for_log_masks_oauth_state_query_values() {
+        assert_eq!(
+            super::redacted_url_for_log(
+                "https://fabro.example.test/auth/callback?state=abc&code=def&keep=1"
+            ),
+            "https://fabro.example.test/auth/callback?state=****&code=****&keep=1"
+        );
     }
 
     fn dev_token_auth_mode() -> AuthMode {

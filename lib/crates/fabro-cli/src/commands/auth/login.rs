@@ -155,6 +155,10 @@ async fn exchange_cli_token(
         .context("failed to parse CLI auth token response")
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "CLI auth builds a raw browser redirect URL; this token-bearing transit URL is intentionally shown to the user, not logged."
+)]
 fn build_browser_url(
     web_url: &str,
     redirect_uri: &str,
