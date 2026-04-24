@@ -1,7 +1,13 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "Live provider integration tests read required API keys from process env."
+)]
+
 use fabro_llm::error::ProviderErrorKind;
 use fabro_llm::provider::ProviderAdapter;
 use fabro_llm::providers::{AnthropicAdapter, GeminiAdapter, OpenAiAdapter};
 use fabro_llm::types::{FinishReason, Message, Request};
+use fabro_static::EnvVars;
 
 fn make_request(model: &str) -> Request {
     Request {
@@ -24,7 +30,7 @@ fn make_request(model: &str) -> Request {
 
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 async fn anthropic_complete() {
-    let api_key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set");
+    let api_key = std::env::var(EnvVars::ANTHROPIC_API_KEY).expect("ANTHROPIC_API_KEY must be set");
     let adapter = AnthropicAdapter::new(api_key);
     let request = make_request("claude-haiku-4-5");
     let response = adapter.complete(&request).await.unwrap();
@@ -108,7 +114,7 @@ async fn openai_server_error() {
 
 #[fabro_macros::e2e_test(live("GEMINI_API_KEY"))]
 async fn gemini_complete() {
-    let api_key = std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
+    let api_key = std::env::var(EnvVars::GEMINI_API_KEY).expect("GEMINI_API_KEY must be set");
     let adapter = GeminiAdapter::new(api_key);
     let request = make_request("gemini-2.5-flash");
     let response = adapter.complete(&request).await.unwrap();
@@ -202,21 +208,21 @@ async fn run_multi_turn_cache_test(
 
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 async fn anthropic_multi_turn_cache() {
-    let api_key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set");
+    let api_key = std::env::var(EnvVars::ANTHROPIC_API_KEY).expect("ANTHROPIC_API_KEY must be set");
     let adapter = AnthropicAdapter::new(api_key);
     run_multi_turn_cache_test(&adapter, "claude-haiku-4-5", 0.5).await;
 }
 
 #[fabro_macros::e2e_test(live("OPENAI_API_KEY"))]
 async fn openai_multi_turn_cache() {
-    let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
+    let api_key = std::env::var(EnvVars::OPENAI_API_KEY).expect("OPENAI_API_KEY must be set");
     let adapter = OpenAiAdapter::new(api_key);
     run_multi_turn_cache_test(&adapter, "gpt-4o-mini", 0.5).await;
 }
 
 #[fabro_macros::e2e_test(live("GEMINI_API_KEY"))]
 async fn gemini_multi_turn_cache() {
-    let api_key = std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
+    let api_key = std::env::var(EnvVars::GEMINI_API_KEY).expect("GEMINI_API_KEY must be set");
     let adapter = GeminiAdapter::new(api_key);
     run_multi_turn_cache_test(&adapter, "gemini-2.5-flash", 0.5).await;
 }

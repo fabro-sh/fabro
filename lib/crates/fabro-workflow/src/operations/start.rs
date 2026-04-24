@@ -16,6 +16,7 @@ use fabro_sandbox::config::{
 };
 use fabro_sandbox::daytona::{DaytonaConfig, detect_repo_info};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
+use fabro_static::EnvVars;
 use fabro_types::RunId;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
@@ -362,7 +363,11 @@ impl RunSession {
             },
             SandboxProvider::Daytona => {
                 let api_key = match &services.vault {
-                    Some(v) => v.read().await.get("DAYTONA_API_KEY").map(str::to_string),
+                    Some(v) => v
+                        .read()
+                        .await
+                        .get(EnvVars::DAYTONA_API_KEY)
+                        .map(str::to_string),
                     None => None,
                 };
                 SandboxSpec::Daytona {
@@ -451,8 +456,16 @@ impl RunSession {
 
 fn resolve_interp(value: &InterpString) -> String {
     value
-        .resolve(|name| std::env::var(name).ok())
+        .resolve(process_env_var)
         .map_or_else(|_| value.as_source(), |resolved| resolved.value)
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Run startup interpolation owns a process-env lookup facade for {{ env.* }} values."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 async fn load_accepted_run_definition(

@@ -31,6 +31,7 @@ fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-sandbox = { path = "../fabro-sandbox" }
+fabro-static.workspace = true
 fabro-util = { path = "../fabro-util" }
 fabro-vault = { path = "../fabro-vault" }
 fabro-http.workspace = true

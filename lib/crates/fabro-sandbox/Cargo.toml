@@ -30,6 +30,7 @@ strum.workspace = true
 tracing.workspace = true
 base64.workspace = true
 fabro-proc = { path = "../fabro-proc" }
+fabro-static.workspace = true
 shlex = "1"
 
 # local

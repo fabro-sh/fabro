@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use fabro_config::{Storage, envfile};
+use fabro_static::EnvVars;
 use fabro_vault::{SecretType as VaultSecretType, Vault};
 
 pub struct PendingSettingsWrite<'a> {
@@ -16,8 +17,8 @@ pub struct PendingSettingsWrite<'a> {
 }
 
 pub const OBJECT_STORE_MANAGED_COMMENT: &str = "managed by fabro-install: object-store";
-pub const OBJECT_STORE_ACCESS_KEY_ID_ENV: &str = "AWS_ACCESS_KEY_ID";
-pub const OBJECT_STORE_SECRET_ACCESS_KEY_ENV: &str = "AWS_SECRET_ACCESS_KEY";
+pub const OBJECT_STORE_ACCESS_KEY_ID_ENV: &str = EnvVars::AWS_ACCESS_KEY_ID;
+pub const OBJECT_STORE_SECRET_ACCESS_KEY_ENV: &str = EnvVars::AWS_SECRET_ACCESS_KEY;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultSecretWrite {

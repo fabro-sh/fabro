@@ -13,14 +13,13 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
+use fabro_static::EnvVars;
 use fs2::FileExt;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::target::ServerTarget;
-
-const AUTH_FILE_ENV: &str = "FABRO_AUTH_FILE";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredSubject {
@@ -83,7 +82,8 @@ pub enum AuthStoreError {
 #[derive(Debug, Error)]
 pub enum LockError {
     #[error(
-        "the filesystem backing {path} does not support file locking; move the auth store to a local filesystem or set {AUTH_FILE_ENV} to a local path"
+        "the filesystem backing {path} does not support file locking; move the auth store to a local filesystem or set {env} to a local path",
+        env = EnvVars::FABRO_AUTH_FILE
     )]
     FilesystemDoesNotSupportLocking { path: PathBuf },
     #[error("failed to lock auth store at {path}: {source}")]
@@ -106,7 +106,7 @@ struct AuthFile {
 
 impl Default for AuthStore {
     fn default() -> Self {
-        let path = std::env::var_os(AUTH_FILE_ENV).map_or_else(
+        let path = std::env::var_os(EnvVars::FABRO_AUTH_FILE).map_or_else(
             || fabro_util::Home::from_env().root().join("auth.json"),
             PathBuf::from,
         );
@@ -362,10 +362,11 @@ mod tests {
     use std::thread;
 
     use chrono::Duration;
+    use fabro_static::EnvVars;
 
-    #[cfg(unix)]
-    use super::{AUTH_FILE_ENV, LockError, classify_lock_error};
     use super::{AuthEntry, AuthStore, StoredSubject, key_for_target};
+    #[cfg(unix)]
+    use super::{LockError, classify_lock_error};
     use crate::target::ServerTarget;
 
     fn entry(login: &str) -> AuthEntry {
@@ -552,6 +553,6 @@ mod tests {
             err,
             LockError::FilesystemDoesNotSupportLocking { path: ref error_path } if error_path == &path
         ));
-        assert!(err.to_string().contains(AUTH_FILE_ENV));
+        assert!(err.to_string().contains(EnvVars::FABRO_AUTH_FILE));
     }
 }

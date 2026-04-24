@@ -29,6 +29,7 @@ mod tests {
     use std::collections::HashMap;
 
     use fabro_config::ServerSettingsBuilder;
+    use fabro_static::EnvVars;
     use fabro_types::settings::ServerNamespace;
 
     use super::validate_startup;
@@ -56,11 +57,11 @@ methods = [{}]
         let dir = tempfile::tempdir().unwrap();
         let env = HashMap::from([
             (
-                "SESSION_SECRET".to_string(),
+                EnvVars::SESSION_SECRET.to_string(),
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
             ),
             (
-                "FABRO_DEV_TOKEN".to_string(),
+                EnvVars::FABRO_DEV_TOKEN.to_string(),
                 "fabro_dev_abababababababababababababababababababababababababababababababab"
                     .to_string(),
             ),

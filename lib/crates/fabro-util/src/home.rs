@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use fabro_static::EnvVars;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Home {
     root: PathBuf,
@@ -12,6 +14,10 @@ impl Home {
     }
 
     #[must_use]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Home::from_env is the process-env facade for resolving Fabro home paths."
+    )]
     pub fn from_env() -> Self {
         Self::from_env_with_lookup(|name| std::env::var_os(name), dirs::home_dir())
     }
@@ -21,11 +27,11 @@ impl Home {
         lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
         fallback_home: Option<PathBuf>,
     ) -> Self {
-        if let Some(root) = lookup("FABRO_HOME") {
+        if let Some(root) = lookup(EnvVars::FABRO_HOME) {
             return Self::new(root);
         }
 
-        if let Some(home) = lookup("HOME") {
+        if let Some(home) = lookup(EnvVars::HOME) {
             return Self::new(PathBuf::from(home).join(".fabro"));
         }
 
@@ -77,7 +83,7 @@ impl Home {
 
 #[cfg(test)]
 mod tests {
-    use super::Home;
+    use super::{EnvVars, Home};
 
     #[test]
     fn accessors_are_relative_to_root() {
@@ -115,7 +121,7 @@ mod tests {
     fn from_env_prefers_home_env_when_fabro_home_is_absent() {
         let home = Home::from_env_with_lookup(
             |name| match name {
-                "HOME" => Some(std::ffi::OsString::from("/tmp/fabro-home-env")),
+                EnvVars::HOME => Some(std::ffi::OsString::from("/tmp/fabro-home-env")),
                 _ => None,
             },
             None,

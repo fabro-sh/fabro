@@ -13,7 +13,7 @@
 )]
 #![expect(
     clippy::disallowed_methods,
-    reason = "These Daytona integration tests use the real git CLI to prepare remote-repo fixtures for workflow runs."
+    reason = "These Daytona integration tests use real process env and git CLI fixtures for workflow runs."
 )]
 
 use std::collections::HashMap;
@@ -26,6 +26,7 @@ use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
+use fabro_static::EnvVars;
 use fabro_store::{ArtifactStore, Database};
 use fabro_types::{RunId, StageId, WorkflowSettings};
 use fabro_workflow::artifact::sync_artifacts_to_env;
@@ -194,7 +195,8 @@ fn load_github_app_credentials() -> fabro_github::GitHubCredentials {
         .app_id
         .expect("app_id not set in settings.toml [git] section");
 
-    let raw = std::env::var("GITHUB_APP_PRIVATE_KEY").expect("GITHUB_APP_PRIVATE_KEY not set");
+    let raw =
+        std::env::var(EnvVars::GITHUB_APP_PRIVATE_KEY).expect("GITHUB_APP_PRIVATE_KEY not set");
     let private_key_pem = if raw.starts_with("-----") {
         raw
     } else {
@@ -1719,13 +1721,13 @@ async fn daytona_toolbox_idle_diagnostic() {
                 eprintln!("[t=+{sleep_secs}s] FAILED: {e}");
 
                 // Diagnose with raw HTTP calls
-                let api_key = std::env::var("DAYTONA_API_KEY").unwrap_or_default();
+                let api_key = std::env::var(EnvVars::DAYTONA_API_KEY).unwrap_or_default();
                 let client = fabro_http::HttpClientBuilder::new()
                     .timeout(std::time::Duration::from_secs(15))
                     .build()
                     .unwrap();
-                let api_url = std::env::var("DAYTONA_API_URL")
-                    .or_else(|_| std::env::var("DAYTONA_SERVER_URL"))
+                let api_url = std::env::var(EnvVars::DAYTONA_API_URL)
+                    .or_else(|_| std::env::var(EnvVars::DAYTONA_SERVER_URL))
                     .unwrap_or_else(|_| "https://app.daytona.io/api".to_string());
 
                 // Check sandbox state

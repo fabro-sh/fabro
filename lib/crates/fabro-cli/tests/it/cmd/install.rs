@@ -1,10 +1,10 @@
 #![expect(
     clippy::disallowed_methods,
-    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
+    reason = "integration tests stage fixtures and subprocess env with sync test infrastructure"
 )]
 
 use fabro_config::{Storage, envfile};
-use fabro_test::{fabro_snapshot, test_context};
+use fabro_test::{EnvVars, fabro_snapshot, test_context};
 use fabro_vault::{SecretType, Vault};
 
 #[test]
@@ -270,10 +270,14 @@ mode = "keep-me"
         std::fs::set_permissions(&fake_gh, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
-    let path = format!("{}:{}", fake_bin.display(), std::env::var("PATH").unwrap());
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var(EnvVars::PATH).unwrap()
+    );
     let output = context
         .command()
-        .env("PATH", path)
+        .env(EnvVars::PATH, path)
         .args([
             "install",
             "github",

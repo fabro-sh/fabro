@@ -9,9 +9,10 @@ use anyhow::Result;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use fabro_config::bind::{self, Bind, BindRequest};
-use fabro_config::user::{FABRO_CONFIG_ENV, active_settings_path, default_storage_dir};
+use fabro_config::user::{active_settings_path, default_storage_dir};
 use fabro_server::install::{self, InstallAppState};
 use fabro_server::serve::{self, ServeArgs};
+use fabro_static::EnvVars;
 use fabro_util::browser;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -167,7 +168,7 @@ fn maybe_install_bootstrap(
     storage_dir: Option<&std::path::Path>,
     serve_args: &ServeArgs,
 ) -> Result<Option<InstallBootstrap>> {
-    if explicit_config.is_some() || std::env::var_os(FABRO_CONFIG_ENV).is_some() {
+    if explicit_config.is_some() || has_config_env_override() {
         return Ok(None);
     }
 
@@ -189,6 +190,14 @@ fn maybe_install_bootstrap(
         config_path,
         token: generate_install_token()?,
     }))
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Install bootstrap checks whether the documented FABRO_CONFIG override is set."
+)]
+fn has_config_env_override() -> bool {
+    std::env::var_os(EnvVars::FABRO_CONFIG).is_some()
 }
 
 async fn run_install_mode(bootstrap: InstallBootstrap, printer: Printer) -> Result<()> {
@@ -258,8 +267,12 @@ fn install_mode_next_step_message(supervised: bool) -> &'static str {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Install-mode URL hints honor Railway's documented public-domain env var."
+)]
 fn install_url_hint(bind: &Bind, token: &str) -> Option<String> {
-    if let Some(domain) = std::env::var("RAILWAY_PUBLIC_DOMAIN")
+    if let Some(domain) = std::env::var(EnvVars::RAILWAY_PUBLIC_DOMAIN)
         .ok()
         .filter(|value| !value.is_empty())
     {
@@ -286,10 +299,14 @@ fn default_install_bind_request() -> BindRequest {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Install-mode bind defaults inspect known container platform env markers."
+)]
 fn running_in_container() -> bool {
-    std::env::var_os("RAILWAY_PUBLIC_DOMAIN").is_some()
-        || std::env::var_os("RAILWAY_ENVIRONMENT").is_some()
-        || std::env::var_os("KUBERNETES_SERVICE_HOST").is_some()
+    std::env::var_os(EnvVars::RAILWAY_PUBLIC_DOMAIN).is_some()
+        || std::env::var_os(EnvVars::RAILWAY_ENVIRONMENT).is_some()
+        || std::env::var_os(EnvVars::KUBERNETES_SERVICE_HOST).is_some()
         || std::path::Path::new("/.dockerenv").exists()
         || std::path::Path::new("/run/.containerenv").exists()
 }

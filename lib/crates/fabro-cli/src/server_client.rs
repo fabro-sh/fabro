@@ -10,6 +10,7 @@ use fabro_client::{
 };
 pub(crate) use fabro_client::{Client, RunEventStream};
 use fabro_config::bind::Bind;
+use fabro_static::EnvVars;
 pub(crate) use fabro_types::RunProjection;
 use fabro_types::UserSettings;
 use fabro_util::dev_token::validate_dev_token_format;
@@ -208,8 +209,16 @@ fn local_dev_token_fallback(target: &ServerTarget) -> bool {
 }
 
 fn load_cli_dev_token() -> Option<String> {
-    let env_token = std::env::var("FABRO_DEV_TOKEN").ok();
+    let env_token = process_env_var(EnvVars::FABRO_DEV_TOKEN);
     load_cli_dev_token_from_sources(env_token.as_deref(), &Home::from_env())
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Server client authentication supports the documented local dev-token env source."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 fn load_cli_dev_token_from_sources(env_token: Option<&str>, home: &Home) -> Option<String> {
@@ -307,7 +316,7 @@ fn resolve_local_tcp_credential_with_store(
 }
 
 fn resolve_local_tcp_credential(target: &ServerTarget) -> Result<Option<Credential>> {
-    let env_token = std::env::var("FABRO_DEV_TOKEN").ok();
+    let env_token = process_env_var(EnvVars::FABRO_DEV_TOKEN);
     let store = AuthStore::default();
     resolve_local_tcp_credential_with_store(
         target,
@@ -321,7 +330,7 @@ fn resolve_target_credential(
     target: &ServerTarget,
     allow_local_dev_token_fallback: bool,
 ) -> Result<Option<Credential>> {
-    let env_token = std::env::var("FABRO_DEV_TOKEN").ok();
+    let env_token = process_env_var(EnvVars::FABRO_DEV_TOKEN);
     let store = AuthStore::default();
     if let Some(credential) = resolve_local_tcp_credential_with_store(
         target,

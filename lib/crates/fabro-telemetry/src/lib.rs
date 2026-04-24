@@ -13,6 +13,7 @@ use std::thread::JoinHandle;
 
 use chrono::Utc;
 use event::{Track, User};
+use fabro_static::EnvVars;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -186,8 +187,12 @@ macro_rules! track {
     };
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Telemetry initialization reads the documented FABRO_TELEMETRY process-env control."
+)]
 pub fn telemetry_level() -> TelemetryLevel {
-    telemetry_level_from(std::env::var("FABRO_TELEMETRY").ok().as_deref())
+    telemetry_level_from(std::env::var(EnvVars::FABRO_TELEMETRY).ok().as_deref())
 }
 
 pub fn telemetry_level_from(env_value: Option<&str>) -> TelemetryLevel {

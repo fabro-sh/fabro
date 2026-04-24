@@ -18,6 +18,7 @@ use fabro_sandbox::config::{
 };
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
+use fabro_static::EnvVars;
 use fabro_types::settings::ServerNamespace;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
@@ -416,7 +417,7 @@ async fn build_preflight_report(
         None
     };
 
-    let daytona_api_key = state.vault_or_env("DAYTONA_API_KEY");
+    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
     let sandbox_ok = run_sandbox_check(
         &mut checks,
         sandbox_provider,

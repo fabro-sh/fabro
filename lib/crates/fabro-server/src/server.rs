@@ -62,6 +62,7 @@ use fabro_slack::config::resolve_credentials as resolve_slack_credentials;
 use fabro_slack::payload::SlackAnswerSubmission;
 use fabro_slack::threads::ThreadRegistry;
 use fabro_slack::{blocks as slack_blocks, connection as slack_connection};
+use fabro_static::EnvVars;
 use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
@@ -734,7 +735,7 @@ impl AppState {
     }
 
     pub(crate) fn vault_or_env(&self, name: &str) -> Option<String> {
-        std::env::var(name).ok().or_else(|| {
+        process_env_var(name).or_else(|| {
             self.vault
                 .try_read()
                 .ok()
@@ -774,7 +775,7 @@ impl AppState {
     }
 
     pub(crate) fn session_key(&self) -> Option<Key> {
-        self.server_secret("SESSION_SECRET")
+        self.server_secret(EnvVars::SESSION_SECRET)
             .and_then(|value| auth::derive_cookie_key(value.as_bytes()).ok())
     }
 
@@ -787,11 +788,11 @@ impl AppState {
                 let Some(app_id) = settings.app_id.as_ref().map(InterpString::as_source) else {
                     return Ok(None);
                 };
-                let raw = self.server_secret("GITHUB_APP_PRIVATE_KEY");
+                let raw = self.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY);
                 let Some(raw) = raw else {
                     return Ok(None);
                 };
-                let private_key_pem = decode_secret_pem("GITHUB_APP_PRIVATE_KEY", &raw)?;
+                let private_key_pem = decode_secret_pem(EnvVars::GITHUB_APP_PRIVATE_KEY, &raw)?;
                 Ok(Some(fabro_github::GitHubCredentials::App(
                     fabro_github::GitHubAppCredentials {
                         app_id,
@@ -801,8 +802,8 @@ impl AppState {
             }
             GithubIntegrationStrategy::Token => {
                 let token = self
-                    .vault_or_env("GITHUB_TOKEN")
-                    .or_else(|| self.vault_or_env("GH_TOKEN"))
+                    .vault_or_env(EnvVars::GITHUB_TOKEN)
+                    .or_else(|| self.vault_or_env(EnvVars::GH_TOKEN))
                     .as_deref()
                     .map(str::trim)
                     .filter(|token| !token.is_empty())
@@ -870,9 +871,17 @@ fn decode_secret_pem(name: &str, raw: &str) -> Result<String, String> {
 
 fn resolve_interp_string(value: &InterpString) -> anyhow::Result<String> {
     value
-        .resolve(|name| std::env::var(name).ok())
+        .resolve(process_env_var)
         .map(|resolved| resolved.value)
         .map_err(anyhow::Error::from)
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Server state owns process-env lookup facades for interpolation and vault fallbacks."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 fn start_optional_slack_service(state: &Arc<AppState>) {
@@ -2515,7 +2524,7 @@ pub fn create_app_state_with_runtime_settings_and_options(
         server_settings,
         manifest_run_defaults,
         max_concurrent_runs,
-        |name| std::env::var(name).ok(),
+        process_env_var,
         &HashMap::new(),
     )
 }
@@ -2710,17 +2719,17 @@ pub fn create_app_state_with_store_and_runtime_settings(
 }
 
 fn default_env_lookup() -> EnvLookup {
-    Arc::new(|name| std::env::var(name).ok())
+    Arc::new(process_env_var)
 }
 
 fn load_test_server_secrets(path: PathBuf, env: HashMap<String, String>) -> ServerSecrets {
     let mut env = env;
     let file_has_session_secret = envfile::read_env_file(&path)
         .ok()
-        .is_some_and(|entries| entries.contains_key("SESSION_SECRET"));
-    if !env.contains_key("SESSION_SECRET") && !file_has_session_secret {
+        .is_some_and(|entries| entries.contains_key(EnvVars::SESSION_SECRET));
+    if !env.contains_key(EnvVars::SESSION_SECRET) && !file_has_session_secret {
         env.insert(
-            "SESSION_SECRET".to_string(),
+            EnvVars::SESSION_SECRET.to_string(),
             "server-test-session-key-0123456789".to_string(),
         );
     }
@@ -2731,7 +2740,7 @@ fn worker_token_keys_from_server_secrets(
     server_secrets: &ServerSecrets,
 ) -> anyhow::Result<WorkerTokenKeys> {
     let session_secret = server_secrets
-        .get("SESSION_SECRET")
+        .get(EnvVars::SESSION_SECRET)
         .ok_or_else(|| jwt_auth::session_secret_key_error(&auth::KeyDeriveError::Empty))?;
     WorkerTokenKeys::from_master_secret(session_secret.as_bytes())
         .map_err(|err| jwt_auth::session_secret_key_error(&err))
@@ -2772,7 +2781,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             .as_ref()
             .map(|value| {
                 value
-                    .resolve(|name| std::env::var(name).ok())
+                    .resolve(process_env_var)
                     .map(|resolved| resolved.value)
                     .map_err(anyhow::Error::from)
             })
@@ -3870,6 +3879,10 @@ async fn append_worker_exit_failure(
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Worker subprocess startup resolves Cargo's test binary env override when present."
+)]
 fn worker_command(
     state: &AppState,
     run_id: RunId,
@@ -3877,7 +3890,7 @@ fn worker_command(
     run_dir: &std::path::Path,
 ) -> anyhow::Result<Command> {
     let current_exe = std::env::current_exe().context("reading current executable path")?;
-    let exe = std::env::var_os("CARGO_BIN_EXE_fabro").map_or(current_exe, PathBuf::from);
+    let exe = std::env::var_os(EnvVars::CARGO_BIN_EXE_FABRO).map_or(current_exe, PathBuf::from);
     let storage_dir = state.server_storage_dir();
     let runtime_directory = Storage::new(&storage_dir).runtime_directory();
     let daemon = ServerDaemon::read(&runtime_directory)?.with_context(|| {
@@ -3906,8 +3919,8 @@ fn worker_command(
         .stderr(Stdio::piped());
 
     apply_worker_env(&mut cmd);
-    cmd.env_remove("FABRO_WORKER_TOKEN");
-    cmd.env("FABRO_WORKER_TOKEN", worker_token);
+    cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
+    cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
 
     #[cfg(unix)]
     fabro_proc::pre_exec_setpgid(cmd.as_std_mut());
@@ -4639,7 +4652,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         .iter()
         .map(|(name, value)| {
             let resolved = value
-                .resolve(|env| std::env::var(env).ok())
+                .resolve(process_env_var)
                 .map_or_else(|_| value.as_source(), |resolved| resolved.value);
             (name.clone(), resolved)
         })
@@ -6594,7 +6607,7 @@ async fn reconnect_run_sandbox(
     run_id: &RunId,
 ) -> Result<Box<dyn Sandbox>, Response> {
     let record = load_run_sandbox_record(state, run_id).await?;
-    let daytona_api_key = state.vault_or_env("DAYTONA_API_KEY");
+    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
     reconnect(&record, daytona_api_key)
         .await
         .map_err(|err| ApiError::new(StatusCode::CONFLICT, format!("{err}")).into_response())
@@ -6619,7 +6632,7 @@ async fn reconnect_daytona_sandbox(
         )
         .into_response());
     };
-    let daytona_api_key = state.vault_or_env("DAYTONA_API_KEY");
+    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
     DaytonaSandbox::reconnect(name, daytona_api_key)
         .await
         .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.clone()).into_response())
@@ -7719,13 +7732,17 @@ async fn create_completion(
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Render-graph subprocess startup resolves Cargo's test binary env override when present."
+)]
 fn render_graph_subprocess_exe(
     exe_override: Option<&std::path::Path>,
 ) -> Result<PathBuf, RenderSubprocessError> {
     if let Some(path) = exe_override {
         Ok(path.to_path_buf())
     } else {
-        if let Some(path) = std::env::var_os("CARGO_BIN_EXE_fabro").map(PathBuf::from) {
+        if let Some(path) = std::env::var_os(EnvVars::CARGO_BIN_EXE_FABRO).map(PathBuf::from) {
             return Ok(path);
         }
 
@@ -7789,7 +7806,7 @@ async fn render_dot_subprocess(
     let mut cmd = Command::new(exe);
     apply_render_graph_env(&mut cmd);
     cmd.arg("__render-graph")
-        .env("FABRO_TELEMETRY", "off")
+        .env(EnvVars::FABRO_TELEMETRY, "off")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

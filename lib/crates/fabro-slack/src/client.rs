@@ -1,3 +1,4 @@
+use fabro_static::EnvVars;
 use serde_json::{Value, json};
 use tracing::debug;
 
@@ -17,9 +18,13 @@ pub struct SlackClient {
 }
 
 impl SlackClient {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Slack client supports a documented process-env API base URL override."
+    )]
     pub fn new(bot_token: String) -> Self {
         let api_base =
-            std::env::var("SLACK_BASE_URL").unwrap_or_else(|_| SLACK_API_BASE.to_string());
+            std::env::var(EnvVars::SLACK_BASE_URL).unwrap_or_else(|_| SLACK_API_BASE.to_string());
         Self {
             bot_token,
             api_base,

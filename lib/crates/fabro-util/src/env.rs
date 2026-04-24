@@ -12,6 +12,10 @@ pub trait Env: Send + Sync {
 pub struct SystemEnv;
 
 impl Env for SystemEnv {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "SystemEnv is the intentional process-env facade behind the Env trait."
+    )]
     fn var(&self, key: &str) -> Result<String, std::env::VarError> {
         std::env::var(key)
     }

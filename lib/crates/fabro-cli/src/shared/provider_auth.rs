@@ -116,6 +116,10 @@ fn read_api_key_from_stdin() -> Result<String> {
     normalize_api_key_input(&raw)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "The user explicitly selected an API-key env var as the credential source."
+)]
 fn read_api_key_from_env_var(name: &str) -> Result<String> {
     let value =
         std::env::var(name).with_context(|| format!("environment variable {name} is not set"))?;

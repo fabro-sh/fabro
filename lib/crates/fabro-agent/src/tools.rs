@@ -5,6 +5,7 @@ use std::sync::Arc;
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, ToolDefinition};
 use fabro_model::ModelHandle;
+use fabro_static::EnvVars;
 
 use crate::config::SessionOptions;
 use crate::sandbox::GrepOptions;
@@ -467,8 +468,12 @@ fn format_brave_results(body: &serde_json::Value) -> String {
 }
 
 #[must_use]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Web search tool setup reads the documented Brave API key override from process env."
+)]
 pub(crate) fn make_web_search_tool() -> RegisteredTool {
-    make_web_search_tool_with_api_key(std::env::var("BRAVE_SEARCH_API_KEY").ok())
+    make_web_search_tool_with_api_key(std::env::var(EnvVars::BRAVE_SEARCH_API_KEY).ok())
 }
 
 fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool {
@@ -492,7 +497,10 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool 
             let api_key = api_key.clone();
             Box::pin(async move {
                 let api_key = api_key.ok_or_else(|| {
-                    "BRAVE_SEARCH_API_KEY environment variable is not set".to_string()
+                    format!(
+                        "{} environment variable is not set",
+                        EnvVars::BRAVE_SEARCH_API_KEY
+                    )
                 })?;
 
                 let query = required_str(&args, "query")?;
@@ -1407,8 +1415,12 @@ mod tests {
     }
 
     #[fabro_macros::e2e_test(live("BRAVE_SEARCH_API_KEY"))]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Live web-search integration test reads its required API key from process env."
+    )]
     async fn web_search_returns_results() {
-        let api_key = std::env::var("BRAVE_SEARCH_API_KEY")
+        let api_key = std::env::var(EnvVars::BRAVE_SEARCH_API_KEY)
             .expect("BRAVE_SEARCH_API_KEY must be set to run this test");
         let tool = make_web_search_tool_with_api_key(Some(api_key));
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());

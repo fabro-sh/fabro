@@ -256,7 +256,7 @@ Solid arrows are real dependencies. Dashed lines show phases that are independen
 
 ### Phase 1 — fabro-static env var registry
 
-- [ ] **Unit 1.1: Create `fabro-static` crate with `EnvVars` struct**
+- [x] **Unit 1.1: Create `fabro-static` crate with `EnvVars` struct**
 
 **Goal:** Ship a new leaf crate exposing all fabro + upstream env var names as `pub const` fields.
 
@@ -292,7 +292,7 @@ Solid arrows are real dependencies. Dashed lines show phases that are independen
 
 ---
 
-- [ ] **Unit 1.2: Migrate fixed env var names and classify dynamic reads**
+- [x] **Unit 1.2: Migrate fixed env var names and classify dynamic reads**
 
 **Goal:** Replace every fixed string-literal env var name in production code with a reference to `EnvVars`, and explicitly document the remaining dynamic env lookup facades that cannot name a single constant.
 

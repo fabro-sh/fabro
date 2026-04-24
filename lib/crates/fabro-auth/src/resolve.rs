@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_model::Provider;
+use fabro_static::EnvVars;
 use fabro_vault::Vault;
 use shlex::try_quote;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -115,6 +116,10 @@ pub struct CredentialResolver {
 
 impl CredentialResolver {
     #[must_use]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "CredentialResolver owns the process-env fallback used after vault lookup."
+    )]
     pub fn new(vault: Arc<AsyncRwLock<Vault>>) -> Self {
         Self::with_env_lookup(vault, Arc::new(|name| std::env::var(name).ok()))
     }
@@ -229,12 +234,12 @@ impl CredentialResolver {
 
     fn to_api_credential(&self, vault: &Vault, credential: &AuthCredential) -> ApiCredential {
         let base_url = match credential.provider {
-            Provider::Anthropic => self.lookup_env_or_vault(vault, "ANTHROPIC_BASE_URL"),
-            Provider::OpenAi => self.lookup_env_or_vault(vault, "OPENAI_BASE_URL"),
-            Provider::Gemini => self.lookup_env_or_vault(vault, "GEMINI_BASE_URL"),
+            Provider::Anthropic => self.lookup_env_or_vault(vault, EnvVars::ANTHROPIC_BASE_URL),
+            Provider::OpenAi => self.lookup_env_or_vault(vault, EnvVars::OPENAI_BASE_URL),
+            Provider::Gemini => self.lookup_env_or_vault(vault, EnvVars::GEMINI_BASE_URL),
             Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => None,
             Provider::OpenAiCompatible => {
-                self.lookup_env_or_vault(vault, "OPENAI_COMPATIBLE_BASE_URL")
+                self.lookup_env_or_vault(vault, EnvVars::OPENAI_COMPATIBLE_BASE_URL)
             }
         };
         match &credential.details {
@@ -242,8 +247,8 @@ impl CredentialResolver {
                 let mut cred = ApiCredential::from_api_key(credential.provider, key.clone());
                 cred.base_url = base_url;
                 if credential.provider == Provider::OpenAi {
-                    cred.org_id = self.lookup_env_or_vault(vault, "OPENAI_ORG_ID");
-                    cred.project_id = self.lookup_env_or_vault(vault, "OPENAI_PROJECT_ID");
+                    cred.org_id = self.lookup_env_or_vault(vault, EnvVars::OPENAI_ORG_ID);
+                    cred.project_id = self.lookup_env_or_vault(vault, EnvVars::OPENAI_PROJECT_ID);
                 }
                 cred
             }
@@ -261,8 +266,8 @@ impl CredentialResolver {
                     extra_headers,
                     base_url: Some("https://chatgpt.com/backend-api/codex".to_string()),
                     codex_mode: true,
-                    org_id: self.lookup_env_or_vault(vault, "OPENAI_ORG_ID"),
-                    project_id: self.lookup_env_or_vault(vault, "OPENAI_PROJECT_ID"),
+                    org_id: self.lookup_env_or_vault(vault, EnvVars::OPENAI_ORG_ID),
+                    project_id: self.lookup_env_or_vault(vault, EnvVars::OPENAI_PROJECT_ID),
                 }
             }
         }
@@ -272,7 +277,7 @@ impl CredentialResolver {
         let mut env_vars = HashMap::new();
         let login_command = match (&credential.provider, &credential.details, kind) {
             (Provider::OpenAi, AuthDetails::ApiKey { key }, CliAgentKind::Codex) => {
-                env_vars.insert("OPENAI_API_KEY".to_string(), key.clone());
+                env_vars.insert(EnvVars::OPENAI_API_KEY.to_string(), key.clone());
                 Some(codex_login_command(key))
             }
             (
@@ -282,9 +287,12 @@ impl CredentialResolver {
                 },
                 CliAgentKind::Codex,
             ) => {
-                env_vars.insert("OPENAI_API_KEY".to_string(), tokens.access_token.clone());
+                env_vars.insert(
+                    EnvVars::OPENAI_API_KEY.to_string(),
+                    tokens.access_token.clone(),
+                );
                 if let Some(account_id) = account_id {
-                    env_vars.insert("CHATGPT_ACCOUNT_ID".to_string(), account_id.clone());
+                    env_vars.insert(EnvVars::CHATGPT_ACCOUNT_ID.to_string(), account_id.clone());
                 }
                 Some(codex_login_command(&tokens.access_token))
             }
@@ -295,7 +303,10 @@ impl CredentialResolver {
                 None
             }
             (_, AuthDetails::CodexOAuth { tokens, .. }, _) => {
-                env_vars.insert("OPENAI_API_KEY".to_string(), tokens.access_token.clone());
+                env_vars.insert(
+                    EnvVars::OPENAI_API_KEY.to_string(),
+                    tokens.access_token.clone(),
+                );
                 None
             }
         };
@@ -319,14 +330,20 @@ pub async fn configured_providers_from_process_env(
         None => Provider::ALL
             .iter()
             .copied()
-            .filter(|provider| {
-                provider
-                    .api_key_env_vars()
-                    .iter()
-                    .any(|env_var| std::env::var(env_var).is_ok())
-            })
+            .filter(|provider| provider_has_process_env_api_key(*provider))
             .collect(),
     }
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Provider discovery intentionally checks documented API-key env names."
+)]
+fn provider_has_process_env_api_key(provider: Provider) -> bool {
+    provider
+        .api_key_env_vars()
+        .iter()
+        .any(|env_var| std::env::var(env_var).is_ok())
 }
 
 fn codex_login_command(api_key: &str) -> String {

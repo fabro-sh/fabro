@@ -3,7 +3,7 @@ mod auth_tokens;
 
 use assert_cmd::Command;
 use fabro_store::EventEnvelope;
-use fabro_test::{TestContext, preserve_coverage_env};
+use fabro_test::{EnvVars, TestContext, preserve_coverage_env};
 use fabro_types::RunId;
 macro_rules! fabro_json_snapshot {
     ($context:expr, $value:expr, @$snapshot:literal) => {{
@@ -99,17 +99,21 @@ impl LightweightCli {
         }
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Lightweight CLI test harness reconstructs a minimal process env for subprocesses."
+    )]
     pub(crate) fn command(&self) -> Command {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_fabro"));
         cmd.env_clear();
         preserve_coverage_env!(cmd);
-        if let Some(path) = std::env::var_os("PATH") {
-            cmd.env("PATH", path);
+        if let Some(path) = std::env::var_os(EnvVars::PATH) {
+            cmd.env(EnvVars::PATH, path);
         }
-        cmd.env("HOME", self.home_dir.path());
-        cmd.env("NO_COLOR", "1");
-        cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
-            .env("FABRO_HTTP_PROXY_POLICY", "disabled");
+        cmd.env(EnvVars::HOME, self.home_dir.path());
+        cmd.env(EnvVars::NO_COLOR, "1");
+        cmd.env(EnvVars::FABRO_NO_UPGRADE_CHECK, "true")
+            .env(EnvVars::FABRO_HTTP_PROXY_POLICY, "disabled");
         cmd.current_dir(self.home_dir.path());
         cmd
     }

@@ -13,6 +13,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+fabro-static.workspace = true
 reqwest = { workspace = true, features = ["blocking", "cookies"] }
 thiserror.workspace = true
 

@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 console.workspace = true
+fabro-static.workspace = true
 rand.workspace = true
 regex.workspace = true
 termimad.workspace = true

@@ -31,6 +31,7 @@ use fabro_api::types::{
     RunFilesMeta, RunFilesMetaDegradedReason, RunFilesMetaToSha,
 };
 use fabro_sandbox::reconnect::reconnect;
+use fabro_static::EnvVars;
 use fabro_types::RunId;
 use fabro_workflow::sandbox_git::{
     DiffError, RawDiffEntry, SubmoduleChange, SymlinkChange, list_binary_paths,
@@ -587,7 +588,7 @@ async fn try_reconnect_run_sandbox(
     let Some(record) = projection.sandbox.clone() else {
         return Ok(None);
     };
-    let daytona_api_key = state.vault_or_env_pub("DAYTONA_API_KEY");
+    let daytona_api_key = state.vault_or_env_pub(EnvVars::DAYTONA_API_KEY);
     match reconnect(&record, daytona_api_key).await {
         Ok(sandbox) => Ok(Some(sandbox)),
         Err(_) => Ok(None),

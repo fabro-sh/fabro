@@ -6,6 +6,10 @@ use fabro_config::envfile;
 use fabro_llm::client::Client;
 use fabro_model::Provider;
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "ServerSecrets snapshots process env once at startup by design."
+)]
 pub fn process_env_snapshot() -> HashMap<String, String> {
     std::env::vars().collect()
 }

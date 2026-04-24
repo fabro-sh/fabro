@@ -1,3 +1,4 @@
+use fabro_static::EnvVars;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use tokio::process::Command;
@@ -6,7 +7,7 @@ use tracing::{info, warn};
 type HmacSha256 = Hmac<Sha256>;
 
 /// Name of the server secret holding the GitHub App webhook HMAC key.
-pub(crate) const WEBHOOK_SECRET_ENV: &str = "GITHUB_APP_WEBHOOK_SECRET";
+pub(crate) const WEBHOOK_SECRET_ENV: &str = EnvVars::GITHUB_APP_WEBHOOK_SECRET;
 
 /// Route path where Fabro receives GitHub App webhook deliveries.
 pub(crate) const WEBHOOK_ROUTE: &str = "/api/v1/webhooks/github";

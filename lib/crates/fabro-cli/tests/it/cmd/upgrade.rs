@@ -1,10 +1,10 @@
 #![expect(
     clippy::disallowed_methods,
-    reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
+    reason = "integration tests stage fixtures and subprocess env with sync test infrastructure"
 )]
 
 use assert_cmd::Command;
-use fabro_test::{TestContext, fabro_snapshot, test_context};
+use fabro_test::{EnvVars, TestContext, fabro_snapshot, test_context};
 
 fn hard_link_or_copy(src: &std::path::Path, dest: &std::path::Path) {
     if std::fs::hard_link(src, dest).is_ok() {
@@ -48,13 +48,13 @@ fn brew_command(context: &TestContext, formula: &str, version: &str) -> Command 
             }
         }
     }
-    cmd.env("NO_COLOR", "1");
-    cmd.env("HOME", &context.home_dir);
-    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
-        .env("FABRO_HTTP_PROXY_POLICY", "disabled")
-        .env("FABRO_TELEMETRY", "off")
-        .env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64")
-        .env("FABRO_TEST_IN_MEMORY_STORE", "1");
+    cmd.env(EnvVars::NO_COLOR, "1");
+    cmd.env(EnvVars::HOME, &context.home_dir);
+    cmd.env(EnvVars::FABRO_NO_UPGRADE_CHECK, "true")
+        .env(EnvVars::FABRO_HTTP_PROXY_POLICY, "disabled")
+        .env(EnvVars::FABRO_TELEMETRY, "off")
+        .env(EnvVars::FABRO_SERVER_MAX_CONCURRENT_RUNS, "64")
+        .env(EnvVars::FABRO_TEST_IN_MEMORY_STORE, "1");
     cmd
 }
 
@@ -177,9 +177,13 @@ esac
         "[TARGET]".to_string(),
     ));
 
-    let path = format!("{}:{}", fake_bin.display(), std::env::var("PATH").unwrap());
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var(EnvVars::PATH).unwrap()
+    );
     let mut cmd = context.command();
-    cmd.env("PATH", path).args(["upgrade", "--dry-run"]);
+    cmd.env(EnvVars::PATH, path).args(["upgrade", "--dry-run"]);
 
     fabro_snapshot!(filters, cmd, @"
     success: true

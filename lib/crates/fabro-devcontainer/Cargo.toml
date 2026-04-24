@@ -13,6 +13,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+fabro-static.workspace = true
 fabro-util = { path = "../fabro-util" }
 fabro-http.workspace = true
 serde = { workspace = true }

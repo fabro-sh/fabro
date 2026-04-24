@@ -2,6 +2,7 @@ use anyhow::{Result, anyhow};
 use axum::extract::FromRequestParts;
 use axum::http::header;
 use axum::http::request::Parts;
+use fabro_static::EnvVars;
 use fabro_types::settings::{ServerAuthMethod, ServerNamespace};
 use fabro_types::{IdpIdentity, RunAuthMethod};
 use fabro_util::dev_token::validate_dev_token_format;
@@ -52,7 +53,15 @@ pub enum AuthMode {
 }
 
 pub fn resolve_auth_mode(settings: &ServerNamespace) -> Result<AuthMode> {
-    resolve_auth_mode_with_lookup(settings, |name| std::env::var(name).ok())
+    resolve_auth_mode_with_lookup(settings, process_env_var)
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Server auth startup validation intentionally reads process env for server secrets."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 pub fn resolve_auth_mode_with_lookup<F>(settings: &ServerNamespace, lookup: F) -> Result<AuthMode>
@@ -78,13 +87,13 @@ where
             "Fabro server refuses to start: github auth is enabled but server.integrations.github.client_id is not configured."
         ));
     }
-    if github_enabled && lookup("GITHUB_APP_CLIENT_SECRET").is_none() {
+    if github_enabled && lookup(EnvVars::GITHUB_APP_CLIENT_SECRET).is_none() {
         return Err(anyhow!(
             "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not set."
         ));
     }
 
-    let session_secret = lookup("SESSION_SECRET");
+    let session_secret = lookup(EnvVars::SESSION_SECRET);
     let secret = session_secret.as_deref().ok_or_else(|| {
         anyhow!("Fabro server refuses to start: auth is configured but SESSION_SECRET is not set.")
     })?;
@@ -93,7 +102,7 @@ where
     }
 
     let dev_token = if methods.contains(&ServerAuthMethod::DevToken) {
-        let token = lookup("FABRO_DEV_TOKEN").ok_or_else(|| {
+        let token = lookup(EnvVars::FABRO_DEV_TOKEN).ok_or_else(|| {
             anyhow!(
                 "Fabro server refuses to start: dev-token auth is enabled but FABRO_DEV_TOKEN is not set."
             )

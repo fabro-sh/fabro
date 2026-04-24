@@ -47,6 +47,7 @@ fabro-vault = { path = "../fabro-vault" }
 fabro-types = { path = "../fabro-types", features = ["clap"] }
 fabro-util = { path = "../fabro-util" }
 fabro-http.workspace = true
+fabro-static.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 cli-table.workspace = true

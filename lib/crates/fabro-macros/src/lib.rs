@@ -100,12 +100,21 @@ pub fn e2e_test(attr: TokenStream, item: TokenStream) -> TokenStream {
     let env_guards = if env_vars.is_empty() {
         quote! {}
     } else {
+        let env_lookup_helper = quote! {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "e2e_test live-mode guard intentionally checks process env for declared live secrets."
+            )]
+            fn __fabro_e2e_env_var_is_missing(name: &str) -> bool {
+                ::std::env::var(name).is_err()
+            }
+        };
         let guards = env_vars.iter().map(|env_var| {
             let env_name = env_var.value();
             let strict_message = format!("{env_name} not set (FABRO_TEST_MODE=strict)");
             let skip_message = format!("skipping: {env_name} not set");
             quote! {
-                if ::std::env::var(#env_var).is_err() {
+                if __fabro_e2e_env_var_is_missing(#env_var) {
                     if __mode == ::fabro_test::TestMode::Strict {
                         panic!(#strict_message);
                     }
@@ -118,6 +127,8 @@ pub fn e2e_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         if has_twin {
             // dual-mode: only check env vars when in live/strict
             quote! {
+                #env_lookup_helper
+
                 if __mode.is_live() {
                     #(#guards)*
                 }
@@ -125,6 +136,8 @@ pub fn e2e_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         } else {
             // live-only: always check env vars (mode guard already skipped twin)
             quote! {
+                #env_lookup_helper
+
                 #(#guards)*
             }
         }

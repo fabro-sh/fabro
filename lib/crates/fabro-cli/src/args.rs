@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use clap::{Args, Subcommand, ValueEnum};
 use fabro_agent::cli::AgentArgs;
 use fabro_config::{CliLayer, CliLoggingLayer, CliOutputLayer, CliUpdatesLayer};
+use fabro_static::EnvVars;
 use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
 use fabro_types::settings::run::MergeStrategy;
 use fabro_util::printer::Printer;
@@ -21,23 +22,23 @@ pub(crate) const LONG_VERSION: &str = concat!(
 #[derive(Args)]
 pub(crate) struct GlobalArgs {
     /// Output as JSON
-    #[arg(long, global = true, env = "FABRO_JSON", value_parser = clap::builder::BoolishValueParser::new())]
+    #[arg(long, global = true, env = EnvVars::FABRO_JSON, value_parser = clap::builder::BoolishValueParser::new())]
     pub json: bool,
 
     /// Enable DEBUG-level logging (default is INFO)
-    #[arg(long, global = true, env = "FABRO_DEBUG", value_parser = clap::builder::BoolishValueParser::new())]
+    #[arg(long, global = true, env = EnvVars::FABRO_DEBUG, value_parser = clap::builder::BoolishValueParser::new())]
     pub debug: bool,
 
     /// Disable automatic upgrade check
-    #[arg(long, global = true, env = "FABRO_NO_UPGRADE_CHECK", value_parser = clap::builder::BoolishValueParser::new())]
+    #[arg(long, global = true, env = EnvVars::FABRO_NO_UPGRADE_CHECK, value_parser = clap::builder::BoolishValueParser::new())]
     pub no_upgrade_check: bool,
 
     /// Suppress non-essential output
-    #[arg(long, global = true, env = "FABRO_QUIET", value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "verbose")]
+    #[arg(long, global = true, env = EnvVars::FABRO_QUIET, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "verbose")]
     pub quiet: bool,
 
     /// Enable verbose output
-    #[arg(long, global = true, env = "FABRO_VERBOSE", value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "quiet")]
+    #[arg(long, global = true, env = EnvVars::FABRO_VERBOSE, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "quiet")]
     pub verbose: bool,
 }
 
@@ -84,7 +85,7 @@ pub(crate) fn require_no_json_override(process_local_json: bool) -> anyhow::Resu
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct StorageDirArgs {
     /// Local storage directory (default: ~/.fabro/storage)
-    #[arg(long, env = "FABRO_STORAGE_DIR")]
+    #[arg(long, env = EnvVars::FABRO_STORAGE_DIR)]
     pub(crate) storage_dir: Option<PathBuf>,
 }
 
@@ -101,7 +102,7 @@ impl StorageDirArgs {
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct ServerTargetArgs {
     /// Fabro server target: http(s) URL or absolute Unix socket path
-    #[arg(long = "server", env = "FABRO_SERVER")]
+    #[arg(long = "server", env = EnvVars::FABRO_SERVER)]
     pub(crate) server: Option<String>,
 }
 

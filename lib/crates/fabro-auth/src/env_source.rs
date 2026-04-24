@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_model::Provider;
+use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
 use crate::{ApiCredential, EnvLookup};
@@ -13,6 +14,10 @@ pub struct EnvCredentialSource {
 
 impl EnvCredentialSource {
     #[must_use]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "EnvCredentialSource is the provider API-key process-env facade."
+    )]
     pub fn new() -> Self {
         Self::with_env_lookup(Arc::new(|name| std::env::var(name).ok()))
     }
@@ -35,13 +40,13 @@ impl EnvCredentialSource {
         let mut cred = ApiCredential::from_api_key(provider, key);
         match provider {
             Provider::Anthropic => {
-                cred.base_url = self.lookup("ANTHROPIC_BASE_URL");
+                cred.base_url = self.lookup(EnvVars::ANTHROPIC_BASE_URL);
             }
             Provider::OpenAi => {
-                cred.base_url = self.lookup("OPENAI_BASE_URL");
-                cred.org_id = self.lookup("OPENAI_ORG_ID");
-                cred.project_id = self.lookup("OPENAI_PROJECT_ID");
-                if let Some(account_id) = self.lookup("CHATGPT_ACCOUNT_ID") {
+                cred.base_url = self.lookup(EnvVars::OPENAI_BASE_URL);
+                cred.org_id = self.lookup(EnvVars::OPENAI_ORG_ID);
+                cred.project_id = self.lookup(EnvVars::OPENAI_PROJECT_ID);
+                if let Some(account_id) = self.lookup(EnvVars::CHATGPT_ACCOUNT_ID) {
                     cred.base_url = Some("https://chatgpt.com/backend-api/codex".to_string());
                     cred.codex_mode = true;
                     cred.extra_headers
@@ -51,7 +56,7 @@ impl EnvCredentialSource {
                 }
             }
             Provider::Gemini => {
-                cred.base_url = self.lookup("GEMINI_BASE_URL");
+                cred.base_url = self.lookup(EnvVars::GEMINI_BASE_URL);
             }
             Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {}
             // OpenAiCompatible has no api_key_env_vars, so find_map returned None above.
