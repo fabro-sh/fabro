@@ -995,7 +995,7 @@ async fn merge_pull_request_with_client(
         .await?;
 
     let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/merge", ctx.base_url);
-    let body = serde_json::json!({ "merge_method": method.as_str() });
+    let body = serde_json::json!({ "merge_method": method });
     let auth = format!("Bearer {token}");
 
     let resp = client
