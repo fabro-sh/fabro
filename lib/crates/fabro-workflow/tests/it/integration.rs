@@ -6734,13 +6734,14 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
         None,
     ));
     let run_store = store.open_run_reader(&run_options.run_id).await.unwrap();
-    let services = fabro_workflow::services::RunServices::for_cli(run_store.into(), llm_source);
+    let run_store_handle: fabro_workflow::runtime_store::RunStoreHandle = run_store.into();
 
     let body = fabro_workflow::pull_request::build_pr_body(
         "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
         "Implement feature",
         "gpt-5.4",
-        services.as_ref(),
+        &run_store_handle,
+        llm_source.as_ref(),
         Some(&Conclusion {
             timestamp:            Utc::now(),
             status:               StageStatus::Success,

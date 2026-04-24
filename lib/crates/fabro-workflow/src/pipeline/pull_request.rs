@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use fabro_auth::CredentialSource;
 use fabro_github::{self as github_app, GitHubCredentials, ssh_url_to_https};
 use fabro_graphviz::parser;
 use fabro_llm::client::Client;
@@ -16,7 +17,6 @@ use crate::event::{Event, RunNoticeLevel};
 use crate::outcome::{StageStatus, format_cost as outcome_format_cost};
 use crate::records::{Conclusion, RunSpec};
 use crate::runtime_store::RunStoreHandle;
-use crate::services::RunServices;
 
 /// Derive a PR title from the workflow goal.
 ///
@@ -292,22 +292,15 @@ pub async fn build_pr_body(
     diff: &str,
     goal: &str,
     model: &str,
-    services: &RunServices,
+    run_store: &RunStoreHandle,
+    llm_source: &dyn CredentialSource,
     conclusion: Option<&Conclusion>,
 ) -> Result<String, String> {
-    let client = Client::from_source(services.llm_source.as_ref())
+    let client = Client::from_source(llm_source)
         .await
         .map_err(|e| format!("Failed to create LLM client: {e}"))?;
 
-    build_pr_body_with_client(
-        diff,
-        goal,
-        model,
-        &services.run_store,
-        conclusion,
-        Arc::new(client),
-    )
-    .await
+    build_pr_body_with_client(diff, goal, model, run_store, conclusion, Arc::new(client)).await
 }
 
 async fn build_pr_body_with_client(
@@ -424,7 +417,8 @@ pub async fn maybe_open_pull_request(
     model: &str,
     draft: bool,
     auto_merge: Option<AutoMergeOptions>,
-    services: &RunServices,
+    run_store: &RunStoreHandle,
+    llm_source: &dyn CredentialSource,
     conclusion: Option<&Conclusion>,
 ) -> Result<Option<PullRequestRecord>, String> {
     if diff.is_empty() {
@@ -435,7 +429,7 @@ pub async fn maybe_open_pull_request(
     let https_url = ssh_url_to_https(origin_url);
     let (owner, repo) = github_app::parse_github_owner_repo(&https_url)?;
 
-    let body = build_pr_body(diff, goal, model, services, conclusion).await?;
+    let body = build_pr_body(diff, goal, model, run_store, llm_source, conclusion).await?;
     let body = truncate_pr_body(&body);
 
     let title = pr_title_from_goal(goal);
@@ -546,7 +540,8 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                         &options.model,
                         pr_cfg.draft,
                         auto_merge,
-                        &services,
+                        &services.run_store,
+                        services.llm_source.as_ref(),
                         Some(&conclusion),
                     )
                     .await
@@ -1329,13 +1324,14 @@ mod tests {
 
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        let services = RunServices::for_cli(run_store.into(), llm_source);
+        let run_store_handle: RunStoreHandle = run_store.into();
 
         let body = build_pr_body(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "gpt-5.4",
-            services.as_ref(),
+            &run_store_handle,
+            llm_source.as_ref(),
             Some(&make_test_conclusion()),
         )
         .await
@@ -1464,8 +1460,8 @@ mod tests {
     async fn empty_diff_returns_none() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let run_store_handle: RunStoreHandle = run_store.into();
         let llm_source = test_llm_source();
-        let services = RunServices::for_cli(run_store.clone().into(), llm_source);
         let creds = GitHubCredentials::App(fabro_github::GitHubAppCredentials {
             app_id:          "123".to_string(),
             private_key_pem: "unused".to_string(),
@@ -1480,7 +1476,8 @@ mod tests {
             "claude-sonnet-4-20250514",
             false,
             None,
-            services.as_ref(),
+            &run_store_handle,
+            llm_source.as_ref(),
             None,
         )
         .await;

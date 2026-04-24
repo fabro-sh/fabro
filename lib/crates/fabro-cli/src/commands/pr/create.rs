@@ -3,7 +3,6 @@ use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::pull_request::maybe_open_pull_request;
-use fabro_workflow::services::RunServices;
 use tracing::info;
 
 use crate::args::PrCreateArgs;
@@ -100,8 +99,7 @@ pub(super) async fn create_command(args: PrCreateArgs, base_ctx: &CommandContext
             .id
             .clone()
     });
-    let pr_services = RunServices::for_cli(run_store.clone().into(), llm_source);
-
+    let run_store_handle = run_store.clone().into();
     let pull_request = maybe_open_pull_request(
         &creds,
         &origin_url,
@@ -112,7 +110,8 @@ pub(super) async fn create_command(args: PrCreateArgs, base_ctx: &CommandContext
         &model,
         true,
         None,
-        pr_services.as_ref(),
+        &run_store_handle,
+        llm_source.as_ref(),
         None,
     )
     .await

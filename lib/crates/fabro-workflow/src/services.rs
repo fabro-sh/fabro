@@ -70,23 +70,6 @@ impl RunServices {
             .await
     }
 
-    /// CLI helper: minimal cross-phase services for PR generation and similar
-    /// source-backed operations outside the workflow executor.
-    #[must_use]
-    pub fn for_cli(run_store: RunStoreHandle, llm_source: Arc<dyn CredentialSource>) -> Arc<Self> {
-        Self::new(
-            run_store,
-            Arc::new(Emitter::default()),
-            Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            )),
-            None,
-            None,
-            Provider::Anthropic,
-            llm_source,
-        )
-    }
-
     #[must_use]
     pub fn with_run_store(self: &Arc<Self>, run_store: RunStoreHandle) -> Arc<Self> {
         Arc::new(Self {
