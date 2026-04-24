@@ -232,6 +232,8 @@ impl Handler for SubWorkflowHandler {
         let sandbox = Arc::clone(&services.run.sandbox);
         let registry = Arc::clone(&services.registry);
         let hook_runner = services.run.hook_runner.clone();
+        let provider = services.run.provider;
+        let llm_source = Arc::clone(&services.run.llm_source);
         let env = services.env.clone();
         let inputs = services.inputs.clone();
         let dry_run = services.dry_run;
@@ -267,8 +269,8 @@ impl Handler for SubWorkflowHandler {
                         sandbox,
                         hook_runner,
                         None,
-                        fabro_llm::Provider::Anthropic,
-                        Arc::new(fabro_auth::EnvCredentialSource::new()),
+                        provider,
+                        llm_source,
                     ),
                     registry,
                     git_state: std::sync::RwLock::new(None),
