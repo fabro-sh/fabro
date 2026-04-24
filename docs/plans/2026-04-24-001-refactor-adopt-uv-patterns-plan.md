@@ -702,7 +702,7 @@ Solid arrows are real dependencies. Dashed lines show phases that are independen
 
 ---
 
-- [ ] **Unit 5.5: Port `refresh-fabro-spa.sh` and `check-fabro-spa-budgets.sh` to `fabro-dev`**
+- [x] **Unit 5.5: Port `refresh-fabro-spa.sh` and `check-fabro-spa-budgets.sh` to `fabro-dev`**
 
 **Goal:** Replace the two SPA-related scripts with `cargo dev refresh-spa` and `cargo dev check-spa-budgets`.
 

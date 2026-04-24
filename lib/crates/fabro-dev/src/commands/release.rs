@@ -254,7 +254,7 @@ impl ReleasePlan {
     }
 
     fn refresh_spa_command() -> PlannedCommand {
-        PlannedCommand::new("scripts/refresh-fabro-spa.sh")
+        PlannedCommand::new("cargo").arg("dev").arg("refresh-spa")
     }
 
     fn spa_assets_diff_command() -> PlannedCommand {

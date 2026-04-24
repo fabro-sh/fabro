@@ -71,9 +71,9 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun install --frozen-lockfile
-      - run: scripts/refresh-fabro-spa.sh
-      - run: git diff --exit-code -- lib/crates/fabro-spa/assets
-      - run: scripts/check-fabro-spa-budgets.sh
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - run: cargo dev refresh-spa
+      - run: git diff --exit-code -- lib/crates/fabro-spa/assets
+      - run: cargo dev check-spa-budgets
       - run: cargo build -p fabro-cli --release
       - run: wc -c < target/release/fabro

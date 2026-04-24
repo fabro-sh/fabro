@@ -26,7 +26,8 @@ jobs:
         with:
           no-cache: true
       - run: bun install
-      - run: scripts/refresh-fabro-spa.sh
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - run: cargo dev refresh-spa
       - run: git diff --exit-code -- lib/crates/fabro-spa/assets
 
   compile:
