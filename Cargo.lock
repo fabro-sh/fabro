@@ -2210,7 +2210,6 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
- "fabro-macros",
  "fabro-model",
  "fabro-util",
  "hex",

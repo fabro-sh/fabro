@@ -13,7 +13,7 @@ use ipnet::IpNet;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::duration::Duration as DurationLayer;
+use super::duration::Duration;
 use super::interp::InterpString;
 
 /// A structurally resolved `[server]` view for consumers.
@@ -295,14 +295,14 @@ fn serialize_std_duration<S>(value: &StdDuration, serializer: S) -> Result<S::Ok
 where
     S: Serializer,
 {
-    serializer.serialize_str(&DurationLayer::from_std(*value).to_string())
+    serializer.serialize_str(&Duration::from_std(*value).to_string())
 }
 
 fn deserialize_std_duration<'de, D>(deserializer: D) -> Result<StdDuration, D::Error>
 where
     D: Deserializer<'de>,
 {
-    Ok(DurationLayer::deserialize(deserializer)?.as_std())
+    Ok(Duration::deserialize(deserializer)?.as_std())
 }
 
 /// Closed enum of object-store providers. Unknown providers hard-fail

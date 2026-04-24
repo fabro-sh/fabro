@@ -3,7 +3,7 @@
 use fabro_types::settings::server::{
     GithubIntegrationStrategy, ObjectStoreProvider, ServerAuthMethod, WebhookStrategy,
 };
-use fabro_types::settings::{Duration as DurationLayer, InterpString};
+use fabro_types::settings::{Duration, InterpString};
 use serde::{Deserialize, Serialize};
 
 use super::maps::StickyMap;
@@ -139,7 +139,7 @@ pub struct ServerSlateDbLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix:         Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub flush_interval: Option<DurationLayer>,
+    pub flush_interval: Option<Duration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local:          Option<ObjectStoreLocalLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
