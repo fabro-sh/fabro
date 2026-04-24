@@ -5125,16 +5125,6 @@ fn run_not_successful_error(status: &fabro_types::StageStatus) -> ApiError {
     )
 }
 
-fn missing_remote_branch_error(run_branch: &str) -> ApiError {
-    ApiError::with_code(
-        StatusCode::BAD_REQUEST,
-        format!(
-            "Branch '{run_branch}' not found on GitHub. Was it pushed? Try: git push origin {run_branch}"
-        ),
-        "missing_remote_branch",
-    )
-}
-
 struct PullRequestGithubContext {
     record: PullRequestRecord,
     owner:  String,
@@ -5231,31 +5221,13 @@ async fn create_run_pull_request(
     }
 
     let normalized_origin = fabro_github::ssh_url_to_https(origin_url);
-    let (owner, repo) =
-        match parse_github_owner_repo_from_url(&normalized_origin, "repo origin URL") {
-            Ok(owner_repo) => owner_repo,
-            Err(err) => return err.into_response(),
-        };
+    if let Err(err) = parse_github_owner_repo_from_url(&normalized_origin, "repo origin URL") {
+        return err.into_response();
+    }
     let creds = match load_server_github_credentials(state.as_ref()) {
         Ok(creds) => creds,
         Err(err) => return err.into_response(),
     };
-
-    let branch_exists = match fabro_github::branch_exists(
-        &creds,
-        &owner,
-        &repo,
-        run_branch,
-        state.github_api_base_url.as_str(),
-    )
-    .await
-    {
-        Ok(branch_exists) => branch_exists,
-        Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
-    };
-    if !branch_exists {
-        return missing_remote_branch_error(run_branch).into_response();
-    }
 
     let model = if let Some(model) = body.model {
         model
@@ -9541,14 +9513,6 @@ slug = "fabro"
         install_mock_llm();
 
         let github = MockServer::start();
-        let branch_mock = github.mock(|when, then| {
-            when.method("GET")
-                .path("/repos/acme/widgets/branches/fabro/run/42")
-                .header("authorization", "Bearer ghu_test");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(json!({ "name": "fabro/run/42" }).to_string());
-        });
         let create_mock = github.mock(|when, then| {
             when.method("POST")
                 .path("/repos/acme/widgets/pulls")
@@ -9617,7 +9581,6 @@ slug = "fabro"
         assert_eq!(state_body["pull_request"]["number"], 42);
         assert!(state_body["pull_request"]["title"].as_str().is_some());
 
-        branch_mock.assert();
         create_mock.assert();
     }
 
