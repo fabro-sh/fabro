@@ -18,6 +18,8 @@ anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
 fabro-cli = { path = "../fabro-cli" }
+fabro-config = { path = "../fabro-config" }
+fabro-options-metadata.workspace = true
 regex.workspace = true
 tracing-subscriber.workspace = true
 walkdir.workspace = true

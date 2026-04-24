@@ -50,11 +50,21 @@ pub struct CliAuthLayer {
 }
 
 /// `[cli.exec]` — `fabro exec` defaults.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
 #[serde(deny_unknown_fields)]
 pub struct CliExecLayer {
     /// Prevent idle sleep on macOS while an exec run is in flight.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(name = "prevent_idle_sleep", default = "false", value_type = "boolean")]
     pub prevent_idle_sleep: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model:              Option<CliExecModelLayer>,
@@ -62,47 +72,109 @@ pub struct CliExecLayer {
     pub agent:              Option<CliExecAgentLayer>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
 #[serde(deny_unknown_fields)]
 pub struct CliExecModelLayer {
+    /// LLM provider for `fabro exec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(value_type = "string")]
     pub provider: Option<InterpString>,
+    /// Model name for `fabro exec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(value_type = "string")]
     pub name:     Option<InterpString>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
 #[serde(deny_unknown_fields)]
 pub struct CliExecAgentLayer {
+    /// Tool permission level for `fabro exec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(
+        default = "\"read-write\"",
+        value_type = "\"read-only\" | \"read-write\" | \"full\""
+    )]
     pub permissions: Option<AgentPermissions>,
     /// Agent-scoped MCP entries for `fabro exec`.
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
+    #[option(value_type = "table")]
     pub mcps:        StickyMap<McpEntryLayer>,
 }
 
 /// `[cli.output]` — generic CLI output defaults.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
 #[serde(deny_unknown_fields)]
 pub struct CliOutputLayer {
+    /// Output format for commands that support machine-readable output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(default = "\"text\"", value_type = "\"text\" | \"json\"")]
     pub format:    Option<OutputFormat>,
+    /// Default output verbosity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(
+        default = "\"normal\"",
+        value_type = "\"quiet\" | \"normal\" | \"verbose\""
+    )]
     pub verbosity: Option<OutputVerbosity>,
 }
 
 /// `[cli.updates]` — upgrade check toggle.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
 #[serde(deny_unknown_fields)]
 pub struct CliUpdatesLayer {
+    /// Check for new Fabro releases during supported CLI commands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(default = "true", value_type = "boolean")]
     pub check: Option<bool>,
 }
 
 /// `[cli.logging]` — process-owned logging configuration for the CLI.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::OptionsMetadata,
+)]
 #[serde(deny_unknown_fields)]
 pub struct CliLoggingLayer {
+    /// Default CLI log level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(
+        default = "\"info\"",
+        value_type = "\"error\" | \"warn\" | \"info\" | \"debug\" | \"trace\""
+    )]
     pub level: Option<String>,
 }

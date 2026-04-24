@@ -12,6 +12,7 @@ on:
       - ".config/**"
       - "bin/dev/**"
       - "docs/reference/cli.mdx"
+      - "docs/reference/user-configuration.mdx"
       - "openapi/**"
       - ".github/workflows/rust.yml"
   pull_request:
@@ -25,6 +26,7 @@ on:
       - ".config/**"
       - "bin/dev/**"
       - "docs/reference/cli.mdx"
+      - "docs/reference/user-configuration.mdx"
       - "openapi/**"
       - ".github/workflows/rust.yml"
   workflow_dispatch:
@@ -86,6 +88,7 @@ jobs:
         with:
           cache-on-failure: true
       - run: cargo dev generate-cli-reference --check
+      - run: cargo dev generate-options-reference --check
 
   test:
     name: Test (Linux)

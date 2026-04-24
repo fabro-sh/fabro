@@ -858,7 +858,7 @@ impl fabro_options_metadata::OptionsMetadata for RunArgs {
 
 ---
 
-- [ ] **Unit 6.3: Add `cargo dev generate-options-reference` for `user-configuration.mdx`**
+- [x] **Unit 6.3: Add `cargo dev generate-options-reference` for `user-configuration.mdx`**
 
 **Goal:** Close the settings-schema drift gap in `docs/reference/user-configuration.mdx` with a generator driven by `OptionsMetadata` on settings structs.
 
@@ -879,6 +879,8 @@ impl fabro_options_metadata::OptionsMetadata for RunArgs {
 - Walk each settings struct via `OptionsMetadata::metadata()`; emit the `[cli.*]` / `[run.*]` / `[server.*]` TOML-shaped sections that currently appear hand-authored in `user-configuration.mdx` (lines ~139-157 for `[cli.output]` and analogous blocks).
 - Use the same fenced-region approach as Unit 6.2: restructure `user-configuration.mdx` once to introduce fences, commit, then regenerate.
 - Same determinism requirements: sorted order, LF-only, trimmed whitespace.
+
+**Implementation note:** Landed against `fabro-config`'s sparse layer structs rather than `fabro-types`' resolved runtime structs. The sparse layer structs are the TOML input schema and preserve names like `prevent_idle_sleep`, `auto_merge`, and transport-specific MCP entries, so they are the correct metadata source for `user-configuration.mdx`. The resolved `fabro-types` structs remain the runtime view after defaults and validation.
 
 **Patterns to follow:**
 - Unit 6.2 (same generator shape, different source structs and different target file).

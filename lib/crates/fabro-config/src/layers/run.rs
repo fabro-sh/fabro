@@ -82,16 +82,30 @@ pub enum RunGoalLayer {
 }
 
 /// `[run.model]` — provider-neutral default model selection.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
 #[serde(deny_unknown_fields)]
 pub struct RunModelLayer {
+    /// Provider name for workflow model selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(value_type = "string")]
     pub provider:  Option<InterpString>,
+    /// Model name for workflow runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(value_type = "string")]
     pub name:      Option<InterpString>,
     /// Ordered list of fallback model references. Supports `...` splice marker
     /// at layering time — see [`super::splice_array`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[option(default = "[]", value_type = "array<string>")]
     pub fallbacks: Vec<ModelRefOrSplice>,
 }
 
@@ -131,12 +145,25 @@ pub struct RunGitLayer {
     pub author: Option<GitAuthorLayer>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
 #[serde(deny_unknown_fields)]
 pub struct GitAuthorLayer {
+    /// Git author name for checkpoint commits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(default = "\"fabro\"", value_type = "string")]
     pub name:  Option<InterpString>,
+    /// Git author email for checkpoint commits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(default = "\"fabro@local\"", value_type = "string")]
     pub email: Option<InterpString>,
 }
 
@@ -326,13 +353,28 @@ pub struct InterviewProviderLayer {
 }
 
 /// `[run.agent]` — agent knobs only (permissions, MCPs).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
 #[serde(deny_unknown_fields)]
 pub struct RunAgentLayer {
+    /// Default tool permission level for workflow agents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(
+        default = "\"read-write\"",
+        value_type = "\"read-only\" | \"read-write\" | \"full\""
+    )]
     pub permissions: Option<AgentPermissions>,
     /// Agent-scoped MCP server entries, keyed by name.
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
+    #[option(value_type = "table")]
     pub mcps:        StickyMap<McpEntryLayer>,
 }
 
@@ -470,16 +512,38 @@ pub struct RunScmLayer {
 pub struct ScmGitHubLayer;
 
 /// `[run.pull_request]` — provider-neutral PR behavior.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
 #[serde(deny_unknown_fields)]
 pub struct RunPullRequestLayer {
+    /// Automatically create a PR after successful runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(default = "false", value_type = "boolean")]
     pub enabled:        Option<bool>,
+    /// Open created pull requests as drafts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(default = "true", value_type = "boolean")]
     pub draft:          Option<bool>,
+    /// Enable GitHub auto-merge for created pull requests. Implies `draft =
+    /// false`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(name = "auto_merge", default = "false", value_type = "boolean")]
     pub auto_merge:     Option<bool>,
+    /// Merge method to configure for the pull request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(
+        name = "merge_strategy",
+        default = "\"squash\"",
+        value_type = "\"merge\" | \"squash\" | \"rebase\""
+    )]
     pub merge_strategy: Option<MergeStrategy>,
 }
 

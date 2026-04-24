@@ -4,7 +4,7 @@ use syn::meta::ParseNestedMeta;
 use syn::spanned::Spanned;
 use syn::{
     Attribute, Data, DataStruct, DeriveInput, ExprLit, Field, Fields, GenericArgument, Lit, Meta,
-    PathArguments, Type,
+    PathArguments, Token, Type,
 };
 
 pub(crate) fn derive_impl(input: DeriveInput) -> syn::Result<TokenStream> {
@@ -303,6 +303,9 @@ fn has_serde_flatten(field: &Field) -> syn::Result<bool> {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("flatten") {
                 flatten = true;
+            }
+            if meta.input.peek(Token![=]) {
+                let _ = meta.value()?.parse::<syn::Expr>()?;
             }
             Ok(())
         })?;
