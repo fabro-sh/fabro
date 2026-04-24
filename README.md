@@ -2,7 +2,7 @@
 <a href="https://docs.fabro.sh"><img alt="Fabro" src="docs/logo/dark.svg" height="75"></a>
 </div>
 
-## The open source dark software factory for expert engineers
+## The open source dark software factory for expert engineers.
 
 AI coding agents are powerful but unpredictable. You either babysit every step or review a 50-file diff you don't trust. Fabro gives you a middle path: define the process as a graph, let agents execute it, and intervene only where it matters. [Why Fabro?](https://docs.fabro.sh/getting-started/why-fabro)
 
