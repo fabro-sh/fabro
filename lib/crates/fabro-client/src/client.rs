@@ -1033,10 +1033,11 @@ impl Client {
                 Ok(Some(Bytes::from(bytes)))
             }
             Err(err) => {
+                let err = map_api_error(err);
                 if is_not_found_error(&err) {
                     Ok(None)
                 } else {
-                    Err(map_api_error(err))
+                    Err(err)
                 }
             }
         }

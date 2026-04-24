@@ -216,19 +216,8 @@ pub async fn classify_http_response(
     }))
 }
 
-pub fn is_not_found_error<E>(err: &progenitor_client::Error<E>) -> bool
-where
-    E: serde::Serialize + std::fmt::Debug,
-{
-    match err {
-        progenitor_client::Error::ErrorResponse(response) => {
-            response.status() == fabro_http::StatusCode::NOT_FOUND
-        }
-        progenitor_client::Error::UnexpectedResponse(response) => {
-            response.status() == fabro_http::StatusCode::NOT_FOUND
-        }
-        _ => false,
-    }
+pub fn is_not_found_error(err: &anyhow::Error) -> bool {
+    api_failure_for(err).is_some_and(|failure| failure.status == fabro_http::StatusCode::NOT_FOUND)
 }
 
 pub fn convert_type<TInput, TOutput>(value: TInput) -> Result<TOutput>

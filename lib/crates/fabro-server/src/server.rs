@@ -5053,14 +5053,6 @@ fn load_server_github_credentials(
     }
 }
 
-fn no_stored_pull_request_error(run_id: &RunId) -> ApiError {
-    ApiError::with_code(
-        StatusCode::NOT_FOUND,
-        format!("No pull request found in store. Create one first with: fabro pr create {run_id}"),
-        "no_stored_record",
-    )
-}
-
 fn github_pull_request_not_found_error(record: &PullRequestRecord) -> ApiError {
     ApiError::with_code(
         StatusCode::BAD_GATEWAY,
@@ -5069,59 +5061,11 @@ fn github_pull_request_not_found_error(record: &PullRequestRecord) -> ApiError {
     )
 }
 
-fn pull_request_already_exists_error(record: &PullRequestRecord) -> ApiError {
-    ApiError::with_code(
-        StatusCode::CONFLICT,
-        format!("Pull request already exists at {}", record.html_url),
-        "pull_request_exists",
-    )
-}
-
-fn missing_repo_origin_error() -> ApiError {
-    ApiError::with_code(
-        StatusCode::BAD_REQUEST,
-        "Run has no repo origin URL — pull request creation requires git metadata.",
-        "missing_repo_origin",
-    )
-}
-
-fn missing_base_branch_error() -> ApiError {
-    ApiError::with_code(
-        StatusCode::BAD_REQUEST,
-        "Run has no base branch — pull request creation requires git metadata.",
-        "missing_base_branch",
-    )
-}
-
-fn missing_run_branch_error() -> ApiError {
-    ApiError::with_code(
-        StatusCode::BAD_REQUEST,
-        "Run has no run_branch — was it run with git push enabled?",
-        "missing_run_branch",
-    )
-}
-
-fn run_not_finished_error() -> ApiError {
-    ApiError::with_code(
-        StatusCode::BAD_REQUEST,
-        "Run is not finished yet.",
-        "run_not_finished",
-    )
-}
-
 fn empty_pull_request_diff_error() -> ApiError {
     ApiError::with_code(
         StatusCode::BAD_REQUEST,
         "Stored diff is empty — nothing to create a PR for",
         "empty_diff",
-    )
-}
-
-fn run_not_successful_error(status: &fabro_types::StageStatus) -> ApiError {
-    ApiError::with_code(
-        StatusCode::BAD_REQUEST,
-        format!("Run status is '{status}', expected success or partial_success"),
-        "run_not_successful",
     )
 }
 
@@ -5145,9 +5089,13 @@ async fn load_pull_request_github_context(
         .state()
         .await
         .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
-    let record = run_state
-        .pull_request
-        .ok_or_else(|| no_stored_pull_request_error(id))?;
+    let record = run_state.pull_request.ok_or_else(|| {
+        ApiError::with_code(
+            StatusCode::NOT_FOUND,
+            format!("No pull request found in store. Create one first with: fabro pr create {id}"),
+            "no_stored_record",
+        )
+    })?;
     let (owner, repo) = parse_github_owner_repo_from_url(&record.html_url, "pull request URL")?;
     let creds = load_server_github_credentials(state.as_ref())?;
     Ok(PullRequestGithubContext {
@@ -5176,7 +5124,12 @@ async fn create_run_pull_request(
     };
 
     if let Some(record) = run_state.pull_request.as_ref() {
-        return pull_request_already_exists_error(record).into_response();
+        return ApiError::with_code(
+            StatusCode::CONFLICT,
+            format!("Pull request already exists at {}", record.html_url),
+            "pull_request_exists",
+        )
+        .into_response();
     }
 
     let Some(run_spec) = run_state.spec.as_ref() else {
@@ -5188,17 +5141,32 @@ async fn create_run_pull_request(
     };
 
     let Some(origin_url) = run_spec.repo_origin_url.as_deref() else {
-        return missing_repo_origin_error().into_response();
+        return ApiError::with_code(
+            StatusCode::BAD_REQUEST,
+            "Run has no repo origin URL — pull request creation requires git metadata.",
+            "missing_repo_origin",
+        )
+        .into_response();
     };
     let Some(base_branch) = run_spec.base_branch.as_deref() else {
-        return missing_base_branch_error().into_response();
+        return ApiError::with_code(
+            StatusCode::BAD_REQUEST,
+            "Run has no base branch — pull request creation requires git metadata.",
+            "missing_base_branch",
+        )
+        .into_response();
     };
     let Some(run_branch) = run_state
         .start
         .as_ref()
         .and_then(|start| start.run_branch.as_deref())
     else {
-        return missing_run_branch_error().into_response();
+        return ApiError::with_code(
+            StatusCode::BAD_REQUEST,
+            "Run has no run_branch — was it run with git push enabled?",
+            "missing_run_branch",
+        )
+        .into_response();
     };
 
     let Some(diff) = run_state.final_patch.as_deref() else {
@@ -5209,7 +5177,12 @@ async fn create_run_pull_request(
     }
 
     let Some(conclusion) = run_state.conclusion.as_ref() else {
-        return run_not_finished_error().into_response();
+        return ApiError::with_code(
+            StatusCode::BAD_REQUEST,
+            "Run is not finished yet.",
+            "run_not_finished",
+        )
+        .into_response();
     };
     if !body.force
         && !matches!(
@@ -5217,7 +5190,15 @@ async fn create_run_pull_request(
             fabro_types::StageStatus::Success | fabro_types::StageStatus::PartialSuccess
         )
     {
-        return run_not_successful_error(&conclusion.status).into_response();
+        return ApiError::with_code(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Run status is '{}', expected success or partial_success",
+                conclusion.status
+            ),
+            "run_not_successful",
+        )
+        .into_response();
     }
 
     let normalized_origin = fabro_github::ssh_url_to_https(origin_url);
