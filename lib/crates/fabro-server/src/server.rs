@@ -8967,6 +8967,29 @@ strategy = "token"
         (state, app, run_id)
     }
 
+    /// Same as [`pr_test_app`] but the run is set up as a completed
+    /// workflow ready for `POST /runs/{id}/pull_request`. The branches
+    /// and diff are fixed defaults; only the origin URL varies per
+    /// test (None to test missing-origin rejection, gitlab.com to test
+    /// non-github rejection, etc.).
+    async fn pr_test_app_with_completed_run(
+        token: Option<&str>,
+        github_api_base_url: Option<String>,
+        repo_origin_url: Option<&str>,
+    ) -> (Arc<AppState>, Router, RunId) {
+        let (state, app, run_id) = pr_test_app(token, github_api_base_url);
+        create_completed_run_ready_for_pull_request(
+            &state,
+            run_id,
+            repo_origin_url,
+            Some("main"),
+            Some("fabro/run/42"),
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
+        )
+        .await;
+        (state, app, run_id)
+    }
+
     async fn create_run_with_pull_request_record(
         state: &Arc<AppState>,
         run_id: RunId,
@@ -9915,15 +9938,10 @@ slug = "fabro"
                     .to_string(),
                 );
         });
-        let (state, app, run_id) = pr_test_app(Some("ghu_test"), Some(github.base_url()));
-
-        create_completed_run_ready_for_pull_request(
-            &state,
-            run_id,
+        let (_state, app, run_id) = pr_test_app_with_completed_run(
+            Some("ghu_test"),
+            Some(github.base_url()),
             Some("git@github.com:acme/widgets.git"),
-            Some("main"),
-            Some("fabro/run/42"),
-            "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
         )
         .await;
 
@@ -10008,17 +10026,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn create_run_pull_request_rejects_missing_repo_origin() {
-        let (state, app, run_id) = pr_test_app(None, None);
-
-        create_completed_run_ready_for_pull_request(
-            &state,
-            run_id,
-            None,
-            Some("main"),
-            Some("fabro/run/42"),
-            "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
-        )
-        .await;
+        let (_state, app, run_id) = pr_test_app_with_completed_run(None, None, None).await;
 
         let response = app
             .oneshot(
@@ -10044,17 +10052,9 @@ slug = "fabro"
 
     #[tokio::test]
     async fn create_run_pull_request_returns_service_unavailable_without_github_credentials() {
-        let (state, app, run_id) = pr_test_app(None, None);
-
-        create_completed_run_ready_for_pull_request(
-            &state,
-            run_id,
-            Some("https://github.com/acme/widgets.git"),
-            Some("main"),
-            Some("fabro/run/42"),
-            "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
-        )
-        .await;
+        let (_state, app, run_id) =
+            pr_test_app_with_completed_run(None, None, Some("https://github.com/acme/widgets.git"))
+                .await;
 
         let response = app
             .oneshot(
@@ -10080,15 +10080,10 @@ slug = "fabro"
 
     #[tokio::test]
     async fn create_run_pull_request_rejects_non_github_origin_url() {
-        let (state, app, run_id) = pr_test_app(Some("ghu_test"), None);
-
-        create_completed_run_ready_for_pull_request(
-            &state,
-            run_id,
+        let (_state, app, run_id) = pr_test_app_with_completed_run(
+            Some("ghu_test"),
+            None,
             Some("https://gitlab.com/acme/widgets.git"),
-            Some("main"),
-            Some("fabro/run/42"),
-            "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
         )
         .await;
 
