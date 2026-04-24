@@ -98,7 +98,7 @@ impl From<WorkflowLayer> for SettingsLayer {
     }
 }
 
-#[cfg(any(test, feature = "test-support"))]
+#[cfg(test)]
 impl SettingsLayer {
     /// A default layer that resolves cleanly: populates `server.auth.methods`
     /// with `["dev-token"]`. Use anywhere a test needs a starter

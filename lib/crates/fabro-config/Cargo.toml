@@ -12,7 +12,6 @@ doctest = false
 [features]
 default = []
 clap = ["dep:clap", "fabro-types/clap"]
-test-support = []
 
 [lints]
 workspace = true
