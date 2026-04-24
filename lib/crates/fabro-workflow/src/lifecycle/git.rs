@@ -163,37 +163,37 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                             ) {
                                 Ok(sha) => Some(sha),
                                 Err(e) => {
-                                    self.emitter.emit(&Event::RunNotice {
-                                        level:   RunNoticeLevel::Warn,
-                                        code:    "checkpoint_metadata_write_failed".to_string(),
-                                        message: format!(
+                                    self.emitter.notice(
+                                        RunNoticeLevel::Warn,
+                                        "checkpoint_metadata_write_failed",
+                                        format!(
                                             "[node: {node_id}] metadata checkpoint write failed: {e}"
                                         ),
-                                    });
+                                    );
                                     None
                                 }
                             }
                         }
                         Err(e) => {
-                            self.emitter.emit(&Event::RunNotice {
-                                level:   RunNoticeLevel::Warn,
-                                code:    "checkpoint_metadata_write_failed".to_string(),
-                                message: format!(
+                            self.emitter.notice(
+                                RunNoticeLevel::Warn,
+                                "checkpoint_metadata_write_failed",
+                                format!(
                                     "[node: {node_id}] metadata checkpoint serialization failed: {e}"
                                 ),
-                            });
+                            );
                             None
                         }
                     }
                 }
                 Err(e) => {
-                    self.emitter.emit(&Event::RunNotice {
-                        level:   RunNoticeLevel::Warn,
-                        code:    "checkpoint_metadata_write_failed".to_string(),
-                        message: format!(
+                    self.emitter.notice(
+                        RunNoticeLevel::Warn,
+                        "checkpoint_metadata_write_failed",
+                        format!(
                             "[node: {node_id}] failed to load run state for metadata snapshot: {e}"
                         ),
-                    });
+                    );
                     None
                 }
             }
@@ -289,11 +289,11 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     }
                     Ok(_) => {}
                     Err(err) => {
-                        self.emitter.emit(&Event::RunNotice {
-                            level:   RunNoticeLevel::Warn,
-                            code:    "git_diff_failed".to_string(),
-                            message: format!("[node: {node_id}] git diff failed: {err}"),
-                        });
+                        self.emitter.notice(
+                            RunNoticeLevel::Warn,
+                            "git_diff_failed",
+                            format!("[node: {node_id}] git diff failed: {err}"),
+                        );
                     }
                 }
 
