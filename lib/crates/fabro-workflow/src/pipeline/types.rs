@@ -307,11 +307,10 @@ pub struct Concluded {
 /// Output of the PULL_REQUEST phase.
 #[non_exhaustive]
 pub struct Finalized {
-    pub run_id:        RunId,
-    pub outcome:       Result<Outcome, Error>,
-    pub conclusion:    Conclusion,
-    pub pushed_branch: Option<String>,
-    pub pr_url:        Option<String>,
+    pub run_id:     RunId,
+    pub outcome:    Result<Outcome, Error>,
+    pub conclusion: Conclusion,
+    pub pr_url:     Option<String>,
 }
 
 /// Options for the TRANSFORM phase.

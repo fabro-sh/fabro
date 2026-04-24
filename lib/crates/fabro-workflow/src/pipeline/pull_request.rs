@@ -580,7 +580,6 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
         run_id: run_options.run_id,
         outcome,
         conclusion,
-        pushed_branch: run_options.run_branch().map(str::to_string),
         pr_url,
     }
 }
