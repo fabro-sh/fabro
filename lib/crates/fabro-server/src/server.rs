@@ -5069,22 +5069,12 @@ fn github_pull_request_not_found_error(record: &PullRequestRecord) -> ApiError {
     )
 }
 
-fn pull_request_already_exists_response(record: &PullRequestRecord) -> Response {
-    let status = StatusCode::CONFLICT;
-    let title = status.canonical_reason().unwrap_or("Conflict").to_string();
-    (
-        status,
-        Json(serde_json::json!({
-            "errors": [{
-                "status": status.as_u16().to_string(),
-                "title": title,
-                "detail": format!("Pull request already exists at {}", record.html_url),
-                "code": "pull_request_exists",
-            }],
-            "pull_request": record,
-        })),
+fn pull_request_already_exists_error(record: &PullRequestRecord) -> ApiError {
+    ApiError::with_code(
+        StatusCode::CONFLICT,
+        format!("Pull request already exists at {}", record.html_url),
+        "pull_request_exists",
     )
-        .into_response()
 }
 
 fn missing_repo_origin_error() -> ApiError {
@@ -5196,7 +5186,7 @@ async fn create_run_pull_request(
     };
 
     if let Some(record) = run_state.pull_request.as_ref() {
-        return pull_request_already_exists_response(record);
+        return pull_request_already_exists_error(record).into_response();
     }
 
     let Some(run_spec) = run_state.spec.as_ref() else {
@@ -9662,10 +9652,11 @@ slug = "fabro"
         let body = response_json!(response, StatusCode::CONFLICT).await;
 
         assert_eq!(body["errors"][0]["code"], "pull_request_exists");
-        assert_eq!(body["pull_request"]["number"], 42);
-        assert_eq!(
-            body["pull_request"]["html_url"],
-            "https://github.com/acme/widgets/pull/42"
+        assert!(
+            body["errors"][0]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("https://github.com/acme/widgets/pull/42")
         );
     }
 

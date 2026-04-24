@@ -949,9 +949,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: >-
-            Pull request already exists for this run. The `pull_request` field
-            contains the existing record so clients can recover its URL and
-            number without an extra call.
+            Pull request already exists for this run. Clients can GET
+            /runs/{id}/pull_request to retrieve the stored record.
           content:
             application/json:
               schema:
@@ -3801,13 +3800,6 @@ components:
             failure responses only.
           items:
             type: string
-        pull_request:
-          allOf:
-            - $ref: "#/components/schemas/PullRequestRecord"
-          description: >-
-            Optional existing pull request record. Populated by `POST
-            /runs/{id}/pull_request` 409 responses so clients can recover the
-            stored record without a follow-up request.
 
     ActorKind:
       description: High-level category of an event actor.

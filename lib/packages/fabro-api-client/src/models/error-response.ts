@@ -16,9 +16,6 @@
 // May contain unused imports in some cases
 // @ts-ignore
 import type { ErrorResponseEntry } from './error-response-entry';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PullRequestRecord } from './pull-request-record';
 
 /**
  * Standard error response containing one or more error entries.
@@ -36,9 +33,5 @@ export interface ErrorResponse {
      * Optional list of runtime env keys that were actually removed before an install failure. Currently populated by `POST /install/finish` failure responses only.
      */
     'removed_env_keys'?: Array<string>;
-    /**
-     * Optional existing pull request record. Populated by `POST /runs/{id}/pull_request` 409 responses so clients can recover the stored record without a follow-up request.
-     */
-    'pull_request'?: PullRequestRecord;
 }
 
