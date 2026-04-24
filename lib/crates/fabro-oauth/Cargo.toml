@@ -23,6 +23,7 @@ hex.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 axum.workspace = true
+fabro-static.workspace = true
 fabro-util = { path = "../fabro-util" }
 
 [dev-dependencies]

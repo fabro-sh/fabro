@@ -65,7 +65,15 @@ impl LocalServerConfig {
 }
 
 pub(crate) fn storage_dir_from_toml(source: &str) -> Result<PathBuf> {
-    storage_dir_from_toml_with_lookup(source, &|name| std::env::var(name).ok())
+    storage_dir_from_toml_with_lookup(source, &process_env_var)
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Local server config interpolation owns a process-env lookup facade for {{ env.* }} values."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 fn storage_dir_from_toml_with_lookup(

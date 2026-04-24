@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write;
 use std::path::Path;
 
+use fabro_static::EnvVars;
 use tokio::fs;
 use tokio::process::Command;
 use tracing::info;
@@ -63,6 +64,10 @@ fn dir_name_from_id(feature_id: &str) -> String {
 }
 
 /// Ensure `oras` CLI is available, installing it if necessary.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "OCI feature fetching installs oras under the user's HOME on Linux."
+)]
 async fn ensure_oras() -> crate::Result<()> {
     let check = Command::new("which")
         .arg("oras")
@@ -92,7 +97,7 @@ async fn ensure_oras() -> crate::Result<()> {
         }
     } else {
         // Linux: download from GitHub releases to ~/.local/bin/
-        let home = std::env::var("HOME")
+        let home = std::env::var(EnvVars::HOME)
             .map_err(|_| DevcontainerError::OrasInstall("HOME not set".to_string()))?;
         let bin_dir = format!("{home}/.local/bin");
 
@@ -1089,8 +1094,12 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires oras"]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Ignored OCI integration test is opt-in via a documented process-env flag."
+    )]
     async fn fetch_feature_oci_integration() {
-        if std::env::var_os("FABRO_ENABLE_FETCH_FEATURE_OCI_INTEGRATION").is_none() {
+        if std::env::var_os(EnvVars::FABRO_ENABLE_FETCH_FEATURE_OCI_INTEGRATION).is_none() {
             return;
         }
 

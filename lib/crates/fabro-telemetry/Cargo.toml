@@ -19,6 +19,7 @@ chrono.workspace = true
 dirs.workspace = true
 exec.workspace = true
 fabro-http.workspace = true
+fabro-static.workspace = true
 fabro-util = { path = "../fabro-util" }
 fork.workspace = true
 git2.workspace = true

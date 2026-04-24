@@ -8,6 +8,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use fabro_static::EnvVars;
 pub use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 pub use reqwest::{
     Body, Method, RequestBuilder, Response, StatusCode, Url, header, multipart, tls,
@@ -18,8 +19,6 @@ pub type BlockingHttpClient = reqwest::blocking::Client;
 pub type BlockingRequestBuilder = reqwest::blocking::RequestBuilder;
 pub type BlockingResponse = reqwest::blocking::Response;
 pub type Proxy = reqwest::Proxy;
-
-pub const HTTP_PROXY_POLICY_ENV: &str = "FABRO_HTTP_PROXY_POLICY";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProxyPolicy {
@@ -51,7 +50,7 @@ impl ProxyPolicy {
     }
 
     fn resolve(explicit: Option<Self>) -> Result<Self, HttpClientBuildError> {
-        match std::env::var(HTTP_PROXY_POLICY_ENV) {
+        match std::env::var(EnvVars::FABRO_HTTP_PROXY_POLICY) {
             Ok(value) => Self::resolve_with_env_value(explicit, Some(&value)),
             Err(std::env::VarError::NotPresent) => Self::resolve_with_env_value(explicit, None),
             Err(std::env::VarError::NotUnicode(value)) => Err(
@@ -63,7 +62,7 @@ impl ProxyPolicy {
 
 #[derive(Debug, thiserror::Error)]
 pub enum HttpClientBuildError {
-    #[error("invalid {HTTP_PROXY_POLICY_ENV} value `{0}`; expected `system` or `disabled`")]
+    #[error("invalid {env} value `{0}`; expected `system` or `disabled`", env = EnvVars::FABRO_HTTP_PROXY_POLICY)]
     InvalidProxyPolicy(String),
 
     #[error(transparent)]

@@ -6,6 +6,7 @@ use fabro_auth::auth_issue_message;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::types::{Message, Request};
 use fabro_model::{Catalog, Provider};
+use fabro_static::EnvVars;
 use fabro_types::settings::server::GithubIntegrationStrategy;
 use fabro_types::settings::{InterpString, ServerAuthMethod};
 use fabro_util::check_report::{CheckDetail, CheckResult, CheckSection, CheckStatus};
@@ -276,10 +277,14 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         .slug
         .as_ref()
         .map(InterpString::as_source);
-    let private_key_raw = state.server_secret("GITHUB_APP_PRIVATE_KEY");
+    let private_key_raw = state.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY);
     let client_id = settings.server.integrations.github.client_id.is_some();
-    let client_secret = state.server_secret("GITHUB_APP_CLIENT_SECRET").is_some();
-    let webhook_secret = state.server_secret("GITHUB_APP_WEBHOOK_SECRET").is_some();
+    let client_secret = state
+        .server_secret(EnvVars::GITHUB_APP_CLIENT_SECRET)
+        .is_some();
+    let webhook_secret = state
+        .server_secret(EnvVars::GITHUB_APP_WEBHOOK_SECRET)
+        .is_some();
 
     if app_id.is_none()
         && private_key_raw.is_none()
@@ -317,7 +322,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         };
     };
 
-    let private_key = match decode_pem_value("GITHUB_APP_PRIVATE_KEY", &private_key_raw) {
+    let private_key = match decode_pem_value(EnvVars::GITHUB_APP_PRIVATE_KEY, &private_key_raw) {
         Ok(value) => value,
         Err(err) => {
             return CheckResult {
@@ -378,7 +383,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
 }
 
 fn check_sandbox(state: &AppState) -> CheckResult {
-    if state.vault_or_env("DAYTONA_API_KEY").is_some() {
+    if state.vault_or_env(EnvVars::DAYTONA_API_KEY).is_some() {
         CheckResult {
             name:        "Sandbox".to_string(),
             status:      CheckStatus::Pass,
@@ -440,7 +445,7 @@ fn check_storage_dir_path(path: &std::path::Path) -> CheckResult {
 }
 
 async fn check_brave_search(state: &AppState) -> CheckResult {
-    let Some(api_key) = state.vault_or_env("BRAVE_SEARCH_API_KEY") else {
+    let Some(api_key) = state.vault_or_env(EnvVars::BRAVE_SEARCH_API_KEY) else {
         return CheckResult {
             name:        "Web Search (Brave)".to_string(),
             status:      CheckStatus::Warning,
@@ -507,7 +512,7 @@ fn check_crypto(state: &AppState) -> CheckResult {
     let mut errors = Vec::new();
 
     if resolved_server_settings.server.web.enabled {
-        match state.server_secret("SESSION_SECRET") {
+        match state.server_secret(EnvVars::SESSION_SECRET) {
             Some(secret) => {
                 if let Err(err) = validate_session_secret(&secret) {
                     errors.push(err);
@@ -519,7 +524,7 @@ fn check_crypto(state: &AppState) -> CheckResult {
 
     let methods = &resolved_server_settings.server.auth.methods;
     if methods.contains(&ServerAuthMethod::DevToken) {
-        match state.server_secret("FABRO_DEV_TOKEN") {
+        match state.server_secret(EnvVars::FABRO_DEV_TOKEN) {
             Some(token) if validate_dev_token_format(&token) => {}
             Some(_) => errors.push("FABRO_DEV_TOKEN has invalid format".to_string()),
             None => errors.push("FABRO_DEV_TOKEN not set".to_string()),
@@ -535,7 +540,10 @@ fn check_crypto(state: &AppState) -> CheckResult {
         {
             errors.push("server.integrations.github.client_id is not configured".to_string());
         }
-        if state.server_secret("GITHUB_APP_CLIENT_SECRET").is_none() {
+        if state
+            .server_secret(EnvVars::GITHUB_APP_CLIENT_SECRET)
+            .is_none()
+        {
             errors.push("GITHUB_APP_CLIENT_SECRET not set".to_string());
         }
     }

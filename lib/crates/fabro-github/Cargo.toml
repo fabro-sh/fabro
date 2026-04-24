@@ -16,6 +16,7 @@ workspace = true
 serde.workspace = true
 serde_json.workspace = true
 fabro-http.workspace = true
+fabro-static.workspace = true
 fabro-types = { path = "../fabro-types" }
 jsonwebtoken.workspace = true
 chrono.workspace = true

@@ -1,28 +1,35 @@
 use std::ffi::OsString;
 
+use fabro_static::EnvVars;
 use tokio::process::Command;
 
 const WORKER_ENV_ALLOWLIST: &[&str] = &[
-    "PATH",
-    "HOME",
-    "TMPDIR",
-    "USER",
-    "RUST_LOG",
-    "RUST_BACKTRACE",
-    "FABRO_HOME",
-    "FABRO_STORAGE_ROOT",
+    EnvVars::PATH,
+    EnvVars::HOME,
+    EnvVars::TMPDIR,
+    EnvVars::USER,
+    EnvVars::RUST_LOG,
+    EnvVars::RUST_BACKTRACE,
+    EnvVars::FABRO_HOME,
+    EnvVars::FABRO_STORAGE_ROOT,
 ];
 
-const RENDER_GRAPH_ENV_ALLOWLIST: &[&str] = &["PATH", "HOME", "TMPDIR"];
+const RENDER_GRAPH_ENV_ALLOWLIST: &[&str] = &[EnvVars::PATH, EnvVars::HOME, EnvVars::TMPDIR];
 
 pub(crate) fn apply_worker_env(cmd: &mut Command) {
-    apply_allowlist(cmd, WORKER_ENV_ALLOWLIST, &|name| std::env::var_os(name));
+    apply_allowlist(cmd, WORKER_ENV_ALLOWLIST, &process_env_var_os);
 }
 
 pub(crate) fn apply_render_graph_env(cmd: &mut Command) {
-    apply_allowlist(cmd, RENDER_GRAPH_ENV_ALLOWLIST, &|name| {
-        std::env::var_os(name)
-    });
+    apply_allowlist(cmd, RENDER_GRAPH_ENV_ALLOWLIST, &process_env_var_os);
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Subprocess env allowlists intentionally copy a narrow process-env subset."
+)]
+fn process_env_var_os(name: &str) -> Option<OsString> {
+    std::env::var_os(name)
 }
 
 fn apply_allowlist(cmd: &mut Command, keys: &[&str], lookup: &dyn Fn(&str) -> Option<OsString>) {

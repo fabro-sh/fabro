@@ -563,7 +563,7 @@ impl CodergenBackend for AgentCliBackend {
         } else {
             let mut env = HashMap::new();
             for name in provider.api_key_env_vars() {
-                if let Ok(val) = std::env::var(name) {
+                if let Some(val) = process_env_var(name) {
                     env.insert((*name).to_string(), val);
                 }
             }
@@ -738,6 +738,14 @@ impl CodergenBackend for AgentCliBackend {
             last_file_touched,
         })
     }
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "CLI agent fallback credentials intentionally read provider API-key env vars."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 /// Routes codergen invocations to either the API backend or CLI backend

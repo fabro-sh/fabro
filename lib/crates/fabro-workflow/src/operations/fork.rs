@@ -6,7 +6,7 @@ use fabro_types::RunId;
 use git2::{Oid, Signature};
 
 use super::run_git;
-use super::timeline::{ForkTarget, TimelineEntry, build_timeline};
+use super::timeline::{ForkTarget, RunTimeline, TimelineEntry, build_timeline};
 use crate::error::Error;
 use crate::event::{self, Event};
 use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
@@ -51,14 +51,10 @@ struct ForkedRun {
 /// checkpoint.
 ///
 /// Returns the new run ID.
-pub fn fork(store: &Store, input: &ForkRunInput) -> Result<RunId> {
+#[cfg(test)]
+fn fork(store: &Store, input: &ForkRunInput) -> Result<RunId> {
     let timeline = build_timeline(store, &input.source_run_id.to_string())?;
-    let entry = match input.target.as_ref() {
-        Some(target) => timeline.resolve(target)?,
-        None => timeline.entries.last().ok_or_else(|| {
-            anyhow::anyhow!("no checkpoints found for run {}", input.source_run_id)
-        })?,
-    };
+    let entry = resolve_fork_entry(&timeline, &input.source_run_id, input.target.as_ref())?;
     Ok(fork_from_entry(store, &input.source_run_id, entry, input.push)?.new_run_id)
 }
 
@@ -71,14 +67,8 @@ pub async fn fork_run(store: &Database, input: &ForkRunInput) -> Result<ForkOutc
         run_git::with_run_git_store(store, source_run_id, move |git_store| {
             let timeline = build_timeline(&git_store, &source_run_id.to_string())
                 .map_err(|err| Error::engine(err.to_string()))?;
-            let entry = match target.as_ref() {
-                Some(target) => timeline
-                    .resolve(target)
-                    .map_err(|err| Error::Validation(err.to_string()))?,
-                None => timeline.entries.last().ok_or_else(|| {
-                    Error::Validation(format!("no checkpoints found for run {source_run_id}"))
-                })?,
-            };
+            let entry = resolve_fork_entry(&timeline, &source_run_id, target.as_ref())
+                .map_err(|err| Error::Validation(err.to_string()))?;
             let resolved = ResolvedForkTarget {
                 checkpoint_ordinal: entry.ordinal,
                 node_id:            entry.node_name.clone(),
@@ -98,6 +88,20 @@ pub async fn fork_run(store: &Database, input: &ForkRunInput) -> Result<ForkOutc
     persist_forked_run(store, &projection).await?;
 
     Ok(outcome)
+}
+
+fn resolve_fork_entry<'a>(
+    timeline: &'a RunTimeline,
+    source_run_id: &RunId,
+    target: Option<&ForkTarget>,
+) -> Result<&'a TimelineEntry> {
+    match target {
+        Some(target) => timeline.resolve(target),
+        None => timeline
+            .entries
+            .last()
+            .ok_or_else(|| anyhow::anyhow!("no checkpoints found for run {source_run_id}")),
+    }
 }
 
 fn fork_from_entry(

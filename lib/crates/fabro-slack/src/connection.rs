@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use fabro_static::EnvVars;
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
@@ -56,6 +57,10 @@ pub fn process_message(
 }
 
 /// Fetch a WebSocket URL from Slack's `apps.connections.open` endpoint.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Slack socket setup supports a documented process-env API base URL override."
+)]
 pub async fn open_socket_url(
     http: &fabro_http::HttpClient,
     app_token: &str,
@@ -63,7 +68,8 @@ pub async fn open_socket_url(
     let resp = http
         .post(format!(
             "{}/apps.connections.open",
-            std::env::var("SLACK_BASE_URL").unwrap_or_else(|_| "https://slack.com/api".to_string())
+            std::env::var(EnvVars::SLACK_BASE_URL)
+                .unwrap_or_else(|_| "https://slack.com/api".to_string())
         ))
         .bearer_auth(app_token)
         .header("Content-Type", "application/x-www-form-urlencoded")

@@ -12,6 +12,7 @@ use fabro_config::{
 };
 use fabro_install::{OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV};
 use fabro_sandbox::SandboxProvider;
+use fabro_static::EnvVars;
 use fabro_types::ServerSettings;
 use fabro_types::settings::server::{GithubIntegrationStrategy, WebhookStrategy};
 use fabro_types::settings::{
@@ -40,8 +41,6 @@ use crate::server::{
 use crate::server_secrets::{ServerSecrets, process_env_snapshot};
 use crate::startup::resolve_startup;
 
-const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
-const AWS_SESSION_TOKEN_ENV: &str = "AWS_SESSION_TOKEN";
 pub const DEFAULT_TCP_PORT: u16 = 32276;
 type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
@@ -340,9 +339,15 @@ async fn start_webhook_strategy(
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Test-only server object-store shortcut reads a documented Fabro env var."
+)]
 fn use_in_memory_store() -> bool {
     !matches!(
-        std::env::var(TEST_IN_MEMORY_STORE_ENV).ok().as_deref(),
+        std::env::var(EnvVars::FABRO_TEST_IN_MEMORY_STORE)
+            .ok()
+            .as_deref(),
         None | Some("" | "0" | "false" | "no")
     )
 }
@@ -374,7 +379,7 @@ where
 
     let access_key_id = env_lookup(OBJECT_STORE_ACCESS_KEY_ID_ENV);
     let secret_access_key = env_lookup(OBJECT_STORE_SECRET_ACCESS_KEY_ENV);
-    let session_token = env_lookup(AWS_SESSION_TOKEN_ENV);
+    let session_token = env_lookup(EnvVars::AWS_SESSION_TOKEN);
     match (access_key_id, secret_access_key) {
         (Some(access_key_id), Some(secret_access_key)) => {
             builder = builder
@@ -394,26 +399,38 @@ where
 
     for (name, key) in [
         (
-            "AWS_WEB_IDENTITY_TOKEN_FILE",
+            EnvVars::AWS_WEB_IDENTITY_TOKEN_FILE,
             AmazonS3ConfigKey::WebIdentityTokenFile,
         ),
-        ("AWS_ROLE_ARN", AmazonS3ConfigKey::RoleArn),
-        ("AWS_ROLE_SESSION_NAME", AmazonS3ConfigKey::RoleSessionName),
-        ("AWS_ENDPOINT_URL_STS", AmazonS3ConfigKey::StsEndpoint),
+        (EnvVars::AWS_ROLE_ARN, AmazonS3ConfigKey::RoleArn),
         (
-            "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+            EnvVars::AWS_ROLE_SESSION_NAME,
+            AmazonS3ConfigKey::RoleSessionName,
+        ),
+        (
+            EnvVars::AWS_ENDPOINT_URL_STS,
+            AmazonS3ConfigKey::StsEndpoint,
+        ),
+        (
+            EnvVars::AWS_CONTAINER_CREDENTIALS_RELATIVE_URI,
             AmazonS3ConfigKey::ContainerCredentialsRelativeUri,
         ),
         (
-            "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+            EnvVars::AWS_CONTAINER_CREDENTIALS_FULL_URI,
             AmazonS3ConfigKey::ContainerCredentialsFullUri,
         ),
         (
-            "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+            EnvVars::AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE,
             AmazonS3ConfigKey::ContainerAuthorizationTokenFile,
         ),
-        ("AWS_METADATA_ENDPOINT", AmazonS3ConfigKey::MetadataEndpoint),
-        ("AWS_IMDSV1_FALLBACK", AmazonS3ConfigKey::ImdsV1Fallback),
+        (
+            EnvVars::AWS_METADATA_ENDPOINT,
+            AmazonS3ConfigKey::MetadataEndpoint,
+        ),
+        (
+            EnvVars::AWS_IMDSV1_FALLBACK,
+            AmazonS3ConfigKey::ImdsV1Fallback,
+        ),
     ] {
         if let Some(value) = env_lookup(name) {
             builder = builder.with_config(key, value);
@@ -492,9 +509,17 @@ fn resolved_bind_request(
 
 fn resolve_interp(value: &InterpString) -> anyhow::Result<String> {
     value
-        .resolve(|name| std::env::var(name).ok())
+        .resolve(process_env_var)
         .map(|resolved| resolved.value)
         .with_context(|| format!("failed to resolve {}", value.as_source()))
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Server settings interpolation owns a process-env lookup facade for {{ env.* }} values."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 fn resolve_interp_path(value: &InterpString) -> anyhow::Result<PathBuf> {
@@ -638,7 +663,7 @@ where
         &server_secrets,
     )?;
     let artifact_store = fabro_store::ArtifactStore::new(artifact_object_store, artifact_prefix);
-    let env_lookup: EnvLookup = Arc::new(|name| std::env::var(name).ok());
+    let env_lookup: EnvLookup = Arc::new(process_env_var);
     resolve_canonical_origin(&resolved_server_settings, &env_lookup).map_err(anyhow::Error::msg)?;
     let state = build_app_state(AppStateConfig {
         resolved_settings: resolved_app_settings,

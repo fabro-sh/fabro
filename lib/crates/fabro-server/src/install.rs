@@ -22,6 +22,7 @@ use fabro_install::{
     write_github_app_settings, write_object_store_settings, write_token_settings,
 };
 use fabro_model::Provider;
+use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
 use fabro_types::ServerSettings;
 use fabro_types::settings::interp::InterpString;
@@ -79,7 +80,6 @@ const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com
 const REDACTED_SECRET_VALUE: &str = "[REDACTED]";
 const VALIDATION_TIMEOUT: Duration = Duration::from_secs(20);
 const VALIDATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const AWS_SESSION_TOKEN_ENV: &str = "AWS_SESSION_TOKEN";
 
 impl InstallAppState {
     #[must_use]
@@ -122,7 +122,7 @@ impl InstallAppState {
         // reachability. Force the in-memory object store shortcut so
         // /install/finish can't hang on an unreachable bucket.
         unsafe {
-            std::env::set_var("FABRO_TEST_IN_MEMORY_STORE", "1");
+            std::env::set_var(EnvVars::FABRO_TEST_IN_MEMORY_STORE, "1");
         }
         Self {
             install_token:      Arc::from(token),
@@ -952,7 +952,7 @@ fn install_object_store_lookup<'a>(
         (Some(credentials), OBJECT_STORE_SECRET_ACCESS_KEY_ENV) => {
             Some(credentials.secret_access_key.expose_secret().to_string())
         }
-        (Some(_), AWS_SESSION_TOKEN_ENV) => None,
+        (Some(_), EnvVars::AWS_SESSION_TOKEN) => None,
         _ => server_secrets.get(name),
     }
 }
@@ -1351,7 +1351,7 @@ async fn post_install_finish(
                 return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
             }
             vault_secrets.push(VaultSecretWrite {
-                name:        "GITHUB_TOKEN".to_string(),
+                name:        EnvVars::GITHUB_TOKEN.to_string(),
                 value:       github.token,
                 secret_type: VaultSecretType::Environment,
                 description: None,
@@ -1388,15 +1388,15 @@ async fn post_install_finish(
                 return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
             }
             server_env_writes.push(make_env_write(
-                "GITHUB_APP_PRIVATE_KEY",
+                EnvVars::GITHUB_APP_PRIVATE_KEY,
                 BASE64_STANDARD.encode(github.pem.as_bytes()),
             ));
             server_env_writes.push(make_env_write(
-                "GITHUB_APP_CLIENT_SECRET",
+                EnvVars::GITHUB_APP_CLIENT_SECRET,
                 github.client_secret,
             ));
             if let Some(secret) = github.webhook_secret {
-                server_env_writes.push(make_env_write("GITHUB_APP_WEBHOOK_SECRET", secret));
+                server_env_writes.push(make_env_write(EnvVars::GITHUB_APP_WEBHOOK_SECRET, secret));
             }
         }
     }
@@ -1409,9 +1409,9 @@ async fn post_install_finish(
     };
 
     let session_secret = session_secret::generate_session_secret();
-    server_env_writes.push(make_env_write("SESSION_SECRET", session_secret));
+    server_env_writes.push(make_env_write(EnvVars::SESSION_SECRET, session_secret));
     if let Some(token) = dev_token.as_ref() {
-        server_env_writes.push(make_env_write("FABRO_DEV_TOKEN", token.clone()));
+        server_env_writes.push(make_env_write(EnvVars::FABRO_DEV_TOKEN, token.clone()));
     }
 
     #[expect(
@@ -1829,6 +1829,10 @@ async fn validate_llm_provider(
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Install flow checks documented provider base-url overrides while building defaults."
+)]
 fn provider_base_url(state: &InstallAppState, provider: Provider) -> String {
     state
         .upstreams
@@ -1836,11 +1840,11 @@ fn provider_base_url(state: &InstallAppState, provider: Provider) -> String {
         .get(&provider)
         .cloned()
         .or_else(|| match provider {
-            Provider::Anthropic => std::env::var("ANTHROPIC_BASE_URL").ok(),
-            Provider::OpenAi => std::env::var("OPENAI_BASE_URL").ok(),
-            Provider::Gemini => std::env::var("GEMINI_BASE_URL").ok(),
+            Provider::Anthropic => std::env::var(EnvVars::ANTHROPIC_BASE_URL).ok(),
+            Provider::OpenAi => std::env::var(EnvVars::OPENAI_BASE_URL).ok(),
+            Provider::Gemini => std::env::var(EnvVars::GEMINI_BASE_URL).ok(),
             Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => None,
-            Provider::OpenAiCompatible => std::env::var("OPENAI_COMPATIBLE_BASE_URL").ok(),
+            Provider::OpenAiCompatible => std::env::var(EnvVars::OPENAI_COMPATIBLE_BASE_URL).ok(),
         })
         .unwrap_or_else(|| match provider {
             Provider::Anthropic => DEFAULT_ANTHROPIC_BASE_URL.to_string(),
@@ -1987,16 +1991,17 @@ mod tests {
 
     use axum::http::HeaderMap;
     use fabro_install::{OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV};
+    use fabro_static::EnvVars;
     use object_store::Error as ObjectStoreError;
     use serde_json::json;
 
     use super::{
-        AWS_SESSION_TOKEN_ENV, DEFAULT_INSTALL_GITHUB_API_BASE_URL, InstallAppState,
-        InstallAwsCredentialPair, InstallFinishGuard, InstallObjectStoreCredentialMode,
-        InstallObjectStoreInput, InstallObjectStoreProvider, InstallObjectStoreState,
-        PendingInstall, ServerSecrets, classify_object_store_validation_error,
-        detect_canonical_url, install_object_store_lookup, lock_unpoisoned,
-        resolve_install_object_store_state, token_is_valid, write_artifact_store_metadata,
+        DEFAULT_INSTALL_GITHUB_API_BASE_URL, InstallAppState, InstallAwsCredentialPair,
+        InstallFinishGuard, InstallObjectStoreCredentialMode, InstallObjectStoreInput,
+        InstallObjectStoreProvider, InstallObjectStoreState, PendingInstall, ServerSecrets,
+        classify_object_store_validation_error, detect_canonical_url, install_object_store_lookup,
+        lock_unpoisoned, resolve_install_object_store_state, token_is_valid,
+        write_artifact_store_metadata,
     };
 
     #[test]
@@ -2209,9 +2214,9 @@ AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/fabro-web-identity-token\n",
             lookup(OBJECT_STORE_SECRET_ACCESS_KEY_ENV).as_deref(),
             Some("submitted-secret")
         );
-        assert_eq!(lookup(AWS_SESSION_TOKEN_ENV), None);
+        assert_eq!(lookup(EnvVars::AWS_SESSION_TOKEN), None);
         assert_eq!(
-            lookup("AWS_WEB_IDENTITY_TOKEN_FILE").as_deref(),
+            lookup(EnvVars::AWS_WEB_IDENTITY_TOKEN_FILE).as_deref(),
             Some("/tmp/fabro-web-identity-token")
         );
     }

@@ -1,5 +1,6 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use fabro_static::EnvVars;
 use fabro_types::PullRequestGithubDetail;
 use fabro_types::settings::run::MergeStrategy;
 use serde::Deserialize;
@@ -9,8 +10,12 @@ pub const GITHUB_API_BASE_URL: &str = "https://api.github.com";
 
 /// Returns the GitHub API base URL, allowing override via `GITHUB_BASE_URL` env
 /// var.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "GitHub API client exposes a documented process-env base URL override."
+)]
 pub fn github_api_base_url() -> String {
-    std::env::var("GITHUB_BASE_URL").unwrap_or_else(|_| GITHUB_API_BASE_URL.to_string())
+    std::env::var(EnvVars::GITHUB_BASE_URL).unwrap_or_else(|_| GITHUB_API_BASE_URL.to_string())
 }
 
 /// Bundle of GitHub credentials and the API base URL, threaded through every
@@ -94,11 +99,15 @@ pub struct GitHubAppCredentials {
 }
 
 impl GitHubAppCredentials {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "GitHub App credentials support a documented private-key env source."
+    )]
     pub fn private_key_from_env() -> Result<Option<String>, String> {
-        let Ok(raw) = std::env::var("GITHUB_APP_PRIVATE_KEY") else {
+        let Ok(raw) = std::env::var(EnvVars::GITHUB_APP_PRIVATE_KEY) else {
             return Ok(None);
         };
-        decode_pem_env("GITHUB_APP_PRIVATE_KEY", &raw).map(Some)
+        decode_pem_env(EnvVars::GITHUB_APP_PRIVATE_KEY, &raw).map(Some)
     }
 
     pub fn from_env(app_id: Option<&str>) -> Result<Option<Self>, String> {

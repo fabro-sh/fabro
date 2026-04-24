@@ -5,6 +5,7 @@ mod rebuild_meta;
 mod resume;
 mod rewind;
 mod run_git;
+mod run_store;
 mod source;
 mod start;
 #[cfg(test)]
@@ -17,7 +18,7 @@ pub use archive::{
     unarchive,
 };
 pub use create::{CreateRunInput, CreatedRun, create, make_run_dir};
-pub use fork::{ForkOutcome, ForkRunInput, ResolvedForkTarget, fork, fork_run};
+pub use fork::{ForkOutcome, ForkRunInput, ResolvedForkTarget, fork_run};
 pub use rebuild_meta::{
     build_timeline_or_rebuild, find_run_id_by_prefix_or_store, rebuild_metadata_branch,
 };

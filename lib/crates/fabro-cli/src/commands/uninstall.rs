@@ -15,6 +15,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use fabro_config::Storage;
 use fabro_config::daemon::ServerDaemon;
+use fabro_static::EnvVars;
 use fabro_util::Home;
 use fabro_util::printer::Printer;
 use serde::Serialize;
@@ -120,13 +121,17 @@ fn dir_size(path: &Path) -> u64 {
     total
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Uninstall scans shell config paths honoring the conventional ZDOTDIR env var."
+)]
 fn find_shell_configs_with_sentinel() -> Vec<PathBuf> {
     let mut found = Vec::new();
     let Some(home) = dirs::home_dir() else {
         return found;
     };
 
-    let zdotdir = std::env::var("ZDOTDIR")
+    let zdotdir = std::env::var(EnvVars::ZDOTDIR)
         .ok()
         .map_or_else(|| home.clone(), PathBuf::from);
 

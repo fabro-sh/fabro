@@ -1,5 +1,5 @@
 use fabro_store::Database;
-use fabro_types::{ActorRef, RunId, RunStatus};
+use fabro_types::{ActorRef, RunId};
 use tracing::error;
 
 use super::fork::{self, ForkOutcome, ForkRunInput, ResolvedForkTarget};
@@ -21,7 +21,6 @@ pub enum RewindOutcome {
         source_run_id: RunId,
         new_run_id:    RunId,
         target:        ResolvedForkTarget,
-        archived:      bool,
     },
     Partial {
         source_run_id: RunId,
@@ -41,15 +40,8 @@ pub async fn rewind(
         Error::Precondition(format!("run {} has no status; cannot rewind", input.run_id))
     })?;
 
-    if matches!(current, RunStatus::Archived { .. }) {
-        return Err(Error::Precondition(archive::archived_rejection_message(
-            &input.run_id,
-        )));
-    }
-    if !matches!(
-        current,
-        RunStatus::Succeeded { .. } | RunStatus::Failed { .. } | RunStatus::Dead
-    ) {
+    archive::ensure_not_archived(Some(current), &input.run_id)?;
+    if current.terminal_status().is_none() {
         return Err(Error::Precondition(format!(
             "run {} must be terminal (succeeded, failed, or dead) to rewind; current status is {current}",
             input.run_id
@@ -65,12 +57,11 @@ pub async fn rewind(
 
     match archive::archive(store, &input.run_id, actor).await {
         Ok(_) => {
-            append_superseded_event(store, &forked).await;
+            append_superseded_event_best_effort(store, &forked).await;
             Ok(RewindOutcome::Full {
                 source_run_id: forked.source_run_id,
                 new_run_id:    forked.new_run_id,
                 target:        forked.target,
-                archived:      true,
             })
         }
         Err(err) => Ok(RewindOutcome::Partial {
@@ -82,7 +73,7 @@ pub async fn rewind(
     }
 }
 
-async fn append_superseded_event(store: &Database, forked: &ForkOutcome) {
+async fn append_superseded_event_best_effort(store: &Database, forked: &ForkOutcome) {
     let run_store = match store.open_run(&forked.source_run_id).await {
         Ok(run_store) => run_store,
         Err(err) => {

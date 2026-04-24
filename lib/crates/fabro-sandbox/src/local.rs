@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use async_trait::async_trait;
+use fabro_static::EnvVars;
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio::task::spawn_blocking;
@@ -41,16 +42,16 @@ impl LocalSandbox {
     }
 
     const ENV_SAFELIST: &'static [&'static str] = &[
-        "PATH",
-        "HOME",
-        "USER",
-        "SHELL",
-        "LANG",
-        "TERM",
-        "TMPDIR",
-        "GOPATH",
-        "CARGO_HOME",
-        "NVM_DIR",
+        EnvVars::PATH,
+        EnvVars::HOME,
+        EnvVars::USER,
+        EnvVars::SHELL,
+        EnvVars::LANG,
+        EnvVars::TERM,
+        EnvVars::TMPDIR,
+        EnvVars::GOPATH,
+        EnvVars::CARGO_HOME,
+        EnvVars::NVM_DIR,
     ];
 
     fn should_filter_env_var(key: &str) -> bool {
@@ -74,13 +75,17 @@ impl LocalSandbox {
         }
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Local sandbox command execution checks PATH/PATHEXT to select optional helpers."
+    )]
     fn binary_on_path(binary: &str) -> bool {
-        let Some(paths) = std::env::var_os("PATH") else {
+        let Some(paths) = std::env::var_os(EnvVars::PATH) else {
             return false;
         };
 
         #[cfg(windows)]
-        let extensions: Vec<String> = std::env::var_os("PATHEXT")
+        let extensions: Vec<String> = std::env::var_os(EnvVars::PATHEXT)
             .map(|value| {
                 value
                     .to_string_lossy()
@@ -110,6 +115,14 @@ impl LocalSandbox {
 
         false
     }
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Local sandbox must snapshot the ambient process env before applying its fail-closed filter."
+)]
+fn process_env_vars() -> Vec<(String, String)> {
+    std::env::vars().collect()
 }
 
 #[async_trait]
@@ -221,7 +234,8 @@ impl Sandbox for LocalSandbox {
     ) -> Result<ExecResult, String> {
         let start = Instant::now();
 
-        let mut filtered_env: Vec<(String, String)> = std::env::vars()
+        let mut filtered_env: Vec<(String, String)> = process_env_vars()
+            .into_iter()
             .filter(|(key, _)| !Self::should_filter_env_var(key))
             .collect();
 

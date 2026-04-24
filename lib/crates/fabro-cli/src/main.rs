@@ -27,6 +27,7 @@ use args::{
     global_args_cli_layer, require_no_json_override,
 };
 use clap::{CommandFactory, Parser};
+use fabro_static::EnvVars;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_util::exit::ExitClass;
 use fabro_util::printer::Printer;
@@ -79,14 +80,14 @@ async fn main() {
     // unscrubbed spawn site cannot leak it. The token flows to `runner::execute`
     // through an explicit function argument instead of the environment.
     let worker_token = if subcommand == Some("__run-worker") {
-        let token = std::env::var("FABRO_WORKER_TOKEN").ok();
+        let token = process_env_var(EnvVars::FABRO_WORKER_TOKEN);
         #[expect(
             clippy::disallowed_methods,
             reason = "Scrub the worker bearer from this process's env before any \
                       child process is spawned, so no descendant can inherit it."
         )]
         {
-            std::env::remove_var("FABRO_WORKER_TOKEN");
+            std::env::remove_var(EnvVars::FABRO_WORKER_TOKEN);
         }
         token
     } else {
@@ -108,7 +109,7 @@ async fn main() {
     if !command_name.is_empty() {
         let command = sanitize::sanitize_command(&raw_args, &command_name);
         let repository = git::repository_identifier();
-        let ci = std::env::var("CI").is_ok();
+        let ci = process_env_var(EnvVars::CI).is_some();
         if is_error {
             fabro_telemetry::track!("CLI Errored", {
                 "subcommand": command_name,
@@ -164,6 +165,14 @@ async fn main() {
         }
         std::process::exit(exit_code);
     }
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "CLI main reads documented process-env controls before telemetry and worker dispatch."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 async fn main_inner(worker_token: Option<String>) -> (String, Result<()>) {

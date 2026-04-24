@@ -1,3 +1,4 @@
+use fabro_static::EnvVars;
 use serde_json::{Value, json};
 
 pub fn build_context() -> Value {
@@ -9,8 +10,12 @@ pub fn build_context() -> Value {
     })
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Telemetry context captures the conventional LANG locale from process env."
+)]
 fn current_locale() -> String {
-    let lang = std::env::var("LANG").unwrap_or_default();
+    let lang = std::env::var(EnvVars::LANG).unwrap_or_default();
     parse_locale(&lang)
 }
 

@@ -1,8 +1,8 @@
 #![expect(
     clippy::disallowed_methods,
     reason = "fabro-test: shared test infrastructure; sync std::fs throughout is intentional for \
-              test fixtures, snapshots, and scratch directories. Tokio-path code under test sits \
-              in other crates."
+              test fixtures, snapshots, scratch directories, and process-env harnessing. \
+              Tokio-path code under test sits in other crates."
 )]
 
 use std::collections::HashMap;
@@ -15,8 +15,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use assert_cmd::Command;
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{RuntimeDirectory, Storage, envfile};
+pub use fabro_static::EnvVars;
 use fabro_types::RunId;
-use fabro_util::browser;
 use regex::Regex;
 use serde_json::{Map, Value, json};
 use toml::Value as TomlValue;
@@ -39,8 +39,8 @@ pub use http_assert::{
 #[macro_export]
 macro_rules! preserve_coverage_env {
     ($cmd:expr) => {{
-        if let Some(val) = ::std::env::var_os("LLVM_PROFILE_FILE") {
-            $cmd.env("LLVM_PROFILE_FILE", val);
+        if let Some(val) = ::std::env::var_os($crate::EnvVars::LLVM_PROFILE_FILE) {
+            $cmd.env($crate::EnvVars::LLVM_PROFILE_FILE, val);
         }
     }};
 }
@@ -77,7 +77,6 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
 ];
 
 const MANAGED_STORAGE_MARKER: &str = "# fabro-test managed storage_dir";
-const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
 const SESSION_LOCK_TIMEOUT: Duration = Duration::from_secs(20);
 const TEST_SESSION_SECRET: &str =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -95,10 +94,10 @@ pub enum TestMode {
 impl TestMode {
     #[must_use]
     pub fn from_env() -> Self {
-        match std::env::var("FABRO_TEST_MODE").as_deref() {
+        match std::env::var(EnvVars::FABRO_TEST_MODE).as_deref() {
             Ok("live") => Self::Live,
             Ok("strict") => Self::Strict,
-            _ => match std::env::var("NEXTEST_PROFILE").as_deref() {
+            _ => match std::env::var(EnvVars::NEXTEST_PROFILE).as_deref() {
                 Ok("e2e") => Self::Strict,
                 _ => Self::Twin,
             },
@@ -157,20 +156,20 @@ fn apply_test_isolation_with_lookup(
     lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
 ) {
     cmd.env_clear();
-    if let Some(coverage) = lookup("LLVM_PROFILE_FILE") {
-        cmd.env("LLVM_PROFILE_FILE", coverage);
+    if let Some(coverage) = lookup(EnvVars::LLVM_PROFILE_FILE) {
+        cmd.env(EnvVars::LLVM_PROFILE_FILE, coverage);
     }
-    if let Some(path) = lookup("PATH") {
-        cmd.env("PATH", path);
+    if let Some(path) = lookup(EnvVars::PATH) {
+        cmd.env(EnvVars::PATH, path);
     }
-    cmd.env("NO_COLOR", "1");
-    cmd.env("HOME", home_dir);
-    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
-        .env("FABRO_HTTP_PROXY_POLICY", "disabled")
-        .env("FABRO_TELEMETRY", "off")
-        .env(browser::SUPPRESS_ENV_VAR, "1");
-    cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
-    cmd.env(TEST_IN_MEMORY_STORE_ENV, "1");
+    cmd.env(EnvVars::NO_COLOR, "1");
+    cmd.env(EnvVars::HOME, home_dir);
+    cmd.env(EnvVars::FABRO_NO_UPGRADE_CHECK, "true")
+        .env(EnvVars::FABRO_HTTP_PROXY_POLICY, "disabled")
+        .env(EnvVars::FABRO_TELEMETRY, "off")
+        .env(EnvVars::FABRO_SUPPRESS_OPEN_BROWSER, "1");
+    cmd.env(EnvVars::FABRO_SERVER_MAX_CONCURRENT_RUNS, "64");
+    cmd.env(EnvVars::FABRO_TEST_IN_MEMORY_STORE, "1");
 }
 
 /// Create a fresh tempdir containing an empty `storage/` subdirectory, for
@@ -355,7 +354,7 @@ fn current_pid() -> u32 {
 }
 
 fn session_paths() -> (SessionMode, String, SessionPaths) {
-    let run_id = std::env::var("NEXTEST_RUN_ID").ok();
+    let run_id = std::env::var(EnvVars::NEXTEST_RUN_ID).ok();
     session_paths_for_run_id(run_id.as_deref())
 }
 
@@ -1778,8 +1777,8 @@ impl TwinGitHub {
 
 impl TwinOpenAi {
     pub fn configure_command(&self, cmd: &mut Command, namespace: &str) {
-        cmd.env("OPENAI_BASE_URL", &self.base_url);
-        cmd.env("OPENAI_API_KEY", namespace);
+        cmd.env(EnvVars::OPENAI_BASE_URL, &self.base_url);
+        cmd.env(EnvVars::OPENAI_API_KEY, namespace);
     }
 
     #[must_use]
@@ -2077,9 +2076,9 @@ macro_rules! e2e_openai {
             let api_key = format!("{}::{}", module_path!(), line!());
             (twin.base_url.clone(), api_key)
         } else {
-            let base_url = std::env::var("OPENAI_BASE_URL")
+            let base_url = std::env::var($crate::EnvVars::OPENAI_BASE_URL)
                 .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-            let api_key = std::env::var("OPENAI_API_KEY")
+            let api_key = std::env::var($crate::EnvVars::OPENAI_API_KEY)
                 .expect("OPENAI_API_KEY must be set in live/strict mode");
             (base_url, api_key)
         }
@@ -2108,11 +2107,11 @@ mod tests {
 
         let envs = cmd.get_envs().collect::<Vec<_>>();
         assert!(envs.iter().any(|(key, value)| {
-            *key == std::ffi::OsStr::new("OPENAI_BASE_URL")
+            *key == std::ffi::OsStr::new(EnvVars::OPENAI_BASE_URL)
                 && *value == Some(std::ffi::OsStr::new("http://127.0.0.1:3000/v1"))
         }),);
         assert!(envs.iter().any(|(key, value)| {
-            *key == std::ffi::OsStr::new("OPENAI_API_KEY")
+            *key == std::ffi::OsStr::new(EnvVars::OPENAI_API_KEY)
                 && *value == Some(std::ffi::OsStr::new("test-namespace"))
         }),);
     }
@@ -2127,10 +2126,12 @@ mod tests {
         let home = tempfile::tempdir().expect("temp home should be created");
         let mut cmd = std::process::Command::new("/usr/bin/env");
         apply_test_isolation_with_lookup(&mut cmd, home.path(), |name| match name {
-            "PATH" => Some(std::ffi::OsString::from("/usr/bin:/bin")),
-            "LLVM_PROFILE_FILE" => Some(std::ffi::OsString::from("/tmp/coverage.profraw")),
-            "GITHUB_TOKEN" => Some(std::ffi::OsString::from("sentinel-should-not-leak")),
-            "ANTHROPIC_API_KEY" => Some(std::ffi::OsString::from("sentinel-also-should-not-leak")),
+            EnvVars::PATH => Some(std::ffi::OsString::from("/usr/bin:/bin")),
+            EnvVars::LLVM_PROFILE_FILE => Some(std::ffi::OsString::from("/tmp/coverage.profraw")),
+            EnvVars::GITHUB_TOKEN => Some(std::ffi::OsString::from("sentinel-should-not-leak")),
+            EnvVars::ANTHROPIC_API_KEY => {
+                Some(std::ffi::OsString::from("sentinel-also-should-not-leak"))
+            }
             _ => None,
         });
         let output = cmd.output().expect("/usr/bin/env should execute");

@@ -10,10 +10,11 @@ use anyhow::{Context, Result, anyhow, bail};
 use fabro_config::RuntimeDirectory;
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::daemon::ServerDaemon;
-use fabro_config::user::{FABRO_CONFIG_ENV, default_settings_path};
+use fabro_config::user::default_settings_path;
 use fabro_server::jwt_auth::auth_method_name;
 use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs, resolve_runtime_server_settings_for_start};
 use fabro_server::{process_env_snapshot, validate_startup};
+use fabro_static::EnvVars;
 use fabro_types::settings::ServerAuthMethod;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -92,7 +93,7 @@ pub(crate) async fn ensure_server_running_for_storage(
     config_path: &Path,
 ) -> Result<Bind> {
     ensure_storage_server_autostart_allowed(
-        std::env::var_os(FABRO_CONFIG_ENV).as_deref(),
+        std::env::var_os(EnvVars::FABRO_CONFIG).as_deref(),
         config_path,
         &default_settings_path(),
     )?;
@@ -208,7 +209,7 @@ fn bind_matches_request(existing: &Bind, requested: &BindRequest) -> bool {
 }
 
 fn server_max_concurrent_runs_override() -> Option<usize> {
-    std::env::var("FABRO_SERVER_MAX_CONCURRENT_RUNS")
+    std::env::var(EnvVars::FABRO_SERVER_MAX_CONCURRENT_RUNS)
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)

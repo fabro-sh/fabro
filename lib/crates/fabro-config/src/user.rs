@@ -6,12 +6,13 @@
 
 use std::path::{Path, PathBuf};
 
+use fabro_static::EnvVars;
+
 use crate::home::Home;
 use crate::load::load_settings_path;
 use crate::{Result, SettingsLayer};
 
 pub const SETTINGS_CONFIG_FILENAME: &str = "settings.toml";
-pub const FABRO_CONFIG_ENV: &str = "FABRO_CONFIG";
 
 pub fn default_settings_path() -> PathBuf {
     Home::from_env().user_config()
@@ -25,6 +26,10 @@ pub fn default_socket_path() -> PathBuf {
     Home::from_env().root().join("fabro.sock")
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Config loading owns the process-env facade used to resolve user settings paths."
+)]
 pub fn active_settings_path(path: Option<&Path>) -> PathBuf {
     active_settings_path_with_lookup(path, |name| std::env::var_os(name))
 }
@@ -34,17 +39,21 @@ fn active_settings_path_with_lookup(
     lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
 ) -> PathBuf {
     path.map(Path::to_path_buf)
-        .or_else(|| lookup(FABRO_CONFIG_ENV).map(PathBuf::from))
+        .or_else(|| lookup(EnvVars::FABRO_CONFIG).map(PathBuf::from))
         .unwrap_or_else(default_settings_path)
 }
 
 /// Load settings config from an explicit path or `~/.fabro/settings.toml`,
 /// returning defaults if the default file doesn't exist. An explicit path that
 /// doesn't exist is an error.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Config loading owns the process-env facade used to resolve user settings paths."
+)]
 pub(crate) fn load_settings_config(path: Option<&Path>) -> Result<SettingsLayer> {
     if let Some(explicit) = path
         .map(Path::to_path_buf)
-        .or_else(|| std::env::var_os(FABRO_CONFIG_ENV).map(PathBuf::from))
+        .or_else(|| std::env::var_os(EnvVars::FABRO_CONFIG).map(PathBuf::from))
     {
         return load_v2_layer_from_path(&explicit);
     }

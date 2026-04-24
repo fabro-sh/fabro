@@ -1,23 +1,27 @@
 #![allow(
     clippy::print_stdout,
     clippy::print_stderr,
-    reason = "This example intentionally writes normal output and diagnostics to stdio."
+    clippy::disallowed_methods,
+    reason = "This example intentionally reads OAuth env vars and writes normal output/diagnostics."
 )]
 
 use std::env;
 
 use fabro_oauth::run_browser_flow;
+use fabro_static::EnvVars;
 
 #[tokio::main]
 async fn main() {
-    let issuer = env::var("OAUTH_ISSUER").expect("set OAUTH_ISSUER");
-    let client_id = env::var("OAUTH_CLIENT_ID").expect("set OAUTH_CLIENT_ID");
-    let scope = env::var("OAUTH_SCOPE").unwrap_or_else(|_| "openid profile email".to_string());
-    let port: u16 = env::var("OAUTH_PORT")
+    let issuer = env::var(EnvVars::OAUTH_ISSUER).expect("set OAUTH_ISSUER");
+    let client_id = env::var(EnvVars::OAUTH_CLIENT_ID).expect("set OAUTH_CLIENT_ID");
+    let scope =
+        env::var(EnvVars::OAUTH_SCOPE).unwrap_or_else(|_| "openid profile email".to_string());
+    let port: u16 = env::var(EnvVars::OAUTH_PORT)
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(0);
-    let callback_path = env::var("OAUTH_CALLBACK_PATH").unwrap_or_else(|_| "/callback".to_string());
+    let callback_path =
+        env::var(EnvVars::OAUTH_CALLBACK_PATH).unwrap_or_else(|_| "/callback".to_string());
 
     match run_browser_flow(&issuer, &client_id, &scope, port, &callback_path).await {
         Ok(tokens) => {

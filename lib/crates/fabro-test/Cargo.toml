@@ -17,6 +17,7 @@ assert_cmd = "2"
 axum = { workspace = true }
 fabro-config = { path = "../fabro-config" }
 fabro-proc = { path = "../fabro-proc" }
+fabro-static.workspace = true
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 fabro-http.workspace = true

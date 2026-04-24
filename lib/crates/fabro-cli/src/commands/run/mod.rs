@@ -8,6 +8,7 @@ use crate::shared::print_json_pretty;
 use crate::sleep_inhibitor;
 
 pub(crate) mod attach;
+pub(crate) mod checkpoints;
 pub(crate) mod command;
 pub(crate) mod cp;
 pub(crate) mod create;

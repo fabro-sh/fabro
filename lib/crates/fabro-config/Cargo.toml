@@ -22,6 +22,7 @@ clap = { workspace = true, optional = true }
 chrono.workspace = true
 fabro-macros = { path = "../fabro-macros" }
 fabro-proc = { path = "../fabro-proc" }
+fabro-static.workspace = true
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 dirs.workspace = true

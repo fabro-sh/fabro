@@ -1,3 +1,4 @@
+use fabro_static::EnvVars;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -11,13 +12,17 @@ pub struct SlackCredentials {
     pub app_token: String,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Slack credential resolution intentionally reads documented token env vars."
+)]
 fn non_empty_env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|s| !s.is_empty())
 }
 
 pub fn resolve_credentials() -> Option<SlackCredentials> {
-    let bot_token = non_empty_env("FABRO_SLACK_BOT_TOKEN")?;
-    let app_token = non_empty_env("FABRO_SLACK_APP_TOKEN")?;
+    let bot_token = non_empty_env(EnvVars::FABRO_SLACK_BOT_TOKEN)?;
+    let app_token = non_empty_env(EnvVars::FABRO_SLACK_APP_TOKEN)?;
     Some(SlackCredentials {
         bot_token,
         app_token,

@@ -1,0 +1,13 @@
+[package]
+name = "fabro-static"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Static string registries for shared Fabro conventions"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

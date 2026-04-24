@@ -1,17 +1,11 @@
 use fabro_checkpoint::git::Store as GitStore;
-use fabro_store::{Database, Error as StoreError};
+use fabro_store::Database;
 use fabro_types::{RunId, RunProjection};
 use git2::Repository;
 use tokio::task::spawn_blocking;
 
+use super::run_store::map_open_run_error;
 use crate::error::Error;
-
-fn map_open_run_error(run_id: &RunId, err: StoreError) -> Error {
-    match err {
-        StoreError::RunNotFound(id) => Error::RunNotFound(id),
-        other => Error::engine(format!("failed to open run {run_id}: {other}")),
-    }
-}
 
 pub(crate) async fn load_projection(
     store: &Database,

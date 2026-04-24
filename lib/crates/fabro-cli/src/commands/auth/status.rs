@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use fabro_client::{AuthEntry, AuthStore};
+use fabro_static::EnvVars;
 use fabro_util::dev_token::{read_dev_token_file, validate_dev_token_format};
 use serde::Serialize;
 
@@ -166,8 +167,12 @@ fn human_state(state: OAuthState) -> &'static str {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Auth status reports whether the documented dev-token env source is configured."
+)]
 fn load_dev_token_if_available() -> bool {
-    let env_token = std::env::var("FABRO_DEV_TOKEN")
+    let env_token = std::env::var(EnvVars::FABRO_DEV_TOKEN)
         .ok()
         .filter(|token| validate_dev_token_format(token));
     env_token.is_some()

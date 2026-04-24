@@ -6,6 +6,7 @@
 mod common;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
+use fabro_static::EnvVars;
 use serde_json::{Value, json};
 
 const DEFAULT_LIVE_BASE_URL: &str = "https://api.openai.com";
@@ -210,15 +211,15 @@ async fn live_openai_contract_smoke_suite() {
 
 impl LiveOptions {
     fn from_env() -> Result<Option<Self>> {
-        let Some(api_key) = non_empty_env("OPENAI_API_KEY") else {
+        let Some(api_key) = non_empty_env(EnvVars::OPENAI_API_KEY) else {
             return Ok(None);
         };
-        let base_url = non_empty_env("TWIN_OPENAI_LIVE_BASE_URL")
+        let base_url = non_empty_env(EnvVars::TWIN_OPENAI_LIVE_BASE_URL)
             .unwrap_or_else(|| DEFAULT_LIVE_BASE_URL.to_owned());
-        let model = non_empty_env("TWIN_OPENAI_LIVE_MODEL")
+        let model = non_empty_env(EnvVars::TWIN_OPENAI_LIVE_MODEL)
             .unwrap_or_else(|| DEFAULT_LIVE_MODEL.to_owned());
-        let organization = non_empty_env("OPENAI_ORGANIZATION");
-        let project = non_empty_env("OPENAI_PROJECT");
+        let organization = non_empty_env(EnvVars::OPENAI_ORGANIZATION);
+        let project = non_empty_env(EnvVars::OPENAI_PROJECT);
 
         Ok(Some(Self {
             api: common::ApiClient::new(base_url, Some(api_key), organization, project)?,
@@ -1836,6 +1837,10 @@ where
     Ok(())
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Live twin-openai contract tests read documented OpenAI env inputs."
+)]
 fn non_empty_env(name: &str) -> Option<String> {
     std::env::var(name)
         .ok()

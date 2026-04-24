@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "Build scripts run at compile time and read Cargo-provided env vars."
+)]
+
 fn main() {
     println!("cargo:rerun-if-changed=c/capture_argv.c");
 

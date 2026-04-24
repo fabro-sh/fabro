@@ -7,6 +7,7 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use cookie::time::Duration;
 use cookie::{Cookie, CookieJar, Key, SameSite};
+use fabro_static::EnvVars;
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{IdpIdentity, RunAuthMethod};
 use fabro_util::dev_token::validate_dev_token_format;
@@ -293,8 +294,16 @@ fn session_cookie_secure(state: &AppState) -> bool {
         .server
         .web
         .url
-        .resolve(|name| std::env::var(name).ok())
+        .resolve(process_env_var)
         .is_ok_and(|resolved| resolved.value.starts_with("https://"))
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Web auth resolves configured {{ env.* }} URLs through this process-env facade."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 async fn login_dev_token(
@@ -534,7 +543,7 @@ async fn callback_github(
             );
         }
     };
-    let Some(client_secret) = state.server_secret("GITHUB_APP_CLIENT_SECRET") else {
+    let Some(client_secret) = state.server_secret(EnvVars::GITHUB_APP_CLIENT_SECRET) else {
         error!("OAuth callback failed: GITHUB_APP_CLIENT_SECRET not configured");
         return json_response(
             StatusCode::CONFLICT,

@@ -15,6 +15,7 @@ base64.workspace = true
 ring = "0.17"
 toml.workspace = true
 fabro-config = { path = "../fabro-config" }
+fabro-static.workspace = true
 fabro-types = { path = "../fabro-types" }
 fabro-vault = { path = "../fabro-vault" }
 

@@ -95,7 +95,7 @@ fn resolve_goal_file(
     base_dir: &Path,
 ) -> std::result::Result<ResolvedRunGoal, ResolveRunGoalError> {
     let resolved = file
-        .resolve(|name| std::env::var(name).ok())
+        .resolve(process_env_var)
         .map_err(|err| ResolveRunGoalError::EnvLookup { var: err.name })?;
     let path = resolve_goal_file_path(&resolved.value, base_dir);
     let text = std::fs::read_to_string(&path).map_err(|source| ResolveRunGoalError::Io {
@@ -106,6 +106,14 @@ fn resolve_goal_file(
         text,
         source: ResolvedGoalSource::File { path },
     })
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Run config interpolation owns a process-env lookup facade for {{ env.* }} values."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 fn resolve_layer_goal(

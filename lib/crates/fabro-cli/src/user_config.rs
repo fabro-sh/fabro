@@ -3,11 +3,12 @@ use std::str::FromStr;
 
 use anyhow::Result;
 pub(crate) use fabro_client::ServerTarget;
-pub(crate) use fabro_config::user::{FABRO_CONFIG_ENV, active_settings_path, default_storage_dir};
+pub(crate) use fabro_config::user::{active_settings_path, default_storage_dir};
 use fabro_config::user::{default_settings_path, default_socket_path};
 use fabro_config::{
     CliLayer, ParseError, RunSettingsBuilder, ServerSettingsBuilder, UserSettingsBuilder,
 };
+use fabro_static::EnvVars;
 use fabro_types::settings::cli::CliTargetSettings;
 use fabro_types::settings::{CliNamespace, InterpString, RunNamespace};
 use fabro_types::{ServerSettings, UserSettings};
@@ -52,7 +53,7 @@ pub(crate) fn load_resolved_settings(
 }
 
 fn load_settings_document(config_path: Option<&Path>) -> anyhow::Result<toml::Value> {
-    load_settings_document_with_lookup(config_path, |name| std::env::var_os(name))
+    load_settings_document_with_lookup(config_path, process_env_var_os)
 }
 
 #[expect(
@@ -65,7 +66,7 @@ fn load_settings_document_with_lookup(
 ) -> anyhow::Result<toml::Value> {
     let config_path = config_path
         .map(Path::to_path_buf)
-        .or_else(|| lookup(FABRO_CONFIG_ENV).map(PathBuf::from));
+        .or_else(|| lookup(EnvVars::FABRO_CONFIG).map(PathBuf::from));
 
     let path = if let Some(path) = config_path {
         path
@@ -125,7 +126,23 @@ fn storage_dir_from_document(
     document: &toml::Value,
     storage_dir: Option<&Path>,
 ) -> anyhow::Result<PathBuf> {
-    storage_dir_from_document_with_lookup(document, storage_dir, &|name| std::env::var(name).ok())
+    storage_dir_from_document_with_lookup(document, storage_dir, &process_env_var)
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "CLI settings loading owns the process-env facade for interpolation."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "CLI settings loading owns the process-env facade for config path lookup."
+)]
+fn process_env_var_os(name: &str) -> Option<std::ffi::OsString> {
+    std::env::var_os(name)
 }
 
 fn storage_dir_from_document_with_lookup(

@@ -19,6 +19,7 @@ chrono = { workspace = true, features = ["serde"] }
 fabro-api = { path = "../fabro-api" }
 fabro-http.workspace = true
 fabro-model = { path = "../fabro-model" }
+fabro-static.workspace = true
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 fs2.workspace = true

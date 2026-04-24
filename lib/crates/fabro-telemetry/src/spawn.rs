@@ -3,6 +3,8 @@
     reason = "sync pre-fork filesystem interaction; the whole module runs before fork/exec"
 )]
 
+use fabro_static::EnvVars;
+
 /// Spawn a fully detached subprocess that survives parent exit and terminal
 /// close.
 ///
@@ -150,8 +152,8 @@ pub fn spawn_fabro_subcommand(subcommand: &str, filename: &str, json: &[u8]) {
 
     spawn_detached(
         &[&exe, subcommand, &path_str],
-        &[("FABRO_TELEMETRY", "off")],
-        &["FABRO_JSON"],
+        &[(EnvVars::FABRO_TELEMETRY, "off")],
+        &[EnvVars::FABRO_JSON],
     );
 }
 

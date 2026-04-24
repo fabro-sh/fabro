@@ -36,6 +36,7 @@ fabro-api = { path = "../fabro-api" }
 fabro-store = { path = "../fabro-store" }
 fabro-vault = { path = "../fabro-vault" }
 fabro-http.workspace = true
+fabro-static.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
 axum.workspace = true

@@ -37,6 +37,7 @@ fabro-model = { path = "../fabro-model" }
 fabro-retro = { path = "../fabro-retro" }
 fabro-core = { path = "../fabro-core" }
 fabro-store = { path = "../fabro-store" }
+fabro-static.workspace = true
 fabro-types = { path = "../fabro-types" }
 fabro-http.workspace = true
 thiserror.workspace = true

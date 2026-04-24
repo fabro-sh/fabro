@@ -1520,6 +1520,7 @@ dependencies = [
  "fabro-mcp",
  "fabro-model",
  "fabro-sandbox",
+ "fabro-static",
  "fabro-test",
  "fabro-types",
  "fabro-util",
@@ -1572,6 +1573,7 @@ dependencies = [
  "fabro-http",
  "fabro-model",
  "fabro-oauth",
+ "fabro-static",
  "fabro-util",
  "fabro-vault",
  "httpmock",
@@ -1641,6 +1643,7 @@ dependencies = [
  "fabro-retro",
  "fabro-sandbox",
  "fabro-server",
+ "fabro-static",
  "fabro-store",
  "fabro-telemetry",
  "fabro-test",
@@ -1699,6 +1702,7 @@ dependencies = [
  "fabro-api",
  "fabro-http",
  "fabro-model",
+ "fabro-static",
  "fabro-types",
  "fabro-util",
  "fs2",
@@ -1727,6 +1731,7 @@ dependencies = [
  "dirs",
  "fabro-macros",
  "fabro-proc",
+ "fabro-static",
  "fabro-types",
  "fabro-util",
  "ipnet",
@@ -1761,6 +1766,7 @@ name = "fabro-devcontainer"
 version = "0.213.0-nightly.0"
 dependencies = [
  "fabro-http",
+ "fabro-static",
  "fabro-util",
  "insta",
  "serde",
@@ -1780,6 +1786,7 @@ dependencies = [
  "chrono",
  "fabro-http",
  "fabro-macros",
+ "fabro-static",
  "fabro-test",
  "fabro-types",
  "jsonwebtoken",
@@ -1832,6 +1839,7 @@ dependencies = [
 name = "fabro-http"
 version = "0.213.0-nightly.0"
 dependencies = [
+ "fabro-static",
  "http",
  "reqwest 0.13.2",
  "thiserror 2.0.18",
@@ -1844,6 +1852,7 @@ dependencies = [
  "anyhow",
  "base64",
  "fabro-config",
+ "fabro-static",
  "fabro-types",
  "fabro-vault",
  "ring",
@@ -1877,6 +1886,7 @@ dependencies = [
  "fabro-http",
  "fabro-macros",
  "fabro-model",
+ "fabro-static",
  "fabro-test",
  "fabro-util",
  "futures",
@@ -1924,6 +1934,7 @@ dependencies = [
 name = "fabro-model"
 version = "0.213.0-nightly.0"
 dependencies = [
+ "fabro-static",
  "insta",
  "serde",
  "serde_json",
@@ -1937,6 +1948,7 @@ dependencies = [
  "axum",
  "base64",
  "fabro-http",
+ "fabro-static",
  "fabro-test",
  "fabro-util",
  "hex",
@@ -1990,6 +2002,7 @@ dependencies = [
  "fabro-config",
  "fabro-github",
  "fabro-proc",
+ "fabro-static",
  "fabro-types",
  "futures",
  "git2",
@@ -2039,6 +2052,7 @@ dependencies = [
  "fabro-sandbox",
  "fabro-slack",
  "fabro-spa",
+ "fabro-static",
  "fabro-store",
  "fabro-test",
  "fabro-types",
@@ -2092,6 +2106,7 @@ version = "0.213.0-nightly.0"
 dependencies = [
  "fabro-http",
  "fabro-interview",
+ "fabro-static",
  "fabro-workflow",
  "futures-util",
  "rustls",
@@ -2111,6 +2126,10 @@ version = "0.213.0-nightly.0"
 dependencies = [
  "rust-embed",
 ]
+
+[[package]]
+name = "fabro-static"
+version = "0.213.0-nightly.0"
 
 [[package]]
 name = "fabro-store"
@@ -2148,6 +2167,7 @@ dependencies = [
  "dirs",
  "exec",
  "fabro-http",
+ "fabro-static",
  "fabro-util",
  "fork",
  "git2",
@@ -2184,6 +2204,7 @@ dependencies = [
  "fabro-config",
  "fabro-http",
  "fabro-proc",
+ "fabro-static",
  "fabro-types",
  "fabro-util",
  "insta",
@@ -2238,6 +2259,7 @@ dependencies = [
  "anyhow",
  "console 0.15.11",
  "dirs",
+ "fabro-static",
  "insta",
  "open",
  "rand 0.9.4",
@@ -2301,6 +2323,7 @@ dependencies = [
  "fabro-model",
  "fabro-retro",
  "fabro-sandbox",
+ "fabro-static",
  "fabro-store",
  "fabro-template",
  "fabro-test",
@@ -6946,6 +6969,7 @@ dependencies = [
  "async-stream",
  "axum",
  "fabro-http",
+ "fabro-static",
  "futures-util",
  "http",
  "serde",

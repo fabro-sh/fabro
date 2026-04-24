@@ -1,3 +1,4 @@
+use fabro_static::EnvVars;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString, IntoStaticStr};
 
@@ -55,13 +56,13 @@ impl Provider {
     #[must_use]
     pub fn api_key_env_vars(self) -> &'static [&'static str] {
         match self {
-            Self::Anthropic => &["ANTHROPIC_API_KEY"],
-            Self::OpenAi => &["OPENAI_API_KEY"],
-            Self::Gemini => &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-            Self::Kimi => &["KIMI_API_KEY"],
-            Self::Zai => &["ZAI_API_KEY"],
-            Self::Minimax => &["MINIMAX_API_KEY"],
-            Self::Inception => &["INCEPTION_API_KEY"],
+            Self::Anthropic => &[EnvVars::ANTHROPIC_API_KEY],
+            Self::OpenAi => &[EnvVars::OPENAI_API_KEY],
+            Self::Gemini => &[EnvVars::GEMINI_API_KEY, EnvVars::GOOGLE_API_KEY],
+            Self::Kimi => &[EnvVars::KIMI_API_KEY],
+            Self::Zai => &[EnvVars::ZAI_API_KEY],
+            Self::Minimax => &[EnvVars::MINIMAX_API_KEY],
+            Self::Inception => &[EnvVars::INCEPTION_API_KEY],
             Self::OpenAiCompatible => &[],
         }
     }
@@ -69,6 +70,10 @@ impl Provider {
     /// Returns `true` if at least one of the provider's API key env vars is
     /// set.
     #[must_use]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Provider discovery intentionally checks the process env for known API-key names."
+    )]
     pub fn has_api_key(self) -> bool {
         self.api_key_env_vars()
             .iter()

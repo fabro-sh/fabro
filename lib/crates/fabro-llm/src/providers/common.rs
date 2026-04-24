@@ -1,6 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_http::HeaderMap;
+use fabro_static::EnvVars;
 use tokio::{fs, time};
 use tracing::warn;
 
@@ -92,11 +93,15 @@ pub fn mime_from_extension(path: &str) -> &str {
 ///
 /// # Errors
 /// Returns an error if the file cannot be read.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Attachment path expansion supports the conventional HOME env var."
+)]
 pub async fn load_file_as_base64(path: &str) -> Result<(String, String), std::io::Error> {
     let expanded = path.strip_prefix("~/").map_or_else(
         || path.to_string(),
         |rest| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+            let home = std::env::var(EnvVars::HOME).unwrap_or_else(|_| "/".to_string());
             format!("{home}/{rest}")
         },
     );
