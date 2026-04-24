@@ -526,18 +526,22 @@ export default function InstallApp() {
               {objectStoreForm.credentialMode === "access_key" ? (
                 <div className="space-y-5">
                   <Field label="AWS access key ID">
-                    <PasswordInput
-                      inputRef={accessKeyIdInputRef}
+                    <input
+                      ref={accessKeyIdInputRef}
                       id="aws_access_key_id"
                       name="aws_access_key_id"
                       value={objectStoreForm.accessKeyId}
-                      onChange={(value) =>
+                      onChange={(event) =>
                         setObjectStoreForm((current) => ({
                           ...current,
-                          accessKeyId: value,
+                          accessKeyId: event.target.value,
                         }))
                       }
+                      className={`${INPUT_CLASS} font-mono`}
                       placeholder="AKIA..."
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoCapitalize="off"
                     />
                   </Field>
                   <Field label="AWS secret access key">
