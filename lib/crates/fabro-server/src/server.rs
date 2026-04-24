@@ -8941,6 +8941,18 @@ strategy = "token"
         state
     }
 
+    /// Build the (state, router, run_id) triple every PR-endpoint test
+    /// needs. Use this instead of repeating the
+    /// state/build_router/fixtures::RUN_1 incantation per test.
+    fn pr_test_app(
+        token: Option<&str>,
+        github_api_base_url: Option<String>,
+    ) -> (Arc<AppState>, Router, RunId) {
+        let state = create_github_token_app_state(token, github_api_base_url);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        (state, app, fixtures::RUN_1)
+    }
+
     async fn create_run_with_pull_request_record(
         state: &Arc<AppState>,
         run_id: RunId,
@@ -9722,9 +9734,7 @@ slug = "fabro"
                     .to_string(),
                 );
         });
-        let state = create_github_token_app_state(Some("ghu_test"), Some(github.base_url()));
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(Some("ghu_test"), Some(github.base_url()));
 
         create_run_with_pull_request_record(
             &state,
@@ -9779,9 +9789,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn get_run_pull_request_rejects_non_github_record_url() {
-        let state = create_github_token_app_state(Some("ghu_test"), None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(Some("ghu_test"), None);
 
         create_run_with_pull_request_record(
             &state,
@@ -9809,9 +9817,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn get_run_pull_request_returns_service_unavailable_without_github_credentials() {
-        let state = create_github_token_app_state(None, None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(None, None);
 
         create_run_with_pull_request_record(
             &state,
@@ -9848,9 +9854,7 @@ slug = "fabro"
                 .header("content-type", "application/json")
                 .body(json!({ "message": "Not Found" }).to_string());
         });
-        let state = create_github_token_app_state(Some("ghu_test"), Some(github.base_url()));
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(Some("ghu_test"), Some(github.base_url()));
 
         create_run_with_pull_request_record(
             &state,
@@ -9897,9 +9901,7 @@ slug = "fabro"
                     .to_string(),
                 );
         });
-        let state = create_github_token_app_state(Some("ghu_test"), Some(github.base_url()));
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(Some("ghu_test"), Some(github.base_url()));
 
         create_completed_run_ready_for_pull_request(
             &state,
@@ -9955,9 +9957,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn create_run_pull_request_returns_conflict_when_record_exists() {
-        let state = create_github_token_app_state(None, None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(None, None);
 
         create_run_with_pull_request_record(
             &state,
@@ -9994,9 +9994,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn create_run_pull_request_rejects_missing_repo_origin() {
-        let state = create_github_token_app_state(None, None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(None, None);
 
         create_completed_run_ready_for_pull_request(
             &state,
@@ -10032,9 +10030,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn create_run_pull_request_returns_service_unavailable_without_github_credentials() {
-        let state = create_github_token_app_state(None, None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(None, None);
 
         create_completed_run_ready_for_pull_request(
             &state,
@@ -10070,9 +10066,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn create_run_pull_request_rejects_non_github_origin_url() {
-        let state = create_github_token_app_state(Some("ghu_test"), None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(Some("ghu_test"), None);
 
         create_completed_run_ready_for_pull_request(
             &state,
@@ -10194,9 +10188,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn merge_run_pull_request_rejects_invalid_method() {
-        let state = create_github_token_app_state(Some("ghu_test"), None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(Some("ghu_test"), None);
 
         create_run_with_pull_request_record(
             &state,
@@ -10224,9 +10216,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn merge_run_pull_request_rejects_non_github_record_url() {
-        let state = create_github_token_app_state(Some("ghu_test"), None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(Some("ghu_test"), None);
 
         create_run_with_pull_request_record(
             &state,
@@ -10255,9 +10245,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn merge_run_pull_request_returns_service_unavailable_without_github_credentials() {
-        let state = create_github_token_app_state(None, None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(None, None);
 
         create_run_with_pull_request_record(
             &state,
@@ -10307,9 +10295,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn close_run_pull_request_rejects_non_github_record_url() {
-        let state = create_github_token_app_state(Some("ghu_test"), None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(Some("ghu_test"), None);
 
         create_run_with_pull_request_record(
             &state,
@@ -10337,9 +10323,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn close_run_pull_request_returns_service_unavailable_without_github_credentials() {
-        let state = create_github_token_app_state(None, None);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(None, None);
 
         create_run_with_pull_request_record(
             &state,
@@ -10376,9 +10360,7 @@ slug = "fabro"
                 .header("content-type", "application/json")
                 .body(json!({ "message": "Not Found" }).to_string());
         });
-        let state = create_github_token_app_state(Some("ghu_test"), Some(github.base_url()));
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-        let run_id = fixtures::RUN_1;
+        let (state, app, run_id) = pr_test_app(Some("ghu_test"), Some(github.base_url()));
 
         create_run_with_pull_request_record(
             &state,
