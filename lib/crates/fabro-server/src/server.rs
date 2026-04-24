@@ -5222,14 +5222,6 @@ fn github_pull_request_not_found_error(record: &PullRequestRecord) -> ApiError {
     )
 }
 
-fn empty_pull_request_diff_error() -> ApiError {
-    ApiError::with_code(
-        StatusCode::BAD_REQUEST,
-        "Stored diff is empty — nothing to create a PR for",
-        "empty_diff",
-    )
-}
-
 struct PullRequestGithubContext {
     record: PullRequestRecord,
     owner:  String,
@@ -5320,7 +5312,13 @@ impl<'a> RunPrInputs<'a> {
             .final_patch
             .as_deref()
             .filter(|d| !d.trim().is_empty())
-            .ok_or_else(empty_pull_request_diff_error)?;
+            .ok_or_else(|| {
+                ApiError::with_code(
+                    StatusCode::BAD_REQUEST,
+                    "Stored diff is empty — nothing to create a PR for",
+                    "empty_diff",
+                )
+            })?;
         let conclusion = run_state.conclusion.as_ref().ok_or_else(|| {
             ApiError::with_code(
                 StatusCode::BAD_REQUEST,
