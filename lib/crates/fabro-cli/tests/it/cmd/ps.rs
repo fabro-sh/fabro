@@ -14,17 +14,15 @@ const TEST_SESSION_SECRET: &str =
 
 fn provision_local_server_auth(context: &fabro_test::TestContext, storage_dir: &std::path::Path) {
     context.ensure_home_server_auth_methods();
-    let server_env_path = Storage::new(storage_dir).runtime_directory().env_path();
+    let runtime_directory = Storage::new(storage_dir).runtime_directory();
+    let server_env_path = runtime_directory.env_path();
     envfile::merge_env_file(&server_env_path, [
         ("FABRO_DEV_TOKEN", TEST_DEV_TOKEN),
         ("SESSION_SECRET", TEST_SESSION_SECRET),
     ])
     .expect("merging server auth into server.env");
-    dev_token::write_dev_token(
-        &context.home_dir.join(".fabro").join("dev-token"),
-        TEST_DEV_TOKEN,
-    )
-    .expect("writing home dev-token");
+    dev_token::write_dev_token(&runtime_directory.dev_token_path(), TEST_DEV_TOKEN)
+        .expect("writing runtime dev-token");
 }
 
 #[test]

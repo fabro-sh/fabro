@@ -1,12 +1,12 @@
 use std::fmt;
 
-use crate::AuthEntry;
+use crate::OAuthEntry;
 
 #[derive(Clone)]
 pub enum Credential {
     DevToken(String),
     Worker(String),
-    OAuth(AuthEntry),
+    OAuth(OAuthEntry),
 }
 
 pub trait CredentialFallback: Send + Sync {

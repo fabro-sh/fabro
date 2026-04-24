@@ -29,7 +29,7 @@ use crate::error::{
 };
 use crate::session::OAuthSession;
 use crate::target::ServerTarget;
-use crate::{AuthEntry, StoredSubject, sse};
+use crate::{AuthEntry, OAuthEntry, StoredSubject, sse};
 
 type TransportFuture = BoxFuture<'static, Result<(fabro_http::HttpClient, String)>>;
 
@@ -361,7 +361,14 @@ impl Client {
             self.rebuild_with_fallback(oauth_session).await?;
             return Err(session_expired());
         };
-        if entry.refresh_token_expires_at <= chrono::Utc::now() {
+        let oauth_entry = match entry {
+            AuthEntry::DevToken(entry) => {
+                self.rebuild_client(Some(entry.token)).await?;
+                return Ok(());
+            }
+            AuthEntry::OAuth(entry) => entry,
+        };
+        if oauth_entry.refresh_token_expires_at <= chrono::Utc::now() {
             oauth_session.auth_store.remove(&oauth_session.target)?;
             self.rebuild_with_fallback(oauth_session).await?;
             return Err(session_expired());
@@ -369,7 +376,10 @@ impl Client {
         let (http_client, base_url) = oauth_session.target.build_public_http_client()?;
         let response = http_client
             .post(format!("{base_url}/auth/cli/refresh"))
-            .header(AUTHORIZATION, format!("Bearer {}", entry.refresh_token))
+            .header(
+                AUTHORIZATION,
+                format!("Bearer {}", oauth_entry.refresh_token),
+            )
             .send()
             .await?;
 
@@ -378,7 +388,7 @@ impl Client {
                 .json::<CliTokenResponse>()
                 .await
                 .context("failed to parse CLI auth refresh response")?;
-            let entry = AuthEntry {
+            let entry = OAuthEntry {
                 access_token:             tokens.access_token.clone(),
                 access_token_expires_at:  tokens.access_token_expires_at,
                 refresh_token:            tokens.refresh_token.clone(),
@@ -390,11 +400,11 @@ impl Client {
                     name:        tokens.subject.name,
                     email:       tokens.subject.email,
                 },
-                logged_in_at:             entry.logged_in_at,
+                logged_in_at:             oauth_entry.logged_in_at,
             };
             oauth_session
                 .auth_store
-                .put(&oauth_session.target, entry.clone())
+                .put(&oauth_session.target, AuthEntry::OAuth(entry.clone()))
                 .context("failed to persist refreshed CLI auth tokens")?;
             self.rebuild_client(Some(entry.access_token)).await?;
             return Ok(());
@@ -1480,6 +1490,8 @@ fn add_pr_upgrade_hint(err: anyhow::Error) -> anyhow::Error {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use chrono::Duration as ChronoDuration;
     use fabro_util::exit;
     use httpmock::Method::POST;
@@ -1489,12 +1501,12 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::AuthStore;
     use crate::error::tag_with_failure;
+    use crate::{AuthStore, DevTokenEntry};
 
-    fn oauth_entry(login: &str) -> AuthEntry {
+    fn oauth_entry(login: &str) -> OAuthEntry {
         let now = chrono::Utc::now();
-        AuthEntry {
+        OAuthEntry {
             access_token:             format!("access-{login}"),
             access_token_expires_at:  now + ChronoDuration::minutes(10),
             refresh_token:            format!("refresh-{login}"),
@@ -1549,7 +1561,9 @@ mod tests {
         });
         let target = ServerTarget::http_url(format!("http://localhost:{port}")).unwrap();
         let entry = oauth_entry("octocat");
-        auth_store.put(&target, entry.clone()).unwrap();
+        auth_store
+            .put(&target, AuthEntry::OAuth(entry.clone()))
+            .unwrap();
 
         let client = Client::builder()
             .target(target.clone())
@@ -1562,6 +1576,9 @@ mod tests {
 
         client.refresh_access_token("access-octocat").await.unwrap();
         let refreshed = auth_store.get(&target).unwrap().unwrap();
+        let AuthEntry::OAuth(refreshed) = refreshed else {
+            panic!("expected OAuth entry");
+        };
         assert_eq!(refreshed.access_token, "access-refreshed");
         assert_eq!(refreshed.refresh_token, "refresh-refreshed");
         server.abort();
@@ -1574,7 +1591,9 @@ mod tests {
         let auth_store = AuthStore::new(temp.path().join("auth.json"));
         let target = ServerTarget::http_url(server.base_url()).unwrap();
         let entry = oauth_entry("octocat");
-        auth_store.put(&target, entry.clone()).unwrap();
+        auth_store
+            .put(&target, AuthEntry::OAuth(entry.clone()))
+            .unwrap();
 
         let client = Client::builder()
             .target(target.clone())
@@ -1592,6 +1611,58 @@ mod tests {
             .unwrap();
 
         (temp, client, auth_store, target)
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_reinstalls_stored_dev_token_without_refresh_request() {
+        let server = MockServer::start();
+        let refresh_mock = server.mock(|when, then| {
+            when.method(POST).path("/auth/cli/refresh");
+            then.status(500);
+        });
+        let temp = tempfile::tempdir().unwrap();
+        let auth_store = AuthStore::new(temp.path().join("auth.json"));
+        let target = ServerTarget::http_url(server.base_url()).unwrap();
+        let old_token =
+            "fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+        let stored_token =
+            "fabro_dev_abababababababababababababababababababababababababababababababab";
+        auth_store
+            .put(
+                &target,
+                AuthEntry::DevToken(DevTokenEntry {
+                    token:        stored_token.to_string(),
+                    logged_in_at: chrono::Utc::now(),
+                }),
+            )
+            .unwrap();
+
+        let seen_tokens = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen_tokens_for_connector = Arc::clone(&seen_tokens);
+        let base_url = server.base_url();
+        let client = Client::builder()
+            .target(target.clone())
+            .credential(Credential::DevToken(old_token.to_string()))
+            .oauth_session(OAuthSession::new(target.clone(), auth_store.clone()))
+            .transport_connector(TransportConnector::new(move |bearer_token| {
+                let seen_tokens = Arc::clone(&seen_tokens_for_connector);
+                let base_url = base_url.clone();
+                async move {
+                    seen_tokens.lock().unwrap().push(bearer_token);
+                    Ok((fabro_http::test_http_client().unwrap(), base_url))
+                }
+            }))
+            .connect()
+            .await
+            .unwrap();
+
+        client.refresh_access_token(old_token).await.unwrap();
+
+        assert_eq!(refresh_mock.calls(), 0);
+        assert_eq!(*seen_tokens.lock().unwrap(), vec![
+            Some(old_token.to_string()),
+            Some(stored_token.to_string()),
+        ]);
     }
 
     #[tokio::test]

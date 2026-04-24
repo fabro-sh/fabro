@@ -410,6 +410,7 @@ fn write_auth_entry(
         serde_json::to_string_pretty(&json!({
             "servers": {
                 canonical: {
+                    "kind": "oauth",
                     "access_token": access_token,
                     "access_token_expires_at": (now + ChronoDuration::minutes(10)).to_rfc3339(),
                     "refresh_token": refresh_token,

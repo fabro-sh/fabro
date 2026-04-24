@@ -17,7 +17,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use chrono::{Duration as ChronoDuration, Utc};
-use fabro_client::{AuthEntry, AuthStore, ServerTarget, StoredSubject};
+use fabro_client::{AuthEntry, AuthStore, OAuthEntry, ServerTarget, StoredSubject};
 use fabro_config::{Storage, envfile};
 use fabro_store::EventEnvelope;
 use fabro_test::{apply_test_isolation, expect_reqwest_json, isolated_storage_dir, test_context};
@@ -180,20 +180,23 @@ fn write_submitter_auth(home_dir: &Path, target: &str, access_token: &str) {
     let target = ServerTarget::http_url(target).unwrap();
     let now = Utc::now();
     auth_store
-        .put(&target, AuthEntry {
-            access_token:             access_token.to_string(),
-            access_token_expires_at:  now + ChronoDuration::minutes(10),
-            refresh_token:            "refresh-unused".to_string(),
-            refresh_token_expires_at: now + ChronoDuration::days(30),
-            subject:                  StoredSubject {
-                idp_issuer:  "https://github.com".to_string(),
-                idp_subject: "12345".to_string(),
-                login:       "octocat".to_string(),
-                name:        "The Octocat".to_string(),
-                email:       "octocat@example.com".to_string(),
-            },
-            logged_in_at:             now,
-        })
+        .put(
+            &target,
+            AuthEntry::OAuth(OAuthEntry {
+                access_token:             access_token.to_string(),
+                access_token_expires_at:  now + ChronoDuration::minutes(10),
+                refresh_token:            "refresh-unused".to_string(),
+                refresh_token_expires_at: now + ChronoDuration::days(30),
+                subject:                  StoredSubject {
+                    idp_issuer:  "https://github.com".to_string(),
+                    idp_subject: "12345".to_string(),
+                    login:       "octocat".to_string(),
+                    name:        "The Octocat".to_string(),
+                    email:       "octocat@example.com".to_string(),
+                },
+                logged_in_at:             now,
+            }),
+        )
         .unwrap();
 }
 

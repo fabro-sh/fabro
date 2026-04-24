@@ -32,15 +32,16 @@ fn write_dev_token_server_settings(config_path: &std::path::Path, rest: &str) {
     .expect("writing dev-token server settings fixture");
 }
 
-fn provision_dev_token_auth(home_dir: &std::path::Path, storage_dir: &std::path::Path) {
-    let server_env_path = Storage::new(storage_dir).runtime_directory().env_path();
+fn provision_dev_token_auth(_home_dir: &std::path::Path, storage_dir: &std::path::Path) {
+    let runtime_directory = Storage::new(storage_dir).runtime_directory();
+    let server_env_path = runtime_directory.env_path();
     envfile::merge_env_file(&server_env_path, [
         ("FABRO_DEV_TOKEN", TEST_DEV_TOKEN),
         ("SESSION_SECRET", TEST_SESSION_SECRET),
     ])
     .expect("merging server auth into server.env");
-    dev_token::write_dev_token(&home_dir.join(".fabro").join("dev-token"), TEST_DEV_TOKEN)
-        .expect("writing home dev-token");
+    dev_token::write_dev_token(&runtime_directory.dev_token_path(), TEST_DEV_TOKEN)
+        .expect("writing runtime dev-token");
 }
 
 #[derive(Clone, Copy, Debug)]

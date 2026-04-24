@@ -1452,6 +1452,10 @@ pub(crate) struct AuthLoginArgs {
     #[command(flatten)]
     pub(crate) server: ServerTargetArgs,
 
+    /// Log in with a dev-token instead of browser OAuth
+    #[arg(long, conflicts_with_all = ["no_browser", "timeout"])]
+    pub(crate) dev_token: Option<String>,
+
     /// Print the browser URL instead of opening it automatically
     #[arg(long)]
     pub(crate) no_browser: bool,

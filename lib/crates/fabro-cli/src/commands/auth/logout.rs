@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use fabro_client::{AuthEntry, AuthStore};
+use fabro_client::{AuthEntry, AuthStore, OAuthEntry};
 use fabro_http::header::AUTHORIZATION;
 
 use crate::args::AuthLogoutArgs;
@@ -21,8 +21,10 @@ pub(super) async fn logout_command(args: AuthLogoutArgs, base_ctx: &CommandConte
 
         let mut warnings = Vec::new();
         for (target, entry) in entries {
-            if let Err(error) = revoke_remote_session(&target, &entry).await {
-                warnings.push(format_warning(&target, &error.to_string()));
+            if let AuthEntry::OAuth(entry) = &entry {
+                if let Err(error) = revoke_remote_session(&target, entry).await {
+                    warnings.push(format_warning(&target, &error.to_string()));
+                }
             }
             store.remove(&target)?;
         }
@@ -40,15 +42,17 @@ pub(super) async fn logout_command(args: AuthLogoutArgs, base_ctx: &CommandConte
         return Ok(());
     };
 
-    if let Err(error) = revoke_remote_session(&target, &entry).await {
-        fabro_util::printerr!(printer, "{}", format_warning(&target, &error.to_string()));
+    if let AuthEntry::OAuth(entry) = &entry {
+        if let Err(error) = revoke_remote_session(&target, entry).await {
+            fabro_util::printerr!(printer, "{}", format_warning(&target, &error.to_string()));
+        }
     }
     store.remove(&target)?;
     fabro_util::printerr!(printer, "Logged out from {}.", target);
     Ok(())
 }
 
-async fn revoke_remote_session(target: &ServerTarget, entry: &AuthEntry) -> Result<()> {
+async fn revoke_remote_session(target: &ServerTarget, entry: &OAuthEntry) -> Result<()> {
     let (http_client, base_url) = target.build_public_http_client()?;
     let response = http_client
         .post(format!("{base_url}/auth/cli/logout"))

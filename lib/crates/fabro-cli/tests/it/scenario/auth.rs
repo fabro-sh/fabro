@@ -151,11 +151,6 @@ fn auth_refresh_failure_clears_local_session() {
     let context = test_context!();
     let server = MockServer::start();
     let target = server_target(&server);
-    context.write_home(
-        ".fabro/dev-token",
-        "fabro_dev_abababababababababababababababababababababababababababababababab\n",
-    );
-
     server.mock(|when, then| {
         when.method(POST)
             .path("/auth/cli/token")

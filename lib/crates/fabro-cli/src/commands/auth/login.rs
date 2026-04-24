@@ -2,9 +2,10 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_client::{AuthEntry, AuthStore, StoredSubject};
+use fabro_client::{AuthEntry, AuthStore, DevTokenEntry, OAuthEntry, StoredSubject};
 use fabro_http::header::CONTENT_TYPE;
 use fabro_util::browser;
+use fabro_util::dev_token::validate_dev_token_format;
 use fabro_util::printer::Printer;
 use serde::Deserialize;
 use tokio::time::timeout;
@@ -35,6 +36,22 @@ struct CliTokenSubject {
 pub(super) async fn login_command(args: AuthLoginArgs, base_ctx: &CommandContext) -> Result<()> {
     base_ctx.require_no_json_override()?;
     let printer = base_ctx.printer();
+
+    if let Some(token) = args.dev_token.as_ref() {
+        if !validate_dev_token_format(token) {
+            bail!("invalid dev-token format");
+        }
+        let target = user_config::resolve_server_target(&args.server, base_ctx.user_settings())?;
+        AuthStore::default().put(
+            &target,
+            AuthEntry::DevToken(DevTokenEntry {
+                token:        token.clone(),
+                logged_in_at: Utc::now(),
+            }),
+        )?;
+        fabro_util::printerr!(printer, "Logged in to {} with dev-token", target);
+        return Ok(());
+    }
 
     #[cfg(not(unix))]
     {
@@ -80,7 +97,7 @@ pub(super) async fn login_command(args: AuthLoginArgs, base_ctx: &CommandContext
         };
 
         let tokens = exchange_cli_token(&target, &code, &pkce.verifier, &redirect_uri).await?;
-        let entry = AuthEntry {
+        let entry = OAuthEntry {
             access_token:             tokens.access_token,
             access_token_expires_at:  tokens.access_token_expires_at,
             refresh_token:            tokens.refresh_token,
@@ -95,7 +112,7 @@ pub(super) async fn login_command(args: AuthLoginArgs, base_ctx: &CommandContext
             logged_in_at:             Utc::now(),
         };
         let summary = identity_summary(&entry.subject);
-        AuthStore::default().put(&target, entry)?;
+        AuthStore::default().put(&target, AuthEntry::OAuth(entry))?;
         fabro_util::printerr!(printer, "Logged in to {} as {}", target, summary);
         Ok(())
     }
@@ -199,7 +216,7 @@ fn login_failure_message(error_code: &str, error_description: Option<&str>) -> S
             "GitHub session required. Complete sign-in in the browser and try again.".to_string()
         }
         "github_not_configured" => {
-            "The fabro server does not have GitHub login enabled. Ask the operator to enable it or use a dev-token.".to_string()
+            "This server uses dev-token auth. Copy the token from the server and run: `fabro auth login --dev-token <TOKEN>`".to_string()
         }
         "access_denied" => "Authorization denied.".to_string(),
         "unauthorized" => "Login not permitted.".to_string(),
@@ -280,7 +297,7 @@ mod tests {
                 "github_not_configured",
                 Some("GitHub authentication is not enabled on this server")
             ),
-            "The fabro server does not have GitHub login enabled. Ask the operator to enable it or use a dev-token."
+            "This server uses dev-token auth. Copy the token from the server and run: `fabro auth login --dev-token <TOKEN>`"
         );
         assert_eq!(
             login_failure_message("server_error", Some("SESSION_SECRET is not configured")),

@@ -1,8 +1,9 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use fabro_client::{AuthEntry, AuthStore};
+use fabro_client::{AuthEntry, AuthStore, OAuthEntry};
 use fabro_static::EnvVars;
-use fabro_util::dev_token::{read_dev_token_file, validate_dev_token_format};
+use fabro_util::dev_token::validate_dev_token_format;
+use fabro_util::printer::Printer;
 use serde::Serialize;
 
 use crate::args::AuthStatusArgs;
@@ -20,23 +21,32 @@ enum OAuthState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct StatusRow {
-    server:                   String,
-    oauth_state:              OAuthState,
-    access_token_expires_at:  DateTime<Utc>,
-    refresh_token_expires_at: DateTime<Utc>,
-    logged_in_at:             DateTime<Utc>,
-    login:                    String,
-    name:                     String,
-    email:                    String,
-    idp_issuer:               String,
-    idp_subject:              String,
+#[serde(tag = "kind")]
+enum StatusRow {
+    #[serde(rename = "oauth")]
+    OAuth {
+        server:                   String,
+        oauth_state:              OAuthState,
+        access_token_expires_at:  DateTime<Utc>,
+        refresh_token_expires_at: DateTime<Utc>,
+        logged_in_at:             DateTime<Utc>,
+        login:                    String,
+        name:                     String,
+        email:                    String,
+        idp_issuer:               String,
+        idp_subject:              String,
+    },
+    #[serde(rename = "dev-token")]
+    DevToken {
+        server:       String,
+        logged_in_at: DateTime<Utc>,
+    },
 }
 
 #[derive(Serialize)]
 struct StatusOutput {
-    servers:   Vec<StatusRow>,
-    dev_token: &'static str,
+    servers:       Vec<StatusRow>,
+    env_dev_token: &'static str,
 }
 
 pub(super) fn status_command(args: &AuthStatusArgs, ctx: &CommandContext) -> Result<()> {
@@ -49,7 +59,7 @@ pub(super) fn status_command(args: &AuthStatusArgs, ctx: &CommandContext) -> Res
     } else {
         all_rows(&store, now)?
     };
-    let dev_token = if load_dev_token_if_available() {
+    let env_dev_token = if load_env_dev_token_if_available() {
         "active"
     } else {
         "not_set"
@@ -58,14 +68,14 @@ pub(super) fn status_command(args: &AuthStatusArgs, ctx: &CommandContext) -> Res
     if ctx.explicit_json_requested() {
         print_json_pretty(&StatusOutput {
             servers: rows,
-            dev_token,
+            env_dev_token,
         })?;
         return Ok(());
     }
 
     if rows.is_empty() {
         fabro_util::printerr!(printer, "Not logged in to any servers.");
-        fabro_util::printerr!(printer, "Dev token: {dev_token}");
+        print_env_dev_token_status(env_dev_token, printer);
         return Ok(());
     }
 
@@ -73,44 +83,65 @@ pub(super) fn status_command(args: &AuthStatusArgs, ctx: &CommandContext) -> Res
         if index > 0 {
             fabro_util::printerr!(printer, "");
         }
-        fabro_util::printerr!(printer, "{}", row.server);
-        fabro_util::printerr!(
-            printer,
-            "  OAuth: {} as {}",
-            human_state(row.oauth_state),
-            row.login
-        );
-        fabro_util::printerr!(
-            printer,
-            "  Name: {}",
-            if row.name.is_empty() {
-                "(not set)"
-            } else {
-                row.name.as_str()
+        match row {
+            StatusRow::OAuth {
+                server,
+                oauth_state,
+                access_token_expires_at,
+                refresh_token_expires_at,
+                login,
+                name,
+                email,
+                ..
+            } => {
+                fabro_util::printerr!(printer, "{server}");
+                fabro_util::printerr!(
+                    printer,
+                    "  OAuth: {} as {}",
+                    human_state(*oauth_state),
+                    login
+                );
+                fabro_util::printerr!(
+                    printer,
+                    "  Name: {}",
+                    if name.is_empty() {
+                        "(not set)"
+                    } else {
+                        name.as_str()
+                    }
+                );
+                fabro_util::printerr!(
+                    printer,
+                    "  Email: {}",
+                    if email.is_empty() {
+                        "(not set)"
+                    } else {
+                        email.as_str()
+                    }
+                );
+                fabro_util::printerr!(
+                    printer,
+                    "  Access expires: {}",
+                    access_token_expires_at.to_rfc3339()
+                );
+                fabro_util::printerr!(
+                    printer,
+                    "  Refresh expires: {}",
+                    refresh_token_expires_at.to_rfc3339()
+                );
             }
-        );
-        fabro_util::printerr!(
-            printer,
-            "  Email: {}",
-            if row.email.is_empty() {
-                "(not set)"
-            } else {
-                row.email.as_str()
+            StatusRow::DevToken {
+                server,
+                logged_in_at,
+            } => {
+                fabro_util::printerr!(printer, "{server}");
+                fabro_util::printerr!(printer, "  Auth: dev-token");
+                fabro_util::printerr!(printer, "  Logged in: {}", logged_in_at.to_rfc3339());
             }
-        );
-        fabro_util::printerr!(
-            printer,
-            "  Access expires: {}",
-            row.access_token_expires_at.to_rfc3339()
-        );
-        fabro_util::printerr!(
-            printer,
-            "  Refresh expires: {}",
-            row.refresh_token_expires_at.to_rfc3339()
-        );
+        }
     }
     fabro_util::printerr!(printer, "");
-    fabro_util::printerr!(printer, "Dev token: {dev_token}");
+    print_env_dev_token_status(env_dev_token, printer);
     Ok(())
 }
 
@@ -135,27 +166,44 @@ fn filter_rows(
 }
 
 fn status_row(target: &ServerTarget, entry: AuthEntry, now: DateTime<Utc>) -> StatusRow {
-    StatusRow {
-        server:                   target.to_string(),
-        oauth_state:              oauth_state(&entry, now),
-        access_token_expires_at:  entry.access_token_expires_at,
-        refresh_token_expires_at: entry.refresh_token_expires_at,
-        logged_in_at:             entry.logged_in_at,
-        login:                    entry.subject.login,
-        name:                     entry.subject.name,
-        email:                    entry.subject.email,
-        idp_issuer:               entry.subject.idp_issuer,
-        idp_subject:              entry.subject.idp_subject,
+    match entry {
+        AuthEntry::OAuth(entry) => StatusRow::OAuth {
+            server:                   target.to_string(),
+            oauth_state:              oauth_state(&entry, now),
+            access_token_expires_at:  entry.access_token_expires_at,
+            refresh_token_expires_at: entry.refresh_token_expires_at,
+            logged_in_at:             entry.logged_in_at,
+            login:                    entry.subject.login,
+            name:                     entry.subject.name,
+            email:                    entry.subject.email,
+            idp_issuer:               entry.subject.idp_issuer,
+            idp_subject:              entry.subject.idp_subject,
+        },
+        AuthEntry::DevToken(entry) => StatusRow::DevToken {
+            server:       target.to_string(),
+            logged_in_at: entry.logged_in_at,
+        },
     }
 }
 
-fn oauth_state(entry: &AuthEntry, now: DateTime<Utc>) -> OAuthState {
+fn oauth_state(entry: &OAuthEntry, now: DateTime<Utc>) -> OAuthState {
     if entry.access_token_expires_at > now {
         OAuthState::Active
     } else if entry.refresh_token_expires_at > now {
         OAuthState::ExpiredRefreshable
     } else {
         OAuthState::Expired
+    }
+}
+
+fn print_env_dev_token_status(env_dev_token: &str, printer: Printer) {
+    if env_dev_token == "active" {
+        fabro_util::printerr!(
+            printer,
+            "FABRO_DEV_TOKEN: active (overrides persisted credentials)"
+        );
+    } else {
+        fabro_util::printerr!(printer, "FABRO_DEV_TOKEN: not_set");
     }
 }
 
@@ -171,24 +219,23 @@ fn human_state(state: OAuthState) -> &'static str {
     clippy::disallowed_methods,
     reason = "Auth status reports whether the documented dev-token env source is configured."
 )]
-fn load_dev_token_if_available() -> bool {
+fn load_env_dev_token_if_available() -> bool {
     let env_token = std::env::var(EnvVars::FABRO_DEV_TOKEN)
         .ok()
         .filter(|token| validate_dev_token_format(token));
     env_token.is_some()
-        || read_dev_token_file(&fabro_util::Home::from_env().dev_token_path()).is_some()
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::Duration;
-    use fabro_client::{AuthEntry, StoredSubject};
+    use fabro_client::{OAuthEntry, StoredSubject};
 
     use super::{OAuthState, human_state, oauth_state};
 
-    fn entry(access_offset_secs: i64, refresh_offset_secs: i64) -> AuthEntry {
+    fn entry(access_offset_secs: i64, refresh_offset_secs: i64) -> OAuthEntry {
         let now = chrono::Utc::now();
-        AuthEntry {
+        OAuthEntry {
             access_token:             "access".to_string(),
             access_token_expires_at:  now + Duration::seconds(access_offset_secs),
             refresh_token:            "refresh".to_string(),

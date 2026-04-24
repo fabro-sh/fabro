@@ -13,7 +13,9 @@ use axum::http::{Request, StatusCode};
 use fabro_config::{ServerSettingsBuilder, Storage};
 use fabro_install::OBJECT_STORE_MANAGED_COMMENT;
 use fabro_model::Provider;
-use fabro_server::install::{InstallAppState, build_install_router};
+use fabro_server::install::{
+    InstallAppState, InstallFinishHook, InstallFinishInfo, build_install_router,
+};
 use fabro_util::{Home, dev_token};
 use fabro_vault::Vault;
 use httpmock::MockServer;
@@ -776,6 +778,53 @@ async fn token_install_finish_persists_settings_env_and_vault() {
 }
 
 #[tokio::test]
+async fn token_install_finish_invokes_finish_hook_before_response_returns() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join("settings.toml");
+    let observed = Arc::new(StdMutex::new(None));
+    let observed_for_hook = Arc::clone(&observed);
+    let hook: InstallFinishHook = Arc::new(move |info: &InstallFinishInfo| {
+        *observed_for_hook.lock().unwrap() =
+            Some((info.canonical_url.clone(), info.dev_token.clone()));
+        Ok(())
+    });
+    let app = build_install_router(
+        InstallAppState::for_test_with_paths("test-install-token", temp_dir.path(), &config_path)
+            .with_finish_hook(hook),
+    )
+    .await;
+    configure_token_install(&app, "test-install-token").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let finish_body = response_json(
+        finish_response,
+        StatusCode::ACCEPTED,
+        "POST /install/finish",
+    )
+    .await;
+
+    let Some((canonical_url, dev_token)) = observed.lock().unwrap().clone() else {
+        panic!("finish hook should run before response returns");
+    };
+    assert_eq!(canonical_url, "https://fabro.example.com");
+    assert_eq!(
+        dev_token.as_deref(),
+        finish_body["dev_token"].as_str(),
+        "hook receives the same token returned to the browser"
+    );
+}
+
+#[tokio::test]
 async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
     let temp_dir = tempfile::tempdir().unwrap();
     let home_root = tempfile::tempdir().unwrap();
@@ -929,7 +978,7 @@ async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
     assert!(!server_env.contains("FABRO_DEV_TOKEN="));
 
     assert!(
-        !home.dev_token_path().exists(),
+        !home.root().join("dev-token").exists(),
         "home dev token file should not be created for App installs"
     );
     assert!(
@@ -1909,7 +1958,7 @@ async fn install_finish_failure_reports_only_env_keys_actually_removed() {
 }
 
 #[tokio::test]
-async fn install_finish_failure_leaves_home_dev_token_mirror_written() {
+async fn install_finish_failure_does_not_create_home_dev_token() {
     let temp_dir = tempfile::tempdir().unwrap();
     let home_root = tempfile::tempdir().unwrap();
     let home = Home::new(home_root.path().join(".fabro"));
@@ -1947,13 +1996,14 @@ async fn install_finish_failure_leaves_home_dev_token_mirror_written() {
     )
     .await;
 
-    let home_dev_token = dev_token::read_dev_token_file(&home.dev_token_path())
-        .expect("home dev token should exist");
+    assert!(
+        !home.root().join("dev-token").exists(),
+        "home dev token file should not be created"
+    );
     let storage_dev_token =
         dev_token::read_dev_token_file(&storage.runtime_directory().dev_token_path())
             .expect("storage dev token should exist");
-    assert_eq!(home_dev_token, storage_dev_token);
 
     let server_env = std::fs::read_to_string(storage.runtime_directory().env_path()).unwrap();
-    assert!(server_env.contains(&format!("FABRO_DEV_TOKEN={home_dev_token}")));
+    assert!(server_env.contains(&format!("FABRO_DEV_TOKEN={storage_dev_token}")));
 }

@@ -113,8 +113,7 @@ function DevTokenForm({
       </button>
       {showLocation ? (
         <p className="text-center text-xs text-fg-muted">
-          Paste the dev token from your terminal or{" "}
-          <code className="font-mono text-fg-3">cat ~/.fabro/dev-token</code>.
+          Paste the dev token from your server terminal or install output.
         </p>
       ) : null}
     </form>

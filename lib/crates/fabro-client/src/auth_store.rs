@@ -31,13 +31,28 @@ pub struct StoredSubject {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AuthEntry {
+#[serde(tag = "kind")]
+pub enum AuthEntry {
+    #[serde(rename = "oauth")]
+    OAuth(OAuthEntry),
+    #[serde(rename = "dev-token")]
+    DevToken(DevTokenEntry),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuthEntry {
     pub access_token:             String,
     pub access_token_expires_at:  DateTime<Utc>,
     pub refresh_token:            String,
     pub refresh_token_expires_at: DateTime<Utc>,
     pub subject:                  StoredSubject,
     pub logged_in_at:             DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DevTokenEntry {
+    pub token:        String,
+    pub logged_in_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Error)]
@@ -364,14 +379,18 @@ mod tests {
     use chrono::Duration;
     use fabro_static::EnvVars;
 
-    use super::{AuthEntry, AuthStore, StoredSubject, key_for_target};
+    use super::{AuthEntry, AuthStore, DevTokenEntry, OAuthEntry, StoredSubject, key_for_target};
     #[cfg(unix)]
     use super::{LockError, classify_lock_error};
     use crate::target::ServerTarget;
 
     fn entry(login: &str) -> AuthEntry {
+        AuthEntry::OAuth(oauth_entry(login))
+    }
+
+    fn oauth_entry(login: &str) -> OAuthEntry {
         let now = chrono::Utc::now();
-        AuthEntry {
+        OAuthEntry {
             access_token:             format!("access-{login}"),
             access_token_expires_at:  now + Duration::minutes(10),
             refresh_token:            format!("refresh-{login}"),
@@ -401,7 +420,56 @@ mod tests {
         store.put(&target, entry("octocat")).unwrap();
 
         let saved = store.get(&target).unwrap().unwrap();
+        let AuthEntry::OAuth(saved) = saved else {
+            panic!("expected OAuth entry");
+        };
         assert_eq!(saved.subject.login, "octocat");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn round_trips_dev_token_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = AuthStore::new(temp.path().join("auth.json"));
+        let target = https_target("https://fabro.example.com");
+        let now = chrono::Utc::now();
+
+        store
+            .put(
+                &target,
+                AuthEntry::DevToken(DevTokenEntry {
+                    token:
+                        "fabro_dev_abababababababababababababababababababababababababababababababab"
+                            .to_string(),
+                    logged_in_at: now,
+                }),
+            )
+            .unwrap();
+
+        let saved = store.get(&target).unwrap().unwrap();
+        let AuthEntry::DevToken(saved) = saved else {
+            panic!("expected dev-token entry");
+        };
+        assert_eq!(
+            saved.token,
+            "fabro_dev_abababababababababababababababababababababababababababababababab"
+        );
+        assert_eq!(saved.logged_in_at, now);
+    }
+
+    #[test]
+    fn serializes_explicit_variant_kinds() {
+        let oauth = serde_json::to_value(AuthEntry::OAuth(oauth_entry("octocat"))).unwrap();
+        assert_eq!(oauth["kind"], "oauth");
+
+        let dev_token = serde_json::to_value(AuthEntry::DevToken(DevTokenEntry {
+            token:
+                "fabro_dev_abababababababababababababababababababababababababababababababab"
+                    .to_string(),
+            logged_in_at: chrono::Utc::now(),
+        }))
+        .unwrap();
+        assert_eq!(dev_token["kind"], "dev-token");
     }
 
     #[cfg(unix)]
@@ -414,6 +482,9 @@ mod tests {
         store.put(&target, entry("alice")).unwrap();
 
         let saved = store.get(&target).unwrap().unwrap();
+        let AuthEntry::OAuth(saved) = saved else {
+            panic!("expected OAuth entry");
+        };
         assert_eq!(saved.subject.login, "alice");
     }
 
@@ -429,6 +500,9 @@ mod tests {
         store.put(&target, entry("unix")).unwrap();
 
         let saved = store.get(&target).unwrap().unwrap();
+        let AuthEntry::OAuth(saved) = saved else {
+            panic!("expected OAuth entry");
+        };
         assert_eq!(saved.subject.login, "unix");
     }
 
@@ -507,6 +581,9 @@ mod tests {
         }
 
         let saved = store.get(&target).unwrap().unwrap();
+        let AuthEntry::OAuth(saved) = saved else {
+            panic!("expected OAuth entry");
+        };
         assert!(matches!(saved.subject.login.as_str(), "alice" | "bob"));
     }
 

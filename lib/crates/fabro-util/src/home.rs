@@ -61,11 +61,6 @@ impl Home {
     }
 
     #[must_use]
-    pub fn dev_token_path(&self) -> PathBuf {
-        self.root.join("dev-token")
-    }
-
-    #[must_use]
     pub fn workflows_dir(&self) -> PathBuf {
         self.root.join("workflows")
     }
@@ -101,10 +96,6 @@ mod tests {
         assert_eq!(
             home.socket_path(),
             std::path::Path::new("/tmp/fabro-home/fabro.sock")
-        );
-        assert_eq!(
-            home.dev_token_path(),
-            std::path::Path::new("/tmp/fabro-home/dev-token")
         );
         assert_eq!(
             home.workflows_dir(),
