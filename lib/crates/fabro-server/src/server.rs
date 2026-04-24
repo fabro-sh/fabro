@@ -5153,6 +5153,39 @@ fn missing_remote_branch_error(run_branch: &str) -> ApiError {
     )
 }
 
+struct PullRequestGithubContext {
+    record: PullRequestRecord,
+    owner:  String,
+    repo:   String,
+    creds:  fabro_github::GitHubCredentials,
+}
+
+async fn load_pull_request_github_context(
+    state: &Arc<AppState>,
+    id: &RunId,
+) -> Result<PullRequestGithubContext, ApiError> {
+    let run_store = state
+        .store
+        .open_run_reader(id)
+        .await
+        .map_err(|_| ApiError::not_found("Run not found."))?;
+    let run_state = run_store
+        .state()
+        .await
+        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let record = run_state
+        .pull_request
+        .ok_or_else(|| no_stored_pull_request_error(id))?;
+    let (owner, repo) = parse_github_owner_repo_from_url(&record.html_url, "pull request URL")?;
+    let creds = load_server_github_credentials(state.as_ref())?;
+    Ok(PullRequestGithubContext {
+        record,
+        owner,
+        repo,
+        creds,
+    })
+}
+
 fn pull_request_detail_json(
     record: &PullRequestRecord,
     detail: &fabro_github::PullRequestDetail,
@@ -5330,45 +5363,23 @@ async fn get_run_pull_request(
     AuthorizeRunScoped(id): AuthorizeRunScoped,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let Ok(run_store) = state.store.open_run_reader(&id).await else {
-        return ApiError::not_found("Run not found.").into_response();
-    };
-
-    let run_state = match run_store.state().await {
-        Ok(run_state) => run_state,
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
-    };
-
-    let Some(record) = run_state.pull_request else {
-        return no_stored_pull_request_error(&id).into_response();
-    };
-
-    let (owner, repo) = match parse_github_owner_repo_from_url(&record.html_url, "pull request URL")
-    {
-        Ok(owner_repo) => owner_repo,
-        Err(err) => return err.into_response(),
-    };
-
-    let creds = match load_server_github_credentials(state.as_ref()) {
-        Ok(creds) => creds,
+    let ctx = match load_pull_request_github_context(&state, &id).await {
+        Ok(ctx) => ctx,
         Err(err) => return err.into_response(),
     };
 
     match fabro_github::get_pull_request(
-        &creds,
-        &owner,
-        &repo,
-        record.number,
+        &ctx.creds,
+        &ctx.owner,
+        &ctx.repo,
+        ctx.record.number,
         state.github_api_base_url.as_str(),
     )
     .await
     {
-        Ok(detail) => Json(pull_request_detail_json(&record, &detail)).into_response(),
+        Ok(detail) => Json(pull_request_detail_json(&ctx.record, &detail)).into_response(),
         Err(err) if err.contains("not found") => {
-            github_pull_request_not_found_error(&record).into_response()
+            github_pull_request_not_found_error(&ctx.record).into_response()
         }
         Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
     }
@@ -5379,53 +5390,32 @@ async fn merge_run_pull_request(
     State(state): State<Arc<AppState>>,
     Json(body): Json<MergeRunPullRequestRequest>,
 ) -> Response {
-    let Ok(run_store) = state.store.open_run_reader(&id).await else {
-        return ApiError::not_found("Run not found.").into_response();
-    };
-
-    let run_state = match run_store.state().await {
-        Ok(run_state) => run_state,
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
-    };
-
-    let Some(record) = run_state.pull_request else {
-        return no_stored_pull_request_error(&id).into_response();
-    };
-
     let Ok(method) = body.method.parse::<fabro_github::AutoMergeMethod>() else {
         return invalid_merge_method_error(&body.method).into_response();
     };
-    let (owner, repo) = match parse_github_owner_repo_from_url(&record.html_url, "pull request URL")
-    {
-        Ok(owner_repo) => owner_repo,
-        Err(err) => return err.into_response(),
-    };
-    let creds = match load_server_github_credentials(state.as_ref()) {
-        Ok(creds) => creds,
+    let ctx = match load_pull_request_github_context(&state, &id).await {
+        Ok(ctx) => ctx,
         Err(err) => return err.into_response(),
     };
 
     match fabro_github::merge_pull_request(
-        &creds,
-        &owner,
-        &repo,
-        record.number,
+        &ctx.creds,
+        &ctx.owner,
+        &ctx.repo,
+        ctx.record.number,
         method.as_str(),
         state.github_api_base_url.as_str(),
     )
     .await
     {
         Ok(()) => Json(serde_json::json!({
-            "number": record.number,
-            "html_url": record.html_url,
+            "number": ctx.record.number,
+            "html_url": ctx.record.html_url,
             "method": method.as_str(),
         }))
         .into_response(),
         Err(err) if err.contains("not found") => {
-            github_pull_request_not_found_error(&record).into_response()
+            github_pull_request_not_found_error(&ctx.record).into_response()
         }
         Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
     }
@@ -5435,48 +5425,27 @@ async fn close_run_pull_request(
     AuthorizeRunScoped(id): AuthorizeRunScoped,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let Ok(run_store) = state.store.open_run_reader(&id).await else {
-        return ApiError::not_found("Run not found.").into_response();
-    };
-
-    let run_state = match run_store.state().await {
-        Ok(run_state) => run_state,
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
-    };
-
-    let Some(record) = run_state.pull_request else {
-        return no_stored_pull_request_error(&id).into_response();
-    };
-
-    let (owner, repo) = match parse_github_owner_repo_from_url(&record.html_url, "pull request URL")
-    {
-        Ok(owner_repo) => owner_repo,
-        Err(err) => return err.into_response(),
-    };
-    let creds = match load_server_github_credentials(state.as_ref()) {
-        Ok(creds) => creds,
+    let ctx = match load_pull_request_github_context(&state, &id).await {
+        Ok(ctx) => ctx,
         Err(err) => return err.into_response(),
     };
 
     match fabro_github::close_pull_request(
-        &creds,
-        &owner,
-        &repo,
-        record.number,
+        &ctx.creds,
+        &ctx.owner,
+        &ctx.repo,
+        ctx.record.number,
         state.github_api_base_url.as_str(),
     )
     .await
     {
         Ok(()) => Json(serde_json::json!({
-            "number": record.number,
-            "html_url": record.html_url,
+            "number": ctx.record.number,
+            "html_url": ctx.record.html_url,
         }))
         .into_response(),
         Err(err) if err.contains("not found") => {
-            github_pull_request_not_found_error(&record).into_response()
+            github_pull_request_not_found_error(&ctx.record).into_response()
         }
         Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
     }
