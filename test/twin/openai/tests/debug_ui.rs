@@ -10,7 +10,7 @@ use std::process::Stdio;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::process::Command as TokioCommand;
-use tokio::time::{Duration, sleep};
+use tokio::time::{Duration, timeout};
 use twin_openai::config::Config;
 
 #[tokio::test]
@@ -324,34 +324,26 @@ async fn debug_page_renders_in_headless_chrome() {
         .arg(format!("{}/__debug?refresh=0", server.base_url))
         .spawn()
         .expect("Chrome should start");
-    let mut screenshot_data = None;
-    for _ in 0..200 {
-        if let Ok(data) = std::fs::read(&screenshot_path) {
-            if data.len() >= 10_000 {
-                screenshot_data = Some(data);
-                break;
-            }
+
+    // Chrome with --screenshot exits once the file is written, so waiting on
+    // the process is the deterministic completion signal.
+    let wait_result = timeout(Duration::from_mins(2), child.wait()).await;
+    let status = match wait_result {
+        Ok(Ok(status)) => status,
+        Ok(Err(err)) => panic!("Chrome wait failed: {err}"),
+        Err(_) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            panic!("Chrome did not exit within 120s while taking screenshot");
         }
+    };
+    assert!(
+        status.success(),
+        "Chrome exited with non-success status: {status}"
+    );
 
-        if let Some(status) = child
-            .try_wait()
-            .expect("Chrome status check should succeed")
-        {
-            panic!("Chrome exited before writing screenshot, status: {status}");
-        }
-
-        sleep(Duration::from_millis(100)).await;
-    }
-
-    let screenshot_data = screenshot_data.expect("Chrome should write a screenshot within 20s");
-    if child
-        .try_wait()
-        .expect("Chrome status check should succeed")
-        .is_none()
-    {
-        child.start_kill().expect("Chrome should be killable");
-        let _ = child.wait().await;
-    }
+    let screenshot_data = std::fs::read(&screenshot_path)
+        .expect("Chrome exited successfully but screenshot file is missing");
 
     assert!(
         screenshot_data.len() >= 10_000,

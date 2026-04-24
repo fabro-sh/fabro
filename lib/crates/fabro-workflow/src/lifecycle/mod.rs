@@ -8,7 +8,7 @@ pub(crate) mod hook;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -96,8 +96,6 @@ impl WorkflowLifecycle {
         let checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>> =
             Arc::new(Mutex::new(None));
         let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let final_patch: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let captured_artifact_count = Arc::new(AtomicUsize::new(0));
 
         let circuit_breaker = Arc::new(CircuitBreakerLifecycle::new(loop_restart_signature_limit));
 
@@ -114,21 +112,18 @@ impl WorkflowLifecycle {
         };
 
         let event = EventLifecycle {
-            emitter:                 Arc::clone(emitter),
-            graph_name:              graph.name.clone(),
-            run_id:                  run_options.run_id,
-            run_start:               Mutex::new(Instant::now()),
-            restarted_from:          Arc::clone(&restarted_from),
-            base_branch:             run_options.base_branch.clone(),
-            base_sha:                run_options.git.as_ref().and_then(|g| g.base_sha.clone()),
-            run_branch:              run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
-            worktree_dir:            working_directory.clone(),
-            goal:                    (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
-            captured_artifact_count: Arc::clone(&captured_artifact_count),
-            last_git_sha:            Arc::clone(&last_git_sha),
-            final_patch:             Arc::clone(&final_patch),
-            checkpoint_git_result:   Arc::clone(&checkpoint_git_result),
-            circuit_breaker:         Arc::clone(&circuit_breaker),
+            emitter:               Arc::clone(emitter),
+            graph_name:            graph.name.clone(),
+            run_id:                run_options.run_id,
+            run_start:             Mutex::new(Instant::now()),
+            restarted_from:        Arc::clone(&restarted_from),
+            base_branch:           run_options.base_branch.clone(),
+            base_sha:              run_options.git.as_ref().and_then(|g| g.base_sha.clone()),
+            run_branch:            run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
+            worktree_dir:          working_directory.clone(),
+            goal:                  (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
+            checkpoint_git_result: Arc::clone(&checkpoint_git_result),
+            circuit_breaker:       Arc::clone(&circuit_breaker),
         };
 
         let hook = HookLifecycle {
@@ -156,8 +151,7 @@ impl WorkflowLifecycle {
             run_options: Arc::clone(run_options),
             start_node_id,
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
-            last_git_sha: Arc::clone(&last_git_sha),
-            final_patch,
+            last_git_sha,
         };
 
         let artifact = ArtifactLifecycle::new(
@@ -167,7 +161,6 @@ impl WorkflowLifecycle {
             run_options.run_id,
             run_options.artifact_globs(),
             artifact_sink,
-            captured_artifact_count,
         );
 
         Self {
@@ -419,12 +412,6 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
     }
 
     async fn on_run_end(&self, outcome: &Outcome, state: &WfRunState) {
-        if state.cancelled {
-            self.event.on_run_end(outcome, state).await;
-            return;
-        }
-        self.git.on_run_end(outcome, state).await;
-        self.event.on_run_end(outcome, state).await;
         self.hook.on_run_end(outcome, state).await;
     }
 }

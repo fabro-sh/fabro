@@ -106,15 +106,17 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
         });
     }
 
+    let working_directory = project::resolve_working_directory(&merged_settings, &input.cwd);
+
     let goal = resolve_manifest_goal(
         &input.args_layer,
         &merged_settings,
         &root_source,
         &target_path,
-        &input.cwd,
+        &working_directory,
     )?;
 
-    let git = build_manifest_git(&input.cwd);
+    let git = build_manifest_git(&working_directory);
     let args = input.args.filter(|args| !manifest_args_is_empty(args));
 
     Ok(BuiltManifest {
@@ -391,13 +393,11 @@ fn resolve_manifest_goal(
     settings: &SettingsLayer,
     root_source: &str,
     root_dot_path: &Path,
-    cwd: &Path,
+    working_directory: &Path,
 ) -> Result<Option<types::ManifestGoal>> {
-    let working_directory = project::resolve_working_directory(settings, cwd);
-
     // Precedence 1: CLI args (`--goal` / `--goal-file`). These are already
     // resolved to absolute paths by `overrides::goal_layer_from_args`.
-    if let Some(resolved) = resolve_run_goal(args_layer, &working_directory)
+    if let Some(resolved) = resolve_run_goal(args_layer, working_directory)
         .context("failed to resolve --goal-file contents")?
     {
         return Ok(Some(resolved_goal_to_manifest(resolved)));
@@ -406,7 +406,7 @@ fn resolve_manifest_goal(
     // Precedence 2: merged config `run.goal`. Config-sourced `goal.file`
     // paths were rewritten to absolute by `load_settings_path` at the
     // directory of the config file that declared them.
-    if let Some(resolved) = resolve_run_goal(settings, &working_directory)
+    if let Some(resolved) = resolve_run_goal(settings, working_directory)
         .context("failed to resolve run.goal.file contents")?
     {
         return Ok(Some(resolved_goal_to_manifest(resolved)));
@@ -458,11 +458,11 @@ fn resolved_goal_to_manifest(resolved: ResolvedRunGoal) -> types::ManifestGoal {
     }
 }
 
-fn build_manifest_git(cwd: &Path) -> Option<types::ManifestGit> {
-    let (origin_url, branch) = detect_repo_info(cwd).ok()?;
+fn build_manifest_git(repo_path: &Path) -> Option<types::ManifestGit> {
+    let (origin_url, branch) = detect_repo_info(repo_path).ok()?;
     let branch = branch?;
-    let sha = head_sha(cwd).ok()?;
-    let clean = sync_status(cwd, "origin", Some(&branch)) != GitSyncStatus::Dirty;
+    let sha = head_sha(repo_path).ok()?;
+    let clean = sync_status(repo_path, "origin", Some(&branch)) != GitSyncStatus::Dirty;
     Some(types::ManifestGit {
         branch,
         clean,
@@ -754,5 +754,103 @@ file = "prompts/goal.md"
         let resolved = goal.path.expect("file goal must carry a path");
         let expected = workflow_dir.join("prompts").join("goal.md");
         assert_eq!(PathBuf::from(resolved), expected);
+    }
+
+    /// When `[run] working_dir` points to a nested git repo, the manifest's
+    /// `git.branch` and `git.origin_url` must come from that target repo, not
+    /// from an enclosing workspace repo that happens to be the CLI's cwd.
+    /// Regression test for https://github.com/fabro-sh/fabro/issues/159.
+    #[test]
+    fn build_manifest_git_follows_working_directory_into_nested_repo() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path();
+        let target = workspace.join("repos").join("target");
+        std::fs::create_dir_all(&target).unwrap();
+
+        init_git_repo(
+            workspace,
+            "workspace-branch",
+            "https://github.com/example/workspace.git",
+        );
+        init_git_repo(
+            &target,
+            "target-branch",
+            "https://github.com/example/target.git",
+        );
+
+        let workflow_dir = workspace.join(".fabro/workflows/demo");
+        std::fs::create_dir_all(&workflow_dir).unwrap();
+        std::fs::write(
+            workspace.join(".fabro/project.toml"),
+            r#"_version = 1
+
+[run]
+working_dir = "repos/target"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.toml"),
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.fabro"),
+            r"digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+        )
+        .unwrap();
+
+        let built = build_run_manifest(ManifestBuildInput {
+            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd:                workspace.to_path_buf(),
+            args_layer:         SettingsLayer::default(),
+            args:               None,
+            run_id:             None,
+            user_layer:         SettingsLayer::default(),
+            user_settings_path: None,
+        })
+        .unwrap();
+
+        let git = built
+            .manifest
+            .git
+            .expect("manifest git info should be detected");
+        assert_eq!(git.branch, "target-branch");
+        assert_eq!(git.origin_url, "https://github.com/example/target");
+    }
+
+    fn init_git_repo(path: &Path, branch: &str, origin_url: &str) {
+        use std::process::Command;
+        let run = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(path)
+                .output()
+                .unwrap_or_else(|e| panic!("failed to spawn git {args:?}: {e}"));
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+        };
+        run(&[
+            "-c",
+            &format!("init.defaultBranch={branch}"),
+            "init",
+            "--quiet",
+        ]);
+        run(&[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "--quiet",
+            "-m",
+            "init",
+        ]);
+        run(&["remote", "add", "origin", origin_url]);
     }
 }

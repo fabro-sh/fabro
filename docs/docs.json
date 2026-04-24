@@ -330,7 +330,7 @@
     "primary": {
       "type": "button",
       "label": "Get Started",
-      "href": "https://fabro.dev/getting-started/quick-start"
+      "href": "/getting-started/introduction"
     }
   },
   "contextual": {
