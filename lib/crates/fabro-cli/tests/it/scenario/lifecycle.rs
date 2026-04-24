@@ -7,11 +7,11 @@
     reason = "Integration tests stage fixtures with sync std::fs calls."
 )]
 
-use fabro_test::test_context;
+use fabro_test::{fabro_json_snapshot, test_context};
 use serde_json::Value;
 
 use super::{fixture, run_state, timeout_for};
-use crate::support::{fabro_json_snapshot, unique_run_id};
+use crate::support::unique_run_id;
 
 #[fabro_macros::e2e_test()]
 fn local_run_lifecycle() {

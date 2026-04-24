@@ -6,13 +6,13 @@
 use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::Storage;
 use fabro_model::Provider;
-use fabro_test::{fabro_snapshot, test_context};
+use fabro_test::{fabro_json_snapshot, fabro_snapshot, test_context};
 use fabro_vault::{SecretType, Vault};
 use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{output_stderr, wait_for_event_names};
-use crate::support::{fabro_json_snapshot, run_output_filters, unique_run_id};
+use crate::support::{run_output_filters, unique_run_id};
 
 fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
     let status = match status {

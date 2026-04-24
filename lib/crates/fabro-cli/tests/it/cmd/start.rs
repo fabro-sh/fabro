@@ -1,7 +1,7 @@
-use fabro_test::{fabro_snapshot, test_context};
+use fabro_test::{fabro_json_snapshot, fabro_snapshot, test_context};
 
 use super::support::{output_stdout, resolve_run, wait_for_status, write_gated_workflow};
-use crate::support::{fabro_json_snapshot, unique_run_id};
+use crate::support::unique_run_id;
 
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 

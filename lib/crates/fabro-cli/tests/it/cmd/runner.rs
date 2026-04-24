@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 
 use fabro_config::{Storage, envfile};
 use fabro_store::EventEnvelope;
-use fabro_test::{assert_reqwest_status, expect_reqwest_json, fabro_snapshot, test_context};
+use fabro_test::{
+    assert_reqwest_status, expect_reqwest_json, fabro_json_snapshot, fabro_snapshot, test_context,
+};
 use fabro_types::{EventBody, FailureReason, RunEvent, StageId};
 use hkdf::Hkdf;
 use httpmock::MockServer;
@@ -25,7 +27,7 @@ use super::support::{
     find_run_dir, local_dev_token, output_stderr, run_events, run_state, server_endpoint,
     server_target, wait_for_event_names, wait_for_status, write_gated_workflow,
 };
-use crate::support::{fabro_json_snapshot, unique_run_id};
+use crate::support::unique_run_id;
 
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const LEAKED_WORKER_PARENT_TOKEN: &str = "leak-worker-parent-token";

@@ -9,14 +9,15 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use fabro_test::{
-    apply_filters, assert_reqwest_status, expect_reqwest_json, fabro_snapshot, test_context,
+    apply_filters, assert_reqwest_status, expect_reqwest_json, fabro_json_snapshot, fabro_snapshot,
+    test_context,
 };
 use serde_json::Value;
 
 use super::support::{
     output_stdout, resolve_run, server_endpoint, wait_for_status, write_gated_workflow,
 };
-use crate::support::{fabro_json_snapshot, run_output_filters, unique_run_id};
+use crate::support::{run_output_filters, unique_run_id};
 
 const SHARED_DAEMON_TIMEOUT: Duration = Duration::from_secs(30);
 

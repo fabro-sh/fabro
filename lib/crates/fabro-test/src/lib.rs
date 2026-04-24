@@ -1686,6 +1686,79 @@ pub fn apply_filters(snapshot: &str, filters: &[(String, String)]) -> String {
     result
 }
 
+#[doc(hidden)]
+pub trait FabroSnapshotFilterSource {
+    fn snapshot_filters(&self) -> Vec<(String, String)>;
+}
+
+impl FabroSnapshotFilterSource for TestContext {
+    fn snapshot_filters(&self) -> Vec<(String, String)> {
+        self.filters()
+    }
+}
+
+impl FabroSnapshotFilterSource for Vec<(String, String)> {
+    fn snapshot_filters(&self) -> Vec<(String, String)> {
+        self.clone()
+    }
+}
+
+impl FabroSnapshotFilterSource for [(String, String)] {
+    fn snapshot_filters(&self) -> Vec<(String, String)> {
+        self.to_vec()
+    }
+}
+
+impl<T> FabroSnapshotFilterSource for &T
+where
+    T: FabroSnapshotFilterSource + ?Sized,
+{
+    fn snapshot_filters(&self) -> Vec<(String, String)> {
+        (*self).snapshot_filters()
+    }
+}
+
+#[doc(hidden)]
+pub fn snapshot_filters_from<T>(source: &T) -> Vec<(String, String)>
+where
+    T: FabroSnapshotFilterSource + ?Sized,
+{
+    source.snapshot_filters()
+}
+
+/// Add JSON-specific normalizations to a snapshot filter set.
+pub fn json_snapshot_filters(mut filters: Vec<(String, String)>) -> Vec<(String, String)> {
+    filters.push((
+        r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b".to_string(),
+        "[TIMESTAMP]".to_string(),
+    ));
+    filters.push((
+        r#""id":\s*"[0-9a-f-]+""#.to_string(),
+        r#""id": "[EVENT_ID]""#.to_string(),
+    ));
+    filters.push((
+        r#""duration_ms":\s*\d+"#.to_string(),
+        r#""duration_ms": "[DURATION_MS]""#.to_string(),
+    ));
+    filters.push((
+        r#""manifest_blob":\s*"[0-9a-f]{64}""#.to_string(),
+        r#""manifest_blob": "[BLOB_ID]""#.to_string(),
+    ));
+    filters.push((
+        r#""definition_blob":\s*"[0-9a-f]{64}""#.to_string(),
+        r#""definition_blob": "[BLOB_ID]""#.to_string(),
+    ));
+    filters.push((
+        r#""run_dir":\s*"\[STORAGE_DIR\]/scratch/\d{8}-\[ULID\]""#.to_string(),
+        r#""run_dir": "[RUN_DIR]""#.to_string(),
+    ));
+    filters.push((
+        regex::escape(env!("CARGO_PKG_VERSION")),
+        "[VERSION]".to_string(),
+    ));
+    filters
+}
+
 /// Create a `TestContext` using the `fabro` binary built by cargo.
 ///
 /// Automatically registers a `[FIXTURES]` snapshot filter for the `test/`
@@ -1724,6 +1797,41 @@ macro_rules! fabro_snapshot {
         let mut cmd = $spawnable;
         let (snapshot, _output) = $crate::run_and_format(&mut cmd, &filters);
         insta::assert_snapshot!(snapshot, @$snapshot);
+    }};
+}
+
+/// Snapshot a JSON-serializable value using insta with Fabro's default filters.
+///
+/// Usage:
+/// ```ignore
+/// fabro_json_snapshot!(context, value, @"...");
+/// fabro_json_snapshot!(context.filters(), value, @"...");
+/// fabro_json_snapshot!(value, @"...");
+/// ```
+#[macro_export]
+macro_rules! fabro_json_snapshot {
+    ($value:expr, @$snapshot:literal) => {{
+        let filters = $crate::json_snapshot_filters($crate::TestContext::default_filters());
+        let filters: Vec<(&str, &str)> = filters
+            .iter()
+            .map(|(pattern, replacement)| (pattern.as_str(), replacement.as_str()))
+            .collect();
+        let rendered = serde_json::to_string_pretty(&$value).unwrap();
+        insta::with_settings!({ filters => filters }, {
+            insta::assert_snapshot!(rendered, @$snapshot);
+        });
+    }};
+    ($filter_source:expr, $value:expr, @$snapshot:literal) => {{
+        let filters =
+            $crate::json_snapshot_filters($crate::snapshot_filters_from(&$filter_source));
+        let filters: Vec<(&str, &str)> = filters
+            .iter()
+            .map(|(pattern, replacement)| (pattern.as_str(), replacement.as_str()))
+            .collect();
+        let rendered = serde_json::to_string_pretty(&$value).unwrap();
+        insta::with_settings!({ filters => filters }, {
+            insta::assert_snapshot!(rendered, @$snapshot);
+        });
     }};
 }
 
@@ -2114,6 +2222,53 @@ mod tests {
             *key == std::ffi::OsStr::new(EnvVars::OPENAI_API_KEY)
                 && *value == Some(std::ffi::OsStr::new("test-namespace"))
         }),);
+    }
+
+    #[test]
+    fn json_snapshot_filters_normalize_json_fields() {
+        let mut base_filters = TestContext::default_filters();
+        base_filters.push(("custom-value".to_string(), "[CUSTOM]".to_string()));
+        let filters = json_snapshot_filters(base_filters);
+        let value = serde_json::json!({
+            "id": "a68e40fe-0877-48a3-913f-6339b0d198cc",
+            "created_at": "2026-04-24T12:34:56.789Z",
+            "duration_ms": 12345,
+            "manifest_blob": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "definition_blob": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+            "run_dir": "[STORAGE_DIR]/scratch/20260424-01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "message": "custom-value"
+        });
+        let rendered = serde_json::to_string_pretty(&value).expect("json should render");
+
+        assert_eq!(
+            apply_filters(&rendered, &filters),
+            r#"{
+  "id": "[EVENT_ID]",
+  "created_at": "[TIMESTAMP]",
+  "duration_ms": "[DURATION_MS]",
+  "manifest_blob": "[BLOB_ID]",
+  "definition_blob": "[BLOB_ID]",
+  "run_dir": "[RUN_DIR]",
+  "message": "[CUSTOM]"
+}"#
+        );
+    }
+
+    #[test]
+    fn fabro_json_snapshot_accepts_default_filters_and_extra_filters() {
+        crate::fabro_json_snapshot!(
+            vec![("custom-value".to_string(), "[CUSTOM]".to_string())],
+            serde_json::json!({
+                "created_at": "2026-04-24T12:34:56Z",
+                "message": "custom-value"
+            }),
+            @r#"
+        {
+          "created_at": "[TIMESTAMP]",
+          "message": "[CUSTOM]"
+        }
+        "#
+        );
     }
 
     #[cfg(unix)]

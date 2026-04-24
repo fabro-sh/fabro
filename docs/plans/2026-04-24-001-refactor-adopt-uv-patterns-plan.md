@@ -474,7 +474,7 @@ Solid arrows are real dependencies. Dashed lines show phases that are independen
 
 ### Phase 3 — Expanded snapshot helpers
 
-- [ ] **Unit 3.1: Lift `fabro_json_snapshot!` into `fabro-test`**
+- [x] **Unit 3.1: Lift `fabro_json_snapshot!` into `fabro-test`**
 
 **Goal:** Promote the crate-local JSON snapshot macro in `fabro-cli/tests/it/support/mod.rs:8-46` to a workspace-wide export in `fabro-test`, with the same baseline filter set as `fabro_snapshot!` plus JSON-specific normalizations.
 

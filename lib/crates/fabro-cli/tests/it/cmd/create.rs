@@ -1,10 +1,10 @@
-use fabro_test::{fabro_snapshot, test_context};
+use fabro_test::{fabro_json_snapshot, fabro_snapshot, test_context};
 use httpmock::MockServer;
 use insta::assert_snapshot;
 use serde_json::json;
 
 use super::support::{fixture, output_stdout, resolve_run, run_count_for_test_case, run_state};
-use crate::support::{fabro_json_snapshot, unique_run_id};
+use crate::support::unique_run_id;
 
 fn resolved_run(settings: &fabro_types::WorkflowSettings) -> fabro_types::settings::RunNamespace {
     settings.run.clone()
