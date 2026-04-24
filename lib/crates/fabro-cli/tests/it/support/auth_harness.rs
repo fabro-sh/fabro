@@ -17,13 +17,13 @@ use axum::extract::{Request, State as AxumState};
 use axum::middleware::{self, Next};
 use axum::response::Response as AxumResponse;
 use chrono::{Duration as ChronoDuration, Utc};
-use fabro_config::{parse_settings_layer, resolve_server_from_file};
+use fabro_config::{RunLayer, ServerSettingsBuilder};
 use fabro_server::auth::GithubEndpoints;
 use fabro_server::ip_allowlist::IpAllowlistConfig;
 use fabro_server::jwt_auth::resolve_auth_mode_with_lookup;
 use fabro_server::server::{
     RouterOptions, build_router_with_options,
-    create_app_state_with_env_lookup_and_server_secret_env,
+    create_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env,
 };
 use fabro_test::{GitHubAppState, TestContext, apply_test_isolation};
 use serde_json::Value;
@@ -68,7 +68,7 @@ impl RealAuthHarness {
         let (api_listener, api_base_url) = bind_listener().await;
 
         let settings = auth_settings(&api_base_url, &github_client_id, auth_methods);
-        let resolved = resolve_server_from_file(&settings).expect("settings should resolve");
+        let resolved = settings.server.clone();
         let dev_token = dev_token.map(str::to_string);
         let auth_mode = resolve_auth_mode_with_lookup(&resolved, |name| match name {
             "SESSION_SECRET" => Some(TEST_SESSION_SECRET.to_string()),
@@ -90,8 +90,13 @@ impl RealAuthHarness {
         if let Some(token) = dev_token.clone() {
             secrets.insert("FABRO_DEV_TOKEN".to_string(), token);
         }
-        let state =
-            create_app_state_with_env_lookup_and_server_secret_env(settings, 5, |_| None, &secrets);
+        let state = create_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env(
+            settings,
+            RunLayer::default(),
+            5,
+            |_| None,
+            &secrets,
+        );
         let github_base = github_base_url(&twin.base_url);
         let router = build_router_with_options(
             state,
@@ -336,13 +341,13 @@ fn auth_settings(
     api_base_url: &str,
     github_client_id: &str,
     auth_methods: &[&str],
-) -> fabro_types::settings::SettingsLayer {
+) -> fabro_types::ServerSettings {
     let auth_methods = auth_methods
         .iter()
         .map(|method| format!("\"{method}\""))
         .collect::<Vec<_>>()
         .join(", ");
-    parse_settings_layer(&format!(
+    ServerSettingsBuilder::from_toml(&format!(
         r#"
 _version = 1
 
@@ -359,7 +364,7 @@ url = "{api_base_url}"
 client_id = "{github_client_id}"
 "#
     ))
-    .expect("test settings should parse")
+    .expect("test settings should resolve")
 }
 
 fn github_base_url(base_url: &str) -> fabro_http::Url {

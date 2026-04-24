@@ -559,10 +559,10 @@ mod tests {
     use fabro_types::run_event::{
         InterviewCompletedProps, InterviewOption, InterviewStartedProps, RunControlEffectProps,
     };
-    use fabro_types::settings::SettingsLayer;
     use fabro_types::{
         BlockedReason, Checkpoint, EventBody, FailureReason, InterviewQuestionType, NodeState,
-        RunBlobId, RunControlAction, RunEvent, RunStatus, SuccessReason, TerminalStatus, fixtures,
+        RunBlobId, RunControlAction, RunEvent, RunStatus, SuccessReason, TerminalStatus,
+        WorkflowSettings, fixtures,
     };
     use serde_json::json;
 
@@ -647,7 +647,7 @@ mod tests {
         let state: RunProjection = serde_json::from_value(serde_json::json!({
             "spec": {
                 "run_id": "01JW6A7VNFZSFF0SKXJG29Z2M3",
-                "settings": { "_version": 1 },
+                "settings": WorkflowSettings::default(),
                 "graph": { "name": "ship", "nodes": {}, "edges": [], "attrs": {} },
                 "workflow_slug": "demo",
                 "working_directory": "/tmp/project",
@@ -980,7 +980,7 @@ mod tests {
         let mut state = RunProjection::default();
         state.spec = Some(fabro_types::RunSpec {
             run_id:            fixtures::RUN_1,
-            settings:          SettingsLayer::default(),
+            settings:          WorkflowSettings::default(),
             graph:             fabro_types::Graph::new("test"),
             workflow_slug:     Some("test".to_string()),
             working_directory: std::path::PathBuf::from("/tmp/run"),
@@ -1011,7 +1011,7 @@ mod tests {
                     "run_id": fixtures::RUN_1,
                     "event": "run.created",
                     "properties": {
-                        "settings": SettingsLayer::default(),
+                        "settings": WorkflowSettings::default(),
                         "graph": {
                             "name": "test",
                             "nodes": {},

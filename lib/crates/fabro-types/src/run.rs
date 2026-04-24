@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::WorkflowSettings;
 use crate::graph::Graph;
 use crate::run_blob_id::RunBlobId;
 use crate::run_id::RunId;
-use crate::settings::SettingsLayer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,7 +51,7 @@ pub struct RunProvenance {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunSpec {
     pub run_id:            RunId,
-    pub settings:          SettingsLayer,
+    pub settings:          WorkflowSettings,
     pub graph:             Graph,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_slug:     Option<String>,
@@ -84,7 +84,7 @@ impl RunSpec {
     }
 
     #[must_use]
-    pub fn settings(&self) -> &SettingsLayer {
+    pub fn settings(&self) -> &WorkflowSettings {
         &self.settings
     }
 

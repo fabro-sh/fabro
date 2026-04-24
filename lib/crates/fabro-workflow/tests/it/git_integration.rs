@@ -10,8 +10,7 @@ use std::sync::Arc;
 
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
-use fabro_types::settings::SettingsLayer;
-use fabro_types::{RunEvent, fixtures};
+use fabro_types::{RunEvent, WorkflowSettings, fixtures};
 use fabro_workflow::event::Emitter;
 use fabro_workflow::git::{
     MetadataStore, add_worktree, branch_needs_push, create_branch, push_branch, push_ref,
@@ -157,7 +156,7 @@ fn test_run_options(run_dir: &Path) -> RunOptions {
         run_dir:          run_dir.to_path_buf(),
         cancel_token:     None,
         run_id:           fixtures::RUN_2,
-        settings:         SettingsLayer::default(),
+        settings:         WorkflowSettings::default(),
         git:              None,
         host_repo_path:   None,
         labels:           HashMap::new(),

@@ -1,8 +1,9 @@
 use fabro_graphviz::graph::Graph;
 use fabro_graphviz::parser;
 use fabro_model::{Catalog, Provider};
-use fabro_types::settings::run::{RunGoalLayer, RunLayer, RunModelLayer, RunPullRequestLayer};
-use fabro_types::settings::{InterpString, SettingsLayer};
+use fabro_types::WorkflowSettings;
+use fabro_types::settings::InterpString;
+use fabro_types::settings::run::{PullRequestSettings, RunGoal, RunModelSettings, RunNamespace};
 use fabro_workflow::run_materialization::materialize_run;
 
 fn graph(source: &str) -> Graph {
@@ -18,23 +19,23 @@ fn materialize_run_applies_graph_and_catalog_defaults() {
         start -> exit
     }"#;
 
-    let settings = SettingsLayer {
-        run: Some(RunLayer {
-            model: Some(RunModelLayer {
+    let settings = WorkflowSettings {
+        run: RunNamespace {
+            model: RunModelSettings {
                 name: Some(InterpString::parse("sonnet")),
-                ..RunModelLayer::default()
+                ..RunModelSettings::default()
+            },
+            pull_request: Some(PullRequestSettings {
+                enabled: false,
+                ..PullRequestSettings::default()
             }),
-            pull_request: Some(RunPullRequestLayer {
-                enabled: Some(false),
-                ..RunPullRequestLayer::default()
-            }),
-            ..RunLayer::default()
-        }),
-        ..SettingsLayer::default()
+            ..RunNamespace::default()
+        },
+        ..WorkflowSettings::default()
     };
 
     let materialized = materialize_run(settings, &graph(source), Catalog::builtin(), &[]);
-    let resolved = fabro_config::resolve_run_from_file(&materialized).unwrap();
+    let resolved = &materialized.run;
 
     assert_eq!(
         resolved
@@ -55,8 +56,8 @@ fn materialize_run_applies_graph_and_catalog_defaults() {
         Some("anthropic")
     );
     assert_eq!(
-        materialized.run.as_ref().and_then(|run| run.goal.as_ref()),
-        Some(&RunGoalLayer::Inline(InterpString::parse("Build feature")))
+        materialized.run.goal.as_ref(),
+        Some(&RunGoal::Inline(InterpString::parse("Build feature")))
     );
     assert!(resolved.pull_request.is_none());
 }
@@ -71,12 +72,12 @@ fn materialize_run_uses_configured_provider_defaults() {
     }"#;
 
     let materialized = materialize_run(
-        SettingsLayer::default(),
+        WorkflowSettings::default(),
         &graph(source),
         Catalog::builtin(),
         &[Provider::OpenAi],
     );
-    let resolved = fabro_config::resolve_run_from_file(&materialized).unwrap();
+    let resolved = &materialized.run;
 
     assert_eq!(
         resolved

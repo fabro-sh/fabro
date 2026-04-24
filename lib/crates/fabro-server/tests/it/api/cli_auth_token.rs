@@ -1,26 +1,24 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use base64::Engine;
-use fabro_config::{parse_settings_layer, resolve_server_from_file};
 use fabro_server::ip_allowlist::IpAllowlistConfig;
 use fabro_server::jwt_auth::resolve_auth_mode_with_lookup;
-use fabro_server::server::{RouterOptions, build_router_with_options, create_app_state_with_store};
+use fabro_server::server::{
+    RouterOptions, build_router_with_options, create_app_state_with_store_and_runtime_settings,
+};
 use fabro_store::{ArtifactStore, AuthCode, Database, RefreshToken};
 use object_store::memory::InMemory;
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use crate::helpers::body_json;
+use crate::helpers::{body_json, settings_from_toml};
 
-fn settings(source: &str) -> fabro_types::settings::SettingsLayer {
-    parse_settings_layer(source).expect("fixture should parse")
-}
-
-fn test_app(settings: fabro_types::settings::SettingsLayer) -> (axum::Router, Arc<Database>) {
+fn test_app(source: &str) -> (axum::Router, Arc<Database>) {
+    let settings = settings_from_toml(source);
     let object_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
     let store = Arc::new(Database::new(
         Arc::clone(&object_store),
@@ -29,16 +27,17 @@ fn test_app(settings: fabro_types::settings::SettingsLayer) -> (axum::Router, Ar
         None,
     ));
     let artifact_store = ArtifactStore::new(object_store, "artifacts");
-    let resolved = resolve_server_from_file(&settings).expect("settings should resolve");
-    let auth_mode = resolve_auth_mode_with_lookup(&resolved, |name| match name {
-        "SESSION_SECRET" => Some("0123456789abcdef0123456789abcdef".to_string()),
-        "GITHUB_APP_CLIENT_SECRET" => Some("test-client-secret".to_string()),
-        _ => None,
-    })
-    .expect("auth mode should resolve");
+    let auth_mode =
+        resolve_auth_mode_with_lookup(&settings.server_settings.server, |name| match name {
+            "SESSION_SECRET" => Some("0123456789abcdef0123456789abcdef".to_string()),
+            "GITHUB_APP_CLIENT_SECRET" => Some("test-client-secret".to_string()),
+            _ => None,
+        })
+        .expect("auth mode should resolve");
     let app = build_router_with_options(
-        create_app_state_with_store(
-            Arc::new(RwLock::new(settings)),
+        create_app_state_with_store_and_runtime_settings(
+            settings.server_settings,
+            settings.manifest_run_defaults,
             5,
             Arc::clone(&store),
             artifact_store,
@@ -60,7 +59,7 @@ fn hash_refresh_secret(secret: &str) -> [u8; 32] {
 
 #[tokio::test]
 async fn cli_auth_token_exchanges_code_over_public_router() {
-    let (app, store) = test_app(settings(
+    let (app, store) = test_app(
         r#"
 _version = 1
 
@@ -76,7 +75,7 @@ url = "https://fabro.example"
 [server.integrations.github]
 client_id = "Iv1.test"
 "#,
-    ));
+    );
     let auth_codes = store.auth_codes().await.unwrap();
     auth_codes
         .insert(AuthCode {
@@ -127,7 +126,7 @@ client_id = "Iv1.test"
 
 #[tokio::test]
 async fn cli_auth_refresh_replay_revokes_chain_over_public_router() {
-    let (app, store) = test_app(settings(
+    let (app, store) = test_app(
         r#"
 _version = 1
 
@@ -143,7 +142,7 @@ url = "https://fabro.example"
 [server.integrations.github]
 client_id = "Iv1.test"
 "#,
-    ));
+    );
     let auth_tokens = store.refresh_tokens().await.unwrap();
     let now = chrono::Utc::now();
     auth_tokens

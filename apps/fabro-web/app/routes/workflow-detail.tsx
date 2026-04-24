@@ -2,7 +2,7 @@ import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import { Link, Outlet, useLocation, useParams } from "react-router";
 import { apiJsonOrNull } from "../api";
 import type {
-  RunSettingsLayer,
+  WorkflowSettingsSnapshot,
   WorkflowDetailResponse as ApiWorkflowDetail,
 } from "../lib/workflow-api";
 
@@ -11,14 +11,15 @@ export interface WorkflowEntry {
   slug: string;
   description: string;
   filename: string;
-  settings: RunSettingsLayer;
+  settings: WorkflowSettingsSnapshot;
   graph: string;
 }
 
 // Static sample data used by the `workflow-definition` index route for the
-// hardcoded showcase workflows. Shape mirrors the persisted `SettingsLayer`
-// JSON returned by `/api/v1/runs/:id/settings`. Fields are opaque to the
-// `RunSettingsLayer` TypeScript type, which is a bare `Record<string, unknown>`.
+// hardcoded showcase workflows. Shape mirrors the persisted
+// `WorkflowSettings` snapshot returned by `/api/v1/runs/:id/settings`.
+// Fields stay opaque to the `WorkflowSettingsSnapshot` TypeScript alias,
+// which is a bare `Record<string, unknown>`.
 export const workflowData: Record<string, WorkflowEntry> = {
   fix_build: {
     name: "Fix Build",

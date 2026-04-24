@@ -34,7 +34,7 @@ pub(super) async fn logout_command(args: AuthLogoutArgs, base_ctx: &CommandConte
         return Ok(());
     }
 
-    let target = user_config::resolve_server_target(&args.server, base_ctx.machine_settings())?;
+    let target = user_config::resolve_server_target(&args.server, base_ctx.user_settings())?;
     let Some(entry) = store.get(&target)? else {
         fabro_util::printerr!(printer, "Not logged in to {}.", target);
         return Ok(());

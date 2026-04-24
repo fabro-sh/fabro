@@ -3,13 +3,12 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{ActorRef, BilledTokenCounts, RunNoticeLevel};
-use crate::settings::SettingsLayer;
 use crate::status::{BlockedReason, FailureReason, SuccessReason};
-use crate::{Graph, RunBlobId, RunControlAction, RunProvenance};
+use crate::{Graph, RunBlobId, RunControlAction, RunProvenance, WorkflowSettings};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCreatedProps {
-    pub settings:          SettingsLayer,
+    pub settings:          WorkflowSettings,
     pub graph:             Graph,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_source:   Option<String>,

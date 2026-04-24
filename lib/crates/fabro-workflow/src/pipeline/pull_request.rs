@@ -598,7 +598,6 @@ mod tests {
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
     use fabro_store::Database;
-    use fabro_types::settings::SettingsLayer;
     use fabro_types::{BilledTokenCounts, RunSpec, SuccessReason, fixtures};
     use futures::stream;
     use object_store::memory::InMemory;
@@ -1090,7 +1089,7 @@ mod tests {
 
         let run_spec = RunSpec {
             run_id:            fixtures::RUN_1,
-            settings:          SettingsLayer::default(),
+            settings:          fabro_types::WorkflowSettings::default(),
             graph:             Graph::new("test"),
             workflow_slug:     Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),
@@ -1155,7 +1154,7 @@ mod tests {
 
         let run_spec = RunSpec {
             run_id:            fixtures::RUN_1,
-            settings:          SettingsLayer::default(),
+            settings:          fabro_types::WorkflowSettings::default(),
             graph:             Graph::new("test"),
             workflow_slug:     Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),
@@ -1374,7 +1373,7 @@ mod tests {
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let run_spec = RunSpec {
             run_id:            fixtures::RUN_1,
-            settings:          SettingsLayer::default(),
+            settings:          fabro_types::WorkflowSettings::default(),
             graph:             Graph::new("test"),
             workflow_slug:     None,
             working_directory: tmp.path().to_path_buf(),

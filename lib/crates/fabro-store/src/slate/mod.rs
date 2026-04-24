@@ -302,9 +302,9 @@ mod tests {
     use std::path::PathBuf;
 
     use chrono::{DateTime, Utc};
-    use fabro_types::settings::SettingsLayer;
     use fabro_types::{
         AttrValue, FailureReason, Graph, RunControlAction, RunSpec, RunStatus, SuccessReason,
+        WorkflowSettings,
     };
     use futures::TryStreamExt;
     use object_store::memory::InMemory;
@@ -355,7 +355,7 @@ mod tests {
         );
         RunSpec {
             run_id: test_run_id(label),
-            settings: SettingsLayer::default(),
+            settings: WorkflowSettings::default(),
             graph,
             workflow_slug: Some("night-sky".to_string()),
             working_directory: PathBuf::from(format!("/tmp/{label}")),

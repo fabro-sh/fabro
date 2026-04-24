@@ -1301,12 +1301,9 @@ mod tests {
     use axum_extra::extract::cookie::Key;
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use fabro_config::{RunLayer, ServerSettingsBuilder};
     use fabro_types::RunAuthMethod;
-    use fabro_types::settings::SettingsLayer;
-    use fabro_types::settings::server::{
-        GithubIntegrationLayer, ServerAuthGithubLayer, ServerAuthLayer, ServerAuthMethod,
-        ServerIntegrationsLayer, ServerLayer, ServerWebLayer,
-    };
+    use fabro_types::settings::server::ServerAuthMethod;
     use serde_json::json;
     use sha2::{Digest, Sha256};
     use tokio::sync::Barrier;
@@ -1343,35 +1340,34 @@ mod tests {
         AuthMode::Enabled(config)
     }
 
-    fn github_settings(web_url: &str) -> SettingsLayer {
-        SettingsLayer {
-            server: Some(ServerLayer {
-                web: Some(ServerWebLayer {
-                    enabled: Some(true),
-                    url:     Some(web_url.into()),
-                }),
-                auth: Some(ServerAuthLayer {
-                    methods: Some(vec![ServerAuthMethod::Github]),
-                    github:  Some(ServerAuthGithubLayer {
-                        allowed_usernames: vec!["octocat".to_string()],
-                    }),
-                }),
-                integrations: Some(ServerIntegrationsLayer {
-                    github: Some(GithubIntegrationLayer {
-                        client_id: Some("github-client-id".into()),
-                        ..GithubIntegrationLayer::default()
-                    }),
-                    ..ServerIntegrationsLayer::default()
-                }),
-                ..ServerLayer::default()
-            }),
-            ..SettingsLayer::default()
-        }
+    fn github_settings(web_url: &str) -> fabro_types::ServerSettings {
+        ServerSettingsBuilder::from_toml(&format!(
+            r#"
+_version = 1
+
+[server.web]
+enabled = true
+url = "{web_url}"
+
+[server.auth]
+methods = ["github"]
+
+[server.auth.github]
+allowed_usernames = ["octocat"]
+
+[server.integrations.github]
+client_id = "github-client-id"
+"#
+        ))
+        .expect("github settings should resolve")
     }
 
-    fn test_router(settings: SettingsLayer) -> (axum::Router, Arc<crate::server::AppState>) {
-        let state = server::create_test_app_state_with_session_key(
+    fn test_router(
+        settings: fabro_types::ServerSettings,
+    ) -> (axum::Router, Arc<crate::server::AppState>) {
+        let state = server::create_test_app_state_with_runtime_settings_and_session_key(
             settings,
+            RunLayer::default(),
             Some("cli-flow-test-key-material-0123456789"),
         );
         let app = axum::Router::new()

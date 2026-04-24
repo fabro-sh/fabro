@@ -133,7 +133,10 @@ fn inspect_created_run_shows_run_spec_without_start_or_conclusion() {
           "kind": "submitted"
         },
         "run_spec": {
-          "goal": "Run tests and report results",
+          "goal": {
+            "type": "inline",
+            "value": "Run tests and report results"
+          },
           "workflow_name": "Simple",
           "workflow_slug": "simple",
           "sandbox_provider": "local",
@@ -169,7 +172,10 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
           "reason": "completed"
         },
         "run_spec": {
-          "goal": "Run tests and report results",
+          "goal": {
+            "type": "inline",
+            "value": "Run tests and report results"
+          },
           "workflow_name": "Simple",
           "workflow_slug": "simple",
           "sandbox_provider": "local",
@@ -238,7 +244,10 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
           "reason": "completed"
         },
         "run_spec": {
-          "goal": "Run tests and report results",
+          "goal": {
+            "type": "inline",
+            "value": "Run tests and report results"
+          },
           "workflow_name": "Simple",
           "workflow_slug": "simple",
           "sandbox_provider": "local",
@@ -292,7 +301,10 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
           "reason": "completed"
         },
         "run_spec": {
-          "goal": "Edit a tracked file",
+          "goal": {
+            "type": "inline",
+            "value": "Edit a tracked file"
+          },
           "workflow_name": "Flow",
           "workflow_slug": "flow",
           "llm_provider": "openai",

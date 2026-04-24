@@ -13,12 +13,15 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use fabro_config::Storage;
+use fabro_config::{ServerSettingsBuilder, Storage};
 use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage};
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
+use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunMode;
-use fabro_types::settings::{InterpString, SettingsLayer};
-use fabro_types::{ActorRef, ArtifactUpload, EventBody, FailureReason, RunBlobId, RunEvent, RunId};
+use fabro_types::{
+    ActorRef, ArtifactUpload, EventBody, FailureReason, RunBlobId, RunEvent, RunId,
+    WorkflowSettings,
+};
 use fabro_vault::Vault;
 use fabro_workflow::artifact_upload::{ArtifactSink, StageArtifactUploader};
 use fabro_workflow::event::{Emitter, RunEventSink};
@@ -492,26 +495,25 @@ fn stamp_system_worker(mut event: RunEvent) -> RunEvent {
 }
 
 fn maybe_build_github_credentials(
-    settings: &SettingsLayer,
+    settings: &WorkflowSettings,
     vault: Option<&fabro_vault::Vault>,
 ) -> Result<Option<fabro_github::GitHubCredentials>> {
-    let resolved_run = fabro_config::resolve_run_from_file(settings).ok();
-    let resolved_server = fabro_config::resolve_server_from_file(settings).ok();
-    let required_github_credentials = resolved_run.as_ref().is_some_and(|settings| {
-        settings.execution.mode != RunMode::DryRun && settings.sandbox.provider == "daytona"
-    }) || resolved_server
-        .as_ref()
-        .is_some_and(|settings| !settings.integrations.github.permissions.is_empty());
-    let pull_request_enabled = resolved_run.as_ref().is_some_and(|settings| {
-        settings.execution.mode != RunMode::DryRun && settings.pull_request.is_some()
-    });
+    let resolved_run = &settings.run;
+    let resolved_server = ServerSettingsBuilder::load_default().ok();
+    let required_github_credentials = (resolved_run.execution.mode != RunMode::DryRun
+        && resolved_run.sandbox.provider == "daytona")
+        || resolved_server
+            .as_ref()
+            .is_some_and(|settings| !settings.server.integrations.github.permissions.is_empty());
+    let pull_request_enabled =
+        resolved_run.execution.mode != RunMode::DryRun && resolved_run.pull_request.is_some();
     let strategy = resolved_server
         .as_ref()
-        .map(|settings| settings.integrations.github.strategy)
+        .map(|settings| settings.server.integrations.github.strategy)
         .unwrap_or_default();
     let app_id = resolved_server
         .as_ref()
-        .and_then(|settings| settings.integrations.github.app_id.as_ref())
+        .and_then(|settings| settings.server.integrations.github.app_id.as_ref())
         .map(InterpString::as_source);
 
     if required_github_credentials {

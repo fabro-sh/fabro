@@ -4,24 +4,25 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{Method, Request, StatusCode};
-use fabro_config::{parse_settings_layer, resolve_server_from_file};
+use fabro_config::ServerSettingsBuilder;
 use fabro_server::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
 use fabro_server::jwt_auth::{AuthMode, resolve_auth_mode_with_lookup};
 use fabro_server::server::{
     RouterOptions, build_router, build_router_with_options, create_app_state,
-    create_app_state_with_options,
+    create_app_state_with_runtime_settings_and_options,
 };
-use fabro_types::settings::SettingsLayer;
 use tower::ServiceExt;
 
-use crate::helpers::{checked_response, response_json, response_status, response_text};
+use crate::helpers::{
+    checked_response, response_json, response_status, response_text, settings_from_toml,
+};
 
 const DEV_TOKEN: &str =
     "fabro_dev_abababababababababababababababababababababababababababababababab";
 const SESSION_SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn dev_token_enabled_auth_mode() -> AuthMode {
-    let settings = parse_settings_layer(
+    let resolved = ServerSettingsBuilder::from_toml(
         r#"
 _version = 1
 
@@ -29,8 +30,8 @@ _version = 1
 methods = ["dev-token"]
 "#,
     )
-    .expect("settings fixture should parse");
-    let resolved = resolve_server_from_file(&settings).expect("settings should resolve");
+    .expect("settings should resolve")
+    .server;
     resolve_auth_mode_with_lookup(&resolved, |name| match name {
         "SESSION_SECRET" => Some(SESSION_SECRET.to_string()),
         "FABRO_DEV_TOKEN" => Some(DEV_TOKEN.to_string()),
@@ -412,17 +413,20 @@ async fn security_headers_are_applied_to_all_responses() {
 
 #[tokio::test]
 async fn web_disabled_returns_404_for_web_routes_and_keeps_machine_api() {
-    let settings: SettingsLayer = parse_settings_layer(
+    let settings = settings_from_toml(
         r"
 _version = 1
 
 [server.web]
 enabled = false
 ",
-    )
-    .expect("settings fixture should parse");
+    );
     let app = build_router_with_options(
-        create_app_state_with_options(settings, 5),
+        create_app_state_with_runtime_settings_and_options(
+            settings.server_settings,
+            settings.manifest_run_defaults,
+            5,
+        ),
         &AuthMode::Disabled,
         Arc::new(IpAllowlistConfig::default()),
         RouterOptions {
@@ -474,17 +478,20 @@ enabled = false
 
 #[tokio::test]
 async fn web_disabled_ignores_demo_header_dispatch() {
-    let settings: SettingsLayer = parse_settings_layer(
+    let settings = settings_from_toml(
         r"
 _version = 1
 
 [server.web]
 enabled = false
 ",
-    )
-    .expect("settings fixture should parse");
+    );
     let app = build_router_with_options(
-        create_app_state_with_options(settings, 5),
+        create_app_state_with_runtime_settings_and_options(
+            settings.server_settings,
+            settings.manifest_run_defaults,
+            5,
+        ),
         &AuthMode::Disabled,
         Arc::new(IpAllowlistConfig::default()),
         RouterOptions {

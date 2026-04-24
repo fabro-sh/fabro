@@ -8,15 +8,14 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use fabro_api::types;
-use fabro_config::load::load_settings_for_workflow;
 use fabro_config::project::{self, discover_project_config, resolve_workflow_path};
-use fabro_config::run::{parse_run_config, resolve_run_goal};
+use fabro_config::run::{resolve_run_goal_from_layer, resolve_run_goal_from_namespace};
+use fabro_config::{CliLayer, DaytonaDockerfileLayer, RunLayer, WorkflowSettingsBuilder};
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_sandbox::daytona::detect_repo_info;
-use fabro_types::RunId;
-use fabro_types::settings::run::{DaytonaDockerfileLayer, ResolvedGoalSource, ResolvedRunGoal};
-use fabro_types::settings::{Combine, SettingsLayer};
+use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal};
+use fabro_types::{RunId, WorkflowSettings};
 use fabro_workflow::git::{GitSyncStatus, head_sha, sync_status};
 
 use crate::args::{PreflightArgs, RunArgs};
@@ -25,12 +24,10 @@ use crate::args::{PreflightArgs, RunArgs};
 pub(crate) struct ManifestBuildInput {
     pub workflow:           PathBuf,
     pub cwd:                PathBuf,
-    pub args_layer:         SettingsLayer,
+    pub run_overrides:      Option<RunLayer>,
+    pub cli_overrides:      Option<CliLayer>,
     pub args:               Option<types::ManifestArgs>,
     pub run_id:             Option<RunId>,
-    /// User-level settings layer. Production callers load via
-    /// `load_settings_user()`; tests pass `SettingsLayer::default()`.
-    pub user_layer:         SettingsLayer,
     /// Path to the user settings file (for inclusion in
     /// `RunManifest.configs`). `None` skips the user config entry.
     pub user_settings_path: Option<PathBuf>,
@@ -56,14 +53,43 @@ struct WorkflowScanInput {
 }
 
 pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
-    let workflow_layer = load_settings_for_workflow(&input.workflow, &input.cwd)?;
-    let merged_settings = input
-        .args_layer
-        .clone()
-        .combine(workflow_layer)
-        .combine(input.user_layer);
-
     let root_resolution = resolve_workflow_path(&input.workflow, &input.cwd)?;
+    if root_resolution.workflow_toml_path.is_none()
+        && !root_resolution.resolved_workflow_path.is_file()
+    {
+        return Err(fabro_config::Error::WorkflowNotFound(
+            root_resolution.resolved_workflow_path.display().to_string(),
+        )
+        .into());
+    }
+    let workflow_parent = root_resolution
+        .resolved_workflow_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let project_config = discover_project_config(workflow_parent)?;
+    let mut workflow_settings_builder = WorkflowSettingsBuilder::new();
+    if let Some(run) = input.run_overrides.clone() {
+        workflow_settings_builder = workflow_settings_builder.run_overrides(run);
+    }
+    if let Some(cli) = input.cli_overrides.clone() {
+        workflow_settings_builder = workflow_settings_builder.cli_overrides(cli);
+    }
+    if let Some(path) = root_resolution.workflow_toml_path.as_ref() {
+        workflow_settings_builder = workflow_settings_builder.workflow_file(path)?;
+    }
+    if let Some(path) = project_config.as_ref() {
+        workflow_settings_builder = workflow_settings_builder.project_file(path)?;
+    }
+    if let Some(path) = input
+        .user_settings_path
+        .as_ref()
+        .filter(|path| path.is_file())
+    {
+        workflow_settings_builder = workflow_settings_builder.user_file(path)?;
+    }
+    let workflow_settings = workflow_settings_builder
+        .build()
+        .map_err(|errors| anyhow!("failed to resolve manifest settings: {errors}"))?;
     let target_path = root_resolution.dot_path.clone();
     let target_logical_path = to_logical_path(&target_path, &input.cwd)?;
     let target_logical_path_string = logical_path_string(&target_logical_path);
@@ -82,12 +108,7 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
         .ok_or_else(|| anyhow!("root workflow missing from manifest bundle"))?;
 
     let mut configs = Vec::new();
-    if let Some((path, _config)) = discover_project_config(
-        root_resolution
-            .resolved_workflow_path
-            .parent()
-            .unwrap_or_else(|| Path::new(".")),
-    )? {
+    if let Some(path) = project_config {
         let source = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
         configs.push(types::ManifestConfig {
@@ -106,11 +127,12 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
         });
     }
 
-    let working_directory = project::resolve_working_directory(&merged_settings, &input.cwd);
+    let working_directory =
+        project::resolve_working_directory_from_run(&workflow_settings.run, &input.cwd);
 
     let goal = resolve_manifest_goal(
-        &input.args_layer,
-        &merged_settings,
+        input.run_overrides.as_ref(),
+        &workflow_settings,
         &root_source,
         &target_path,
         &working_directory,
@@ -327,11 +349,19 @@ fn collect_workflow_config_files(
     config: &types::ManifestWorkflowConfig,
     files: &mut HashMap<String, types::ManifestFileEntry>,
 ) -> Result<()> {
-    let config_layer = parse_run_config(&config.source)?;
-    let dockerfile = config_layer
-        .run
+    let mut document: toml::Table = config
+        .source
+        .parse()
+        .map_err(|err| anyhow!("Failed to parse run config TOML: {err}"))?;
+    let run = document
+        .remove("run")
+        .map(toml::Value::try_into::<RunLayer>)
+        .transpose()
+        .map_err(|err| anyhow!("Failed to parse run config TOML: {err}"))?
+        .unwrap_or_default();
+    let dockerfile = run
+        .sandbox
         .as_ref()
-        .and_then(|run| run.sandbox.as_ref())
         .and_then(|sandbox| sandbox.daytona.as_ref())
         .and_then(|daytona| daytona.snapshot.as_ref())
         .and_then(|snapshot| snapshot.dockerfile.as_ref());
@@ -389,24 +419,26 @@ fn collect_bundled_file(
 }
 
 fn resolve_manifest_goal(
-    args_layer: &SettingsLayer,
-    settings: &SettingsLayer,
+    run_overrides: Option<&RunLayer>,
+    settings: &WorkflowSettings,
     root_source: &str,
     root_dot_path: &Path,
     working_directory: &Path,
 ) -> Result<Option<types::ManifestGoal>> {
     // Precedence 1: CLI args (`--goal` / `--goal-file`). These are already
     // resolved to absolute paths by `overrides::goal_layer_from_args`.
-    if let Some(resolved) = resolve_run_goal(args_layer, working_directory)
-        .context("failed to resolve --goal-file contents")?
-    {
-        return Ok(Some(resolved_goal_to_manifest(resolved)));
+    if let Some(run_overrides) = run_overrides {
+        if let Some(resolved) = resolve_run_goal_from_layer(run_overrides, working_directory)
+            .context("failed to resolve --goal-file contents")?
+        {
+            return Ok(Some(resolved_goal_to_manifest(resolved)));
+        }
     }
 
     // Precedence 2: merged config `run.goal`. Config-sourced `goal.file`
     // paths were rewritten to absolute by `load_settings_path` at the
     // directory of the config file that declared them.
-    if let Some(resolved) = resolve_run_goal(settings, working_directory)
+    if let Some(resolved) = resolve_run_goal_from_namespace(&settings.run, working_directory)
         .context("failed to resolve run.goal.file contents")?
     {
         return Ok(Some(resolved_goal_to_manifest(resolved)));
@@ -607,10 +639,10 @@ mod tests {
         let built = build_run_manifest(ManifestBuildInput {
             workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd:                project.to_path_buf(),
-            args_layer:         SettingsLayer::default(),
+            run_overrides:      None,
+            cli_overrides:      None,
             args:               None,
             run_id:             None,
-            user_layer:         SettingsLayer::default(),
             user_settings_path: None,
         })
         .unwrap();
@@ -687,10 +719,10 @@ file = "prompts/goal.md"
         let built = build_run_manifest(ManifestBuildInput {
             workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd:                project.to_path_buf(),
-            args_layer:         SettingsLayer::default(),
+            run_overrides:      None,
+            cli_overrides:      None,
             args:               None,
             run_id:             None,
-            user_layer:         SettingsLayer::default(),
             user_settings_path: None,
         })
         .unwrap();
@@ -740,10 +772,10 @@ file = "prompts/goal.md"
         let built = build_run_manifest(ManifestBuildInput {
             workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd:                project.to_path_buf(),
-            args_layer:         SettingsLayer::default(),
+            run_overrides:      None,
+            cli_overrides:      None,
             args:               None,
             run_id:             None,
-            user_layer:         SettingsLayer::default(),
             user_settings_path: None,
         })
         .unwrap();
@@ -803,10 +835,10 @@ working_dir = "repos/target"
         let built = build_run_manifest(ManifestBuildInput {
             workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd:                workspace.to_path_buf(),
-            args_layer:         SettingsLayer::default(),
+            run_overrides:      None,
+            cli_overrides:      None,
             args:               None,
             run_id:             None,
-            user_layer:         SettingsLayer::default(),
             user_settings_path: None,
         })
         .unwrap();

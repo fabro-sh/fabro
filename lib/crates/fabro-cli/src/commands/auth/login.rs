@@ -46,7 +46,7 @@ pub(super) async fn login_command(args: AuthLoginArgs, base_ctx: &CommandContext
 
     #[cfg(unix)]
     {
-        let target = user_config::resolve_server_target(&args.server, base_ctx.machine_settings())?;
+        let target = user_config::resolve_server_target(&args.server, base_ctx.user_settings())?;
         let web_url = browser_origin(&target)?;
         let pkce = fabro_oauth::generate_pkce();
         let state = fabro_oauth::generate_state();

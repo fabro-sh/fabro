@@ -830,11 +830,8 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::{HeaderMap, Request, StatusCode, header};
     use axum_extra::extract::cookie::Key;
-    use fabro_types::settings::SettingsLayer;
-    use fabro_types::settings::server::{
-        GithubIntegrationLayer, ServerAuthGithubLayer, ServerAuthLayer, ServerAuthMethod,
-        ServerIntegrationsLayer, ServerLayer, ServerWebLayer,
-    };
+    use fabro_config::{RunLayer, ServerSettingsBuilder};
+    use fabro_types::settings::server::ServerAuthMethod;
     use fabro_types::{IdpIdentity, RunAuthMethod};
     use serde_json::json;
     use tower::ServiceExt;
@@ -877,38 +874,47 @@ mod tests {
             .expect("test JWT key should derive")
     }
 
-    fn github_settings(web_url: &str) -> SettingsLayer {
-        SettingsLayer {
-            server: Some(ServerLayer {
-                web: Some(ServerWebLayer {
-                    enabled: Some(true),
-                    url:     Some(web_url.into()),
-                }),
-                auth: Some(ServerAuthLayer {
-                    methods: Some(vec![ServerAuthMethod::Github]),
-                    github:  Some(ServerAuthGithubLayer {
-                        allowed_usernames: vec!["octocat".to_string()],
-                    }),
-                }),
-                integrations: Some(ServerIntegrationsLayer {
-                    github: Some(GithubIntegrationLayer {
-                        client_id: Some("github-client-id".into()),
-                        ..GithubIntegrationLayer::default()
-                    }),
-                    ..ServerIntegrationsLayer::default()
-                }),
-                ..ServerLayer::default()
-            }),
-            ..SettingsLayer::default()
-        }
+    fn default_settings() -> fabro_types::ServerSettings {
+        ServerSettingsBuilder::from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+"#,
+        )
+        .expect("default test settings should resolve")
+    }
+
+    fn github_settings(web_url: &str) -> fabro_types::ServerSettings {
+        ServerSettingsBuilder::from_toml(&format!(
+            r#"
+_version = 1
+
+[server.web]
+enabled = true
+url = "{web_url}"
+
+[server.auth]
+methods = ["github"]
+
+[server.auth.github]
+allowed_usernames = ["octocat"]
+
+[server.integrations.github]
+client_id = "github-client-id"
+"#
+        ))
+        .expect("github settings should resolve")
     }
 
     fn test_auth_router_with_settings(
-        settings: SettingsLayer,
+        settings: fabro_types::ServerSettings,
         auth_mode: AuthMode,
     ) -> axum::Router {
-        let state = server::create_test_app_state_with_session_key(
+        let state = server::create_test_app_state_with_runtime_settings_and_session_key(
             settings,
+            RunLayer::default(),
             Some("web-auth-test-key-material-0123456789"),
         );
         let middleware_state = state.clone();
@@ -925,7 +931,7 @@ mod tests {
     }
 
     fn test_auth_router(_key: &Key, auth_mode: AuthMode) -> axum::Router {
-        test_auth_router_with_settings(SettingsLayer::default(), auth_mode)
+        test_auth_router_with_settings(default_settings(), auth_mode)
     }
 
     macro_rules! response_json {
@@ -1044,7 +1050,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_me_returns_unauthorized_under_demo_mode_without_jwt() {
-        let app = test_auth_router_with_settings(SettingsLayer::default(), dev_token_auth_mode());
+        let app = test_auth_router_with_settings(default_settings(), dev_token_auth_mode());
 
         let response = app
             .oneshot(
@@ -1102,8 +1108,9 @@ mod tests {
 
     #[tokio::test]
     async fn auth_config_returns_real_methods_when_demo_cookie_set() {
-        let state = server::create_test_app_state_with_session_key(
+        let state = server::create_test_app_state_with_runtime_settings_and_session_key(
             github_settings("https://fabro.example"),
+            RunLayer::default(),
             Some("web-auth-test-key-material-0123456789"),
         );
         let app = server::build_router_with_options(
@@ -1194,8 +1201,9 @@ mod tests {
 
     #[tokio::test]
     async fn login_github_uses_injected_github_endpoints() {
-        let state = server::create_test_app_state_with_session_key(
+        let state = server::create_test_app_state_with_runtime_settings_and_session_key(
             github_settings("https://fabro.example"),
+            RunLayer::default(),
             Some("web-auth-test-key-material-0123456789"),
         );
         let app = crate::server::build_router_with_options(

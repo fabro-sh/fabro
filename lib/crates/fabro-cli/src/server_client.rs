@@ -11,14 +11,13 @@ use fabro_client::{
 pub(crate) use fabro_client::{Client, RunEventStream};
 use fabro_config::bind::Bind;
 pub(crate) use fabro_types::RunProjection;
-use fabro_types::settings::SettingsLayer;
+use fabro_types::UserSettings;
 use fabro_util::dev_token::validate_dev_token_format;
 use fabro_util::{Home, dev_token};
 use tokio::time::sleep;
 
 use crate::args::ServerTargetArgs;
 use crate::commands::server::start;
-use crate::local_server;
 use crate::user_config::{self, cli_http_client_builder};
 
 #[derive(Debug)]
@@ -67,14 +66,15 @@ pub(crate) async fn connect_server_target_with_bearer(
 
 pub(crate) async fn connect_server_with_settings(
     args: &ServerTargetArgs,
-    settings: &SettingsLayer,
+    settings: &UserSettings,
+    storage_dir: &Path,
     base_config_path: &Path,
 ) -> Result<Client> {
     if let Some(target) = user_config::resolve_nondefault_server_target(args, settings)? {
         if let Some(path) = target.as_unix_socket_path() {
             return connect_managed_unix_socket_api_client_bundle(
                 path,
-                &local_server::storage_dir(settings)?,
+                storage_dir,
                 base_config_path,
             )
             .await;
@@ -82,7 +82,7 @@ pub(crate) async fn connect_server_with_settings(
         return connect_target_api_client_bundle(&target).await;
     }
 
-    connect_local_api_client_bundle(&local_server::storage_dir(settings)?, base_config_path).await
+    connect_local_api_client_bundle(storage_dir, base_config_path).await
 }
 
 async fn connect_managed_unix_socket_api_client_bundle(

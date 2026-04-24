@@ -1,6 +1,7 @@
-use fabro_types::settings::workflow::{WorkflowLayer, WorkflowNamespace};
+use fabro_types::settings::WorkflowNamespace;
 
 use super::ResolveError;
+use crate::WorkflowLayer;
 
 pub fn resolve_workflow(
     layer: &WorkflowLayer,

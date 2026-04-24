@@ -1,19 +1,22 @@
-use fabro_config::{
-    apply_builtin_defaults, defaults_layer, parse_settings_layer, resolve_run_from_file,
-    resolve_server_from_file, resolve_workflow_from_file,
-};
-use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::cli::OutputFormat;
 use fabro_types::settings::run::{ApprovalMode, RunMode, WorktreeMode};
 use fabro_types::settings::server::ObjectStoreProvider;
 
+use crate::{Combine, ServerSettingsBuilder, SettingsLayer, WorkflowSettingsBuilder};
+
 fn parse(source: &str) -> SettingsLayer {
-    parse_settings_layer(source).expect("fixture should parse")
+    source
+        .parse::<SettingsLayer>()
+        .expect("fixture should parse")
+}
+
+fn embedded_defaults() -> SettingsLayer {
+    parse(include_str!("../defaults.toml"))
 }
 
 #[test]
 fn embedded_defaults_parse_successfully() {
-    let defaults = defaults_layer();
+    let defaults = embedded_defaults();
 
     assert_eq!(
         defaults
@@ -33,7 +36,7 @@ fn embedded_defaults_parse_successfully() {
 
 #[test]
 fn apply_builtin_defaults_materializes_expected_layer() {
-    let layer = apply_builtin_defaults(SettingsLayer::default());
+    let layer = SettingsLayer::default().combine(embedded_defaults());
 
     assert_eq!(
         layer
@@ -94,15 +97,19 @@ fn apply_builtin_defaults_materializes_expected_layer() {
 
 #[test]
 fn resolve_empty_settings_requires_explicit_server_auth_methods() {
-    let errors = resolve_server_from_file(&SettingsLayer::default())
+    let errors = ServerSettingsBuilder::from_layer(&SettingsLayer::default())
         .expect_err("empty server settings should fail");
 
-    assert!(errors.iter().any(|error| {
-        matches!(
-            error,
-            fabro_config::ResolveError::Missing { path } if path == "server.auth.methods"
-        )
-    }));
+    assert!(matches!(
+        errors,
+        fabro_config::Error::Resolve { errors, .. }
+            if errors.iter().any(|error| {
+                matches!(
+                    error,
+                    fabro_config::ResolveError::Missing { path } if path == "server.auth.methods"
+                )
+            })
+    ));
 }
 
 #[test]
@@ -119,10 +126,10 @@ mode = "dry_run"
 "#,
     );
 
-    let workflow = resolve_workflow_from_file(&layer).expect("workflow settings should resolve");
-    let run = resolve_run_from_file(&layer).expect("run settings should resolve");
+    let settings =
+        WorkflowSettingsBuilder::from_layer(&layer).expect("workflow settings should resolve");
 
-    assert_eq!(run.execution.mode, RunMode::DryRun);
-    assert_eq!(run.execution.approval, ApprovalMode::Prompt);
-    assert_eq!(workflow.graph, "workflow.fabro");
+    assert_eq!(settings.run.execution.mode, RunMode::DryRun);
+    assert_eq!(settings.run.execution.approval, ApprovalMode::Prompt);
+    assert_eq!(settings.workflow.graph, "workflow.fabro");
 }

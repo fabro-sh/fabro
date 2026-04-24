@@ -50,12 +50,12 @@ pub(crate) async fn dispatch(
                 return run_install_mode(bootstrap, printer).await;
             }
 
-            let settings = user_config::load_settings_with_config_and_storage_dir(
+            let local_config = local_server::LocalServerConfig::load(
                 serve_args.config.as_deref(),
                 storage_dir.as_deref(),
             )?;
-            let storage_dir = local_server::storage_dir(&settings)?;
-            let bind_addr = local_server::bind_request(&settings, serve_args.bind.as_deref())?;
+            let storage_dir = local_config.storage_dir().to_path_buf();
+            let bind_addr = local_config.bind_request(serve_args.bind.as_deref())?;
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             Box::pin(start::execute(
                 bind_addr,
@@ -72,8 +72,9 @@ pub(crate) async fn dispatch(
             storage_dir,
             timeout,
         }) => {
-            let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
-            let storage_dir = local_server::storage_dir(&settings)?;
+            let local_config =
+                local_server::LocalServerConfig::load_with_storage_dir(storage_dir.as_deref())?;
+            let storage_dir = local_config.storage_dir().to_path_buf();
             stop::execute(&storage_dir, Duration::from_secs(timeout), printer).await
         }
         ServerCommand::Restart(ServerRestartArgs {
@@ -97,13 +98,13 @@ pub(crate) async fn dispatch(
                 return run_install_mode(bootstrap, printer).await;
             }
 
-            let settings = user_config::load_settings_with_config_and_storage_dir(
+            let local_config = local_server::LocalServerConfig::load(
                 serve_args.config.as_deref(),
                 storage_dir.as_deref(),
             )?;
-            let storage_dir = local_server::storage_dir(&settings)?;
+            let storage_dir = local_config.storage_dir().to_path_buf();
             stop::stop_server(&storage_dir, Duration::from_secs(timeout)).await?;
-            let bind_addr = local_server::bind_request(&settings, serve_args.bind.as_deref())?;
+            let bind_addr = local_config.bind_request(serve_args.bind.as_deref())?;
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             Box::pin(start::execute(
                 bind_addr,
@@ -117,15 +118,16 @@ pub(crate) async fn dispatch(
             .await
         }
         ServerCommand::Status(ServerStatusArgs { storage_dir, json }) => {
-            let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
-            let storage_dir = local_server::storage_dir(&settings)?;
+            let local_config =
+                local_server::LocalServerConfig::load_with_storage_dir(storage_dir.as_deref())?;
+            let storage_dir = local_config.storage_dir().to_path_buf();
             status::execute(&storage_dir, json, printer)
         }
         ServerCommand::Serve(ServerServeArgs {
             storage_dir,
             serve_args,
         }) => {
-            let settings = user_config::load_settings_with_config_and_storage_dir(
+            let local_config = local_server::LocalServerConfig::load(
                 serve_args.config.as_deref(),
                 storage_dir.as_deref(),
             )?;
@@ -135,8 +137,8 @@ pub(crate) async fn dispatch(
                     .clone()
                     .unwrap_or_else(|| user_config::active_settings_path(None)),
             );
-            let storage_dir = local_server::storage_dir(&settings)?;
-            let bind_addr = local_server::bind_request(&settings, serve_args.bind.as_deref())?;
+            let storage_dir = local_config.storage_dir().to_path_buf();
+            let bind_addr = local_config.bind_request(serve_args.bind.as_deref())?;
             let _ = printer;
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             Box::pin(foreground::serve_with_daemon_record(

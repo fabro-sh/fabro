@@ -442,9 +442,8 @@ async fn prepare_server_bootstrap(
     storage_dir: Option<&std::path::Path>,
     foreground: bool,
 ) -> Result<PreTracingBootstrap> {
-    let settings =
-        user_config::load_settings_with_config_and_storage_dir(config_path, storage_dir)?;
-    let storage_dir = local_server::storage_dir(&settings)?;
+    let local_config = local_server::LocalServerConfig::load(config_path, storage_dir)?;
+    let storage_dir = local_config.storage_dir().to_path_buf();
     let runtime_directory = fabro_config::RuntimeDirectory::new(storage_dir.clone());
     let foreground_server_log_bootstrap = if foreground {
         Some(commands::server::start::prepare_foreground_server_log(&runtime_directory).await?)
@@ -456,7 +455,7 @@ async fn prepare_server_bootstrap(
         sink: logging::InternalLogSink::Server {
             path: runtime_directory.log_path(),
         },
-        config_log_level: local_server::config_log_level(&settings),
+        config_log_level: local_config.config_log_level().map(str::to_owned),
         foreground_server_log_bootstrap,
     })
 }

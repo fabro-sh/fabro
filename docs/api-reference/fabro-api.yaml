@@ -1554,7 +1554,7 @@ paths:
       operationId: retrieveRunSettings
       tags: [Run Internals]
       summary: Retrieve Run Settings
-      description: Returns the persisted `SettingsLayer` used to launch this run.
+      description: Returns the persisted dense `WorkflowSettings` snapshot used to launch this run.
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
@@ -1563,7 +1563,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunSettingsLayer"
+                $ref: "#/components/schemas/WorkflowSettings"
         "404":
           description: Run not found
           content:
@@ -5820,10 +5820,10 @@ components:
       type: string
       enum: [tailscale_funnel, server_url]
 
-    RunSettingsLayer:
+    WorkflowSettings:
       description: |
-        The persisted `SettingsLayer` used for a specific run, serialized as-is.
-        This matches the stored run manifest shape rather than a resolved view.
+        The persisted dense `WorkflowSettings` snapshot used for a specific run.
+        This matches the resolved run settings recorded at launch time.
       type: object
       additionalProperties: true
 

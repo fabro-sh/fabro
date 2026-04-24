@@ -1,6 +1,7 @@
-use fabro_types::settings::features::{FeaturesLayer, FeaturesNamespace};
+use fabro_types::settings::FeaturesNamespace;
 
 use super::ResolveError;
+use crate::FeaturesLayer;
 
 pub fn resolve_features(
     layer: &FeaturesLayer,

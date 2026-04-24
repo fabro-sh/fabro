@@ -3,17 +3,20 @@
     reason = "sync test fixture setup; not on a Tokio path"
 )]
 
-use fabro_config::{parse_settings_layer, resolve_cli_from_file};
+use fabro_types::settings::InterpString;
 use fabro_types::settings::cli::{CliTargetSettings, OutputFormat, OutputVerbosity};
 use fabro_types::settings::run::AgentPermissions;
-use fabro_types::settings::{InterpString, SettingsLayer};
 use temp_env::with_var;
+
+use crate::{SettingsLayer, UserSettingsBuilder};
 
 #[test]
 fn resolves_cli_defaults_from_empty_settings() {
     let settings = SettingsLayer::default();
 
-    let cli = resolve_cli_from_file(&settings).expect("empty settings should resolve");
+    let cli = UserSettingsBuilder::from_layer(&settings)
+        .expect("empty settings should resolve")
+        .cli;
 
     assert!(cli.target.is_none());
     assert_eq!(cli.output.format, OutputFormat::Text);
@@ -25,7 +28,7 @@ fn resolves_cli_defaults_from_empty_settings() {
 
 #[test]
 fn user_settings_from_layer_matches_namespace_resolvers() {
-    let settings: SettingsLayer = parse_settings_layer(
+    let user_settings = fabro_config::UserSettingsBuilder::from_toml(
         r#"
 _version = 1
 
@@ -37,20 +40,15 @@ url = "https://config.example.com"
 session_sandboxes = true
 "#,
     )
-    .expect("fixture should parse");
-
-    let user_settings =
-        fabro_config::UserSettings::from_layer(&settings).expect("user settings should resolve");
+    .expect("user settings should resolve");
 
     assert_eq!(
-        user_settings.cli,
-        resolve_cli_from_file(&settings).expect("cli namespace should resolve")
+        user_settings.cli.target,
+        Some(CliTargetSettings::Http {
+            url: InterpString::parse("https://config.example.com"),
+        })
     );
-    assert_eq!(
-        user_settings.features,
-        fabro_config::resolve_features_from_file(&settings)
-            .expect("features namespace should resolve")
-    );
+    assert!(user_settings.features.session_sandboxes);
 }
 
 #[test]
@@ -71,8 +69,8 @@ session_sandboxes = true
     .unwrap();
 
     with_var("FABRO_HOME", Some(home.path()), || {
-        let user_settings =
-            fabro_config::UserSettings::resolve().expect("user settings should resolve");
+        let user_settings = fabro_config::UserSettingsBuilder::load_default()
+            .expect("user settings should resolve");
         assert_eq!(user_settings.cli.output.verbosity, OutputVerbosity::Verbose);
         assert!(user_settings.features.session_sandboxes);
     });
@@ -83,8 +81,8 @@ fn user_settings_resolve_returns_defaults_when_default_settings_file_is_missing(
     let home = tempfile::tempdir().unwrap();
 
     with_var("FABRO_HOME", Some(home.path()), || {
-        let user_settings =
-            fabro_config::UserSettings::resolve().expect("user settings should resolve");
+        let user_settings = fabro_config::UserSettingsBuilder::load_default()
+            .expect("user settings should resolve");
         assert_eq!(user_settings.cli.output.format, OutputFormat::Text);
         assert_eq!(user_settings.cli.output.verbosity, OutputVerbosity::Normal);
         assert!(!user_settings.features.session_sandboxes);
@@ -93,7 +91,7 @@ fn user_settings_resolve_returns_defaults_when_default_settings_file_is_missing(
 
 #[test]
 fn resolves_cli_target_exec_and_output_settings() {
-    let settings: SettingsLayer = parse_settings_layer(
+    let cli = UserSettingsBuilder::from_toml(
         r#"
 _version = 1
 
@@ -126,9 +124,8 @@ check = false
 level = "debug"
 "#,
     )
-    .expect("fixture should parse");
-
-    let cli = resolve_cli_from_file(&settings).expect("cli settings should resolve");
+    .expect("cli settings should resolve")
+    .cli;
 
     let CliTargetSettings::Http { url } = cli.target.expect("target") else {
         panic!("expected http target");

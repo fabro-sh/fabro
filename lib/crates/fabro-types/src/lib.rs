@@ -6,6 +6,7 @@ pub mod billing;
 pub mod blob_ref;
 pub mod checkpoint;
 pub mod conclusion;
+pub mod dense;
 pub mod event_envelope;
 pub mod failure_signature;
 pub mod graph;
@@ -39,6 +40,7 @@ pub use blob_ref::{
 };
 pub use checkpoint::Checkpoint;
 pub use conclusion::{Conclusion, StageSummary};
+pub use dense::{ServerSettings, UserSettings, WorkflowSettings};
 pub use event_envelope::EventEnvelope;
 pub use failure_signature::FailureSignature;
 pub use graph::{AttrValue, Edge, Graph, Node, is_llm_handler_type, shape_to_handler_type};
@@ -63,7 +65,6 @@ pub use run_id::{RunId, fixtures};
 pub use run_projection::{NodeState, PendingInterviewRecord, RunProjection};
 pub use run_summary::RunSummary;
 pub use sandbox_record::SandboxRecord;
-pub use settings::Combine;
 pub use stage_id::{ParallelBranchId, StageId};
 pub use start::StartRecord;
 pub use status::{

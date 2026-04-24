@@ -570,53 +570,78 @@ fn attach_json_errors_without_prompting_for_human_input() {
           },
           "run_dir": "[RUN_DIR]",
           "settings": {
-            "workflow": {
-              "graph": "workflow.fabro"
-            },
-            "cli": {
-              "exec": {
-                "prevent_idle_sleep": false
-              },
-              "output": {
-                "format": "text",
-                "verbosity": "normal"
-              },
-              "target": {
-                "path": "[CLI_SOCKET]",
-                "type": "unix"
-              },
-              "updates": {
-                "check": true
-              }
-            },
-            "features": {
-              "session_sandboxes": false
-            },
             "project": {
-              "directory": "."
+              "description": null,
+              "directory": ".",
+              "metadata": {},
+              "name": null
             },
             "run": {
+              "agent": {
+                "mcps": {},
+                "permissions": null
+              },
+              "artifacts": {
+                "include": []
+              },
+              "checkpoint": {
+                "exclude_globs": []
+              },
               "execution": {
                 "approval": "prompt",
                 "mode": "normal",
                 "retros": false
               },
-              "goal": "Wait for approval",
+              "git": {
+                "author": null
+              },
+              "goal": {
+                "type": "inline",
+                "value": "Wait for approval"
+              },
+              "hooks": [],
+              "inputs": {},
+              "interviews": {
+                "discord": null,
+                "provider": null,
+                "slack": null,
+                "teams": null
+              },
+              "metadata": {},
               "model": {
+                "fallbacks": [],
                 "name": "gpt-5.4",
                 "provider": "openai"
               },
+              "notifications": {},
               "prepare": {
-                "timeout": "5m"
+                "commands": [],
+                "timeout_ms": 300000
               },
+              "pull_request": null,
               "sandbox": {
+                "daytona": null,
                 "devcontainer": false,
+                "env": {},
                 "local": {
                   "worktree_mode": "clean"
                 },
                 "preserve": false,
                 "provider": "local"
-              }
+              },
+              "scm": {
+                "github": null,
+                "owner": null,
+                "provider": null,
+                "repository": null
+              },
+              "working_dir": null
+            },
+            "workflow": {
+              "description": null,
+              "graph": "workflow.fabro",
+              "metadata": {},
+              "name": null
             }
           },
           "workflow_slug": "human-gate",

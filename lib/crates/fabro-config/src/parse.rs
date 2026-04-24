@@ -1,6 +1,6 @@
 use std::fmt;
 
-use fabro_types::settings::SettingsLayer;
+use crate::SettingsLayer;
 
 const CURRENT_VERSION: u32 = 1;
 
@@ -58,7 +58,7 @@ impl fmt::Display for VersionError {
 
 impl std::error::Error for VersionError {}
 
-pub fn parse_settings_layer(input: &str) -> Result<SettingsLayer, ParseError> {
+pub(crate) fn parse_settings(input: &str) -> Result<SettingsLayer, ParseError> {
     let raw: toml::Value = toml::from_str(input).map_err(|e| ParseError::Toml(e.to_string()))?;
     validate_version(&raw).map_err(ParseError::Version)?;
 
@@ -135,19 +135,19 @@ mod tests {
 
     #[test]
     fn parses_empty_file() {
-        let file = parse_settings_layer("").unwrap();
+        let file = "".parse::<SettingsLayer>().unwrap();
         assert_eq!(file, SettingsLayer::default());
     }
 
     #[test]
     fn parses_minimal_valid_file() {
-        let file = parse_settings_layer("_version = 1\n").unwrap();
+        let file = "_version = 1\n".parse::<SettingsLayer>().unwrap();
         assert_eq!(file.version, Some(1));
     }
 
     #[test]
     fn rejects_legacy_version_key_with_rename_hint() {
-        let err = parse_settings_layer("version = 1").unwrap_err();
+        let err = "version = 1".parse::<SettingsLayer>().unwrap_err();
         assert!(matches!(
             err,
             ParseError::Version(VersionError::LegacyVersionKey)
@@ -157,13 +157,13 @@ mod tests {
 
     #[test]
     fn rejects_unknown_top_level_key() {
-        let err = parse_settings_layer("unknown_key = 1").unwrap_err();
+        let err = "unknown_key = 1".parse::<SettingsLayer>().unwrap_err();
         assert!(matches!(err, ParseError::UnknownTopLevelKey { .. }));
     }
 
     #[test]
     fn higher_version_rejected_with_upgrade_hint() {
-        let err = parse_settings_layer("_version = 99").unwrap_err();
+        let err = "_version = 99".parse::<SettingsLayer>().unwrap_err();
         assert!(err.to_string().contains("Upgrade"));
     }
 }

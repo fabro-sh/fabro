@@ -4,17 +4,19 @@ use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
+use fabro_config::{LocalSandboxLayer, RunLayer, RunSandboxLayer, ServerSettingsBuilder};
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{
-    AppState, build_router, create_app_state, create_app_state_with_env_lookup,
-    create_app_state_with_options_and_registry_factory, spawn_scheduler,
+    AppState, build_router, create_app_state,
+    create_app_state_with_runtime_settings_and_env_lookup,
+    create_app_state_with_runtime_settings_and_options_and_registry_factory, spawn_scheduler,
 };
 use fabro_test::{
     assert_axum_status, assert_reqwest_status, expect_axum_json, expect_axum_status,
     expect_axum_status_in, expect_axum_text,
 };
-use fabro_types::settings::SettingsLayer;
-use fabro_types::settings::run::{LocalSandboxLayer, RunLayer, RunSandboxLayer, WorktreeMode};
+use fabro_types::ServerSettings;
+use fabro_types::settings::run::WorktreeMode;
 use tokio::time::sleep;
 use tower::ServiceExt;
 
@@ -28,24 +30,71 @@ pub(crate) const MINIMAL_DOT: &str = r#"digraph Test {
 pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(10);
 pub(crate) const POLL_ATTEMPTS: usize = 500;
 
+#[derive(Clone)]
+pub(crate) struct TestAppSettings {
+    pub server_settings:       ServerSettings,
+    pub manifest_run_defaults: RunLayer,
+}
+
+impl Default for TestAppSettings {
+    fn default() -> Self {
+        settings_from_toml("_version = 1\n")
+    }
+}
+
+fn ensure_test_auth_methods(document: &mut toml::Table) {
+    let server = document
+        .entry("server")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .expect("[server] should stay a table in test fixtures");
+    let auth = server
+        .entry("auth")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .expect("[server.auth] should stay a table in test fixtures");
+    auth.entry("methods")
+        .or_insert_with(|| toml::Value::Array(vec![toml::Value::String("dev-token".to_string())]));
+}
+
+pub(crate) fn settings_from_toml(source: &str) -> TestAppSettings {
+    let mut document: toml::Table = source.parse().expect("test fixture should parse as TOML");
+    ensure_test_auth_methods(&mut document);
+    let manifest_run_defaults = document
+        .remove("run")
+        .map(toml::Value::try_into::<RunLayer>)
+        .transpose()
+        .expect("test run settings should parse")
+        .unwrap_or_default();
+    let server_settings = ServerSettingsBuilder::from_toml(
+        &toml::to_string(&document).expect("test fixture should serialize"),
+    )
+    .expect("test server settings should resolve");
+    TestAppSettings {
+        server_settings,
+        manifest_run_defaults,
+    }
+}
+
 pub(crate) fn test_app_state() -> Arc<AppState> {
     create_app_state()
 }
 
 pub(crate) fn test_app_state_with_options(
-    settings: SettingsLayer,
+    settings: TestAppSettings,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
-    create_app_state_with_options_and_registry_factory(
-        settings,
+    create_app_state_with_runtime_settings_and_options_and_registry_factory(
+        settings.server_settings,
+        settings.manifest_run_defaults,
         max_concurrent_runs,
         |interviewer| fabro_workflow::handler::default_registry(interviewer, || None),
     )
 }
 
-pub(crate) fn test_settings() -> SettingsLayer {
-    SettingsLayer {
-        run: Some(RunLayer {
+pub(crate) fn test_settings() -> TestAppSettings {
+    TestAppSettings {
+        manifest_run_defaults: RunLayer {
             sandbox: Some(RunSandboxLayer {
                 local: Some(LocalSandboxLayer {
                     worktree_mode: Some(WorktreeMode::Never),
@@ -53,8 +102,8 @@ pub(crate) fn test_settings() -> SettingsLayer {
                 ..RunSandboxLayer::default()
             }),
             ..RunLayer::default()
-        }),
-        ..SettingsLayer::default()
+        },
+        ..TestAppSettings::default()
     }
 }
 
@@ -64,17 +113,29 @@ pub(crate) fn test_app_with_scheduler(state: Arc<AppState>) -> axum::Router {
 }
 
 pub(crate) fn test_app_with_no_providers() -> axum::Router {
-    let state = create_app_state_with_env_lookup(test_settings(), 5, |_| None);
+    let settings = test_settings();
+    let state = create_app_state_with_runtime_settings_and_env_lookup(
+        settings.server_settings,
+        settings.manifest_run_defaults,
+        5,
+        |_| None,
+    );
     build_router(state, AuthMode::Disabled)
 }
 
 pub(crate) fn test_app_with_mock_anthropic(mock_base_url: &str) -> axum::Router {
     let base_url = mock_base_url.to_string();
-    let state = create_app_state_with_env_lookup(test_settings(), 5, move |name| match name {
-        "ANTHROPIC_API_KEY" => Some("test-key".to_string()),
-        "ANTHROPIC_BASE_URL" => Some(base_url.clone()),
-        _ => None,
-    });
+    let settings = test_settings();
+    let state = create_app_state_with_runtime_settings_and_env_lookup(
+        settings.server_settings,
+        settings.manifest_run_defaults,
+        5,
+        move |name| match name {
+            "ANTHROPIC_API_KEY" => Some("test-key".to_string()),
+            "ANTHROPIC_BASE_URL" => Some(base_url.clone()),
+            _ => None,
+        },
+    );
     build_router(state, AuthMode::Disabled)
 }
 

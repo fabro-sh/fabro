@@ -754,6 +754,12 @@ mod runs {
     use std::time::Duration;
 
     use fabro_api::types::*;
+    use fabro_types::WorkflowSettings;
+    use fabro_types::settings::run::{
+        DaytonaSettings, DaytonaSnapshotSettings, LocalSandboxSettings, RunGoal, RunModelSettings,
+        RunNamespace, RunPrepareSettings, RunSandboxSettings,
+    };
+    use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
 
     use super::ts;
     use crate::server::truncate_goal;
@@ -1338,39 +1344,57 @@ mod runs {
     }
 
     pub(super) fn settings() -> serde_json::Value {
-        // v2 SettingsLayer shape — matches what /api/v1/runs/:id/settings
-        // returns in production, so the demo renders identically.
-        serde_json::json!({
-            "_version": 1,
-            "run": {
-                "goal": "Add rate limiting to auth endpoints",
-                "working_dir": "/workspace/api-server",
-                "model": {
-                    "provider": "anthropic",
-                    "name": "claude-opus-4-6"
+        let settings = WorkflowSettings {
+            project:  ProjectNamespace {
+                directory: "/workspace/api-server".into(),
+                ..ProjectNamespace::default()
+            },
+            workflow: WorkflowNamespace {
+                graph: "workflow.fabro".into(),
+                ..WorkflowNamespace::default()
+            },
+            run:      RunNamespace {
+                goal: Some(RunGoal::Inline(InterpString::parse(
+                    "Add rate limiting to auth endpoints",
+                ))),
+                working_dir: Some(InterpString::parse("/workspace/api-server")),
+                model: RunModelSettings {
+                    provider: Some(InterpString::parse("anthropic")),
+                    name: Some(InterpString::parse("claude-opus-4-6")),
+                    ..RunModelSettings::default()
                 },
-                "prepare": {
-                    "steps": [
-                        { "command": ["bun", "install"] },
-                        { "command": ["bun", "run", "typecheck"] }
-                    ],
-                    "timeout": "120s"
+                prepare: RunPrepareSettings {
+                    commands:   vec!["bun install".into(), "bun run typecheck".into()],
+                    timeout_ms: 120_000,
                 },
-                "sandbox": {
-                    "provider": "daytona",
-                    "daytona": {
-                        "auto_stop_interval": 60,
-                        "labels": { "project": "api-server" },
-                        "snapshot": {
-                            "name": "api-server-dev",
-                            "cpu": 4,
-                            "memory": "8GB",
-                            "disk": "10GB"
-                        }
-                    }
-                }
-            }
-        })
+                sandbox: RunSandboxSettings {
+                    provider:     "daytona".into(),
+                    preserve:     false,
+                    devcontainer: false,
+                    env:          HashMap::new(),
+                    local:        LocalSandboxSettings::default(),
+                    daytona:      Some(DaytonaSettings {
+                        auto_stop_interval: Some(60),
+                        labels:             HashMap::from([(
+                            "project".to_string(),
+                            "api-server".to_string(),
+                        )]),
+                        snapshot:           Some(DaytonaSnapshotSettings {
+                            name:       "api-server-dev".into(),
+                            cpu:        Some(4),
+                            memory_gb:  Some(8),
+                            disk_gb:    Some(10),
+                            dockerfile: None,
+                        }),
+                        network:            None,
+                        skip_clone:         false,
+                    }),
+                },
+                ..RunNamespace::default()
+            },
+        };
+
+        serde_json::to_value(settings).expect("demo workflow settings should serialize")
     }
 
     #[cfg(test)]
@@ -1560,8 +1584,9 @@ mod settings {
         static CACHED: OnceLock<serde_json::Value> = OnceLock::new();
         CACHED
             .get_or_init(|| {
-                let settings = fabro_config::parse_settings_layer(
-                    r#"
+                serde_json::to_value(
+                    fabro_config::ServerSettingsBuilder::from_toml(
+                        r#"
 _version = 1
 
 [server.listen]
@@ -1597,12 +1622,8 @@ slug = "fabro-dev"
 [features]
 session_sandboxes = false
 "#,
-                )
-                .expect("demo settings fixture should parse");
-
-                serde_json::to_value(
-                    fabro_config::ServerSettings::from_layer(&settings)
-                        .expect("demo settings fixture should resolve"),
+                    )
+                    .expect("demo settings fixture should resolve"),
                 )
                 .expect("demo settings should serialize")
             })

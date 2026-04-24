@@ -112,8 +112,7 @@ mod tests {
     use fabro_graphviz::graph::Graph;
     use fabro_store::Database;
     use fabro_types::run_event::RunSubmittedProps;
-    use fabro_types::settings::SettingsLayer;
-    use fabro_types::{EventBody, RunEvent, fixtures};
+    use fabro_types::{EventBody, RunEvent, WorkflowSettings, fixtures};
     use object_store::memory::InMemory;
 
     use super::RunStoreHandle;
@@ -133,7 +132,7 @@ mod tests {
     fn test_run_spec() -> RunSpec {
         RunSpec {
             run_id:            fixtures::RUN_1,
-            settings:          SettingsLayer::default(),
+            settings:          WorkflowSettings::default(),
             graph:             Graph::new("test"),
             workflow_slug:     Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/test"),

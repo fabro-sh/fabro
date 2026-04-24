@@ -21,7 +21,6 @@ workspace = true
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, optional = true }
 dirs.workspace = true
-fabro-macros = { path = "../fabro-macros" }
 fabro-model = { path = "../fabro-model" }
 fabro-util = { path = "../fabro-util" }
 hex.workspace = true

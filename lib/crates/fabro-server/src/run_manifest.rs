@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow, bail};
 use fabro_api::types;
-use fabro_config::effective_settings::EffectiveSettingsLayers;
-use fabro_config::project::resolve_working_directory;
-use fabro_config::run::parse_run_config;
-use fabro_config::{effective_settings, parse_settings_layer};
+use fabro_config::{
+    CliLayer, CliOutputLayer, DaytonaDockerfileLayer, ReplaceMap, RunExecutionLayer, RunLayer,
+    RunModelLayer, RunSandboxLayer, WorkflowSettingsBuilder,
+};
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::Provider;
@@ -17,15 +17,14 @@ use fabro_sandbox::config::{
 };
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
-use fabro_types::RunId;
-use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
+use fabro_types::settings::ServerNamespace;
+use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
-    ApprovalMode, DaytonaDockerfileLayer, DaytonaNetworkLayer, DaytonaSettings, DockerfileSource,
-    RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer, RunNamespace,
-    RunSandboxLayer,
+    ApprovalMode, DaytonaNetworkLayer, DaytonaSettings, DockerfileSource, RunGoal, RunMode,
+    RunNamespace,
 };
-use fabro_types::settings::{Combine, ReplaceMap, ServerNamespace, SettingsLayer};
+use fabro_types::{RunId, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::Error as WorkflowError;
@@ -43,15 +42,26 @@ pub(crate) struct PreparedManifest {
     pub git:               Option<types::ManifestGit>,
     pub root_source:       String,
     pub run_id:            Option<RunId>,
-    pub settings:          SettingsLayer,
+    pub settings:          WorkflowSettings,
     pub target_path:       PathBuf,
     pub workflow_bundle:   WorkflowBundle,
     pub workflow_input:    BundledWorkflow,
     pub working_directory: PathBuf,
 }
 
+#[derive(Clone, Debug, Default)]
+struct ManifestSettingsOverrides {
+    run: Option<RunLayer>,
+    cli: Option<CliLayer>,
+}
+
+#[cfg(test)]
+pub(crate) fn manifest_run_defaults(run: Option<&RunLayer>) -> RunLayer {
+    run.cloned().unwrap_or_default()
+}
+
 pub(crate) fn prepare_manifest(
-    server_settings: &SettingsLayer,
+    manifest_run_defaults: &RunLayer,
     manifest: &types::RunManifest,
 ) -> Result<PreparedManifest> {
     if manifest.version != 1 {
@@ -67,29 +77,43 @@ pub(crate) fn prepare_manifest(
         .ok_or_else(|| anyhow!("manifest target path is missing from workflows map"))?;
     let root_source = workflow_input.source.clone();
 
-    let args_layer = manifest_args_layer(manifest.args.as_ref());
-    let workflow_layer = root_workflow_config_layer(manifest, &workflow_input)?;
-    let project_layer = manifest
+    let args_overrides = manifest_args_overrides(manifest.args.as_ref());
+    let workflow_run_layer = root_workflow_run_layer(manifest, &workflow_input)?;
+    let mut workflow_settings_builder =
+        WorkflowSettingsBuilder::new().server_run_defaults(manifest_run_defaults.clone());
+    if let Some(run) = args_overrides.run {
+        workflow_settings_builder = workflow_settings_builder.run_overrides(run);
+    }
+    if let Some(cli) = args_overrides.cli {
+        workflow_settings_builder = workflow_settings_builder.cli_overrides(cli);
+    }
+    if !workflow_run_layer.eq(&RunLayer::default()) {
+        workflow_settings_builder =
+            workflow_settings_builder.workflow_run_layer(workflow_run_layer);
+    }
+    for config in manifest
         .configs
         .iter()
         .filter(|config| config.type_ == types::ManifestConfigType::Project)
-        .try_fold(SettingsLayer::default(), |layer, config| {
-            Ok::<_, anyhow::Error>(parse_manifest_config(config)?.combine(layer))
-        })?;
-    let user_layer = manifest
+    {
+        if let Some(source) = config.source.as_deref() {
+            workflow_settings_builder = workflow_settings_builder.project_toml(source)?;
+        }
+    }
+    for config in manifest
         .configs
         .iter()
         .filter(|config| config.type_ == types::ManifestConfigType::User)
-        .try_fold(SettingsLayer::default(), |layer, config| {
-            Ok::<_, anyhow::Error>(parse_manifest_config(config)?.combine(layer))
-        })?;
-    let mut settings = effective_settings::materialize_settings_layer(
-        EffectiveSettingsLayers::new(args_layer, workflow_layer, project_layer, user_layer),
-        Some(server_settings),
-    )?;
+    {
+        if let Some(source) = config.source.as_deref() {
+            workflow_settings_builder = workflow_settings_builder.user_toml(source)?;
+        }
+    }
+    let mut settings = workflow_settings_builder
+        .build()
+        .map_err(|errors| anyhow!("failed to resolve manifest settings: {errors}"))?;
     if let Some(goal) = manifest.goal.as_ref() {
-        let run = settings.run.get_or_insert_with(RunLayer::default);
-        run.goal = Some(RunGoalLayer::Inline(InterpString::parse(&goal.text)));
+        settings.run.goal = Some(RunGoal::Inline(InterpString::parse(&goal.text)));
     }
 
     Ok(PreparedManifest {
@@ -186,32 +210,34 @@ fn workflow_bundle_from_manifest(
     Ok(WorkflowBundle::new(workflows))
 }
 
-fn root_workflow_config_layer(
+fn root_workflow_run_layer(
     manifest: &types::RunManifest,
     workflow: &BundledWorkflow,
-) -> Result<SettingsLayer> {
+) -> Result<RunLayer> {
     let Some(root) = manifest.workflows.get(&manifest.target.path) else {
         bail!("manifest target path is missing from workflows map");
     };
     let Some(config) = root.config.as_ref() else {
-        return Ok(SettingsLayer::default());
+        return Ok(RunLayer::default());
     };
 
-    let mut layer = parse_run_config(&config.source)?;
-    resolve_manifest_dockerfile(&mut layer, Path::new(&config.path), &workflow.files)?;
-    Ok(layer)
+    let mut document: toml::Table = config
+        .source
+        .parse()
+        .map_err(|err| anyhow!("Failed to parse run config TOML: {err}"))?;
+    let mut run = document
+        .remove("run")
+        .map(toml::Value::try_into::<RunLayer>)
+        .transpose()
+        .map_err(|err| anyhow!("Failed to parse run config TOML: {err}"))?
+        .unwrap_or_default();
+    resolve_manifest_dockerfile(&mut run, Path::new(&config.path), &workflow.files)?;
+    Ok(run)
 }
 
-fn parse_manifest_config(config: &types::ManifestConfig) -> Result<SettingsLayer> {
-    let Some(source) = config.source.as_deref() else {
-        return Ok(SettingsLayer::default());
-    };
-    parse_settings_layer(source).map_err(|err| anyhow!("Failed to parse settings file: {err}"))
-}
-
-fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> SettingsLayer {
+fn manifest_args_overrides(args: Option<&types::ManifestArgs>) -> ManifestSettingsOverrides {
     let Some(args) = args else {
-        return SettingsLayer::default();
+        return ManifestSettingsOverrides::default();
     };
 
     let model = (args.model.is_some() || args.provider.is_some()).then(|| RunModelLayer {
@@ -264,11 +290,7 @@ fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> SettingsLayer {
         })
     });
 
-    SettingsLayer {
-        run,
-        cli,
-        ..SettingsLayer::default()
-    }
+    ManifestSettingsOverrides { run, cli }
 }
 
 fn parse_labels(labels: &[String]) -> HashMap<String, String> {
@@ -279,15 +301,31 @@ fn parse_labels(labels: &[String]) -> HashMap<String, String> {
         .collect()
 }
 
+fn resolve_working_directory(settings: &WorkflowSettings, caller_cwd: &Path) -> PathBuf {
+    let Some(work_dir) = settings
+        .run
+        .working_dir
+        .as_ref()
+        .map(InterpString::as_source)
+    else {
+        return caller_cwd.to_path_buf();
+    };
+    let path = PathBuf::from(&work_dir);
+    if path.is_absolute() {
+        path
+    } else {
+        caller_cwd.join(path)
+    }
+}
+
 fn resolve_manifest_dockerfile(
-    layer: &mut SettingsLayer,
+    run: &mut RunLayer,
     config_path: &Path,
     files: &HashMap<PathBuf, String>,
 ) -> Result<()> {
-    let source = layer
-        .run
+    let source = run
+        .sandbox
         .as_mut()
-        .and_then(|run| run.sandbox.as_mut())
         .and_then(|sandbox| sandbox.daytona.as_mut())
         .and_then(|daytona| daytona.snapshot.as_mut())
         .and_then(|snapshot| snapshot.dockerfile.as_mut());
@@ -351,16 +389,14 @@ async fn build_preflight_report(
         ));
     }
 
-    let settings = &prepared.settings;
     let configured_providers = state.provider_credentials.configured_providers().await;
     let materialized = materialize_run(
-        settings.clone(),
+        prepared.settings.clone(),
         graph,
         Catalog::builtin(),
         &configured_providers,
     );
-    let resolved_run = fabro_config::resolve_run_from_file(&materialized)
-        .map_err(|errors| anyhow!(fabro_config::render_resolve_errors(&errors)))?;
+    let resolved_run = materialized.run;
     let server_settings = state.server_settings();
     let github_integration = &server_settings.server.integrations.github;
     let sandbox_provider = resolve_sandbox_provider(&resolved_run)?;
@@ -415,9 +451,7 @@ async fn build_preflight_report(
 }
 
 fn base_preflight_checks(prepared: &PreparedManifest, graph: &Graph) -> Vec<CheckResult> {
-    let setup_command_count = fabro_config::resolve_run_from_file(&prepared.settings)
-        .map(|settings| settings.prepare.commands.len())
-        .unwrap_or_default();
+    let setup_command_count = prepared.settings.run.prepare.commands.len();
     let repo_summary = prepared.git.as_ref().map_or_else(
         || "unknown".to_string(),
         |git| {
@@ -938,20 +972,23 @@ mod tests {
         }
     }
 
-    fn server_settings_fixture(source: &str) -> SettingsLayer {
-        let mut layer =
-            fabro_config::parse_settings_layer(source).expect("v2 fixture should parse");
-        layer.ensure_test_auth_methods();
-        layer
+    fn server_settings_fixture(source: &str) -> RunLayer {
+        let mut document: toml::Table = source.parse().expect("v2 fixture should parse");
+        document
+            .remove("run")
+            .map(toml::Value::try_into::<RunLayer>)
+            .transpose()
+            .expect("run settings should parse")
+            .unwrap_or_default()
     }
 
-    fn default_settings_fixture() -> SettingsLayer {
-        SettingsLayer::test_default()
+    fn default_settings_fixture() -> RunLayer {
+        RunLayer::default()
     }
 
     #[test]
     fn prepare_manifest_preserves_explicit_manifest_dry_run() {
-        let server_settings = server_settings_fixture(
+        let server_settings = manifest_run_defaults(Some(&server_settings_fixture(
             r#"
 _version = 1
 
@@ -961,7 +998,7 @@ mode = "dry_run"
 [server.storage]
 root = "/srv/fabro"
 "#,
-        );
+        )));
         let mut manifest = minimal_manifest();
         manifest.args = Some(types::ManifestArgs {
             auto_approve:     None,
@@ -978,17 +1015,14 @@ root = "/srv/fabro"
         let prepared = prepare_manifest(&server_settings, &manifest).unwrap();
 
         assert_eq!(
-            fabro_config::resolve_run_from_file(&prepared.settings)
-                .unwrap()
-                .execution
-                .mode,
+            prepared.settings.run.execution.mode,
             fabro_types::settings::run::RunMode::DryRun
         );
     }
 
     #[test]
     fn prepare_manifest_prefers_bundled_settings_without_duplication() {
-        let server_settings = server_settings_fixture(
+        let server_settings = manifest_run_defaults(Some(&server_settings_fixture(
             r#"
 _version = 1
 
@@ -999,9 +1033,9 @@ root = "/srv/fabro"
 script = "cli-setup"
 
 [server.integrations.github]
-app_id = "snapshotted-app-id"
+app_id = "fixture-app-id"
 "#,
-        );
+        )));
 
         let mut manifest = minimal_manifest();
         manifest.workflows.get_mut("workflow.fabro").unwrap().config =
@@ -1028,7 +1062,7 @@ methods = ["dev-token"]
 script = "cli-setup"
 
 [server.integrations.github]
-app_id = "snapshotted-app-id"
+app_id = "fixture-app-id"
 "#
                 .to_string(),
             ),
@@ -1036,31 +1070,24 @@ app_id = "snapshotted-app-id"
         });
 
         let prepared = prepare_manifest(&server_settings, &manifest).unwrap();
-        let resolved_run = fabro_config::resolve_run_from_file(&prepared.settings).unwrap();
-        let resolved_server = fabro_config::resolve_server_from_file(&prepared.settings).unwrap();
+        let settings_json = serde_json::to_value(&prepared.settings).unwrap();
 
         // v2 merge matrix: run.prepare.steps replaces the whole list across
         // layers, so the higher-precedence workflow layer wins over cli.
-        assert_eq!(resolved_run.prepare.commands, vec![
+        assert_eq!(prepared.settings.run.prepare.commands, vec![
             "workflow-setup".to_string()
         ]);
-        assert_eq!(
-            resolved_server
-                .integrations
-                .github
-                .app_id
-                .as_ref()
-                .map(fabro_types::settings::InterpString::as_source)
-                .as_deref(),
-            Some("snapshotted-app-id")
-        );
-        assert_eq!(resolved_server.storage.root.as_source(), "/srv/fabro");
+        assert!(settings_json.pointer("/server").is_none());
     }
 
     #[tokio::test]
     async fn invalid_preflight_returns_diagnostics_without_runtime_checks() {
         let state = crate::server::create_app_state();
-        let prepared = prepare_manifest(&default_settings_fixture(), &invalid_manifest()).unwrap();
+        let prepared = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &invalid_manifest(),
+        )
+        .unwrap();
         let validated = validate_prepared_manifest(&prepared).unwrap();
 
         assert!(validated.has_errors());
@@ -1095,7 +1122,11 @@ enabled = true
             type_:  types::ManifestConfigType::Project,
         });
 
-        let prepared = prepare_manifest(&default_settings_fixture(), &manifest).unwrap();
+        let prepared = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &manifest,
+        )
+        .unwrap();
         let validated = validate_prepared_manifest(&prepared).unwrap();
 
         assert!(!validated.has_errors());
@@ -1132,7 +1163,11 @@ provider = "daytona"
             type_:  types::ManifestConfigType::Project,
         });
 
-        let prepared = prepare_manifest(&default_settings_fixture(), &manifest).unwrap();
+        let prepared = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &manifest,
+        )
+        .unwrap();
         let validated = validate_prepared_manifest(&prepared).unwrap();
 
         let (response, _ok) = run_preflight(state.as_ref(), &prepared, &validated)

@@ -40,7 +40,7 @@ pub use fabro_api::types::{
 };
 use fabro_auth::{configured_providers_from_process_env, parse_credential_secret};
 use fabro_config::daemon::ServerDaemon;
-use fabro_config::{ServerSettings, Storage, envfile};
+use fabro_config::{RunLayer, RunSettingsBuilder, ServerSettingsBuilder, Storage, envfile};
 use fabro_interview::{
     Answer, ControlInterviewer, Interviewer, Question, QuestionType, WorkerControlEnvelope,
 };
@@ -65,15 +65,12 @@ use fabro_store::{
 #[cfg(test)]
 use fabro_types::BlockedReason;
 use fabro_types::settings::run::RunMode;
-use fabro_types::settings::server::{
-    GithubIntegrationSettings, GithubIntegrationStrategy, ServerAuthLayer, ServerAuthMethod,
-    ServerLayer,
-};
-use fabro_types::settings::{InterpString, SettingsLayer};
+use fabro_types::settings::server::{GithubIntegrationSettings, GithubIntegrationStrategy};
+use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
     ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, PullRequestRecord,
     RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
-    RunServerProvenance, RunSubjectProvenance,
+    RunServerProvenance, RunSubjectProvenance, ServerSettings,
 };
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::text::strip_goal_decoration;
@@ -554,7 +551,8 @@ pub struct AppState {
     pub(crate) vault:                Arc<AsyncRwLock<Vault>>,
     pub(super) server_secrets:       ServerSecrets,
     pub(crate) provider_credentials: ProviderCredentials,
-    pub(crate) settings:             Arc<RwLock<SettingsLayer>>,
+    manifest_run_defaults:           RwLock<Arc<RunLayer>>,
+    manifest_run_settings:           RwLock<std::result::Result<RunNamespace, String>>,
     pub(crate) server_settings:      RwLock<Arc<ServerSettings>>,
     pub(crate) env_lookup:           EnvLookup,
     pub(crate) github_api_base_url:  String,
@@ -566,7 +564,7 @@ pub struct AppState {
 }
 
 pub(crate) struct AppStateConfig {
-    pub(crate) settings:                  Arc<RwLock<SettingsLayer>>,
+    pub(crate) resolved_settings:         ResolvedAppStateSettings,
     pub(crate) registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     pub(crate) max_concurrent_runs:       usize,
     pub(crate) store:                     Arc<Database>,
@@ -576,6 +574,13 @@ pub(crate) struct AppStateConfig {
     pub(crate) env_lookup:                EnvLookup,
     pub(crate) github_api_base_url:       Option<String>,
     pub(crate) http_client:               Option<fabro_http::HttpClient>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ResolvedAppStateSettings {
+    pub(crate) server_settings:       ServerSettings,
+    pub(crate) manifest_run_defaults: RunLayer,
+    pub(crate) manifest_run_settings: std::result::Result<RunNamespace, String>,
 }
 
 fn nonzero_i64(value: i64) -> Option<i64> {
@@ -622,6 +627,15 @@ fn accumulate_model_billing(entry: &mut ModelBillingTotals, usage: &BilledModelU
 }
 
 impl AppState {
+    pub(crate) fn manifest_run_defaults(&self) -> Arc<RunLayer> {
+        Arc::clone(
+            &self
+                .manifest_run_defaults
+                .read()
+                .expect("manifest run defaults lock poisoned"),
+        )
+    }
+
     pub(crate) fn server_settings(&self) -> Arc<ServerSettings> {
         Arc::clone(
             &self
@@ -629,6 +643,13 @@ impl AppState {
                 .read()
                 .expect("server settings lock poisoned"),
         )
+    }
+
+    pub(crate) fn manifest_run_settings(&self) -> std::result::Result<RunNamespace, String> {
+        self.manifest_run_settings
+            .read()
+            .expect("manifest run settings lock poisoned")
+            .clone()
     }
 
     fn http_client(&self) -> Result<fabro_http::HttpClient, fabro_http::HttpClientBuildError> {
@@ -743,15 +764,32 @@ impl AppState {
         self.shutting_down.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn replace_settings(&self, settings: SettingsLayer) -> anyhow::Result<()> {
-        let resolved = Arc::new(ServerSettings::from_layer(&settings)?);
-        resolve_canonical_origin(&resolved.server, &self.env_lookup).map_err(anyhow::Error::msg)?;
+    pub(crate) fn replace_runtime_settings(
+        &self,
+        resolved_settings: ResolvedAppStateSettings,
+    ) -> anyhow::Result<()> {
+        let ResolvedAppStateSettings {
+            server_settings,
+            manifest_run_defaults,
+            manifest_run_settings,
+        } = resolved_settings;
+        let server_settings = Arc::new(server_settings);
+        let manifest_run_defaults = Arc::new(manifest_run_defaults);
+        resolve_canonical_origin(&server_settings.server, &self.env_lookup)
+            .map_err(anyhow::Error::msg)?;
 
-        *self.settings.write().expect("settings lock poisoned") = settings;
+        *self
+            .manifest_run_defaults
+            .write()
+            .expect("manifest run defaults lock poisoned") = manifest_run_defaults;
+        *self
+            .manifest_run_settings
+            .write()
+            .expect("manifest run settings lock poisoned") = manifest_run_settings;
         *self
             .server_settings
             .write()
-            .expect("server settings lock poisoned") = resolved;
+            .expect("server settings lock poisoned") = server_settings;
         Ok(())
     }
 }
@@ -1231,11 +1269,8 @@ async fn get_system_info(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
+    let manifest_run_settings = state.manifest_run_settings();
+    let server_settings = state.server_settings();
     let (total_runs, active_runs) = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         let active = runs
@@ -1268,16 +1303,23 @@ async fn get_system_info(
             total:  Some(to_i64(total_runs)),
             active: Some(to_i64(active_runs)),
         }),
-        sandbox_provider: Some(system_sandbox_provider(&settings)),
-        features:         Some(system_features(&settings)),
+        sandbox_provider: Some(system_sandbox_provider(&manifest_run_settings)),
+        features:         Some(system_features(
+            server_settings.as_ref(),
+            &manifest_run_settings,
+        )),
     };
     (StatusCode::OK, Json(response)).into_response()
 }
 
-fn system_features(settings: &SettingsLayer) -> SystemFeatures {
-    let session_sandboxes =
-        fabro_config::resolve_features_from_file(settings).is_ok_and(|s| s.session_sandboxes);
-    let retros = fabro_config::resolve_run_from_file(settings).is_ok_and(|s| s.execution.retros);
+fn system_features(
+    server_settings: &ServerSettings,
+    manifest_run_settings: &std::result::Result<RunNamespace, String>,
+) -> SystemFeatures {
+    let session_sandboxes = server_settings.features.session_sandboxes;
+    let retros = manifest_run_settings
+        .as_ref()
+        .is_ok_and(|settings| settings.execution.retros);
     SystemFeatures {
         session_sandboxes: Some(session_sandboxes),
         retros:            Some(retros),
@@ -1569,10 +1611,30 @@ fn build_prune_plan(
     })
 }
 
-fn system_sandbox_provider(settings: &SettingsLayer) -> String {
-    fabro_config::resolve_run_from_file(settings).map_or_else(
+fn resolve_manifest_run_settings(
+    manifest_run_defaults: &RunLayer,
+) -> std::result::Result<RunNamespace, String> {
+    RunSettingsBuilder::from_run_layer(manifest_run_defaults).map_err(|err| err.to_string())
+}
+
+fn default_test_server_settings() -> ServerSettings {
+    ServerSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+"#,
+    )
+    .expect("default test server settings should resolve")
+}
+
+fn system_sandbox_provider(
+    manifest_run_settings: &std::result::Result<RunNamespace, String>,
+) -> String {
+    manifest_run_settings.as_ref().map_or_else(
         |_| SandboxProvider::default().to_string(),
-        |settings| settings.sandbox.provider,
+        |settings| settings.sandbox.provider.clone(),
     )
 }
 
@@ -2265,66 +2327,143 @@ async fn get_run_billing(
 
 /// Create an `AppState` with default settings.
 pub fn create_app_state() -> Arc<AppState> {
-    create_app_state_with_options(SettingsLayer::default(), 5)
+    create_app_state_with_options(default_test_server_settings(), RunLayer::default(), 5)
 }
 
 #[doc(hidden)]
 pub fn create_app_state_with_registry_factory(
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    create_app_state_with_options_and_registry_factory(
-        SettingsLayer::default(),
-        5,
+    create_app_state_with_settings_and_registry_factory(
+        default_test_server_settings(),
+        RunLayer::default(),
         registry_factory_override,
     )
 }
 
 #[doc(hidden)]
 pub fn create_app_state_with_settings_and_registry_factory(
-    settings: SettingsLayer,
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    create_app_state_with_options_and_registry_factory(settings, 5, registry_factory_override)
+    create_app_state_with_options_and_registry_factory(
+        server_settings,
+        manifest_run_defaults,
+        5,
+        registry_factory_override,
+    )
 }
 
 #[doc(hidden)]
 pub fn create_app_state_with_options_and_registry_factory(
-    settings: SettingsLayer,
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
     max_concurrent_runs: usize,
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    let env_lookup = default_env_lookup();
-    let settings = Arc::new(RwLock::new(settings));
-    ensure_test_auth_methods(&settings);
-    let mut config = default_test_app_state_config(settings, max_concurrent_runs, env_lookup);
-    config.registry_factory_override = Some(Box::new(registry_factory_override));
-    build_app_state(config).expect("test app state should build")
+    create_app_state_with_runtime_settings_and_options_and_registry_factory(
+        server_settings,
+        manifest_run_defaults,
+        max_concurrent_runs,
+        registry_factory_override,
+    )
 }
 
 /// Create an `AppState` with the given settings and concurrency limit.
 pub fn create_app_state_with_options(
-    settings: SettingsLayer,
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
-    let settings = Arc::new(RwLock::new(settings));
-    ensure_test_auth_methods(&settings);
-    let env_lookup = default_env_lookup();
-    build_app_state(default_test_app_state_config(
-        settings,
+    create_app_state_with_runtime_settings_and_options(
+        server_settings,
+        manifest_run_defaults,
         max_concurrent_runs,
-        env_lookup,
-    ))
-    .expect("test app state should build")
+    )
+}
+
+fn resolved_runtime_settings_for_tests(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
+) -> ResolvedAppStateSettings {
+    ResolvedAppStateSettings {
+        manifest_run_settings: resolve_manifest_run_settings(&manifest_run_defaults),
+        manifest_run_defaults,
+        server_settings,
+    }
 }
 
 #[doc(hidden)]
-pub fn create_app_state_with_env_lookup(
-    settings: SettingsLayer,
+pub fn create_app_state_with_runtime_settings_and_registry_factory(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
+    registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
+) -> Arc<AppState> {
+    create_app_state_with_runtime_settings_and_options_and_registry_factory(
+        server_settings,
+        manifest_run_defaults,
+        5,
+        registry_factory_override,
+    )
+}
+
+#[doc(hidden)]
+pub fn create_app_state_with_runtime_settings_and_options_and_registry_factory(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
+    max_concurrent_runs: usize,
+    registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
+) -> Arc<AppState> {
+    let (store, artifact_store) = test_store_bundle();
+    let vault_path = test_secret_store_path();
+    let server_env_path = vault_path.with_file_name("server.env");
+    let env_lookup = default_env_lookup();
+    let mut config = AppStateConfig {
+        resolved_settings: resolved_runtime_settings_for_tests(
+            server_settings,
+            manifest_run_defaults,
+        ),
+        registry_factory_override: None,
+        max_concurrent_runs,
+        store,
+        artifact_store,
+        vault_path,
+        server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
+        env_lookup,
+        github_api_base_url: None,
+        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+    };
+    config.registry_factory_override = Some(Box::new(registry_factory_override));
+    build_app_state(config).expect("test app state should build")
+}
+
+/// Create an `AppState` with dense runtime settings and a concurrency limit.
+#[doc(hidden)]
+pub fn create_app_state_with_runtime_settings_and_options(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
+    max_concurrent_runs: usize,
+) -> Arc<AppState> {
+    create_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env(
+        server_settings,
+        manifest_run_defaults,
+        max_concurrent_runs,
+        |name| std::env::var(name).ok(),
+        &HashMap::new(),
+    )
+}
+
+#[doc(hidden)]
+pub fn create_app_state_with_runtime_settings_and_env_lookup(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
     max_concurrent_runs: usize,
     env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    create_app_state_with_env_lookup_and_server_secret_env(
-        settings,
+    create_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env(
+        server_settings,
+        manifest_run_defaults,
         max_concurrent_runs,
         env_lookup,
         &HashMap::new(),
@@ -2332,22 +2471,65 @@ pub fn create_app_state_with_env_lookup(
 }
 
 #[doc(hidden)]
-pub fn create_app_state_with_env_lookup_and_server_secret_env(
-    settings: SettingsLayer,
+pub fn create_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
     max_concurrent_runs: usize,
     env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
     server_secret_env: &HashMap<String, String>,
 ) -> Arc<AppState> {
     let (store, artifact_store) = test_store_bundle();
     let env_lookup: EnvLookup = Arc::new(env_lookup);
-    let settings = Arc::new(RwLock::new(settings));
-    ensure_test_auth_methods(&settings);
-    let mut config = default_test_app_state_config(settings, max_concurrent_runs, env_lookup);
-    config.store = store;
-    config.artifact_store = artifact_store;
-    let server_env_path = config.vault_path.with_file_name("server.env");
-    config.server_secrets = load_test_server_secrets(server_env_path, server_secret_env.clone());
-    build_app_state(config).expect("test app state should build")
+    let vault_path = test_secret_store_path();
+    let server_env_path = vault_path.with_file_name("server.env");
+    build_app_state(AppStateConfig {
+        resolved_settings: resolved_runtime_settings_for_tests(
+            server_settings,
+            manifest_run_defaults,
+        ),
+        registry_factory_override: None,
+        max_concurrent_runs,
+        store,
+        artifact_store,
+        vault_path,
+        server_secrets: load_test_server_secrets(server_env_path, server_secret_env.clone()),
+        env_lookup,
+        github_api_base_url: None,
+        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+    })
+    .expect("test app state should build")
+}
+
+#[doc(hidden)]
+pub fn create_app_state_with_env_lookup(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
+    max_concurrent_runs: usize,
+    env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
+) -> Arc<AppState> {
+    create_app_state_with_runtime_settings_and_env_lookup(
+        server_settings,
+        manifest_run_defaults,
+        max_concurrent_runs,
+        env_lookup,
+    )
+}
+
+#[doc(hidden)]
+pub fn create_app_state_with_env_lookup_and_server_secret_env(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
+    max_concurrent_runs: usize,
+    env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
+    server_secret_env: &HashMap<String, String>,
+) -> Arc<AppState> {
+    create_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env(
+        server_settings,
+        manifest_run_defaults,
+        max_concurrent_runs,
+        env_lookup,
+        server_secret_env,
+    )
 }
 
 #[cfg(test)]
@@ -2355,8 +2537,9 @@ pub fn create_app_state_with_env_lookup_and_server_secret_env(
     clippy::disallowed_methods,
     reason = "test helper writes a fixture server.env with sync std::fs::write"
 )]
-pub(crate) fn create_test_app_state_with_session_key(
-    settings: SettingsLayer,
+pub(crate) fn create_test_app_state_with_runtime_settings_and_session_key(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
     session_secret: Option<&str>,
 ) -> Arc<AppState> {
     let vault_path = test_secret_store_path();
@@ -2373,10 +2556,11 @@ pub(crate) fn create_test_app_state_with_session_key(
     }
     let (store, artifact_store) = test_store_bundle();
     let env_lookup = default_env_lookup();
-    let settings = Arc::new(RwLock::new(settings));
-    ensure_test_auth_methods(&settings);
     build_app_state(AppStateConfig {
-        settings,
+        resolved_settings: resolved_runtime_settings_for_tests(
+            server_settings,
+            manifest_run_defaults,
+        ),
         registry_factory_override: None,
         max_concurrent_runs: 5,
         store,
@@ -2388,6 +2572,35 @@ pub(crate) fn create_test_app_state_with_session_key(
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
     })
     .expect("test app state should build")
+}
+
+#[cfg(test)]
+pub(crate) fn create_test_app_state_with_session_key(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
+    session_secret: Option<&str>,
+) -> Arc<AppState> {
+    create_test_app_state_with_runtime_settings_and_session_key(
+        server_settings,
+        manifest_run_defaults,
+        session_secret,
+    )
+}
+
+pub fn create_app_state_with_store(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
+    max_concurrent_runs: usize,
+    store: Arc<Database>,
+    artifact_store: ArtifactStore,
+) -> Arc<AppState> {
+    create_app_state_with_store_and_runtime_settings(
+        server_settings,
+        manifest_run_defaults,
+        max_concurrent_runs,
+        store,
+        artifact_store,
+    )
 }
 
 fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
@@ -2402,74 +2615,32 @@ fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
     (store, artifact_store)
 }
 
-fn default_test_app_state_config(
-    settings: Arc<RwLock<SettingsLayer>>,
+#[doc(hidden)]
+pub fn create_app_state_with_store_and_runtime_settings(
+    server_settings: ServerSettings,
+    manifest_run_defaults: RunLayer,
     max_concurrent_runs: usize,
-    env_lookup: EnvLookup,
-) -> AppStateConfig {
-    ensure_test_auth_methods(&settings);
-    let (store, artifact_store) = test_store_bundle();
+    store: Arc<Database>,
+    artifact_store: ArtifactStore,
+) -> Arc<AppState> {
     let vault_path = test_secret_store_path();
     let server_env_path = vault_path.with_file_name("server.env");
-    AppStateConfig {
-        settings,
+    build_app_state(AppStateConfig {
+        resolved_settings: resolved_runtime_settings_for_tests(
+            server_settings,
+            manifest_run_defaults,
+        ),
         registry_factory_override: None,
         max_concurrent_runs,
         store,
         artifact_store,
         vault_path,
         server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
-        env_lookup,
+        env_lookup: default_env_lookup(),
         github_api_base_url: None,
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
-    }
-}
-
-fn ensure_test_auth_methods(settings: &Arc<RwLock<SettingsLayer>>) {
-    let mut settings = settings.write().expect("test settings lock poisoned");
-    if settings
-        .server
-        .as_ref()
-        .and_then(|server| server.auth.as_ref())
-        .and_then(|auth| auth.methods.as_ref())
-        .is_some()
-    {
-        return;
-    }
-    let server = settings.server.get_or_insert_with(ServerLayer::default);
-    let auth = server.auth.get_or_insert_with(ServerAuthLayer::default);
-    auth.methods = Some(vec![ServerAuthMethod::DevToken]);
-}
-
-pub fn create_app_state_with_store(
-    settings: Arc<RwLock<SettingsLayer>>,
-    max_concurrent_runs: usize,
-    store: Arc<Database>,
-    artifact_store: ArtifactStore,
-) -> Arc<AppState> {
-    let env_lookup = default_env_lookup();
-    create_app_state_with_store_and_env_lookup(
-        settings,
-        max_concurrent_runs,
-        store,
-        artifact_store,
-        &env_lookup,
-    )
-}
-
-fn create_app_state_with_store_and_env_lookup(
-    settings: Arc<RwLock<SettingsLayer>>,
-    max_concurrent_runs: usize,
-    store: Arc<Database>,
-    artifact_store: ArtifactStore,
-    env_lookup: &EnvLookup,
-) -> Arc<AppState> {
-    ensure_test_auth_methods(&settings);
-    let mut config =
-        default_test_app_state_config(settings, max_concurrent_runs, Arc::clone(env_lookup));
-    config.store = store;
-    config.artifact_store = artifact_store;
-    build_app_state(config).expect("test app state should build")
+    })
+    .expect("test app state should build")
 }
 
 fn default_env_lookup() -> EnvLookup {
@@ -2502,7 +2673,7 @@ fn worker_token_keys_from_server_secrets(
 
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
-        settings,
+        resolved_settings,
         registry_factory_override,
         max_concurrent_runs,
         store,
@@ -2520,10 +2691,9 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         move |name| env_lookup(name)
     });
     let (global_event_tx, _) = broadcast::channel(4096);
-    let current_server_settings = {
-        let settings = settings.read().expect("settings lock poisoned");
-        Arc::new(ServerSettings::from_layer(&settings)?)
-    };
+    let current_server_settings = Arc::new(resolved_settings.server_settings);
+    let current_manifest_run_defaults = Arc::new(resolved_settings.manifest_run_defaults);
+    let current_manifest_run_settings = resolved_settings.manifest_run_settings;
     let slack_service = {
         current_server_settings
             .server
@@ -2564,7 +2734,8 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         vault,
         server_secrets,
         provider_credentials,
-        settings,
+        manifest_run_defaults: RwLock::new(current_manifest_run_defaults),
+        manifest_run_settings: RwLock::new(current_manifest_run_settings),
         server_settings: RwLock::new(current_server_settings),
         env_lookup: Arc::clone(&env_lookup),
         github_api_base_url,
@@ -3935,10 +4106,8 @@ async fn create_run(
         Ok(req) => req,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let prepared = match run_manifest::prepare_manifest(
-        &state.settings.read().expect("settings lock poisoned"),
-        &req,
-    ) {
+    let manifest_run_defaults = state.manifest_run_defaults();
+    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -4056,10 +4225,8 @@ async fn run_preflight(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RunManifest>,
 ) -> Response {
-    let prepared = match run_manifest::prepare_manifest(
-        &state.settings.read().expect("settings lock poisoned"),
-        &req,
-    ) {
+    let manifest_run_defaults = state.manifest_run_defaults();
+    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -4085,13 +4252,12 @@ async fn render_graph_from_manifest(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RenderWorkflowGraphRequest>,
 ) -> Response {
-    let prepared = match run_manifest::prepare_manifest(
-        &state.settings.read().expect("settings lock poisoned"),
-        &req.manifest,
-    ) {
-        Ok(prepared) => prepared,
-        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
-    };
+    let manifest_run_defaults = state.manifest_run_defaults();
+    let prepared =
+        match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req.manifest) {
+            Ok(prepared) => prepared,
+            Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+        };
     let validated = match run_manifest::validate_prepared_manifest(&prepared) {
         Ok(validated) => validated,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
@@ -4358,33 +4524,28 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     };
     let server_settings = state.server_settings();
     let github_settings = &server_settings.server.integrations.github;
-    let github_app_result = match fabro_config::resolve_run_from_file(
-        &persisted.run_spec().settings,
-    ) {
-        Ok(settings) => {
-            let required_github_credentials = (settings.execution.mode != RunMode::DryRun
-                && settings.sandbox.provider == "daytona")
-                || !github_settings.permissions.is_empty();
-            if required_github_credentials {
-                state.github_credentials(github_settings)
-            } else if settings.execution.mode != RunMode::DryRun && settings.pull_request.is_some()
-            {
-                match state.github_credentials(github_settings) {
-                    Ok(github_app) => Ok(github_app),
-                    Err(err) => {
-                        tracing::warn!(
-                            run_id = %run_id,
-                            error = %err,
-                            "GitHub credentials unavailable; pull request creation will be skipped"
-                        );
-                        Ok(None)
-                    }
+    let github_app_result = {
+        let settings = &persisted.run_spec().settings.run;
+        let required_github_credentials = (settings.execution.mode != RunMode::DryRun
+            && settings.sandbox.provider == "daytona")
+            || !github_settings.permissions.is_empty();
+        if required_github_credentials {
+            state.github_credentials(github_settings)
+        } else if settings.execution.mode != RunMode::DryRun && settings.pull_request.is_some() {
+            match state.github_credentials(github_settings) {
+                Ok(github_app) => Ok(github_app),
+                Err(err) => {
+                    tracing::warn!(
+                        run_id = %run_id,
+                        error = %err,
+                        "GitHub credentials unavailable; pull request creation will be skipped"
+                    );
+                    Ok(None)
                 }
-            } else {
-                Ok(None)
             }
+        } else {
+            Ok(None)
         }
-        Err(_) => Ok(None),
     };
     let github_app = match github_app_result {
         Ok(github_app) => github_app,
@@ -7531,8 +7692,8 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Method, Request, header};
     use chrono::{Duration as ChronoDuration, Utc};
+    use fabro_config::ServerSettingsBuilder;
     use fabro_config::bind::Bind;
-    use fabro_config::parse_settings_layer;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
     use fabro_llm::Error as LlmError;
     use fabro_llm::client::Client as LlmClient;
@@ -7570,6 +7731,27 @@ mod tests {
     const TEST_JWT_ISSUER: &str = "https://fabro.example";
     const WRONG_DEV_TOKEN: &str =
         "fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+
+    fn manifest_run_defaults_from_toml(source: &str) -> fabro_config::RunLayer {
+        let mut document: toml::Table = source.parse().expect("run defaults should parse");
+        document
+            .remove("run")
+            .map(toml::Value::try_into::<fabro_config::RunLayer>)
+            .transpose()
+            .expect("run defaults should parse")
+            .unwrap_or_default()
+    }
+
+    fn server_settings_from_toml(source: &str) -> ServerSettings {
+        ServerSettingsBuilder::from_toml(source).expect("server settings should resolve")
+    }
+
+    fn resolved_runtime_settings_from_toml(source: &str) -> ResolvedAppStateSettings {
+        resolved_runtime_settings_for_tests(
+            server_settings_from_toml(source),
+            manifest_run_defaults_from_toml(source),
+        )
+    }
 
     fn test_app_with() -> Router {
         let state = create_app_state();
@@ -7621,7 +7803,8 @@ mod tests {
     fn webhook_test_app(auth_mode: AuthMode) -> Router {
         let secret = TEST_WEBHOOK_SECRET.to_string();
         let state = create_app_state_with_env_lookup_and_server_secret_env(
-            SettingsLayer::default(),
+            default_test_server_settings(),
+            RunLayer::default(),
             5,
             |_| None,
             &HashMap::from([(WEBHOOK_SECRET_ENV.to_string(), secret)]),
@@ -7677,7 +7860,11 @@ mod tests {
     }
 
     fn jwt_auth_state() -> Arc<AppState> {
-        create_test_app_state_with_session_key(SettingsLayer::default(), Some(TEST_SESSION_SECRET))
+        create_test_app_state_with_session_key(
+            default_test_server_settings(),
+            RunLayer::default(),
+            Some(TEST_SESSION_SECRET),
+        )
     }
 
     fn jwt_auth_app() -> (Arc<AppState>, Router) {
@@ -7742,8 +7929,8 @@ mod tests {
             .unwrap()
     }
 
-    fn canonical_origin_settings(url: &str) -> SettingsLayer {
-        fabro_config::parse_settings_layer(&format!(
+    fn canonical_origin_settings(url: &str) -> ServerSettings {
+        server_settings_from_toml(&format!(
             r#"
 _version = 1
 
@@ -7754,7 +7941,6 @@ methods = ["dev-token"]
 url = "{url}"
 "#
         ))
-        .expect("settings fixture should parse")
     }
 
     #[test]
@@ -7762,6 +7948,7 @@ url = "{url}"
         for invalid in ["", "/relative/path", "ftp://fabro.example.com"] {
             let state = create_app_state_with_env_lookup(
                 canonical_origin_settings("http://valid.example.com"),
+                RunLayer::default(),
                 5,
                 {
                     let invalid = invalid.to_string();
@@ -7770,7 +7957,17 @@ url = "{url}"
             );
 
             let err = state
-                .replace_settings(canonical_origin_settings("{{ env.FABRO_WEB_URL }}"))
+                .replace_runtime_settings(resolved_runtime_settings_from_toml(
+                    r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.web]
+url = "{{ env.FABRO_WEB_URL }}"
+"#,
+                ))
                 .expect_err("invalid canonical origin should be rejected");
             assert!(
                 err.to_string()
@@ -7787,7 +7984,7 @@ url = "{url}"
     #[test]
     fn replace_settings_updates_layer_and_typed_server_settings() {
         let state = create_app_state_with_options(
-            fabro_config::parse_settings_layer(
+            server_settings_from_toml(
                 r#"
 _version = 1
 
@@ -7800,13 +7997,25 @@ url = "http://old.example.com"
 [server.storage]
 root = "/srv/old"
 "#,
-            )
-            .expect("settings fixture should parse"),
+            ),
+            manifest_run_defaults_from_toml(
+                r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.web]
+url = "http://old.example.com"
+
+[server.storage]
+root = "/srv/old"
+"#,
+            ),
             5,
         );
 
-        let updated = fabro_config::parse_settings_layer(
-            r#"
+        let updated = r#"
 _version = 1
 
 [server.auth]
@@ -7815,14 +8024,15 @@ methods = ["dev-token"]
 [server.web]
 url = "http://new.example.com"
 
+[run.execution]
+mode = "dry_run"
+
 [server.storage]
 root = "/srv/new"
-"#,
-        )
-        .expect("settings fixture should parse");
+"#;
 
         state
-            .replace_settings(updated)
+            .replace_runtime_settings(resolved_runtime_settings_from_toml(updated))
             .expect("valid settings should replace current state");
 
         assert_eq!(state.canonical_origin().unwrap(), "http://new.example.com");
@@ -7830,24 +8040,161 @@ root = "/srv/new"
             state.server_settings().server.storage.root.as_source(),
             "/srv/new"
         );
+        assert_eq!(
+            state
+                .manifest_run_settings()
+                .expect("manifest run settings should resolve")
+                .execution
+                .mode,
+            RunMode::DryRun
+        );
+        let manifest_run_defaults = state.manifest_run_defaults();
+        assert_eq!(
+            manifest_run_defaults
+                .execution
+                .as_ref()
+                .and_then(|execution| execution.mode),
+            Some(RunMode::DryRun)
+        );
+    }
 
-        let layer_root = state
-            .settings
-            .read()
-            .expect("settings lock poisoned")
-            .server
-            .as_ref()
-            .and_then(|server| server.storage.as_ref())
-            .and_then(|storage| storage.root.as_ref())
-            .map(InterpString::as_source);
-        assert_eq!(layer_root.as_deref(), Some("/srv/new"));
+    #[test]
+    fn replace_settings_caches_invalid_manifest_run_settings_tolerantly() {
+        let state = create_app_state_with_options(
+            server_settings_from_toml(
+                r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.web]
+url = "http://old.example.com"
+"#,
+            ),
+            manifest_run_defaults_from_toml(
+                r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.web]
+url = "http://old.example.com"
+"#,
+            ),
+            5,
+        );
+
+        let updated = r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.web]
+url = "http://new.example.com"
+
+[run.sandbox]
+provider = "invalid-provider"
+"#;
+
+        state
+            .replace_runtime_settings(resolved_runtime_settings_from_toml(updated))
+            .expect("invalid run defaults should not block replace");
+
+        assert_eq!(state.canonical_origin().unwrap(), "http://new.example.com");
+        assert!(
+            state.manifest_run_settings().is_err(),
+            "manifest run settings should stay tolerant for invalid defaults"
+        );
+    }
+
+    #[test]
+    fn system_features_use_dense_server_and_manifest_defaults() {
+        let source = r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[features]
+session_sandboxes = true
+
+[run.execution]
+retros = false
+"#;
+        let server_settings = server_settings_from_toml(source);
+        let manifest_run_settings = resolve_manifest_run_settings(
+            &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
+        );
+        let features = system_features(&server_settings, &manifest_run_settings);
+
+        assert_eq!(features.session_sandboxes, Some(true));
+        assert_eq!(features.retros, Some(false));
+    }
+
+    #[test]
+    fn system_features_default_retros_when_manifest_run_settings_do_not_resolve() {
+        let source = r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[features]
+session_sandboxes = true
+
+[run.sandbox]
+provider = "invalid-provider"
+"#;
+        let server_settings = server_settings_from_toml(source);
+        let manifest_run_settings = resolve_manifest_run_settings(
+            &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
+        );
+        let features = system_features(&server_settings, &manifest_run_settings);
+
+        assert_eq!(features.session_sandboxes, Some(true));
+        assert_eq!(features.retros, Some(false));
+    }
+
+    #[test]
+    fn system_sandbox_provider_uses_manifest_defaults() {
+        let source = r#"
+_version = 1
+
+[run.sandbox]
+provider = "daytona"
+"#;
+        let manifest_run_settings = resolve_manifest_run_settings(
+            &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
+        );
+
+        assert_eq!(system_sandbox_provider(&manifest_run_settings), "daytona");
+    }
+
+    #[test]
+    fn system_sandbox_provider_defaults_when_manifest_run_settings_do_not_resolve() {
+        let source = r#"
+_version = 1
+
+[run.sandbox]
+provider = "invalid-provider"
+"#;
+        let manifest_run_settings = resolve_manifest_run_settings(
+            &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
+        );
+
+        assert_eq!(
+            system_sandbox_provider(&manifest_run_settings),
+            SandboxProvider::default().to_string()
+        );
     }
 
     #[tokio::test]
     async fn create_secret_stores_file_secret_and_excludes_it_from_snapshot() {
         let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-
         let req = Request::builder()
             .method("POST")
             .uri(api("/secrets"))
@@ -8240,13 +8587,22 @@ root = "/srv/new"
 
     #[test]
     fn build_app_state_requires_session_secret_for_worker_tokens() {
-        let settings = Arc::new(RwLock::new(SettingsLayer::default()));
-        ensure_test_auth_methods(&settings);
+        let server_settings = server_settings_from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+"#,
+        );
         let (store, artifact_store) = test_store_bundle();
         let vault_path = test_secret_store_path();
         let server_env_path = vault_path.with_file_name("server.env");
         let Err(err) = build_app_state(AppStateConfig {
-            settings,
+            resolved_settings: resolved_runtime_settings_for_tests(
+                server_settings,
+                RunLayer::default(),
+            ),
             registry_factory_override: None,
             max_concurrent_runs: 5,
             store,
@@ -8274,7 +8630,7 @@ root = "/srv/new"
     ) -> Arc<AppState> {
         let dev_token = dev_token.map(str::to_owned);
         std::fs::create_dir_all(storage_dir).unwrap();
-        let settings = fabro_config::parse_settings_layer(&format!(
+        let source = format!(
             r#"
 _version = 1
 
@@ -8293,8 +8649,7 @@ allowed_usernames = ["octocat"]
                 .map(|method| format!("\"{method}\""))
                 .collect::<Vec<_>>()
                 .join(", ")
-        ))
-        .unwrap();
+        );
         let runtime_directory = Storage::new(storage_dir).runtime_directory();
         ServerDaemon::new(
             std::process::id(),
@@ -8308,7 +8663,8 @@ allowed_usernames = ["octocat"]
             .map(|token| HashMap::from([("FABRO_DEV_TOKEN".to_string(), token)]))
             .unwrap_or_default();
         create_app_state_with_env_lookup_and_server_secret_env(
-            settings,
+            server_settings_from_toml(&source),
+            manifest_run_defaults_from_toml(&source),
             5,
             |_| None,
             &server_secret_env,
@@ -8534,27 +8890,45 @@ allowed_usernames = ["octocat"]
         run_store.append_event(&payload).await.unwrap();
     }
 
-    fn github_token_settings() -> SettingsLayer {
-        parse_settings_layer(
+    fn github_token_settings() -> ServerSettings {
+        ServerSettingsBuilder::from_toml(
             r#"
 _version = 1
+
+[server.auth]
+methods = ["dev-token"]
 
 [server.integrations.github]
 strategy = "token"
 "#,
         )
-        .expect("github token settings fixture should parse")
+        .expect("github token settings fixture should resolve")
     }
 
     fn create_github_token_app_state(
         token: Option<&str>,
         github_api_base_url: Option<String>,
     ) -> Arc<AppState> {
-        let settings = Arc::new(RwLock::new(github_token_settings()));
-        ensure_test_auth_methods(&settings);
-        let env_lookup: EnvLookup = Arc::new(|_| None);
-        let mut config = default_test_app_state_config(settings, 5, env_lookup);
-        config.github_api_base_url = github_api_base_url;
+        let (store, artifact_store) = test_store_bundle();
+        let vault_path = test_secret_store_path();
+        let server_env_path = vault_path.with_file_name("server.env");
+        let config = AppStateConfig {
+            resolved_settings: resolved_runtime_settings_for_tests(
+                github_token_settings(),
+                RunLayer::default(),
+            ),
+            registry_factory_override: None,
+            max_concurrent_runs: 5,
+            store,
+            artifact_store,
+            vault_path,
+            server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
+            env_lookup: Arc::new(|_| None),
+            github_api_base_url,
+            http_client: Some(
+                fabro_http::test_http_client().expect("test HTTP client should build"),
+            ),
+        };
         let state = build_app_state(config).expect("test app state should build");
         if let Some(token) = token {
             state
@@ -8689,7 +9063,7 @@ strategy = "token"
         );
         let run_spec = RunSpec {
             run_id,
-            settings: SettingsLayer::default(),
+            settings: fabro_types::WorkflowSettings::default(),
             graph,
             workflow_slug: Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),
@@ -8781,7 +9155,12 @@ strategy = "token"
 
     #[tokio::test]
     async fn test_model_alias_returns_canonical_model_id() {
-        let state = create_app_state_with_env_lookup(SettingsLayer::default(), 5, |_| None);
+        let state = create_app_state_with_env_lookup(
+            default_test_server_settings(),
+            RunLayer::default(),
+            5,
+            |_| None,
+        );
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -8799,7 +9178,12 @@ strategy = "token"
 
     #[tokio::test]
     async fn test_model_invalid_mode_returns_400() {
-        let state = create_app_state_with_env_lookup(SettingsLayer::default(), 5, |_| None);
+        let state = create_app_state_with_env_lookup(
+            default_test_server_settings(),
+            RunLayer::default(),
+            5,
+            |_| None,
+        );
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -8875,24 +9259,28 @@ strategy = "token"
 
     #[tokio::test]
     async fn auth_login_github_redirects_to_github() {
-        let settings: SettingsLayer = fabro_config::parse_settings_layer(
-            r#"
+        let source = r#"
 _version = 1
+
+[server.auth]
+methods = ["github"]
 
 [server.web]
 enabled = true
 url = "http://localhost:3000"
 
+[server.auth.github]
+allowed_usernames = ["octocat"]
+
 [server.integrations.github]
 app_id = "123"
 client_id = "Iv1.testclient"
 slug = "fabro"
-"#,
-        )
-        .expect("fixture should parse");
+"#;
         let app = build_router(
             create_test_app_state_with_session_key(
-                settings,
+                server_settings_from_toml(source),
+                manifest_run_defaults_from_toml(source),
                 Some("github-redirect-test-key-0123456789"),
             ),
             AuthMode::Enabled(ConfiguredAuth {
@@ -10117,7 +10505,8 @@ slug = "fabro"
             "fabro_dev_abababababababababababababababababababababababababababababababab";
 
         let state = create_test_app_state_with_session_key(
-            SettingsLayer::default(),
+            default_test_server_settings(),
+            RunLayer::default(),
             Some("server-test-session-key-0123456789"),
         );
         let app = build_router(
@@ -11530,9 +11919,11 @@ slug = "fabro"
 
     #[tokio::test]
     async fn start_run_persists_full_settings_snapshot() {
-        let settings: SettingsLayer = fabro_config::parse_settings_layer(
-            r#"
+        let source = r#"
 _version = 1
+
+[server.auth]
+methods = ["dev-token"]
 
 [run.execution]
 mode = "dry_run"
@@ -11567,10 +11958,12 @@ url = "http://api.example.test"
 
 [server.logging]
 level = "debug"
-"#,
-        )
-        .expect("fixture should parse");
-        let state = create_app_state_with_options(settings, 5);
+"#;
+        let state = create_app_state_with_options(
+            server_settings_from_toml(source),
+            manifest_run_defaults_from_toml(source),
+            5,
+        );
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         let req = Request::builder()
@@ -11600,12 +11993,12 @@ level = "debug"
             .unwrap()
             .spec
             .expect("run spec should exist");
-        let resolved_run = fabro_config::resolve_run_from_file(&run_spec.settings).unwrap();
+        let resolved_run = &run_spec.settings.run;
 
         // Verify a sampling of the persisted v2 settings, including inherited
         // run execution mode from server settings.
         assert_eq!(
-            match resolved_run.goal {
+            match &resolved_run.goal {
                 Some(fabro_types::settings::run::RunGoal::Inline(value)) => Some(value.as_source()),
                 _ => None,
             }
@@ -11630,14 +12023,8 @@ level = "debug"
         // Server-operational fields (auth, integrations, etc.) deliberately
         // do not flow into the run's persisted settings — they live on the
         // server and are read via AppState::server_settings().
-        assert!(run_spec.settings.server.as_ref().is_none_or(|server| {
-            server
-                .integrations
-                .as_ref()
-                .and_then(|integrations| integrations.github.as_ref())
-                .and_then(|github| github.app_id.as_ref())
-                .is_none()
-        }));
+        let settings_json = serde_json::to_value(&run_spec.settings).unwrap();
+        assert!(settings_json.pointer("/server").is_none());
     }
 
     #[tokio::test]
@@ -12129,21 +12516,23 @@ level = "debug"
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_during_startup_persists_cancelled_reason() {
-        let settings: SettingsLayer = fabro_config::parse_settings_layer(
-            r#"
+        let source = r#"
 _version = 1
+
+[server.auth]
+methods = ["dev-token"]
 
 [[run.prepare.steps]]
 script = "sleep 5"
 
 [run.prepare]
 timeout = "30s"
-"#,
-        )
-        .expect("fixture should parse");
-        let state = create_app_state_with_settings_and_registry_factory(settings, |interviewer| {
-            fabro_workflow::handler::default_registry(interviewer, || None)
-        });
+"#;
+        let state = create_app_state_with_settings_and_registry_factory(
+            server_settings_from_toml(source),
+            manifest_run_defaults_from_toml(source),
+            |interviewer| fabro_workflow::handler::default_registry(interviewer, || None),
+        );
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
@@ -12289,7 +12678,8 @@ timeout = "30s"
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrency_limit_respected() {
-        let state = create_app_state_with_options(SettingsLayer::default(), 1);
+        let state =
+            create_app_state_with_options(default_test_server_settings(), RunLayer::default(), 1);
         let app = test_app_with_scheduler(Arc::clone(&state));
 
         // Create and start two runs with max_concurrent_runs=1

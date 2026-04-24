@@ -1,25 +1,31 @@
 use std::collections::HashMap;
 
-use super::cli::{
-    CliAuthLayer, CliAuthStrategy, CliLoggingLayer, CliTargetLayer, OutputFormat, OutputVerbosity,
+use fabro_types::settings::cli::{CliAuthStrategy, OutputFormat, OutputVerbosity};
+use fabro_types::settings::run::{
+    AgentPermissions, ApprovalMode, DaytonaNetworkLayer, MergeStrategy, RunMode, WorktreeMode,
 };
-use super::duration::Duration;
+use fabro_types::settings::server::{
+    GithubIntegrationStrategy, ObjectStoreProvider, ServerAuthMethod, WebhookStrategy,
+};
+use fabro_types::settings::{Duration, InterpString, Size};
+
+use super::cli::{CliAuthLayer, CliLoggingLayer, CliTargetLayer};
 use super::features::FeaturesLayer;
-use super::interp::InterpString;
 use super::run::{
-    AgentPermissions, ApprovalMode, DaytonaNetworkLayer, DaytonaSnapshotLayer, HookAgentMarker,
-    HookEntry, HookTlsMode, InterviewProviderLayer, LocalSandboxLayer, MergeStrategy,
-    ModelRefOrSplice, NotificationProviderLayer, RunArtifactsLayer, RunCheckpointLayer,
-    RunGoalLayer, RunMode, RunPrepareLayer, ScmGitHubLayer, StringOrSplice, WorktreeMode,
+    DaytonaSnapshotLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
+    LocalSandboxLayer, ModelRefOrSplice, NotificationProviderLayer, RunArtifactsLayer,
+    RunCheckpointLayer, RunGoalLayer, RunPrepareLayer, ScmGitHubLayer, StringOrSplice,
 };
 use super::server::{
-    GithubIntegrationStrategy, ObjectStoreLocalLayer, ObjectStoreProvider, ObjectStoreS3Layer,
-    ServerApiLayer, ServerAuthGithubLayer, ServerAuthMethod, ServerListenLayer, ServerLoggingLayer,
-    WebhookStrategy,
+    ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer, ServerAuthGithubLayer,
+    ServerListenLayer, ServerLoggingLayer,
 };
-use super::size::Size;
 
-pub trait Combine {
+/// Internal merge trait used by sparse config layers inside `fabro-config`.
+///
+/// The `fabro_macros::Combine` derive expands against this trait via an
+/// absolute path, so deriving `Combine` only works for types defined here.
+pub(crate) trait Combine {
     /// Combine two values, preferring the values in `self`.
     #[must_use]
     fn combine(self, other: Self) -> Self;
@@ -137,7 +143,7 @@ impl Combine for RunCheckpointLayer {
 
 /// An element of a splice-aware sequence: either a regular value or the
 /// `...` marker that asks the combiner to expand the fallback list inline.
-pub trait SpliceMarker {
+trait SpliceMarker {
     fn is_splice(&self) -> bool;
 }
 

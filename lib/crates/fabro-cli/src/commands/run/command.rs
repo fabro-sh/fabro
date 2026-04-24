@@ -4,6 +4,8 @@ use fabro_util::terminal::Styles;
 use crate::args::RunArgs;
 use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
+#[cfg(feature = "sleep_inhibitor")]
+use crate::sleep_inhibitor;
 
 pub(crate) async fn execute(mut args: RunArgs, base_ctx: &CommandContext) -> Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
@@ -25,7 +27,7 @@ pub(crate) async fn execute(mut args: RunArgs, base_ctx: &CommandContext) -> Res
     }
 
     #[cfg(feature = "sleep_inhibitor")]
-    let _sleep_guard = crate::sleep_inhibitor::guard(prevent_idle_sleep);
+    let _sleep_guard = sleep_inhibitor::guard(prevent_idle_sleep);
 
     #[cfg(not(feature = "sleep_inhibitor"))]
     let _ = prevent_idle_sleep;

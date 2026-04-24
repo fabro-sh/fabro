@@ -5,7 +5,7 @@ pub use fabro_checkpoint::META_BRANCH_PREFIX;
 pub use fabro_checkpoint::author::GitAuthor;
 use fabro_checkpoint::git::Store;
 pub use fabro_checkpoint::metadata::MetadataStore;
-use fabro_types::settings::SettingsLayer;
+use fabro_types::WorkflowSettings;
 use tokio::task::{JoinError, spawn_blocking};
 use tokio::time::timeout;
 
@@ -14,10 +14,12 @@ use crate::error::{Error, Result};
 /// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).
 pub const RUN_BRANCH_PREFIX: &str = "fabro/run/";
 
-pub fn git_author_from_settings(settings: &SettingsLayer) -> GitAuthor {
-    fabro_config::resolve_run_from_file(settings)
-        .ok()
-        .and_then(|settings| settings.git.author)
+pub fn git_author_from_settings(settings: &WorkflowSettings) -> GitAuthor {
+    settings
+        .run
+        .git
+        .author
+        .clone()
         .map(|author| GitAuthor::from(&author))
         .unwrap_or_default()
 }

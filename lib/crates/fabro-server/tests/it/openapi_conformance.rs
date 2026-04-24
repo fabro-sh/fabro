@@ -12,7 +12,9 @@ use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use fabro_server::install::{InstallAppState, build_install_router};
 use fabro_server::jwt_auth::AuthMode;
-use fabro_server::server::{build_router, create_app_state_with_env_lookup_and_server_secret_env};
+use fabro_server::server::{
+    build_router, create_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env,
+};
 use serde_yaml::Value;
 use tower::ServiceExt;
 
@@ -145,9 +147,11 @@ fn github_webhook_spec_and_sdk_describe_a_json_body() {
 #[tokio::test]
 async fn github_webhook_spec_route_is_routable_when_webhook_secret_is_present() {
     let secret = "test-webhook-secret".to_string();
+    let settings = test_settings();
     let app = build_router(
-        create_app_state_with_env_lookup_and_server_secret_env(
-            test_settings(),
+        create_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env(
+            settings.server_settings,
+            settings.manifest_run_defaults,
             5,
             |_| None,
             &std::collections::HashMap::from([("GITHUB_APP_WEBHOOK_SECRET".to_string(), secret)]),
@@ -214,8 +218,8 @@ async fn install_and_normal_routes_stay_isolated() {
 
 // Note: the earlier `server_settings_keys_match_openapi_spec` drift check
 // was deleted in Stage 6.3b alongside the legacy flat `fabro_types::Settings`
-// struct that it instantiated. The v2 `/api/v1/settings` and
-// `/api/v1/runs/:id/settings` endpoints now return the freely-shaped
-// `SettingsLayer` tree which the OpenAPI spec declares as
-// `type: object, additionalProperties: true`, so there is nothing to diff
-// at the property-key level.
+// struct that it instantiated. `/api/v1/settings` now returns dense
+// `ServerSettings`, and `/api/v1/runs/:id/settings` returns a dense
+// `WorkflowSettings` snapshot. Property-level conformance for those payloads
+// lives in the `fabro-api` round-trip tests that pin the Rust types against
+// the OpenAPI schema names.

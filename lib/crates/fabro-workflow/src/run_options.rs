@@ -3,9 +3,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use fabro_types::RunId;
-use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::RunMode;
+use fabro_types::{RunId, WorkflowSettings};
 
 use crate::git::{GitAuthor, git_author_from_settings};
 
@@ -20,7 +19,7 @@ pub struct GitCheckpointOptions {
 /// Options for a workflow run.
 #[derive(Clone)]
 pub struct RunOptions {
-    pub settings:         SettingsLayer,
+    pub settings:         WorkflowSettings,
     pub run_dir:          PathBuf,
     pub cancel_token:     Option<Arc<AtomicBool>>,
     /// Unique identifier for this workflow run.
@@ -44,14 +43,11 @@ pub struct RunOptions {
 
 impl RunOptions {
     pub fn dry_run_enabled(&self) -> bool {
-        fabro_config::resolve_run_from_file(&self.settings)
-            .is_ok_and(|settings| settings.execution.mode == RunMode::DryRun)
+        self.settings.run.execution.mode == RunMode::DryRun
     }
 
     pub fn checkpoint_exclude_globs(&self) -> Vec<String> {
-        fabro_config::resolve_run_from_file(&self.settings)
-            .map(|settings| settings.checkpoint.exclude_globs)
-            .unwrap_or_default()
+        self.settings.run.checkpoint.exclude_globs.clone()
     }
 
     pub fn git_author(&self) -> GitAuthor {
@@ -59,9 +55,7 @@ impl RunOptions {
     }
 
     pub fn artifact_globs(&self) -> Vec<String> {
-        fabro_config::resolve_run_from_file(&self.settings)
-            .map(|settings| settings.artifacts.include)
-            .unwrap_or_default()
+        self.settings.run.artifacts.include.clone()
     }
 }
 

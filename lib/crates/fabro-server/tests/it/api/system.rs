@@ -9,15 +9,13 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_config::Storage;
 use fabro_types::RunId;
-use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::interp::InterpString;
-use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
 use tempfile::tempdir;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    MINIMAL_DOT, POLL_ATTEMPTS, POLL_INTERVAL, api, checked_response, minimal_manifest_json,
-    minimal_manifest_json_with_dry_run, response_json, response_status,
+    MINIMAL_DOT, POLL_ATTEMPTS, POLL_INTERVAL, TestAppSettings, api, checked_response,
+    minimal_manifest_json, minimal_manifest_json_with_dry_run, response_json, response_status,
     test_app_state_with_options, test_app_with_scheduler, test_settings, wait_for_run_status,
 };
 
@@ -37,14 +35,12 @@ const HUMAN_GATE_DOT: &str = r#"digraph GateTest {
     revise -> gate
 }"#;
 
-fn temp_storage_settings() -> (tempfile::TempDir, SettingsLayer, PathBuf) {
+fn temp_storage_settings() -> (tempfile::TempDir, TestAppSettings, PathBuf) {
     let temp = tempdir().expect("tempdir should create");
     let mut settings = test_settings();
     let storage_dir = temp.path().join("storage");
-    let server = settings.server.get_or_insert_with(ServerLayer::default);
-    server.storage = Some(ServerStorageLayer {
-        root: Some(InterpString::parse(&storage_dir.to_string_lossy())),
-    });
+    settings.server_settings.server.storage.root =
+        InterpString::parse(&storage_dir.to_string_lossy());
     (temp, settings, storage_dir)
 }
 

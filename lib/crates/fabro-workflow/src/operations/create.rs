@@ -8,16 +8,15 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use fabro_config::{Storage, WorkflowSettings};
+use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_store::Database;
 use fabro_template::{TemplateContext, render as render_template};
-use fabro_types::settings::SettingsLayer;
-use fabro_types::settings::run::RunMode;
-use fabro_types::{RunId, RunProvenance};
+use fabro_types::settings::run::{RunMode, RunNamespace};
+use fabro_types::{RunId, RunProvenance, WorkflowSettings};
 use fabro_util::json::normalize_json_value;
 use tokio::task::spawn_blocking;
 
@@ -36,7 +35,7 @@ use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 #[derive(Clone, Debug)]
 pub struct CreateRunInput {
     pub workflow: WorkflowInput,
-    pub settings: SettingsLayer,
+    pub settings: WorkflowSettings,
     pub cwd: PathBuf,
     pub workflow_slug: Option<String>,
     pub workflow_path: Option<PathBuf>,
@@ -59,7 +58,7 @@ pub struct CreatedRun {
 }
 
 struct PersistCreateOptions {
-    settings:             SettingsLayer,
+    settings:             WorkflowSettings,
     run_id:               Option<RunId>,
     run_dir:              Option<PathBuf>,
     workflow_slug:        Option<String>,
@@ -84,12 +83,11 @@ pub async fn create(
         cwd:      request.cwd,
     })
     .map_err(|err| Error::Parse(err.to_string()))?;
-
-    if fabro_config::resolve_run_from_file(&resolved.settings)
-        .map_or(true, |settings| settings.execution.mode != RunMode::DryRun)
-    {
-        validate_sandbox_provider(&resolved.settings)?;
+    if resolved.settings.run.execution.mode != RunMode::DryRun {
+        validate_sandbox_provider(&resolved.settings.run)?;
     }
+    let labels = resolved.settings.combined_labels();
+    let settings = resolved.settings.clone();
 
     let CreateRunInput {
         workflow: _,
@@ -107,9 +105,6 @@ pub async fn create(
         configured_providers,
     } = request;
 
-    let settings = resolved.settings.clone();
-    let resolved_settings = WorkflowSettings::from_layer(&settings)
-        .map_err(|errors| Error::Precondition(fabro_config::render_resolve_errors(&errors)))?;
     let run_id = run_id.unwrap_or_else(RunId::new);
     let storage = Storage::new(storage_root);
     let run_dir = storage.run_scratch(&run_id).root().to_path_buf();
@@ -150,7 +145,7 @@ pub async fn create(
                 run_id: Some(run_id),
                 run_dir: Some(persisted_run_dir),
                 workflow_slug: workflow_slug.or(resolved_workflow_slug),
-                labels: resolved_settings.combined_labels(),
+                labels,
                 base_branch,
                 working_directory,
                 host_repo_path,
@@ -271,11 +266,8 @@ fn store_error(err: impl std::fmt::Display) -> Error {
     Error::engine(err.to_string())
 }
 
-fn validate_sandbox_provider(settings: &SettingsLayer) -> Result<(), Error> {
-    let resolved = fabro_config::resolve_run_from_file(settings)
-        .map_err(|errors| Error::Precondition(fabro_config::render_resolve_errors(&errors)))?;
-    resolved
-        .sandbox
+fn validate_sandbox_provider(run: &RunNamespace) -> Result<(), Error> {
+    run.sandbox
         .provider
         .parse::<SandboxProvider>()
         .map_err(|err| Error::Precondition(format!("Invalid sandbox provider: {err}")))?;
@@ -313,7 +305,7 @@ pub(super) fn preprocess_and_validate(
     current_dir: Option<PathBuf>,
     file_resolver: Option<Arc<dyn FileResolver>>,
     custom_transforms: Vec<Box<dyn Transform>>,
-    settings: Option<&SettingsLayer>,
+    settings: Option<&WorkflowSettings>,
     goal_override: Option<&str>,
 ) -> Result<Validated, Error> {
     let inputs = run_inputs(settings);
@@ -337,11 +329,9 @@ pub(super) fn preprocess_and_validate(
     Ok(pipeline::validate(transformed, &[]))
 }
 
-fn run_inputs(settings: Option<&SettingsLayer>) -> HashMap<String, toml::Value> {
+fn run_inputs(settings: Option<&WorkflowSettings>) -> HashMap<String, toml::Value> {
     settings
-        .and_then(|settings| settings.run.as_ref())
-        .and_then(|run| run.inputs.as_ref())
-        .cloned()
+        .map(|settings| settings.run.inputs.clone())
         .unwrap_or_default()
 }
 
@@ -416,10 +406,15 @@ mod tests {
     use std::time::Duration;
 
     use chrono::{Local, TimeZone, Utc};
+    use fabro_config::{
+        ReplaceMap, RunExecutionLayer, RunGoalLayer, RunLayer, RunModelLayer, RunPullRequestLayer,
+        WorkflowSettingsBuilder,
+    };
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::Database;
-    use fabro_types::fixtures;
     use fabro_types::settings::InterpString;
+    use fabro_types::settings::run::RunMode;
+    use fabro_types::{WorkflowSettings, fixtures};
     use object_store::local::LocalFileSystem;
     use object_store::memory::InMemory;
 
@@ -435,11 +430,20 @@ mod tests {
         ))
     }
 
-    fn test_default_settings() -> SettingsLayer {
-        SettingsLayer::test_default()
+    fn settings_from_run_layer(run: RunLayer) -> WorkflowSettings {
+        WorkflowSettingsBuilder::new()
+            .run_overrides(run)
+            .build()
+            .expect("settings should resolve")
     }
 
-    fn validate_dot(dot_source: &str, settings: SettingsLayer) -> Validated {
+    fn test_default_settings() -> WorkflowSettings {
+        WorkflowSettingsBuilder::new()
+            .build()
+            .expect("default settings should resolve")
+    }
+
+    fn validate_dot(dot_source: &str, settings: WorkflowSettings) -> Validated {
         validate(ValidateInput {
             workflow: WorkflowInput::DotSource {
                 source:   dot_source.to_string(),
@@ -461,7 +465,7 @@ mod tests {
 
     #[test]
     fn validate_minimal() {
-        let validated = validate_dot(MINIMAL_DOT, SettingsLayer::default());
+        let validated = validate_dot(MINIMAL_DOT, WorkflowSettings::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(validated.graph().name, "Test");
@@ -478,7 +482,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(dot, SettingsLayer::default());
+        let validated = validate_dot(dot, WorkflowSettings::default());
         validated.raise_on_errors().unwrap();
 
         let prompt = validated.graph().nodes["work"]
@@ -516,7 +520,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(dot, SettingsLayer::default());
+        let validated = validate_dot(dot, WorkflowSettings::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(
@@ -534,19 +538,18 @@ mod tests {
             exit [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(dot, {
-            use fabro_types::settings::run::{RunGoalLayer, RunLayer};
-            let mut inputs = std::collections::HashMap::new();
-            inputs.insert("who".to_string(), toml::Value::String("agent".to_string()));
-            SettingsLayer {
-                run: Some(RunLayer {
+        let validated = validate_dot(
+            dot,
+            settings_from_run_layer({
+                let mut inputs = std::collections::HashMap::new();
+                inputs.insert("who".to_string(), toml::Value::String("agent".to_string()));
+                RunLayer {
                     goal: Some(RunGoalLayer::Inline(InterpString::parse("override"))),
                     inputs: Some(inputs),
                     ..RunLayer::default()
-                }),
-                ..SettingsLayer::default()
-            }
-        });
+                }
+            }),
+        );
         validated.raise_on_errors().unwrap();
 
         assert_eq!(validated.graph().goal(), "override");
@@ -565,7 +568,7 @@ mod tests {
                 source:   "not a graph".to_string(),
                 base_dir: None,
             },
-            settings:          SettingsLayer::default(),
+            settings:          WorkflowSettings::default(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
         });
@@ -578,7 +581,7 @@ mod tests {
             graph [goal="Test"]
             work [label="Work"]
         }"#;
-        let validated = validate_dot(dot, SettingsLayer::default());
+        let validated = validate_dot(dot, WorkflowSettings::default());
 
         assert!(validated.has_errors());
         assert!(validated.raise_on_errors().is_err());
@@ -608,7 +611,7 @@ mod tests {
                 source:   MINIMAL_DOT.to_string(),
                 base_dir: None,
             },
-            settings:          SettingsLayer::default(),
+            settings:          WorkflowSettings::default(),
             cwd:               PathBuf::from("."),
             custom_transforms: vec![Box::new(TagTransform)],
         })
@@ -641,7 +644,7 @@ mod tests {
 
         let validated = validate(ValidateInput {
             workflow:          WorkflowInput::Path(dot_path),
-            settings:          SettingsLayer::default(),
+            settings:          WorkflowSettings::default(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
         })
@@ -680,7 +683,7 @@ mod tests {
                     ),
                 ]),
             }),
-            settings:          SettingsLayer::default(),
+            settings:          WorkflowSettings::default(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
         })
@@ -751,25 +754,10 @@ mod tests {
                     base_dir: None,
                 },
                 settings: {
-                    use fabro_types::settings::run::{
-                        RunExecutionLayer, RunLayer, RunMode, RunSandboxLayer,
-                    };
-                    let mut layer = SettingsLayer {
-                        run: Some(RunLayer {
-                            execution: Some(RunExecutionLayer {
-                                mode: Some(RunMode::DryRun),
-                                ..RunExecutionLayer::default()
-                            }),
-                            sandbox: Some(RunSandboxLayer {
-                                provider: Some("not-a-provider".to_string()),
-                                ..RunSandboxLayer::default()
-                            }),
-                            ..RunLayer::default()
-                        }),
-                        ..SettingsLayer::default()
-                    };
-                    layer.ensure_test_auth_methods();
-                    layer
+                    let mut settings = WorkflowSettings::default();
+                    settings.run.execution.mode = RunMode::Normal;
+                    settings.run.sandbox.provider = "not-a-provider".to_string();
+                    settings
                 },
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
@@ -790,7 +778,7 @@ mod tests {
 
         match err {
             Error::Precondition(message) => {
-                assert!(message.contains("run.sandbox.provider"));
+                assert!(message.contains("Invalid sandbox provider"));
                 assert!(!message.contains('\n'));
             }
             other => panic!("expected Precondition, got {other:?}"),
@@ -809,37 +797,27 @@ mod tests {
                     source:   MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: {
-                    use fabro_types::settings::ReplaceMap;
-                    use fabro_types::settings::run::{
-                        RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer,
-                        RunPullRequestLayer,
-                    };
+                settings: settings_from_run_layer({
                     let mut metadata = HashMap::new();
                     metadata.insert("env".to_string(), "test".to_string());
-                    let mut layer = SettingsLayer {
-                        run: Some(RunLayer {
-                            goal: Some(RunGoalLayer::Inline(InterpString::parse("override goal"))),
-                            metadata: ReplaceMap::from(metadata),
-                            model: Some(RunModelLayer {
-                                name: Some(InterpString::parse("sonnet")),
-                                ..RunModelLayer::default()
-                            }),
-                            pull_request: Some(RunPullRequestLayer {
-                                enabled: Some(false),
-                                ..RunPullRequestLayer::default()
-                            }),
-                            execution: Some(RunExecutionLayer {
-                                mode: Some(RunMode::DryRun),
-                                ..RunExecutionLayer::default()
-                            }),
-                            ..RunLayer::default()
+                    RunLayer {
+                        goal: Some(RunGoalLayer::Inline(InterpString::parse("override goal"))),
+                        metadata: ReplaceMap::from(metadata),
+                        model: Some(RunModelLayer {
+                            name: Some(InterpString::parse("sonnet")),
+                            ..RunModelLayer::default()
                         }),
-                        ..SettingsLayer::default()
-                    };
-                    layer.ensure_test_auth_methods();
-                    layer
-                },
+                        pull_request: Some(RunPullRequestLayer {
+                            enabled: Some(false),
+                            ..RunPullRequestLayer::default()
+                        }),
+                        execution: Some(RunExecutionLayer {
+                            mode: Some(RunMode::DryRun),
+                            ..RunExecutionLayer::default()
+                        }),
+                        ..RunLayer::default()
+                    }
+                }),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,
@@ -860,8 +838,11 @@ mod tests {
         assert_eq!(created.run_id, fixtures::RUN_1);
         assert_eq!(created.persisted.run_spec().graph.goal(), "override goal");
         assert_eq!(
-            fabro_config::resolve_run_from_file(&created.persisted.run_spec().settings)
-                .unwrap()
+            created
+                .persisted
+                .run_spec()
+                .settings
+                .run
                 .model
                 .name
                 .as_ref()
@@ -870,8 +851,11 @@ mod tests {
             Some("claude-sonnet-4-6")
         );
         assert_eq!(
-            fabro_config::resolve_run_from_file(&created.persisted.run_spec().settings)
-                .unwrap()
+            created
+                .persisted
+                .run_spec()
+                .settings
+                .run
                 .model
                 .provider
                 .as_ref()
@@ -880,10 +864,7 @@ mod tests {
             Some("anthropic")
         );
         assert_eq!(
-            match fabro_config::resolve_run_from_file(&created.persisted.run_spec().settings)
-                .unwrap()
-                .goal
-            {
+            match &created.persisted.run_spec().settings.run.goal {
                 Some(fabro_types::settings::run::RunGoal::Inline(value)) => {
                     Some(value.as_source())
                 }
@@ -893,8 +874,11 @@ mod tests {
             Some("override goal")
         );
         assert!(
-            fabro_config::resolve_run_from_file(&created.persisted.run_spec().settings)
-                .unwrap()
+            created
+                .persisted
+                .run_spec()
+                .settings
+                .run
                 .pull_request
                 .is_none()
         );
@@ -932,22 +916,16 @@ mod tests {
                     source:   MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: {
-                    use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
-                    let mut layer = SettingsLayer {
-                        run: Some(RunLayer {
-                            working_dir: Some(InterpString::parse("workspace")),
-                            execution: Some(RunExecutionLayer {
-                                mode: Some(RunMode::DryRun),
-                                ..RunExecutionLayer::default()
-                            }),
-                            ..RunLayer::default()
+                settings: settings_from_run_layer({
+                    RunLayer {
+                        working_dir: Some(InterpString::parse("workspace")),
+                        execution: Some(RunExecutionLayer {
+                            mode: Some(RunMode::DryRun),
+                            ..RunExecutionLayer::default()
                         }),
-                        ..SettingsLayer::default()
-                    };
-                    layer.ensure_test_auth_methods();
-                    layer
-                },
+                        ..RunLayer::default()
+                    }
+                }),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -1015,43 +993,24 @@ mod tests {
         );
     }
 
-    fn dry_run_only_settings() -> SettingsLayer {
-        use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
-        let mut layer = SettingsLayer {
-            run: Some(RunLayer {
-                execution: Some(RunExecutionLayer {
-                    mode: Some(RunMode::DryRun),
-                    ..RunExecutionLayer::default()
-                }),
-                ..RunLayer::default()
+    fn dry_run_only_settings() -> WorkflowSettings {
+        settings_from_run_layer(RunLayer {
+            execution: Some(RunExecutionLayer {
+                mode: Some(RunMode::DryRun),
+                ..RunExecutionLayer::default()
             }),
-            ..SettingsLayer::default()
-        };
-        layer.ensure_test_auth_methods();
-        layer
+            ..RunLayer::default()
+        })
     }
 
-    fn dry_run_with_storage(storage_dir: &Path) -> SettingsLayer {
-        use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
-        use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
-        let mut layer = SettingsLayer {
-            run: Some(RunLayer {
-                execution: Some(RunExecutionLayer {
-                    mode: Some(RunMode::DryRun),
-                    ..RunExecutionLayer::default()
-                }),
-                ..RunLayer::default()
+    fn dry_run_with_storage(_storage_dir: &Path) -> WorkflowSettings {
+        settings_from_run_layer(RunLayer {
+            execution: Some(RunExecutionLayer {
+                mode: Some(RunMode::DryRun),
+                ..RunExecutionLayer::default()
             }),
-            server: Some(ServerLayer {
-                storage: Some(ServerStorageLayer {
-                    root: Some(InterpString::parse(&storage_dir.to_string_lossy())),
-                }),
-                ..ServerLayer::default()
-            }),
-            ..SettingsLayer::default()
-        };
-        layer.ensure_test_auth_methods();
-        layer
+            ..RunLayer::default()
+        })
     }
 
     #[tokio::test]

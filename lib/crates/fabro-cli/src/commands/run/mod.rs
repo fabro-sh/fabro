@@ -4,6 +4,8 @@ use fabro_util::terminal::Styles;
 use crate::args::{AttachArgs, RunCommands, RunWorkerArgs, StartArgs};
 use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
+#[cfg(feature = "sleep_inhibitor")]
+use crate::sleep_inhibitor;
 
 pub(crate) mod attach;
 pub(crate) mod command;
@@ -106,7 +108,7 @@ pub(crate) async fn dispatch(
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
                 let ctx = base_ctx.with_target(&args.server)?;
-                crate::sleep_inhibitor::guard(ctx.user_settings().cli.exec.prevent_idle_sleep)
+                sleep_inhibitor::guard(ctx.user_settings().cli.exec.prevent_idle_sleep)
             };
             Box::pin(resume::resume_command(args, styles, base_ctx)).await
         }

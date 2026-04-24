@@ -43,7 +43,7 @@ pub(super) fn status_command(args: &AuthStatusArgs, ctx: &CommandContext) -> Res
     let store = AuthStore::default();
     let now = Utc::now();
     let rows = if args.server.as_deref().is_some() {
-        let target = user_config::resolve_server_target(&args.server, ctx.machine_settings())?;
+        let target = user_config::resolve_server_target(&args.server, ctx.user_settings())?;
         filter_rows(&store, &target, now)?
     } else {
         all_rows(&store, now)?

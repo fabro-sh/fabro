@@ -1,19 +1,22 @@
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
-    ArtifactsSettings, DaytonaDockerfileLayer, DaytonaSandboxLayer, DaytonaSettings,
-    DaytonaSnapshotSettings, DockerfileSource, GitAuthorSettings, HookAgentMarker, HookDefinition,
-    HookEntry, HookTlsMode, HookType, InterviewProviderLayer, InterviewProviderSettings,
-    InterviewsLayer, LocalSandboxSettings, McpEntryLayer, McpServerSettings, McpTransport,
-    MergeStrategy, ModelRefOrSplice, NotificationProviderLayer, NotificationProviderSettings,
-    NotificationRouteLayer, NotificationRouteSettings, PullRequestSettings, RunAgentLayer,
-    RunAgentSettings, RunArtifactsLayer, RunCheckpointLayer, RunCheckpointSettings,
-    RunExecutionLayer, RunExecutionSettings, RunGitLayer, RunGitSettings, RunGoal, RunGoalLayer,
-    RunInterviewsSettings, RunLayer, RunModelLayer, RunModelSettings, RunNamespace,
-    RunPrepareLayer, RunPrepareSettings, RunPullRequestLayer, RunSandboxLayer, RunSandboxSettings,
-    RunScmLayer, RunScmSettings, ScmGitHubSettings, StringOrSplice, TlsMode,
+    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerfileSource,
+    GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, LocalSandboxSettings,
+    McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
+    NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunCheckpointSettings,
+    RunExecutionSettings, RunGitSettings, RunGoal, RunInterviewsSettings, RunModelSettings,
+    RunNamespace, RunPrepareSettings, RunSandboxSettings, RunScmSettings, ScmGitHubSettings,
+    TlsMode,
 };
 
 use super::ResolveError;
+use crate::{
+    DaytonaDockerfileLayer, DaytonaSandboxLayer, HookAgentMarker, HookEntry, HookTlsMode,
+    InterviewProviderLayer, InterviewsLayer, McpEntryLayer, ModelRefOrSplice,
+    NotificationProviderLayer, NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer,
+    RunCheckpointLayer, RunExecutionLayer, RunGitLayer, RunGoalLayer, RunLayer, RunModelLayer,
+    RunPrepareLayer, RunPullRequestLayer, RunSandboxLayer, RunScmLayer, StringOrSplice,
+};
 
 pub fn resolve_run(layer: &RunLayer, errors: &mut Vec<ResolveError>) -> RunNamespace {
     RunNamespace {
@@ -451,7 +454,7 @@ fn resolve_scm(scm: Option<&RunScmLayer>) -> RunScmSettings {
         provider:   scm.provider.clone(),
         owner:      scm.owner.clone(),
         repository: scm.repository.clone(),
-        github:     scm.github.as_ref().map(|_| ScmGitHubSettings),
+        github:     scm.github.as_ref().map(|_| ScmGitHubSettings {}),
     }
 }
 

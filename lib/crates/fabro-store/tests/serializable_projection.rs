@@ -5,17 +5,16 @@ use chrono::{TimeZone, Utc};
 use fabro_store::{NodeState, RunProjection, SerializableProjection, StageId};
 use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
-use fabro_types::settings::SettingsLayer;
 use fabro_types::{
     Checkpoint, NodeStatusRecord, RunStatus, SandboxRecord, StageStatus, StartRecord,
-    TerminalStatus, fixtures,
+    TerminalStatus, WorkflowSettings, fixtures,
 };
 use serde_json::json;
 
 fn sample_run_spec() -> RunSpec {
     RunSpec {
         run_id:            fixtures::RUN_1,
-        settings:          SettingsLayer::default(),
+        settings:          WorkflowSettings::default(),
         graph:             Graph::new("ship"),
         workflow_slug:     Some("demo".to_string()),
         working_directory: PathBuf::from("/tmp/project"),

@@ -12,13 +12,11 @@ use std::time::Duration as StdDuration;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 
-use super::duration::Duration;
 use super::interp::InterpString;
-use super::maps::{MergeMap, ReplaceMap, StickyMap};
 use super::model_ref::ModelRef;
 
 /// A structurally resolved `[run]` view for consumers.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunNamespace {
     pub goal:          Option<RunGoal>,
     pub working_dir:   Option<InterpString>,
@@ -40,32 +38,32 @@ pub struct RunNamespace {
 }
 
 /// The resolved source of a run goal.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum RunGoal {
     Inline(InterpString),
     File(InterpString),
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunModelSettings {
     pub provider:  Option<InterpString>,
     pub name:      Option<InterpString>,
     pub fallbacks: Vec<ModelRef>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunGitSettings {
     pub author: Option<GitAuthorSettings>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct GitAuthorSettings {
     pub name:  Option<InterpString>,
     pub email: Option<InterpString>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunPrepareSettings {
     pub commands:   Vec<String>,
     pub timeout_ms: u64,
@@ -80,7 +78,7 @@ impl Default for RunPrepareSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunExecutionSettings {
     pub mode:     RunMode,
     pub approval: ApprovalMode,
@@ -97,12 +95,12 @@ impl Default for RunExecutionSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunCheckpointSettings {
     pub exclude_globs: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSandboxSettings {
     pub provider:     String,
     pub preserve:     bool,
@@ -125,12 +123,12 @@ impl Default for RunSandboxSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LocalSandboxSettings {
     pub worktree_mode: WorktreeMode,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DaytonaSettings {
     pub auto_stop_interval: Option<i32>,
     pub labels:             HashMap<String, String>,
@@ -142,6 +140,13 @@ pub struct DaytonaSettings {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DockerfileSource {
     Inline(String),
+    Path { path: String },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum DockerfileSourceRepr {
+    Inline { value: String },
     Path { path: String },
 }
 
@@ -165,7 +170,19 @@ impl Serialize for DockerfileSource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+impl<'de> Deserialize<'de> for DockerfileSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match DockerfileSourceRepr::deserialize(deserializer)? {
+            DockerfileSourceRepr::Inline { value } => Ok(Self::Inline(value)),
+            DockerfileSourceRepr::Path { path } => Ok(Self::Path { path }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DaytonaSnapshotSettings {
     pub name:       String,
     pub cpu:        Option<i32>,
@@ -174,7 +191,7 @@ pub struct DaytonaSnapshotSettings {
     pub dockerfile: Option<DockerfileSource>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct NotificationRouteSettings {
     pub enabled:  bool,
     pub provider: Option<String>,
@@ -184,12 +201,12 @@ pub struct NotificationRouteSettings {
     pub teams:    Option<NotificationProviderSettings>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct NotificationProviderSettings {
     pub channel: Option<InterpString>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunInterviewsSettings {
     pub provider: Option<String>,
     pub slack:    Option<InterviewProviderSettings>,
@@ -197,18 +214,18 @@ pub struct RunInterviewsSettings {
     pub teams:    Option<InterviewProviderSettings>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct InterviewProviderSettings {
     pub channel: Option<InterpString>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunAgentSettings {
     pub permissions: Option<AgentPermissions>,
     pub mcps:        HashMap<String, McpServerSettings>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct McpServerSettings {
     pub name:                 String,
     pub transport:            McpTransport,
@@ -242,7 +259,7 @@ impl McpServerSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum McpTransport {
     Stdio {
@@ -372,7 +389,7 @@ impl HookDefinition {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunScmSettings {
     pub provider:   Option<String>,
     pub owner:      Option<InterpString>,
@@ -380,20 +397,14 @@ pub struct RunScmSettings {
     pub github:     Option<ScmGitHubSettings>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct ScmGitHubSettings;
+#[expect(
+    clippy::empty_structs_with_brackets,
+    reason = "resolved empty table must stay object-shaped on the wire"
+)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ScmGitHubSettings {}
 
-impl Serialize for ScmGitHubSettings {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let state = serializer.serialize_struct("ScmGitHubSettings", 0)?;
-        state.end()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PullRequestSettings {
     pub enabled:        bool,
     pub draft:          bool,
@@ -412,86 +423,14 @@ impl Default for PullRequestSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ArtifactsSettings {
     pub include: Vec<String>,
 }
-
-/// A sparse `[run]` layer as it appears in a single settings file.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct RunLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal:          Option<RunGoalLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub working_dir:   Option<InterpString>,
-    /// Flat string-to-string map. Replaces wholesale across layers.
-    #[serde(default, skip_serializing_if = "ReplaceMap::is_empty")]
-    pub metadata:      ReplaceMap<String>,
-    /// Run inputs: typed scalar values. Replaces wholesale across layers.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub inputs:        Option<HashMap<String, toml::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model:         Option<RunModelLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub git:           Option<RunGitLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prepare:       Option<RunPrepareLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution:     Option<RunExecutionLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub checkpoint:    Option<RunCheckpointLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sandbox:       Option<RunSandboxLayer>,
-    #[serde(default, skip_serializing_if = "MergeMap::is_empty")]
-    pub notifications: MergeMap<NotificationRouteLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub interviews:    Option<InterviewsLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent:         Option<RunAgentLayer>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub hooks:         Vec<HookEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scm:           Option<RunScmLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pull_request:  Option<RunPullRequestLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifacts:     Option<RunArtifactsLayer>,
-}
-
-/// The source of a run's goal, either inline literal text or a reference to
-/// a file on disk.
-///
-/// TOML surface:
-///
-/// ```toml
-/// # Inline form
-/// [run]
-/// goal = "Diagnose and fix CI build failures"
-///
-/// # File form
-/// [run.goal]
-/// file = "prompts/fix_build.md"
-/// ```
-///
-/// Relative paths inside the `file` variant are resolved against the
-/// directory of the config file that declared them at load time (see
-/// `fabro_config::resolve_goal_file_paths`). `{{ env.NAME }}` interpolation is
-/// supported inside the `file` path; env-tokenized relative paths stay
-/// unresolved until consume time and are then resolved against the run's
-/// effective working directory.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged, deny_unknown_fields)]
-pub enum RunGoalLayer {
-    Inline(InterpString),
-    File { file: InterpString },
-}
-
-/// Outcome of resolving a [`RunGoalLayer`] to its final goal text.
+/// Outcome of resolving a [`RunGoal`] to its final goal text.
 ///
 /// Carries provenance alongside the text so downstream consumers (e.g. the
-/// run manifest builder) can distinguish inline goals from file-sourced
-/// goals without having to re-walk the layer.
+/// run manifest builder) can distinguish inline goals from file-sourced goals.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedRunGoal {
     pub text:   String,
@@ -508,77 +447,6 @@ pub enum ResolvedGoalSource {
     File { path: std::path::PathBuf },
 }
 
-/// `[run.model]` — provider-neutral default model selection.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct RunModelLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider:  Option<InterpString>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name:      Option<InterpString>,
-    /// Ordered list of fallback model references. Supports `...` splice marker
-    /// at layering time — see [`super::splice_array`].
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub fallbacks: Vec<ModelRefOrSplice>,
-}
-
-/// A single `fallbacks` entry: either a parsed `ModelRef` or the splice marker.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ModelRefOrSplice {
-    ModelRef(ModelRef),
-    Splice,
-}
-
-impl Serialize for ModelRefOrSplice {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::ModelRef(m) => m.serialize(serializer),
-            Self::Splice => serializer.serialize_str(super::splice_array::SPLICE_MARKER),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for ModelRefOrSplice {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let raw = String::deserialize(deserializer)?;
-        if raw == super::splice_array::SPLICE_MARKER {
-            return Ok(Self::Splice);
-        }
-        let model = raw.parse::<ModelRef>().map_err(D::Error::custom)?;
-        Ok(Self::ModelRef(model))
-    }
-}
-
-/// `[run.git]` — local git behavior such as commit author.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct RunGitLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub author: Option<GitAuthorLayer>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct GitAuthorLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name:  Option<InterpString>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub email: Option<InterpString>,
-}
-
-/// `[run.prepare]` — ordered list of preparation steps. Whole list replaces
-/// across layers.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RunPrepareLayer {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub steps:   Vec<PrepareStep>,
-    /// Optional timeout applied to each prepare step.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<Duration>,
-}
-
 /// A single prepare step. Exactly one of `script` or `command` must be set.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -589,19 +457,6 @@ pub struct PrepareStep {
     pub command: Option<Vec<InterpString>>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env:     HashMap<String, InterpString>,
-}
-
-/// `[run.execution]` — run posture knobs.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct RunExecutionLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode:     Option<RunMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approval: Option<ApprovalMode>,
-    /// Positive-form: `true` runs retros, `false` skips them.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub retros:   Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -618,40 +473,6 @@ pub enum ApprovalMode {
     Auto,
 }
 
-/// `[run.checkpoint]` — checkpoint policy.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RunCheckpointLayer {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub exclude_globs: Vec<String>,
-}
-
-/// `[run.sandbox]` — sandbox selection and execution-environment surface.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct RunSandboxLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider:     Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preserve:     Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub devcontainer: Option<bool>,
-    /// Sticky merge-by-key across layers.
-    #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
-    pub env:          StickyMap<InterpString>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub local:        Option<LocalSandboxLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub daytona:      Option<DaytonaSandboxLayer>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LocalSandboxLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worktree_mode: Option<WorktreeMode>,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorktreeMode {
@@ -662,44 +483,6 @@ pub enum WorktreeMode {
     Never,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct DaytonaSandboxLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_stop_interval: Option<i32>,
-    /// Sticky merge-by-key (provider-native labels).
-    #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
-    pub labels:             StickyMap<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub snapshot:           Option<DaytonaSnapshotLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub network:            Option<DaytonaNetworkLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub skip_clone:         Option<bool>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DaytonaSnapshotLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name:       Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cpu:        Option<i32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memory:     Option<super::size::Size>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disk:       Option<super::size::Size>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dockerfile: Option<DaytonaDockerfileLayer>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged, deny_unknown_fields)]
-pub enum DaytonaDockerfileLayer {
-    Inline(String),
-    Path { path: String },
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum DaytonaNetworkLayer {
@@ -708,210 +491,12 @@ pub enum DaytonaNetworkLayer {
     AllowList { allow_list: Vec<String> },
 }
 
-/// `[run.notifications.<name>]` — a keyed notification route.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct NotificationRouteLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled:  Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    /// Raw Fabro event names. Splice marker supported at layering time.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub events:   Vec<StringOrSplice>,
-    /// Provider-specific destination subtables. First-pass chat providers.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slack:    Option<NotificationProviderLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub discord:  Option<NotificationProviderLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub teams:    Option<NotificationProviderLayer>,
-}
-
-/// A single string array entry that may be the splice marker.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StringOrSplice {
-    Value(String),
-    Splice,
-}
-
-impl Serialize for StringOrSplice {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::Value(s) => serializer.serialize_str(s),
-            Self::Splice => serializer.serialize_str(super::splice_array::SPLICE_MARKER),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for StringOrSplice {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        if s == super::splice_array::SPLICE_MARKER {
-            Ok(Self::Splice)
-        } else {
-            Ok(Self::Value(s))
-        }
-    }
-}
-
-/// Provider-specific destination fields for a notification route.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NotificationProviderLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub channel: Option<InterpString>,
-}
-
-/// `[run.interviews]` — external interview delivery.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct InterviewsLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slack:    Option<InterviewProviderLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub discord:  Option<InterviewProviderLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub teams:    Option<InterviewProviderLayer>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct InterviewProviderLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub channel: Option<InterpString>,
-}
-
-/// `[run.agent]` — agent knobs only (permissions, MCPs).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct RunAgentLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub permissions: Option<AgentPermissions>,
-    /// Agent-scoped MCP server entries, keyed by name.
-    #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
-    pub mcps:        StickyMap<McpEntryLayer>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentPermissions {
     ReadOnly,
     ReadWrite,
     Full,
-}
-
-/// A single MCP entry. `type` selects the transport; `script`/`command` are
-/// mutually exclusive for process-launching transports. Non-launching HTTP
-/// transports use neither field.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, tag = "type", rename_all = "snake_case")]
-pub enum McpEntryLayer {
-    Http {
-        #[serde(default)]
-        enabled:         Option<bool>,
-        url:             InterpString,
-        #[serde(default)]
-        headers:         HashMap<String, InterpString>,
-        #[serde(default)]
-        startup_timeout: Option<Duration>,
-        #[serde(default)]
-        tool_timeout:    Option<Duration>,
-    },
-    Stdio {
-        #[serde(default)]
-        enabled:         Option<bool>,
-        #[serde(default)]
-        script:          Option<InterpString>,
-        #[serde(default)]
-        command:         Option<Vec<InterpString>>,
-        #[serde(default)]
-        env:             HashMap<String, InterpString>,
-        #[serde(default)]
-        startup_timeout: Option<Duration>,
-        #[serde(default)]
-        tool_timeout:    Option<Duration>,
-    },
-    Sandbox {
-        #[serde(default)]
-        enabled:         Option<bool>,
-        #[serde(default)]
-        script:          Option<InterpString>,
-        #[serde(default)]
-        command:         Option<Vec<InterpString>>,
-        port:            u16,
-        #[serde(default)]
-        env:             HashMap<String, InterpString>,
-        #[serde(default)]
-        startup_timeout: Option<Duration>,
-        #[serde(default)]
-        tool_timeout:    Option<Duration>,
-    },
-}
-
-/// A run hook entry. Exactly one of `script`, `command`, `url`, `prompt`, or
-/// `agent` fields determines the hook behavior. The `id` field, when set, is
-/// used for cross-layer replace-by-id merging.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HookEntry {
-    /// Optional merge identity. Hooks with the same `id` replace in place.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id:               Option<String>,
-    /// Display-only human name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name:             Option<String>,
-    pub event:            HookEvent,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub matcher:          Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub blocking:         Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout:          Option<Duration>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sandbox:          Option<bool>,
-    // Exactly one of the following groups is expected:
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub script:           Option<InterpString>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub command:          Option<Vec<InterpString>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url:              Option<InterpString>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub headers:          HashMap<String, InterpString>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub allowed_env_vars: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tls:              Option<HookTlsMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt:           Option<InterpString>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model:            Option<InterpString>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_tool_rounds:  Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent:            Option<HookAgentMarker>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HookTlsMode {
-    #[default]
-    Verify,
-    NoVerify,
-    Off,
-}
-
-/// Reserved marker for hook entries that use the `agent` hook type. Having
-/// this as its own field rather than a flag lets `HookEntry` remain a flat
-/// struct without a discriminator.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HookAgentMarker {
-    #[default]
-    Enabled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -935,54 +520,10 @@ pub enum HookEvent {
     PostToolUseFailure,
 }
 
-/// `[run.scm]` — remote SCM host/provider behavior.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct RunScmLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider:   Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owner:      Option<InterpString>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repository: Option<InterpString>,
-    /// Provider-specific SCM leaves. First-pass providers.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github:     Option<ScmGitHubLayer>,
-}
-
-/// `[run.scm.github]` — GitHub-specific SCM leaf. Intentionally minimal in
-/// the first pass; additional branch/checkout context stays on `run` or
-/// `run.pull_request` until a concrete use case lands.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ScmGitHubLayer;
-
-/// `[run.pull_request]` — provider-neutral PR behavior.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct RunPullRequestLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled:        Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub draft:          Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_merge:     Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub merge_strategy: Option<MergeStrategy>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MergeStrategy {
     Squash,
     Merge,
     Rebase,
-}
-
-/// `[run.artifacts]` — run artifact collection policy.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RunArtifactsLayer {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub include: Vec<String>,
 }

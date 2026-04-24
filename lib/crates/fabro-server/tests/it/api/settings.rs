@@ -1,16 +1,14 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_config::parse_settings_layer;
 use fabro_server::jwt_auth::AuthMode;
-use fabro_server::server::{build_router, create_app_state_with_options};
-use fabro_types::settings::SettingsLayer;
+use fabro_server::server::{build_router, create_app_state_with_runtime_settings_and_options};
 use tower::ServiceExt;
 
-use crate::helpers::response_json;
+use crate::helpers::{response_json, settings_from_toml};
 
 #[tokio::test]
 async fn retrieve_server_settings_returns_dense_server_settings_from_app_state() {
-    let settings: SettingsLayer = parse_settings_layer(
+    let settings = settings_from_toml(
         r#"
 _version = 1
 
@@ -33,10 +31,13 @@ allowed_usernames = ["alice"]
 [server.integrations.github]
 client_id = "Iv1.abcdef"
 "#,
-    )
-    .expect("settings fixture should parse");
+    );
     let app = build_router(
-        create_app_state_with_options(settings, 5),
+        create_app_state_with_runtime_settings_and_options(
+            settings.server_settings,
+            settings.manifest_run_defaults,
+            5,
+        ),
         AuthMode::Disabled,
     );
 

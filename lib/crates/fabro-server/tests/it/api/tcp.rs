@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use axum::http::StatusCode;
 use fabro_config::bind::Bind;
-use fabro_config::{RuntimeDirectory, parse_settings_layer, resolve_server_from_file};
+use fabro_config::{RuntimeDirectory, ServerSettingsBuilder};
 use fabro_server::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
 use fabro_server::jwt_auth::{AuthMode, resolve_auth_mode_with_lookup};
 use fabro_server::serve::{ServeArgs, serve_command};
@@ -106,7 +106,12 @@ async fn spawn_served_listener(
         .await
     });
 
-    let bind = rx.await.expect("server should report its bind address");
+    let Ok(bind) = rx.await else {
+        let result = handle
+            .await
+            .expect("server task should not panic before reporting readiness");
+        panic!("server should report its bind address: {result:?}");
+    };
     (handle, bind, tempdir)
 }
 
@@ -159,7 +164,7 @@ methods = ["dev-token"]
 
 #[tokio::test]
 async fn tcp_dev_token_auth_uses_bearer_auth() {
-    let settings = parse_settings_layer(
+    let resolved = ServerSettingsBuilder::from_toml(
         r#"
 _version = 1
 
@@ -167,8 +172,8 @@ _version = 1
 methods = ["dev-token"]
 "#,
     )
-    .expect("test settings should parse");
-    let resolved = resolve_server_from_file(&settings).expect("test settings should resolve");
+    .expect("test settings should resolve")
+    .server;
     let auth_mode = resolve_auth_mode_with_lookup(&resolved, |name| match name {
         "SESSION_SECRET" => Some(TEST_SESSION_SECRET.to_string()),
         "FABRO_DEV_TOKEN" => Some(TEST_DEV_TOKEN.to_string()),

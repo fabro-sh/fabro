@@ -1,10 +1,10 @@
 import type { PaginationMeta } from "@qltysh/fabro-api-client";
 
 /**
- * Opaque persisted `SettingsLayer` payload returned by `/api/v1/runs/:id/settings`.
- * Treated as a loose JSON object on the web side — consumers only render it.
+ * Opaque persisted `WorkflowSettings` snapshot returned by `/api/v1/runs/:id/settings`.
+ * Treated as a loose JSON object on the web side; consumers only render it.
  */
-export type RunSettingsLayer = Record<string, unknown>;
+export type WorkflowSettingsSnapshot = Record<string, unknown>;
 
 export interface WorkflowScheduleSummary {
   expression: string;
@@ -33,6 +33,6 @@ export interface WorkflowDetailResponse {
   slug: string;
   description: string;
   filename: string;
-  settings: RunSettingsLayer;
+  settings: WorkflowSettingsSnapshot;
   graph: string;
 }

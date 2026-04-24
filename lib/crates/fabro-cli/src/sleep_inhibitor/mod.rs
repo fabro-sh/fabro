@@ -16,7 +16,7 @@ mod dummy;
 use tracing::debug;
 
 /// RAII guard that prevents idle system sleep while held.
-pub struct SleepInhibitorGuard {
+pub(crate) struct SleepInhibitorGuard {
     _inner: InnerGuard,
 }
 
@@ -39,7 +39,7 @@ enum InnerGuard {
 /// If `enabled` is `true`, attempts to acquire a platform-specific sleep
 /// inhibitor. Falls back to a dummy (no-op) backend if the platform backend
 /// is unavailable.
-pub fn guard(enabled: bool) -> Option<SleepInhibitorGuard> {
+pub(crate) fn guard(enabled: bool) -> Option<SleepInhibitorGuard> {
     if !enabled {
         debug!("Sleep inhibitor: disabled by configuration");
         return None;
@@ -63,9 +63,8 @@ pub fn guard(enabled: bool) -> Option<SleepInhibitorGuard> {
         }
     }
 
-    // Fallback to dummy
-    dummy::DummySleepInhibitor::acquire().map(|inner| SleepInhibitorGuard {
-        _inner: InnerGuard::Dummy(inner),
+    Some(SleepInhibitorGuard {
+        _inner: InnerGuard::Dummy(dummy::DummySleepInhibitor::acquire()),
     })
 }
 

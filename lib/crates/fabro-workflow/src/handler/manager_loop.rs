@@ -7,7 +7,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
 use fabro_store::{ArtifactStore, Database};
-use fabro_types::settings::SettingsLayer;
+use fabro_types::WorkflowSettings;
 use object_store::memory::InMemory;
 use tokio::fs;
 use tokio::time::{sleep, timeout};
@@ -73,7 +73,7 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
                 source:   dot.to_string(),
                 base_dir: None,
             },
-            settings:          SettingsLayer::default(),
+            settings:          WorkflowSettings::default(),
             cwd:               cwd.clone(),
             custom_transforms: Vec::new(),
         })?;
@@ -115,7 +115,7 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
         };
         let validated = validate(ValidateInput {
             workflow,
-            settings: SettingsLayer::default(),
+            settings: WorkflowSettings::default(),
             cwd,
             custom_transforms: Vec::new(),
         })?;
@@ -202,7 +202,7 @@ impl Handler for SubWorkflowHandler {
         let child_cancel = Arc::clone(&cancel_token);
 
         let child_run_options = RunOptions {
-            settings:         SettingsLayer::default(),
+            settings:         WorkflowSettings::default(),
             run_dir:          child_logs,
             cancel_token:     Some(cancel_token),
             // Child workflows are part of the parent run's event stream.

@@ -1,10 +1,10 @@
 use fabro_types::settings::cli::{
-    CliAuthSettings, CliExecAgentSettings, CliExecLayer, CliExecModelSettings, CliExecSettings,
-    CliLayer, CliLoggingSettings, CliNamespace, CliOutputSettings, CliTargetLayer,
-    CliTargetSettings, CliUpdatesSettings,
+    CliAuthSettings, CliExecAgentSettings, CliExecModelSettings, CliExecSettings,
+    CliLoggingSettings, CliNamespace, CliOutputSettings, CliTargetSettings, CliUpdatesSettings,
 };
 
 use super::{ResolveError, require_interp};
+use crate::{CliExecLayer, CliLayer, CliTargetLayer};
 
 pub fn resolve_cli(layer: &CliLayer, errors: &mut Vec<ResolveError>) -> CliNamespace {
     CliNamespace {

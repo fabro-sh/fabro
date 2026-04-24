@@ -6,11 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
-use fabro_types::settings::SettingsLayer;
-
-use crate::Result;
 use crate::home::Home;
 use crate::load::load_settings_path;
+use crate::{Result, SettingsLayer};
 
 pub const SETTINGS_CONFIG_FILENAME: &str = "settings.toml";
 pub const FABRO_CONFIG_ENV: &str = "FABRO_CONFIG";
@@ -43,7 +41,7 @@ fn active_settings_path_with_lookup(
 /// Load settings config from an explicit path or `~/.fabro/settings.toml`,
 /// returning defaults if the default file doesn't exist. An explicit path that
 /// doesn't exist is an error.
-pub fn load_settings_config(path: Option<&Path>) -> Result<SettingsLayer> {
+pub(crate) fn load_settings_config(path: Option<&Path>) -> Result<SettingsLayer> {
     if let Some(explicit) = path
         .map(Path::to_path_buf)
         .or_else(|| std::env::var_os(FABRO_CONFIG_ENV).map(PathBuf::from))
@@ -61,24 +59,6 @@ pub fn load_settings_config(path: Option<&Path>) -> Result<SettingsLayer> {
 
 fn load_v2_layer_from_path(path: &Path) -> Result<SettingsLayer> {
     load_settings_path(path)
-}
-
-/// Override the resolved storage root in a settings layer with a runtime path.
-pub fn apply_storage_dir_override(
-    mut layer: SettingsLayer,
-    storage_dir: Option<&Path>,
-) -> SettingsLayer {
-    use fabro_types::settings::interp::InterpString;
-    use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
-    if let Some(dir) = storage_dir {
-        let server = layer.server.get_or_insert_with(ServerLayer::default);
-        let storage = server
-            .storage
-            .get_or_insert_with(ServerStorageLayer::default);
-        storage.root = Some(InterpString::parse(&dir.display().to_string()));
-    }
-
-    layer
 }
 
 #[cfg(test)]

@@ -468,7 +468,7 @@ pub fn persist_install_outputs_direct(
 
 #[cfg(test)]
 mod tests {
-    use fabro_config::{Storage, envfile};
+    use fabro_config::{ServerSettingsBuilder, Storage, envfile};
     use fabro_vault::{SecretType as VaultSecretType, Vault};
 
     use super::{
@@ -492,16 +492,12 @@ mod tests {
 
     #[test]
     fn config_toml_has_auth_strategies() {
-        use fabro_types::settings::{ServerAuthMethod, SettingsLayer};
+        use fabro_types::settings::ServerAuthMethod;
 
         let toml_str = format_config_toml();
-        let cfg: SettingsLayer = fabro_config::parse_settings_layer(&toml_str).unwrap();
-        let auth = cfg
-            .server
-            .as_ref()
-            .and_then(|s| s.auth.as_ref())
-            .expect("server.auth should be set");
-        assert_eq!(auth.methods, Some(vec![ServerAuthMethod::DevToken]));
+        let cfg =
+            ServerSettingsBuilder::from_toml(&toml_str).expect("generated config should resolve");
+        assert_eq!(cfg.server.auth.methods, vec![ServerAuthMethod::DevToken]);
     }
 
     #[test]
@@ -657,12 +653,11 @@ name = "custom"
         )
         .unwrap();
 
-        let settings = fabro_config::parse_settings_layer(
+        let resolved = ServerSettingsBuilder::from_toml(
             &toml::to_string_pretty(&doc).expect("settings should serialize"),
         )
-        .expect("settings should parse");
-        let resolved =
-            fabro_config::resolve_server_from_file(&settings).expect("settings should resolve");
+        .expect("settings should resolve")
+        .server;
         match resolved.listen {
             ServerListenSettings::Tcp { address, .. } => {
                 assert_eq!(address.to_string(), "0.0.0.0:32276");

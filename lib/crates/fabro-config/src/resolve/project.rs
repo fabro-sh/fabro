@@ -1,6 +1,7 @@
-use fabro_types::settings::project::{ProjectLayer, ProjectNamespace};
+use fabro_types::settings::ProjectNamespace;
 
 use super::ResolveError;
+use crate::ProjectLayer;
 
 pub fn resolve_project(layer: &ProjectLayer, _errors: &mut Vec<ResolveError>) -> ProjectNamespace {
     ProjectNamespace {

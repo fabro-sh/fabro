@@ -19,14 +19,14 @@ pub(super) fn list_command(_args: &WorkflowListArgs, base_ctx: &CommandContext) 
     let styles = Styles::detect_stderr();
     let cwd = std::env::current_dir()?;
 
-    let Some((config_path, config)) = discover_project_config(&cwd)? else {
+    let Some(config_path) = discover_project_config(&cwd)? else {
         bail!(
             "No .fabro/project.toml found in {cwd} or any parent directory",
             cwd = cwd.display()
         );
     };
 
-    let fabro_root = resolve_fabro_root(&config_path, &config);
+    let fabro_root = resolve_fabro_root(&config_path);
     let project_wf_dir = fabro_root.join("workflows");
     let user_wf_dir = Some(fabro_util::Home::from_env().workflows_dir());
 

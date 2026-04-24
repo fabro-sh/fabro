@@ -164,7 +164,7 @@ mod tests {
     use std::str::FromStr;
 
     use fabro_store::RunProjection;
-    use fabro_types::RunId;
+    use fabro_types::{RunId, WorkflowSettings};
     use git2::Oid;
 
     use super::super::test_support::*;
@@ -177,11 +177,12 @@ mod tests {
 
     fn make_run_projection(run_id: &RunId) -> RunProjection {
         let mut projection = RunProjection::default();
+        let settings = serde_json::to_value(WorkflowSettings::default()).unwrap();
         projection.spec = Some(
             serde_json::from_value(serde_json::json!({
                 "run_id": run_id.to_string(),
                 "created_at": "2025-01-01T00:00:00Z",
-                "settings": {},
+                "settings": settings,
                 "graph": {
                     "name": "test_workflow",
                     "nodes": {

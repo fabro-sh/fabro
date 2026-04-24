@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_config::{Storage, parse_settings_layer, resolve_server_from_file};
+use fabro_config::{ServerSettingsBuilder, Storage};
 use fabro_install::OBJECT_STORE_MANAGED_COMMENT;
 use fabro_model::Provider;
 use fabro_server::install::{InstallAppState, build_install_router};
@@ -744,8 +744,9 @@ async fn token_install_finish_persists_settings_env_and_vault() {
     let settings = std::fs::read_to_string(&config_path).unwrap();
     assert!(settings.contains("https://fabro.example.com"));
     assert!(settings.contains("strategy = \"token\""));
-    let parsed = parse_settings_layer(&settings).expect("settings should parse");
-    let resolved = resolve_server_from_file(&parsed).expect("settings should resolve");
+    let resolved = ServerSettingsBuilder::from_toml(&settings)
+        .expect("settings should resolve")
+        .server;
     assert_eq!(
         match resolved.listen {
             fabro_types::settings::server::ServerListenSettings::Tcp { address, .. } => {

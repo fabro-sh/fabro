@@ -309,10 +309,9 @@ impl RunSession {
         let (origin_url, detected_base_branch) = detect_repo_info(&working_directory)
             .map_or((None, None), |(url, branch)| (Some(url), branch));
 
-        let resolved = fabro_config::resolve_run_from_file(settings)
-            .map_err(|errors| Error::Precondition(fabro_config::render_resolve_errors(&errors)))?;
+        let resolved = &settings.run;
 
-        let sandbox_provider = resolve_sandbox_provider(&resolved)?;
+        let sandbox_provider = resolve_sandbox_provider(resolved)?;
         let sandbox_provider =
             if resolved.execution.mode == RunMode::DryRun && !sandbox_provider.is_local() {
                 SandboxProvider::Local
@@ -367,7 +366,7 @@ impl RunSession {
                     None => None,
                 };
                 SandboxSpec::Daytona {
-                    config: resolve_daytona_config(&resolved).unwrap_or_default(),
+                    config: resolve_daytona_config(resolved).unwrap_or_default(),
                     github_app: services.github_app.clone(),
                     run_id: Some(record.run_id),
                     clone_branch: detected_base_branch.or_else(|| record.base_branch.clone()),
@@ -435,7 +434,7 @@ impl RunSession {
             artifact_sink: services.artifact_sink,
             git,
             github_app: services.github_app.clone(),
-            worktree_mode: Some(resolve_worktree_mode(&resolved)),
+            worktree_mode: Some(resolve_worktree_mode(resolved)),
             registry_override: services.registry_override,
             retro_enabled: resolved.execution.retros && project_config::is_retro_enabled(),
             preserve_sandbox: resolved.sandbox.preserve,
@@ -970,10 +969,10 @@ mod tests {
     use std::time::Duration;
 
     use chrono::Utc;
+    use fabro_config::{RunExecutionLayer, RunLayer, WorkflowSettingsBuilder};
     use fabro_store::Database;
-    use fabro_types::fixtures;
-    use fabro_types::settings::SettingsLayer;
-    use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
+    use fabro_types::settings::run::RunMode;
+    use fabro_types::{WorkflowSettings, fixtures};
     use object_store::memory::InMemory;
 
     use super::*;
@@ -1012,6 +1011,13 @@ mod tests {
         (storage_root, run_dir)
     }
 
+    fn settings_from_run_layer(run: RunLayer) -> WorkflowSettings {
+        WorkflowSettingsBuilder::new()
+            .run_overrides(run)
+            .build()
+            .expect("settings should resolve")
+    }
+
     async fn persisted_workflow(dot: &str, storage_root: &Path) -> (Persisted, Arc<Database>) {
         let store = memory_store();
         let created = crate::operations::create(
@@ -1021,20 +1027,13 @@ mod tests {
                     source:   dot.to_string(),
                     base_dir: None,
                 },
-                settings: {
-                    let mut layer = SettingsLayer {
-                        run: Some(RunLayer {
-                            execution: Some(RunExecutionLayer {
-                                mode: Some(RunMode::DryRun),
-                                ..RunExecutionLayer::default()
-                            }),
-                            ..RunLayer::default()
-                        }),
-                        ..SettingsLayer::default()
-                    };
-                    layer.ensure_test_auth_methods();
-                    layer
-                },
+                settings: settings_from_run_layer(RunLayer {
+                    execution: Some(RunExecutionLayer {
+                        mode: Some(RunMode::DryRun),
+                        ..RunExecutionLayer::default()
+                    }),
+                    ..RunLayer::default()
+                }),
                 cwd: storage_root
                     .parent()
                     .unwrap_or_else(|| Path::new("."))
@@ -1209,20 +1208,13 @@ mod tests {
                         .unwrap()
                         .clone(),
                 ),
-                settings: {
-                    let mut layer = SettingsLayer {
-                        run: Some(RunLayer {
-                            execution: Some(RunExecutionLayer {
-                                mode: Some(RunMode::DryRun),
-                                ..RunExecutionLayer::default()
-                            }),
-                            ..RunLayer::default()
-                        }),
-                        ..SettingsLayer::default()
-                    };
-                    layer.ensure_test_auth_methods();
-                    layer
-                },
+                settings: settings_from_run_layer(RunLayer {
+                    execution: Some(RunExecutionLayer {
+                        mode: Some(RunMode::DryRun),
+                        ..RunExecutionLayer::default()
+                    }),
+                    ..RunLayer::default()
+                }),
                 cwd: temp.path().to_path_buf(),
                 workflow_slug: Some("bundle-child".to_string()),
                 workflow_path: Some(PathBuf::from("workflow.fabro")),

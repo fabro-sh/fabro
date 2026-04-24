@@ -174,12 +174,12 @@ fn impl_combine(ast: &DeriveInput) -> TokenStream {
     let combines = fields.iter().map(|field| {
         let name = &field.ident;
         quote! {
-            #name: crate::settings::Combine::combine(self.#name, other.#name)
+            #name: ::fabro_config::layers::Combine::combine(self.#name, other.#name)
         }
     });
 
     quote! {
-        impl #impl_generics crate::settings::Combine for #name #ty_generics #where_clause {
+        impl #impl_generics ::fabro_config::layers::Combine for #name #ty_generics #where_clause {
             fn combine(self, other: Self) -> Self {
                 Self {
                     #(#combines),*

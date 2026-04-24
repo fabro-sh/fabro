@@ -3,9 +3,8 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand, ValueEnum};
 use fabro_agent::cli::AgentArgs;
-use fabro_types::settings::cli::{
-    CliLayer, CliLoggingLayer, CliOutputLayer, CliUpdatesLayer, OutputFormat, OutputVerbosity,
-};
+use fabro_config::{CliLayer, CliLoggingLayer, CliOutputLayer, CliUpdatesLayer};
+use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
 use fabro_util::printer::Printer;
 
 pub(crate) const LONG_VERSION: &str = concat!(

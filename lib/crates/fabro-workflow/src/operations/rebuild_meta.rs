@@ -310,8 +310,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use fabro_graphviz::graph::Graph;
     use fabro_store::{Database, RunProjection, StageId};
-    use fabro_types::settings::SettingsLayer;
-    use fabro_types::{RunId, RunSpec, SandboxRecord, StartRecord, fixtures};
+    use fabro_types::{RunId, RunSpec, SandboxRecord, StartRecord, WorkflowSettings, fixtures};
     use object_store::memory::InMemory;
 
     use super::*;
@@ -343,7 +342,7 @@ mod tests {
     fn sample_run_spec(run_id: RunId, host_repo_path: Option<&str>) -> RunSpec {
         RunSpec {
             run_id,
-            settings: SettingsLayer::default(),
+            settings: WorkflowSettings::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
             working_directory: PathBuf::from("/tmp/project"),

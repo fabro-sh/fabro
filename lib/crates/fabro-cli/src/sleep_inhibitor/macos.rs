@@ -6,7 +6,10 @@
 use core_foundation::base::TCFType;
 use tracing::{debug, warn};
 
-use super::iokit_bindings::*;
+use super::iokit_bindings::{
+    IOPMAssertionCreateWithName, IOPMAssertionID, IOPMAssertionRelease, assertion_reason,
+    kIOPMAssertionIDInvalid, kIOPMAssertionLevelOn, kIOReturnSuccess, prevent_idle_sleep_type,
+};
 
 pub(crate) struct MacOSSleepInhibitor {
     assertion_id: IOPMAssertionID,
@@ -23,7 +26,7 @@ impl MacOSSleepInhibitor {
                 assertion_type.as_concrete_TypeRef(),
                 kIOPMAssertionLevelOn,
                 reason.as_concrete_TypeRef(),
-                &mut assertion_id,
+                &raw mut assertion_id,
             )
         };
 

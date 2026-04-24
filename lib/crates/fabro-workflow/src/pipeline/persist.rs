@@ -63,9 +63,6 @@ mod tests {
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_store::{Database, RunDatabase};
     use fabro_types::fixtures;
-    use fabro_types::settings::SettingsLayer;
-    use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
-    use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
     use object_store::memory::InMemory;
 
     use super::*;
@@ -128,22 +125,15 @@ mod tests {
     fn sample_record(graph: Graph) -> RunSpec {
         RunSpec {
             run_id: fixtures::RUN_1,
-            settings: SettingsLayer {
-                run: Some(RunLayer {
-                    execution: Some(RunExecutionLayer {
-                        mode: Some(RunMode::DryRun),
-                        ..RunExecutionLayer::default()
-                    }),
-                    ..RunLayer::default()
-                }),
-                cli: Some(CliLayer {
-                    output: Some(CliOutputLayer {
-                        verbosity: Some(OutputVerbosity::Verbose),
-                        ..CliOutputLayer::default()
-                    }),
-                    ..CliLayer::default()
-                }),
-                ..SettingsLayer::default()
+            settings: fabro_types::WorkflowSettings {
+                run: fabro_types::settings::RunNamespace {
+                    execution: fabro_types::settings::run::RunExecutionSettings {
+                        mode: fabro_types::settings::run::RunMode::DryRun,
+                        ..fabro_types::settings::run::RunExecutionSettings::default()
+                    },
+                    ..fabro_types::settings::RunNamespace::default()
+                },
+                ..fabro_types::WorkflowSettings::default()
             },
             graph,
             workflow_slug: Some("ship".to_string()),

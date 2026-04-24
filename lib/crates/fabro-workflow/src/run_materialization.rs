@@ -1,25 +1,26 @@
 use fabro_graphviz::graph::Graph;
 use fabro_model::{Catalog, Provider};
-use fabro_types::settings::run::{RunGoalLayer, RunLayer, RunModelLayer};
-use fabro_types::settings::{InterpString, SettingsLayer};
+use fabro_types::WorkflowSettings;
+use fabro_types::settings::InterpString;
+use fabro_types::settings::run::RunGoal;
 
 pub fn materialize_run(
-    mut layer: SettingsLayer,
+    mut settings: WorkflowSettings,
     graph: &Graph,
     catalog: &Catalog,
     configured_providers: &[Provider],
-) -> SettingsLayer {
-    let configured_model = layer
+) -> WorkflowSettings {
+    let configured_model = settings
         .run
+        .model
+        .name
         .as_ref()
-        .and_then(|run| run.model.as_ref())
-        .and_then(|model| model.name.as_ref())
         .map(InterpString::as_source);
-    let configured_provider = layer
+    let configured_provider = settings
         .run
+        .model
+        .provider
         .as_ref()
-        .and_then(|run| run.model.as_ref())
-        .and_then(|model| model.provider.as_ref())
         .map(InterpString::as_source);
     let graph_provider = graph
         .attrs
@@ -51,25 +52,24 @@ pub fn materialize_run(
         None => (model, provider),
     };
 
-    let run = layer.run.get_or_insert_with(RunLayer::default);
-    let model_layer = run.model.get_or_insert_with(RunModelLayer::default);
-    model_layer.name = Some(InterpString::parse(&resolved_model));
-    model_layer.provider = resolved_provider.as_deref().map(InterpString::parse);
+    settings.run.model.name = Some(InterpString::parse(&resolved_model));
+    settings.run.model.provider = resolved_provider.as_deref().map(InterpString::parse);
 
     let goal = graph.goal().to_string();
-    run.goal = if goal.is_empty() {
+    settings.run.goal = if goal.is_empty() {
         None
     } else {
-        Some(RunGoalLayer::Inline(InterpString::parse(&goal)))
+        Some(RunGoal::Inline(InterpString::parse(&goal)))
     };
 
-    if run
+    if settings
+        .run
         .pull_request
         .as_ref()
-        .is_some_and(|pull_request| !pull_request.enabled.unwrap_or(false))
+        .is_some_and(|pull_request| !pull_request.enabled)
     {
-        run.pull_request = None;
+        settings.run.pull_request = None;
     }
 
-    layer
+    settings
 }

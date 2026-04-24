@@ -10,7 +10,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use fabro_config::RuntimeDirectory;
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::daemon::ServerDaemon;
-use fabro_config::user::{FABRO_CONFIG_ENV, default_settings_path, load_settings_config};
+use fabro_config::user::{FABRO_CONFIG_ENV, default_settings_path};
 use fabro_server::jwt_auth::auth_method_name;
 use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs, resolve_runtime_server_settings_for_start};
 use fabro_server::{process_env_snapshot, validate_startup};
@@ -148,8 +148,7 @@ async fn ensure_server_running_with_bind(
     let bind_request = if let Some(bind_request) = bind_request {
         bind_request
     } else {
-        let settings = load_settings_config(Some(config_path))?;
-        local_server::bind_request(&settings, None)?
+        local_server::LocalServerConfig::load(Some(config_path), None)?.bind_request(None)?
     };
 
     match execute_daemon(
@@ -216,9 +215,9 @@ fn server_max_concurrent_runs_override() -> Option<usize> {
 }
 
 fn configured_auth_methods(config_path: Option<&Path>) -> Vec<ServerAuthMethod> {
-    load_settings_config(config_path)
+    local_server::LocalServerConfig::load(config_path, None)
         .ok()
-        .map(|settings| local_server::auth_methods(&settings))
+        .map(|settings| settings.auth_methods().to_vec())
         .unwrap_or_default()
 }
 

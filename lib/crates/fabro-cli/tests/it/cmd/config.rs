@@ -5,9 +5,7 @@
 
 use std::path::PathBuf;
 
-use fabro_config::parse_settings_layer;
 use fabro_test::{fabro_snapshot, test_context};
-use fabro_types::settings::SettingsLayer;
 use httpmock::MockServer;
 use predicates::prelude::*;
 
@@ -50,9 +48,8 @@ fn server_storage_root(settings: &serde_json::Value) -> &str {
         .expect("server.storage.root")
 }
 
-fn server_settings_layer_fixture() -> SettingsLayer {
-    parse_settings_layer(
-        r#"
+fn server_settings_toml_fixture() -> &'static str {
+    r#"
 _version = 1
 
 [server.auth]
@@ -68,13 +65,11 @@ provider = "openai"
 [run.inputs]
 server_only = "1"
 shared = "server"
-"#,
-    )
-    .expect("server settings fixture should parse")
+"#
 }
 
 fn resolved_server_settings_fixture() -> serde_json::Value {
-    let settings = fabro_config::ServerSettings::from_layer(&server_settings_layer_fixture())
+    let settings = fabro_config::ServerSettingsBuilder::from_toml(server_settings_toml_fixture())
         .expect("server settings fixture should resolve");
     serde_json::to_value(settings).expect("resolved settings payload should serialize")
 }
@@ -358,10 +353,6 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
         Some("auto")
     );
     assert_eq!(
-        run_spec["settings"]["server"]["storage"]["root"].as_str(),
-        Some(storage_dir.to_str().unwrap())
-    );
-    assert_eq!(
         run_spec["settings"]["run"]["sandbox"]["preserve"].as_bool(),
         Some(true)
     );
@@ -371,8 +362,8 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
     );
     // v2 R30: run.prepare.steps replaces the whole ordered list across layers.
     assert_eq!(
-        run_spec["settings"]["run"]["prepare"]["steps"],
-        serde_json::json!([{"script": "workflow-setup"}])
+        run_spec["settings"]["run"]["prepare"]["commands"],
+        serde_json::json!(["workflow-setup"])
     );
 }
 

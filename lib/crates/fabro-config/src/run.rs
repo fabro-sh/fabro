@@ -1,9 +1,8 @@
 //! Workflow / run config loading helpers.
 //!
-//! Thin wrappers around `parse_settings_layer` / `load_settings_path` plus
-//! path resolution for the `[workflow] graph` override. Runtime types
-//! that used to be re-exported from here live under
-//! `fabro_types::settings::run` now.
+//! Helpers for loading workflow-local settings and resolving runtime goal /
+//! graph paths. Runtime types that used to be re-exported from here live
+//! under `fabro_types::settings::run` now.
 
 #![expect(
     clippy::disallowed_methods,
@@ -12,24 +11,17 @@
 
 use std::path::{Path, PathBuf};
 
-use fabro_types::settings::SettingsLayer;
-use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal, RunGoalLayer};
+use fabro_types::settings::InterpString;
+use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal, RunGoal, RunNamespace};
 
 use crate::load::{load_settings_path, resolve_goal_file_path};
-use crate::parse::parse_settings_layer;
-use crate::{Error, Result};
-
-/// Load and parse a run config from a TOML file.
-pub fn parse_run_config(contents: &str) -> Result<SettingsLayer> {
-    parse_settings_layer(contents)
-        .map_err(|err| Error::parse("Failed to parse run config TOML", err))
-}
+use crate::{Result, RunGoalLayer, RunLayer, SettingsLayer};
 
 /// Load and parse a run config from a TOML file.
 ///
 /// Goes through [`load_settings_path`] so that relative `run.goal.file`
 /// paths are anchored at the directory of `path` at load time.
-pub fn load_run_config(path: &Path) -> Result<SettingsLayer> {
+pub(crate) fn load_run_config(path: &Path) -> Result<SettingsLayer> {
     load_settings_path(path)
 }
 
@@ -76,42 +68,78 @@ impl std::error::Error for ResolveRunGoalError {
     }
 }
 
-pub fn resolve_run_goal(
-    settings: &SettingsLayer,
+pub fn resolve_run_goal_from_layer(
+    run: &RunLayer,
     base_dir: &Path,
 ) -> std::result::Result<Option<ResolvedRunGoal>, ResolveRunGoalError> {
-    let Some(goal) = settings.run.as_ref().and_then(|run| run.goal.as_ref()) else {
+    let Some(goal) = run.goal.as_ref() else {
         return Ok(None);
     };
 
+    resolve_layer_goal(goal, base_dir).map(Some)
+}
+
+pub fn resolve_run_goal_from_namespace(
+    run: &RunNamespace,
+    base_dir: &Path,
+) -> std::result::Result<Option<ResolvedRunGoal>, ResolveRunGoalError> {
+    let Some(goal) = run.goal.as_ref() else {
+        return Ok(None);
+    };
+
+    resolve_goal(goal, base_dir).map(Some)
+}
+
+fn resolve_goal_file(
+    file: &InterpString,
+    base_dir: &Path,
+) -> std::result::Result<ResolvedRunGoal, ResolveRunGoalError> {
+    let resolved = file
+        .resolve(|name| std::env::var(name).ok())
+        .map_err(|err| ResolveRunGoalError::EnvLookup { var: err.name })?;
+    let path = resolve_goal_file_path(&resolved.value, base_dir);
+    let text = std::fs::read_to_string(&path).map_err(|source| ResolveRunGoalError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    Ok(ResolvedRunGoal {
+        text,
+        source: ResolvedGoalSource::File { path },
+    })
+}
+
+fn resolve_layer_goal(
+    goal: &RunGoalLayer,
+    base_dir: &Path,
+) -> std::result::Result<ResolvedRunGoal, ResolveRunGoalError> {
     match goal {
-        RunGoalLayer::Inline(text) => Ok(Some(ResolvedRunGoal {
+        RunGoalLayer::Inline(text) => Ok(ResolvedRunGoal {
             text:   text.as_source(),
             source: ResolvedGoalSource::Inline,
-        })),
-        RunGoalLayer::File { file } => {
-            let resolved = file
-                .resolve(|name| std::env::var(name).ok())
-                .map_err(|err| ResolveRunGoalError::EnvLookup { var: err.name })?;
-            let path = resolve_goal_file_path(&resolved.value, base_dir);
-            let text =
-                std::fs::read_to_string(&path).map_err(|source| ResolveRunGoalError::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-            Ok(Some(ResolvedRunGoal {
-                text,
-                source: ResolvedGoalSource::File { path },
-            }))
-        }
+        }),
+        RunGoalLayer::File { file } => resolve_goal_file(file, base_dir),
+    }
+}
+
+fn resolve_goal(
+    goal: &RunGoal,
+    base_dir: &Path,
+) -> std::result::Result<ResolvedRunGoal, ResolveRunGoalError> {
+    match goal {
+        RunGoal::Inline(text) => Ok(ResolvedRunGoal {
+            text:   text.as_source(),
+            source: ResolvedGoalSource::Inline,
+        }),
+        RunGoal::File(file) => resolve_goal_file(file, base_dir),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::settings::run::RunGoalLayer;
+    use fabro_types::settings::run::RunGoal;
 
     use super::*;
+    use crate::RunGoalLayer;
 
     #[test]
     fn load_run_config_rewrites_relative_goal_file_path() {
@@ -160,5 +188,29 @@ file = "/etc/fabro/goal.md"
             panic!("expected file variant");
         };
         assert_eq!(file.as_source(), "/etc/fabro/goal.md");
+    }
+
+    #[test]
+    fn resolve_run_goal_from_namespace_reads_file_goal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let goal_path = tmp.path().join("goal.md");
+        std::fs::write(&goal_path, "ship from namespace").unwrap();
+
+        let resolved = resolve_run_goal_from_namespace(
+            &RunNamespace {
+                goal: Some(RunGoal::File(InterpString::parse(
+                    &goal_path.display().to_string(),
+                ))),
+                ..RunNamespace::default()
+            },
+            tmp.path(),
+        )
+        .unwrap()
+        .expect("goal should resolve");
+
+        assert_eq!(resolved.text, "ship from namespace");
+        assert_eq!(resolved.source, ResolvedGoalSource::File {
+            path: goal_path,
+        });
     }
 }

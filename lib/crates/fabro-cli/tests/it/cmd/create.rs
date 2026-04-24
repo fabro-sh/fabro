@@ -6,10 +6,8 @@ use serde_json::json;
 use super::support::{fixture, output_stdout, resolve_run, run_count_for_test_case, run_state};
 use crate::support::{fabro_json_snapshot, unique_run_id};
 
-fn resolved_run(
-    settings: &fabro_types::settings::SettingsLayer,
-) -> fabro_types::settings::RunNamespace {
-    fabro_config::resolve_run_from_file(settings).expect("run settings should resolve")
+fn resolved_run(settings: &fabro_types::WorkflowSettings) -> fabro_types::settings::RunNamespace {
+    settings.run.clone()
 }
 
 fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
@@ -365,7 +363,6 @@ fn create_persists_requested_overrides_into_store() {
     });
     let settings = &run_spec.settings;
     let resolved_run = resolved_run(settings);
-    let cli_settings = fabro_config::resolve_cli_from_file(settings).expect("cli settings");
     let compact = json!({
         "workflow_slug": run_spec.workflow_slug,
         "settings": {
@@ -376,7 +373,6 @@ fn create_persists_requested_overrides_into_store() {
             "dry_run": resolved_run.execution.mode == fabro_types::settings::run::RunMode::DryRun,
             "auto_approve": resolved_run.execution.approval == fabro_types::settings::run::ApprovalMode::Auto,
             "no_retro": !resolved_run.execution.retros,
-            "verbose": cli_settings.output.verbosity == fabro_types::settings::cli::OutputVerbosity::Verbose,
             "llm": {
                 "model": resolved_run.model.name.as_ref().map(fabro_types::settings::InterpString::as_source),
                 "provider": resolved_run.model.provider.as_ref().map(fabro_types::settings::InterpString::as_source),
@@ -397,7 +393,6 @@ fn create_persists_requested_overrides_into_store() {
         "dry_run": true,
         "auto_approve": true,
         "no_retro": true,
-        "verbose": true,
         "llm": {
           "model": "gpt-5",
           "provider": "openai"

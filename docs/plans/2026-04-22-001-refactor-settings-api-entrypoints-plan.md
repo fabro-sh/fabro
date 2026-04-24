@@ -809,7 +809,7 @@ memory. Delete the redaction machinery. Typed OpenAPI schema via
   - Replace `ServerSettings`'s `additionalProperties: true` with a typed
     schema (two fields: `server`, `features`) matching the Rust
     `ServerSettings`.
-  - Rename the `RunSettings` schema to `RunSettingsLayer` and update its
+  - Rename the `RunSettings` schema to a sparse run-settings wire name and update its
     description to reflect that the endpoint returns the persisted
     `SettingsLayer` as-is.
   - Remove all `redact`, `redaction`, `secret subtrees` language across
@@ -883,7 +883,7 @@ memory. Delete the redaction machinery. Typed OpenAPI schema via
 - *Contract:* Generated TypeScript client returns a typed object with
   `server` and `features` fields.
 - *Contract:* `GET /api/v1/runs/:id/settings` returns the persisted
-  `SettingsLayer` (renamed `RunSettingsLayer` in the spec) directly.
+  `SettingsLayer` (renamed to the sparse run-settings wire name in the spec) directly.
 - *Behavior:* `server.listen` is present and visible in the main settings
   response.
 - *Integration:* OpenAPI conformance passes.
@@ -961,7 +961,7 @@ and their constructors are the primary API; internal helpers go
 - **API surface:** `GET /api/v1/settings` shape changes (single dense
   `ServerSettings` served from `AppState`). `GET /api/v1/runs/:id/settings`
   shape unchanged (still the persisted `SettingsLayer`; OpenAPI schema
-  renamed `RunSettingsLayer`).
+  renamed to the sparse run-settings wire name).
 - **Integration coverage:** OpenAPI conformance guards spec/router
   alignment. Progenitor regen + `bun run generate` + SPA refresh is the
   known hygiene.

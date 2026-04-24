@@ -340,7 +340,7 @@ digraph CachedGraph {
 }
 
 #[test]
-fn runner_uses_snapshotted_app_id_for_github_credentials() {
+fn runner_local_dry_runs_ignore_github_app_configuration() {
     let context = auth_context();
     let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("workflow.fabro");
@@ -354,7 +354,7 @@ _version = 1
 methods = [\"dev-token\"]
 
 [server.integrations.github]
-app_id = \"snapshotted-app-id\"
+app_id = \"fixture-app-id\"
 ",
     );
     context.write_temp(
@@ -382,21 +382,6 @@ digraph GitHubApp {
         .success();
 
     let run_dir = context.find_run_dir(&run_id);
-    let state = run_state(&run_dir);
-    let run = state.spec.as_ref().expect("run spec should exist");
-    let resolved_server = fabro_config::resolve_server_from_file(&run.settings).unwrap();
-    fabro_json_snapshot!(
-        context,
-        serde_json::json!({
-            "app_id": resolved_server.integrations.github.app_id.map(|value| value.as_source()),
-        }),
-        @r#"
-        {
-          "app_id": "snapshotted-app-id"
-        }
-        "#
-    );
-
     context.write_home(".fabro/settings.toml", "_version = 1\n");
 
     let server = server_target(&context.storage_dir);

@@ -1,28 +1,28 @@
-use fabro_config::parse_settings_layer;
+use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunMode;
-use fabro_types::settings::{InterpString, SettingsLayer};
 
-fn parse(source: &str) -> SettingsLayer {
-    parse_settings_layer(source).expect("fixture should parse")
-}
+use crate::{ServerSettingsBuilder, SettingsLayer, WorkflowSettingsBuilder};
 
 #[test]
 fn resolves_root_settings_require_explicit_server_auth_methods() {
-    let errors = fabro_config::resolve_server_from_file(&SettingsLayer::default())
+    let errors = ServerSettingsBuilder::from_layer(&SettingsLayer::default())
         .expect_err("empty server settings should fail");
 
-    assert!(errors.iter().any(|error| {
-        matches!(
-            error,
-            fabro_config::ResolveError::Missing { path } if path == "server.auth.methods"
-        )
-    }));
+    assert!(matches!(
+        errors,
+        fabro_config::Error::Resolve { errors, .. }
+            if errors.iter().any(|error| {
+                matches!(
+                    error,
+                    fabro_config::ResolveError::Missing { path } if path == "server.auth.methods"
+                )
+            })
+    ));
 }
 
 #[test]
 fn resolve_accumulates_errors_across_namespaces() {
-    let settings = parse(
-        r#"
+    let source = r#"
 _version = 1
 
 [server.listen]
@@ -37,21 +37,28 @@ allowed_usernames = []
 
 [run.sandbox]
 provider = "not-a-provider"
-"#,
-    );
+"#;
 
     let mut rendered = Vec::new();
     rendered.extend(
-        fabro_config::resolve_server_from_file(&settings)
+        match ServerSettingsBuilder::from_toml(source)
             .expect_err("invalid server settings should fail")
-            .into_iter()
-            .map(|error| error.to_string()),
+        {
+            fabro_config::Error::Resolve { errors, .. } => errors,
+            other => panic!("expected resolve error, got {other:#}"),
+        }
+        .into_iter()
+        .map(|error| error.to_string()),
     );
     rendered.extend(
-        fabro_config::resolve_run_from_file(&settings)
+        match fabro_config::WorkflowSettingsBuilder::from_toml(source)
             .expect_err("invalid run settings should fail")
-            .into_iter()
-            .map(|error| error.to_string()),
+        {
+            fabro_config::Error::Resolve { errors, .. } => errors,
+            other => panic!("expected resolve error, got {other:#}"),
+        }
+        .into_iter()
+        .map(|error| error.to_string()),
     );
     let rendered = rendered.join("\n");
 
@@ -62,8 +69,7 @@ provider = "not-a-provider"
 
 #[test]
 fn namespace_resolvers_cover_root_level_settings_shape() {
-    let settings = parse(
-        r#"
+    let source = r#"
 _version = 1
 
 [project]
@@ -80,26 +86,31 @@ methods = ["dev-token"]
 [run.model]
 provider = "openai"
 name = "gpt-5"
-"#,
-    );
+"#;
 
-    let project = fabro_config::resolve_project_from_file(&settings)
-        .expect("project settings should resolve");
-    let workflow = fabro_config::resolve_workflow_from_file(&settings)
-        .expect("workflow settings should resolve");
-    let server =
-        fabro_config::resolve_server_from_file(&settings).expect("server settings should resolve");
-    let run = fabro_config::resolve_run_from_file(&settings).expect("run settings should resolve");
+    let workflow_settings =
+        WorkflowSettingsBuilder::from_toml(source).expect("workflow settings should resolve");
+    let server = ServerSettingsBuilder::from_toml(source).expect("server settings should resolve");
 
-    assert_eq!(project.directory, ".fabro");
-    assert_eq!(workflow.graph, "graphs/workflow.dot");
-    assert_eq!(server.storage.root.as_source(), "/srv/fabro");
+    assert_eq!(workflow_settings.project.directory, ".fabro");
+    assert_eq!(workflow_settings.workflow.graph, "graphs/workflow.dot");
+    assert_eq!(server.server.storage.root.as_source(), "/srv/fabro");
     assert_eq!(
-        run.model.provider.as_ref().map(InterpString::as_source),
+        workflow_settings
+            .run
+            .model
+            .provider
+            .as_ref()
+            .map(InterpString::as_source),
         Some("openai".to_string())
     );
     assert_eq!(
-        run.model.name.as_ref().map(InterpString::as_source),
+        workflow_settings
+            .run
+            .model
+            .name
+            .as_ref()
+            .map(InterpString::as_source),
         Some("gpt-5".to_string())
     );
 }
@@ -107,8 +118,8 @@ name = "gpt-5"
 #[test]
 fn workflow_settings_resolve_defaults_and_expose_fields() {
     let settings = SettingsLayer::default();
-    let resolved =
-        fabro_config::WorkflowSettings::from_layer(&settings).expect("defaults should resolve");
+    let resolved = fabro_config::WorkflowSettingsBuilder::from_layer(&settings)
+        .expect("defaults should resolve");
 
     assert_eq!(resolved.project.directory, ".");
     assert_eq!(resolved.workflow.graph, "workflow.fabro");
@@ -117,7 +128,7 @@ fn workflow_settings_resolve_defaults_and_expose_fields() {
 
 #[test]
 fn workflow_settings_combine_labels_with_later_namespaces_winning() {
-    let settings = parse(
+    let labels = fabro_config::WorkflowSettingsBuilder::from_toml(
         r#"
 _version = 1
 
@@ -133,11 +144,9 @@ shared = "workflow"
 run = "yes"
 shared = "run"
 "#,
-    );
-
-    let labels = fabro_config::WorkflowSettings::from_layer(&settings)
-        .expect("workflow settings should resolve")
-        .combined_labels();
+    )
+    .expect("workflow settings should resolve")
+    .combined_labels();
 
     assert_eq!(labels.get("project").map(String::as_str), Some("yes"));
     assert_eq!(labels.get("workflow").map(String::as_str), Some("yes"));
@@ -147,17 +156,19 @@ shared = "run"
 
 #[test]
 fn workflow_settings_report_invalid_run_sandbox_provider() {
-    let settings = parse(
+    let errors = match fabro_config::WorkflowSettingsBuilder::from_toml(
         r#"
 _version = 1
 
 [run.sandbox]
 provider = "not-a-provider"
 "#,
-    );
-
-    let errors = fabro_config::WorkflowSettings::from_layer(&settings)
-        .expect_err("invalid workflow settings should fail");
+    )
+    .expect_err("invalid workflow settings should fail")
+    {
+        fabro_config::Error::Resolve { errors, .. } => errors,
+        other => panic!("expected resolve error, got {other:#}"),
+    };
 
     assert!(errors.iter().any(|error| {
         matches!(
@@ -169,7 +180,7 @@ provider = "not-a-provider"
 
 #[test]
 fn workflow_settings_accumulate_multiple_run_errors() {
-    let settings = parse(
+    let rendered = fabro_config::WorkflowSettingsBuilder::from_toml(
         r#"
 _version = 1
 
@@ -180,14 +191,9 @@ provider = "not-a-provider"
 script = "echo hi"
 command = ["echo", "hi"]
 "#,
-    );
-
-    let rendered = fabro_config::WorkflowSettings::from_layer(&settings)
-        .expect_err("invalid workflow settings should fail")
-        .into_iter()
-        .map(|error| error.to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
+    )
+    .expect_err("invalid workflow settings should fail")
+    .to_string();
 
     assert!(rendered.contains("run.sandbox.provider"));
     assert!(rendered.contains("run.prepare.steps[0]"));

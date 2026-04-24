@@ -23,7 +23,7 @@ use fabro_install::{
 };
 use fabro_model::Provider;
 use fabro_store::ArtifactStore;
-use fabro_types::settings::SettingsLayer;
+use fabro_types::ServerSettings;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::server::ObjectStoreSettings;
 use fabro_util::version::FABRO_VERSION;
@@ -1433,7 +1433,7 @@ async fn post_install_finish(
             .into_response();
     }
 
-    if let Ok(settings) = fabro_config::parse_settings_layer(&settings_toml) {
+    if let Ok(settings) = fabro_config::ServerSettingsBuilder::from_toml(&settings_toml) {
         if let Err(err) = write_artifact_store_metadata(&settings, state.storage_dir.as_ref()).await
         {
             warn!(error = %err, "failed to write artifact store metadata after install");
@@ -1888,22 +1888,14 @@ fn is_valid_github_manifest_code(code: &str) -> bool {
 }
 
 async fn write_artifact_store_metadata(
-    settings: &SettingsLayer,
+    settings: &ServerSettings,
     storage_dir: &Path,
 ) -> anyhow::Result<()> {
     use fabro_types::settings::interp::InterpString;
-    use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
 
     let mut settings = settings.clone();
-    let server = settings.server.get_or_insert_with(ServerLayer::default);
-    let storage = server
-        .storage
-        .get_or_insert_with(ServerStorageLayer::default);
-    storage.root = Some(InterpString::parse(&storage_dir.display().to_string()));
-
-    let resolved =
-        fabro_config::ServerSettings::from_layer(&settings).map_err(anyhow::Error::from)?;
-    let (object_store, prefix) = serve::build_artifact_object_store(&resolved.server)?;
+    settings.server.storage.root = InterpString::parse(&storage_dir.display().to_string());
+    let (object_store, prefix) = serve::build_artifact_object_store(&settings.server)?;
     let artifact_store = ArtifactStore::new(object_store, prefix);
     artifact_store.write_metadata(FABRO_VERSION).await?;
     Ok(())
@@ -1973,6 +1965,7 @@ mod tests {
         InstallObjectStoreInput, InstallObjectStoreProvider, PendingInstall, ServerSecrets,
         classify_object_store_validation_error, detect_canonical_url, install_object_store_lookup,
         lock_unpoisoned, resolve_install_object_store_state, token_is_valid,
+        write_artifact_store_metadata,
     };
 
     #[test]
@@ -2043,6 +2036,46 @@ mod tests {
             DEFAULT_INSTALL_GITHUB_API_BASE_URL,
             "https://api.github.com"
         );
+    }
+
+    #[tokio::test]
+    async fn write_artifact_store_metadata_creates_marker_in_overridden_storage_root() {
+        use object_store::path::Path as ObjectPath;
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = fabro_config::ServerSettingsBuilder::from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+"#,
+        )
+        .unwrap();
+
+        write_artifact_store_metadata(&settings, dir.path())
+            .await
+            .unwrap();
+
+        let mut overridden = settings.clone();
+        overridden.server.storage.root =
+            fabro_types::settings::interp::InterpString::parse(&dir.path().display().to_string());
+        let (object_store, prefix) =
+            crate::serve::build_artifact_object_store(&overridden.server).unwrap();
+        let marker = if prefix.is_empty() {
+            "store-metadata.json".to_string()
+        } else {
+            format!("{prefix}/store-metadata.json")
+        };
+        let bytes = object_store
+            .get(&ObjectPath::from(marker))
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["fabro_version"], super::FABRO_VERSION);
     }
 
     #[test]

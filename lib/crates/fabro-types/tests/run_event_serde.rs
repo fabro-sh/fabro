@@ -1,37 +1,15 @@
 use std::collections::BTreeMap;
 
+use fabro_types::WorkflowSettings;
 use fabro_types::graph::Graph;
 use fabro_types::run_event::run::RunCreatedProps;
-use fabro_types::settings::run::{RunGoalLayer, RunLayer};
-use fabro_types::settings::server::{
-    GithubIntegrationLayer, ServerIntegrationsLayer, ServerLayer, ServerStorageLayer,
-};
-use fabro_types::settings::{InterpString, SettingsLayer};
+use fabro_types::settings::InterpString;
+use fabro_types::settings::run::RunGoal;
 
-fn templated_settings() -> SettingsLayer {
-    SettingsLayer {
-        version: Some(1),
-        run: Some(RunLayer {
-            goal: Some(RunGoalLayer::Inline(InterpString::parse(
-                "Ship {{ env.TASK }}",
-            ))),
-            ..RunLayer::default()
-        }),
-        server: Some(ServerLayer {
-            storage: Some(ServerStorageLayer {
-                root: Some(InterpString::parse("{{ env.FABRO_STORAGE }}")),
-            }),
-            integrations: Some(ServerIntegrationsLayer {
-                github: Some(GithubIntegrationLayer {
-                    app_id: Some(InterpString::parse("{{ env.GITHUB_APP_ID }}")),
-                    ..GithubIntegrationLayer::default()
-                }),
-                ..ServerIntegrationsLayer::default()
-            }),
-            ..ServerLayer::default()
-        }),
-        ..SettingsLayer::default()
-    }
+fn templated_settings() -> WorkflowSettings {
+    let mut settings = WorkflowSettings::default();
+    settings.run.goal = Some(RunGoal::Inline(InterpString::parse("Ship {{ env.TASK }}")));
+    settings
 }
 
 #[test]
@@ -62,34 +40,7 @@ fn run_created_props_round_trip_templated_settings() {
         json
     );
     assert_eq!(
-        round_trip
-            .settings
-            .run
-            .as_ref()
-            .and_then(|run| run.goal.as_ref()),
-        Some(&RunGoalLayer::Inline(InterpString::parse(
-            "Ship {{ env.TASK }}"
-        )))
-    );
-    assert_eq!(
-        round_trip
-            .settings
-            .server
-            .as_ref()
-            .and_then(|server| server.storage.as_ref())
-            .and_then(|storage| storage.root.as_ref())
-            .map(InterpString::as_source),
-        Some("{{ env.FABRO_STORAGE }}".to_string())
-    );
-    assert_eq!(
-        round_trip
-            .settings
-            .server
-            .as_ref()
-            .and_then(|server| server.integrations.as_ref())
-            .and_then(|integrations| integrations.github.as_ref())
-            .and_then(|github| github.app_id.as_ref())
-            .map(InterpString::as_source),
-        Some("{{ env.GITHUB_APP_ID }}".to_string())
+        round_trip.settings.run.goal,
+        Some(RunGoal::Inline(InterpString::parse("Ship {{ env.TASK }}")))
     );
 }

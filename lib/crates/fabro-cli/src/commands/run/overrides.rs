@@ -2,16 +2,22 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use fabro_sandbox::SandboxProvider;
-use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
-use fabro_types::settings::interp::InterpString;
-use fabro_types::settings::run::{
-    ApprovalMode, RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer,
+use fabro_config::{
+    CliLayer, CliOutputLayer, ReplaceMap, RunExecutionLayer, RunGoalLayer, RunLayer, RunModelLayer,
     RunSandboxLayer,
 };
-use fabro_types::settings::{ReplaceMap, SettingsLayer};
+use fabro_sandbox::SandboxProvider;
+use fabro_types::settings::cli::OutputVerbosity;
+use fabro_types::settings::interp::InterpString;
+use fabro_types::settings::run::{ApprovalMode, RunMode};
 
 use crate::args::{PreflightArgs, RunArgs};
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ManifestSettingsOverrides {
+    pub(crate) run: Option<RunLayer>,
+    pub(crate) cli: Option<CliLayer>,
+}
 
 fn sparse_flag(value: bool) -> Option<bool> {
     value.then_some(true)
@@ -116,7 +122,7 @@ fn current_dir_or_dot() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-pub(crate) fn run_args_layer(args: &RunArgs) -> Result<SettingsLayer> {
+pub(crate) fn run_args_overrides(args: &RunArgs) -> Result<ManifestSettingsOverrides> {
     let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
     let sandbox = sandbox_layer(
         args.sandbox.map(Into::into),
@@ -140,14 +146,13 @@ pub(crate) fn run_args_layer(args: &RunArgs) -> Result<SettingsLayer> {
         ..RunLayer::default()
     };
 
-    Ok(SettingsLayer {
+    Ok(ManifestSettingsOverrides {
         run: Some(run),
         cli: cli_layer_for_verbose(args.verbose),
-        ..SettingsLayer::default()
     })
 }
 
-pub(crate) fn preflight_args_layer(args: &PreflightArgs) -> Result<SettingsLayer> {
+pub(crate) fn preflight_args_overrides(args: &PreflightArgs) -> Result<ManifestSettingsOverrides> {
     let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
     let sandbox = args.sandbox.map(|s| RunSandboxLayer {
         provider: Some(SandboxProvider::from(s).to_string()),
@@ -164,10 +169,9 @@ pub(crate) fn preflight_args_layer(args: &PreflightArgs) -> Result<SettingsLayer
         ..RunLayer::default()
     };
 
-    Ok(SettingsLayer {
+    Ok(ManifestSettingsOverrides {
         run: Some(run),
         cli: cli_layer_for_verbose(args.verbose),
-        ..SettingsLayer::default()
     })
 }
 

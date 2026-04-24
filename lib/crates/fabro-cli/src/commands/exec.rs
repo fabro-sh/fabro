@@ -12,101 +12,18 @@ use fabro_llm::providers::common::{LineReader, parse_retry_after};
 use fabro_llm::types::{
     FinishReason, Message, Request, Response as LlmResponse, StreamEvent, TokenCounts,
 };
-use fabro_mcp::config::{McpServerSettings, McpTransport};
+use fabro_mcp::config::McpServerSettings;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
-use fabro_types::settings::run::McpEntryLayer;
 use fabro_util::exit::{ErrorExt, ExitClass};
 use futures::stream;
 use serde::Deserialize;
 
 use crate::args::ExecArgs;
 use crate::command_context::CommandContext;
+#[cfg(feature = "sleep_inhibitor")]
+use crate::sleep_inhibitor;
 use crate::{server_client, user_config};
-
-fn runtime_mcp_server(name: &str, entry: &McpEntryLayer) -> McpServerSettings {
-    let transport = match entry {
-        McpEntryLayer::Stdio {
-            script,
-            command,
-            env,
-            ..
-        } => {
-            let command = if let Some(script) = script {
-                vec!["sh".to_string(), "-c".to_string(), script.as_source()]
-            } else {
-                command
-                    .as_ref()
-                    .map(|command| command.iter().map(InterpString::as_source).collect())
-                    .unwrap_or_default()
-            };
-            McpTransport::Stdio {
-                command,
-                env: env
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.as_source()))
-                    .collect(),
-            }
-        }
-        McpEntryLayer::Http { url, headers, .. } => McpTransport::Http {
-            url:     url.as_source(),
-            headers: headers
-                .iter()
-                .map(|(key, value)| (key.clone(), value.as_source()))
-                .collect(),
-        },
-        McpEntryLayer::Sandbox {
-            script,
-            command,
-            port,
-            env,
-            ..
-        } => {
-            let command = if let Some(script) = script {
-                vec!["sh".to_string(), "-c".to_string(), script.as_source()]
-            } else {
-                command
-                    .as_ref()
-                    .map(|command| command.iter().map(InterpString::as_source).collect())
-                    .unwrap_or_default()
-            };
-            McpTransport::Sandbox {
-                command,
-                port: *port,
-                env: env
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.as_source()))
-                    .collect(),
-            }
-        }
-    };
-    let (startup_timeout_secs, tool_timeout_secs) = match entry {
-        McpEntryLayer::Http {
-            startup_timeout,
-            tool_timeout,
-            ..
-        }
-        | McpEntryLayer::Stdio {
-            startup_timeout,
-            tool_timeout,
-            ..
-        }
-        | McpEntryLayer::Sandbox {
-            startup_timeout,
-            tool_timeout,
-            ..
-        } => (
-            startup_timeout.map_or(10, |duration| duration.as_std().as_secs()),
-            tool_timeout.map_or(60, |duration| duration.as_std().as_secs()),
-        ),
-    };
-    McpServerSettings {
-        name: name.to_string(),
-        transport,
-        startup_timeout_secs,
-        tool_timeout_secs,
-    }
-}
 
 struct AuthenticatedFabroServerAdapter {
     client:        server_client::Client,
@@ -361,9 +278,8 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
     use fabro_types::settings::run::AgentPermissions;
 
     let cli = &ctx.user_settings().cli;
-    let raw_settings = user_config::load_settings()?;
     #[cfg(feature = "sleep_inhibitor")]
-    let _sleep_guard = crate::sleep_inhibitor::guard(cli.exec.prevent_idle_sleep);
+    let _sleep_guard = sleep_inhibitor::guard(cli.exec.prevent_idle_sleep);
     let provider_str = cli
         .exec
         .model
@@ -390,45 +306,12 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
     // v2 MCPs live under `cli.exec.agent.mcps` (owner-specific) or
     // `run.agent.mcps`. For `fabro exec` we use the cli.exec path, falling
     // back to run.agent.mcps if unset.
-    let mcp_servers: Vec<McpServerSettings> = if !cli.exec.agent.mcps.is_empty() {
-        cli.exec
-            .agent
-            .mcps
-            .values()
-            .map(|server| McpServerSettings {
-                name:                 server.name.clone(),
-                transport:            server.transport.clone(),
-                startup_timeout_secs: server.startup_timeout_secs,
-                tool_timeout_secs:    server.tool_timeout_secs,
-            })
-            .collect()
-    } else if let Some(mcps) = raw_settings
-        .cli
-        .as_ref()
-        .and_then(|cli| cli.exec.as_ref())
-        .and_then(|exec| exec.agent.as_ref())
-        .map(|agent| &agent.mcps)
-        .filter(|mcps| !mcps.is_empty())
-    {
-        mcps.iter()
-            .map(|(name, entry)| runtime_mcp_server(name, entry))
-            .collect()
-    } else {
-        fabro_config::resolve_run_from_file(&raw_settings)
-            .map(|settings| {
-                settings
-                    .agent
-                    .mcps
-                    .values()
-                    .map(|server| McpServerSettings {
-                        name:                 server.name.clone(),
-                        transport:            server.transport.clone(),
-                        startup_timeout_secs: server.startup_timeout_secs,
-                        tool_timeout_secs:    server.tool_timeout_secs,
-                    })
-                    .collect()
-            })
+    let mcp_servers: Vec<McpServerSettings> = if cli.exec.agent.mcps.is_empty() {
+        ctx.run_settings()
+            .map(|settings| settings.agent.mcps.values().cloned().collect())
             .unwrap_or_default()
+    } else {
+        cli.exec.agent.mcps.values().cloned().collect()
     };
     if let Some(target) = server_target {
         tracing::info!(transport = "server", "Agent session starting");

@@ -14,7 +14,6 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/codegen.rs"));
 }
 pub mod types {
-    pub use fabro_config::ServerSettings;
     pub use fabro_types::settings::server::{
         DiscordIntegrationSettings, GithubIntegrationSettings, GithubIntegrationStrategy,
         IntegrationWebhooksSettings, IpAllowEntry, ObjectStoreSettings, ServerApiSettings,
@@ -28,6 +27,7 @@ pub mod types {
     pub use fabro_types::status::{
         BlockedReason, FailureReason, RunControlAction, RunStatus, SuccessReason, TerminalStatus,
     };
+    pub use fabro_types::{ServerSettings, WorkflowSettings};
 
     pub use crate::generated::types::*;
 }

@@ -5,7 +5,7 @@ use axum::http::{Request, StatusCode};
 use fabro_interview::Interviewer;
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{
-    build_router, create_app_state_with_settings_and_registry_factory, spawn_scheduler,
+    build_router, create_app_state_with_runtime_settings_and_registry_factory, spawn_scheduler,
 };
 use fabro_workflow::handler::HandlerRegistry;
 use fabro_workflow::handler::agent::AgentHandler;
@@ -119,7 +119,12 @@ const GATE_DOT: &str = r#"digraph GateTest {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_http_lifecycle_approve_and_complete() {
-    let state = create_app_state_with_settings_and_registry_factory(test_settings(), gate_registry);
+    let settings = test_settings();
+    let state = create_app_state_with_runtime_settings_and_registry_factory(
+        settings.server_settings,
+        settings.manifest_run_defaults,
+        gate_registry,
+    );
     spawn_scheduler(Arc::clone(&state));
     let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
@@ -202,7 +207,12 @@ async fn full_http_lifecycle_approve_and_complete() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_http_lifecycle_cancel() {
-    let state = create_app_state_with_settings_and_registry_factory(test_settings(), gate_registry);
+    let settings = test_settings();
+    let state = create_app_state_with_runtime_settings_and_registry_factory(
+        settings.server_settings,
+        settings.manifest_run_defaults,
+        gate_registry,
+    );
     spawn_scheduler(Arc::clone(&state));
     let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
@@ -268,7 +278,12 @@ async fn full_http_lifecycle_cancel() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
-    let state = create_app_state_with_settings_and_registry_factory(test_settings(), gate_registry);
+    let settings = test_settings();
+    let state = create_app_state_with_runtime_settings_and_registry_factory(
+        settings.server_settings,
+        settings.manifest_run_defaults,
+        gate_registry,
+    );
     spawn_scheduler(Arc::clone(&state));
     let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 

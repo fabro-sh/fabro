@@ -10,7 +10,8 @@
 use std::io::Write;
 
 use fabro_api::types::ServerSettings;
-use fabro_config::UserSettings;
+use fabro_config::UserSettingsBuilder;
+use fabro_types::UserSettings;
 use serde::Serialize;
 
 use crate::args::SettingsArgs;
@@ -25,7 +26,7 @@ struct RenderedConfig {
 
 pub(crate) async fn execute(args: &SettingsArgs, base_ctx: &CommandContext) -> anyhow::Result<()> {
     let ctx = base_ctx.with_target(&args.target)?;
-    let user = fabro_config::UserSettings::resolve()?;
+    let user = UserSettingsBuilder::load_default()?;
     let server = ctx
         .server()
         .await?

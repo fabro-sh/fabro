@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use fabro_types::fixtures;
 use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
-use fabro_types::settings::SettingsLayer;
+use fabro_types::{WorkflowSettings, fixtures};
 
 fn sample_run_spec() -> RunSpec {
     RunSpec {
         run_id:            fixtures::RUN_1,
-        settings:          SettingsLayer::default(),
+        settings:          WorkflowSettings::default(),
         graph:             Graph::new("ship"),
         workflow_slug:     Some("demo".to_string()),
         working_directory: PathBuf::from("/tmp/project"),
@@ -29,7 +28,7 @@ fn run_spec_getters_return_declared_fields() {
 
     assert_eq!(run_spec.id(), fixtures::RUN_1);
     assert_eq!(run_spec.graph().name, "ship");
-    assert_eq!(run_spec.settings(), &SettingsLayer::default());
+    assert_eq!(run_spec.settings(), &WorkflowSettings::default());
     assert_eq!(run_spec.workflow_slug(), Some("demo"));
     assert_eq!(run_spec.working_directory(), Path::new("/tmp/project"));
     assert_eq!(

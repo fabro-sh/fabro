@@ -28,13 +28,13 @@ pub fn validate_startup(
 mod tests {
     use std::collections::HashMap;
 
-    use fabro_config::parse_settings_layer;
+    use fabro_config::ServerSettingsBuilder;
     use fabro_types::settings::ServerNamespace;
 
     use super::validate_startup;
 
     fn resolved_settings(auth_methods: &[&str]) -> ServerNamespace {
-        let settings = parse_settings_layer(&format!(
+        ServerSettingsBuilder::from_toml(&format!(
             r"
 _version = 1
 
@@ -47,8 +47,8 @@ methods = [{}]
                 .collect::<Vec<_>>()
                 .join(", ")
         ))
-        .unwrap();
-        fabro_config::resolve_server_from_file(&settings).unwrap()
+        .unwrap()
+        .server
     }
 
     #[test]

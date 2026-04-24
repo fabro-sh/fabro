@@ -176,7 +176,8 @@ fn main() {
             "fabro_types::status::RunStatusRecord",
             &[],
         ),
-        ("ServerSettings", "fabro_config::ServerSettings", &[]),
+        ("WorkflowSettings", "fabro_types::WorkflowSettings", &[]),
+        ("ServerSettings", "fabro_types::ServerSettings", &[]),
         (
             "ServerNamespace",
             "fabro_types::settings::ServerNamespace",

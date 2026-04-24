@@ -18,7 +18,7 @@ pub(crate) async fn version_command(args: &VersionArgs, base_ctx: &CommandContex
     let client = client_info();
     let printer = base_ctx.printer();
     let ctx = base_ctx.with_target(&args.target)?;
-    let server_target = user_config::resolve_server_target(&args.target, ctx.machine_settings())?;
+    let server_target = user_config::resolve_server_target(&args.target, ctx.user_settings())?;
     let server_address = format_server_target(&server_target);
     let server_info = match ctx.server().await {
         Ok(server) => match server.get_system_info().await {

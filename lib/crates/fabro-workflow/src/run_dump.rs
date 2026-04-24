@@ -427,10 +427,9 @@ mod tests {
     use fabro_store::{NodeState, RunProjection, StageId};
     use fabro_types::graph::Graph;
     use fabro_types::run::RunSpec;
-    use fabro_types::settings::SettingsLayer;
     use fabro_types::{
         Checkpoint, Conclusion, NodeStatusRecord, RunStatus, SandboxRecord, StageStatus,
-        StartRecord, SuccessReason, fixtures,
+        StartRecord, SuccessReason, WorkflowSettings, fixtures,
     };
 
     use super::RunDump;
@@ -439,7 +438,7 @@ mod tests {
     fn sample_run_spec() -> RunSpec {
         RunSpec {
             run_id:            fixtures::RUN_1,
-            settings:          SettingsLayer::default(),
+            settings:          WorkflowSettings::default(),
             graph:             Graph::new("ship"),
             workflow_slug:     Some("demo".to_string()),
             working_directory: PathBuf::from("/tmp/project"),

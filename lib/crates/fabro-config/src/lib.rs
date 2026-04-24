@@ -2,45 +2,59 @@
     clippy::disallowed_methods,
     reason = "sync config loading utilities used at startup; not on a Tokio path"
 )]
-//! Resolved settings entrypoints: [`ServerSettings`] for the running server,
-//! [`UserSettings`] for the CLI/user perspective, and [`WorkflowSettings`] for
-//! workflow execution.
+//! Configuration loading and resolution helpers.
 
 extern crate self as fabro_config;
 
-pub mod context;
+pub mod builders;
 mod defaults;
+mod layers;
 
 pub mod bind;
 pub mod daemon;
-pub mod effective_settings;
 pub mod envfile;
 pub mod error;
 pub mod home;
-pub mod load;
+mod load;
 pub mod parse;
 pub mod project;
 pub mod resolve;
 pub mod run;
 pub mod storage;
+#[cfg(test)]
+mod tests;
 pub mod user;
 
 use std::path::Path;
 
-pub use context::{ServerSettings, UserSettings, WorkflowSettings};
-pub use defaults::{apply_builtin_defaults, defaults_layer};
+pub use builders::{
+    ResolveErrors, RunSettingsBuilder, ServerRuntimeSettings, ServerSettingsBuilder,
+    UserSettingsBuilder, WorkflowSettingsBuilder, load_server_runtime_settings,
+};
 pub use error::{Error, Result};
 pub use fabro_util::path::expand_tilde;
 pub use home::Home;
-pub use load::{
-    load_settings_for_workflow, load_settings_path, load_settings_project, load_settings_user,
+pub use layers::{
+    CliAuthLayer, CliExecAgentLayer, CliExecLayer, CliExecModelLayer, CliLayer, CliLoggingLayer,
+    CliOutputLayer, CliTargetLayer, CliUpdatesLayer, DaytonaDockerfileLayer, DaytonaSandboxLayer,
+    DaytonaSnapshotLayer, DiscordIntegrationLayer, FeaturesLayer, GitAuthorLayer,
+    GithubIntegrationLayer, HookAgentMarker, HookEntry, HookTlsMode, IntegrationWebhooksLayer,
+    InterviewProviderLayer, InterviewsLayer, LocalSandboxLayer, McpEntryLayer, MergeMap,
+    ModelRefOrSplice, NotificationProviderLayer, NotificationRouteLayer, ObjectStoreLocalLayer,
+    ObjectStoreS3Layer, PrepareStep, ProjectLayer, ReplaceMap, RunAgentLayer, RunArtifactsLayer,
+    RunCheckpointLayer, RunExecutionLayer, RunGitLayer, RunGoalLayer, RunLayer, RunModelLayer,
+    RunPrepareLayer, RunPullRequestLayer, RunSandboxLayer, RunScmLayer, ScmGitHubLayer,
+    ServerApiLayer, ServerArtifactsLayer, ServerAuthGithubLayer, ServerAuthLayer,
+    ServerIntegrationsLayer, ServerIpAllowlistLayer, ServerIpAllowlistOverrideLayer, ServerLayer,
+    ServerListenLayer, ServerLoggingLayer, ServerSchedulerLayer, ServerSlateDbLayer,
+    ServerStorageLayer, ServerWebLayer, SlackIntegrationLayer, StickyMap, StringOrSplice,
+    TeamsIntegrationLayer, WorkflowLayer,
 };
-pub use parse::{ParseError, parse_settings_layer};
+pub(crate) use layers::{Combine, SettingsLayer};
+pub use parse::ParseError;
 pub use resolve::{
-    ResolveError, dev_token_auth_enabled, render_resolve_errors, resolve_cli,
-    resolve_cli_from_file, resolve_features, resolve_features_from_file, resolve_project,
-    resolve_project_from_file, resolve_run, resolve_run_from_file, resolve_server,
-    resolve_server_from_file, resolve_storage_root, resolve_workflow, resolve_workflow_from_file,
+    ResolveError, resolve_cli, resolve_features, resolve_project, resolve_run, resolve_server,
+    resolve_workflow,
 };
 use serde::de::DeserializeOwned;
 pub use storage::{RunScratch, RuntimeDirectory, Storage};

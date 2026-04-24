@@ -3,9 +3,9 @@ use tracing::debug;
 pub(crate) struct DummySleepInhibitor;
 
 impl DummySleepInhibitor {
-    pub(crate) fn acquire() -> Option<Self> {
+    pub(crate) fn acquire() -> Self {
         debug!("Sleep inhibitor: using dummy backend (no-op)");
-        Some(DummySleepInhibitor)
+        Self
     }
 }
 

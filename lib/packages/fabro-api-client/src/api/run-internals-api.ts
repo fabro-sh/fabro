@@ -608,7 +608,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Returns the persisted `SettingsLayer` used to launch this run.
+         * Returns the persisted dense `WorkflowSettings` snapshot used to launch this run.
          * @summary Retrieve Run Settings
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -874,7 +874,7 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns the persisted `SettingsLayer` used to launch this run.
+         * Returns the persisted dense `WorkflowSettings` snapshot used to launch this run.
          * @summary Retrieve Run Settings
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -1046,7 +1046,7 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.retrieveRunCheckpoint(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns the persisted `SettingsLayer` used to launch this run.
+         * Returns the persisted dense `WorkflowSettings` snapshot used to launch this run.
          * @summary Retrieve Run Settings
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -1222,7 +1222,7 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
-     * Returns the persisted `SettingsLayer` used to launch this run.
+     * Returns the persisted dense `WorkflowSettings` snapshot used to launch this run.
      * @summary Retrieve Run Settings
      * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.
