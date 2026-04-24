@@ -12,6 +12,21 @@ pub fn github_api_base_url() -> String {
     std::env::var("GITHUB_BASE_URL").unwrap_or_else(|_| GITHUB_API_BASE_URL.to_string())
 }
 
+/// Bundle of GitHub credentials and the API base URL, threaded through every
+/// authenticated GitHub call. Lets call sites pass one parameter instead of
+/// two, and keeps the auth/endpoint pair from drifting apart.
+#[derive(Debug, Clone, Copy)]
+pub struct GitHubContext<'a> {
+    pub creds:    &'a GitHubCredentials,
+    pub base_url: &'a str,
+}
+
+impl<'a> GitHubContext<'a> {
+    pub fn new(creds: &'a GitHubCredentials, base_url: &'a str) -> Self {
+        Self { creds, base_url }
+    }
+}
+
 /// Errors returned by pull-request endpoints. Callers branch on `NotFound` to
 /// distinguish a missing PR from any other failure.
 #[derive(Debug, thiserror::Error)]
@@ -456,7 +471,7 @@ pub struct CreatedPullRequest {
     reason = "Creating a pull request needs explicit repo, branch, and body fields."
 )]
 pub async fn create_pull_request(
-    creds: &GitHubCredentials,
+    ctx: GitHubContext<'_>,
     owner: &str,
     repo: &str,
     base: &str,
@@ -464,7 +479,6 @@ pub async fn create_pull_request(
     title: &str,
     body: &str,
     draft: bool,
-    base_url: &str,
 ) -> Result<CreatedPullRequest, String> {
     #[derive(Deserialize)]
     struct PullRequestResponse {
@@ -474,12 +488,13 @@ pub async fn create_pull_request(
     }
 
     let client = http_client()?;
-    let token = creds
+    let token = ctx
+        .creds
         .resolve_bearer_token(
             &client,
             owner,
             repo,
-            base_url,
+            ctx.base_url,
             serde_json::json!({ "contents": "write", "pull_requests": "write" }),
         )
         .await?;
@@ -494,7 +509,7 @@ pub async fn create_pull_request(
         "draft": draft,
     });
 
-    let url = format!("{base_url}/repos/{owner}/{repo}/pulls");
+    let url = format!("{}/repos/{owner}/{repo}/pulls", ctx.base_url);
     let auth = format!("Bearer {token}");
     let resp = HttpClient::request(
         &client,
@@ -553,20 +568,20 @@ fn merge_method_as_graphql_value(method: fabro_types::MergeMethod) -> &'static s
 /// Requires the PR's `node_id` (from the REST API response) and a merge method.
 /// The repository must have auto-merge enabled in its settings.
 pub async fn enable_auto_merge(
-    creds: &GitHubCredentials,
+    ctx: GitHubContext<'_>,
     owner: &str,
     repo: &str,
     pr_node_id: &str,
     merge_method: fabro_types::MergeMethod,
-    base_url: &str,
 ) -> Result<(), String> {
     let client = http_client()?;
-    let token = creds
+    let token = ctx
+        .creds
         .resolve_bearer_token(
             &client,
             owner,
             repo,
-            base_url,
+            ctx.base_url,
             serde_json::json!({ "contents": "write", "pull_requests": "write" }),
         )
         .await?;
@@ -591,7 +606,7 @@ pub async fn enable_auto_merge(
         "Enabling auto-merge"
     );
 
-    let graphql_url = format!("{base_url}/graphql");
+    let graphql_url = format!("{}/graphql", ctx.base_url);
     let auth = format!("Bearer {token}");
     let graphql_body = serde_json::json!({ "query": query });
     let resp = HttpClient::request(
@@ -916,37 +931,36 @@ pub async fn resolve_authenticated_url(
 
 /// Fetch detailed information about a pull request.
 pub async fn get_pull_request(
-    creds: &GitHubCredentials,
+    ctx: GitHubContext<'_>,
     owner: &str,
     repo: &str,
     number: u64,
-    base_url: &str,
 ) -> Result<PullRequestGithubDetail, PullRequestApiError> {
     let client = http_client()?;
-    get_pull_request_with_client(&client, creds, owner, repo, number, base_url).await
+    get_pull_request_with_client(&client, ctx, owner, repo, number).await
 }
 
 async fn get_pull_request_with_client(
     client: &impl HttpClient,
-    creds: &GitHubCredentials,
+    ctx: GitHubContext<'_>,
     owner: &str,
     repo: &str,
     number: u64,
-    base_url: &str,
 ) -> Result<PullRequestGithubDetail, PullRequestApiError> {
     tracing::debug!(owner, repo, number, "Fetching pull request");
 
-    let token = creds
+    let token = ctx
+        .creds
         .resolve_bearer_token(
             client,
             owner,
             repo,
-            base_url,
+            ctx.base_url,
             serde_json::json!({ "contents": "write", "pull_requests": "write" }),
         )
         .await?;
 
-    let url = format!("{base_url}/repos/{owner}/{repo}/pulls/{number}");
+    let url = format!("{}/repos/{owner}/{repo}/pulls/{number}", ctx.base_url);
     let auth = format!("Bearer {token}");
     let resp = client
         .request(HttpMethod::Get, &url, &github_headers(&auth), None)
@@ -984,43 +998,38 @@ async fn get_pull_request_with_client(
 
 /// Merge a pull request.
 pub async fn merge_pull_request(
-    creds: &GitHubCredentials,
+    ctx: GitHubContext<'_>,
     owner: &str,
     repo: &str,
     number: u64,
     method: fabro_types::MergeMethod,
-    base_url: &str,
 ) -> Result<(), PullRequestApiError> {
     let client = http_client()?;
-    merge_pull_request_with_client(&client, creds, owner, repo, number, method, base_url).await
+    merge_pull_request_with_client(&client, ctx, owner, repo, number, method).await
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Merging a pull request needs explicit repo, method, auth, and client inputs."
-)]
 async fn merge_pull_request_with_client(
     client: &impl HttpClient,
-    creds: &GitHubCredentials,
+    ctx: GitHubContext<'_>,
     owner: &str,
     repo: &str,
     number: u64,
     method: fabro_types::MergeMethod,
-    base_url: &str,
 ) -> Result<(), PullRequestApiError> {
     tracing::debug!(owner, repo, number, method = %method, "Merging pull request");
 
-    let token = creds
+    let token = ctx
+        .creds
         .resolve_bearer_token(
             client,
             owner,
             repo,
-            base_url,
+            ctx.base_url,
             serde_json::json!({ "contents": "write", "pull_requests": "write" }),
         )
         .await?;
 
-    let url = format!("{base_url}/repos/{owner}/{repo}/pulls/{number}/merge");
+    let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/merge", ctx.base_url);
     let body = serde_json::json!({ "merge_method": method.as_str() });
     let auth = format!("Bearer {token}");
 
@@ -1055,37 +1064,36 @@ async fn merge_pull_request_with_client(
 
 /// Close a pull request.
 pub async fn close_pull_request(
-    creds: &GitHubCredentials,
+    ctx: GitHubContext<'_>,
     owner: &str,
     repo: &str,
     number: u64,
-    base_url: &str,
 ) -> Result<(), PullRequestApiError> {
     let client = http_client()?;
-    close_pull_request_with_client(&client, creds, owner, repo, number, base_url).await
+    close_pull_request_with_client(&client, ctx, owner, repo, number).await
 }
 
 async fn close_pull_request_with_client(
     client: &impl HttpClient,
-    creds: &GitHubCredentials,
+    ctx: GitHubContext<'_>,
     owner: &str,
     repo: &str,
     number: u64,
-    base_url: &str,
 ) -> Result<(), PullRequestApiError> {
     tracing::debug!(owner, repo, number, "Closing pull request");
 
-    let token = creds
+    let token = ctx
+        .creds
         .resolve_bearer_token(
             client,
             owner,
             repo,
-            base_url,
+            ctx.base_url,
             serde_json::json!({ "contents": "write", "pull_requests": "write" }),
         )
         .await?;
 
-    let url = format!("{base_url}/repos/{owner}/{repo}/pulls/{number}");
+    let url = format!("{}/repos/{owner}/{repo}/pulls/{number}", ctx.base_url);
     let body = serde_json::json!({ "state": "closed" });
     let auth = format!("Bearer {token}");
 
@@ -1845,9 +1853,15 @@ mod tests {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         });
-        let detail = get_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "")
-            .await
-            .unwrap();
+        let detail = get_pull_request_with_client(
+            &mock,
+            GitHubContext::new(&creds, ""),
+            "owner",
+            "repo",
+            42,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(detail.number, 42);
         assert_eq!(detail.title, "Fix the bug");
@@ -1884,9 +1898,15 @@ mod tests {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         });
-        let err = get_pull_request_with_client(&mock, &creds, "owner", "repo", 999, "")
-            .await
-            .unwrap_err();
+        let err = get_pull_request_with_client(
+            &mock,
+            GitHubContext::new(&creds, ""),
+            "owner",
+            "repo",
+            999,
+        )
+        .await
+        .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -1912,9 +1932,15 @@ mod tests {
             .with_req_header("Authorization", "Bearer ghu_test");
 
         let creds = GitHubCredentials::Token("ghu_test".to_string());
-        let detail = get_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "")
-            .await
-            .unwrap();
+        let detail = get_pull_request_with_client(
+            &mock,
+            GitHubContext::new(&creds, ""),
+            "owner",
+            "repo",
+            42,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(detail.number, 42);
     }
@@ -1969,12 +1995,11 @@ mod tests {
         });
         merge_pull_request_with_client(
             &mock,
-            &creds,
+            GitHubContext::new(&creds, ""),
             "owner",
             "repo",
             42,
             fabro_types::MergeMethod::Squash,
-            "",
         )
         .await
         .unwrap();
@@ -2004,12 +2029,11 @@ mod tests {
         });
         let err = merge_pull_request_with_client(
             &mock,
-            &creds,
+            GitHubContext::new(&creds, ""),
             "owner",
             "repo",
             42,
             fabro_types::MergeMethod::Squash,
-            "",
         )
         .await
         .unwrap_err();
@@ -2040,12 +2064,11 @@ mod tests {
         });
         let err = merge_pull_request_with_client(
             &mock,
-            &creds,
+            GitHubContext::new(&creds, ""),
             "owner",
             "repo",
             42,
             fabro_types::MergeMethod::Squash,
-            "",
         )
         .await
         .unwrap_err();
@@ -2083,7 +2106,7 @@ mod tests {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         });
-        close_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "")
+        close_pull_request_with_client(&mock, GitHubContext::new(&creds, ""), "owner", "repo", 42)
             .await
             .unwrap();
     }
@@ -2110,9 +2133,15 @@ mod tests {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         });
-        let err = close_pull_request_with_client(&mock, &creds, "owner", "repo", 999, "")
-            .await
-            .unwrap_err();
+        let err = close_pull_request_with_client(
+            &mock,
+            GitHubContext::new(&creds, ""),
+            "owner",
+            "repo",
+            999,
+        )
+        .await
+        .unwrap_err();
         assert!(
             matches!(
                 err,

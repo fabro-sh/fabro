@@ -1,5 +1,5 @@
 use fabro_github::{
-    GitHubAppCredentials, GitHubCredentials, close_pull_request,
+    GitHubAppCredentials, GitHubContext, GitHubCredentials, close_pull_request,
     create_installation_access_token_for_pr, create_pull_request, enable_auto_merge,
     get_pull_request, merge_pull_request, resolve_authenticated_url, sign_app_jwt,
 };
@@ -39,9 +39,10 @@ fn standard_app_state() -> GitHubAppState {
 async fn create_and_get_pull_request() {
     let twin = TwinGitHub::start(standard_app_state()).await;
     let creds = github_credentials();
+    let ctx = GitHubContext::new(&creds, &twin.base_url);
 
     let created = create_pull_request(
-        &creds,
+        ctx,
         "acme",
         "widgets",
         "main",
@@ -49,12 +50,11 @@ async fn create_and_get_pull_request() {
         "Add widgets",
         "PR body",
         false,
-        &twin.base_url,
     )
     .await
     .unwrap();
 
-    let pr = get_pull_request(&creds, "acme", "widgets", created.number, &twin.base_url)
+    let pr = get_pull_request(ctx, "acme", "widgets", created.number)
         .await
         .unwrap();
 
@@ -70,33 +70,19 @@ async fn create_and_get_pull_request() {
 async fn create_merge_and_verify_state() {
     let twin = TwinGitHub::start(standard_app_state()).await;
     let creds = github_credentials();
+    let ctx = GitHubContext::new(&creds, &twin.base_url);
 
     let created = create_pull_request(
-        &creds,
-        "acme",
-        "widgets",
-        "main",
-        "feature",
-        "Merge me",
-        "PR body",
-        false,
-        &twin.base_url,
+        ctx, "acme", "widgets", "main", "feature", "Merge me", "PR body", false,
     )
     .await
     .unwrap();
 
-    merge_pull_request(
-        &creds,
-        "acme",
-        "widgets",
-        created.number,
-        MergeMethod::Squash,
-        &twin.base_url,
-    )
-    .await
-    .unwrap();
+    merge_pull_request(ctx, "acme", "widgets", created.number, MergeMethod::Squash)
+        .await
+        .unwrap();
 
-    let pr = get_pull_request(&creds, "acme", "widgets", created.number, &twin.base_url)
+    let pr = get_pull_request(ctx, "acme", "widgets", created.number)
         .await
         .unwrap();
 
@@ -111,25 +97,19 @@ async fn create_close_and_verify_state() {
     let twin = TwinGitHub::start(standard_app_state()).await;
     let creds = github_credentials();
 
+    let ctx = GitHubContext::new(&creds, &twin.base_url);
+
     let created = create_pull_request(
-        &creds,
-        "acme",
-        "widgets",
-        "main",
-        "feature",
-        "Close me",
-        "PR body",
-        false,
-        &twin.base_url,
+        ctx, "acme", "widgets", "main", "feature", "Close me", "PR body", false,
     )
     .await
     .unwrap();
 
-    close_pull_request(&creds, "acme", "widgets", created.number, &twin.base_url)
+    close_pull_request(ctx, "acme", "widgets", created.number)
         .await
         .unwrap();
 
-    let pr = get_pull_request(&creds, "acme", "widgets", created.number, &twin.base_url)
+    let pr = get_pull_request(ctx, "acme", "widgets", created.number)
         .await
         .unwrap();
 
@@ -143,8 +123,10 @@ async fn enable_auto_merge_persists() {
     let twin = TwinGitHub::start(standard_app_state()).await;
     let creds = github_credentials();
 
+    let ctx = GitHubContext::new(&creds, &twin.base_url);
+
     let created = create_pull_request(
-        &creds,
+        ctx,
         "acme",
         "widgets",
         "main",
@@ -152,18 +134,16 @@ async fn enable_auto_merge_persists() {
         "Auto merge me",
         "PR body",
         false,
-        &twin.base_url,
     )
     .await
     .unwrap();
 
     enable_auto_merge(
-        &creds,
+        ctx,
         "acme",
         "widgets",
         &created.node_id,
         MergeMethod::Squash,
-        &twin.base_url,
     )
     .await
     .unwrap();

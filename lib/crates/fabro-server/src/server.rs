@@ -5383,9 +5383,8 @@ async fn create_run_pull_request(
 
     let pull_request =
         match pull_request::maybe_open_pull_request(pull_request::OpenPullRequestRequest {
-            creds: &creds,
+            github: fabro_github::GitHubContext::new(&creds, state.github_api_base_url.as_str()),
             origin_url: &normalized_origin,
-            github_api_base_url: state.github_api_base_url.as_str(),
             base_branch,
             head_branch: run_branch,
             goal: run_spec.graph.goal(),
@@ -5436,11 +5435,10 @@ async fn get_run_pull_request(
     };
 
     match fabro_github::get_pull_request(
-        &ctx.creds,
+        fabro_github::GitHubContext::new(&ctx.creds, state.github_api_base_url.as_str()),
         &ctx.owner,
         &ctx.repo,
         ctx.record.number,
-        state.github_api_base_url.as_str(),
     )
     .await
     {
@@ -5467,12 +5465,11 @@ async fn merge_run_pull_request(
     };
 
     match fabro_github::merge_pull_request(
-        &ctx.creds,
+        fabro_github::GitHubContext::new(&ctx.creds, state.github_api_base_url.as_str()),
         &ctx.owner,
         &ctx.repo,
         ctx.record.number,
         body.method,
-        state.github_api_base_url.as_str(),
     )
     .await
     {
@@ -5500,11 +5497,10 @@ async fn close_run_pull_request(
     };
 
     match fabro_github::close_pull_request(
-        &ctx.creds,
+        fabro_github::GitHubContext::new(&ctx.creds, state.github_api_base_url.as_str()),
         &ctx.owner,
         &ctx.repo,
         ctx.record.number,
-        state.github_api_base_url.as_str(),
     )
     .await
     {

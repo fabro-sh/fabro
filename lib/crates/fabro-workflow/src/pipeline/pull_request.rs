@@ -1,4 +1,4 @@
-use fabro_github::{self as github_app, GitHubCredentials, ssh_url_to_https};
+use fabro_github::{self as github_app, ssh_url_to_https};
 use fabro_graphviz::parser;
 use fabro_llm::generate::{GenerateParams, generate};
 use fabro_retro::retro::Retro;
@@ -396,18 +396,17 @@ pub struct AutoMergeOptions {
 
 /// Inputs for [`maybe_open_pull_request`].
 pub struct OpenPullRequestRequest<'a> {
-    pub creds:               &'a GitHubCredentials,
-    pub origin_url:          &'a str,
-    pub github_api_base_url: &'a str,
-    pub base_branch:         &'a str,
-    pub head_branch:         &'a str,
-    pub goal:                &'a str,
-    pub diff:                &'a str,
-    pub model:               &'a str,
-    pub draft:               bool,
-    pub auto_merge:          Option<AutoMergeOptions>,
-    pub run_store:           &'a RunStoreHandle,
-    pub conclusion:          Option<&'a Conclusion>,
+    pub github:      github_app::GitHubContext<'a>,
+    pub origin_url:  &'a str,
+    pub base_branch: &'a str,
+    pub head_branch: &'a str,
+    pub goal:        &'a str,
+    pub diff:        &'a str,
+    pub model:       &'a str,
+    pub draft:       bool,
+    pub auto_merge:  Option<AutoMergeOptions>,
+    pub run_store:   &'a RunStoreHandle,
+    pub conclusion:  Option<&'a Conclusion>,
 }
 
 /// Optionally open a pull request after a successful workflow run.
@@ -431,7 +430,7 @@ pub async fn maybe_open_pull_request(
     let title = pr_title_from_goal(req.goal);
 
     let created = github_app::create_pull_request(
-        req.creds,
+        req.github,
         &owner,
         &repo,
         req.base_branch,
@@ -439,7 +438,6 @@ pub async fn maybe_open_pull_request(
         &title,
         &body,
         req.draft,
-        req.github_api_base_url,
     )
     .await?;
 
@@ -452,12 +450,11 @@ pub async fn maybe_open_pull_request(
             MergeStrategy::Rebase => fabro_types::MergeMethod::Rebase,
         };
         match github_app::enable_auto_merge(
-            req.creds,
+            req.github,
             &owner,
             &repo,
             &created.node_id,
             merge_method,
-            req.github_api_base_url,
         )
         .await
         {
@@ -529,9 +526,11 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                     };
 
                     match maybe_open_pull_request(OpenPullRequestRequest {
-                        creds,
+                        github: github_app::GitHubContext::new(
+                            creds,
+                            &github_app::github_api_base_url(),
+                        ),
                         origin_url: origin,
-                        github_api_base_url: &github_app::github_api_base_url(),
                         base_branch,
                         head_branch: run_branch,
                         goal: graph.goal(),
@@ -1344,23 +1343,23 @@ mod tests {
     async fn empty_diff_returns_none() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        let creds = GitHubCredentials::App(fabro_github::GitHubAppCredentials {
+        let creds = fabro_github::GitHubCredentials::App(fabro_github::GitHubAppCredentials {
             app_id:          "123".to_string(),
             private_key_pem: "unused".to_string(),
         });
+        let base_url = github_app::github_api_base_url();
         let result = maybe_open_pull_request(OpenPullRequestRequest {
-            creds:               &creds,
-            origin_url:          "https://github.com/owner/repo.git",
-            github_api_base_url: &github_app::github_api_base_url(),
-            base_branch:         "main",
-            head_branch:         "fabro/run/123",
-            goal:                "Fix bug",
-            diff:                "",
-            model:               "claude-sonnet-4-20250514",
-            draft:               false,
-            auto_merge:          None,
-            run_store:           &run_store.clone().into(),
-            conclusion:          None,
+            github:      github_app::GitHubContext::new(&creds, &base_url),
+            origin_url:  "https://github.com/owner/repo.git",
+            base_branch: "main",
+            head_branch: "fabro/run/123",
+            goal:        "Fix bug",
+            diff:        "",
+            model:       "claude-sonnet-4-20250514",
+            draft:       false,
+            auto_merge:  None,
+            run_store:   &run_store.clone().into(),
+            conclusion:  None,
         })
         .await;
         assert!(result.is_ok());

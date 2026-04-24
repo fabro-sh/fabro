@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
 use fabro_config::CliLayer;
+use fabro_types::UserSettings;
 use fabro_types::settings::RunNamespace;
 use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
-use fabro_types::{ServerSettings, UserSettings};
 use fabro_util::printer::Printer;
 use tokio::sync::OnceCell;
 
@@ -36,17 +36,15 @@ pub(crate) struct CommandContext {
     cli_layer:          CliLayer,
     storage_dir:        PathBuf,
     run_settings:       std::result::Result<RunNamespace, String>,
-    server_settings:    std::result::Result<ServerSettings, String>,
     user_settings:      UserSettings,
     server_mode:        ServerMode,
     server:             OnceCell<Arc<Client>>,
 }
 
 struct ResolvedCommandSettings {
-    storage_dir:     PathBuf,
-    run_settings:    std::result::Result<RunNamespace, String>,
-    server_settings: std::result::Result<ServerSettings, String>,
-    user_settings:   UserSettings,
+    storage_dir:   PathBuf,
+    run_settings:  std::result::Result<RunNamespace, String>,
+    user_settings: UserSettings,
 }
 
 impl CommandContext {
@@ -64,7 +62,6 @@ impl CommandContext {
             cli_layer: cli_layer.clone(),
             storage_dir: resolved_settings.storage_dir,
             run_settings: resolved_settings.run_settings,
-            server_settings: resolved_settings.server_settings,
             user_settings: resolved_settings.user_settings,
             server_mode: ServerMode::None,
             server: OnceCell::new(),
@@ -98,24 +95,6 @@ impl CommandContext {
 
     pub(crate) fn cwd(&self) -> &Path {
         &self.cwd
-    }
-
-    #[expect(
-        dead_code,
-        reason = "no current consumers since PR commands moved server-side; kept for parity with run_settings/server_settings"
-    )]
-    pub(crate) fn storage_dir(&self) -> &Path {
-        &self.storage_dir
-    }
-
-    #[expect(
-        dead_code,
-        reason = "no current consumers since PR commands moved server-side"
-    )]
-    pub(crate) fn server_settings(&self) -> Result<&ServerSettings> {
-        self.server_settings
-            .as_ref()
-            .map_err(|err| anyhow::anyhow!("{err}"))
     }
 
     pub(crate) fn run_settings(&self) -> Result<&RunNamespace> {
@@ -182,7 +161,6 @@ impl CommandContext {
             cli_layer: self.cli_layer.clone(),
             storage_dir: resolved_settings.storage_dir,
             run_settings: resolved_settings.run_settings,
-            server_settings: resolved_settings.server_settings,
             user_settings: resolved_settings.user_settings,
             server_mode,
             server: OnceCell::new(),
@@ -212,10 +190,9 @@ fn load_merged_settings(
 
 fn resolve_command_settings(loaded_settings: LoadedSettings) -> ResolvedCommandSettings {
     ResolvedCommandSettings {
-        storage_dir:     loaded_settings.storage_dir,
-        run_settings:    loaded_settings.run_settings,
-        server_settings: loaded_settings.server_settings,
-        user_settings:   loaded_settings.user_settings,
+        storage_dir:   loaded_settings.storage_dir,
+        run_settings:  loaded_settings.run_settings,
+        user_settings: loaded_settings.user_settings,
     }
 }
 
@@ -255,7 +232,6 @@ mod tests {
             cli_layer,
             storage_dir: resolved_settings.storage_dir,
             run_settings: resolved_settings.run_settings,
-            server_settings: resolved_settings.server_settings,
             user_settings: resolved_settings.user_settings,
             server_mode: ServerMode::None,
             server: OnceCell::new(),
@@ -326,29 +302,30 @@ root = "/srv/fabro/default"
             connection_settings.run_settings.unwrap().agent.mcps.len(),
             0
         );
-        assert!(base_settings.server_settings.is_err());
-        assert!(connection_settings.server_settings.is_err());
     }
 
     #[test]
     fn storage_dir_stays_available_when_server_settings_do_not_resolve() {
-        let resolved = resolve_command_settings(
-            user_config::load_resolved_settings_from_toml(
-                r#"
+        let loaded = user_config::load_resolved_settings_from_toml(
+            r#"
 _version = 1
 
 [server.storage]
 root = "/srv/fabro"
 "#,
-                None,
-                Some(&CliLayer::default()),
-            )
-            .expect("settings should resolve"),
+            None,
+            Some(&CliLayer::default()),
+        )
+        .expect("settings should resolve");
+
+        assert!(
+            loaded.server_settings.is_err(),
+            "fixture intentionally omits [server.auth] so server_settings should fail to resolve"
         );
 
+        let resolved = resolve_command_settings(loaded);
         assert_eq!(resolved.storage_dir, PathBuf::from("/srv/fabro"));
         assert!(resolved.run_settings.is_ok());
-        assert!(resolved.server_settings.is_err());
     }
 
     #[test]
