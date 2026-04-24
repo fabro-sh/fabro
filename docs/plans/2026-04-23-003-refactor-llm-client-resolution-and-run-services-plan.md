@@ -311,7 +311,7 @@ Phase data flow:
   - `EnvCredentialSource::new()` reads env for each provider in `Provider::ALL`, emitting `ApiCredential`s. `auth_issues` is always empty. Replaces the body of today's `Client::from_env`.
   - `Client::from_source(source: &dyn CredentialSource) -> Result<Arc<Client>, Error>` — calls `source.resolve()`, discards `auth_issues`, calls `Client::from_credentials`, wraps in `Arc`. Callers that need diagnostics call `source.resolve()` directly.
   - Move `auth_issue_message` helper (today duplicated in `fabro-workflow/handler/llm/api.rs:82` and `fabro-server/server_secrets.rs:127`) to `fabro-auth` alongside the trait.
-  - `ApiCredential` must have a redacting `Debug` impl (verify/add using `fabro-util::redaction`). Add unit test asserting `format!("{:?}", credential)` does not echo key material.
+  - `ApiCredential` must have a redacting `Debug` impl (verify/add using `fabro-redact`). Add unit test asserting `format!("{:?}", credential)` does not echo key material.
 
   **Patterns to follow:**
   - `CredentialFallback` trait shape in `docs/plans/2026-04-20-002-refactor-extract-fabro-client-crate-plan.md`.

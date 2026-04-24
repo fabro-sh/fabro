@@ -1573,8 +1573,8 @@ dependencies = [
  "fabro-http",
  "fabro-model",
  "fabro-oauth",
+ "fabro-redact",
  "fabro-static",
- "fabro-util",
  "fabro-vault",
  "httpmock",
  "serde",
@@ -1640,6 +1640,7 @@ dependencies = [
  "fabro-model",
  "fabro-oauth",
  "fabro-proc",
+ "fabro-redact",
  "fabro-retro",
  "fabro-sandbox",
  "fabro-server",
@@ -1786,10 +1787,10 @@ dependencies = [
  "chrono",
  "fabro-http",
  "fabro-macros",
+ "fabro-redact",
  "fabro-static",
  "fabro-test",
  "fabro-types",
- "fabro-util",
  "jsonwebtoken",
  "serde",
  "serde_json",
@@ -1888,6 +1889,7 @@ dependencies = [
  "fabro-http",
  "fabro-macros",
  "fabro-model",
+ "fabro-redact",
  "fabro-static",
  "fabro-test",
  "fabro-util",
@@ -1950,6 +1952,7 @@ dependencies = [
  "axum",
  "base64",
  "fabro-http",
+ "fabro-redact",
  "fabro-static",
  "fabro-test",
  "fabro-util",
@@ -1970,6 +1973,22 @@ dependencies = [
  "cc",
  "libc",
  "tempfile",
+]
+
+[[package]]
+name = "fabro-redact"
+version = "0.213.0-nightly.0"
+dependencies = [
+ "aho-corasick",
+ "ref-cast",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -2050,6 +2069,7 @@ dependencies = [
  "fabro-llm",
  "fabro-model",
  "fabro-proc",
+ "fabro-redact",
  "fabro-retro",
  "fabro-sandbox",
  "fabro-slack",
@@ -2257,7 +2277,6 @@ dependencies = [
 name = "fabro-util"
 version = "0.213.0-nightly.0"
 dependencies = [
- "aho-corasick",
  "anyhow",
  "console 0.15.11",
  "dirs",
@@ -2265,18 +2284,13 @@ dependencies = [
  "insta",
  "open",
  "rand 0.9.4",
- "ref-cast",
- "regex",
  "serde",
  "serde_json",
  "tempfile",
  "termimad",
- "thiserror 2.0.18",
  "tokio",
- "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
- "url",
 ]
 
 [[package]]
@@ -2326,6 +2340,7 @@ dependencies = [
  "fabro-macros",
  "fabro-mcp",
  "fabro-model",
+ "fabro-redact",
  "fabro-retro",
  "fabro-sandbox",
  "fabro-static",

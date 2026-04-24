@@ -45,6 +45,7 @@ fabro-telemetry = { path = "../fabro-telemetry" }
 fabro-store = { path = "../fabro-store" }
 fabro-vault = { path = "../fabro-vault" }
 fabro-types = { path = "../fabro-types", features = ["clap"] }
+fabro-redact.workspace = true
 fabro-util = { path = "../fabro-util" }
 fabro-http.workspace = true
 fabro-static.workspace = true

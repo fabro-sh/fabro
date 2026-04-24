@@ -79,6 +79,7 @@ rust-embed = "8"
 percent-encoding = "2"
 minijinja = "2"
 fabro-http = { path = "lib/crates/fabro-http" }
+fabro-redact = { path = "lib/crates/fabro-redact" }
 fabro-static = { path = "lib/crates/fabro-static" }
 graphviz-sys = { git = "https://github.com/fabro-sh/graphviz-sys" }
 ref-cast = "1"

@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 use fabro_model::Provider;
-use fabro_util::redact::redact_string;
+use fabro_redact::redact_string;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

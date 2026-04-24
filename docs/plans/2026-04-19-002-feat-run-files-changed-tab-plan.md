@@ -134,7 +134,7 @@ Carried from origin + new measurable targets:
 - **Sandbox reconnect**: `lib/crates/fabro-sandbox/src/reconnect.rs:17-60` (dispatches on `provider` string; only Local and Daytona are compiled into the server — `fabro-server/Cargo.toml:25` enables only `features = ["daytona"]`, so Docker runs would 409 at reconnect). `reconnect_run_sandbox` in `lib/crates/fabro-server/src/server.rs:5797-5806` maps all reconnect errors to `StatusCode::CONFLICT`.
 - **Sandbox git helpers**: `lib/crates/fabro-workflow/src/sandbox_git.rs`. `GIT_REMOTE` (line 23), `shell_quote` (line 26), `git_diff` at line 185 is `pub(crate)` with a 30 s timeout and returns an unbounded string — not fit for the new endpoint. A sibling machine-readable helper is needed.
 - **`RunProjection.final_patch`**: `lib/crates/fabro-store/src/run_state.rs:35`, populated at `lib/crates/fabro-workflow/src/lifecycle/git.rs:303-332` via `on_run_end` when `outcome.status == Success || PartialSuccess`. Extending to Failed is the lifecycle change in Unit 2.
-- **Redaction**: `lib/crates/fabro-util/src/redact/` is gitleaks+entropy at the content level. No path-denylist exists anywhere — Unit 8 is greenfield for that.
+- **Redaction**: `lib/crates/fabro-redact/src/` is gitleaks+entropy at the content level. No path-denylist exists anywhere — Unit 8 is greenfield for that.
 - **Frontend API helpers**: `apps/fabro-web/app/api.ts:41-47` (`apiJson`), `:115-130` (`apiJsonOrNull` — handles 404 and 501 gracefully — use this for the new route).
 - **Route conventions**: loaders use `({ request, params })`; `export const handle = { wide: true }` toggles wide layout; data flows through `withRouteModule` wrapper (`router.tsx:42-49`).
 - **Tab visibility**: `apps/fabro-web/app/routes/run-detail.tsx:14` has `{ name: "Files Changed", path: "/files", broken: true }`; `:68` filters with `!t.broken`. Removing the flag makes the tab visible.
@@ -182,7 +182,7 @@ There is no `docs/solutions/` directory in this repo; `docs/plans/` and `docs/br
 | **Response shape**: reuse `PaginatedRunFileList` name; introduce `RunFilesMeta` replacing `PaginationMeta` on this endpoint. | Keeps the existing schema name (already in the spec and the TS client as a type alias). Adds `truncated`, `total_changed`, optional `degraded`, optional `patch` without touching shared `PaginationMeta`. Non-breaking for consumers of `PaginationMeta` on other endpoints. |
 | **No cursor pagination; single top-level `truncated` + `total_changed`.** | Natural-bound list with a hard 200-file cap. Follows `ListResponse<T>` precedent where "paginated" just means "bounded". Adding a cursor is deferred until a consumer needs it. |
 | **`change_kind` is optional.** | Resolves the R19/R23 back-compat tension: existing progenitor/openapi-generator clients can ignore it; v1 clients that know about it can skip hunk inspection. Kept as additive-only metadata. |
-| **Denylist in server code; content-based scanning out of scope.** | `fabro-util::redact` is content-level; the brainstorm explicitly confines R31 to path-based skipping. Matches the "authz gate + `git diff` parity" framing in R30. Config-driven denylist can come later. |
+| **Denylist in server code; content-based scanning out of scope.** | `fabro-redact` is content-level; the brainstorm explicitly confines R31 to path-based skipping. Matches the "authz gate + `git diff` parity" framing in R30. Config-driven denylist can come later. |
 | **Request coalescing, not queuing.** | Concurrent callers for the same run share one in-flight materialization via a singleflight map on `AppState`. Avoids redundant git work, prevents queue-exhaustion DoS, and is simpler than a 429-with-retry policy. |
 | **Use `apiJsonOrNull` on the web loader.** | Handles 404 and 501 gracefully, so dev environments without the new route (or demo without the new demo stub) render R4(c) empty state instead of hitting `RootErrorBoundary`. Mirrors the precedent in `run-stages.tsx:118` and `run-overview.tsx:16`. |
 
@@ -669,7 +669,7 @@ flowchart TB
 - **Extend `docs-internal/logging-strategy.md`** with the new prohibited-field entries (`diff_contents`, `file_path` for changed-file paths specifically, `git_stderr`) so future endpoints inherit the rule.
 
 **Patterns to follow:**
-- `lib/crates/fabro-util/src/redact/jsonl.rs:21` — the existing redaction field skiplist, as the conceptual ancestor (but content-level, not path-level).
+- `lib/crates/fabro-redact/src/jsonl.rs:21` — the existing redaction field skiplist, as the conceptual ancestor (but content-level, not path-level).
 - `AGENTS.md` shell-quoting rule for any shell-adjacent code.
 
 **Test scenarios:**

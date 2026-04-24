@@ -31,6 +31,7 @@ fabro-github = { path = "../fabro-github" }
 fabro-interview = { path = "../fabro-interview" }
 fabro-template = { path = "../fabro-template" }
 fabro-util = { path = "../fabro-util" }
+fabro-redact.workspace = true
 fabro-checkpoint = { path = "../fabro-checkpoint" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }

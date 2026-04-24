@@ -4,7 +4,7 @@ edition.workspace = true
 version.workspace = true
 publish = false
 license.workspace = true
-description = "Shared utilities: secret redaction and terminal styling"
+description = "Shared utilities for terminal output, paths, environment, and runtime helpers"
 
 [lib]
 doctest = false
@@ -16,11 +16,7 @@ workspace = true
 console.workspace = true
 fabro-static.workspace = true
 rand.workspace = true
-ref-cast.workspace = true
-regex.workspace = true
 termimad.workspace = true
-thiserror.workspace = true
-aho-corasick.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 tokio.workspace = true
@@ -29,11 +25,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
 open = "5"
-url.workspace = true
-
-[build-dependencies]
-toml = "0.8"
-serde = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }

@@ -1,6 +1,6 @@
 #![allow(
     clippy::disallowed_types,
-    reason = "fabro-util::redact owns the raw URL wrapper and redaction boundary"
+    reason = "fabro-redact owns the raw URL wrapper and redaction boundary"
 )]
 
 //! Credential-redacting URL display helpers.
@@ -414,6 +414,13 @@ mod tests {
             url.redacted_string(),
             "https://example.com/cb?tokenish=abc&keyed=xyz"
         );
+    }
+
+    #[test]
+    fn display_preserves_ipv6_host_brackets() {
+        let url = DisplaySafeUrl::parse("https://[::1]:8080/cb?token=abc").unwrap();
+
+        assert_eq!(url.redacted_string(), "https://[::1]:8080/cb?token=****");
     }
 
     #[test]

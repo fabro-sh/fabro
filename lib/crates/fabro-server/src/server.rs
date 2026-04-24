@@ -54,6 +54,7 @@ use fabro_llm::types::{
     ToolDefinition,
 };
 use fabro_model::{BilledModelUsage, BilledTokenCounts, Catalog};
+use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::daytona::DaytonaSandbox;
 use fabro_sandbox::reconnect::reconnect;
 use fabro_sandbox::{Sandbox, SandboxProvider};
@@ -76,7 +77,6 @@ use fabro_types::{
     RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
     RunServerProvenance, RunSubjectProvenance, ServerSettings,
 };
-use fabro_util::redact::redact_jsonl_line;
 use fabro_util::text::strip_goal_decoration;
 use fabro_util::version::FABRO_VERSION;
 use fabro_vault::{Error as VaultError, SecretType, Vault};

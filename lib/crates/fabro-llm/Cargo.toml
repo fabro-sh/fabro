@@ -35,6 +35,7 @@ tracing.workspace = true
 fabro-http.workspace = true
 fabro-auth = { path = "../fabro-auth" }
 fabro-model = { path = "../fabro-model" }
+fabro-redact.workspace = true
 fabro-static.workspace = true
 fabro-util = { path = "../fabro-util" }
 

@@ -1,9 +1,9 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use fabro_redact::DisplaySafeUrl;
 use fabro_static::EnvVars;
 use fabro_types::PullRequestGithubDetail;
 use fabro_types::settings::run::MergeStrategy;
-use fabro_util::redact::DisplaySafeUrl;
 use serde::Deserialize;
 use tokio::process::Command;
 

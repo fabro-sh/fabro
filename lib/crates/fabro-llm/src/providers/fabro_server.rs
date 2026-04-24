@@ -1,4 +1,4 @@
-use fabro_util::redact::DisplaySafeUrl;
+use fabro_redact::DisplaySafeUrl;
 use futures::stream;
 use tracing::{debug, error};
 

@@ -916,14 +916,14 @@ Organized into five phases. Early phases stand alone (no behavior changes). Late
 
 **Logging invariant (key technical decision):**
 - Never log raw bearer values, raw auth codes, or `code_verifier`.
-- Never log raw `user_agent` strings — they're attacker-controlled and can carry ANSI escape sequences (terminal injection for operators tail-ing logs) or newlines (log-splitting). Log a `user_agent_fingerprint = hex(sha256(user_agent)[..8])` instead — stable for correlation, inert as payload. SHA-256 is already in the workspace; no new dependency. If the raw UA is needed for support debugging, route it through `fabro_util::redact` which strips control characters.
+- Never log raw `user_agent` strings — they're attacker-controlled and can carry ANSI escape sequences (terminal injection for operators tail-ing logs) or newlines (log-splitting). Log a `user_agent_fingerprint = hex(sha256(user_agent)[..8])` instead — stable for correlation, inert as payload. SHA-256 is already in the workspace; no new dependency. If the raw UA is needed for support debugging, route it through `fabro-redact` which strips control characters.
 - User email is logged at INFO only on `/token` (login event) and `/logout` (explicit exit event); not on `/refresh` rotations.
 - Enforced by review at implementation time and documented in the module's top-level doc comment.
 
 **Patterns to follow:**
 - Existing handler signature patterns for state/extension extraction in `server.rs:2771` (`list_runs`) and `web_auth.rs:285` (`login_github`).
 - Generate 32-byte secrets via `OsRng::fill_bytes`, encode with `base64::engine::general_purpose::URL_SAFE_NO_PAD`.
-- Existing `fabro_util::redact` patterns for any case where bearer-adjacent data must appear in logs.
+- Existing `fabro-redact` patterns for any case where bearer-adjacent data must appear in logs.
 
 **Test scenarios:**
 - Happy path (/token): valid code + verifier → 200 with access+refresh; refresh row exists in store.

@@ -17,8 +17,8 @@ chrono = { workspace = true, features = ["serde"] }
 fabro-http.workspace = true
 fabro-model = { path = "../fabro-model" }
 fabro-oauth = { path = "../fabro-oauth" }
+fabro-redact.workspace = true
 fabro-static.workspace = true
-fabro-util = { path = "../fabro-util" }
 fabro-vault = { path = "../fabro-vault" }
 serde.workspace = true
 serde_json.workspace = true

@@ -16,6 +16,7 @@ workspace = true
 serde.workspace = true
 serde_json.workspace = true
 fabro-http.workspace = true
+fabro-redact.workspace = true
 sha2.workspace = true
 base64.workspace = true
 rand.workspace = true

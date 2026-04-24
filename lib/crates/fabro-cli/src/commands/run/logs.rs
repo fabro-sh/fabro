@@ -13,8 +13,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
+use fabro_redact::redact_jsonl_line;
 use fabro_util::json::normalize_json_value;
-use fabro_util::redact::redact_jsonl_line;
 use fabro_util::terminal::Styles;
 use tokio::time;
 use tracing::{debug, info};
