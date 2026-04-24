@@ -178,19 +178,13 @@ pub async fn write_finalize_commit(
     .await;
 }
 
-/// Failed and cancelled runs use a shorter diff timeout so a corrupted
-/// workspace can't stall downstream consumers waiting on the terminal event.
-async fn compute_final_patch(
-    run_options: &RunOptions,
-    services: &RunServices,
-    status: StageStatus,
-) -> Option<String> {
+/// Bounded to 10s so a corrupted or unresponsive workspace can't stall
+/// downstream consumers waiting on the terminal event. Git diff on a
+/// healthy workspace returns in well under a second; timeout is a failsafe,
+/// not a common-case budget.
+async fn compute_final_patch(run_options: &RunOptions, services: &RunServices) -> Option<String> {
     let base_sha = run_options.git.as_ref().and_then(|g| g.base_sha.clone())?;
-    let timeout_ms = match status {
-        StageStatus::Success | StageStatus::PartialSuccess => 30_000,
-        _ => 10_000,
-    };
-    match git_diff_with_timeout(&*services.sandbox, &base_sha, timeout_ms).await {
+    match git_diff_with_timeout(&*services.sandbox, &base_sha, 10_000).await {
         Ok(patch) if !patch.is_empty() => Some(patch),
         Ok(_) => None,
         Err(err) => {
@@ -325,14 +319,14 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
     let conclusion = build_conclusion_from_parts(
         checkpoint.as_ref(),
         &stage_durations,
-        final_status.clone(),
+        final_status,
         failure_reason,
         duration_ms,
         options.last_git_sha.clone(),
     );
 
     let (final_patch, ()) = tokio::join!(
-        compute_final_patch(&run_options, &services, final_status),
+        compute_final_patch(&run_options, &services),
         write_finalize_commit(&run_options, &services.run_store, &conclusion),
     );
 
