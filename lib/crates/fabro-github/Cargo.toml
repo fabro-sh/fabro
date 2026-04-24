@@ -23,6 +23,7 @@ tracing.workspace = true
 tokio = { workspace = true }
 base64.workspace = true
 strum.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 fabro-macros = { path = "../fabro-macros" }

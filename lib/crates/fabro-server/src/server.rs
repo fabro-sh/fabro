@@ -5344,10 +5344,10 @@ async fn get_run_pull_request(
             github,
         })
         .into_response(),
-        Err(err) if err.contains("not found") => {
+        Err(fabro_github::PullRequestApiError::NotFound { .. }) => {
             github_pull_request_not_found_error(&ctx.record).into_response()
         }
-        Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+        Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
     }
 }
 
@@ -5378,10 +5378,10 @@ async fn merge_run_pull_request(
             method:   body.method,
         })
         .into_response(),
-        Err(err) if err.contains("not found") => {
+        Err(fabro_github::PullRequestApiError::NotFound { .. }) => {
             github_pull_request_not_found_error(&ctx.record).into_response()
         }
-        Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+        Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
     }
 }
 
@@ -5409,10 +5409,10 @@ async fn close_run_pull_request(
             html_url: ctx.record.html_url,
         })
         .into_response(),
-        Err(err) if err.contains("not found") => {
+        Err(fabro_github::PullRequestApiError::NotFound { .. }) => {
             github_pull_request_not_found_error(&ctx.record).into_response()
         }
-        Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+        Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
     }
 }
 

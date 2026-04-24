@@ -12,6 +12,26 @@ pub fn github_api_base_url() -> String {
     std::env::var("GITHUB_BASE_URL").unwrap_or_else(|_| GITHUB_API_BASE_URL.to_string())
 }
 
+/// Errors returned by pull-request endpoints. Callers branch on `NotFound` to
+/// distinguish a missing PR from any other failure.
+#[derive(Debug, thiserror::Error)]
+pub enum PullRequestApiError {
+    #[error("Pull request #{number} not found in {owner}/{repo}")]
+    NotFound {
+        owner:  String,
+        repo:   String,
+        number: u64,
+    },
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<String> for PullRequestApiError {
+    fn from(value: String) -> Self {
+        Self::Other(value)
+    }
+}
+
 fn http_client() -> Result<fabro_http::HttpClient, String> {
     fabro_http::http_client().map_err(|err| err.to_string())
 }
@@ -901,7 +921,7 @@ pub async fn get_pull_request(
     repo: &str,
     number: u64,
     base_url: &str,
-) -> Result<PullRequestGithubDetail, String> {
+) -> Result<PullRequestGithubDetail, PullRequestApiError> {
     let client = http_client()?;
     get_pull_request_with_client(&client, creds, owner, repo, number, base_url).await
 }
@@ -913,7 +933,7 @@ async fn get_pull_request_with_client(
     repo: &str,
     number: u64,
     base_url: &str,
-) -> Result<PullRequestGithubDetail, String> {
+) -> Result<PullRequestGithubDetail, PullRequestApiError> {
     tracing::debug!(owner, repo, number, "Fetching pull request");
 
     let token = creds
@@ -936,26 +956,30 @@ async fn get_pull_request_with_client(
     match resp.status {
         200 => {}
         404 => {
-            return Err(format!(
-                "Pull request #{number} not found in {owner}/{repo}"
-            ));
+            return Err(PullRequestApiError::NotFound {
+                owner: owner.to_string(),
+                repo: repo.to_string(),
+                number,
+            });
         }
         401 | 403 => {
             return Err(format!(
                 "Authentication failed fetching pull request ({})",
                 resp.status
-            ));
+            )
+            .into());
         }
         status => {
             return Err(format!(
                 "Unexpected status {status} fetching pull request: {}",
                 resp.text()
-            ));
+            )
+            .into());
         }
     }
 
     resp.json::<PullRequestGithubDetail>()
-        .map_err(|e| format!("Failed to parse pull request response: {e}"))
+        .map_err(|e| format!("Failed to parse pull request response: {e}").into())
 }
 
 /// Merge a pull request.
@@ -966,7 +990,7 @@ pub async fn merge_pull_request(
     number: u64,
     method: fabro_types::MergeMethod,
     base_url: &str,
-) -> Result<(), String> {
+) -> Result<(), PullRequestApiError> {
     let client = http_client()?;
     merge_pull_request_with_client(&client, creds, owner, repo, number, method, base_url).await
 }
@@ -983,7 +1007,7 @@ async fn merge_pull_request_with_client(
     number: u64,
     method: fabro_types::MergeMethod,
     base_url: &str,
-) -> Result<(), String> {
+) -> Result<(), PullRequestApiError> {
     tracing::debug!(owner, repo, number, method = %method, "Merging pull request");
 
     let token = creds
@@ -1007,21 +1031,25 @@ async fn merge_pull_request_with_client(
 
     match resp.status {
         200 => Ok(()),
-        405 => Err(format!(
-            "Pull request #{number} is not mergeable (method may not be allowed)"
-        )),
-        409 => Err(format!("Pull request #{number} has a merge conflict")),
-        404 => Err(format!(
-            "Pull request #{number} not found in {owner}/{repo}"
-        )),
+        405 => Err(
+            format!("Pull request #{number} is not mergeable (method may not be allowed)").into(),
+        ),
+        409 => Err(format!("Pull request #{number} has a merge conflict").into()),
+        404 => Err(PullRequestApiError::NotFound {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            number,
+        }),
         401 | 403 => Err(format!(
             "Authentication failed merging pull request ({})",
             resp.status
-        )),
+        )
+        .into()),
         status => Err(format!(
             "Unexpected status {status} merging pull request: {}",
             resp.text()
-        )),
+        )
+        .into()),
     }
 }
 
@@ -1032,7 +1060,7 @@ pub async fn close_pull_request(
     repo: &str,
     number: u64,
     base_url: &str,
-) -> Result<(), String> {
+) -> Result<(), PullRequestApiError> {
     let client = http_client()?;
     close_pull_request_with_client(&client, creds, owner, repo, number, base_url).await
 }
@@ -1044,7 +1072,7 @@ async fn close_pull_request_with_client(
     repo: &str,
     number: u64,
     base_url: &str,
-) -> Result<(), String> {
+) -> Result<(), PullRequestApiError> {
     tracing::debug!(owner, repo, number, "Closing pull request");
 
     let token = creds
@@ -1068,17 +1096,21 @@ async fn close_pull_request_with_client(
 
     match resp.status {
         200 => Ok(()),
-        404 => Err(format!(
-            "Pull request #{number} not found in {owner}/{repo}"
-        )),
+        404 => Err(PullRequestApiError::NotFound {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            number,
+        }),
         401 | 403 => Err(format!(
             "Authentication failed closing pull request ({})",
             resp.status
-        )),
+        )
+        .into()),
         status => Err(format!(
             "Unexpected status {status} closing pull request: {}",
             resp.text()
-        )),
+        )
+        .into()),
     }
 }
 
@@ -1855,8 +1887,17 @@ mod tests {
         let err = get_pull_request_with_client(&mock, &creds, "owner", "repo", 999, "")
             .await
             .unwrap_err();
-        assert!(err.contains("not found"), "got: {err}");
-        assert!(err.contains("#999"), "got: {err}");
+        assert!(
+            matches!(
+                err,
+                PullRequestApiError::NotFound {
+                    number: 999,
+                    ref owner,
+                    ref repo,
+                } if owner == "owner" && repo == "repo"
+            ),
+            "got: {err}"
+        );
     }
 
     #[tokio::test]
@@ -1972,7 +2013,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.contains("not mergeable"), "got: {err}");
+        assert!(err.to_string().contains("not mergeable"), "got: {err}");
     }
 
     #[tokio::test]
@@ -2008,7 +2049,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.contains("merge conflict"), "got: {err}");
+        assert!(err.to_string().contains("merge conflict"), "got: {err}");
     }
 
     // -----------------------------------------------------------------------
@@ -2072,7 +2113,16 @@ mod tests {
         let err = close_pull_request_with_client(&mock, &creds, "owner", "repo", 999, "")
             .await
             .unwrap_err();
-        assert!(err.contains("not found"), "got: {err}");
-        assert!(err.contains("#999"), "got: {err}");
+        assert!(
+            matches!(
+                err,
+                PullRequestApiError::NotFound {
+                    number: 999,
+                    ref owner,
+                    ref repo,
+                } if owner == "owner" && repo == "repo"
+            ),
+            "got: {err}"
+        );
     }
 }
