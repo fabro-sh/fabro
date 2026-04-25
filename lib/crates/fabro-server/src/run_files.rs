@@ -1513,6 +1513,91 @@ diff --git a/src/lib.rs b/src/lib.rs
     }
 
     #[test]
+    fn patch_to_stats_aggregates_across_multiple_files() {
+        let patch = "\
+diff --git a/a.rs b/a.rs
+--- a/a.rs
++++ b/a.rs
+@@ -1,2 +1,3 @@
+ keep
+-old1
++new1
++new2
+diff --git a/b.rs b/b.rs
+--- a/b.rs
++++ b/b.rs
+@@ -1,3 +1,1 @@
+-x
+-y
+-z
++only
+";
+        let stats = patch_to_stats(patch);
+        assert_eq!(stats.additions, 3);
+        assert_eq!(stats.deletions, 4);
+    }
+
+    #[test]
+    fn patch_to_stats_ignores_hunk_headers_and_no_newline_marker() {
+        // `@@` hunk headers and `\ No newline at end of file` markers don't
+        // start with `+` or `-`, so the simple line-prefix scan must skip
+        // them. Worth pinning explicitly so a future refactor can't
+        // accidentally start counting them.
+        let patch = "\
+diff --git a/a.rs b/a.rs
+--- a/a.rs
++++ b/a.rs
+@@ -1,2 +1,2 @@
+ ctx
+-old
+\\ No newline at end of file
++new
+\\ No newline at end of file
+";
+        let stats = patch_to_stats(patch);
+        assert_eq!(stats.additions, 1);
+        assert_eq!(stats.deletions, 1);
+    }
+
+    #[test]
+    fn patch_to_stats_zero_for_empty_patch() {
+        let stats = patch_to_stats("");
+        assert_eq!(stats.additions, 0);
+        assert_eq!(stats.deletions, 0);
+    }
+
+    #[test]
+    fn patch_to_stats_after_strip_denylisted_ignores_sensitive_section() {
+        // Integration: run the same pipeline the degraded fallback uses —
+        // `strip_denylisted_sections` redacts each sensitive file's content
+        // to a single `# sensitive file omitted: <path>` line, which starts
+        // with `#` and so contributes 0 to the totals. Only the benign file
+        // remains for `patch_to_stats` to count.
+        let patch = "\
+diff --git a/.env.production b/.env.production
+--- a/.env.production
++++ b/.env.production
+@@ -1 +1 @@
+-SECRET=old
++SECRET=new
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1 +1,2 @@
+ hi
++there
+";
+        let filtered = strip_denylisted_sections(patch, is_sensitive);
+        assert!(
+            filtered.contains("# sensitive file omitted"),
+            "expected redaction placeholder in: {filtered:?}",
+        );
+        let stats = patch_to_stats(&filtered);
+        assert_eq!(stats.additions, 1);
+        assert_eq!(stats.deletions, 0);
+    }
+
+    #[test]
     fn classify_entries_sums_only_displayable_text_stats() {
         let raw = vec![
             RawDiffEntry::Added {
