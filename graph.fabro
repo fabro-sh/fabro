@@ -1,0 +1,11 @@
+digraph Hello {
+    graph [goal="Say hello and demonstrate a basic Fabro workflow"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    greet [label="Greet", prompt="Print a listing of the top-level files and directories in this repo."]
+
+    start -> greet -> exit
+}
