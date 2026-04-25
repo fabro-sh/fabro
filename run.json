@@ -191,7 +191,7 @@
   "status_updated_at": "2026-04-25T12:46:59.372188Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-04-25T12:47:11.907620Z",
+    "timestamp": "2026-04-25T12:47:15.309673Z",
     "current_node": "greet",
     "completed_nodes": [
       "start",
@@ -199,23 +199,23 @@
     ],
     "node_retries": {},
     "context_values": {
-      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
-      "outcome": "success",
-      "current_node": "greet",
-      "last_stage": "greet",
-      "internal.work_dir": "/Users/bhelmkamp/.fabro/storage/scratch/20260425-01KQ2AVGJE404WDJXYMQY7EHP1/worktree",
-      "failure_class": "",
-      "internal.retry_count.greet": 0,
-      "response.greet": "Here's a listing of the top-level contents of the repo:\n\n**Directories:**\n| Name | Description |\n|---|---|\n| `.ai` | AI-related config |\n| `.cargo` | Cargo configuration |\n| `.claude` | Claude config |\n| `.config` | General config |\n| `.context` | Context files |\n| `.fabro` | Fabro workflows and local config |\n| `.github` | GitHub Actions CI/CD |\n| `apps` | Frontend apps (`fabro-web`, `marketing`) |\n| `bin` | Scripts/binaries |\n| `docker` | Docker-related files |\n| `docs` | Public documentation (API reference, etc.) |\n| `docs-internal` | Internal strategy docs |\n| `evals` | Evaluations |\n| `files-internal` | Internal files (testing strategy, etc.) |\n| `installer` | Installation scripts |\n| `lib` | Rust crates (`lib/crates/`) and TypeScript packages (`lib/packages/`) |\n| `test` | Test fixtures and helpers |\n\n**Key files:**\n| Name | Description |\n|---|---|\n| `AGENTS.md` / `CLAUDE.md` | AI agent guidance (CLAUDE.md symlinks to AGENTS.md) |\n| `Cargo.toml` / `Cargo.lock` | Rust workspace manifest |\n| `package.json` / `bun.lock` | JS/TS workspace root |\n| `Dockerfile` / `Dockerfile.deploy` | Container build definitions |\n| `docker-compose.yaml` | Local dev compose |\n| `README.md` / `CONTRIBUTING.md` / `LICENSE.md` | Project docs |\n| `clippy.toml` / `rustfmt.toml` | Rust linting/formatting config |\n| `fly.toml` / `railway.toml` / `render.yaml` | Deployment platform configs |\n| `Caddyfile` | Caddy reverse proxy config |\n| `install.sh` / `install.md` | Installer entry points (symlinked from `apps/marketing/public/`) |\n| `.env.example` | Environment variable template |",
-      "internal.thread_id": "start",
       "last_response": "Here's a listing of the top-level contents of the repo:\n\n**Directories:**\n| Name | Description |\n|---|---|\n| `.ai` | AI-related config |\n| `.cargo` | Cargo configuration |\n| `.claude` | Claude config ",
+      "thread.start.current_node": "greet",
+      "last_stage": "greet",
+      "internal.retry_count.start": 0,
+      "current_node": "greet",
+      "internal.retry_count.greet": 0,
+      "internal.thread_id": "start",
+      "graph.rankdir": "LR",
+      "internal.fidelity": "compact",
       "internal.run_id": "01KQ2AVGJE404WDJXYMQY7EHP1",
       "internal.node_visit_count": 1,
+      "internal.work_dir": "/Users/bhelmkamp/.fabro/storage/scratch/20260425-01KQ2AVGJE404WDJXYMQY7EHP1/worktree",
       "failure_signature": "",
-      "internal.fidelity": "compact",
-      "graph.rankdir": "LR",
-      "thread.start.current_node": "greet",
-      "internal.retry_count.start": 0
+      "failure_class": "",
+      "outcome": "success",
+      "response.greet": "Here's a listing of the top-level contents of the repo:\n\n**Directories:**\n| Name | Description |\n|---|---|\n| `.ai` | AI-related config |\n| `.cargo` | Cargo configuration |\n| `.claude` | Claude config |\n| `.config` | General config |\n| `.context` | Context files |\n| `.fabro` | Fabro workflows and local config |\n| `.github` | GitHub Actions CI/CD |\n| `apps` | Frontend apps (`fabro-web`, `marketing`) |\n| `bin` | Scripts/binaries |\n| `docker` | Docker-related files |\n| `docs` | Public documentation (API reference, etc.) |\n| `docs-internal` | Internal strategy docs |\n| `evals` | Evaluations |\n| `files-internal` | Internal files (testing strategy, etc.) |\n| `installer` | Installation scripts |\n| `lib` | Rust crates (`lib/crates/`) and TypeScript packages (`lib/packages/`) |\n| `test` | Test fixtures and helpers |\n\n**Key files:**\n| Name | Description |\n|---|---|\n| `AGENTS.md` / `CLAUDE.md` | AI agent guidance (CLAUDE.md symlinks to AGENTS.md) |\n| `Cargo.toml` / `Cargo.lock` | Rust workspace manifest |\n| `package.json` / `bun.lock` | JS/TS workspace root |\n| `Dockerfile` / `Dockerfile.deploy` | Container build definitions |\n| `docker-compose.yaml` | Local dev compose |\n| `README.md` / `CONTRIBUTING.md` / `LICENSE.md` | Project docs |\n| `clippy.toml` / `rustfmt.toml` | Rust linting/formatting config |\n| `fly.toml` / `railway.toml` / `render.yaml` | Deployment platform configs |\n| `Caddyfile` | Caddy reverse proxy config |\n| `install.sh` / `install.md` | Installer entry points (symlinked from `apps/marketing/public/`) |\n| `.env.example` | Environment variable template |",
+      "graph.goal": "Say hello and demonstrate a basic Fabro workflow"
     },
     "node_outcomes": {
       "start": {
@@ -256,9 +256,10 @@
       }
     },
     "next_node_id": "exit",
+    "git_commit_sha": "542bc752fa5cf788ca17b96aa99272dd35c12036",
     "node_visits": {
-      "greet": 1,
-      "start": 1
+      "start": 1,
+      "greet": 1
     }
   },
   "checkpoints": [
@@ -296,9 +297,114 @@
           "start": 1
         }
       }
+    ],
+    [
+      26,
+      {
+        "timestamp": "2026-04-25T12:47:15.309673Z",
+        "current_node": "greet",
+        "completed_nodes": [
+          "start",
+          "greet"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "last_response": "Here's a listing of the top-level contents of the repo:\n\n**Directories:**\n| Name | Description |\n|---|---|\n| `.ai` | AI-related config |\n| `.cargo` | Cargo configuration |\n| `.claude` | Claude config ",
+          "thread.start.current_node": "greet",
+          "last_stage": "greet",
+          "internal.retry_count.start": 0,
+          "current_node": "greet",
+          "internal.retry_count.greet": 0,
+          "internal.thread_id": "start",
+          "graph.rankdir": "LR",
+          "internal.fidelity": "compact",
+          "internal.run_id": "01KQ2AVGJE404WDJXYMQY7EHP1",
+          "internal.node_visit_count": 1,
+          "internal.work_dir": "/Users/bhelmkamp/.fabro/storage/scratch/20260425-01KQ2AVGJE404WDJXYMQY7EHP1/worktree",
+          "failure_signature": "",
+          "failure_class": "",
+          "outcome": "success",
+          "response.greet": "Here's a listing of the top-level contents of the repo:\n\n**Directories:**\n| Name | Description |\n|---|---|\n| `.ai` | AI-related config |\n| `.cargo` | Cargo configuration |\n| `.claude` | Claude config |\n| `.config` | General config |\n| `.context` | Context files |\n| `.fabro` | Fabro workflows and local config |\n| `.github` | GitHub Actions CI/CD |\n| `apps` | Frontend apps (`fabro-web`, `marketing`) |\n| `bin` | Scripts/binaries |\n| `docker` | Docker-related files |\n| `docs` | Public documentation (API reference, etc.) |\n| `docs-internal` | Internal strategy docs |\n| `evals` | Evaluations |\n| `files-internal` | Internal files (testing strategy, etc.) |\n| `installer` | Installation scripts |\n| `lib` | Rust crates (`lib/crates/`) and TypeScript packages (`lib/packages/`) |\n| `test` | Test fixtures and helpers |\n\n**Key files:**\n| Name | Description |\n|---|---|\n| `AGENTS.md` / `CLAUDE.md` | AI agent guidance (CLAUDE.md symlinks to AGENTS.md) |\n| `Cargo.toml` / `Cargo.lock` | Rust workspace manifest |\n| `package.json` / `bun.lock` | JS/TS workspace root |\n| `Dockerfile` / `Dockerfile.deploy` | Container build definitions |\n| `docker-compose.yaml` | Local dev compose |\n| `README.md` / `CONTRIBUTING.md` / `LICENSE.md` | Project docs |\n| `clippy.toml` / `rustfmt.toml` | Rust linting/formatting config |\n| `fly.toml` / `railway.toml` / `render.yaml` | Deployment platform configs |\n| `Caddyfile` | Caddy reverse proxy config |\n| `install.sh` / `install.md` | Installer entry points (symlinked from `apps/marketing/public/`) |\n| `.env.example` | Environment variable template |",
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "success",
+            "usage": null
+          },
+          "greet": {
+            "status": "success",
+            "context_updates": {
+              "response.greet": "Here's a listing of the top-level contents of the repo:\n\n**Directories:**\n| Name | Description |\n|---|---|\n| `.ai` | AI-related config |\n| `.cargo` | Cargo configuration |\n| `.claude` | Claude config |\n| `.config` | General config |\n| `.context` | Context files |\n| `.fabro` | Fabro workflows and local config |\n| `.github` | GitHub Actions CI/CD |\n| `apps` | Frontend apps (`fabro-web`, `marketing`) |\n| `bin` | Scripts/binaries |\n| `docker` | Docker-related files |\n| `docs` | Public documentation (API reference, etc.) |\n| `docs-internal` | Internal strategy docs |\n| `evals` | Evaluations |\n| `files-internal` | Internal files (testing strategy, etc.) |\n| `installer` | Installation scripts |\n| `lib` | Rust crates (`lib/crates/`) and TypeScript packages (`lib/packages/`) |\n| `test` | Test fixtures and helpers |\n\n**Key files:**\n| Name | Description |\n|---|---|\n| `AGENTS.md` / `CLAUDE.md` | AI agent guidance (CLAUDE.md symlinks to AGENTS.md) |\n| `Cargo.toml` / `Cargo.lock` | Rust workspace manifest |\n| `package.json` / `bun.lock` | JS/TS workspace root |\n| `Dockerfile` / `Dockerfile.deploy` | Container build definitions |\n| `docker-compose.yaml` | Local dev compose |\n| `README.md` / `CONTRIBUTING.md` / `LICENSE.md` | Project docs |\n| `clippy.toml` / `rustfmt.toml` | Rust linting/formatting config |\n| `fly.toml` / `railway.toml` / `render.yaml` | Deployment platform configs |\n| `Caddyfile` | Caddy reverse proxy config |\n| `install.sh` / `install.md` | Installer entry points (symlinked from `apps/marketing/public/`) |\n| `.env.example` | Environment variable template |",
+              "last_response": "Here's a listing of the top-level contents of the repo:\n\n**Directories:**\n| Name | Description |\n|---|---|\n| `.ai` | AI-related config |\n| `.cargo` | Cargo configuration |\n| `.claude` | Claude config ",
+              "last_stage": "greet"
+            },
+            "notes": "Stage completed: greet",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 2046,
+                    "output_tokens": 632,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 7296,
+                    "cache_write_tokens": 7643
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 7643,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 46467
+            }
+          }
+        },
+        "next_node_id": "exit",
+        "git_commit_sha": "542bc752fa5cf788ca17b96aa99272dd35c12036",
+        "node_visits": {
+          "start": 1,
+          "greet": 1
+        }
+      }
     ]
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-04-25T12:47:15.327949Z",
+    "status": "success",
+    "duration_ms": 15937,
+    "final_git_commit_sha": "542bc752fa5cf788ca17b96aa99272dd35c12036",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "greet",
+        "stage_label": "greet",
+        "duration_ms": 12530,
+        "billing_usd_micros": 46467,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 2046,
+      "output_tokens": 632,
+      "total_tokens": 17617,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 7296,
+      "cache_write_tokens": 7643,
+      "total_usd_micros": 46467
+    },
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -311,15 +417,16 @@
   "superseded_by": null,
   "pending_interviews": {},
   "nodes": {
-    "greet@1": {
+    "exit@1": {
       "prompt": null,
       "response": null,
-      "status": null,
-      "provider_used": {
-        "mode": "agent",
-        "provider": "anthropic",
-        "model": "claude-sonnet-4-6"
+      "status": {
+        "status": "success",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-04-25T12:47:15.309765Z"
       },
+      "provider_used": null,
       "diff": null,
       "script_invocation": null,
       "script_timing": null,
@@ -337,6 +444,27 @@
         "timestamp": "2026-04-25T12:46:59.376859Z"
       },
       "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
+    "greet@1": {
+      "prompt": null,
+      "response": null,
+      "status": {
+        "status": "success",
+        "notes": "Stage completed: greet",
+        "failure_reason": null,
+        "timestamp": "2026-04-25T12:47:11.907528Z"
+      },
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
       "diff": null,
       "script_invocation": null,
       "script_timing": null,
