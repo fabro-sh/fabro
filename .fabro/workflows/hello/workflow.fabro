@@ -5,7 +5,7 @@ digraph Hello {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    greet [label="Greet", prompt="Print a listing of the top-level files and directories in this repo."]
+    greet [label="Greet", prompt="Add a haiku to the README"]
 
     start -> greet -> exit
 }

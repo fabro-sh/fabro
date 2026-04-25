@@ -5,3 +5,6 @@ graph = "workflow.fabro"
 
 [run.sandbox]
 provider = "local"
+
+[run.sandbox.local]
+worktree_mode = "always"
