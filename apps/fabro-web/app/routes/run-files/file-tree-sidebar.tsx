@@ -1,9 +1,9 @@
 import {
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   type ChangeEvent,
+  type CSSProperties,
 } from "react";
 import {
   FileTree,
@@ -11,9 +11,16 @@ import {
   useFileTreeSearch,
   useFileTreeSelection,
 } from "@pierre/trees/react";
-import { themeToTreeStyles, type GitStatus, type GitStatusEntry } from "@pierre/trees";
+import {
+  themeToTreeStyles,
+  type FileTree as FileTreeModel,
+  type GitStatus,
+  type GitStatusEntry,
+} from "@pierre/trees";
 import pierreDark from "@pierre/theme/pierre-dark";
 import type { FileDiff } from "@qltysh/fabro-api-client";
+
+type TreeThemeStyle = CSSProperties & Record<`--${string}`, string | number>;
 
 const CHANGE_KIND_TO_GIT_STATUS: Record<NonNullable<FileDiff["change_kind"]>, GitStatus> = {
   added:     "added",
@@ -28,16 +35,38 @@ function filePath(file: FileDiff): string {
   return file.new_file.name || file.old_file.name;
 }
 
-function ancestorPaths(paths: readonly string[]): string[] {
-  const set = new Set<string>();
-  for (const p of paths) {
-    let i = p.indexOf("/");
-    while (i !== -1) {
-      set.add(p.slice(0, i));
-      i = p.indexOf("/", i + 1);
+function gitStatusFor(file: FileDiff): GitStatus {
+  return file.change_kind
+    ? CHANGE_KIND_TO_GIT_STATUS[file.change_kind] ?? "modified"
+    : "modified";
+}
+
+function lastSelectedFile(
+  selected: readonly string[],
+  changedPaths: ReadonlySet<string>,
+): string | null {
+  for (let index = selected.length - 1; index >= 0; index -= 1) {
+    const path = selected[index];
+    if (path && changedPaths.has(path)) return path;
+  }
+  return null;
+}
+
+function syncSelection(
+  model: FileTreeModel,
+  selection: readonly string[],
+  selectedPath: string | null,
+) {
+  for (const path of selection) {
+    if (path !== selectedPath) {
+      model.getItem(path)?.deselect();
     }
   }
-  return [...set];
+  if (!selectedPath || (selection.length === 1 && selection[0] === selectedPath)) {
+    return;
+  }
+  const item = model.getItem(selectedPath);
+  if (item && !item.isSelected()) item.select();
 }
 
 interface FileTreeSidebarProps {
@@ -52,24 +81,32 @@ export function FileTreeSidebar({
   onSelect,
 }: FileTreeSidebarProps) {
   const paths = useMemo(() => files.map(filePath), [files]);
+  const changedPaths = useMemo(() => new Set(paths), [paths]);
 
   const gitStatus = useMemo<GitStatusEntry[]>(
     () =>
       files.map((file) => ({
         path:   filePath(file),
-        status: file.change_kind
-          ? CHANGE_KIND_TO_GIT_STATUS[file.change_kind]
-          : "modified",
+        status: gitStatusFor(file),
       })),
     [files],
   );
 
-  const initialExpandedPaths = useMemo(() => ancestorPaths(paths), [paths]);
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  const selectedPathRef = useRef(selectedPath);
+  selectedPathRef.current = selectedPath;
+
+  const changedPathsRef = useRef<ReadonlySet<string>>(changedPaths);
+  changedPathsRef.current = changedPaths;
+
+  const pendingSelectedPathRef = useRef<string | null>(null);
 
   const { model } = useFileTree({
     paths,
     flattenEmptyDirectories: true,
-    initialExpandedPaths,
+    initialExpansion:        "open",
     initialSelectedPaths:    selectedPath ? [selectedPath] : undefined,
     gitStatus,
     icons:                   "standard",
@@ -77,53 +114,60 @@ export function FileTreeSidebar({
     search:                  true,
     fileTreeSearchMode:      "hide-non-matches",
     onSelectionChange:       (selected) => {
-      const first = selected[0];
-      if (first) onSelect(first);
+      const selectedFile = lastSelectedFile(selected, changedPathsRef.current);
+      if (!selectedFile) return;
+      pendingSelectedPathRef.current = selectedFile;
+      onSelectRef.current(selectedFile);
     },
   });
 
-  // Keep the long-lived model in sync when the underlying files change
-  // (e.g. a Refresh fetched a new commit).
+  const didSyncModelRef = useRef(false);
   useEffect(() => {
+    if (!didSyncModelRef.current) {
+      didSyncModelRef.current = true;
+      return;
+    }
     model.resetPaths(paths);
-  }, [model, paths]);
-
-  useEffect(() => {
     model.setGitStatus(gitStatus);
-  }, [model, gitStatus]);
+    pendingSelectedPathRef.current = null;
+    const currentSelectedPath = selectedPathRef.current;
+    syncSelection(
+      model,
+      model.getSelectedPaths(),
+      currentSelectedPath && changedPathsRef.current.has(currentSelectedPath)
+        ? currentSelectedPath
+        : null,
+    );
+  }, [gitStatus, model, paths]);
 
-  // Drive selection from the URL hash (back/forward navigation, deep links).
   const selection = useFileTreeSelection(model);
   useEffect(() => {
-    if (!selectedPath) return;
-    if (selection.length === 1 && selection[0] === selectedPath) return;
-    const item = model.getItem(selectedPath);
-    if (item) item.select();
-  }, [model, selectedPath, selection]);
+    const pendingSelectedPath = pendingSelectedPathRef.current;
+    if (pendingSelectedPath === selectedPath) {
+      pendingSelectedPathRef.current = null;
+    }
+    const nextSelectedPath = pendingSelectedPath ?? selectedPath;
+    syncSelection(
+      model,
+      selection,
+      nextSelectedPath && changedPaths.has(nextSelectedPath) ? nextSelectedPath : null,
+    );
+  }, [changedPaths, model, selectedPath, selection]);
 
   const search = useFileTreeSearch(model);
   const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) =>
     search.setValue(event.target.value);
 
-  // `themeToTreeStyles` returns a Record<string, string> of CSS custom
-  // properties (--trees-theme-*). React's CSSProperties is closed and
-  // doesn't accept arbitrary string keys, so apply them imperatively to a
-  // wrapper element — they cascade into the tree's shadow DOM as expected.
-  const themeStyles = useMemo(() => themeToTreeStyles(pierreDark), []);
-  const themeRef = useRef<HTMLDivElement | null>(null);
-  useLayoutEffect(() => {
-    const el = themeRef.current;
-    if (!el) return;
-    for (const [key, value] of Object.entries(themeStyles)) {
-      if (key.startsWith("--")) el.style.setProperty(key, value);
-    }
-  }, [themeStyles]);
+  const themeStyles = useMemo(
+    () => themeToTreeStyles(pierreDark) as TreeThemeStyle,
+    [],
+  );
 
   return (
     <aside
-      ref={themeRef}
       aria-label="Changed files"
-      className="hidden md:flex sticky top-4 self-start w-72 shrink-0 flex-col gap-2 max-h-[calc(100vh-6rem)]"
+      style={themeStyles}
+      className="sticky top-4 flex max-h-[calc(100vh-6rem)] w-72 shrink-0 flex-col gap-2 self-start"
     >
       <input
         type="search"

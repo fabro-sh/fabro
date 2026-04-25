@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -26,7 +28,6 @@ import {
   RunFilesErrorBoundary,
 } from "./run-files/states";
 import { useFileKeyboardNav } from "./run-files/keyboard";
-import { FileTreeSidebar } from "./run-files/file-tree-sidebar";
 import { Toolbar, type DiffStyle } from "./run-files/toolbar";
 import { ApiError, extractRequestId } from "../lib/api-client";
 import { useRun, useRunFiles } from "../lib/queries";
@@ -34,6 +35,11 @@ import { useRun, useRunFiles } from "../lib/queries";
 export { extractRequestId };
 
 const { MultiFileDiff, PatchDiff } = PierreDiffs;
+const FileTreeSidebar = lazy(() =>
+  import("./run-files/file-tree-sidebar").then((module) => ({
+    default: module.FileTreeSidebar,
+  })),
+);
 const maybeVirtualizer = (PierreDiffs as Record<string, unknown>).Virtualizer;
 const Virtualizer = typeof maybeVirtualizer === "function"
   ? maybeVirtualizer as ({ children }: { children: ReactNode }) => ReactElement
@@ -49,7 +55,10 @@ const DIFF_STYLE_STORAGE_KEY = "fabro.run-files.diff-style";
 export const ErrorBoundary = RunFilesErrorBoundary;
 
 function useNarrowViewport(): boolean {
-  const [narrow, setNarrow] = useState(false);
+  const [narrow, setNarrow] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia(`(max-width: ${MD_BREAKPOINT_PX - 1}px)`).matches;
+  });
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mql = window.matchMedia(`(max-width: ${MD_BREAKPOINT_PX - 1}px)`);
@@ -469,11 +478,15 @@ export default function RunFiles() {
         />
       ) : null}
       <div className="flex gap-4">
-        <FileTreeSidebar
-          files={files}
-          selectedPath={hashFile}
-          onSelect={handleFileSelect}
-        />
+        {!narrow ? (
+          <Suspense fallback={null}>
+            <FileTreeSidebar
+              files={files}
+              selectedPath={hashFile}
+              onSelect={handleFileSelect}
+            />
+          </Suspense>
+        ) : null}
         <div className="flex min-w-0 flex-1 flex-col gap-4">
           {body}
         </div>
