@@ -15,7 +15,7 @@
 
 
 /**
- * Aggregate `+/-` line counts across all files in a diff (or the unified patch in degraded mode). Binary, sensitive, symlink, and submodule files contribute 0/0 since they have no line-level diff. Both fields are 0 for empty / pre-start envelopes. 
+ * Aggregate `+/-` line counts across all files in a diff (or the unified patch in degraded mode). Binary, sensitive, symlink, and submodule files contribute 0/0 since they have no line-level diff. Both fields are 0 for empty / pre-start envelopes.
  */
 export interface DiffStats {
     /**

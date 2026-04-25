@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use fabro_agent::Sandbox;
@@ -552,24 +553,26 @@ fn classify_entry(
     })
 }
 
-/// Output of `git diff --numstat`: which paths are binary, plus aggregate
-/// `+/-` line totals across the text files in the range. Both pieces come
-/// from a single git invocation so callers don't need to run two diffs.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct DiffLineStats {
+    pub additions: u64,
+    pub deletions: u64,
+}
+
+/// Output of `git diff --numstat`: which paths are binary, plus per-path
+/// `+/-` line totals for text files in the range. Both pieces come from a
+/// single git invocation so callers don't need to run two diffs.
+#[derive(Debug, Default)]
 pub struct DiffNumstat {
     /// Repo-relative paths (post-rename) that git classifies as binary.
-    pub binary_paths: std::collections::HashSet<String>,
-    /// Sum of `+` columns across text files. Binary entries (`-\t-`) do not
-    /// contribute.
-    pub additions:    u64,
-    /// Sum of `-` columns across text files. Binary entries (`-\t-`) do not
-    /// contribute.
-    pub deletions:    u64,
+    pub binary_paths:       HashSet<String>,
+    /// Repo-relative paths (post-rename) to line stats for text files.
+    pub line_stats_by_path: HashMap<String, DiffLineStats>,
 }
 
 /// Run `git diff --numstat` once and return both the set of binary paths and
-/// the aggregate text-file `+/-` totals. The single call replaces the
-/// previous binary-only helper.
+/// text-file `+/-` totals. The single call replaces the previous binary-only
+/// helper.
 pub async fn list_diff_numstat(
     sandbox: &dyn Sandbox,
     base_sha: &str,
@@ -611,14 +614,20 @@ pub async fn list_diff_numstat(
         let mut parts = line.splitn(3, '\t');
         let adds_s = parts.next().unwrap_or("");
         let dels_s = parts.next().unwrap_or("");
+        let Some(path_s) = parts.next() else {
+            continue;
+        };
         let Ok(adds) = adds_s.parse::<u64>() else {
             continue;
         };
         let Ok(dels) = dels_s.parse::<u64>() else {
             continue;
         };
-        out.additions = out.additions.saturating_add(adds);
-        out.deletions = out.deletions.saturating_add(dels);
+        let path = extract_new_path_from_numstat(path_s);
+        out.line_stats_by_path.insert(path, DiffLineStats {
+            additions: adds,
+            deletions: dels,
+        });
     }
     Ok(out)
 }
@@ -1264,8 +1273,9 @@ mod tests {
             "binary_paths: {:?}",
             stats.binary_paths
         );
-        assert_eq!(stats.additions, 3, "additions: {stats:?}");
-        assert_eq!(stats.deletions, 2, "deletions: {stats:?}");
+        let doc_stats = stats.line_stats_by_path.get("doc.md").unwrap();
+        assert_eq!(doc_stats.additions, 3, "additions: {stats:?}");
+        assert_eq!(doc_stats.deletions, 2, "deletions: {stats:?}");
     }
 
     #[tokio::test]

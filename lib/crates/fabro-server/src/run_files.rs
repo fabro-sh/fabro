@@ -34,8 +34,8 @@ use fabro_sandbox::reconnect::reconnect;
 use fabro_static::EnvVars;
 use fabro_types::RunId;
 use fabro_workflow::sandbox_git::{
-    DiffError, DiffNumstat, RawDiffEntry, SubmoduleChange, SymlinkChange, list_changed_files_raw,
-    list_diff_numstat, stream_blob_metadata, stream_blobs,
+    DiffError, DiffLineStats, DiffNumstat, RawDiffEntry, SubmoduleChange, SymlinkChange,
+    list_changed_files_raw, list_diff_numstat, stream_blob_metadata, stream_blobs,
 };
 use futures_util::FutureExt;
 use serde::Deserialize;
@@ -297,18 +297,17 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
             return Err(transient_503("git diff --numstat", &message));
         }
     };
-    let binary_paths = numstat.binary_paths.clone();
-
     let total_changed_before_cap = raw_entries.len();
 
     // Classify every entry against the denylist + binary/symlink/submodule
     // flags FIRST so no-blob-needed placeholders don't consume cap slots
     // that belong to real file changes.
-    let classified = classify_entries(&raw_entries, &binary_paths, is_sensitive);
+    let classified = classify_entries(&raw_entries, &numstat, is_sensitive);
+    let stats = classified.stats;
 
     // Then cap the combined list at 200 entries.
-    let truncated_by_count = classified.len() > FILE_COUNT_CAP;
-    let mut classified = classified;
+    let truncated_by_count = classified.entries.len() > FILE_COUNT_CAP;
+    let mut classified = classified.entries;
     if truncated_by_count {
         classified.truncate(FILE_COUNT_CAP);
     }
@@ -364,7 +363,7 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
             files_omitted_by_budget: (files_omitted_by_budget > 0)
                 .then(|| i64::try_from(files_omitted_by_budget).unwrap_or(i64::MAX)),
             total_changed: i64::try_from(total_changed_before_cap).unwrap_or(i64::MAX),
-            stats: numstat_to_stats(&numstat),
+            stats,
             to_sha: Some(to_sha_wrapper(&to_sha)),
             to_sha_committed_at,
             degraded: Some(false),
@@ -374,10 +373,10 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
     })
 }
 
-fn numstat_to_stats(n: &DiffNumstat) -> DiffStats {
+fn line_stats_to_api(stats: DiffLineStats) -> DiffStats {
     DiffStats {
-        additions: i64::try_from(n.additions).unwrap_or(i64::MAX),
-        deletions: i64::try_from(n.deletions).unwrap_or(i64::MAX),
+        additions: i64::try_from(stats.additions).unwrap_or(i64::MAX),
+        deletions: i64::try_from(stats.deletions).unwrap_or(i64::MAX),
     }
 }
 
@@ -452,22 +451,44 @@ fn build_fallback_response(
 /// summation we use on the live-sandbox path so the toolbar shows the same
 /// numbers regardless of which response branch we took.
 fn patch_to_stats(patch: &str) -> DiffStats {
-    let mut additions: u64 = 0;
-    let mut deletions: u64 = 0;
-    for line in patch.lines() {
-        if line.starts_with("+++") || line.starts_with("---") {
+    let mut stats = DiffLineStats::default();
+    for section in patch.split("diff --git ").skip(1) {
+        if patch_section_omits_line_stats(section) {
             continue;
         }
-        match line.as_bytes().first() {
-            Some(b'+') => additions = additions.saturating_add(1),
-            Some(b'-') => deletions = deletions.saturating_add(1),
-            _ => {}
+        for line in section.lines() {
+            if line.starts_with("+++") || line.starts_with("---") {
+                continue;
+            }
+            match line.as_bytes().first() {
+                Some(b'+') => stats.additions = stats.additions.saturating_add(1),
+                Some(b'-') => stats.deletions = stats.deletions.saturating_add(1),
+                _ => {}
+            }
         }
     }
-    DiffStats {
-        additions: i64::try_from(additions).unwrap_or(i64::MAX),
-        deletions: i64::try_from(deletions).unwrap_or(i64::MAX),
+    line_stats_to_api(stats)
+}
+
+fn patch_section_omits_line_stats(section: &str) -> bool {
+    section.lines().any(|line| {
+        patch_mode_line_matches(line, "120000") || patch_mode_line_matches(line, "160000")
+    })
+}
+
+fn patch_mode_line_matches(line: &str, mode: &str) -> bool {
+    let line = line.trim_end();
+    if let Some(rest) = line
+        .strip_prefix("new file mode ")
+        .or_else(|| line.strip_prefix("deleted file mode "))
+        .or_else(|| line.strip_prefix("old mode "))
+        .or_else(|| line.strip_prefix("new mode "))
+    {
+        return rest == mode;
     }
+    line.strip_prefix("index ")
+        .and_then(|rest| rest.split_whitespace().last())
+        == Some(mode)
 }
 
 /// Truncate a patch at `cap_bytes` on a UTF-8 character boundary. Returns
@@ -693,14 +714,22 @@ enum ClassifiedEntry {
     NeedsFetch(RawDiffEntry),
 }
 
+struct ClassifiedEntries {
+    entries: Vec<ClassifiedEntry>,
+    stats:   DiffStats,
+}
+
 /// Classify every raw entry against the denylist + binary flags. Runs before
-/// the 200-file cap so sensitive entries don't evict real changes.
+/// the 200-file cap so sensitive entries don't evict real changes, and so
+/// stats include every eligible text file even when the rendered list is
+/// capped.
 fn classify_entries(
     raw: &[RawDiffEntry],
-    binary_paths: &HashSet<String>,
+    numstat: &DiffNumstat,
     is_sensitive_fn: fn(&str) -> bool,
-) -> Vec<ClassifiedEntry> {
+) -> ClassifiedEntries {
     let mut out = Vec::with_capacity(raw.len());
+    let mut stats = DiffLineStats::default();
 
     for entry in raw {
         let (new_path, old_path) = match entry {
@@ -739,19 +768,26 @@ fn classify_entries(
             }
             // `git diff --numstat` reports the post-rename path on renames,
             // so checking `new_path` covers both non-rename and rename cases.
-            _ if binary_paths.contains(new_path) => {
+            _ if numstat.binary_paths.contains(new_path) => {
                 out.push(ClassifiedEntry::Prebuilt(build_placeholder_file_diff(
                     entry,
                     &PlaceholderKind::Binary,
                 )));
             }
             _ => {
+                if let Some(line_stats) = numstat.line_stats_by_path.get(new_path) {
+                    stats.additions = stats.additions.saturating_add(line_stats.additions);
+                    stats.deletions = stats.deletions.saturating_add(line_stats.deletions);
+                }
                 out.push(ClassifiedEntry::NeedsFetch(entry.clone()));
             }
         }
     }
 
-    out
+    ClassifiedEntries {
+        entries: out,
+        stats:   line_stats_to_api(stats),
+    }
 }
 
 enum PlaceholderKind {
@@ -1430,6 +1466,105 @@ diff --git a/src/bar.rs b/src/bar.rs
     fn count_diff_headers_counts_file_sections() {
         let patch = "diff --git a/a.rs b/a.rs\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/b.rs b/b.rs\n@@ -1 +1 @@\n-c\n+d\n";
         assert_eq!(count_diff_headers(patch), 2);
+    }
+
+    #[test]
+    fn patch_to_stats_counts_content_lines_only() {
+        let patch = "\
+diff --git a/src/a.rs b/src/a.rs
+--- a/src/a.rs
++++ b/src/a.rs
+@@ -1 +1,2 @@
+-old
++new
++extra
+";
+        let stats = patch_to_stats(patch);
+        assert_eq!(stats.additions, 2);
+        assert_eq!(stats.deletions, 1);
+    }
+
+    #[test]
+    fn patch_to_stats_skips_symlink_and_submodule_sections() {
+        let patch = "\
+diff --git a/link b/link
+new file mode 120000
+--- /dev/null
++++ b/link
+@@ -0,0 +1 @@
++target
+diff --git a/vendor/lib b/vendor/lib
+index 1111111..2222222 160000
+--- a/vendor/lib
++++ b/vendor/lib
+@@ -1 +1 @@
+-Subproject commit 1111111
++Subproject commit 2222222
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let stats = patch_to_stats(patch);
+        assert_eq!(stats.additions, 1);
+        assert_eq!(stats.deletions, 1);
+    }
+
+    #[test]
+    fn classify_entries_sums_only_displayable_text_stats() {
+        let raw = vec![
+            RawDiffEntry::Added {
+                path:     "src/visible.rs".to_string(),
+                new_blob: "a1".to_string(),
+                new_mode: "100644".to_string(),
+            },
+            RawDiffEntry::Modified {
+                path:     ".env".to_string(),
+                old_blob: "b1".to_string(),
+                new_blob: "b2".to_string(),
+                new_mode: "100644".to_string(),
+            },
+            RawDiffEntry::Modified {
+                path:     "image.png".to_string(),
+                old_blob: "c1".to_string(),
+                new_blob: "c2".to_string(),
+                new_mode: "100644".to_string(),
+            },
+            RawDiffEntry::Symlink {
+                path:        "link".to_string(),
+                change_kind: SymlinkChange::Added,
+                old_blob:    None,
+                new_blob:    Some("d1".to_string()),
+            },
+            RawDiffEntry::Submodule {
+                path:        "vendor/lib".to_string(),
+                change_kind: SubmoduleChange::Modified,
+            },
+        ];
+        let mut numstat = DiffNumstat::default();
+        for (path, additions, deletions) in [
+            ("src/visible.rs", 5, 1),
+            (".env", 100, 100),
+            ("image.png", 200, 200),
+            ("link", 1, 0),
+            ("vendor/lib", 1, 1),
+        ] {
+            numstat
+                .line_stats_by_path
+                .insert(path.to_string(), DiffLineStats {
+                    additions,
+                    deletions,
+                });
+        }
+        numstat.binary_paths.insert("image.png".to_string());
+
+        let classified = classify_entries(&raw, &numstat, is_sensitive);
+
+        assert_eq!(classified.stats.additions, 5);
+        assert_eq!(classified.stats.deletions, 1);
+        assert_eq!(classified.entries.len(), raw.len());
     }
 
     #[test]

@@ -8,10 +8,14 @@ import { ArrowPathIcon } from "@heroicons/react/20/solid";
  */
 export type DiffStyle = "split" | "unified";
 
+type ChangeSummary = {
+  totalChanged: number;
+  additions: number;
+  deletions: number;
+};
+
 export function Toolbar({
-  totalChanged,
-  additions,
-  deletions,
+  changeSummary,
   onRefresh,
   refreshing,
   refreshDisabled,
@@ -21,12 +25,7 @@ export function Toolbar({
   onDiffStyleChange,
   diffStyleForced,
 }: {
-  /** From `meta.total_changed`. May exceed the rendered file list when truncated. */
-  totalChanged: number;
-  /** From `meta.stats.additions`. Aggregate `+` line count across the diff. */
-  additions: number;
-  /** From `meta.stats.deletions`. Aggregate `-` line count across the diff. */
-  deletions: number;
+  changeSummary: ChangeSummary;
   onRefresh: () => void;
   refreshing: boolean;
   /** True when the server has nothing new to show (to_sha unchanged). */
@@ -43,6 +42,7 @@ export function Toolbar({
    */
   diffStyleForced: boolean;
 }) {
+  const { totalChanged, additions, deletions } = changeSummary;
   const refreshTitle = refreshing
     ? "Refreshing"
     : refreshDisabled
