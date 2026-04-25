@@ -83,7 +83,7 @@ fn dry_run_compile_only_skips_image_build() {
     let stdout = output_text(&output.stdout);
 
     assert!(
-        stdout.contains("docker-context/arm64/fabro"),
+        stdout.contains("tmp/docker-context/arm64/fabro"),
         "dry-run compile-only should print staged binary path:\n{stdout}"
     );
     assert!(

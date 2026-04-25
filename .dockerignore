@@ -1,4 +1,4 @@
 *
 !docker/entrypoint.sh
 !docker/settings.toml
-!docker-context/**
+!tmp/docker-context/**

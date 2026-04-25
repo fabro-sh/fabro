@@ -64,7 +64,7 @@ Those behaviors were survivable when the CLI and server were assumed to live on 
 ### Institutional Learnings
 
 - No `docs/solutions/` directory exists in this repository, so there are no institutional learnings to carry forward from that source.
-- `files-internal/testing-strategy.md` reinforces the right split for this work:
+- `docs-internal/testing-strategy.md` reinforces the right split for this work:
   - connection/auth selection logic should get crate-level tests
   - single-command contract regressions should stay in `tests/it/cmd`
   - cross-command auth or exec narratives should stay in `tests/it/scenario`
@@ -322,7 +322,7 @@ flowchart TB
 - Update docs/help copy anywhere it still implies that explicit `--server` may inherit local daemon identity or local dev-token convenience.
 
 **Patterns to follow:**
-- `files-internal/testing-strategy.md` placement rules for crate-level vs `cmd/*` vs `scenario/*`
+- `docs-internal/testing-strategy.md` placement rules for crate-level vs `cmd/*` vs `scenario/*`
 - existing real auth harness organization in `lib/crates/fabro-cli/tests/it/support/auth_harness.rs`
 
 **Test scenarios:**
@@ -386,4 +386,4 @@ flowchart TB
   - `lib/crates/fabro-cli/tests/it/scenario/auth.rs`
   - `lib/crates/fabro-cli/tests/it/support/auth_harness.rs`
 - Repo guidance:
-  - `files-internal/testing-strategy.md`
+  - `docs-internal/testing-strategy.md`

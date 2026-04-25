@@ -188,9 +188,9 @@ jobs:
               x86_64-*) arch=amd64 ;;
               aarch64-*) arch=arm64 ;;
             esac
-            mkdir -p "docker-context/$arch"
+            mkdir -p "tmp/docker-context/$arch"
             tar -xzf "target/distrib/fabro-${target}.tar.gz" -C target/distrib
-            cp "target/distrib/fabro-${target}/fabro" "docker-context/$arch/fabro"
+            cp "target/distrib/fabro-${target}/fabro" "tmp/docker-context/$arch/fabro"
           done
 
       - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0

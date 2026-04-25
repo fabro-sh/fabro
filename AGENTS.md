@@ -25,7 +25,7 @@ macOS note: if `cargo nextest run` fails with `Too many open files (os error 24)
 - `cargo dev refresh-spa` — **run this before committing any TypeScript change in `apps/fabro-web/` or `lib/packages/fabro-api-client/`**. It runs the production build and then copies `dist/` into `lib/crates/fabro-spa/assets/` (which is tracked in git). CI's TypeScript `Build` job reruns this command and then `git diff --exit-code -- lib/crates/fabro-spa/assets` — if the committed bundle drifts from source (e.g. content-hashed filenames like `entry-<hash>.js` change), the check fails. `bun run build` on its own is not enough.
 
 ### Docker image
-- `cargo dev docker-build` — builds the local Docker image from the current tree using the release pipeline's cargo-zigbuild approach. Honors `--arch amd64|arm64`, `--tag <name>` (default `fabro`), `--compile-only` (stages `docker-context/<arch>/fabro` without `docker build`), and `--dry-run` (prints the Docker commands without running them). Prefer this over writing a throwaway Dockerfile; the release pipeline, `Dockerfile`, and this command share the same binary layout.
+- `cargo dev docker-build` — builds the local Docker image from the current tree using the release pipeline's cargo-zigbuild approach. Honors `--arch amd64|arm64`, `--tag <name>` (default `fabro`), `--compile-only` (stages `tmp/docker-context/<arch>/fabro` without `docker build`), and `--dry-run` (prints the Docker commands without running them). Prefer this over writing a throwaway Dockerfile; the release pipeline, `Dockerfile`, and this command share the same binary layout.
 - Refresh the embedded SPA before rebuilding the image after any `apps/fabro-web` change: `cargo dev refresh-spa` runs the bun build and copies `dist/` into `lib/crates/fabro-spa/assets/`. Skipping this step produces a Docker image whose Rust binary embeds a stale SPA bundle.
 
 ### Release automation
@@ -102,7 +102,7 @@ When working on Rust crates, read the relevant strategy doc **before** making ch
 
 - **`docs-internal/logging-strategy.md`** — read when adding `tracing` calls (`info!`, `debug!`, `warn!`, `error!`), working on error handling paths, or adding new operations that should be observable
 - **`docs-internal/events-strategy.md`** — read when adding or modifying `Event` variants, touching `Emitter`/`emit()`, changing `progress.jsonl` output, or adding new workflow stage types
-- **`files-internal/testing-strategy.md`** — read when adding or reorganizing tests, choosing between unit vs `tests/it`, deciding whether a test belongs in `cmd` vs `workflow` vs `scenario`, or deciding how to structure snapshots and fixtures
+- **`docs-internal/testing-strategy.md`** — read when adding or reorganizing tests, choosing between unit vs `tests/it`, deciding whether a test belongs in `cmd` vs `workflow` vs `scenario`, or deciding how to structure snapshots and fixtures
 - **`docs-internal/server-secrets-strategy.md`** — read when adding or changing server-level secrets, startup validation, install-time secret persistence, or subprocess env inheritance/scrubbing
 
 ## Shell quoting in sandbox code

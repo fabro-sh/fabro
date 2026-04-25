@@ -51,7 +51,7 @@ That mismatch leaks implementation history into the domain model and makes every
 - `lib/crates/fabro-workflow/src/lifecycle/git.rs` and `lib/crates/fabro-workflow/src/pipeline/finalize.rs` still use phase-specific `RunDump` constructors and a `checkpoint.json`-oriented metadata helper.
 - `lib/crates/fabro-workflow/src/operations/{fork.rs,rewind.rs,rebuild_meta.rs}` plus `lib/crates/fabro-cli/src/commands/run/rewind.rs` are the critical metadata readers/writers that must switch from standalone `checkpoint.json` and `start.json` reads to projection reads.
 - `lib/crates/fabro-types/src/stage_id.rs` already defines `Display` as `{node_id}@{visit}`, which should become the on-disk stage directory name.
-- `files-internal/testing-strategy.md` says CLI integration tests should remain command-driven and black-box; layout-specific assertions belong in the right layer rather than by planting run internals by hand.
+- `docs-internal/testing-strategy.md` says CLI integration tests should remain command-driven and black-box; layout-specific assertions belong in the right layer rather than by planting run internals by hand.
 
 ### Institutional Learnings
 
@@ -95,7 +95,7 @@ That mismatch leaks implementation history into the domain model and makes every
 
 - Exact helper names for the new metadata commit writer (`write_snapshot`, `write_projection_commit`, etc.). The plan fixes the API shape and intent, but the final Rust name can be chosen during implementation.
 - Whether the shared export builder stays in `lib/crates/fabro-workflow/src/run_dump.rs` or moves to a nearby module. The key constraint is one authoritative layout builder, not a specific file name.
-- Whether any low-value tests should move layers while being updated. Follow `files-internal/testing-strategy.md` if implementation reveals a better layer, but do not turn this refactor into a broad test reorganization.
+- Whether any low-value tests should move layers while being updated. Follow `docs-internal/testing-strategy.md` if implementation reveals a better layer, but do not turn this refactor into a broad test reorganization.
 
 ## High-Level Technical Design
 
@@ -299,11 +299,11 @@ Durable event store
 **Approach:**
 - Update retro agent instructions and sandbox uploads so the agent reads `run.json` projection data plus `graph.fabro` and stage files instead of `checkpoint.json` and `start.json`.
 - Rename or replace tests that currently assert `conclusion.json` or old `nodes/...` layouts so they assert conclusion presence inside `run.json` and stage files under `stages/`.
-- Keep CLI integration tests black-box per `files-internal/testing-strategy.md`; layout assertions should come from public command behavior or crate-level tests, not hand-planted run internals.
+- Keep CLI integration tests black-box per `docs-internal/testing-strategy.md`; layout assertions should come from public command behavior or crate-level tests, not hand-planted run internals.
 - Review snapshot diffs before accepting them because this refactor intentionally changes many file paths and exported filenames.
 
 **Patterns to follow:**
-- Snapshot discipline in `files-internal/testing-strategy.md`
+- Snapshot discipline in `docs-internal/testing-strategy.md`
 - Existing retro upload flow in `lib/crates/fabro-retro/src/retro_agent.rs`
 
 **Test scenarios:**
@@ -351,4 +351,4 @@ Durable event store
   - `lib/crates/fabro-checkpoint/src/metadata.rs`
   - `lib/crates/fabro-workflow/src/operations/{fork.rs,rewind.rs,rebuild_meta.rs}`
   - `lib/crates/fabro-cli/src/commands/{store/dump.rs,store/run_export.rs,run/rewind.rs}`
-- Related guidance: `files-internal/testing-strategy.md`
+- Related guidance: `docs-internal/testing-strategy.md`

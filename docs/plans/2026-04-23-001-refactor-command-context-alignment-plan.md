@@ -132,7 +132,7 @@ behavior and avoids turning `CommandContext` into a new god object.
   `lib/crates/fabro-cli/src/commands/provider/mod.rs` — the clearest
   examples of raw `process_local_json` still being threaded despite the
   rest of the state already belonging to the invocation.
-- `files-internal/testing-strategy.md` — CLI integration tests should
+- `docs-internal/testing-strategy.md` — CLI integration tests should
   stay command-driven and black-box, with implementation-facing behavior
   covered by unit tests near the code.
 - `lib/crates/fabro-cli/src/commands/sandbox/mod.rs` — the real public
@@ -828,7 +828,7 @@ command tree is consistently aligned on `CommandContext`.
   `lib/crates/fabro-cli/src/commands/auth/mod.rs`
   `lib/crates/fabro-cli/src/commands/provider/mod.rs`
   `lib/crates/fabro-cli/src/commands/system/mod.rs`
-- Testing guidance: `files-internal/testing-strategy.md`
+- Testing guidance: `docs-internal/testing-strategy.md`
 - Related history:
   `93b6577cd simplify: drop duplicate settings plumbing from cli/server refactor`
   `367fd9302 refactor(cli): centralize command settings and server access`

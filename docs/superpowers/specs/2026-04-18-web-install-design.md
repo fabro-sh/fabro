@@ -346,7 +346,7 @@ Install-mode failures report to Sentry via `fabro-telemetry` with the existing a
 
 ## Testing strategy
 
-Per `files-internal/testing-strategy.md` (re-read before implementing).
+Per `docs-internal/testing-strategy.md` (re-read before implementing).
 
 ### Unit tests (`fabro-install` crate)
 
