@@ -987,7 +987,7 @@ impl fabro_options_metadata::OptionsMetadata for RunArgs {
 - **fabro strategy docs:**
   - `docs-internal/logging-strategy.md` (Phase 2 alignment)
   - `docs-internal/server-secrets-strategy.md` (Phase 1 constraint: no env mutation)
-  - `files-internal/testing-strategy.md` (Phase 3 guidance)
+  - `docs-internal/testing-strategy.md` (Phase 3 guidance)
 - **AGENTS.md:** `/Users/bhelmkamp/p/fabro-sh/fabro-3/AGENTS.md` (nightly clippy, strum, insta workflow, refresh-spa mandate).
 - **External docs:**
   - `miette`: https://docs.rs/miette/

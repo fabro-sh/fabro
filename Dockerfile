@@ -3,8 +3,8 @@
 # Runtime image for the Fabro server.
 #
 # Binaries are supplied pre-built via the release workflow:
-#   docker-context/amd64/fabro  (x86_64-unknown-linux-musl)
-#   docker-context/arm64/fabro  (aarch64-unknown-linux-musl)
+#   tmp/docker-context/amd64/fabro  (x86_64-unknown-linux-musl)
+#   tmp/docker-context/arm64/fabro  (aarch64-unknown-linux-musl)
 #
 # The image serves the HTTP API (with embedded web UI) on $PORT (default
 # 32276), persists state to /storage, and runs as the unprivileged `fabro`
@@ -26,7 +26,7 @@ RUN apk add --no-cache \
  && adduser -S -u 1000 -G fabro -h /var/fabro -s /sbin/nologin fabro \
  && install -d -o fabro -g fabro -m 0755 /var/fabro /storage
 
-COPY --chmod=0755 docker-context/${TARGETARCH}/fabro /usr/local/bin/fabro
+COPY --chmod=0755 tmp/docker-context/${TARGETARCH}/fabro /usr/local/bin/fabro
 
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/fabro-entrypoint
 

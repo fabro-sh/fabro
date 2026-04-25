@@ -39,6 +39,8 @@ The commit message follows a structured format:
 
 The `Fabro-Checkpoint` trailer links each run branch commit to its metadata branch commit, so you can navigate from file changes to the full execution state and back.
 
+Fabro disables Git commit and tag signing for checkpoint commits created inside a sandbox. Your personal or repository-level signing settings can stay enabled, but sandbox bookkeeping does not need access to your signing key.
+
 ### Metadata branch
 
 The metadata branch (`fabro/meta/{run_id}`) is an orphan branch that stores structured run data using Git's object storage directly (via `git2`). It is initialized at run start with:

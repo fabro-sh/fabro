@@ -1,5 +1,4 @@
 target
-docker-context/
 .env
 .entire
 node_modules

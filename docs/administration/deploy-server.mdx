@@ -34,7 +34,9 @@ This starts the server on a Unix socket at `~/.fabro/fabro.sock` by default. Use
 
 ### First run: web install wizard
 
-If `~/.fabro/settings.toml` does not yet exist, `fabro server start` enters **install mode**: it prints an install URL, attempts to open the URL in your default browser, and serves a web wizard that walks you through configuring your server URL, shared object store, LLM provider, and GitHub integration.
+If `~/.fabro/settings.toml` does not yet exist, `fabro server start` enters **install mode**: it prints an install URL and a one-time install token, attempts to open the URL in your default browser, and serves a web wizard that walks you through configuring your server URL, shared object store, LLM provider, and GitHub integration.
+
+When Fabro can construct a direct install URL, the token is embedded in the URL and also printed on its own line for copying. If you open the server root through a reverse proxy or another machine, paste the printed install token when prompted.
 
 The `Object store` step offers two wizard-managed modes:
 
@@ -87,6 +89,8 @@ The web UI connects to the API server and provides:
 
 - **Runs board** — Monitor all active runs organized by status
 - **Run detail** — Real-time stage progress, event stream, diffs, and usage stats
+- **Files Changed** — Browse changed files with a searchable tree, per-file status, aggregate diff stats, and split or stacked diffs
+- **Settings** — Inspect server configuration, enabled integrations, storage, auth, and capacity settings
 - **Start new run** — Submit workflows from the browser
 - **Human-in-the-loop** — Answer agent questions through the web interface
 - **Workflows** — Browse available workflows, view their graphs, and see run history
@@ -143,6 +147,12 @@ Or use the `--server` flag:
 
 ```bash
 fabro model list --server https://fabro.example.com/api/v1
+```
+
+For dev-token servers, save the token in the CLI auth store instead of exporting it for every command:
+
+```bash
+fabro auth login --server https://fabro.example.com/api/v1 --dev-token fabro_dev_...
 ```
 
 `fabro model list` and `fabro model test` honor `[cli.target]` by default unless you explicitly pass `--storage-dir`. `fabro exec` remains a local agent session and only uses the server when you pass `--server`.

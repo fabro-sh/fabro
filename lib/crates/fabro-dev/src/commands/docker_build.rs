@@ -117,7 +117,7 @@ impl DockerBuildPlan {
 
         if self.compile_only {
             println!(
-                "Staged docker-context/{}/fabro (skipping docker build per --compile-only).",
+                "Staged tmp/docker-context/{}/fabro (skipping docker build per --compile-only).",
                 self.arch
             );
             return Ok(());
@@ -135,7 +135,7 @@ impl DockerBuildPlan {
             self.extract_command().to_shell_line(),
         ];
         if self.compile_only {
-            lines.push(format!("staged docker-context/{}/fabro", self.arch));
+            lines.push(format!("staged tmp/docker-context/{}/fabro", self.arch));
         } else {
             lines.push(self.image_build_command().to_shell_line());
         }
@@ -202,12 +202,13 @@ impl DockerBuildPlan {
 
     fn context_dir(&self) -> PathBuf {
         self.workspace_root
+            .join("tmp")
             .join("docker-context")
             .join(self.arch.to_string())
     }
 
     fn relative_context_dir(&self) -> String {
-        format!("docker-context/{}", self.arch)
+        format!("tmp/docker-context/{}", self.arch)
     }
 }
 
