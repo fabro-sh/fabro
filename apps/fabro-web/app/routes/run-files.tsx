@@ -521,6 +521,7 @@ export default function RunFiles({ loaderData }: any) {
 
   const toolbar = (
     <Toolbar
+      totalChanged={meta.total_changed}
       onRefresh={() => revalidator.revalidate()}
       refreshing={isRevalidating}
       refreshDisabled={refreshDisabled}
