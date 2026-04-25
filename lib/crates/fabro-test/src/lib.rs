@@ -78,6 +78,8 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
 
 const MANAGED_STORAGE_MARKER: &str = "# fabro-test managed storage_dir";
 const SESSION_LOCK_TIMEOUT: Duration = Duration::from_secs(20);
+const STALE_TMP_DAEMON_THRESHOLD: Duration = Duration::from_mins(30);
+const TMP_DAEMON_REAPER_COOLDOWN: Duration = Duration::from_mins(5);
 const TEST_SESSION_SECRET: &str =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const TEST_DEV_TOKEN: &str =
@@ -310,6 +312,7 @@ fn session_refs() -> &'static Mutex<HashMap<PathBuf, usize>> {
 // the existing call structure without introducing cross-mode coupling.
 static NEXTEST_REAPED: OnceLock<()> = OnceLock::new();
 static PROCESS_REAPED: OnceLock<()> = OnceLock::new();
+static TMP_DAEMONS_REAPED: OnceLock<()> = OnceLock::new();
 
 // Advisory-lock-based peer-presence marker. Each test process opens
 // `<session_root>/clients/<pid>` once, holds a shared (LOCK_SH) flock
@@ -1083,6 +1086,113 @@ fn reap_stale_session_roots(mode: SessionMode) {
     }
 }
 
+fn maybe_reap_stale_tmp_daemons() {
+    let (lock_path, stamp_path) = tmp_daemon_reaper_paths();
+    if stamp_is_recent(&stamp_path, TMP_DAEMON_REAPER_COOLDOWN) {
+        return;
+    }
+
+    let Some(parent) = lock_path.parent() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(parent);
+    let Ok(lock_file) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+    else {
+        return;
+    };
+    let Ok(true) = fabro_proc::try_flock_exclusive(&lock_file) else {
+        return;
+    };
+
+    if !stamp_is_recent(&stamp_path, TMP_DAEMON_REAPER_COOLDOWN) {
+        reap_stale_tmp_daemons();
+        let _ = File::create(&stamp_path);
+    }
+    let _ = fabro_proc::flock_unlock(&lock_file);
+}
+
+fn reap_stale_tmp_daemons() {
+    let Ok(output) = std::process::Command::new("ps")
+        .args(["-ww", "-axo", "pid=,etime=,command="])
+        .output()
+    else {
+        return;
+    };
+    if !output.status.success() {
+        return;
+    }
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some((pid, elapsed_secs, command)) = parse_tmp_daemon_ps_line(line) else {
+            continue;
+        };
+        if Duration::from_secs(elapsed_secs) <= STALE_TMP_DAEMON_THRESHOLD {
+            continue;
+        }
+        if tmp_daemon_socket_re().is_match(command) {
+            fabro_proc::sigkill(pid);
+        }
+    }
+}
+
+fn tmp_daemon_reaper_paths() -> (PathBuf, PathBuf) {
+    let base = short_session_base_dir();
+    (
+        base.join("tmp-daemon-reaper.lock"),
+        base.join("tmp-daemon-reaper.stamp"),
+    )
+}
+
+fn stamp_is_recent(path: &Path, cooldown: Duration) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    let Ok(modified) = metadata.modified() else {
+        return false;
+    };
+    modified.elapsed().is_ok_and(|elapsed| elapsed < cooldown)
+}
+
+fn parse_tmp_daemon_ps_line(line: &str) -> Option<(u32, u64, &str)> {
+    static PS_ROW_RE: OnceLock<Regex> = OnceLock::new();
+    let captures = PS_ROW_RE
+        .get_or_init(|| Regex::new(r"^\s*(\d+)\s+(\S+)\s+(.*)$").expect("static regex"))
+        .captures(line)?;
+    let pid = captures.get(1)?.as_str().parse::<u32>().ok()?;
+    let elapsed_secs = parse_etime(captures.get(2)?.as_str())?;
+    let command = captures.get(3)?.as_str();
+    Some((pid, elapsed_secs, command))
+}
+
+fn tmp_daemon_socket_re() -> &'static Regex {
+    static TMP_DAEMON_SOCKET_RE: OnceLock<Regex> = OnceLock::new();
+    TMP_DAEMON_SOCKET_RE.get_or_init(|| {
+        Regex::new(r"^fabro server unix:/tmp/\.tmp[^/]+/[^/]+\.sock\s*$").expect("static regex")
+    })
+}
+
+fn parse_etime(s: &str) -> Option<u64> {
+    let (days, rest) = match s.split_once('-') {
+        Some((days, rest)) => (days.parse::<u64>().ok()?, rest),
+        None => (0, s),
+    };
+    let nums = rest
+        .split(':')
+        .map(|part| part.parse::<u64>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let (hours, minutes, seconds) = match nums.as_slice() {
+        [minutes, seconds] => (0, *minutes, *seconds),
+        [hours, minutes, seconds] => (*hours, *minutes, *seconds),
+        _ => return None,
+    };
+    Some(days * 86_400 + hours * 3_600 + minutes * 60 + seconds)
+}
+
 impl TestContext {
     /// Create a new isolated test context.
     ///
@@ -1108,6 +1218,7 @@ impl TestContext {
         let (_, test_run_id, session_paths) = session_paths();
         NEXTEST_REAPED.get_or_init(|| reap_stale_session_roots(SessionMode::Nextest));
         PROCESS_REAPED.get_or_init(|| reap_stale_session_roots(SessionMode::Process));
+        TMP_DAEMONS_REAPED.get_or_init(maybe_reap_stale_tmp_daemons);
         with_session_lock(&session_paths.root, || {
             std::fs::create_dir_all(session_clients_dir(&session_paths.root)).unwrap_or_else(
                 |err| {
@@ -2373,6 +2484,54 @@ mod tests {
             "session lock must survive remove_dir_all({})",
             root.display()
         );
+    }
+
+    #[test]
+    fn parse_etime_accepts_bsd_elapsed_time_formats() {
+        assert_eq!(parse_etime("00:42"), Some(42));
+        assert_eq!(parse_etime("01:23:45"), Some(5_025));
+        assert_eq!(parse_etime("2-03:04:05"), Some(183_845));
+    }
+
+    #[test]
+    fn parse_etime_rejects_malformed_elapsed_time() {
+        assert_eq!(parse_etime(""), None);
+        assert_eq!(parse_etime("abc"), None);
+        assert_eq!(parse_etime("01:02:03:04"), None);
+        assert_eq!(parse_etime("2-not-time"), None);
+    }
+
+    #[test]
+    fn parse_tmp_daemon_ps_line_handles_padded_rows() {
+        let line = "43640       12:14 fabro server unix:/tmp/.tmppL8cKh/fabro.sock";
+
+        assert_eq!(
+            parse_tmp_daemon_ps_line(line),
+            Some((43_640, 734, "fabro server unix:/tmp/.tmppL8cKh/fabro.sock"))
+        );
+    }
+
+    #[test]
+    fn tmp_daemon_socket_regex_matches_only_test_tmp_unix_daemons() {
+        let re = tmp_daemon_socket_re();
+
+        assert!(re.is_match("fabro server unix:/tmp/.tmpAbC/fabro.sock"));
+        assert!(!re.is_match("fabro server unix:/tmp/.ft-foo-XYZ/test.sock"));
+        assert!(!re.is_match("sh -c fabro server unix:/tmp/.tmpAbC/fabro.sock"));
+        assert!(!re.is_match("fabro server unix:/Users/me/.fabro/fabro.sock"));
+        assert!(!re.is_match("fabro server unix:/tmp/notmatching/fabro.sock"));
+        assert!(!re.is_match("fabro server tcp:127.0.0.1:32276"));
+    }
+
+    #[test]
+    fn stamp_is_recent_checks_missing_and_fresh_stamps() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let missing = temp.path().join("missing.stamp");
+        assert!(!stamp_is_recent(&missing, Duration::from_mins(1)));
+
+        let fresh = temp.path().join("fresh.stamp");
+        File::create(&fresh).expect("stamp should be created");
+        assert!(stamp_is_recent(&fresh, Duration::from_mins(1)));
     }
 
     #[test]
