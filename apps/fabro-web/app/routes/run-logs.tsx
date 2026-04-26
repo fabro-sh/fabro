@@ -4,6 +4,7 @@ import { useParams } from "react-router";
 import { EmptyState, ErrorState, LoadingState } from "../components/state";
 import { StageSidebar } from "../components/stage-sidebar";
 import { CopyButton } from "../components/ui";
+import { formatBytes } from "../lib/format";
 import { useRun, useRunLogs, useRunStages } from "../lib/queries";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 
@@ -36,7 +37,7 @@ function renderBody(logsQuery: ReturnType<typeof useRunLogs>) {
       <ErrorState
         title="Couldn't load run log"
         description={errorMessage(logsQuery.error)}
-        onRetry={() => logsQuery.mutate()}
+        onRetry={() => void logsQuery.mutate()}
       />
     );
   }
@@ -55,15 +56,13 @@ function renderBody(logsQuery: ReturnType<typeof useRunLogs>) {
 }
 
 function LogPanel({ text }: { text: string }) {
-  const byteCount = useMemo(() => new Blob([text]).size, [text]);
+  const byteCount = new Blob([text]).size;
   return (
     <div className="rounded-md border border-line bg-panel-alt">
       <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-2">
         <span className="font-mono text-xs text-fg-muted">runtime/server.log</span>
         <div className="flex items-center gap-3">
-          <span className="text-xs tabular-nums text-fg-muted">
-            {byteCount.toLocaleString()} bytes
-          </span>
+          <span className="text-xs tabular-nums text-fg-muted">{formatBytes(byteCount)}</span>
           <CopyButton value={text} label="Copy run log" />
         </div>
       </div>
@@ -74,7 +73,6 @@ function LogPanel({ text }: { text: string }) {
   );
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return "Please try again.";
+function errorMessage(error: unknown): string | undefined {
+  return error instanceof Error ? error.message : undefined;
 }
