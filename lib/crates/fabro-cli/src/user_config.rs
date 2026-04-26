@@ -1,15 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
 pub(crate) use fabro_client::ServerTarget;
 pub(crate) use fabro_config::user::{active_settings_path, default_storage_dir};
 use fabro_config::user::{default_settings_path, default_socket_path};
 use fabro_config::{
-    CliLayer, ParseError, RunSettingsBuilder, ServerSettingsBuilder, UserSettingsBuilder,
+    CliLayer, LogFilter, ParseError, RunSettingsBuilder, ServerSettingsBuilder, UserSettingsBuilder,
 };
 use fabro_static::EnvVars;
 use fabro_types::settings::cli::CliTargetSettings;
+use fabro_types::settings::server::LogDestination;
 use fabro_types::settings::{CliNamespace, InterpString, RunNamespace};
 use fabro_types::{ServerSettings, UserSettings};
 use fabro_util::version::FABRO_VERSION;
@@ -18,11 +19,12 @@ use tracing::debug;
 use crate::args::ServerTargetArgs;
 
 pub(crate) struct LoadedSettings {
-    pub(crate) storage_dir:      PathBuf,
-    pub(crate) config_log_level: Option<String>,
-    pub(crate) run_settings:     std::result::Result<RunNamespace, String>,
-    pub(crate) server_settings:  std::result::Result<ServerSettings, String>,
-    pub(crate) user_settings:    UserSettings,
+    pub(crate) storage_dir:            PathBuf,
+    pub(crate) config_log_level:       Option<LogFilter>,
+    pub(crate) config_log_destination: Option<LogDestination>,
+    pub(crate) run_settings:           std::result::Result<RunNamespace, String>,
+    pub(crate) server_settings:        std::result::Result<ServerSettings, String>,
+    pub(crate) user_settings:          UserSettings,
 }
 
 pub(crate) fn load_resolved_settings(
@@ -33,7 +35,7 @@ pub(crate) fn load_resolved_settings(
     let document = load_settings_document(config_path)?;
     let storage_override = storage_dir.map(Path::to_path_buf);
     let storage_dir = storage_dir_from_document(&document, storage_dir)?;
-    let config_log_level = config_log_level_from_document(&document);
+    let pre_tracing_config = pre_tracing_config_from_document(&document)?;
     let run_settings = load_run_settings(config_path).map_err(|err| err.to_string());
     let server_settings = load_server_settings(config_path)
         .map(|settings| match storage_override.as_deref() {
@@ -45,7 +47,8 @@ pub(crate) fn load_resolved_settings(
 
     Ok(LoadedSettings {
         storage_dir,
-        config_log_level,
+        config_log_level: pre_tracing_config.log_level,
+        config_log_destination: pre_tracing_config.log_destination,
         run_settings,
         server_settings,
         user_settings,
@@ -118,8 +121,48 @@ fn load_user_settings(
     })
 }
 
-fn config_log_level_from_document(document: &toml::Value) -> Option<String> {
-    string_at_path(document, &["server", "logging", "level"])
+struct PreTracingConfig {
+    log_level:       Option<LogFilter>,
+    log_destination: Option<LogDestination>,
+}
+
+fn pre_tracing_config_from_document(document: &toml::Value) -> Result<PreTracingConfig> {
+    Ok(PreTracingConfig {
+        log_level:       log_filter_at_path(document, &["server", "logging", "level"])?,
+        log_destination: log_destination_at_path(document, &["server", "logging", "destination"])?,
+    })
+}
+
+fn log_filter_at_path(document: &toml::Value, path: &[&str]) -> Result<Option<LogFilter>> {
+    let Some(value) = value_at_path(document, path) else {
+        return Ok(None);
+    };
+    let raw = value
+        .as_str()
+        .ok_or_else(|| anyhow!("{} must be a string", path.join(".")))?;
+    LogFilter::parse(raw)
+        .with_context(|| format!("invalid {} `{raw}`", path.join(".")))
+        .map(Some)
+}
+
+fn log_destination_at_path(
+    document: &toml::Value,
+    path: &[&str],
+) -> Result<Option<LogDestination>> {
+    let Some(value) = value_at_path(document, path) else {
+        return Ok(None);
+    };
+    let raw = value
+        .as_str()
+        .ok_or_else(|| anyhow!("{} must be a string", path.join(".")))?;
+    raw.parse::<LogDestination>()
+        .with_context(|| {
+            format!(
+                "invalid {} `{raw}`; expected `file` or `stdout`",
+                path.join(".")
+            )
+        })
+        .map(Some)
 }
 
 fn storage_dir_from_document(
@@ -163,11 +206,15 @@ fn storage_dir_from_document_with_lookup(
 }
 
 fn string_at_path(document: &toml::Value, path: &[&str]) -> Option<String> {
+    value_at_path(document, path).and_then(|value| value.as_str().map(str::to_owned))
+}
+
+fn value_at_path<'a>(document: &'a toml::Value, path: &[&str]) -> Option<&'a toml::Value> {
     let mut current = document;
     for segment in path {
         current = current.get(*segment)?;
     }
-    current.as_str().map(str::to_owned)
+    Some(current)
 }
 
 /// Pull the resolved CLI target configuration out of `[cli.target]`.
@@ -233,7 +280,7 @@ pub(crate) fn load_resolved_settings_from_toml(
         .map_err(|err| anyhow::anyhow!("failed to parse settings file: {err}"))?;
     let storage_override = storage_dir.map(Path::to_path_buf);
     let storage_dir = storage_dir_from_document(&document, storage_dir)?;
-    let config_log_level = config_log_level_from_document(&document);
+    let pre_tracing_config = pre_tracing_config_from_document(&document)?;
     let run_settings = RunSettingsBuilder::from_toml(source).map_err(|err| err.to_string());
     let server_settings = ServerSettingsBuilder::from_toml(source)
         .map(|settings| match storage_override.as_deref() {
@@ -248,7 +295,8 @@ pub(crate) fn load_resolved_settings_from_toml(
 
     Ok(LoadedSettings {
         storage_dir,
-        config_log_level,
+        config_log_level: pre_tracing_config.log_level,
+        config_log_destination: pre_tracing_config.log_destination,
         run_settings,
         server_settings,
         user_settings,

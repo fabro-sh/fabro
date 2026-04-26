@@ -103,6 +103,7 @@ models/integration-webhooks-settings.ts
 models/internal-stage-status.ts
 models/ip-allow-entry.ts
 models/literal-ip-allow-entry.ts
+models/log-destination.ts
 models/manifest-args.ts
 models/manifest-config.ts
 models/manifest-file-entry.ts

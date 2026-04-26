@@ -1690,6 +1690,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "shlex",
+ "temp-env",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1755,6 +1756,7 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
  "tracing",
+ "tracing-subscriber",
  "ulid",
 ]
 

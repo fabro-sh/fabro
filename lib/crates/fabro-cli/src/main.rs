@@ -461,15 +461,26 @@ async fn prepare_server_bootstrap(
     let local_config = local_server::LocalServerConfig::load(config_path, storage_dir)?;
     let storage_dir = local_config.storage_dir().to_path_buf();
     let runtime_directory = fabro_config::RuntimeDirectory::new(storage_dir.clone());
+    let log_destination = logging::resolve_log_destination(
+        local_config.config_log_destination().unwrap_or_default(),
+    )?;
+    let server_log_destination =
+        logging::server_log_destination(log_destination, runtime_directory.log_path());
     let foreground_server_log_bootstrap = if foreground {
-        Some(commands::server::start::prepare_foreground_server_log(&runtime_directory).await?)
+        Some(
+            commands::server::start::prepare_foreground_server_log(
+                &runtime_directory,
+                &server_log_destination,
+            )
+            .await?,
+        )
     } else {
         None
     };
 
     Ok(PreTracingBootstrap {
         sink: logging::InternalLogSink::Server {
-            path: runtime_directory.log_path(),
+            destination: server_log_destination,
         },
         config_log_level: local_config.config_log_level().map(str::to_owned),
         foreground_server_log_bootstrap,
@@ -486,6 +497,7 @@ mod tests {
         AuthCommand, AuthNamespace, Commands, InstallGitHubStrategyArg, ModelsCommand,
         ProviderCommand, ProviderNamespace,
     };
+    use temp_env::with_var;
     use tokio::runtime::Runtime;
 
     use super::*;
@@ -495,16 +507,30 @@ mod tests {
     }
 
     fn write_test_settings(path: &std::path::Path) {
+        write_test_settings_with_logging(path, "warn", "stdout");
+    }
+
+    fn write_test_settings_with_logging(path: &std::path::Path, level: &str, destination: &str) {
         std::fs::write(
             path,
-            r#"
+            format!(
+                r#"
 _version = 1
 
 [server.logging]
-level = "warn"
-"#,
+level = "{level}"
+destination = "{destination}"
+"#
+            ),
         )
         .unwrap();
+    }
+
+    fn expect_bootstrap_err(result: Result<PreTracingBootstrap>) -> anyhow::Error {
+        match result {
+            Ok(_) => panic!("bootstrap should have failed"),
+            Err(err) => err,
+        }
     }
 
     #[test]
@@ -665,7 +691,7 @@ level = "warn"
             .expect("bootstrap should resolve");
 
         assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
-            path: storage_dir.path().join("logs").join("server.log"),
+            destination: logging::ServerLogDestination::Stdout,
         });
         assert_eq!(bootstrap.config_log_level.as_deref(), Some("warn"));
         assert!(bootstrap.foreground_server_log_bootstrap.is_some());
@@ -696,7 +722,7 @@ level = "warn"
             .expect("bootstrap should resolve");
 
         assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
-            path: storage_dir.path().join("logs").join("server.log"),
+            destination: logging::ServerLogDestination::Stdout,
         });
         assert_eq!(bootstrap.config_log_level.as_deref(), Some("warn"));
         assert!(bootstrap.foreground_server_log_bootstrap.is_some());
@@ -725,10 +751,123 @@ level = "warn"
             .expect("bootstrap should resolve");
 
         assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
-            path: storage_dir.path().join("logs").join("server.log"),
+            destination: logging::ServerLogDestination::Stdout,
         });
         assert_eq!(bootstrap.config_log_level.as_deref(), Some("warn"));
         assert!(bootstrap.foreground_server_log_bootstrap.is_none());
+    }
+
+    #[test]
+    fn pre_tracing_bootstrap_env_destination_overrides_config_file() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        let config_path = config_dir.path().join("settings.toml");
+        write_test_settings_with_logging(&config_path, "warn", "file");
+
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "server",
+            "start",
+            "--foreground",
+            "--storage-dir",
+            storage_dir.path().to_str().unwrap(),
+            "--config",
+            config_path.to_str().unwrap(),
+        ])
+        .expect("should parse");
+        let command = cli.command.as_deref().unwrap();
+
+        with_var(EnvVars::FABRO_LOG_DESTINATION, Some("stdout"), || {
+            let bootstrap = runtime()
+                .block_on(pre_tracing_bootstrap(command))
+                .expect("bootstrap should resolve");
+
+            assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
+                destination: logging::ServerLogDestination::Stdout,
+            });
+        });
+    }
+
+    #[test]
+    fn pre_tracing_bootstrap_rejects_invalid_env_destination() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        let config_path = config_dir.path().join("settings.toml");
+        write_test_settings_with_logging(&config_path, "warn", "file");
+
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "server",
+            "start",
+            "--foreground",
+            "--storage-dir",
+            storage_dir.path().to_str().unwrap(),
+            "--config",
+            config_path.to_str().unwrap(),
+        ])
+        .expect("should parse");
+        let command = cli.command.as_deref().unwrap();
+
+        with_var(EnvVars::FABRO_LOG_DESTINATION, Some("stdot"), || {
+            let err = expect_bootstrap_err(runtime().block_on(pre_tracing_bootstrap(command)));
+            let message = err.to_string();
+            assert!(message.contains(EnvVars::FABRO_LOG_DESTINATION));
+            assert!(message.contains("stdot"));
+        });
+    }
+
+    #[test]
+    fn pre_tracing_bootstrap_rejects_invalid_config_log_level() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        let config_path = config_dir.path().join("settings.toml");
+        write_test_settings_with_logging(&config_path, "definitely not a filter", "file");
+
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "server",
+            "start",
+            "--foreground",
+            "--storage-dir",
+            storage_dir.path().to_str().unwrap(),
+            "--config",
+            config_path.to_str().unwrap(),
+        ])
+        .expect("should parse");
+        let command = cli.command.as_deref().unwrap();
+
+        let err = expect_bootstrap_err(runtime().block_on(pre_tracing_bootstrap(command)));
+        assert!(
+            err.to_string().contains("server.logging.level"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn pre_tracing_bootstrap_rejects_invalid_config_destination() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        let config_path = config_dir.path().join("settings.toml");
+        write_test_settings_with_logging(&config_path, "warn", "stdot");
+
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "server",
+            "start",
+            "--foreground",
+            "--storage-dir",
+            storage_dir.path().to_str().unwrap(),
+            "--config",
+            config_path.to_str().unwrap(),
+        ])
+        .expect("should parse");
+        let command = cli.command.as_deref().unwrap();
+
+        let err = expect_bootstrap_err(runtime().block_on(pre_tracing_bootstrap(command)));
+        assert!(
+            err.to_string().contains("server.logging.destination"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

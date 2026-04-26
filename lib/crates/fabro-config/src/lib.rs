@@ -39,7 +39,7 @@ pub use layers::{
     CliOutputLayer, CliTargetLayer, CliUpdatesLayer, DaytonaDockerfileLayer, DaytonaSandboxLayer,
     DaytonaSnapshotLayer, DiscordIntegrationLayer, FeaturesLayer, GitAuthorLayer,
     GithubIntegrationLayer, HookAgentMarker, HookEntry, HookTlsMode, IntegrationWebhooksLayer,
-    InterviewProviderLayer, InterviewsLayer, LocalSandboxLayer, McpEntryLayer, MergeMap,
+    InterviewProviderLayer, InterviewsLayer, LocalSandboxLayer, LogFilter, McpEntryLayer, MergeMap,
     ModelRefOrSplice, NotificationProviderLayer, NotificationRouteLayer, ObjectStoreLocalLayer,
     ObjectStoreS3Layer, PrepareStep, ProjectLayer, ReplaceMap, RunAgentLayer, RunArtifactsLayer,
     RunCheckpointLayer, RunExecutionLayer, RunGitLayer, RunGoalLayer, RunLayer, RunModelLayer,

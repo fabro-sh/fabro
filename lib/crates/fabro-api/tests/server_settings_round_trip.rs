@@ -1,12 +1,13 @@
 use std::any::{TypeId, type_name};
 
 use fabro_api::types::{
-    FeaturesNamespace as ApiFeaturesNamespace, ObjectStoreSettings as ApiObjectStoreSettings,
-    ServerNamespace as ApiServerNamespace, ServerSettings as ApiServerSettings,
+    FeaturesNamespace as ApiFeaturesNamespace, LogDestination as ApiLogDestination,
+    ObjectStoreSettings as ApiObjectStoreSettings, ServerNamespace as ApiServerNamespace,
+    ServerSettings as ApiServerSettings,
 };
 use fabro_config::ServerSettingsBuilder;
 use fabro_types::ServerSettings;
-use fabro_types::settings::server::ObjectStoreSettings;
+use fabro_types::settings::server::{LogDestination, ObjectStoreSettings};
 use fabro_types::settings::{FeaturesNamespace, ServerNamespace};
 
 #[test]
@@ -15,6 +16,7 @@ fn server_settings_family_reuses_domain_types() {
     assert_same_type::<ApiServerNamespace, ServerNamespace>();
     assert_same_type::<ApiFeaturesNamespace, FeaturesNamespace>();
     assert_same_type::<ApiObjectStoreSettings, ObjectStoreSettings>();
+    assert_same_type::<ApiLogDestination, LogDestination>();
 }
 
 #[test]
@@ -43,6 +45,9 @@ allowed_usernames = ["alice"]
 [server.storage]
 root = "/srv/fabro"
 
+[server.logging]
+destination = "stdout"
+
 [server.integrations.github]
 enabled = true
 strategy = "app"
@@ -60,6 +65,7 @@ session_sandboxes = true
     assert_eq!(json["server"]["listen"]["type"], "tcp");
     assert_eq!(json["server"]["listen"]["address"], "127.0.0.1:32276");
     assert_eq!(json["server"]["storage"]["root"], "/srv/fabro");
+    assert_eq!(json["server"]["logging"]["destination"], "stdout");
     assert_eq!(json["features"]["session_sandboxes"], true);
 
     let round_trip: ApiServerSettings =

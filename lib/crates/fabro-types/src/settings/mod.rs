@@ -45,7 +45,7 @@ pub use run::{
 };
 pub use server::{
     DiscordIntegrationSettings, GithubIntegrationSettings, IntegrationWebhooksSettings,
-    IpAllowEntry, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
+    IpAllowEntry, LogDestination, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
     ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings, ServerIntegrationsSettings,
     ServerIpAllowlistOverrideSettings, ServerIpAllowlistSettings, ServerListenSettings,
     ServerLoggingSettings, ServerNamespace, ServerSchedulerSettings, ServerSlateDbSettings,

@@ -7,15 +7,17 @@ use fabro_config::bind::BindRequest;
 use fabro_config::user::default_storage_dir;
 use fabro_server::serve::resolve_bind_request_from_server_settings;
 use fabro_types::ServerSettings;
+use fabro_types::settings::server::LogDestination;
 use fabro_types::settings::{InterpString, ServerAuthMethod};
 
 use crate::user_config;
 
 pub(crate) struct LocalServerConfig {
-    storage_dir:      PathBuf,
-    auth_methods:     Vec<ServerAuthMethod>,
-    config_log_level: Option<String>,
-    server_settings:  std::result::Result<ServerSettings, String>,
+    storage_dir:            PathBuf,
+    auth_methods:           Vec<ServerAuthMethod>,
+    config_log_level:       Option<fabro_config::LogFilter>,
+    config_log_destination: Option<LogDestination>,
+    server_settings:        std::result::Result<ServerSettings, String>,
 }
 
 impl LocalServerConfig {
@@ -39,6 +41,7 @@ impl LocalServerConfig {
             storage_dir: settings.storage_dir,
             auth_methods,
             config_log_level: settings.config_log_level,
+            config_log_destination: settings.config_log_destination,
             server_settings,
         }
     }
@@ -52,7 +55,13 @@ impl LocalServerConfig {
     }
 
     pub(crate) fn config_log_level(&self) -> Option<&str> {
-        self.config_log_level.as_deref()
+        self.config_log_level
+            .as_ref()
+            .map(fabro_config::LogFilter::as_str)
+    }
+
+    pub(crate) fn config_log_destination(&self) -> Option<LogDestination> {
+        self.config_log_destination
     }
 
     pub(crate) fn bind_request(&self, cli_override: Option<&str>) -> Result<BindRequest> {

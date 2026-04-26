@@ -5,10 +5,12 @@ use fabro_types::settings::run::{
     AgentPermissions, ApprovalMode, DaytonaNetworkLayer, MergeStrategy, RunMode, WorktreeMode,
 };
 use fabro_types::settings::server::{
-    GithubIntegrationStrategy, ObjectStoreProvider, ServerAuthMethod, WebhookStrategy,
+    GithubIntegrationStrategy, LogDestination, ObjectStoreProvider, ServerAuthMethod,
+    WebhookStrategy,
 };
 use fabro_types::settings::{Duration, InterpString, Size};
 
+use super::LogFilter;
 use super::cli::{CliAuthLayer, CliLoggingLayer, CliTargetLayer};
 use super::features::FeaturesLayer;
 use super::run::{
@@ -18,7 +20,7 @@ use super::run::{
 };
 use super::server::{
     ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer, ServerAuthGithubLayer,
-    ServerListenLayer, ServerLoggingLayer,
+    ServerListenLayer,
 };
 
 /// Internal merge trait used by sparse config layers inside `fabro-config`.
@@ -74,9 +76,11 @@ impl_combine_or_option!(
     RunMode,
     WorktreeMode,
     GithubIntegrationStrategy,
+    LogDestination,
     ObjectStoreProvider,
     ServerAuthMethod,
     WebhookStrategy,
+    LogFilter,
 );
 
 impl Combine for Option<Vec<String>> {
@@ -128,7 +132,6 @@ impl_combine_self!(
     ServerApiLayer,
     ServerAuthGithubLayer,
     ServerListenLayer,
-    ServerLoggingLayer,
 );
 
 impl Combine for RunCheckpointLayer {
@@ -284,8 +287,13 @@ mod tests {
             GithubIntegrationStrategy::Token,
         );
         assert_option_leaf(ObjectStoreProvider::S3, ObjectStoreProvider::Local);
+        assert_option_leaf(LogDestination::Stdout, LogDestination::File);
         assert_option_leaf(ServerAuthMethod::Github, ServerAuthMethod::DevToken);
         assert_option_leaf(WebhookStrategy::ServerUrl, WebhookStrategy::TailscaleFunnel);
+        assert_option_leaf(
+            LogFilter::parse("debug").unwrap(),
+            LogFilter::parse("info").unwrap(),
+        );
         assert_option_leaf(vec!["this".to_string()], vec!["fallback".to_string()]);
         assert_option_leaf(vec![ServerAuthMethod::Github], vec![
             ServerAuthMethod::DevToken,

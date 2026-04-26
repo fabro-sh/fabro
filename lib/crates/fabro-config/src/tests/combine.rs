@@ -1,5 +1,6 @@
 use fabro_types::settings::InterpString;
 use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
+use fabro_types::settings::server::LogDestination;
 
 use crate::{Combine, SettingsLayer, StringOrSplice};
 
@@ -257,6 +258,30 @@ level = "debug"
     let merged = higher.combine(lower);
     let updates = merged.cli.unwrap().updates.unwrap();
     assert_eq!(updates.check, Some(true));
+}
+
+#[test]
+fn server_logging_merges_by_field() {
+    let lower = parse(
+        r#"
+[server.logging]
+level = "warn"
+"#,
+    );
+    let higher = parse(
+        r#"
+[server.logging]
+destination = "stdout"
+"#,
+    );
+
+    let merged = higher.combine(lower);
+    let logging = merged.server.unwrap().logging.unwrap();
+    assert_eq!(
+        logging.level.as_ref().map(fabro_config::LogFilter::as_str),
+        Some("warn")
+    );
+    assert_eq!(logging.destination, Some(LogDestination::Stdout));
 }
 
 #[test]

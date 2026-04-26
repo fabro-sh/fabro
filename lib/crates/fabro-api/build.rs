@@ -264,6 +264,11 @@ fn main() {
             &[],
         ),
         (
+            "LogDestination",
+            "fabro_types::settings::server::LogDestination",
+            &[],
+        ),
+        (
             "ServerIntegrationsSettings",
             "fabro_types::settings::server::ServerIntegrationsSettings",
             &[],

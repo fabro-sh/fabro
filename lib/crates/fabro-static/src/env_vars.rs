@@ -19,6 +19,8 @@ impl EnvVars {
     pub const FABRO_HOME: &'static str = "FABRO_HOME";
     pub const FABRO_HTTP_PROXY_POLICY: &'static str = "FABRO_HTTP_PROXY_POLICY";
     pub const FABRO_JSON: &'static str = "FABRO_JSON";
+    pub const FABRO_LOG: &'static str = "FABRO_LOG";
+    pub const FABRO_LOG_DESTINATION: &'static str = "FABRO_LOG_DESTINATION";
     pub const FABRO_NO_UPGRADE_CHECK: &'static str = "FABRO_NO_UPGRADE_CHECK";
     pub const FABRO_QUIET: &'static str = "FABRO_QUIET";
     pub const FABRO_SERVER: &'static str = "FABRO_SERVER";
@@ -134,6 +136,8 @@ mod tests {
     #[test]
     fn env_var_constants_match_their_names() {
         assert_eq!(EnvVars::FABRO_CONFIG, "FABRO_CONFIG");
+        assert_eq!(EnvVars::FABRO_LOG, "FABRO_LOG");
+        assert_eq!(EnvVars::FABRO_LOG_DESTINATION, "FABRO_LOG_DESTINATION");
     }
 
     #[test]
@@ -151,6 +155,8 @@ mod tests {
             EnvVars::FABRO_HOME,
             EnvVars::FABRO_HTTP_PROXY_POLICY,
             EnvVars::FABRO_JSON,
+            EnvVars::FABRO_LOG,
+            EnvVars::FABRO_LOG_DESTINATION,
             EnvVars::FABRO_NO_UPGRADE_CHECK,
             EnvVars::FABRO_QUIET,
             EnvVars::FABRO_SERVER,

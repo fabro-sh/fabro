@@ -49,10 +49,16 @@ pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> Se
                 .expect("defaults.toml should provide server.scheduler.max_concurrent_runs"),
         },
         logging: ServerLoggingSettings {
-            level: layer
+            level:       layer
                 .logging
                 .as_ref()
-                .and_then(|logging| logging.level.clone()),
+                .and_then(|logging| logging.level.as_ref())
+                .map(|level| level.as_str().to_owned()),
+            destination: layer
+                .logging
+                .as_ref()
+                .and_then(|logging| logging.destination)
+                .unwrap_or_default(),
         },
         integrations,
     }

@@ -5,7 +5,7 @@
 
 use fabro_types::settings::InterpString;
 use fabro_types::settings::server::{
-    GithubIntegrationStrategy, IpAllowEntry, ObjectStoreSettings, ServerAuthMethod,
+    GithubIntegrationStrategy, IpAllowEntry, LogDestination, ObjectStoreSettings, ServerAuthMethod,
     ServerListenSettings, ServerNamespace,
 };
 use fabro_util::Home;
@@ -67,6 +67,7 @@ fn resolves_server_defaults_from_empty_settings() {
     assert!(settings.web.enabled);
     assert_eq!(settings.web.url.as_source(), "http://localhost:3000");
     assert_eq!(settings.scheduler.max_concurrent_runs, 5);
+    assert_eq!(settings.logging.destination, LogDestination::File);
 
     match settings.listen {
         ServerListenSettings::Unix { path } => {
@@ -106,6 +107,39 @@ fn resolves_server_defaults_from_empty_settings() {
     }
 
     assert!(!settings.slatedb.disk_cache);
+}
+
+#[test]
+fn resolves_server_logging_destination_from_settings() {
+    let file = parse(
+        r#"
+_version = 1
+
+[server.logging]
+destination = "stdout"
+"#,
+    );
+
+    let settings = resolve_server(&file);
+
+    assert_eq!(settings.logging.destination, LogDestination::Stdout);
+}
+
+#[test]
+fn parsing_rejects_invalid_server_log_filter() {
+    let err = r#"
+_version = 1
+
+[server.logging]
+level = "definitely not a filter"
+"#
+    .parse::<SettingsLayer>()
+    .expect_err("invalid log filters should be rejected at parse time");
+
+    assert!(
+        err.to_string().contains("server.logging.level"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]

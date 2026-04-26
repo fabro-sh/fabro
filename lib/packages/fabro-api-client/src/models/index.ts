@@ -82,6 +82,7 @@ export * from './integration-webhooks-settings';
 export * from './internal-stage-status';
 export * from './ip-allow-entry';
 export * from './literal-ip-allow-entry';
+export * from './log-destination';
 export * from './manifest-args';
 export * from './manifest-config';
 export * from './manifest-file-entry';

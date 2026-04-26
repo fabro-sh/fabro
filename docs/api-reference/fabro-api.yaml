@@ -5978,10 +5978,16 @@ components:
 
     ServerLoggingSettings:
       type: object
-      required: [level]
+      required: [level, destination]
       properties:
         level:
           type: ["string", "null"]
+        destination:
+          $ref: "#/components/schemas/LogDestination"
+
+    LogDestination:
+      type: string
+      enum: [file, stdout]
 
     ServerIntegrationsSettings:
       type: object

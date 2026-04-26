@@ -3,9 +3,11 @@
     reason = "CLI logging setup: sync directory scan during startup"
 )]
 use std::fs::{File, OpenOptions};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use fabro_static::EnvVars;
+use fabro_types::settings::server::LogDestination;
 use fabro_util::run_log;
 use tracing_appender::rolling;
 use tracing_subscriber::fmt::writer::MakeWriter;
@@ -18,7 +20,13 @@ const LOG_RETENTION_DAYS: u32 = 7;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum InternalLogSink {
     Cli,
-    Server { path: std::path::PathBuf },
+    Server { destination: ServerLogDestination },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ServerLogDestination {
+    File(PathBuf),
+    Stdout,
 }
 
 pub(crate) fn init_tracing(
@@ -31,8 +39,8 @@ pub(crate) fn init_tracing(
     } else {
         config_log_level.unwrap_or("info")
     };
-    let filter =
-        EnvFilter::try_from_env("FABRO_LOG").unwrap_or_else(|_| EnvFilter::new(default_level));
+    let filter = EnvFilter::try_from_env(EnvVars::FABRO_LOG)
+        .unwrap_or_else(|_| EnvFilter::new(default_level));
 
     match sink {
         InternalLogSink::Cli => {
@@ -52,12 +60,49 @@ pub(crate) fn init_tracing(
             cleanup_old_logs(&log_dir, "cli", LOG_RETENTION_DAYS);
             init_subscriber(filter, file_appender);
         }
-        InternalLogSink::Server { path } => {
-            init_subscriber(filter, FixedFileAppender::open(path)?);
-        }
+        InternalLogSink::Server { destination } => match destination {
+            ServerLogDestination::File(path) => {
+                init_subscriber(filter, FixedFileAppender::open(path)?);
+            }
+            ServerLogDestination::Stdout => {
+                init_subscriber(filter, std::io::stdout);
+            }
+        },
     }
 
     Ok(())
+}
+
+pub(crate) fn resolve_log_destination(
+    config_destination: LogDestination,
+) -> Result<LogDestination> {
+    let env_value = std::env::var(EnvVars::FABRO_LOG_DESTINATION).ok();
+    resolve_log_destination_with_env(config_destination, env_value.as_deref())
+}
+
+pub(crate) fn resolve_log_destination_with_env(
+    config_destination: LogDestination,
+    env_value: Option<&str>,
+) -> Result<LogDestination> {
+    match env_value {
+        Some(value) => value.parse::<LogDestination>().with_context(|| {
+            format!(
+                "invalid {} value `{value}`; expected `file` or `stdout`",
+                EnvVars::FABRO_LOG_DESTINATION
+            )
+        }),
+        None => Ok(config_destination),
+    }
+}
+
+pub(crate) fn server_log_destination(
+    destination: LogDestination,
+    log_path: PathBuf,
+) -> ServerLogDestination {
+    match destination {
+        LogDestination::File => ServerLogDestination::File(log_path),
+        LogDestination::Stdout => ServerLogDestination::Stdout,
+    }
 }
 
 fn cleanup_old_logs(log_dir: &Path, prefix: &str, max_age_days: u32) {
