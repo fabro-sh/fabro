@@ -481,10 +481,10 @@ async fn prepare_server_bootstrap(
     } else {
         None
     };
-    let log_path = (log_destination == LogDestination::File).then(|| runtime_directory.log_path());
+    let log = server_log_sink(log_destination, &runtime_directory);
 
     Ok(PreTracingBootstrap {
-        sink: logging::InternalLogSink::Server { log_path },
+        sink: logging::InternalLogSink::Server { log },
         config_log_level: local_config.config_log_level().map(str::to_owned),
         foreground_server_log_bootstrap,
     })
@@ -496,15 +496,29 @@ fn prepare_run_worker_bootstrap(
 ) -> Result<PreTracingBootstrap> {
     let local_config = local_server::LocalServerConfig::load_with_storage_dir(storage_dir)?;
     let runtime_directory = fabro_config::RuntimeDirectory::new(local_config.storage_dir());
+    let log_destination = logging::resolve_log_destination(
+        local_config.config_log_destination().unwrap_or_default(),
+    )?;
+    let server_log = server_log_sink(log_destination, &runtime_directory);
 
     Ok(PreTracingBootstrap {
         sink: logging::InternalLogSink::Worker {
-            server_log_path:  runtime_directory.log_path(),
+            server_log,
             per_run_log_path: run_dir.join("runtime").join("server.log"),
         },
         config_log_level: None,
         foreground_server_log_bootstrap: None,
     })
+}
+
+fn server_log_sink(
+    destination: LogDestination,
+    runtime_directory: &fabro_config::RuntimeDirectory,
+) -> logging::ServerLogSink {
+    match destination {
+        LogDestination::File => logging::ServerLogSink::File(runtime_directory.log_path()),
+        LogDestination::Stdout => logging::ServerLogSink::Stdout,
+    }
 }
 
 #[cfg(test)]
@@ -711,7 +725,7 @@ destination = "{destination}"
             .expect("bootstrap should resolve");
 
         assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
-            log_path: None,
+            log: logging::ServerLogSink::Stdout,
         });
         assert_eq!(bootstrap.config_log_level.as_deref(), Some("warn"));
         assert!(bootstrap.foreground_server_log_bootstrap.is_some());
@@ -742,7 +756,7 @@ destination = "{destination}"
             .expect("bootstrap should resolve");
 
         assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
-            log_path: None,
+            log: logging::ServerLogSink::Stdout,
         });
         assert_eq!(bootstrap.config_log_level.as_deref(), Some("warn"));
         assert!(bootstrap.foreground_server_log_bootstrap.is_some());
@@ -771,7 +785,7 @@ destination = "{destination}"
             .expect("bootstrap should resolve");
 
         assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
-            log_path: None,
+            log: logging::ServerLogSink::Stdout,
         });
         assert_eq!(bootstrap.config_log_level.as_deref(), Some("warn"));
         assert!(bootstrap.foreground_server_log_bootstrap.is_none());
@@ -803,7 +817,7 @@ destination = "{destination}"
                 .expect("bootstrap should resolve");
 
             assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
-                log_path: None,
+                log: logging::ServerLogSink::Stdout,
             });
         });
     }
@@ -916,11 +930,46 @@ destination = "{destination}"
             .expect("bootstrap should resolve");
 
         assert_eq!(bootstrap.sink, logging::InternalLogSink::Worker {
-            server_log_path:  storage_dir.path().join("logs").join("server.log"),
+            server_log:       logging::ServerLogSink::File(
+                storage_dir.path().join("logs").join("server.log"),
+            ),
             per_run_log_path: run_dir.path().join("runtime").join("server.log"),
         });
         assert!(bootstrap.config_log_level.is_none());
         assert!(bootstrap.foreground_server_log_bootstrap.is_none());
+    }
+
+    #[test]
+    fn pre_tracing_bootstrap_worker_uses_stdout_when_env_overrides() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let run_dir = tempfile::tempdir().unwrap();
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "__run-worker",
+            "--server",
+            "/tmp/fabro.sock",
+            "--storage-dir",
+            storage_dir.path().to_str().unwrap(),
+            "--run-dir",
+            run_dir.path().to_str().unwrap(),
+            "--run-id",
+            "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "--mode",
+            "start",
+        ])
+        .expect("should parse");
+        let command = cli.command.as_deref().unwrap();
+
+        with_var(EnvVars::FABRO_LOG_DESTINATION, Some("stdout"), || {
+            let bootstrap = runtime()
+                .block_on(pre_tracing_bootstrap(command))
+                .expect("bootstrap should resolve");
+
+            assert_eq!(bootstrap.sink, logging::InternalLogSink::Worker {
+                server_log:       logging::ServerLogSink::Stdout,
+                per_run_log_path: run_dir.path().join("runtime").join("server.log"),
+            });
+        });
     }
 
     #[test]

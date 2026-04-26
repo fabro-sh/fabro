@@ -71,7 +71,9 @@ use fabro_store::{
 #[cfg(test)]
 use fabro_types::BlockedReason;
 use fabro_types::settings::run::RunMode;
-use fabro_types::settings::server::{GithubIntegrationSettings, GithubIntegrationStrategy};
+use fabro_types::settings::server::{
+    GithubIntegrationSettings, GithubIntegrationStrategy, LogDestination,
+};
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
     ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, PullRequestRecord,
@@ -3915,6 +3917,11 @@ fn worker_command(
     let server_target = daemon.bind.to_target();
     let worker_token = issue_worker_token(state.worker_token_keys(), &run_id)
         .map_err(|_| anyhow::anyhow!("failed to sign worker token"))?;
+    let server_destination = resolved_log_destination(state);
+    let worker_stdout = match server_destination {
+        LogDestination::Stdout => Stdio::inherit(),
+        LogDestination::File => Stdio::null(),
+    };
     let mut cmd = Command::new(exe);
     cmd.arg("__run-worker")
         .arg("--server")
@@ -3928,7 +3935,7 @@ fn worker_command(
         .arg("--mode")
         .arg(worker_mode_arg(mode))
         .stdin(Stdio::piped())
-        .stdout(Stdio::null())
+        .stdout(worker_stdout)
         .stderr(Stdio::piped());
 
     apply_worker_env(&mut cmd);
@@ -3937,6 +3944,10 @@ fn worker_command(
             cmd.env(EnvVars::FABRO_LOG, level);
         }
     }
+    if (state.env_lookup)(EnvVars::FABRO_LOG_DESTINATION).is_none() {
+        let value: &'static str = server_destination.into();
+        cmd.env(EnvVars::FABRO_LOG_DESTINATION, value);
+    }
     cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
     cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
 
@@ -3944,6 +3955,13 @@ fn worker_command(
     fabro_proc::pre_exec_setpgid(cmd.as_std_mut());
 
     Ok(cmd)
+}
+
+fn resolved_log_destination(state: &AppState) -> LogDestination {
+    (state.env_lookup)(EnvVars::FABRO_LOG_DESTINATION)
+        .as_deref()
+        .and_then(|raw| raw.parse::<LogDestination>().ok())
+        .unwrap_or(state.server_settings().server.logging.destination)
 }
 
 fn api_question_type(question_type: InterviewQuestionType) -> ApiQuestionType {

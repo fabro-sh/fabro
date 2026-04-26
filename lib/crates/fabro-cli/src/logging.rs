@@ -17,15 +17,19 @@ use tracing_subscriber::{EnvFilter, fmt};
 const LOG_RETENTION_DAYS: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ServerLogSink {
+    File(PathBuf),
+    Stdout,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum InternalLogSink {
     Cli,
-    /// `Some(path)` writes the server log to a file at `path`; `None` writes to
-    /// stdout.
     Server {
-        log_path: Option<PathBuf>,
+        log: ServerLogSink,
     },
     Worker {
-        server_log_path:  PathBuf,
+        server_log:       ServerLogSink,
         per_run_log_path: PathBuf,
     },
 }
@@ -62,20 +66,32 @@ pub(crate) fn init_tracing(
             init_subscriber(filter, file_appender);
         }
         InternalLogSink::Server {
-            log_path: Some(path),
+            log: ServerLogSink::File(path),
         } => {
             init_subscriber(filter, open_buffered_appender(path)?);
         }
-        InternalLogSink::Server { log_path: None } => {
+        InternalLogSink::Server {
+            log: ServerLogSink::Stdout,
+        } => {
             init_subscriber(filter, std::io::stdout);
         }
         InternalLogSink::Worker {
-            server_log_path,
+            server_log: ServerLogSink::File(server_log_path),
             per_run_log_path,
         } => {
             init_worker_subscriber(
                 filter,
                 open_buffered_appender(server_log_path)?,
+                open_buffered_appender(per_run_log_path)?,
+            );
+        }
+        InternalLogSink::Worker {
+            server_log: ServerLogSink::Stdout,
+            per_run_log_path,
+        } => {
+            init_worker_subscriber(
+                filter,
+                std::io::stdout,
                 open_buffered_appender(per_run_log_path)?,
             );
         }

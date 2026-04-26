@@ -11,6 +11,7 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     EnvVars::RUST_LOG,
     EnvVars::RUST_BACKTRACE,
     EnvVars::FABRO_LOG,
+    EnvVars::FABRO_LOG_DESTINATION,
     EnvVars::FABRO_HOME,
     EnvVars::FABRO_STORAGE_ROOT,
 ];
