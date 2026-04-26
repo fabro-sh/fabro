@@ -1,0 +1,14 @@
+---
+title: "Per-run worker tracing logs"
+date: "2026-04-26"
+---
+
+## Run logs
+
+Each server-dispatched run now gets its own worker tracing log at `runtime/server.log`. The server also exposes the log through `GET /api/v1/runs/{id}/logs`, so tools can fetch execution-time tracing for a single run without grepping the process-wide server log.
+
+`fabro dump` now includes the same log as `run.log` when it is available. Dumps still succeed for older runs or submitted runs that do not have a worker log yet.
+
+## Operators
+
+Worker subprocesses continue writing to the main `<storage>/logs/server.log`, and also mirror worker tracing into the per-run file. `FABRO_LOG` still controls log verbosity; if a server config sets `[server.logging] level`, that level is now propagated to workers unless the parent process already set `FABRO_LOG`.

@@ -24,8 +24,8 @@ These paths are local runtime state, not canonical event projections.
 | Path | Purpose |
 |---|---|
 | `worktree/` | Git worktree used by checkpointed runs |
+| `runtime/server.log` | Worker tracing log for the run |
 | `runtime/blobs/` | Materialized local blob payloads for file-backed `fabro+blob://` references |
-| `runtime/worker.stderr.log` | Server-managed worker stderr capture |
 | `nodes/{manager_node}_{visit}/child/` | Nested scratch root for manager-loop child workflows |
 
 ## Reconstructed / Exported Files

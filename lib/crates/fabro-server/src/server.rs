@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::str::FromStr;
@@ -107,7 +108,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
 use tower::{ServiceExt, service_fn};
 use tower_http::trace::TraceLayer;
-use tracing::{debug, error, info, warn};
+use tracing::{Instrument, debug, error, info, warn};
 use ulid::Ulid;
 
 use crate::auth::{self, GithubEndpoints, auth_translation_middleware, demo_routing_middleware};
@@ -1111,6 +1112,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/questions", get(demo::get_questions_stub))
         .route("/runs/{id}/questions/{qid}/answer", post(demo::answer_stub))
         .route("/runs/{id}/state", get(not_implemented))
+        .route("/runs/{id}/logs", get(not_implemented))
         .route(
             "/runs/{id}/events",
             get(not_implemented).post(not_implemented),
@@ -1193,6 +1195,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/questions", get(get_questions))
         .route("/runs/{id}/questions/{qid}/answer", post(submit_answer))
         .route("/runs/{id}/state", get(get_run_state))
+        .route("/runs/{id}/logs", get(get_run_logs))
         .route(
             "/runs/{id}/pull_request",
             get(get_run_pull_request).post(create_run_pull_request),
@@ -3929,6 +3932,11 @@ fn worker_command(
         .stderr(Stdio::piped());
 
     apply_worker_env(&mut cmd);
+    if (state.env_lookup)(EnvVars::FABRO_LOG).is_none() {
+        if let Some(level) = state.server_settings().server.logging.level.as_deref() {
+            cmd.env(EnvVars::FABRO_LOG, level);
+        }
+    }
     cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
     cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
 
@@ -5122,7 +5130,10 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
                 match run_to_start {
                     Some(id) => {
                         let state_clone = Arc::clone(&state);
-                        tokio::spawn(execute_run(state_clone, id));
+                        tokio::spawn(
+                            execute_run(state_clone, id)
+                                .instrument(tracing::info_span!("run", run_id = %id)),
+                        );
                     }
                     None => break,
                 }
@@ -5258,6 +5269,32 @@ async fn get_run_state(
             }
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
+async fn get_run_logs(
+    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if state.store.open_run_reader(&id).await.is_err() {
+        return ApiError::not_found("Run not found.").into_response();
+    }
+
+    let path = Storage::new(state.server_storage_dir())
+        .run_scratch(&id)
+        .runtime_dir()
+        .join("server.log");
+    match fs::read(&path).await {
+        Ok(bytes) => {
+            let body = String::from_utf8_lossy(&bytes).into_owned();
+            ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response()
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => {
+            ApiError::not_found("Run log not available.").into_response()
+        }
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
     }
 }
 
@@ -8039,6 +8076,29 @@ mod tests {
         build_router(state, AuthMode::Disabled)
     }
 
+    fn create_app_state_with_isolated_storage() -> Arc<AppState> {
+        let storage_dir = std::env::temp_dir().join(format!("fabro-server-test-{}", Ulid::new()));
+        std::fs::create_dir_all(&storage_dir).expect("test storage dir should be creatable");
+        let source = format!(
+            r#"
+_version = 1
+
+[server.storage]
+root = "{}"
+
+[server.auth]
+methods = ["dev-token"]
+"#,
+            storage_dir.display()
+        );
+
+        create_app_state_with_options(
+            server_settings_from_toml(&source),
+            manifest_run_defaults_from_toml(&source),
+            5,
+        )
+    }
+
     async fn body_json(body: Body) -> serde_json::Value {
         let bytes = to_bytes(body, usize::MAX).await.unwrap();
         serde_json::from_slice(&bytes).unwrap()
@@ -9069,6 +9129,35 @@ provider = "invalid-provider"
         assert_eq!(dev_claims.run_id, dev_token_run_id.to_string());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_sets_fabro_log_from_server_logging_config() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state = worker_command_test_state_with_extra_config(
+            storage_dir.path(),
+            &["dev-token"],
+            Some(TEST_DEV_TOKEN),
+            r#"
+[server.logging]
+level = "debug"
+"#,
+        );
+        let run_id = RunId::new();
+
+        let cmd = worker_command(
+            state.as_ref(),
+            run_id,
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            command_env_value(&cmd, EnvVars::FABRO_LOG),
+            EnvOverride::Set("debug".to_string())
+        );
+    }
+
     #[test]
     fn build_app_state_requires_session_secret_for_worker_tokens() {
         let server_settings = server_settings_from_toml(
@@ -9112,6 +9201,15 @@ methods = ["dev-token"]
         methods: &[&str],
         dev_token: Option<&str>,
     ) -> Arc<AppState> {
+        worker_command_test_state_with_extra_config(storage_dir, methods, dev_token, "")
+    }
+
+    fn worker_command_test_state_with_extra_config(
+        storage_dir: &Path,
+        methods: &[&str],
+        dev_token: Option<&str>,
+        extra_config: &str,
+    ) -> Arc<AppState> {
         let dev_token = dev_token.map(str::to_owned);
         std::fs::create_dir_all(storage_dir).unwrap();
         let source = format!(
@@ -9126,6 +9224,7 @@ methods = [{}]
 
 [server.auth.github]
 allowed_usernames = ["octocat"]
+{extra_config}
 "#,
             storage_dir.display(),
             methods
@@ -10123,6 +10222,80 @@ slug = "fabro"
         let response = app.oneshot(req).await.unwrap();
         let body = response_json!(response, StatusCode::OK).await;
         assert!(body["nodes"].is_object());
+    }
+
+    #[tokio::test]
+    async fn get_run_logs_returns_per_run_log_file() {
+        let state = create_app_state_with_isolated_storage();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = RunId::new();
+        create_durable_run_with_events(&state, run_id, &[workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        }])
+        .await;
+        let log_path = Storage::new(state.server_storage_dir())
+            .run_scratch(&run_id)
+            .runtime_dir()
+            .join("server.log");
+        tokio::fs::create_dir_all(log_path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&log_path, b"worker log line\nsecond line\n")
+            .await
+            .unwrap();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/logs")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = response_bytes!(response, StatusCode::OK).await;
+
+        assert_eq!(content_type.as_deref(), Some("text/plain; charset=utf-8"));
+        assert_eq!(&body[..], b"worker log line\nsecond line\n");
+    }
+
+    #[tokio::test]
+    async fn get_run_logs_returns_not_found_for_missing_run() {
+        let state = create_app_state_with_isolated_storage();
+        let app = build_router(state, AuthMode::Disabled);
+        let missing_run_id = RunId::new();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{missing_run_id}/logs")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_status!(response, StatusCode::NOT_FOUND).await;
+    }
+
+    #[tokio::test]
+    async fn get_run_logs_returns_not_found_when_log_file_is_missing() {
+        let state = create_app_state_with_isolated_storage();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = RunId::new();
+        create_durable_run_with_events(&state, run_id, &[workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        }])
+        .await;
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/logs")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_status!(response, StatusCode::NOT_FOUND).await;
     }
 
     #[tokio::test]
@@ -12946,7 +13119,10 @@ timeout = "30s"
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
-        let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id));
+        let runner = tokio::spawn(
+            execute_run(Arc::clone(&state), run_id)
+                .instrument(tracing::info_span!("run", run_id = %run_id)),
+        );
         let mut live_status_before_cancel = None;
         for _ in 0..50 {
             live_status_before_cancel = {
@@ -13042,7 +13218,10 @@ timeout = "30s"
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
-        let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id));
+        let runner = tokio::spawn(
+            execute_run(Arc::clone(&state), run_id)
+                .instrument(tracing::info_span!("run", run_id = %run_id)),
+        );
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let req = Request::builder()

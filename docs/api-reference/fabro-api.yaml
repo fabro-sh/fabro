@@ -1050,6 +1050,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/logs:
+    get:
+      operationId: getRunLogs
+      tags: [Run Internals]
+      summary: Get Run Logs
+      description: Returns the worker tracing log for a run when it is available.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Per-run worker tracing log
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Run not found, or no run log has been written yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/pull_request:
     post:
       operationId: createRunPullRequest

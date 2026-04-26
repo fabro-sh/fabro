@@ -82,6 +82,10 @@ async fn write_run_dump(
     let events = client.list_run_events(run_id, None, None).await?;
     let mut dump = RunDump::from_store_state_and_events(state, &events)?;
 
+    if let Some(log) = client.get_run_logs(run_id).await? {
+        dump.add_file_bytes("run.log", log.into_bytes());
+    }
+
     dump.hydrate_referenced_blobs_with_reader(|blob_id| {
         Box::pin(async move { client.read_run_blob(run_id, &blob_id).await })
     })

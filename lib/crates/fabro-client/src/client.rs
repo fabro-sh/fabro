@@ -873,6 +873,38 @@ impl Client {
         convert_type(response.into_inner())
     }
 
+    #[expect(
+        clippy::disallowed_types,
+        reason = "Client builds raw server API request URLs for wire transit; logging redaction is handled at log boundaries."
+    )]
+    pub async fn get_run_logs(&self, run_id: &RunId) -> Result<Option<String>> {
+        let base_url = self.base_url();
+        let mut url = fabro_http::Url::parse(&base_url)
+            .with_context(|| format!("invalid server base URL {base_url}"))?;
+        url.path_segments_mut()
+            .map_err(|()| anyhow!("server base URL cannot accept path segments"))?
+            .extend(["api", "v1", "runs", &run_id.to_string(), "logs"]);
+        let request_url = url.clone();
+
+        let response = self
+            .send_http_response(move |client| {
+                let url = request_url.clone();
+                async move { client.get(url).send().await }
+            })
+            .await?;
+        match response {
+            Ok(response) => {
+                let bytes = response
+                    .bytes()
+                    .await
+                    .context("failed to read run logs response body")?;
+                Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+            }
+            Err(failure) if failure.status == fabro_http::StatusCode::NOT_FOUND => Ok(None),
+            Err(failure) => Err(raw_response_failure_error(&failure)),
+        }
+    }
+
     pub async fn create_run_pull_request(
         &self,
         run_id: &RunId,

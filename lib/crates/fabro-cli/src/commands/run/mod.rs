@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use fabro_util::terminal::Styles;
+use tracing::Instrument as _;
 
 use crate::args::{AttachArgs, RunCommands, RunWorkerArgs, StartArgs};
 use crate::command_context::CommandContext;
@@ -89,14 +90,11 @@ pub(crate) async fn dispatch(
                 .ok_or_else(|| {
                     anyhow!("FABRO_WORKER_TOKEN is required for worker subprocess auth")
                 })?;
-            Box::pin(runner::execute(
-                run_id,
-                server,
-                storage_dir,
-                run_dir,
-                mode,
-                &worker_token,
-            ))
+            let run_span = tracing::info_span!("run", run_id = %run_id);
+            Box::pin(
+                runner::execute(run_id, server, storage_dir, run_dir, mode, &worker_token)
+                    .instrument(run_span),
+            )
             .await
         }
         RunCommands::Diff(args) => diff::run(args, base_ctx).await,

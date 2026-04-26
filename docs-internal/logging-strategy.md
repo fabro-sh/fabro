@@ -1,8 +1,16 @@
 # Fabro Logging Strategy
 
-Fabro uses the `tracing` crate for structured, file-based logging. Logs write to `~/.fabro/logs/{prefix}.YYYY-MM-DD.log` (e.g. `cli.2026-04-06.log`, `server.2026-04-06.log`), rotated daily by `tracing-appender`. Logs older than 7 days are cleaned up on startup. Controlled by the `FABRO_LOG` env var (default: `info`). Logs are for **developers debugging issues after the fact** — they are not user-facing output.
+Fabro uses the `tracing` crate for structured, file-based logging. CLI logs write to `~/.fabro/logs/cli.YYYY-MM-DD.log`, rotated daily by `tracing-appender`; logs older than 7 days are cleaned up on startup. The server writes one main log at `<storage>/logs/server.log`, and worker subprocesses append their tracing events to that same file.
+
+Each worker also writes its tracing events to the run-scoped log at `<scratch>/runtime/server.log`. This per-run file is worker tracing only: parent-side scheduling/cancel/delete events stay in the main server log, and unstructured worker stderr is still drained by the parent into `<storage>/logs/server.log`.
+
+Log level is controlled by the `FABRO_LOG` env var (default: `info`). Server `[server.logging] level = "debug"` is propagated to worker subprocesses when `FABRO_LOG` is not already set in the parent process. Logs are for **developers debugging issues after the fact** — they are not user-facing output.
 
 Production runs at INFO level. INFO should be low-volume and high-signal — the summary of what happened. When something goes wrong, developers enable `FABRO_LOG=debug` to get the full picture. DEBUG can be as verbose as needed since it's only turned on temporarily.
+
+## File Appenders
+
+Fixed server and per-run logs use a per-event-buffered writer opened with `O_APPEND`. Each tracing event buffers formatting writes in memory, then flushes that event to the shared file under a mutex with one `write_all()` call. This is intended to keep normal tracing-sized lines contiguous across concurrent tasks and worker processes; tests validate the event-size range used by Fabro, but the code does not claim a strict syscall-level atomicity guarantee for all possible filesystems and buffer sizes.
 
 ## When to Log
 

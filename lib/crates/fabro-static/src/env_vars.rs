@@ -19,6 +19,7 @@ impl EnvVars {
     pub const FABRO_HOME: &'static str = "FABRO_HOME";
     pub const FABRO_HTTP_PROXY_POLICY: &'static str = "FABRO_HTTP_PROXY_POLICY";
     pub const FABRO_JSON: &'static str = "FABRO_JSON";
+    pub const FABRO_LOG: &'static str = "FABRO_LOG";
     pub const FABRO_NO_UPGRADE_CHECK: &'static str = "FABRO_NO_UPGRADE_CHECK";
     pub const FABRO_QUIET: &'static str = "FABRO_QUIET";
     pub const FABRO_SERVER: &'static str = "FABRO_SERVER";
@@ -151,6 +152,7 @@ mod tests {
             EnvVars::FABRO_HOME,
             EnvVars::FABRO_HTTP_PROXY_POLICY,
             EnvVars::FABRO_JSON,
+            EnvVars::FABRO_LOG,
             EnvVars::FABRO_NO_UPGRADE_CHECK,
             EnvVars::FABRO_QUIET,
             EnvVars::FABRO_SERVER,

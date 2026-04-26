@@ -168,6 +168,10 @@ impl RunDump {
         Ok(())
     }
 
+    pub fn add_file_bytes(&mut self, path: impl Into<String>, contents: Vec<u8>) {
+        self.entries.push(RunDumpEntry::bytes(path, contents));
+    }
+
     pub async fn hydrate_referenced_blobs_with_reader<'a, F>(
         &mut self,
         mut read_blob: F,

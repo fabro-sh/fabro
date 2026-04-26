@@ -2,11 +2,11 @@
     clippy::disallowed_methods,
     reason = "CLI logging setup: sync directory scan during startup"
 )]
-use std::fs::{File, OpenOptions};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use fabro_util::run_log;
+use fabro_static::EnvVars;
+use fabro_util::run_log::BufferedFileAppender;
 use tracing_appender::rolling;
 use tracing_subscriber::fmt::writer::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -18,7 +18,13 @@ const LOG_RETENTION_DAYS: u32 = 7;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum InternalLogSink {
     Cli,
-    Server { path: std::path::PathBuf },
+    Server {
+        path: std::path::PathBuf,
+    },
+    Worker {
+        server_log_path:  std::path::PathBuf,
+        per_run_log_path: std::path::PathBuf,
+    },
 }
 
 pub(crate) fn init_tracing(
@@ -31,8 +37,8 @@ pub(crate) fn init_tracing(
     } else {
         config_log_level.unwrap_or("info")
     };
-    let filter =
-        EnvFilter::try_from_env("FABRO_LOG").unwrap_or_else(|_| EnvFilter::new(default_level));
+    let filter = EnvFilter::try_from_env(EnvVars::FABRO_LOG)
+        .unwrap_or_else(|_| EnvFilter::new(default_level));
 
     match sink {
         InternalLogSink::Cli => {
@@ -53,7 +59,17 @@ pub(crate) fn init_tracing(
             init_subscriber(filter, file_appender);
         }
         InternalLogSink::Server { path } => {
-            init_subscriber(filter, FixedFileAppender::open(path)?);
+            init_subscriber(filter, open_buffered_appender(path)?);
+        }
+        InternalLogSink::Worker {
+            server_log_path,
+            per_run_log_path,
+        } => {
+            init_worker_subscriber(
+                filter,
+                open_buffered_appender(server_log_path)?,
+                open_buffered_appender(per_run_log_path)?,
+            );
         }
     }
 
@@ -96,8 +112,6 @@ fn init_subscriber<W>(filter: EnvFilter, file_writer: W)
 where
     W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
 {
-    let run_log_writer = run_log::init();
-
     tracing_subscriber::registry()
         .with(filter)
         .with(
@@ -106,35 +120,35 @@ where
                 .with_target(true)
                 .with_ansi(false),
         )
+        .init();
+}
+
+fn init_worker_subscriber<ServerWriter, RunWriter>(
+    filter: EnvFilter,
+    server_writer: ServerWriter,
+    run_writer: RunWriter,
+) where
+    ServerWriter: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
+    RunWriter: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
+{
+    tracing_subscriber::registry()
+        .with(filter)
         .with(
             fmt::layer()
-                .with_writer(run_log_writer)
+                .with_writer(server_writer)
+                .with_target(true)
+                .with_ansi(false),
+        )
+        .with(
+            fmt::layer()
+                .with_writer(run_writer)
                 .with_target(true)
                 .with_ansi(false),
         )
         .init();
 }
 
-struct FixedFileAppender {
-    file: File,
-}
-
-impl FixedFileAppender {
-    fn open(path: &Path) -> Result<Self> {
-        let file = OpenOptions::new()
-            .append(true)
-            .open(path)
-            .with_context(|| format!("Failed to open server log file: {}", path.display()))?;
-        Ok(Self { file })
-    }
-}
-
-impl<'writer> MakeWriter<'writer> for FixedFileAppender {
-    type Writer = File;
-
-    fn make_writer(&'writer self) -> Self::Writer {
-        self.file
-            .try_clone()
-            .expect("fixed log file handle should be cloneable")
-    }
+fn open_buffered_appender(path: &Path) -> Result<BufferedFileAppender> {
+    BufferedFileAppender::open(path)
+        .with_context(|| format!("Failed to open log file: {}", path.display()))
 }
