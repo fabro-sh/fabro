@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use anyhow::anyhow;
-#[cfg(feature = "daytona")]
+#[cfg(any(feature = "docker", feature = "daytona"))]
 use fabro_github::GitHubCredentials;
 #[allow(
     unused_imports,
@@ -11,6 +11,8 @@ use fabro_github::GitHubCredentials;
 )]
 use fabro_types::RunId;
 
+#[cfg(any(feature = "docker", feature = "daytona"))]
+use crate::clone_source;
 use crate::config::WorktreeMode;
 #[cfg(feature = "daytona")]
 use crate::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
@@ -27,15 +29,20 @@ pub enum SandboxSpec {
     },
     #[cfg(feature = "docker")]
     Docker {
-        config: DockerSandboxOptions,
+        config:           DockerSandboxOptions,
+        github_app:       Option<GitHubCredentials>,
+        run_id:           Option<RunId>,
+        clone_origin_url: Option<String>,
+        clone_branch:     Option<String>,
     },
     #[cfg(feature = "daytona")]
     Daytona {
-        config:       DaytonaConfig,
-        github_app:   Option<GitHubCredentials>,
-        run_id:       Option<RunId>,
-        clone_branch: Option<String>,
-        api_key:      Option<String>,
+        config:           DaytonaConfig,
+        github_app:       Option<GitHubCredentials>,
+        run_id:           Option<RunId>,
+        clone_origin_url: Option<String>,
+        clone_branch:     Option<String>,
+        api_key:          Option<String>,
     },
 }
 
@@ -58,12 +65,11 @@ impl SandboxSpec {
     }
 
     /// Host-accessible repo path for git status / worktree decisions.
-    /// Only Local and Docker have one.
+    /// Only Local has one. Clone-based providers use their persisted clone
+    /// metadata instead of the worker process filesystem.
     pub fn host_repo_path(&self) -> Option<PathBuf> {
         match self {
             Self::Local { working_directory } => Some(working_directory.clone()),
-            #[cfg(feature = "docker")]
-            Self::Docker { config } => Some(PathBuf::from(&config.host_working_directory)),
             #[allow(
                 unreachable_patterns,
                 reason = "Feature-gated variants make this fallback arm reachable on some builds."
@@ -82,12 +88,46 @@ impl SandboxSpec {
 
         match self {
             #[cfg(feature = "docker")]
-            Self::Docker { config } => SandboxRecord {
+            Self::Docker {
+                config,
+                clone_origin_url,
+                clone_branch,
+                ..
+            } => SandboxRecord {
                 provider: self.provider_name().to_string(),
                 working_directory: working_directory.clone(),
                 identifier,
-                host_working_directory: Some(config.host_working_directory.clone()),
-                container_mount_point: Some(working_directory),
+                host_working_directory: None,
+                container_mount_point: None,
+                repo_cloned: clone_source::repo_cloned_for_record(
+                    config.skip_clone,
+                    clone_origin_url.as_deref(),
+                ),
+                clone_origin_url: clone_source::clean_clone_origin_for_record(
+                    clone_origin_url.as_deref(),
+                ),
+                clone_branch: clone_branch.clone(),
+            },
+            #[cfg(feature = "daytona")]
+            Self::Daytona {
+                config,
+                clone_origin_url,
+                clone_branch,
+                ..
+            } => SandboxRecord {
+                provider: self.provider_name().to_string(),
+                working_directory: working_directory.clone(),
+                identifier,
+                host_working_directory: None,
+                container_mount_point: None,
+                repo_cloned: clone_source::repo_cloned_for_record(
+                    config.skip_clone,
+                    clone_origin_url.as_deref(),
+                ),
+                clone_origin_url: clone_source::clean_clone_origin_for_record(
+                    clone_origin_url.as_deref(),
+                ),
+                clone_branch: clone_branch.clone(),
             },
             _ => SandboxRecord {
                 provider: self.provider_name().to_string(),
@@ -95,6 +135,9 @@ impl SandboxSpec {
                 identifier,
                 host_working_directory: None,
                 container_mount_point: None,
+                repo_cloned: None,
+                clone_origin_url: None,
+                clone_branch: None,
             },
         }
     }
@@ -116,8 +159,6 @@ impl SandboxSpec {
         if checkpoint_present {
             return match self {
                 Self::Local { .. } => WorkdirStrategy::LocalDirectory,
-                #[cfg(feature = "docker")]
-                Self::Docker { .. } => WorkdirStrategy::LocalDirectory,
                 #[allow(
                     unreachable_patterns,
                     reason = "Feature-gated variants make this fallback arm reachable on some builds."
@@ -145,8 +186,6 @@ impl SandboxSpec {
                 }
                 WorktreeMode::Never => WorkdirStrategy::LocalDirectory,
             },
-            #[cfg(feature = "docker")]
-            Self::Docker { .. } => WorkdirStrategy::LocalDirectory,
             #[allow(
                 unreachable_patterns,
                 reason = "Feature-gated variants make this fallback arm reachable on some builds."
@@ -172,18 +211,20 @@ impl SandboxSpec {
                 Ok(Arc::new(sandbox))
             }
             #[cfg(feature = "docker")]
-            Self::Docker { config } => {
-                let mut sandbox = DockerSandbox::new(DockerSandboxOptions {
-                    image:                  config.image.clone(),
-                    host_working_directory: config.host_working_directory.clone(),
-                    container_mount_point:  config.container_mount_point.clone(),
-                    network_mode:           config.network_mode.clone(),
-                    extra_mounts:           config.extra_mounts.clone(),
-                    memory_limit:           config.memory_limit,
-                    cpu_quota:              config.cpu_quota,
-                    auto_pull:              config.auto_pull,
-                    env_vars:               config.env_vars.clone(),
-                })
+            Self::Docker {
+                config,
+                github_app,
+                run_id,
+                clone_origin_url,
+                clone_branch,
+            } => {
+                let mut sandbox = DockerSandbox::new(
+                    config.clone(),
+                    github_app.clone(),
+                    *run_id,
+                    clone_origin_url.clone(),
+                    clone_branch.clone(),
+                )
                 .map_err(|e| anyhow!("Failed to create Docker sandbox: {e}"))?;
                 if let Some(callback) = event_callback {
                     sandbox.set_event_callback(callback);
@@ -195,6 +236,7 @@ impl SandboxSpec {
                 config,
                 github_app,
                 run_id,
+                clone_origin_url,
                 clone_branch,
                 api_key,
             } => {
@@ -202,6 +244,7 @@ impl SandboxSpec {
                     config.clone(),
                     github_app.clone(),
                     *run_id,
+                    clone_origin_url.clone(),
                     clone_branch.clone(),
                     api_key.clone(),
                 )

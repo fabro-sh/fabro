@@ -294,6 +294,9 @@ async fn persist_forked_run(store: &Database, projection: &RunProjection) -> Res
             identifier:             sandbox.identifier.clone(),
             host_working_directory: sandbox.host_working_directory.clone(),
             container_mount_point:  sandbox.container_mount_point.clone(),
+            repo_cloned:            sandbox.repo_cloned,
+            clone_origin_url:       sandbox.clone_origin_url.clone(),
+            clone_branch:           sandbox.clone_branch.clone(),
         })
         .await
         .map_err(|err| Error::engine(err.to_string()))?;

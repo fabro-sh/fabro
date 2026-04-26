@@ -28,6 +28,9 @@ fn local_record(working_directory: &std::path::Path) -> SandboxRecord {
         identifier:             None,
         host_working_directory: None,
         container_mount_point:  None,
+        repo_cloned:            None,
+        clone_origin_url:       None,
+        clone_branch:           None,
     }
 }
 
@@ -123,23 +126,27 @@ async fn local_cp_creates_parent_dirs() {
 // Docker sandbox
 // ---------------------------------------------------------------------------
 
-fn docker_record(host_dir: &std::path::Path, mount_point: &str) -> SandboxRecord {
+fn docker_record(container_id: &str) -> SandboxRecord {
     SandboxRecord {
         provider:               "docker".to_string(),
-        working_directory:      mount_point.to_string(),
-        identifier:             None,
-        host_working_directory: Some(host_dir.to_string_lossy().to_string()),
-        container_mount_point:  Some(mount_point.to_string()),
+        working_directory:      "/workspace".to_string(),
+        identifier:             Some(container_id.to_string()),
+        host_working_directory: None,
+        container_mount_point:  None,
+        repo_cloned:            Some(false),
+        clone_origin_url:       None,
+        clone_branch:           None,
     }
 }
 
 #[tokio::test]
 #[ignore] // requires Docker daemon
 async fn docker_cp_upload_download_round_trip() {
-    let host_dir = tempfile::tempdir().unwrap();
+    let container_id = std::env::var("FABRO_DOCKER_CP_CONTAINER")
+        .expect("set FABRO_DOCKER_CP_CONTAINER to an initialized Fabro-managed container ID");
     let scratch = tempfile::tempdir().unwrap();
 
-    let record = docker_record(host_dir.path(), "/workspace");
+    let record = docker_record(&container_id);
     let sandbox = reconnect(&record, None).await.expect("reconnect docker");
 
     // Upload a text file
@@ -151,13 +158,6 @@ async fn docker_cp_upload_download_round_trip() {
         .upload_file_from_local(&local_src, "cp_test.txt")
         .await
         .expect("upload text");
-
-    // Verify it landed on the host filesystem (bind mount path)
-    assert!(host_dir.path().join("cp_test.txt").exists());
-    assert_eq!(
-        std::fs::read(host_dir.path().join("cp_test.txt")).unwrap(),
-        content
-    );
 
     // Download it back
     let local_dst = scratch.path().join("download.txt");
@@ -172,10 +172,11 @@ async fn docker_cp_upload_download_round_trip() {
 #[tokio::test]
 #[ignore] // requires Docker daemon
 async fn docker_cp_binary_round_trip() {
-    let host_dir = tempfile::tempdir().unwrap();
+    let container_id = std::env::var("FABRO_DOCKER_CP_CONTAINER")
+        .expect("set FABRO_DOCKER_CP_CONTAINER to an initialized Fabro-managed container ID");
     let scratch = tempfile::tempdir().unwrap();
 
-    let record = docker_record(host_dir.path(), "/workspace");
+    let record = docker_record(&container_id);
     let sandbox = reconnect(&record, None).await.expect("reconnect docker");
 
     let binary: Vec<u8> = (0..=255).collect();
@@ -199,10 +200,11 @@ async fn docker_cp_binary_round_trip() {
 #[tokio::test]
 #[ignore] // requires Docker daemon
 async fn docker_cp_creates_parent_dirs() {
-    let host_dir = tempfile::tempdir().unwrap();
+    let container_id = std::env::var("FABRO_DOCKER_CP_CONTAINER")
+        .expect("set FABRO_DOCKER_CP_CONTAINER to an initialized Fabro-managed container ID");
     let scratch = tempfile::tempdir().unwrap();
 
-    let record = docker_record(host_dir.path(), "/workspace");
+    let record = docker_record(&container_id);
     let sandbox = reconnect(&record, None).await.expect("reconnect docker");
 
     let content = b"nested docker file\n";
@@ -214,43 +216,11 @@ async fn docker_cp_creates_parent_dirs() {
         .await
         .expect("upload to nested path");
 
-    assert!(host_dir.path().join("deep/nested/file.txt").exists());
-
     let local_dst = scratch.path().join("p/q/file.txt");
     sandbox
         .download_file_to_local("deep/nested/file.txt", &local_dst)
         .await
         .expect("download to nested path");
-
-    assert_eq!(std::fs::read(&local_dst).unwrap(), content);
-}
-
-#[tokio::test]
-#[ignore] // requires Docker daemon
-async fn docker_cp_custom_mount_point() {
-    let host_dir = tempfile::tempdir().unwrap();
-    let scratch = tempfile::tempdir().unwrap();
-
-    // Use a non-default mount point
-    let record = docker_record(host_dir.path(), "/app");
-    let sandbox = reconnect(&record, None).await.expect("reconnect docker");
-
-    let content = b"custom mount\n";
-    let local_src = scratch.path().join("mount.txt");
-    std::fs::write(&local_src, content).unwrap();
-
-    sandbox
-        .upload_file_from_local(&local_src, "mount.txt")
-        .await
-        .expect("upload with custom mount");
-
-    assert!(host_dir.path().join("mount.txt").exists());
-
-    let local_dst = scratch.path().join("mount_dl.txt");
-    sandbox
-        .download_file_to_local("mount.txt", &local_dst)
-        .await
-        .expect("download with custom mount");
 
     assert_eq!(std::fs::read(&local_dst).unwrap(), content);
 }

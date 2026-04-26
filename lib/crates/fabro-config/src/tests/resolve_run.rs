@@ -13,9 +13,35 @@ fn resolves_run_defaults_from_empty_settings() {
     assert_eq!(settings.execution.approval, ApprovalMode::Prompt);
     assert!(settings.execution.retros);
     assert_eq!(settings.prepare.timeout_ms, 300_000);
-    assert_eq!(settings.sandbox.provider, "local");
+    assert_eq!(settings.sandbox.provider, "docker");
     assert_eq!(settings.sandbox.local.worktree_mode, WorktreeMode::Clean);
+    let docker = settings
+        .sandbox
+        .docker
+        .as_ref()
+        .expect("defaults should provide docker settings");
+    assert_eq!(docker.image, "buildpack-deps:noble");
+    assert_eq!(docker.memory_limit, Some(4_000_000_000));
+    assert_eq!(docker.cpu_quota, Some(200_000));
+    assert!(!docker.skip_clone);
     assert!(settings.pull_request.is_none());
+}
+
+#[test]
+fn resolves_minimal_local_provider_without_docker_table() {
+    let settings = WorkflowSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[run.sandbox]
+provider = "local"
+"#,
+    )
+    .expect("minimal local sandbox settings should resolve")
+    .run;
+
+    assert_eq!(settings.sandbox.provider, "local");
+    assert!(settings.sandbox.docker.is_some());
 }
 
 #[test]

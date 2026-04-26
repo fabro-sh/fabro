@@ -1378,6 +1378,7 @@ mod runs {
                     devcontainer: false,
                     env:          HashMap::new(),
                     local:        LocalSandboxSettings::default(),
+                    docker:       None,
                     daytona:      Some(DaytonaSettings {
                         auto_stop_interval: Some(60),
                         labels:             HashMap::from([(

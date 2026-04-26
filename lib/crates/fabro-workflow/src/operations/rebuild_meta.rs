@@ -374,6 +374,9 @@ mod tests {
             identifier:             None,
             host_working_directory: None,
             container_mount_point:  None,
+            repo_cloned:            None,
+            clone_origin_url:       None,
+            clone_branch:           None,
         }
     }
 
@@ -456,6 +459,9 @@ mod tests {
             identifier:             sandbox.identifier,
             host_working_directory: sandbox.host_working_directory,
             container_mount_point:  sandbox.container_mount_point,
+            repo_cloned:            sandbox.repo_cloned,
+            clone_origin_url:       sandbox.clone_origin_url,
+            clone_branch:           sandbox.clone_branch,
         })
         .await
         .unwrap();

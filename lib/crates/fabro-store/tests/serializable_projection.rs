@@ -69,6 +69,9 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         identifier:             Some("sandbox-1".to_string()),
         host_working_directory: None,
         container_mount_point:  None,
+        repo_cloned:            None,
+        clone_origin_url:       None,
+        clone_branch:           None,
     });
     projection.pending_interviews = BTreeMap::new();
     projection.set_node(stage_id.clone(), NodeState {

@@ -20,9 +20,9 @@ pub use log_filter::LogFilter;
 pub use maps::{MergeMap, ReplaceMap, StickyMap};
 pub use project::ProjectLayer;
 pub use run::{
-    DaytonaDockerfileLayer, DaytonaSandboxLayer, DaytonaSnapshotLayer, GitAuthorLayer,
-    HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer, InterviewsLayer,
-    LocalSandboxLayer, McpEntryLayer, ModelRefOrSplice, NotificationProviderLayer,
+    DaytonaDockerfileLayer, DaytonaSandboxLayer, DaytonaSnapshotLayer, DockerSandboxLayer,
+    GitAuthorLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
+    InterviewsLayer, LocalSandboxLayer, McpEntryLayer, ModelRefOrSplice, NotificationProviderLayer,
     NotificationRouteLayer, PrepareStep, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer,
     RunExecutionLayer, RunGitLayer, RunGoalLayer, RunLayer, RunModelLayer, RunPrepareLayer,
     RunPullRequestLayer, RunSandboxLayer, RunScmLayer, ScmGitHubLayer, StringOrSplice,

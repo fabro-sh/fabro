@@ -6,8 +6,8 @@ use anyhow::{Result, anyhow, bail};
 use fabro_api::types;
 use fabro_auth::auth_issue_message;
 use fabro_config::{
-    CliLayer, CliOutputLayer, DaytonaDockerfileLayer, ReplaceMap, RunExecutionLayer, RunLayer,
-    RunModelLayer, RunSandboxLayer, WorkflowSettingsBuilder,
+    CliLayer, CliOutputLayer, DaytonaDockerfileLayer, DockerSandboxLayer, ReplaceMap,
+    RunExecutionLayer, RunLayer, RunModelLayer, RunSandboxLayer, WorkflowSettingsBuilder,
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
@@ -23,8 +23,8 @@ use fabro_types::settings::ServerNamespace;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
-    ApprovalMode, DaytonaNetworkLayer, DaytonaSettings, DockerfileSource, RunGoal, RunMode,
-    RunNamespace,
+    ApprovalMode, DaytonaNetworkLayer, DaytonaSettings, DockerSettings, DockerfileSource, RunGoal,
+    RunMode, RunNamespace,
 };
 use fabro_types::{RunId, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
@@ -247,11 +247,16 @@ fn manifest_args_overrides(args: Option<&types::ManifestArgs>) -> ManifestSettin
         fallbacks: Vec::new(),
     });
     let sandbox =
-        (args.sandbox.is_some() || args.preserve_sandbox.is_some()).then(|| RunSandboxLayer {
-            provider: args.sandbox.clone(),
-            preserve: args.preserve_sandbox,
-            ..RunSandboxLayer::default()
-        });
+        (args.sandbox.is_some() || args.preserve_sandbox.is_some() || args.docker_image.is_some())
+            .then(|| RunSandboxLayer {
+                provider: args.sandbox.clone(),
+                preserve: args.preserve_sandbox,
+                docker: args.docker_image.as_ref().map(|image| DockerSandboxLayer {
+                    image: Some(image.clone()),
+                    ..DockerSandboxLayer::default()
+                }),
+                ..RunSandboxLayer::default()
+            });
 
     let execution_has_any =
         args.dry_run.is_some() || args.auto_approve.is_some() || args.no_retro.is_some();
@@ -317,6 +322,20 @@ fn resolve_working_directory(settings: &WorkflowSettings, caller_cwd: &Path) -> 
     } else {
         caller_cwd.join(path)
     }
+}
+
+fn resolve_interp(value: &InterpString) -> String {
+    value
+        .resolve(process_env_var)
+        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Manifest preflight interpolation owns a process-env lookup facade for {{ env.* }} values."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 fn resolve_manifest_dockerfile(
@@ -407,8 +426,10 @@ async fn build_preflight_report(
         } else {
             sandbox_provider
         };
-    let needs_github_credentials =
-        sandbox_provider == SandboxProvider::Daytona || !github_integration.permissions.is_empty();
+    let needs_github_credentials = matches!(
+        sandbox_provider,
+        SandboxProvider::Docker | SandboxProvider::Daytona
+    ) || !github_integration.permissions.is_empty();
     let github_app = if needs_github_credentials {
         state
             .github_credentials(github_integration)
@@ -516,6 +537,10 @@ fn resolve_daytona_config(settings: &RunNamespace) -> Option<DaytonaConfig> {
         .map(runtime_daytona_config)
 }
 
+fn resolve_docker_config(settings: &RunNamespace) -> Option<DockerSandboxOptions> {
+    settings.sandbox.docker.as_ref().map(runtime_docker_config)
+}
+
 async fn run_sandbox_check(
     checks: &mut Vec<CheckResult>,
     sandbox_provider: SandboxProvider,
@@ -525,6 +550,7 @@ async fn run_sandbox_check(
     daytona_api_key: Option<String>,
 ) -> bool {
     let daytona_config = resolve_daytona_config(resolved_run);
+    let docker_config = resolve_docker_config(resolved_run);
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
         SandboxProvider::Local => SandboxSpec::Local {
             working_directory: prepared.working_directory.clone(),
@@ -533,10 +559,14 @@ async fn run_sandbox_check(
         .await
         .map_err(|err| err.to_string()),
         SandboxProvider::Docker => SandboxSpec::Docker {
-            config: DockerSandboxOptions {
-                host_working_directory: prepared.working_directory.to_string_lossy().to_string(),
-                ..DockerSandboxOptions::default()
-            },
+            config:           docker_config.unwrap_or_default(),
+            github_app:       github_app.clone(),
+            run_id:           None,
+            clone_origin_url: prepared
+                .git
+                .as_ref()
+                .map(|git| fabro_github::normalize_repo_origin_url(&git.origin_url)),
+            clone_branch:     prepared.git.as_ref().map(|git| git.branch.clone()),
         }
         .build(None)
         .await
@@ -545,6 +575,10 @@ async fn run_sandbox_check(
             config: daytona_config.unwrap_or_default(),
             github_app,
             run_id: None,
+            clone_origin_url: prepared
+                .git
+                .as_ref()
+                .map(|git| fabro_github::normalize_repo_origin_url(&git.origin_url)),
             clone_branch: prepared.git.as_ref().map(|git| git.branch.clone()),
             api_key: daytona_api_key,
         }
@@ -556,24 +590,59 @@ async fn run_sandbox_check(
     match sandbox_result {
         Ok(sandbox) => match sandbox.initialize().await {
             Ok(()) => {
-                let _ = sandbox.cleanup().await;
+                let mut details = vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))];
+                if matches!(
+                    sandbox_provider,
+                    SandboxProvider::Docker | SandboxProvider::Daytona
+                ) && prepared.git.is_none()
+                    && !resolved_run
+                        .sandbox
+                        .docker
+                        .as_ref()
+                        .is_some_and(|docker| docker.skip_clone)
+                    && !resolved_run
+                        .sandbox
+                        .daytona
+                        .as_ref()
+                        .is_some_and(|daytona| daytona.skip_clone)
+                {
+                    details.push(CheckDetail {
+                        text: "No clone source present; sandbox workspace will be empty".into(),
+                        warn: true,
+                    });
+                }
+                if let Err(err) = sandbox.cleanup().await {
+                    checks.push(CheckResult {
+                        name: "Sandbox".into(),
+                        status: CheckStatus::Error,
+                        summary: "cleanup failed".into(),
+                        details,
+                        remediation: Some(format!("Sandbox cleanup failed: {err}")),
+                    });
+                    return false;
+                }
                 checks.push(CheckResult {
-                    name:        "Sandbox".into(),
-                    status:      CheckStatus::Pass,
-                    summary:     sandbox_provider.to_string(),
-                    details:     vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
+                    name: "Sandbox".into(),
+                    status: CheckStatus::Pass,
+                    summary: sandbox_provider.to_string(),
+                    details,
                     remediation: None,
                 });
                 true
             }
             Err(err) => {
-                let _ = sandbox.cleanup().await;
+                let cleanup_error = sandbox.cleanup().await.err();
                 checks.push(CheckResult {
                     name:        "Sandbox".into(),
                     status:      CheckStatus::Error,
                     summary:     "failed".into(),
                     details:     vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
-                    remediation: Some(format!("Sandbox init failed: {err}")),
+                    remediation: Some(cleanup_error.map_or_else(
+                        || format!("Sandbox init failed: {err}"),
+                        |cleanup| {
+                            format!("Sandbox init failed: {err}; cleanup also failed: {cleanup}")
+                        },
+                    )),
                 });
                 false
             }
@@ -767,6 +836,25 @@ fn runtime_daytona_config(settings: &DaytonaSettings) -> DaytonaConfig {
             }
         }),
         skip_clone:         settings.skip_clone,
+    }
+}
+
+fn runtime_docker_config(settings: &DockerSettings) -> DockerSandboxOptions {
+    let mut env_vars = settings
+        .env_vars
+        .iter()
+        .map(|(key, value)| format!("{key}={}", resolve_interp(value)))
+        .collect::<Vec<_>>();
+    env_vars.sort();
+
+    DockerSandboxOptions {
+        image: settings.image.clone(),
+        network_mode: settings.network_mode.clone(),
+        memory_limit: settings.memory_limit,
+        cpu_quota: settings.cpu_quota,
+        env_vars,
+        skip_clone: settings.skip_clone,
+        ..DockerSandboxOptions::default()
     }
 }
 
@@ -1010,6 +1098,7 @@ root = "/srv/fabro"
             preserve_sandbox: None,
             provider:         None,
             sandbox:          None,
+            docker_image:     None,
             verbose:          None,
         });
 
@@ -1112,12 +1201,15 @@ app_id = "fixture-app-id"
         manifest.configs.push(types::ManifestConfig {
             path:   Some("/tmp/project/.fabro/project.toml".to_string()),
             source: Some(
-                r"
+                r#"
 _version = 1
 
 [run.pull_request]
 enabled = true
-"
+
+[run.sandbox]
+provider = "local"
+"#
                 .to_string(),
             ),
             type_:  types::ManifestConfigType::Project,

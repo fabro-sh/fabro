@@ -6697,10 +6697,23 @@ async fn reconnect_daytona_sandbox(
         )
         .into_response());
     };
+    let Some(repo_cloned) = record.repo_cloned else {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "Sandbox record is missing clone metadata.",
+        )
+        .into_response());
+    };
     let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
-    DaytonaSandbox::reconnect(name, daytona_api_key)
-        .await
-        .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.clone()).into_response())
+    DaytonaSandbox::reconnect(
+        name,
+        daytona_api_key,
+        repo_cloned,
+        record.clone_origin_url.clone(),
+        record.clone_branch.clone(),
+    )
+    .await
+    .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.clone()).into_response())
 }
 
 async fn load_run_sandbox_record(
@@ -13227,6 +13240,9 @@ script = "sleep 5"
 
 [run.prepare]
 timeout = "30s"
+
+[run.sandbox]
+provider = "local"
 "#;
         let state = create_app_state_with_settings_and_registry_factory(
             server_settings_from_toml(source),
@@ -13839,6 +13855,9 @@ timeout = "30s"
                 identifier:             Some("sb-test".to_string()),
                 host_working_directory: Some("/tmp/repo".to_string()),
                 container_mount_point:  None,
+                repo_cloned:            None,
+                clone_origin_url:       None,
+                clone_branch:           None,
             },
             workflow_event::Event::PullRequestCreated {
                 pr_url:      "https://github.com/acme/repo/pull/42".to_string(),
@@ -13909,6 +13928,9 @@ timeout = "30s"
                     identifier:             Some(sandbox_id.to_string()),
                     host_working_directory: Some("/tmp/repo".to_string()),
                     container_mount_point:  None,
+                    repo_cloned:            None,
+                    clone_origin_url:       None,
+                    clone_branch:           None,
                 },
             ] {
                 workflow_event::append_event(&run_store, &run_id, &event)

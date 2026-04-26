@@ -2064,6 +2064,7 @@ dependencies = [
  "fabro-config",
  "fabro-github",
  "fabro-proc",
+ "fabro-redact",
  "fabro-static",
  "fabro-types",
  "futures",

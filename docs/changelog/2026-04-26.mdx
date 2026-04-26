@@ -1,7 +1,24 @@
 ---
-title: "Per-run worker tracing logs"
+title: "Per-run logs and clone-based Docker sandboxes"
 date: "2026-04-26"
 ---
+
+<Warning>
+**Docker is now the default runtime sandbox provider.** Docker sandboxes no longer bind-mount the caller's working directory. They create a container workspace and clone the run manifest's GitHub origin into `/workspace`.
+</Warning>
+
+## Clone-based Docker sandboxes
+
+Docker now uses the same clone-shaped runtime model as Daytona. When the run manifest includes a GitHub origin, Fabro clones that repository into the sandbox workspace and configures git lifecycle operations inside the sandbox.
+
+This is a breaking sandbox change:
+
+- Docker no longer bind-mounts host workspaces.
+- Docker and Daytona accept GitHub origins only when cloning.
+- Present non-GitHub origins fail unless `skip_clone = true`.
+- Absent origins and `skip_clone = true` runs create empty workspaces without repository files.
+
+The packaged Docker Compose service mounts the host Docker socket so the server can create sibling run containers. Operators remain responsible for Docker socket permissions, Docker Desktop behavior, `DOCKER_HOST`, TLS, and remote daemon security.
 
 ## Run logs
 

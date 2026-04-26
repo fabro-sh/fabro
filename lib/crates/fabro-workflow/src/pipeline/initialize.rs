@@ -74,11 +74,7 @@ async fn resolve_worktree_plan(options: &mut InitOptions) -> Result<Option<Workt
         }
     }
 
-    let host_repo_path = options
-        .run_options
-        .host_repo_path
-        .clone()
-        .or_else(|| options.sandbox.host_repo_path());
+    let host_repo_path = options.sandbox.host_repo_path();
     let git_status = if let Some(path) = host_repo_path.as_ref() {
         let path = path.clone();
         let base_branch = options.run_options.base_branch.clone();
@@ -566,6 +562,9 @@ pub async fn initialize(
         identifier:             sandbox_record.identifier.clone(),
         host_working_directory: sandbox_record.host_working_directory.clone(),
         container_mount_point:  sandbox_record.container_mount_point.clone(),
+        repo_cloned:            sandbox_record.repo_cloned,
+        clone_origin_url:       sandbox_record.clone_origin_url.clone(),
+        clone_branch:           sandbox_record.clone_branch.clone(),
     });
 
     let env = build_sandbox_env(

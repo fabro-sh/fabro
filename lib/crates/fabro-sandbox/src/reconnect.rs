@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 #[cfg(feature = "daytona")]
 use crate::daytona::DaytonaSandbox;
 #[cfg(feature = "docker")]
-use crate::docker::{DockerSandbox, DockerSandboxOptions};
+use crate::docker::DockerSandbox;
 use crate::local::LocalSandbox;
 use crate::sandbox_record::SandboxRecord;
 
@@ -33,22 +33,21 @@ pub async fn reconnect(
         }
         #[cfg(feature = "docker")]
         "docker" => {
-            let host_dir = record
-                .host_working_directory
+            let identifier = record
+                .identifier
                 .as_deref()
-                .context("Docker sandbox record missing host_working_directory")?;
-            let mount_point = record
-                .container_mount_point
-                .as_deref()
-                .unwrap_or("/workspace");
-
-            let config = DockerSandboxOptions {
-                host_working_directory: host_dir.to_string(),
-                container_mount_point: mount_point.to_string(),
-                ..DockerSandboxOptions::default()
-            };
-            let sandbox = DockerSandbox::new(config)
-                .map_err(|e| anyhow::anyhow!("Failed to create Docker sandbox: {e}"))?;
+                .context("Docker sandbox record missing identifier (container ID/name)")?;
+            let repo_cloned = record
+                .repo_cloned
+                .context("Docker sandbox record missing repo_cloned metadata")?;
+            let sandbox = DockerSandbox::reconnect(
+                identifier,
+                repo_cloned,
+                record.clone_origin_url.clone(),
+                record.clone_branch.clone(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to reconnect Docker sandbox: {e}"))?;
             Ok(Box::new(sandbox))
         }
         #[cfg(feature = "daytona")]
@@ -57,10 +56,19 @@ pub async fn reconnect(
                 .identifier
                 .as_deref()
                 .context("Daytona sandbox record missing identifier (sandbox name)")?;
+            let repo_cloned = record
+                .repo_cloned
+                .context("Daytona sandbox record missing repo_cloned metadata")?;
 
-            let sandbox = DaytonaSandbox::reconnect(name, daytona_api_key)
-                .await
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let sandbox = DaytonaSandbox::reconnect(
+                name,
+                daytona_api_key,
+                repo_cloned,
+                record.clone_origin_url.clone(),
+                record.clone_branch.clone(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
             Ok(Box::new(sandbox))
         }
         other => bail!("Unknown sandbox provider: {other}"),

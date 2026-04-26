@@ -17,12 +17,18 @@ retros = true
 timeout = "5m"
 
 [run.sandbox]
-provider = "local"
+provider = "docker"
 preserve = false
 devcontainer = false
 
 [run.sandbox.local]
 worktree_mode = "clean"
+
+[run.sandbox.docker]
+image = "buildpack-deps:noble"
+memory_limit = "4GB"
+cpu_quota = 200000
+skip_clone = false
 
 [cli.output]
 format = "text"

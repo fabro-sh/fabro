@@ -3532,6 +3532,9 @@ components:
           type: string
         sandbox:
           type: string
+        docker_image:
+          type: string
+          description: Per-run Docker sandbox image override.
         verbose:
           type: boolean
         dry_run:

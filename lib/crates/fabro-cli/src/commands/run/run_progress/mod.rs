@@ -678,6 +678,9 @@ mod tests {
                 identifier:             None,
                 host_working_directory: None,
                 container_mount_point:  None,
+                repo_cloned:            None,
+                clone_origin_url:       None,
+                clone_branch:           None,
             },
             agent_event("code", AgentEvent::ToolCallStarted {
                 tool_name:    "read_file".into(),
@@ -869,6 +872,9 @@ mod tests {
             identifier:             None,
             host_working_directory: None,
             container_mount_point:  None,
+            repo_cloned:            None,
+            clone_origin_url:       None,
+            clone_branch:           None,
         });
         emit(
             &mut ui,

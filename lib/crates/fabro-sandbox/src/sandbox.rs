@@ -510,7 +510,7 @@ pub trait Sandbox: Send + Sync {
 
 /// Resolve a path: relative paths are prepended with the working directory.
 /// Used by the Daytona sandbox implementation.
-#[cfg(feature = "daytona")]
+#[cfg(any(feature = "docker", feature = "daytona"))]
 pub(crate) fn resolve_path(path: &str, working_dir: &str) -> String {
     if std::path::Path::new(path).is_absolute() {
         path.to_string()
@@ -563,7 +563,7 @@ pub async fn setup_git_via_exec(sandbox: &dyn Sandbox, run_id: &str) -> Result<G
     let branch_name = format!("fabro/run/{run_id}");
 
     // Create and checkout a run branch
-    let checkout_cmd = format!("git checkout -b {branch_name}");
+    let checkout_cmd = format!("git checkout -b {}", shell_quote(&branch_name));
     let checkout_result = sandbox
         .exec_command(&checkout_cmd, 10_000, None, None, None)
         .await
@@ -588,7 +588,7 @@ pub async fn git_push_via_exec(sandbox: &dyn Sandbox, branch: &str) -> bool {
     if let Err(e) = sandbox.refresh_push_credentials().await {
         tracing::warn!(error = %e, "Failed to refresh push credentials");
     }
-    let cmd = format!("{GIT} push origin {branch}");
+    let cmd = format!("{GIT} push origin {}", shell_quote(branch));
     match sandbox.exec_command(&cmd, 60_000, None, None, None).await {
         Ok(r) if r.exit_code == 0 => {
             tracing::info!(branch, "Pushed run branch to origin");

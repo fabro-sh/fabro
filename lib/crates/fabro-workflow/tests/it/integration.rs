@@ -12935,21 +12935,22 @@ async fn asset_collection_local_sandbox_on_failure() {
     );
 }
 
-/// Docker sandbox: artifact collection works across the bind-mount boundary.
-/// Requires Docker with `fabro-agent:latest` image available locally.
+/// Docker sandbox: artifact collection works through archive copy.
+/// Requires Docker with the default sandbox image available locally.
 #[tokio::test]
 #[ignore]
 async fn asset_collection_docker_sandbox() {
-    let host_dir = tempfile::tempdir().unwrap();
     let run_dir = tempfile::tempdir().unwrap();
 
     let config = fabro_agent::DockerSandboxOptions {
-        host_working_directory: host_dir.path().to_str().unwrap().to_string(),
         auto_pull: false,
+        skip_clone: true,
         ..Default::default()
     };
-    let sandbox: Arc<dyn fabro_agent::Sandbox> =
-        Arc::new(fabro_agent::DockerSandbox::new(config).expect("Docker not available"));
+    let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(
+        fabro_agent::DockerSandbox::new(config, None, None, None, None)
+            .expect("Docker not available"),
+    );
     sandbox.initialize().await.expect("Docker init failed");
 
     let mut registry = HandlerRegistry::new(Box::new(AssetCreatorHandler::success()));

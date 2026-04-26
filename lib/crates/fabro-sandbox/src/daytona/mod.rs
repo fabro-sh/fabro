@@ -12,6 +12,7 @@ use tokio::sync::OnceCell;
 use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
+use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
 use crate::sandbox::resolve_path;
 use crate::{
     DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
@@ -45,20 +46,21 @@ fn elapsed_ms(start: &Instant) -> u64 {
 
 /// Sandbox that runs all operations inside a Daytona cloud sandbox.
 pub struct DaytonaSandbox {
-    config:         DaytonaConfig,
-    client:         daytona_sdk::Client,
-    github_app:     Option<GitHubCredentials>,
-    sandbox:        OnceCell<daytona_sdk::Sandbox>,
-    rg_available:   OnceCell<bool>,
-    event_callback: Option<SandboxEventCallback>,
+    config:           DaytonaConfig,
+    client:           daytona_sdk::Client,
+    github_app:       Option<GitHubCredentials>,
+    sandbox:          OnceCell<daytona_sdk::Sandbox>,
+    rg_available:     OnceCell<bool>,
+    event_callback:   Option<SandboxEventCallback>,
     /// HTTPS origin URL stored after clone so we can refresh push credentials
     /// later.
-    origin_url:     OnceCell<String>,
-    run_id:         Option<RunId>,
+    origin_url:       OnceCell<String>,
+    repo_cloned:      OnceCell<bool>,
+    run_id:           Option<RunId>,
+    clone_origin_url: Option<String>,
     /// Explicit branch to clone. When set, overrides the branch detected by
-    /// `detect_repo_info` — avoids cloning a local-only worktree branch
-    /// (e.g. `fabro/run/...`) that was never pushed to origin.
-    clone_branch:   Option<String>,
+    /// the submitted run spec.
+    clone_branch:     Option<String>,
 }
 
 impl DaytonaSandbox {
@@ -70,6 +72,7 @@ impl DaytonaSandbox {
         config: DaytonaConfig,
         github_app: Option<GitHubCredentials>,
         run_id: Option<RunId>,
+        clone_origin_url: Option<String>,
         clone_branch: Option<String>,
         api_key: Option<String>,
     ) -> Result<Self, String> {
@@ -84,7 +87,9 @@ impl DaytonaSandbox {
             rg_available: OnceCell::const_new(),
             event_callback: None,
             origin_url: OnceCell::new(),
+            repo_cloned: OnceCell::new(),
             run_id,
+            clone_origin_url,
             clone_branch,
         })
     }
@@ -93,7 +98,13 @@ impl DaytonaSandbox {
     ///
     /// Creates the client internally and fetches the sandbox, replacing the old
     /// `from_existing()` + manual client/get boilerplate at call sites.
-    pub async fn reconnect(sandbox_name: &str, api_key: Option<String>) -> Result<Self, String> {
+    pub async fn reconnect(
+        sandbox_name: &str,
+        api_key: Option<String>,
+        repo_cloned: bool,
+        clone_origin_url: Option<String>,
+        clone_branch: Option<String>,
+    ) -> Result<Self, String> {
         let client = build_daytona_client(api_key)
             .await
             .map_err(|e| format!("Failed to create Daytona client: {e}"))?;
@@ -103,6 +114,14 @@ impl DaytonaSandbox {
             .map_err(|e| format!("Failed to reconnect to Daytona sandbox '{sandbox_name}': {e}"))?;
         let sandbox_cell = OnceCell::new();
         let _ = sandbox_cell.set(sdk_sandbox);
+        let origin_url = OnceCell::new();
+        if repo_cloned {
+            if let Some(origin) = clone_origin_url.as_ref() {
+                let _ = origin_url.set(origin.clone());
+            }
+        }
+        let repo_cloned_cell = OnceCell::new();
+        let _ = repo_cloned_cell.set(repo_cloned);
         Ok(Self {
             config: DaytonaConfig::default(),
             client,
@@ -110,9 +129,11 @@ impl DaytonaSandbox {
             sandbox: sandbox_cell,
             rg_available: OnceCell::const_new(),
             event_callback: None,
-            origin_url: OnceCell::new(),
+            origin_url,
+            repo_cloned: repo_cloned_cell,
             run_id: None,
-            clone_branch: None,
+            clone_origin_url,
+            clone_branch,
         })
     }
 
@@ -320,8 +341,6 @@ impl DaytonaSandbox {
     }
 }
 
-use fabro_github::ssh_url_to_https;
-
 /// Parameters for cloning a git repo into the sandbox during initialization.
 #[derive(Clone, Debug)]
 pub struct GitCloneParams {
@@ -441,8 +460,6 @@ impl Sandbox for DaytonaSandbox {
         });
         let init_start = Instant::now();
 
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-
         let params = if let Some(ref snap_cfg) = self.config.snapshot {
             self.emit(SandboxEvent::SnapshotEnsuring {
                 name: snap_cfg.name.clone(),
@@ -496,197 +513,204 @@ impl Sandbox for DaytonaSandbox {
                 err
             })?;
 
-        // Clone the repo into the sandbox
-        if self.config.skip_clone {
-            // Create working directory without cloning
-            let fs_svc = sandbox
-                .fs()
-                .await
-                .map_err(|e| format!("Failed to get Daytona fs service: {e}"))?;
-            fs_svc
-                .create_folder(WORKING_DIRECTORY, None)
-                .await
-                .map_err(|e| format!("Failed to create working directory: {e}"))?;
-        } else {
-            match detect_repo_info(&cwd) {
-                Ok((detected_url, detected_branch)) => {
-                    // Use explicit clone_branch if provided (avoids cloning a local-only
-                    // worktree branch like fabro/run/... that hasn't been pushed).
-                    let branch = self.clone_branch.clone().or(detected_branch);
-                    // Daytona clones over HTTPS with token auth, so rewrite SSH URLs.
-                    let url = ssh_url_to_https(&detected_url);
-                    self.emit(SandboxEvent::GitCloneStarted {
-                        url:    url.clone(),
-                        branch: branch.clone(),
-                    });
-                    let clone_start = Instant::now();
+        let clone_decision = match clone_source::decide_clone(
+            self.config.skip_clone,
+            self.clone_origin_url.as_deref(),
+            self.clone_branch.as_deref(),
+        ) {
+            Ok(decision) => decision,
+            Err(e) => {
+                let duration_ms =
+                    u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                self.emit(SandboxEvent::InitializeFailed {
+                    provider: "daytona".into(),
+                    error: e.clone(),
+                    duration_ms,
+                });
+                return Err(e);
+            }
+        };
 
-                    // Resolve clone credentials via GitHub App or fall back to no auth
-                    let (username, password) = match &self.github_app {
-                        Some(creds) => {
-                            let (owner, repo) = fabro_github::parse_github_owner_repo(&url)
-                                .map_err(|e| {
-                                    let err = format!("Failed to parse GitHub URL for clone: {e}");
-                                    self.emit(SandboxEvent::GitCloneFailed {
-                                        url:   url.clone(),
-                                        error: err.clone(),
-                                    });
-                                    err
-                                })?;
-                            fabro_github::resolve_clone_credentials(
-                                &fabro_github::GitHubContext::new(
-                                    creds,
-                                    &fabro_github::github_api_base_url(),
-                                ),
-                                &owner,
-                                &repo,
-                            )
-                            .await
+        match clone_decision {
+            CloneDecision::EmptyWorkspace { reason } => {
+                if matches!(reason, EmptyWorkspaceReason::MissingOrigin) {
+                    tracing::warn!(
+                        provider = "daytona",
+                        reason = reason.message(),
+                        "Clone source missing for clone-based sandbox"
+                    );
+                }
+                let fs_svc = sandbox
+                    .fs()
+                    .await
+                    .map_err(|e| format!("Failed to get Daytona fs service: {e}"))?;
+                fs_svc
+                    .create_folder(WORKING_DIRECTORY, None)
+                    .await
+                    .map_err(|e| format!("Failed to create working directory: {e}"))?;
+                let _ = self.repo_cloned.set(false);
+            }
+            CloneDecision::GitHub { origin_url, branch } => {
+                self.emit(SandboxEvent::GitCloneStarted {
+                    url:    origin_url.clone(),
+                    branch: branch.clone(),
+                });
+                let clone_start = Instant::now();
+
+                let (username, password) = match &self.github_app {
+                    Some(creds) => {
+                        let (owner, repo) = fabro_github::parse_github_owner_repo(&origin_url)
                             .map_err(|e| {
-                                let err =
-                                    format!("Failed to get GitHub App credentials for clone: {e}");
+                                let err = format!("Failed to parse GitHub URL for clone: {e}");
                                 self.emit(SandboxEvent::GitCloneFailed {
-                                    url:   url.clone(),
+                                    url:   origin_url.clone(),
                                     error: err.clone(),
-                                });
-                                let duration_ms = u64::try_from(init_start.elapsed().as_millis())
-                                    .unwrap_or(u64::MAX);
-                                self.emit(SandboxEvent::InitializeFailed {
-                                    provider: "daytona".into(),
-                                    error: err.clone(),
-                                    duration_ms,
                                 });
                                 err
-                            })?
-                        }
-                        None => (None, None),
-                    };
-
-                    let git_svc = sandbox
-                        .git()
+                            })?;
+                        fabro_github::resolve_clone_credentials(
+                            &fabro_github::GitHubContext::new(
+                                creds,
+                                &fabro_github::github_api_base_url(),
+                            ),
+                            &owner,
+                            &repo,
+                        )
                         .await
-                        .map_err(|e| format!("Failed to get Daytona git service: {e}"));
-                    let git_svc = match git_svc {
-                        Ok(g) => g,
-                        Err(e) => {
+                        .map_err(|e| {
+                            let err =
+                                format!("Failed to get GitHub App credentials for clone: {e}");
                             self.emit(SandboxEvent::GitCloneFailed {
-                                url:   url.clone(),
-                                error: e.clone(),
+                                url:   origin_url.clone(),
+                                error: err.clone(),
                             });
                             let duration_ms =
                                 u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
                             self.emit(SandboxEvent::InitializeFailed {
                                 provider: "daytona".into(),
-                                error: e.clone(),
+                                error: err.clone(),
                                 duration_ms,
                             });
-                            return Err(e);
-                        }
-                    };
+                            err
+                        })?
+                    }
+                    None => (None, None),
+                };
 
-                    let clone_token = password.clone();
-                    let clone_result = git_svc
-                        .clone(&url, WORKING_DIRECTORY, daytona_sdk::GitCloneOptions {
+                let git_svc = sandbox
+                    .git()
+                    .await
+                    .map_err(|e| format!("Failed to get Daytona git service: {e}"));
+                let git_svc = match git_svc {
+                    Ok(g) => g,
+                    Err(e) => {
+                        self.emit(SandboxEvent::GitCloneFailed {
+                            url:   origin_url.clone(),
+                            error: e.clone(),
+                        });
+                        let duration_ms =
+                            u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        self.emit(SandboxEvent::InitializeFailed {
+                            provider: "daytona".into(),
+                            error: e.clone(),
+                            duration_ms,
+                        });
+                        return Err(e);
+                    }
+                };
+
+                let clone_token = password.clone();
+                let clone_result = git_svc
+                    .clone(
+                        &origin_url,
+                        WORKING_DIRECTORY,
+                        daytona_sdk::GitCloneOptions {
                             branch,
                             username,
                             password,
                             ..Default::default()
-                        })
-                        .await;
+                        },
+                    )
+                    .await;
 
-                    match clone_result {
-                        Ok(()) => {
-                            let clone_duration = u64::try_from(clone_start.elapsed().as_millis())
-                                .unwrap_or(u64::MAX);
-                            self.emit(SandboxEvent::GitCloneCompleted {
-                                url:         url.clone(),
-                                duration_ms: clone_duration,
-                            });
+                match clone_result {
+                    Ok(()) => {
+                        let clone_duration =
+                            u64::try_from(clone_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        self.emit(SandboxEvent::GitCloneCompleted {
+                            url:         origin_url.clone(),
+                            duration_ms: clone_duration,
+                        });
 
-                            // Store origin URL and set push credentials for later pushes
-                            if let Some(token) = clone_token {
-                                let _ = self.origin_url.set(url);
-                                let process_svc = sandbox.process().await.ok();
-                                if let Some(ps) = process_svc {
-                                    let origin = self.origin_url.get().expect("just set");
-                                    match fabro_github::embed_token_in_url(origin, &token) {
-                                        Ok(auth_url) => {
-                                            let cmd = format!(
-                                                "git -c maintenance.auto=0 remote set-url origin {}",
-                                                shell_quote(auth_url.as_raw_url().as_str()),
-                                            );
-                                            let opts = daytona_sdk::ExecuteCommandOptions {
-                                                cwd: Some(WORKING_DIRECTORY.to_string()),
-                                                ..Default::default()
-                                            };
-                                            let wrapped = wrap_bash_command(&cmd);
-                                            if let Ok(r) = ps.execute_command(&wrapped, opts).await
-                                            {
-                                                if r.exit_code != 0 {
-                                                    tracing::warn!(
-                                                        exit_code = r.exit_code,
-                                                        "Failed to set push credentials on origin"
-                                                    );
-                                                }
+                        let _ = self.repo_cloned.set(true);
+                        let _ = self.origin_url.set(origin_url.clone());
+                        if let Some(token) = clone_token {
+                            let process_svc = sandbox.process().await.ok();
+                            if let Some(ps) = process_svc {
+                                match fabro_github::embed_token_in_url(&origin_url, &token) {
+                                    Ok(auth_url) => {
+                                        let cmd = format!(
+                                            "git -c maintenance.auto=0 remote set-url origin {}",
+                                            shell_quote(auth_url.as_raw_url().as_str()),
+                                        );
+                                        let opts = daytona_sdk::ExecuteCommandOptions {
+                                            cwd: Some(WORKING_DIRECTORY.to_string()),
+                                            ..Default::default()
+                                        };
+                                        let wrapped = wrap_bash_command(&cmd);
+                                        if let Ok(r) = ps.execute_command(&wrapped, opts).await {
+                                            if r.exit_code != 0 {
+                                                tracing::warn!(
+                                                    exit_code = r.exit_code,
+                                                    "Failed to set push credentials on origin"
+                                                );
                                             }
                                         }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                error = %e,
-                                                "Failed to build authenticated origin URL"
-                                            );
-                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            error = %e,
+                                            "Failed to build authenticated origin URL"
+                                        );
                                     }
                                 }
                             }
                         }
-                        Err(e) if self.github_app.is_none() => {
-                            let err = format!(
-                                "Git clone failed: {e}. If this is a private repository, \
+                    }
+                    Err(e) if self.github_app.is_none() => {
+                        let err = format!(
+                            "Git clone failed: {e}. If this is a private repository, \
                              configure a GitHub App with `fabro install` and install it \
                              for your organization."
-                            );
-                            self.emit(SandboxEvent::GitCloneFailed {
-                                url,
-                                error: err.clone(),
-                            });
-                            let duration_ms =
-                                u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                            self.emit(SandboxEvent::InitializeFailed {
-                                provider: "daytona".into(),
-                                error: err.clone(),
-                                duration_ms,
-                            });
-                            return Err(err);
-                        }
-                        Err(e) => {
-                            let err = format!("Failed to clone repo into Daytona sandbox: {e}");
-                            self.emit(SandboxEvent::GitCloneFailed {
-                                url,
-                                error: err.clone(),
-                            });
-                            let duration_ms =
-                                u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                            self.emit(SandboxEvent::InitializeFailed {
-                                provider: "daytona".into(),
-                                error: err.clone(),
-                                duration_ms,
-                            });
-                            return Err(err);
-                        }
+                        );
+                        self.emit(SandboxEvent::GitCloneFailed {
+                            url:   origin_url,
+                            error: err.clone(),
+                        });
+                        let duration_ms =
+                            u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        self.emit(SandboxEvent::InitializeFailed {
+                            provider: "daytona".into(),
+                            error: err.clone(),
+                            duration_ms,
+                        });
+                        return Err(err);
                     }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "Could not detect git repo for Daytona clone");
-                    // Create working directory even without a repo
-                    let fs_svc = sandbox
-                        .fs()
-                        .await
-                        .map_err(|e| format!("Failed to get Daytona fs service: {e}"))?;
-                    fs_svc
-                        .create_folder(WORKING_DIRECTORY, None)
-                        .await
-                        .map_err(|e| format!("Failed to create working directory: {e}"))?;
+                    Err(e) => {
+                        let err = format!("Failed to clone repo into Daytona sandbox: {e}");
+                        self.emit(SandboxEvent::GitCloneFailed {
+                            url:   origin_url,
+                            error: err.clone(),
+                        });
+                        let duration_ms =
+                            u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        self.emit(SandboxEvent::InitializeFailed {
+                            provider: "daytona".into(),
+                            error: err.clone(),
+                            duration_ms,
+                        });
+                        return Err(err);
+                    }
                 }
             }
         }
@@ -756,16 +780,27 @@ impl Sandbox for DaytonaSandbox {
     }
 
     async fn setup_git_for_run(&self, run_id: &str) -> Result<Option<crate::GitRunInfo>, String> {
+        if !self.repo_cloned.get().copied().unwrap_or(false) {
+            return Ok(None);
+        }
         crate::setup_git_via_exec(self, run_id).await.map(Some)
     }
 
     fn resume_setup_commands(&self, run_branch: &str) -> Vec<String> {
+        if !self.repo_cloned.get().copied().unwrap_or(false) {
+            return Vec::new();
+        }
         vec![format!(
-            "git fetch origin {run_branch} && git checkout {run_branch}"
+            "git fetch origin {} && git checkout {}",
+            shell_quote(run_branch),
+            shell_quote(run_branch)
         )]
     }
 
     async fn git_push_branch(&self, branch: &str) -> bool {
+        if !self.repo_cloned.get().copied().unwrap_or(false) {
+            return false;
+        }
         crate::git_push_via_exec(self, branch).await
     }
 
@@ -790,6 +825,9 @@ impl Sandbox for DaytonaSandbox {
     }
 
     fn origin_url(&self) -> Option<&str> {
+        if !self.repo_cloned.get().copied().unwrap_or(false) {
+            return None;
+        }
         self.origin_url.get().map(String::as_str)
     }
 
@@ -814,6 +852,9 @@ impl Sandbox for DaytonaSandbox {
     }
 
     async fn refresh_push_credentials(&self) -> Result<(), String> {
+        if !self.repo_cloned.get().copied().unwrap_or(false) {
+            return Ok(());
+        }
         let Some(origin_url) = self.origin_url.get() else {
             return Ok(()); // no authenticated origin — nothing to refresh
         };
@@ -832,9 +873,19 @@ impl Sandbox for DaytonaSandbox {
             "git -c maintenance.auto=0 remote set-url origin {}",
             shell_quote(auth_url.as_raw_url().as_str()),
         );
-        self.exec_command(&cmd, 10_000, None, None, None)
+        let result = self
+            .exec_command(&cmd, 10_000, None, None, None)
             .await
             .map_err(|e| format!("Failed to set refreshed push credentials: {e}"))?;
+        if result.exit_code != 0 {
+            let stderr = result
+                .stderr
+                .replace(&auth_url.raw_string(), &auth_url.redacted_string());
+            return Err(format!(
+                "Failed to set refreshed push credentials (exit {}): {}",
+                result.exit_code, stderr
+            ));
+        }
 
         Ok(())
     }

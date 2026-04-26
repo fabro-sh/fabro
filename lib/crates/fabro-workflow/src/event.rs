@@ -395,6 +395,12 @@ pub enum Event {
         host_working_directory: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         container_mount_point:  Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repo_cloned:            Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clone_origin_url:       Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clone_branch:           Option<String>,
     },
     SetupStarted {
         command_count: usize,
@@ -2230,12 +2236,18 @@ fn event_body_from_event(event: &Event) -> EventBody {
             identifier,
             host_working_directory,
             container_mount_point,
+            repo_cloned,
+            clone_origin_url,
+            clone_branch,
         } => EventBody::SandboxInitialized(fabro_types::SandboxInitializedProps {
             working_directory:      working_directory.clone(),
             provider:               provider.clone(),
             identifier:             identifier.clone(),
             host_working_directory: host_working_directory.clone(),
             container_mount_point:  container_mount_point.clone(),
+            repo_cloned:            *repo_cloned,
+            clone_origin_url:       clone_origin_url.clone(),
+            clone_branch:           clone_branch.clone(),
         }),
         Event::SetupStarted { command_count } => {
             EventBody::SetupStarted(fabro_types::SetupStartedProps {

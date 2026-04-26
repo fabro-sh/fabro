@@ -513,6 +513,9 @@ mod tests {
             identifier:             Some("sandbox-1".to_string()),
             host_working_directory: None,
             container_mount_point:  None,
+            repo_cloned:            None,
+            clone_origin_url:       None,
+            clone_branch:           None,
         });
         projection.retro_prompt = Some("retro prompt".to_string());
         projection.retro_response = Some("retro response".to_string());

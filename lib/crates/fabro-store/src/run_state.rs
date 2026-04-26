@@ -214,6 +214,9 @@ impl RunProjectionReducer for RunProjection {
                     identifier:             props.identifier.clone(),
                     host_working_directory: props.host_working_directory.clone(),
                     container_mount_point:  props.container_mount_point.clone(),
+                    repo_cloned:            props.repo_cloned,
+                    clone_origin_url:       props.clone_origin_url.clone(),
+                    clone_branch:           props.clone_branch.clone(),
                 });
             }
             EventBody::RetroStarted(props) => {

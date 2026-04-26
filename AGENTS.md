@@ -28,6 +28,11 @@ macOS note: if `cargo nextest run` fails with `Too many open files (os error 24)
 - `cargo dev docker-build` — builds the local Docker image from the current tree using the release pipeline's cargo-zigbuild approach. Honors `--arch amd64|arm64`, `--tag <name>` (default `fabro-sh/fabro`), `--compile-only` (stages `tmp/docker-context/<arch>/fabro` without `docker build`), and `--dry-run` (prints the Docker commands without running them). Prefer this over writing a throwaway Dockerfile; the release pipeline, `Dockerfile`, and this command share the same binary layout.
 - Refresh the embedded SPA before rebuilding the image after any `apps/fabro-web` change: `cargo dev spa refresh` runs the bun build, verifies budgets, and copies `dist/` into `lib/crates/fabro-spa/assets/`. Skipping this step produces a Docker image whose Rust binary embeds a stale SPA bundle.
 
+### Docker sandbox provider
+- Docker is the default runtime sandbox provider from `defaults.toml`. The Fabro process must have a working Docker client environment (`DOCKER_HOST`, socket access, Docker Desktop behavior, TLS settings, groups/permissions, and any remote daemon policy are operator responsibilities).
+- The packaged compose service mounts `/var/run/docker.sock` so the server can create sibling run containers on the host daemon. This is host-root-equivalent under Docker's security model; only use it in the trusted, single-tenant deployment model described by the sandbox code/docs.
+- Docker and Daytona are clone-based providers. When a run manifest has a GitHub origin, they clone it into the provider workspace. Present non-GitHub origins fail unless the provider has `skip_clone = true`; absent origins or `skip_clone = true` create an empty workspace without repository files.
+
 ### Release automation
 - `cargo dev release` — creates the next stable release tag. Use `cargo dev release --nightly` for a nightly prerelease. Use `--dry-run` to print planned commands without mutating git or running Cargo, `--skip-tests` only after running the release-mode smoke yourself, and `--release-date YYYY-MM-DD` or `FABRO_RELEASE_DATE` for deterministic version computation.
 
@@ -75,6 +80,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **fabro-cli** — CLI entry point. Commands: `run`, `exec`, `serve`, `validate`, `parse`, `cp`, `model`, `doctor`, `install`, `ps`, `system prune`
 - **fabro-workflow** — Core workflow engine. Parses Graphviz graphs, runs stages, manages checkpoints/resume, hooks, retros, and human-in-the-loop interactions
 - **fabro-agent** — AI coding agent with tool use (Bash, Read, Write, Edit, Glob, Grep, WebFetch). `Sandbox` trait abstracts execution environments
+- **fabro-sandbox** — Local, Docker, and Daytona sandbox providers. Docker is the default runtime provider and creates clone-based `/workspace` containers through the operator's Docker daemon; Daytona uses the same GitHub-only clone-source contract. Docker daemon access is host-root-equivalent and assumes trusted callers/payloads.
 - **fabro-server** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
 - **fabro-llm** — Unified LLM client with providers: Anthropic, OpenAI, Gemini, OpenAI-compatible, plus retry/middleware/streaming
 - **fabro-api** — Auto-generated Rust types and reqwest HTTP client from OpenAPI spec (build.rs + progenitor)
@@ -91,7 +97,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **lib/packages/fabro-api-client** — Auto-generated TypeScript Axios client from OpenAPI spec
 
 ### Key design patterns
-- **Sandbox trait** — Uniform interface for local, Docker, and Daytona execution environments
+- **Sandbox trait** — Uniform interface for local, Docker, and Daytona execution environments. Clone-based providers use run-spec GitHub origin metadata rather than worker process cwd detection.
 - **Graphviz graph workflows** — Stages and transitions defined as Graphviz graph attributes
 - **OpenAPI-first** — `fabro-api.yaml` drives Rust type + client generation (progenitor) and TypeScript client generation (openapi-generator)
 - **Checkpoint/resume** — Workflows can be paused, checkpointed, and resumed

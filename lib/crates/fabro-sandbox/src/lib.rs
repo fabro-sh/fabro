@@ -2,6 +2,9 @@ pub mod config;
 pub mod sandbox;
 pub mod sandbox_spec;
 
+#[cfg(any(feature = "docker", feature = "daytona"))]
+mod clone_source;
+
 pub mod read_guard;
 
 pub mod reconnect;

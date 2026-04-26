@@ -36,7 +36,7 @@ pub use public_url::{
     is_wildcard_host, replace_wildcard_host, validate_public_url, validate_public_url_with_label,
 };
 pub use run::{
-    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerfileSource,
+    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerSettings, DockerfileSource,
     GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, McpServerSettings,
     McpTransport, NotificationProviderSettings, NotificationRouteSettings, PullRequestSettings,
     RunAgentSettings, RunCheckpointSettings, RunExecutionSettings, RunGitSettings, RunGoal,
