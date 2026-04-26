@@ -17,7 +17,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 const LOG_RETENTION_DAYS: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ServerLogSink {
+pub(crate) enum LogSink {
     File(PathBuf),
     Stdout,
 }
@@ -26,10 +26,10 @@ pub(crate) enum ServerLogSink {
 pub(crate) enum InternalLogSink {
     Cli,
     Server {
-        log: ServerLogSink,
+        log: LogSink,
     },
     Worker {
-        server_log:       ServerLogSink,
+        server_log:       LogSink,
         per_run_log_path: PathBuf,
     },
 }
@@ -66,17 +66,17 @@ pub(crate) fn init_tracing(
             init_subscriber(filter, file_appender);
         }
         InternalLogSink::Server {
-            log: ServerLogSink::File(path),
+            log: LogSink::File(path),
         } => {
             init_subscriber(filter, open_buffered_appender(path)?);
         }
         InternalLogSink::Server {
-            log: ServerLogSink::Stdout,
+            log: LogSink::Stdout,
         } => {
             init_subscriber(filter, std::io::stdout);
         }
         InternalLogSink::Worker {
-            server_log: ServerLogSink::File(server_log_path),
+            server_log: LogSink::File(server_log_path),
             per_run_log_path,
         } => {
             init_worker_subscriber(
@@ -86,7 +86,7 @@ pub(crate) fn init_tracing(
             );
         }
         InternalLogSink::Worker {
-            server_log: ServerLogSink::Stdout,
+            server_log: LogSink::Stdout,
             per_run_log_path,
         } => {
             init_worker_subscriber(

@@ -481,7 +481,7 @@ async fn prepare_server_bootstrap(
     } else {
         None
     };
-    let log = server_log_sink(log_destination, &runtime_directory);
+    let log = log_sink(log_destination, &runtime_directory);
 
     Ok(PreTracingBootstrap {
         sink: logging::InternalLogSink::Server { log },
@@ -499,7 +499,7 @@ fn prepare_run_worker_bootstrap(
     let log_destination = logging::resolve_log_destination(
         local_config.config_log_destination().unwrap_or_default(),
     )?;
-    let server_log = server_log_sink(log_destination, &runtime_directory);
+    let server_log = log_sink(log_destination, &runtime_directory);
 
     Ok(PreTracingBootstrap {
         sink: logging::InternalLogSink::Worker {
@@ -511,13 +511,13 @@ fn prepare_run_worker_bootstrap(
     })
 }
 
-fn server_log_sink(
+fn log_sink(
     destination: LogDestination,
     runtime_directory: &fabro_config::RuntimeDirectory,
-) -> logging::ServerLogSink {
+) -> logging::LogSink {
     match destination {
-        LogDestination::File => logging::ServerLogSink::File(runtime_directory.log_path()),
-        LogDestination::Stdout => logging::ServerLogSink::Stdout,
+        LogDestination::File => logging::LogSink::File(runtime_directory.log_path()),
+        LogDestination::Stdout => logging::LogSink::Stdout,
     }
 }
 
@@ -725,7 +725,7 @@ destination = "{destination}"
             .expect("bootstrap should resolve");
 
         assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
-            log: logging::ServerLogSink::Stdout,
+            log: logging::LogSink::Stdout,
         });
         assert_eq!(bootstrap.config_log_level.as_deref(), Some("warn"));
         assert!(bootstrap.foreground_server_log_bootstrap.is_some());
@@ -756,7 +756,7 @@ destination = "{destination}"
             .expect("bootstrap should resolve");
 
         assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
-            log: logging::ServerLogSink::Stdout,
+            log: logging::LogSink::Stdout,
         });
         assert_eq!(bootstrap.config_log_level.as_deref(), Some("warn"));
         assert!(bootstrap.foreground_server_log_bootstrap.is_some());
@@ -785,7 +785,7 @@ destination = "{destination}"
             .expect("bootstrap should resolve");
 
         assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
-            log: logging::ServerLogSink::Stdout,
+            log: logging::LogSink::Stdout,
         });
         assert_eq!(bootstrap.config_log_level.as_deref(), Some("warn"));
         assert!(bootstrap.foreground_server_log_bootstrap.is_none());
@@ -817,7 +817,7 @@ destination = "{destination}"
                 .expect("bootstrap should resolve");
 
             assert_eq!(bootstrap.sink, logging::InternalLogSink::Server {
-                log: logging::ServerLogSink::Stdout,
+                log: logging::LogSink::Stdout,
             });
         });
     }
@@ -930,7 +930,7 @@ destination = "{destination}"
             .expect("bootstrap should resolve");
 
         assert_eq!(bootstrap.sink, logging::InternalLogSink::Worker {
-            server_log:       logging::ServerLogSink::File(
+            server_log:       logging::LogSink::File(
                 storage_dir.path().join("logs").join("server.log"),
             ),
             per_run_log_path: run_dir.path().join("runtime").join("server.log"),
@@ -966,7 +966,7 @@ destination = "{destination}"
                 .expect("bootstrap should resolve");
 
             assert_eq!(bootstrap.sink, logging::InternalLogSink::Worker {
-                server_log:       logging::ServerLogSink::Stdout,
+                server_log:       logging::LogSink::Stdout,
                 per_run_log_path: run_dir.path().join("runtime").join("server.log"),
             });
         });
