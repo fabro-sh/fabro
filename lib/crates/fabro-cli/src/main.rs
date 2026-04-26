@@ -467,7 +467,7 @@ async fn prepare_server_bootstrap(
     let local_config = local_server::LocalServerConfig::load(config_path, storage_dir)?;
     let storage_dir = local_config.storage_dir().to_path_buf();
     let runtime_directory = fabro_config::RuntimeDirectory::new(storage_dir.clone());
-    let log_destination = logging::resolve_log_destination(
+    let log_destination = fabro_config::resolve_log_destination(
         local_config.config_log_destination().unwrap_or_default(),
     )?;
     let foreground_server_log_bootstrap = if foreground {
@@ -496,7 +496,7 @@ fn prepare_run_worker_bootstrap(
 ) -> Result<PreTracingBootstrap> {
     let local_config = local_server::LocalServerConfig::load_with_storage_dir(storage_dir)?;
     let runtime_directory = fabro_config::RuntimeDirectory::new(local_config.storage_dir());
-    let log_destination = logging::resolve_log_destination(
+    let log_destination = fabro_config::resolve_log_destination(
         local_config.config_log_destination().unwrap_or_default(),
     )?;
     let server_log = log_sink(log_destination, &runtime_directory);

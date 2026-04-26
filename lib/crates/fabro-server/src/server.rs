@@ -3917,7 +3917,7 @@ fn worker_command(
     let server_target = daemon.bind.to_target();
     let worker_token = issue_worker_token(state.worker_token_keys(), &run_id)
         .map_err(|_| anyhow::anyhow!("failed to sign worker token"))?;
-    let server_destination = resolved_log_destination(state);
+    let server_destination = resolved_log_destination(state)?;
     let worker_stdout = match server_destination {
         LogDestination::Stdout => Stdio::inherit(),
         LogDestination::File => Stdio::null(),
@@ -3944,10 +3944,8 @@ fn worker_command(
             cmd.env(EnvVars::FABRO_LOG, level);
         }
     }
-    if (state.env_lookup)(EnvVars::FABRO_LOG_DESTINATION).is_none() {
-        let value: &'static str = server_destination.into();
-        cmd.env(EnvVars::FABRO_LOG_DESTINATION, value);
-    }
+    let value: &'static str = server_destination.into();
+    cmd.env(EnvVars::FABRO_LOG_DESTINATION, value);
     cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
     cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
 
@@ -3957,11 +3955,12 @@ fn worker_command(
     Ok(cmd)
 }
 
-fn resolved_log_destination(state: &AppState) -> LogDestination {
-    (state.env_lookup)(EnvVars::FABRO_LOG_DESTINATION)
-        .as_deref()
-        .and_then(|raw| raw.parse::<LogDestination>().ok())
-        .unwrap_or(state.server_settings().server.logging.destination)
+fn resolved_log_destination(state: &AppState) -> anyhow::Result<LogDestination> {
+    let env_value = (state.env_lookup)(EnvVars::FABRO_LOG_DESTINATION);
+    fabro_config::resolve_log_destination_with_env(
+        state.server_settings().server.logging.destination,
+        env_value.as_deref(),
+    )
 }
 
 fn api_question_type(question_type: InterviewQuestionType) -> ApiQuestionType {
@@ -9173,6 +9172,95 @@ level = "debug"
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_sets_fabro_log_destination_from_server_logging_config() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state = worker_command_test_state_with_extra_config(
+            storage_dir.path(),
+            &["dev-token"],
+            Some(TEST_DEV_TOKEN),
+            r#"
+[server.logging]
+destination = "stdout"
+"#,
+        );
+        let run_id = RunId::new();
+
+        let cmd = worker_command(
+            state.as_ref(),
+            run_id,
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            command_env_value(&cmd, EnvVars::FABRO_LOG_DESTINATION),
+            EnvOverride::Set("stdout".to_string())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_env_log_destination_overrides_server_logging_config() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state = worker_command_test_state_with_extra_config_and_env_lookup(
+            storage_dir.path(),
+            &["dev-token"],
+            Some(TEST_DEV_TOKEN),
+            r#"
+[server.logging]
+destination = "file"
+"#,
+            |name| (name == EnvVars::FABRO_LOG_DESTINATION).then(|| "stdout".to_string()),
+        );
+        let run_id = RunId::new();
+
+        let cmd = worker_command(
+            state.as_ref(),
+            run_id,
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            command_env_value(&cmd, EnvVars::FABRO_LOG_DESTINATION),
+            EnvOverride::Set("stdout".to_string())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_rejects_invalid_env_log_destination() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state = worker_command_test_state_with_extra_config_and_env_lookup(
+            storage_dir.path(),
+            &["dev-token"],
+            Some(TEST_DEV_TOKEN),
+            r#"
+[server.logging]
+destination = "file"
+"#,
+            |name| (name == EnvVars::FABRO_LOG_DESTINATION).then(|| "stdot".to_string()),
+        );
+        let run_id = RunId::new();
+
+        let Err(err) = worker_command(
+            state.as_ref(),
+            run_id,
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        ) else {
+            panic!("invalid env destination should fail");
+        };
+
+        let message = err.to_string();
+        assert!(message.contains(EnvVars::FABRO_LOG_DESTINATION));
+        assert!(message.contains("stdot"));
+    }
+
     #[test]
     fn build_app_state_requires_session_secret_for_worker_tokens() {
         let server_settings = server_settings_from_toml(
@@ -9225,6 +9313,22 @@ methods = ["dev-token"]
         dev_token: Option<&str>,
         extra_config: &str,
     ) -> Arc<AppState> {
+        worker_command_test_state_with_extra_config_and_env_lookup(
+            storage_dir,
+            methods,
+            dev_token,
+            extra_config,
+            |_| None,
+        )
+    }
+
+    fn worker_command_test_state_with_extra_config_and_env_lookup(
+        storage_dir: &Path,
+        methods: &[&str],
+        dev_token: Option<&str>,
+        extra_config: &str,
+        env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
+    ) -> Arc<AppState> {
         let dev_token = dev_token.map(str::to_owned);
         std::fs::create_dir_all(storage_dir).unwrap();
         let source = format!(
@@ -9264,7 +9368,7 @@ allowed_usernames = ["octocat"]
             server_settings_from_toml(&source),
             manifest_run_defaults_from_toml(&source),
             5,
-            |_| None,
+            env_lookup,
             &server_secret_env,
         )
     }

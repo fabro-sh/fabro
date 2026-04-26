@@ -23,7 +23,7 @@ use tokio::process::Command as TokioCommand;
 use tokio::task::spawn_blocking;
 use tokio::time;
 
-use crate::{local_server, logging};
+use crate::local_server;
 
 pub(crate) struct ForegroundServerLogBootstrap {
     #[expect(dead_code, reason = "held for its Drop to release the server lock")]
@@ -268,7 +268,7 @@ async fn execute_daemon(
     }
 
     let resolved_settings = resolve_runtime_server_settings_for_start(serve_args, storage_dir)?;
-    let destination = logging::resolve_log_destination(resolved_settings.logging.destination)?;
+    let destination = fabro_config::resolve_log_destination(resolved_settings.logging.destination)?;
     if matches!(destination, LogDestination::Stdout) {
         bail!(
             "[server.logging].destination = \"stdout\" is incompatible with daemon mode; use `fabro server start --foreground`"

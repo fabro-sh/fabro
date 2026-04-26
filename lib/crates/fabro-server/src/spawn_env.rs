@@ -11,7 +11,6 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     EnvVars::RUST_LOG,
     EnvVars::RUST_BACKTRACE,
     EnvVars::FABRO_LOG,
-    EnvVars::FABRO_LOG_DESTINATION,
     EnvVars::FABRO_HOME,
     EnvVars::FABRO_STORAGE_ROOT,
 ];
@@ -78,6 +77,7 @@ mod tests {
             ("USER".to_string(), "alice".to_string()),
             ("RUST_LOG".to_string(), "debug".to_string()),
             ("FABRO_LOG".to_string(), "debug".to_string()),
+            ("FABRO_LOG_DESTINATION".to_string(), "stdout".to_string()),
             ("FABRO_HOME".to_string(), "/tmp/fabro-home".to_string()),
             (
                 "FABRO_STORAGE_ROOT".to_string(),
@@ -106,6 +106,7 @@ mod tests {
         assert_eq!(actual.get("PATH").map(String::as_str), Some("/bin"));
         assert_eq!(actual.get("HOME").map(String::as_str), Some("/tmp/home"));
         assert_eq!(actual.get("FABRO_LOG").map(String::as_str), Some("debug"));
+        assert!(!actual.contains_key("FABRO_LOG_DESTINATION"));
         assert_eq!(
             actual.get("FABRO_DEV_TOKEN").map(String::as_str),
             Some("fabro_dev_abababababababababababababababababababababababababababababababab")

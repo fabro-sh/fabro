@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use fabro_static::EnvVars;
-use fabro_types::settings::server::LogDestination;
 use fabro_util::run_log::BufferedFileAppender;
 use tracing_appender::rolling;
 use tracing_subscriber::fmt::writer::MakeWriter;
@@ -98,28 +97,6 @@ pub(crate) fn init_tracing(
     }
 
     Ok(())
-}
-
-pub(crate) fn resolve_log_destination(
-    config_destination: LogDestination,
-) -> Result<LogDestination> {
-    let env_value = std::env::var(EnvVars::FABRO_LOG_DESTINATION).ok();
-    resolve_log_destination_with_env(config_destination, env_value.as_deref())
-}
-
-pub(crate) fn resolve_log_destination_with_env(
-    config_destination: LogDestination,
-    env_value: Option<&str>,
-) -> Result<LogDestination> {
-    match env_value {
-        Some(value) => value.parse::<LogDestination>().with_context(|| {
-            format!(
-                "invalid {} value `{value}`; expected `file` or `stdout`",
-                EnvVars::FABRO_LOG_DESTINATION
-            )
-        }),
-        None => Ok(config_destination),
-    }
 }
 
 fn cleanup_old_logs(log_dir: &Path, prefix: &str, max_age_days: u32) {

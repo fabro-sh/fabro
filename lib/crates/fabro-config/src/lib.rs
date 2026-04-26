@@ -16,6 +16,7 @@ pub mod envfile;
 pub mod error;
 pub mod home;
 mod load;
+pub mod logging;
 pub mod parse;
 pub mod project;
 pub mod resolve;
@@ -51,6 +52,7 @@ pub use layers::{
     TeamsIntegrationLayer, WorkflowLayer,
 };
 pub(crate) use layers::{Combine, SettingsLayer};
+pub use logging::{resolve_log_destination, resolve_log_destination_with_env};
 pub use parse::ParseError;
 pub use resolve::{
     ResolveError, resolve_cli, resolve_features, resolve_project, resolve_run, resolve_server,
