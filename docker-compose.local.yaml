@@ -1,0 +1,12 @@
+services:
+  fabro:
+    image: fabro-sh/fabro
+    restart: unless-stopped
+    ports:
+      - "32276:32276"
+    volumes:
+      - fabro-storage:/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  fabro-storage:
