@@ -1,3 +1,5 @@
+use fabro_util::error::{collect_causes, render_with_causes};
+
 #[derive(Debug)]
 struct Cause(&'static str);
 
@@ -34,14 +36,12 @@ fn collect_causes_walks_error_source_chain() {
         source:  Cause("inner failure"),
     };
 
-    assert_eq!(fabro_util::error::collect_causes(&error), vec![
-        "inner failure"
-    ]);
+    assert_eq!(collect_causes(&error), vec!["inner failure"]);
 }
 
 #[test]
 fn render_with_causes_adds_indented_caused_by_lines() {
-    let rendered = fabro_util::error::render_with_causes("operation failed", &[
+    let rendered = render_with_causes("operation failed", &[
         "first cause".to_string(),
         "second cause".to_string(),
     ]);

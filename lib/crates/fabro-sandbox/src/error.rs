@@ -1,3 +1,7 @@
+#[cfg(feature = "docker")]
+use bollard::errors::Error as BollardError;
+use fabro_util::error::{collect_causes, render_with_causes};
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{0}")]
@@ -14,7 +18,7 @@ pub enum Error {
     #[error("Failed to connect to Docker daemon")]
     DockerConnect {
         #[source]
-        source: bollard::errors::Error,
+        source: BollardError,
     },
 
     #[cfg(feature = "docker")]
@@ -22,7 +26,7 @@ pub enum Error {
     DockerImageInspect {
         image:  String,
         #[source]
-        source: bollard::errors::Error,
+        source: BollardError,
     },
 
     #[cfg(feature = "docker")]
@@ -30,7 +34,7 @@ pub enum Error {
     DockerImagePull {
         image:  String,
         #[source]
-        source: bollard::errors::Error,
+        source: BollardError,
     },
 }
 
@@ -50,12 +54,12 @@ impl Error {
     }
 
     #[cfg(feature = "docker")]
-    pub fn docker_connect(source: bollard::errors::Error) -> Self {
+    pub fn docker_connect(source: BollardError) -> Self {
         Self::DockerConnect { source }
     }
 
     #[cfg(feature = "docker")]
-    pub fn docker_image_inspect(image: impl Into<String>, source: bollard::errors::Error) -> Self {
+    pub fn docker_image_inspect(image: impl Into<String>, source: BollardError) -> Self {
         Self::DockerImageInspect {
             image: image.into(),
             source,
@@ -63,7 +67,7 @@ impl Error {
     }
 
     #[cfg(feature = "docker")]
-    pub fn docker_image_pull(image: impl Into<String>, source: bollard::errors::Error) -> Self {
+    pub fn docker_image_pull(image: impl Into<String>, source: BollardError) -> Self {
         Self::DockerImagePull {
             image: image.into(),
             source,
@@ -71,11 +75,11 @@ impl Error {
     }
 
     pub fn causes(&self) -> Vec<String> {
-        fabro_util::error::collect_causes(self)
+        collect_causes(self)
     }
 
     pub fn display_with_causes(&self) -> String {
-        fabro_util::error::render_with_causes(&self.to_string(), &self.causes())
+        render_with_causes(&self.to_string(), &self.causes())
     }
 }
 

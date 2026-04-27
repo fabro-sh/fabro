@@ -13,10 +13,6 @@ use crate::tool_registry::{RegisteredTool, ToolRegistry};
 
 const MAX_WEB_FETCH_BYTES: usize = 100 * 1024;
 
-fn sandbox_error(error: fabro_sandbox::Error) -> String {
-    error.display_with_causes()
-}
-
 /// Configuration for the optional LLM-based summarizer used by `web_fetch`.
 #[derive(Clone)]
 pub struct WebFetchSummarizer {
@@ -108,7 +104,7 @@ pub fn make_read_file_tool() -> RegisteredTool {
                     .env
                     .read_file(file_path, offset_usize, limit_usize)
                     .await
-                    .map_err(sandbox_error)?;
+                    .map_err(|e| e.display_with_causes())?;
                 ctx.env.mark_agent_read(file_path);
                 Ok(content)
             })
@@ -139,7 +135,7 @@ pub fn make_write_file_tool() -> RegisteredTool {
                 ctx.env
                     .write_file(file_path, content)
                     .await
-                    .map_err(sandbox_error)?;
+                    .map_err(|e| e.display_with_causes())?;
                 Ok(format!("Successfully wrote to {file_path}"))
             })
         }),
@@ -177,7 +173,7 @@ pub fn make_edit_file_tool() -> RegisteredTool {
                     .env
                     .read_file(file_path, None, None)
                     .await
-                    .map_err(sandbox_error)?;
+                    .map_err(|e| e.display_with_causes())?;
 
                 // Strip line numbers: each line looks like "  1 | content" or " 10 | content"
                 let raw_lines: Vec<&str> = numbered_content
@@ -205,7 +201,7 @@ pub fn make_edit_file_tool() -> RegisteredTool {
                 ctx.env
                     .write_file(file_path, &new_content)
                     .await
-                    .map_err(sandbox_error)?;
+                    .map_err(|e| e.display_with_causes())?;
                 Ok(format!("Successfully edited {file_path}"))
             })
         }),
@@ -261,7 +257,7 @@ pub fn make_shell_tool_with_config(config: &SessionOptions) -> RegisteredTool {
                         Some(ctx.cancel),
                     )
                     .await
-                    .map_err(sandbox_error)?;
+                    .map_err(|e| e.display_with_causes())?;
 
                 let mut output = String::new();
                 if result.timed_out {
@@ -327,7 +323,7 @@ pub fn make_grep_tool() -> RegisteredTool {
                     .env
                     .grep(pattern, path, &options)
                     .await
-                    .map_err(sandbox_error)?;
+                    .map_err(|e| e.display_with_causes())?;
                 let mut seen_files = std::collections::HashSet::new();
                 for line in &results {
                     if let Some(file_path) = line.split(':').next() {
@@ -362,7 +358,11 @@ pub fn make_glob_tool() -> RegisteredTool {
                 let pattern = required_str(&args, "pattern")?;
                 let path = args.get("path").and_then(serde_json::Value::as_str);
 
-                let results = ctx.env.glob(pattern, path).await.map_err(sandbox_error)?;
+                let results = ctx
+                    .env
+                    .glob(pattern, path)
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
                 Ok(results.join("\n"))
             })
         }),
@@ -438,7 +438,7 @@ pub(crate) fn make_list_dir_tool() -> RegisteredTool {
                     .env
                     .list_directory(path, depth)
                     .await
-                    .map_err(sandbox_error)?;
+                    .map_err(|e| e.display_with_causes())?;
                 let lines: Vec<String> = entries
                     .iter()
                     .map(|e| {
@@ -613,7 +613,7 @@ pub(crate) fn make_web_fetch_tool(summarizer: Option<WebFetchSummarizer>) -> Reg
                         Some(ctx.cancel),
                     )
                     .await
-                    .map_err(sandbox_error)?;
+                    .map_err(|e| e.display_with_causes())?;
 
                 if result.exit_code != 0 {
                     return Err(format!(

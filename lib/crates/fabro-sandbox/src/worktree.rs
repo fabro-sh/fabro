@@ -531,7 +531,7 @@ mod tests {
         let result = wt.initialize().await;
 
         assert!(result.is_err(), "should return Err on non-zero exit");
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().to_string();
         assert!(
             err.contains("branch --force failed") || err.contains("128"),
             "error should mention the failure: {err}"

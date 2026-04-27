@@ -13,6 +13,7 @@ use fabro_types::{
     RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageStatus, StartRecord,
     TerminalStatus,
 };
+use fabro_util::error::render_with_causes;
 use serde_json::Value;
 
 use crate::{Error, EventEnvelope, Result};
@@ -461,10 +462,7 @@ fn conclusion_from_failed(props: &RunFailedProps, timestamp: DateTime<Utc>) -> C
         timestamp,
         status: StageStatus::Fail,
         duration_ms: props.duration_ms,
-        failure_reason: Some(fabro_util::error::render_with_causes(
-            &props.error,
-            &props.causes,
-        )),
+        failure_reason: Some(render_with_causes(&props.error, &props.causes)),
         final_git_commit_sha: props.git_commit_sha.clone(),
         stages: Vec::new(),
         billing: None,

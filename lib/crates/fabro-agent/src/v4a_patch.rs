@@ -6,10 +6,6 @@ use crate::sandbox::{Sandbox, format_lines_numbered};
 use crate::tool_registry::RegisteredTool;
 use crate::truncation::{TruncationMode, truncate_output};
 
-fn sandbox_error(error: fabro_sandbox::Error) -> String {
-    error.display_with_causes()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
     Remove(String),
@@ -209,11 +205,15 @@ pub async fn apply_patch_operations(
     for op in ops {
         match op {
             PatchOperation::Add { path, content } => {
-                env.write_file(path, content).await.map_err(sandbox_error)?;
+                env.write_file(path, content)
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
                 results.push(format!("Added file: {path}"));
             }
             PatchOperation::Delete { path } => {
-                env.delete_file(path).await.map_err(sandbox_error)?;
+                env.delete_file(path)
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
                 results.push(format!("Deleted file: {path}"));
             }
             PatchOperation::Update {
@@ -224,15 +224,17 @@ pub async fn apply_patch_operations(
                 let original = env
                     .read_file(path, None, None)
                     .await
-                    .map_err(sandbox_error)?;
+                    .map_err(|e| e.display_with_causes())?;
                 let updated = apply_hunks(&original, hunks)
                     .map_err(|err| format_patch_error(&err, path, &original))?;
                 let dest = new_path.as_deref().unwrap_or(path);
                 env.write_file(dest, &updated)
                     .await
-                    .map_err(sandbox_error)?;
+                    .map_err(|e| e.display_with_causes())?;
                 if new_path.is_some() {
-                    env.delete_file(path).await.map_err(sandbox_error)?;
+                    env.delete_file(path)
+                        .await
+                        .map_err(|e| e.display_with_causes())?;
                     results.push(format!("Moved file: {path} → {dest}"));
                 } else {
                     results.push(format!("Updated file: {path}"));

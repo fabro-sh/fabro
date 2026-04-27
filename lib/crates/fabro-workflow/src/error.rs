@@ -2,6 +2,7 @@ use fabro_graphviz::Error as GraphvizError;
 use fabro_llm::{Error as LlmError, ProviderErrorKind};
 pub use fabro_types::failure_signature::FailureSignature;
 pub use fabro_types::outcome::FailureCategory;
+use fabro_util::error::{collect_causes, collect_chain, render_with_causes};
 use fabro_validate::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
@@ -264,8 +265,8 @@ impl Error {
         source: &(dyn std::error::Error + 'static),
     ) -> Self {
         let message = message.into();
-        let causes = fabro_util::error::collect_chain(source);
-        let rendered = fabro_util::error::render_with_causes(&message, &causes);
+        let causes = collect_chain(source);
+        let rendered = render_with_causes(&message, &causes);
         let failure_class = classify_failure_reason(&rendered);
         Self::Handler {
             message,
@@ -291,8 +292,8 @@ impl Error {
         source: &(dyn std::error::Error + 'static),
     ) -> Self {
         let message = message.into();
-        let causes = fabro_util::error::collect_chain(source);
-        let rendered = fabro_util::error::render_with_causes(&message, &causes);
+        let causes = collect_chain(source);
+        let rendered = render_with_causes(&message, &causes);
         let failure_class = classify_failure_reason(&rendered);
         Self::Engine {
             message,
@@ -305,14 +306,14 @@ impl Error {
     pub fn causes(&self) -> Vec<String> {
         match self {
             Self::Engine { causes, .. } | Self::Handler { causes, .. } => causes.clone(),
-            Self::Llm(err) => fabro_util::error::collect_causes(err),
+            Self::Llm(err) => collect_causes(err),
             _ => Vec::new(),
         }
     }
 
     #[must_use]
     pub fn display_with_causes(&self) -> String {
-        fabro_util::error::render_with_causes(&self.to_string(), &self.causes())
+        render_with_causes(&self.to_string(), &self.causes())
     }
 
     /// Whether this error category is retryable (transient) or terminal.

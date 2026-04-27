@@ -123,7 +123,7 @@ mod tests {
     fn non_github_origin_fails_without_skip_clone() {
         let error = decide_clone(false, Some("https://gitlab.com/acme/widgets.git"), None)
             .expect_err("non-GitHub origins should fail");
-        assert!(error.contains("GitHub repository origins only"));
+        assert!(error.to_string().contains("GitHub repository origins only"));
     }
 
     #[test]

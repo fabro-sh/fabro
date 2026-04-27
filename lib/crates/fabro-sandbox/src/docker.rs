@@ -1390,7 +1390,11 @@ mod tests {
     fn label_validation_rejects_unmanaged_container() {
         let labels = HashMap::new();
         let error = verify_managed_labels("abc", &labels, None).unwrap_err();
-        assert!(error.contains("missing label sh.fabro.managed=true"));
+        assert!(
+            error
+                .to_string()
+                .contains("missing label sh.fabro.managed=true")
+        );
     }
 
     #[test]

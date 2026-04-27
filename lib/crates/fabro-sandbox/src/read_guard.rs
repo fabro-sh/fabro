@@ -124,7 +124,7 @@ mod tests {
         let result = env.write_file("a.ts", "new content").await;
 
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().to_string();
         assert!(err.contains("a.ts"));
         assert!(err.contains("read"));
     }
@@ -253,7 +253,11 @@ mod tests {
         let mock = mock_with_files(HashMap::from([("main.rs".into(), "fn main() {}".into())]));
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
 
-        let err = env.write_file("main.rs", "new").await.unwrap_err();
+        let err = env
+            .write_file("main.rs", "new")
+            .await
+            .unwrap_err()
+            .to_string();
 
         assert!(err.contains("main.rs"));
         assert!(err.contains("read_file"));

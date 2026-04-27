@@ -15,7 +15,9 @@ fn context_error_preserves_source_cause() {
 #[cfg(feature = "docker")]
 #[test]
 fn docker_image_inspect_error_preserves_source_cause() {
-    let source = bollard::errors::Error::DockerResponseServerError {
+    use bollard::errors::Error as BollardError;
+
+    let source = BollardError::DockerResponseServerError {
         status_code: 500,
         message:     "daemon unavailable".to_string(),
     };

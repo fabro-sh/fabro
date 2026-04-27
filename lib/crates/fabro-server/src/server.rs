@@ -13,7 +13,7 @@ use axum::body::Body;
 use axum::body::to_bytes;
 use axum::extract::{self as axum_extract, DefaultBodyLimit, Path, Query, State};
 use axum::http::{HeaderMap, Method, StatusCode, header};
-use axum::middleware::{self};
+use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -80,6 +80,7 @@ use fabro_types::{
     RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
     RunServerProvenance, RunSubjectProvenance, ServerSettings,
 };
+use fabro_util::error::{collect_causes, render_with_causes};
 use fabro_util::version::FABRO_VERSION;
 use fabro_vault::{Error as VaultError, SecretType, Vault};
 use fabro_workflow::artifact_upload::ArtifactSink;
@@ -1083,7 +1084,7 @@ pub fn build_router_with_options(
         .layer(middleware::from_fn(http_log_middleware))
 }
 
-async fn http_log_middleware(req: axum_extract::Request, next: axum::middleware::Next) -> Response {
+async fn http_log_middleware(req: axum_extract::Request, next: Next) -> Response {
     let method = req.method().clone();
     let path = req.uri().path().to_string();
     let start = std::time::Instant::now();
@@ -6632,10 +6633,7 @@ async fn reconnect_run_sandbox(
     let record = load_run_sandbox_record(state, run_id).await?;
     let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
     reconnect(&record, daytona_api_key).await.map_err(|err| {
-        let detail = fabro_util::error::render_with_causes(
-            &err.to_string(),
-            &fabro_util::error::collect_causes(err.as_ref()),
-        );
+        let detail = render_with_causes(&err.to_string(), &collect_causes(err.as_ref()));
         ApiError::new(StatusCode::CONFLICT, detail).into_response()
     })
 }
