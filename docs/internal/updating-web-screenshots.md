@@ -32,7 +32,7 @@ With the SPA baked into the binary, there's no in-container edit path. Commit th
 
 ## Updating logos
 
-Logos live at `apps/fabro-web/public/logotype.svg` (dark) and `apps/fabro-web/public/logotype-light.svg` (light). These are bundled into the SPA at build time — rebuilding the image picks up the changes. The source-of-truth logos are in `docs/logo/dark.svg` and `docs/logo/light.svg`.
+Logos live at `apps/fabro-web/public/logotype.svg` (dark) and `apps/fabro-web/public/logotype-light.svg` (light). These are bundled into the SPA at build time — rebuilding the image picks up the changes. The source-of-truth logos are in `docs/public/logo/dark.svg` and `docs/public/logo/light.svg`.
 
 ## Browser setup
 
@@ -45,7 +45,7 @@ If the nav bar is too crowded at this width, hide low-priority items (Start, Set
 
 ## Taking screenshots
 
-Screenshots live in `docs/images/web/`. Each screenshot maps to a specific URL (served from `http://localhost/` with the `X-Fabro-Demo: 1` header):
+Screenshots live in `docs/public/images/web/`. Each screenshot maps to a specific URL (served from `http://localhost/` with the `X-Fabro-Demo: 1` header):
 
 | File | URL |
 |---|---|

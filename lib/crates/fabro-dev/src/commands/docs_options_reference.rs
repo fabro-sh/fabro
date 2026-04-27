@@ -6,7 +6,7 @@ use fabro_options_metadata::{OptionField, OptionSet};
 
 use super::{markdown_cell, replace_generated_region};
 
-const OPTIONS_REFERENCE_PATH: &str = "docs/reference/user-configuration.mdx";
+const OPTIONS_REFERENCE_PATH: &str = "docs/public/reference/user-configuration.mdx";
 const FENCE_START: &str = "<!-- generated:options -->";
 const FENCE_END: &str = "<!-- /generated:options -->";
 

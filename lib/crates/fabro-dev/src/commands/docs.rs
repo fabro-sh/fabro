@@ -23,7 +23,7 @@ enum DocsCommand {
 
 #[derive(Debug, Args)]
 struct DocsCommandArgs {
-    /// Workspace root containing docs/reference.
+    /// Workspace root containing docs/public/reference.
     #[arg(long, hide = true)]
     root: Option<PathBuf>,
 }

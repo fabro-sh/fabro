@@ -2154,7 +2154,7 @@ async fn run_diagnostics(
 }
 
 async fn openapi_spec() -> Response {
-    let yaml = include_str!("../../../../docs/api-reference/fabro-api.yaml");
+    let yaml = include_str!("../../../../docs/public/api-reference/fabro-api.yaml");
     let value: serde_json::Value =
         serde_yaml::from_str(yaml).expect("embedded OpenAPI YAML is invalid");
     Json(value).into_response()

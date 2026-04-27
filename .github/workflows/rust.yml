@@ -11,8 +11,8 @@ on:
       - ".cargo/**"
       - ".config/**"
       - "bin/dev/**"
-      - "docs/reference/cli.mdx"
-      - "docs/reference/user-configuration.mdx"
+      - "docs/public/reference/cli.mdx"
+      - "docs/public/reference/user-configuration.mdx"
       - "openapi/**"
       - ".github/workflows/rust.yml"
   pull_request:
@@ -25,8 +25,8 @@ on:
       - ".cargo/**"
       - ".config/**"
       - "bin/dev/**"
-      - "docs/reference/cli.mdx"
-      - "docs/reference/user-configuration.mdx"
+      - "docs/public/reference/cli.mdx"
+      - "docs/public/reference/user-configuration.mdx"
       - "openapi/**"
       - ".github/workflows/rust.yml"
   workflow_dispatch:

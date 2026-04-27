@@ -21,7 +21,7 @@ use tower::ServiceExt;
 use super::helpers::{read_repo_file, test_app_state, test_settings};
 
 fn load_spec() -> Value {
-    let text = read_repo_file("docs/api-reference/fabro-api.yaml");
+    let text = read_repo_file("docs/public/api-reference/fabro-api.yaml");
     serde_yaml::from_str(&text).expect("failed to parse spec")
 }
 

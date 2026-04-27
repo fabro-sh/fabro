@@ -1,6 +1,6 @@
 # Mintlify Changelog MDX Format
 
-Each changelog entry is a separate `.mdx` file in `docs/changelog/`.
+Each changelog entry is a separate `.mdx` file in `docs/public/changelog/`.
 
 ## Template
 

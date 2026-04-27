@@ -132,7 +132,7 @@ fn spec_path_from_manifest_dir(manifest_dir: &Path) -> PathBuf {
         .ancestors()
         .nth(3)
         .expect("fabro-api manifest dir should be nested under <repo>/lib/crates/fabro-api")
-        .join("docs/api-reference/fabro-api.yaml")
+        .join("docs/public/api-reference/fabro-api.yaml")
 }
 
 fn main() {

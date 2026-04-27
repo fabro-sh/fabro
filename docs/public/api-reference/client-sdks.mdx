@@ -3,7 +3,7 @@ title: "Client SDKs"
 description: "Language-specific clients generated from the Fabro OpenAPI spec"
 ---
 
-The Fabro API is defined by an OpenAPI 3.1 specification (`docs/api-reference/fabro-api.yaml` in the repository) that serves as the single source of truth for all endpoints, request/response schemas, and parameter definitions. The spec is also available at runtime from the server at `GET /api/v1/openapi.json`. Both client SDKs below are generated directly from this spec.
+The Fabro API is defined by an OpenAPI 3.1 specification (`docs/public/api-reference/fabro-api.yaml` in the repository) that serves as the single source of truth for all endpoints, request/response schemas, and parameter definitions. The spec is also available at runtime from the server at `GET /api/v1/openapi.json`. Both client SDKs below are generated directly from this spec.
 
 ## TypeScript (Axios)
 
@@ -18,7 +18,7 @@ cd lib/packages/fabro-api-client
 bun run generate
 ```
 
-This runs `openapi-generator-cli` against `docs/api-reference/fabro-api.yaml` and writes the generated source into `lib/packages/fabro-api-client/src/`.
+This runs `openapi-generator-cli` against `docs/public/api-reference/fabro-api.yaml` and writes the generated source into `lib/packages/fabro-api-client/src/`.
 
 ### Usage
 
@@ -40,7 +40,7 @@ The `fabro-api` crate generates Rust structs, enums, and a `reqwest`-based HTTP 
 
 ### How It Works
 
-A `build.rs` script reads `docs/api-reference/fabro-api.yaml`, patches it from OpenAPI 3.1 to 3.0 for progenitor compatibility, and generates both types and a client. The generated code is written to `OUT_DIR` and included via:
+A `build.rs` script reads `docs/public/api-reference/fabro-api.yaml`, patches it from OpenAPI 3.1 to 3.0 for progenitor compatibility, and generates both types and a client. The generated code is written to `OUT_DIR` and included via:
 
 ```rust
 // lib/crates/fabro-api/src/lib.rs

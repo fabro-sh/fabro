@@ -1,5 +1,5 @@
 <div align="left" id="top">
-<a href="https://docs.fabro.sh"><img alt="Fabro" src="docs/logo/dark.svg" height="75"></a>
+<a href="https://docs.fabro.sh"><img alt="Fabro" src="docs/public/logo/dark.svg" height="75"></a>
 </div>
 
 ## The open source dark software factory for expert engineers
@@ -27,7 +27,7 @@ curl -fsSL https://fabro.sh/install.sh | bash
 
 Then run `fabro server start` to finish setup in your browser. The server opens a web wizard, exits when the wizard completes, and starts in configured mode the next time you run it.
 
-<img src="docs/images/runs-board.png" alt="Fabro Runs board showing workflows across Working, Pending, Verify, and Merge stages" />
+<img src="docs/public/images/runs-board.png" alt="Fabro Runs board showing workflows across Working, Pending, Verify, and Merge stages" />
 
 ---
 
@@ -67,7 +67,7 @@ Then run `fabro server start` to finish setup in your browser. The server opens 
 
 A plan-approve-implement workflow where a human reviews the plan before the agent writes code:
 
-<img src="docs/images/plan-implement-readme.svg" alt="Plan-Implement workflow graph showing Start → Plan → Approve Plan → Implement → Simplify → Exit with a Revise loop" />
+<img src="docs/public/images/plan-implement-readme.svg" alt="Plan-Implement workflow graph showing Start → Plan → Approve Plan → Implement → Simplify → Exit with a Revise loop" />
 
 ```dot
 digraph PlanImplement {

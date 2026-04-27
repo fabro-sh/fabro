@@ -17,7 +17,7 @@ fn docs_check(root: &Path) -> assert_cmd::Command {
 fn write_reference_fixtures(root: &Path) {
     write_file(
         root,
-        "docs/reference/cli.mdx",
+        "docs/public/reference/cli.mdx",
         r"---
 title: CLI
 ---
@@ -33,7 +33,7 @@ Tail copy.
     );
     write_file(
         root,
-        "docs/reference/user-configuration.mdx",
+        "docs/public/reference/user-configuration.mdx",
         r"---
 title: Settings
 ---
@@ -56,7 +56,7 @@ fn refresh_updates_both_reference_files() {
 
     docs_refresh(fixture.path()).assert().success();
 
-    let cli = read_file(fixture.path(), "docs/reference/cli.mdx");
+    let cli = read_file(fixture.path(), "docs/public/reference/cli.mdx");
     assert!(
         cli.contains("Intro copy."),
         "manual cli intro should be preserved:\n{cli}"
@@ -78,7 +78,10 @@ fn refresh_updates_both_reference_files() {
         "stale cli generated content should be replaced:\n{cli}"
     );
 
-    let options = read_file(fixture.path(), "docs/reference/user-configuration.mdx");
+    let options = read_file(
+        fixture.path(),
+        "docs/public/reference/user-configuration.mdx",
+    );
     assert!(
         options.contains("Settings intro copy."),
         "manual options intro should be preserved:\n{options}"
@@ -129,7 +132,7 @@ fn check_fails_when_either_generated_region_is_stale() {
     let stderr = output_text(&output.stderr);
 
     assert!(
-        stderr.contains("docs/reference/cli.mdx is stale; run `cargo dev docs refresh`"),
+        stderr.contains("docs/public/reference/cli.mdx is stale; run `cargo dev docs refresh`"),
         "check failure should explain how to regenerate docs:\n{stderr}"
     );
 }
@@ -140,12 +143,18 @@ fn refresh_is_deterministic() {
     write_reference_fixtures(fixture.path());
 
     docs_refresh(fixture.path()).assert().success();
-    let first_cli = read_file(fixture.path(), "docs/reference/cli.mdx");
-    let first_options = read_file(fixture.path(), "docs/reference/user-configuration.mdx");
+    let first_cli = read_file(fixture.path(), "docs/public/reference/cli.mdx");
+    let first_options = read_file(
+        fixture.path(),
+        "docs/public/reference/user-configuration.mdx",
+    );
 
     docs_refresh(fixture.path()).assert().success();
-    let second_cli = read_file(fixture.path(), "docs/reference/cli.mdx");
-    let second_options = read_file(fixture.path(), "docs/reference/user-configuration.mdx");
+    let second_cli = read_file(fixture.path(), "docs/public/reference/cli.mdx");
+    let second_options = read_file(
+        fixture.path(),
+        "docs/public/reference/user-configuration.mdx",
+    );
 
     assert_eq!(first_cli, second_cli);
     assert_eq!(first_options, second_options);
