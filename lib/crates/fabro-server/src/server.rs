@@ -5105,7 +5105,7 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
                         let state_clone = Arc::clone(&state);
                         tokio::spawn(
                             execute_run(state_clone, id)
-                                .instrument(tracing::info_span!("run", run_id = %id)),
+                                .instrument(tracing::info_span!("run", id = %id)),
                         );
                     }
                     None => break,
@@ -13224,7 +13224,7 @@ provider = "local"
 
         let runner = tokio::spawn(
             execute_run(Arc::clone(&state), run_id)
-                .instrument(tracing::info_span!("run", run_id = %run_id)),
+                .instrument(tracing::info_span!("run", id = %run_id)),
         );
         let mut live_status_before_cancel = None;
         for _ in 0..50 {
@@ -13323,7 +13323,7 @@ provider = "local"
 
         let runner = tokio::spawn(
             execute_run(Arc::clone(&state), run_id)
-                .instrument(tracing::info_span!("run", run_id = %run_id)),
+                .instrument(tracing::info_span!("run", id = %run_id)),
         );
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 

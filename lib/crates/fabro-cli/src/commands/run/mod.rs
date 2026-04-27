@@ -90,7 +90,7 @@ pub(crate) async fn dispatch(
                 .ok_or_else(|| {
                     anyhow!("FABRO_WORKER_TOKEN is required for worker subprocess auth")
                 })?;
-            let run_span = tracing::info_span!("run", run_id = %run_id);
+            let run_span = tracing::info_span!("run", id = %run_id);
             Box::pin(
                 runner::execute(run_id, server, storage_dir, run_dir, mode, &worker_token)
                     .instrument(run_span),
