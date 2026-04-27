@@ -16,9 +16,6 @@ pub(crate) struct SpaRefreshArgs {
     /// Repository root containing apps/fabro-web and lib/crates/fabro-spa.
     #[arg(long, hide = true)]
     root: Option<PathBuf>,
-    /// Skip bun run build and only mirror an existing dist directory.
-    #[arg(long, hide = true)]
-    pub(super) skip_build: bool,
     /// Override the raw asset budget.
     #[arg(long, hide = true, default_value_t = DEFAULT_ASSET_BUDGET_BYTES)]
     pub(super) asset_budget_bytes: u64,
@@ -29,11 +26,14 @@ pub(crate) struct SpaRefreshArgs {
 
 pub(crate) fn spa_refresh(args: SpaRefreshArgs) -> Result<()> {
     let root = args.root.unwrap_or_else(workspace_root);
-    spa_refresh_root(
-        &root,
-        args.skip_build,
-        args.asset_budget_bytes,
-        args.payload_budget_bytes,
+    spa_refresh_root_with_budgets(&root, args.asset_budget_bytes, args.payload_budget_bytes)
+}
+
+pub(crate) fn spa_refresh_root(root: &Path) -> Result<()> {
+    spa_refresh_root_with_budgets(
+        root,
+        DEFAULT_ASSET_BUDGET_BYTES,
+        DEFAULT_PAYLOAD_BUDGET_BYTES,
     )
 }
 
@@ -41,9 +41,8 @@ pub(crate) fn spa_refresh(args: SpaRefreshArgs) -> Result<()> {
     clippy::print_stdout,
     reason = "dev spa refresh command reports progress directly"
 )]
-pub(super) fn spa_refresh_root(
+fn spa_refresh_root_with_budgets(
     root: &Path,
-    skip_build: bool,
     asset_budget_bytes: u64,
     payload_budget_bytes: u64,
 ) -> Result<()> {
@@ -51,16 +50,32 @@ pub(super) fn spa_refresh_root(
     let dist_dir = web_dir.join("dist");
     let asset_dir = root.join("lib/crates/fabro-spa/assets");
 
-    if !skip_build {
-        println!("Running bun run build in apps/fabro-web...");
-        run_bun_build(&web_dir)?;
-    }
+    println!("Running bun run build in apps/fabro-web...");
+    run_bun_build(&web_dir)?;
 
-    let staging = TempDir::new(root, "refresh")?;
-    mirror_dist(&dist_dir, staging.path())?;
-    check_spa_asset_budgets(staging.path(), asset_budget_bytes, payload_budget_bytes)?;
-    mirror_dist(staging.path(), &asset_dir)?;
+    refresh_from_dist(
+        root,
+        &dist_dir,
+        &asset_dir,
+        asset_budget_bytes,
+        payload_budget_bytes,
+    )?;
     println!("Refreshed lib/crates/fabro-spa/assets");
+
+    Ok(())
+}
+
+fn refresh_from_dist(
+    root: &Path,
+    dist_dir: &Path,
+    asset_dir: &Path,
+    asset_budget_bytes: u64,
+    payload_budget_bytes: u64,
+) -> Result<()> {
+    let staging = TempDir::new(root, "refresh")?;
+    mirror_dist(dist_dir, staging.path())?;
+    check_spa_asset_budgets(staging.path(), asset_budget_bytes, payload_budget_bytes)?;
+    mirror_dist(staging.path(), asset_dir)?;
 
     Ok(())
 }
@@ -128,6 +143,9 @@ pub(super) fn mirror_dist(dist_dir: &Path, asset_dir: &Path) -> Result<()> {
         })?;
     }
 
+    std::fs::write(asset_dir.join(".gitkeep"), b"")
+        .with_context(|| format!("writing {}", asset_dir.join(".gitkeep").display()))?;
+
     Ok(())
 }
 
@@ -168,5 +186,91 @@ impl TempDir {
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests stage temporary SPA fixture files with sync std::fs operations"
+)]
+mod tests {
+    use std::path::Path;
+
+    use super::{mirror_dist, refresh_from_dist};
+
+    fn write_file(root: &Path, path: &str, contents: impl AsRef<[u8]>) {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().expect("fixture path should have parent"))
+            .expect("creating fixture parent directory");
+        std::fs::write(path, contents).expect("writing fixture file");
+    }
+
+    fn read_bytes(root: &Path, path: &str) -> Vec<u8> {
+        std::fs::read(root.join(path)).expect("reading fixture file")
+    }
+
+    #[test]
+    fn mirror_dist_removes_stale_files_source_maps_and_keeps_directory_tracked() {
+        let fixture = tempfile::tempdir().expect("creating fixture");
+        write_file(fixture.path(), "dist/index.html", b"index");
+        write_file(fixture.path(), "dist/assets/app.js", b"app");
+        write_file(fixture.path(), "dist/assets/app.js.map", b"map");
+        write_file(fixture.path(), "assets/stale.txt", b"stale");
+
+        mirror_dist(&fixture.path().join("dist"), &fixture.path().join("assets"))
+            .expect("mirroring dist");
+
+        assert!(fixture.path().join("assets/index.html").is_file());
+        assert!(fixture.path().join("assets/assets/app.js").is_file());
+        assert!(fixture.path().join("assets/.gitkeep").is_file());
+        assert!(!fixture.path().join("assets/assets/app.js.map").exists());
+        assert!(!fixture.path().join("assets/stale.txt").exists());
+    }
+
+    #[test]
+    fn mirror_dist_missing_source_errors_cleanly() {
+        let fixture = tempfile::tempdir().expect("creating fixture");
+
+        let error = mirror_dist(&fixture.path().join("dist"), &fixture.path().join("assets"))
+            .expect_err("missing dist should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("apps/fabro-web/dist is missing; run `bun run build`"),
+            "missing dist should explain how to recover: {error:#}"
+        );
+    }
+
+    #[test]
+    fn refresh_budget_failure_leaves_assets_untouched() {
+        let fixture = tempfile::tempdir().expect("creating fixture");
+        write_file(fixture.path(), "apps/fabro-web/dist/index.html", b"hello");
+        write_file(
+            fixture.path(),
+            "lib/crates/fabro-spa/assets/index.html",
+            b"embedded",
+        );
+
+        let error = refresh_from_dist(
+            fixture.path(),
+            &fixture.path().join("apps/fabro-web/dist"),
+            &fixture.path().join("lib/crates/fabro-spa/assets"),
+            4,
+            100,
+        )
+        .expect_err("budget failure should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("fabro-spa embedded assets exceed budget: 5 > 4"),
+            "budget failure should report raw byte overage: {error:#}"
+        );
+        assert_eq!(
+            read_bytes(fixture.path(), "lib/crates/fabro-spa/assets/index.html"),
+            b"embedded"
+        );
     }
 }

@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use chrono::{Local, NaiveDate};
 use clap::Args;
 
-use super::{PlannedCommand, capture_command, run_command, workspace_root};
+use super::{PlannedCommand, capture_command, run_command, spa_refresh, workspace_root};
 
 const RELEASE_EPOCH: &str = "2026-01-01";
 const RELEASE_TEST_SEGMENT_WRITE_KEY: &str = "fake-for-local-smoke";
@@ -66,7 +66,7 @@ pub(crate) fn release(args: ReleaseArgs) -> Result<()> {
     }
 
     plan.ensure_clean_worktree()?;
-    plan.verify_spa_assets()?;
+    spa_refresh::spa_refresh_root(&plan.root)?;
     plan.verify_release_tests()?;
     update_version(&cargo_toml, &current_version, &new_version)?;
     println!("Updated {}", cargo_toml.display());
@@ -177,10 +177,6 @@ impl ReleasePlan {
         Ok(())
     }
 
-    fn verify_spa_assets(&self) -> Result<()> {
-        run_command(&self.root, &Self::spa_check_command())
-    }
-
     #[expect(
         clippy::print_stdout,
         reason = "dev release command reports release test progress directly"
@@ -200,8 +196,8 @@ impl ReleasePlan {
         reason = "dev release command reports dry-run commands directly"
     )]
     fn print_dry_run(&self, current_version: &str, new_version: &str, tag: &str) {
-        println!("DRY RUN: would verify SPA assets:");
-        println!("{}", Self::spa_check_command().to_shell_line());
+        println!("DRY RUN: would refresh SPA assets:");
+        println!("{}", Self::spa_refresh_command().to_shell_line());
 
         if self.skip_tests {
             println!("--skip-tests set, would skip release-mode test smoke");
@@ -239,11 +235,11 @@ impl ReleasePlan {
         }
     }
 
-    fn spa_check_command() -> PlannedCommand {
+    fn spa_refresh_command() -> PlannedCommand {
         PlannedCommand::new("cargo")
             .arg("dev")
             .arg("spa")
-            .arg("check")
+            .arg("refresh")
     }
 
     fn release_tests_command() -> PlannedCommand {

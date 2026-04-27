@@ -58,7 +58,7 @@ fn help_lists_scaffolded_commands() {
         .clone();
     let stdout = output_text(&output.stdout);
 
-    for command in ["docker-build", "docs", "release", "spa"] {
+    for command in ["build", "docker-build", "docs", "release", "spa"] {
         assert!(
             stdout.contains(command),
             "top-level help should list {command}:\n{stdout}"
@@ -112,6 +112,22 @@ fn group_only_docs_prints_subcommand_help_successfully() {
             "docs help should list {command}:\n{stdout}"
         );
     }
+}
+
+#[test]
+fn build_help_lists_forwarded_cargo_args() {
+    let output = fabro_dev()
+        .args(["build", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = output_text(&output.stdout);
+
+    assert!(
+        stdout.contains("Arguments forwarded to `cargo build`"),
+        "build help should explain forwarded cargo args:\n{stdout}"
+    );
 }
 
 #[test]

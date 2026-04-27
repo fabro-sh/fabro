@@ -22,11 +22,10 @@ macOS note: if `cargo nextest run` fails with `Too many open files (os error 24)
 - `cd apps/fabro-web && bun test` — run tests
 - `cd apps/fabro-web && bun run typecheck` — type check
 - `cd apps/fabro-web && bun run build` — production build (writes to `apps/fabro-web/dist/` only; does NOT update the bundled SPA that ships in the Rust binary)
-- `cargo dev spa refresh` — **run this before committing any TypeScript change in `apps/fabro-web/` or `lib/packages/fabro-api-client/`**. It runs the production build, verifies SPA asset budgets, and then copies `dist/` into `lib/crates/fabro-spa/assets/` (which is tracked in git). CI's TypeScript `Build` job runs `cargo dev spa check` — if the committed bundle drifts from source or exceeds budgets, the check fails. `bun run build` on its own is not enough.
+- `cargo dev build [-- <cargo args>]` — refreshes the embedded SPA assets from the production build, verifies SPA asset budgets, and then runs `cargo build` with forwarded args. The embedded assets are gitignored except for `.gitkeep`; use this when building a Rust binary that should include a populated SPA bundle. `bun run dev` for local development is unchanged because debug builds prefer `apps/fabro-web/dist/` on disk via the server fallback.
 
 ### Docker image
 - `cargo dev docker-build` — builds the local Docker image from the current tree using the release pipeline's cargo-zigbuild approach. Honors `--arch amd64|arm64`, `--tag <name>` (default `fabro-sh/fabro`), `--compile-only` (stages `tmp/docker-context/<arch>/fabro` without `docker build`), and `--dry-run` (prints the Docker commands without running them). Prefer this over writing a throwaway Dockerfile; the release pipeline, `Dockerfile`, and this command share the same binary layout.
-- Refresh the embedded SPA before rebuilding the image after any `apps/fabro-web` change: `cargo dev spa refresh` runs the bun build, verifies budgets, and copies `dist/` into `lib/crates/fabro-spa/assets/`. Skipping this step produces a Docker image whose Rust binary embeds a stale SPA bundle.
 
 ### Docker sandbox provider
 - Docker is the default runtime sandbox provider from `defaults.toml`. The Fabro process must have a working Docker client environment (`DOCKER_HOST`, socket access, Docker Desktop behavior, TLS settings, groups/permissions, and any remote daemon policy are operator responsibilities).

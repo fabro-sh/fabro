@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use clap::{Args, ValueEnum};
 
-use super::{PlannedCommand, run_command, shell_arg, workspace_root};
+use super::{PlannedCommand, run_command, shell_arg, spa_refresh, workspace_root};
 
 const ZIG_VERSION: &str = "0.13.0";
 
@@ -98,6 +98,9 @@ impl DockerBuildPlan {
         reason = "dev docker-build command reports progress directly"
     )]
     fn run(&self) -> Result<()> {
+        println!("Refreshing embedded SPA assets...");
+        spa_refresh::spa_refresh_root(&self.workspace_root)?;
+
         println!(
             "Building fabro-cli for {} inside rust:1-bookworm via cargo-zigbuild...",
             self.arch.target()
@@ -130,6 +133,7 @@ impl DockerBuildPlan {
 
     fn dry_run_lines(&self) -> Vec<String> {
         let mut lines = vec![
+            Self::spa_refresh_command().to_shell_line(),
             self.build_command().to_shell_line(),
             format!("mkdir -p {}", shell_arg(self.relative_context_dir())),
             self.extract_command().to_shell_line(),
@@ -140,6 +144,13 @@ impl DockerBuildPlan {
             lines.push(self.image_build_command().to_shell_line());
         }
         lines
+    }
+
+    fn spa_refresh_command() -> PlannedCommand {
+        PlannedCommand::new("cargo")
+            .arg("dev")
+            .arg("spa")
+            .arg("refresh")
     }
 
     fn build_command(&self) -> PlannedCommand {

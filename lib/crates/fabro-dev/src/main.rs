@@ -18,6 +18,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Refresh embedded SPA assets and run cargo build.
+    Build(commands::BuildArgs),
     /// Build Fabro Docker images with the release pipeline layout.
     DockerBuild(commands::DockerBuildArgs),
     /// Manage generated reference documentation.
@@ -31,6 +33,7 @@ enum Command {
 impl Command {
     fn run(self) -> Result<()> {
         match self {
+            Self::Build(args) => commands::build(args),
             Self::DockerBuild(args) => commands::docker_build(args),
             Self::Docs(args) => commands::docs(args),
             Self::Release(args) => commands::release(args),

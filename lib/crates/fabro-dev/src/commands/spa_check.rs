@@ -79,7 +79,7 @@ pub(super) fn check_spa_asset_budgets(
 
     if report.asset_bytes > asset_budget_bytes {
         bail!(
-            "fabro-spa assets exceed budget: {} > {}",
+            "fabro-spa embedded assets exceed budget: {} > {}",
             report.asset_bytes,
             asset_budget_bytes
         );

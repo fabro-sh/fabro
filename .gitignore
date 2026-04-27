@@ -3,6 +3,8 @@ target
 .entire
 node_modules
 apps/fabro-web/dist/
+lib/crates/fabro-spa/assets/*
+!lib/crates/fabro-spa/assets/.gitkeep
 tmp
 evals/swe-bench/repos/
 evals/swe-bench/results/

@@ -53,6 +53,10 @@ fn dry_run_prints_equivalent_build_commands() {
     let stdout = output_text(&output.stdout);
 
     assert!(
+        stdout.contains("cargo dev spa refresh"),
+        "dry-run should print SPA refresh command:\n{stdout}"
+    );
+    assert!(
         stdout.contains("docker run --rm --platform linux/amd64"),
         "dry-run should print builder docker run:\n{stdout}"
     );

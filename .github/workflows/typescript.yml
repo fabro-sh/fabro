@@ -72,6 +72,5 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun install --frozen-lockfile
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-      - run: cargo dev spa check
-      - run: cargo build -p fabro-cli --release
+      - run: cargo dev build -- -p fabro-cli --release
       - run: wc -c < target/release/fabro

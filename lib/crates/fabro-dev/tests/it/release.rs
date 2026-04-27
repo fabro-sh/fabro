@@ -96,8 +96,8 @@ fn dry_run_computes_stable_version_from_date() {
         "dry-run should compute base version from date:\n{stdout}"
     );
     assert!(
-        stdout.contains("cargo dev spa check"),
-        "dry-run should print one SPA verification command:\n{stdout}"
+        stdout.contains("cargo dev spa refresh"),
+        "dry-run should print one SPA refresh command:\n{stdout}"
     );
     assert!(
         !stdout.contains("git diff --exit-code -- lib/crates/fabro-spa/assets"),
