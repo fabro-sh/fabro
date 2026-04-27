@@ -2,7 +2,7 @@ import { formatElapsedSecs, formatDurationSecs } from "../lib/format";
 import type {
   RunListItem,
   RunStatus as ApiRunStatus,
-  StoreRunSummary,
+  RunSummary,
 } from "@qltysh/fabro-api-client";
 
 export type CiStatus = "passing" | "failing" | "pending";
@@ -84,9 +84,9 @@ export function mapRunListItem(item: RunListItem): RunItem {
   };
 }
 
-export type RunSummaryResponse = StoreRunSummary;
+export type { RunSummary };
 
-export function mapRunSummaryToRunItem(summary: RunSummaryResponse): RunItem {
+export function mapRunSummaryToRunItem(summary: RunSummary): RunItem {
   const lifecycleStatus = runStatusKind(summary.status);
   return {
     id: summary.run_id,

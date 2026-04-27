@@ -27,7 +27,7 @@ pub mod types {
     pub use fabro_types::status::{
         BlockedReason, FailureReason, RunControlAction, RunStatus, SuccessReason, TerminalStatus,
     };
-    pub use fabro_types::{ServerSettings, WorkflowSettings};
+    pub use fabro_types::{RepositoryReference, RunSummary, ServerSettings, WorkflowSettings};
 
     pub use crate::generated::types::*;
 }

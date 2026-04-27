@@ -18,13 +18,13 @@
 import type { PaginationMeta } from './pagination-meta';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { StoreRunSummary } from './store-run-summary';
+import type { RunSummary } from './run-summary';
 
 /**
  * Paginated list of runs.
  */
 export interface PaginatedRunList {
-    'data': Array<StoreRunSummary>;
+    'data': Array<RunSummary>;
     'meta': PaginationMeta;
 }
 

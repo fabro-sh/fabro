@@ -134,7 +134,7 @@ impl RunInfo {
     pub fn goal(&self) -> String {
         self.summary
             .as_ref()
-            .and_then(|summary| summary.goal.clone())
+            .map(|summary| summary.goal.clone())
             .unwrap_or_default()
     }
 }

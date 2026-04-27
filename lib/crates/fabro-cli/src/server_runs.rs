@@ -65,7 +65,7 @@ impl ServerRunSummaryInfo {
     }
 
     pub(crate) fn goal(&self) -> String {
-        self.summary.goal.clone().unwrap_or_default()
+        self.summary.goal.clone()
     }
 }
 

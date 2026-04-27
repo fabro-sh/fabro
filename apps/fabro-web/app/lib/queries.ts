@@ -8,6 +8,7 @@ import type {
   PaginatedStageTurnList,
   RunBilling,
   ServerSettings,
+  RunSummary,
 } from "@qltysh/fabro-api-client";
 
 import type { PaginatedWorkflowListResponse, WorkflowDetailResponse } from "./workflow-api";
@@ -20,7 +21,6 @@ import {
   type PaginatedEnvelope,
 } from "./api-client";
 import { queryKeys } from "./query-keys";
-import type { RunSummaryResponse } from "../data/runs";
 
 const immutableOptions: SWRConfiguration = {
   revalidateIfStale: false,
@@ -63,7 +63,7 @@ export function useBoardsRuns() {
 }
 
 export function useRun(id: string | undefined) {
-  return useSWR<RunSummaryResponse | null>(
+  return useSWR<RunSummary | null>(
     id ? queryKeys.runs.detail(id) : null,
     apiNullableFetcher,
   );

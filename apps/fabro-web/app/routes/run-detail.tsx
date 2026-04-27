@@ -10,7 +10,7 @@ import {
   isRunStatus,
   mapRunSummaryToRunItem,
   runStatusDisplay,
-  type RunSummaryResponse,
+  type RunSummary,
 } from "../data/runs";
 import { useDemoMode } from "../lib/demo-mode";
 import {
@@ -78,7 +78,7 @@ export function lifecycleActionVisibility(status: string | null | undefined) {
   };
 }
 
-function buildRunDetailRun(summary: RunSummaryResponse): RunDetailRun {
+function buildRunDetailRun(summary: RunSummary): RunDetailRun {
   const item = mapRunSummaryToRunItem(summary);
   const rawStatus = summary.status;
   const statusKind = rawStatus.kind;

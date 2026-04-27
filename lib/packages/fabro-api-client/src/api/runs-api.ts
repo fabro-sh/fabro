@@ -56,9 +56,9 @@ import type { RunManifest } from '../models';
 // @ts-ignore
 import type { RunStatusResponse } from '../models';
 // @ts-ignore
-import type { StartRunRequest } from '../models';
+import type { RunSummary } from '../models';
 // @ts-ignore
-import type { StoreRunSummary } from '../models';
+import type { StartRunRequest } from '../models';
 // @ts-ignore
 import type { TimelineEntryResponse } from '../models';
 /**
@@ -1198,7 +1198,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async resolveRun(selector: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<StoreRunSummary>> {
+        async resolveRun(selector: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunSummary>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.resolveRun(selector, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.resolveRun']?.[localVarOperationServerIndex]?.url;
@@ -1211,7 +1211,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async retrieveRun(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<StoreRunSummary>> {
+        async retrieveRun(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunSummary>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRun(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.retrieveRun']?.[localVarOperationServerIndex]?.url;
@@ -1460,7 +1460,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        resolveRun(selector: string, options?: RawAxiosRequestConfig): AxiosPromise<StoreRunSummary> {
+        resolveRun(selector: string, options?: RawAxiosRequestConfig): AxiosPromise<RunSummary> {
             return localVarFp.resolveRun(selector, options).then((request) => request(axios, basePath));
         },
         /**
@@ -1470,7 +1470,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<StoreRunSummary> {
+        retrieveRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunSummary> {
             return localVarFp.retrieveRun(id, options).then((request) => request(axios, basePath));
         },
         /**

@@ -171,9 +171,10 @@ fn main() {
             "fabro_types::status::RunControlAction",
             &[],
         ),
+        ("RunSummary", "fabro_types::RunSummary", &[]),
         (
-            "RunStatusRecord",
-            "fabro_types::status::RunStatusRecord",
+            "RepositoryReference",
+            "fabro_types::RepositoryReference",
             &[],
         ),
         ("WorkflowSettings", "fabro_types::WorkflowSettings", &[]),

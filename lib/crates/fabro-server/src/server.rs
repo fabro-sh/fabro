@@ -80,7 +80,6 @@ use fabro_types::{
     RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
     RunServerProvenance, RunSubjectProvenance, ServerSettings,
 };
-use fabro_util::text::strip_goal_decoration;
 use fabro_util::version::FABRO_VERSION;
 use fabro_vault::{Error as VaultError, SecretType, Vault};
 use fabro_workflow::artifact_upload::ArtifactSink;
@@ -2868,56 +2867,6 @@ pub(crate) fn board_columns() -> serde_json::Value {
     ])
 }
 
-pub(crate) fn truncate_goal(goal: &str) -> String {
-    const MAX_LEN: usize = 100;
-
-    let stripped = strip_goal_decoration(goal);
-    let char_count = stripped.chars().count();
-    if char_count <= MAX_LEN {
-        return stripped.to_string();
-    }
-
-    let truncated: String = stripped.chars().take(MAX_LEN - 3).collect();
-    format!("{truncated}...")
-}
-
-fn repository_name(host_repo_path: Option<&str>) -> String {
-    host_repo_path
-        .and_then(|path| path.rsplit(['/', '\\']).find(|segment| !segment.is_empty()))
-        .unwrap_or("unknown")
-        .to_string()
-}
-
-fn elapsed_secs(duration_ms: Option<u64>) -> Option<f64> {
-    duration_ms.map(|ms| ms as f64 / 1000.0)
-}
-
-fn summary_to_api_run_summary(summary: fabro_types::RunSummary) -> serde_json::Value {
-    let goal = summary.goal.unwrap_or_default();
-    let title = truncate_goal(&goal);
-    let repository = repository_name(summary.host_repo_path.as_deref());
-    let created_at = summary.run_id.created_at().to_rfc3339();
-
-    serde_json::json!({
-        "run_id": summary.run_id.to_string(),
-        "workflow_name": summary.workflow_name,
-        "workflow_slug": summary.workflow_slug,
-        "goal": goal,
-        "title": title,
-        "labels": summary.labels,
-        "host_repo_path": summary.host_repo_path,
-        "repository": { "name": repository },
-        "start_time": summary.start_time.map(|time| time.to_rfc3339()),
-        "status": summary.status,
-        "pending_control": summary.pending_control,
-        "duration_ms": summary.duration_ms,
-        "elapsed_secs": elapsed_secs(summary.duration_ms),
-        "total_usd_micros": summary.total_usd_micros,
-        "superseded_by": summary.superseded_by.map(|run_id| run_id.to_string()),
-        "created_at": created_at,
-    })
-}
-
 async fn board_run_metadata(
     state: &AppState,
     run_id: RunId,
@@ -3010,7 +2959,8 @@ async fn list_board_runs(
     let mut data = Vec::with_capacity(page_summaries.len());
     for (summary, column) in page_summaries {
         let run_id = summary.run_id;
-        let mut item = summary_to_api_run_summary(summary);
+        let mut item =
+            serde_json::to_value(&summary).expect("RunSummary serialization is infallible");
         item["column"] = serde_json::json!(column);
         if let Some(object) = item.as_object_mut() {
             object.extend(board_run_metadata(state.as_ref(), run_id).await);
@@ -3045,7 +2995,6 @@ async fn list_runs(
                 .filter(|summary| {
                     include_archived || !matches!(summary.status, RunStatus::Archived { .. })
                 })
-                .map(summary_to_api_run_summary)
                 .collect::<Vec<_>>();
             let (data, has_more) = paginate_items(items, &params.pagination());
             (
@@ -3099,11 +3048,7 @@ async fn resolve_run(
         |run| run.workflow_name.clone(),
         |run| run.run_id.created_at(),
     ) {
-        Ok(run) => (
-            StatusCode::OK,
-            Json(summary_to_api_run_summary(run.clone())),
-        )
-            .into_response(),
+        Ok(run) => (StatusCode::OK, Json(run.clone())).into_response(),
         Err(err @ (ResolveRunError::InvalidSelector | ResolveRunError::AmbiguousPrefix { .. })) => {
             ApiError::bad_request(err.to_string()).into_response()
         }
@@ -5174,7 +5119,7 @@ async fn get_run_status(
         .await
     {
         Ok(runs) => match runs.into_iter().find(|run| run.run_id == id) {
-            Some(run) => (StatusCode::OK, Json(summary_to_api_run_summary(run))).into_response(),
+            Some(run) => (StatusCode::OK, Json(run)).into_response(),
             None => ApiError::not_found("Run not found.").into_response(),
         },
         Err(err) => {
@@ -13504,18 +13449,24 @@ provider = "local"
     }
 
     #[tokio::test]
-    async fn demo_get_run_returns_store_run_summary_shape() {
+    async fn demo_get_run_returns_run_summary_shape() {
         let state = create_app_state();
         let app = build_router(state, AuthMode::Disabled);
+        let run_id = RunId::with_timestamp(
+            "2026-03-06T14:30:00Z"
+                .parse()
+                .expect("demo timestamp should parse"),
+            1,
+        );
         let req = Request::builder()
             .method("GET")
-            .uri(api("/runs/run-1"))
+            .uri(api(&format!("/runs/{run_id}")))
             .header("X-Fabro-Demo", "1")
             .body(Body::empty())
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
         let body = response_json!(response, StatusCode::OK).await;
-        // Should have StoreRunSummary fields, not RunStatusResponse fields
+        // Should have RunSummary fields, not RunStatusResponse fields
         assert!(body["run_id"].is_string(), "should have run_id field");
         assert!(body["goal"].is_string(), "should have goal field");
         assert!(

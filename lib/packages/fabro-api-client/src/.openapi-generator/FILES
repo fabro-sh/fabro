@@ -198,6 +198,7 @@ models/run-status-starting.ts
 models/run-status-submitted.ts
 models/run-status-succeeded.ts
 models/run-status.ts
+models/run-summary.ts
 models/run-superseded-by-props.ts
 models/run-timings.ts
 models/sandbox-file-entry.ts
@@ -232,7 +233,6 @@ models/ssh-access-response.ts
 models/stage-status.ts
 models/stage-turn.ts
 models/start-run-request.ts
-models/store-run-summary.ts
 models/submit-answer-request.ts
 models/success-reason.ts
 models/system-features.ts

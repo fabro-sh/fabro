@@ -14,6 +14,7 @@ pub mod interview;
 pub mod node_status;
 pub mod outcome;
 pub mod pull_request;
+pub mod repository;
 pub mod retro;
 pub mod run;
 pub mod run_blob_id;
@@ -50,6 +51,7 @@ pub use outcome::{FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMe
 pub use pull_request::{
     PullRequestDetail, PullRequestGithubDetail, PullRequestRecord, PullRequestRef, PullRequestUser,
 };
+pub use repository::RepositoryReference;
 pub use retro::{
     AggregateStats, FrictionKind, FrictionPoint, Learning, LearningCategory, OpenItem,
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,

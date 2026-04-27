@@ -18,6 +18,13 @@ impl RunId {
         self.0.datetime().into()
     }
 
+    pub fn with_timestamp(timestamp: DateTime<Utc>, sequence: u128) -> Self {
+        Self(Ulid::from_parts(
+            timestamp.timestamp_millis().cast_unsigned(),
+            sequence,
+        ))
+    }
+
     #[cfg(test)]
     pub fn from_datetime(dt: DateTime<Utc>) -> Self {
         Self(Ulid::from_datetime(dt.into()))
@@ -199,6 +206,17 @@ mod tests {
         let dt = Utc.with_ymd_and_hms(2026, 3, 27, 12, 34, 56).unwrap();
         let run_id = RunId::from_datetime(dt);
 
+        assert_eq!(run_id.created_at(), dt);
+    }
+
+    #[test]
+    fn creates_deterministic_run_id_from_timestamp_and_sequence() {
+        let dt = Utc.with_ymd_and_hms(2026, 3, 27, 12, 34, 56).unwrap();
+
+        let run_id = RunId::with_timestamp(dt, 42);
+
+        assert_eq!(run_id, RunId::with_timestamp(dt, 42));
+        assert_ne!(run_id, RunId::with_timestamp(dt, 43));
         assert_eq!(run_id.created_at(), dt);
     }
 }

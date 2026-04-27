@@ -536,7 +536,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StoreRunSummary"
+                $ref: "#/components/schemas/RunSummary"
         "400":
           description: Selector is invalid or ambiguous
           content:
@@ -617,7 +617,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StoreRunSummary"
+                $ref: "#/components/schemas/RunSummary"
         "404":
           description: Run not found
           content:
@@ -2858,7 +2858,7 @@ components:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/StoreRunSummary"
+            $ref: "#/components/schemas/RunSummary"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
@@ -4374,7 +4374,7 @@ components:
           additionalProperties:
             $ref: "#/components/schemas/NodeState"
 
-    StoreRunSummary:
+    RunSummary:
       description: Durable run summary derived from the backing store.
       type: object
       required:
