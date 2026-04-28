@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use fabro_agent::Sandbox;
 use fabro_checkpoint::trailer as trailerlink;
 use fabro_checkpoint::trailer::Trailer;
+use fabro_sandbox::shell_quote;
 use fabro_types::RunId;
 
 use crate::artifact_snapshot;
@@ -34,14 +35,6 @@ fn exec_err(label: &str, r: &fabro_sandbox::ExecResult) -> String {
     } else {
         format!("{label} failed (exit {}): {detail}", r.exit_code)
     }
-}
-
-/// Shell-escape a string using `shlex::try_quote` (POSIX-safe).
-fn shell_quote(s: &str) -> String {
-    shlex::try_quote(s).map_or_else(
-        |_| format!("'{}'", s.replace('\'', "'\\''")),
-        |q| q.to_string(),
-    )
 }
 
 /// Run a git checkpoint commit via the sandbox.

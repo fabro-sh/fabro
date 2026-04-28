@@ -79,7 +79,9 @@ function LogPanel({ text }: { text: string }) {
 const LOG_LINE_RE =
   /^(\S+)(\s+)(TRACE|DEBUG|INFO|WARN|ERROR)(\s+)(.*)$/;
 
-const LEVEL_COLOR: Record<string, string> = {
+type LogLevel = "TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR";
+
+const LEVEL_COLOR: Record<LogLevel, string> = {
   ERROR: "text-coral",
   WARN: "text-amber",
   INFO: "text-teal-500",
@@ -98,7 +100,7 @@ function LogLine({ line, trailingNewline }: { line: string; trailingNewline: boo
     <span>
       <span className="text-fg-muted">{timestamp}</span>
       {gap1}
-      <span className={`font-semibold ${LEVEL_COLOR[level] ?? "text-fg-2"}`}>{level}</span>
+      <span className={`font-semibold ${LEVEL_COLOR[level as LogLevel]}`}>{level}</span>
       {gap2}
       <LogRest text={rest} />
       {newline}

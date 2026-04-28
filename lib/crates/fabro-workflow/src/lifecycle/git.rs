@@ -180,29 +180,25 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 }
 
                 // Save diff.patch
-                let prev = self
-                    .last_git_sha
-                    .lock()
-                    .unwrap()
-                    .clone()
-                    .or_else(|| {
-                        self.run_options
-                            .git
-                            .as_ref()
-                            .and_then(|g| g.base_sha.clone())
-                    })
-                    .unwrap_or_else(|| sha.clone());
-                match git_diff(&*self.sandbox, &prev).await {
-                    Ok(patch) if !patch.is_empty() => {
-                        git_result.diff = Some(patch);
-                    }
-                    Ok(_) => {}
-                    Err(err) => {
-                        self.emitter.emit(&Event::RunNotice {
-                            level:   RunNoticeLevel::Warn,
-                            code:    "git_diff_failed".to_string(),
-                            message: format!("[node: {node_id}] git diff failed: {err}"),
-                        });
+                let prev = self.last_git_sha.lock().unwrap().clone().or_else(|| {
+                    self.run_options
+                        .git
+                        .as_ref()
+                        .and_then(|g| g.base_sha.clone())
+                });
+                if let Some(prev) = prev.filter(|p| p != &sha) {
+                    match git_diff(&*self.sandbox, &prev).await {
+                        Ok(patch) if !patch.is_empty() => {
+                            git_result.diff = Some(patch);
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            self.emitter.emit(&Event::RunNotice {
+                                level:   RunNoticeLevel::Warn,
+                                code:    "git_diff_failed".to_string(),
+                                message: format!("[node: {node_id}] git diff failed: {err}"),
+                            });
+                        }
                     }
                 }
 

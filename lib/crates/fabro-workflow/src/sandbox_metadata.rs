@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use fabro_agent::Sandbox;
+use fabro_sandbox::shell_quote;
 use tokio::fs;
 use tokio::sync::OnceCell;
 
@@ -121,16 +122,13 @@ impl<'a> SandboxMetadataWriter<'a> {
         let result = self
             .write_snapshot_in_temp(&entries, message, &temp, &index)
             .await;
-        let cleanup = exec_ok(
+        let _ = exec_ok(
             self.sandbox,
             &format!("rm -rf {}", shell_quote(&temp)),
             None,
         )
         .await;
-        match (result, cleanup) {
-            (Ok(snapshot), _) => Ok(snapshot),
-            (Err(err), _) => Err(err),
-        }
+        result
     }
 
     async fn write_snapshot_in_temp(
@@ -276,11 +274,9 @@ async fn probe_sandbox_git(sandbox: &dyn Sandbox) -> Result<(), String> {
 }
 
 fn sandbox_temp_dir(sandbox: &dyn Sandbox, run_id: &str, label: &str) -> String {
-    format!(
-        "{}/.fabro/tmp/{label}-{run_id}-{}",
-        sandbox.working_directory().trim_end_matches('/'),
-        uuid::Uuid::new_v4()
-    )
+    let cwd = sandbox.working_directory().trim_end_matches('/');
+    let id = uuid::Uuid::new_v4();
+    format!("{cwd}/.fabro/tmp/{label}-{run_id}-{id}")
 }
 
 fn git_index_env(index: &str, author: &GitAuthor) -> HashMap<String, String> {
@@ -342,11 +338,4 @@ fn validate_metadata_path(path: &str) -> Result<(), SandboxMetadataError> {
         )));
     }
     Ok(())
-}
-
-fn shell_quote(value: &str) -> String {
-    shlex::try_quote(value).map_or_else(
-        |_| format!("'{}'", value.replace('\'', "'\\''")),
-        |quoted| quoted.to_string(),
-    )
 }
