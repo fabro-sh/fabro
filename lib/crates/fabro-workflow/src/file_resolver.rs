@@ -50,7 +50,16 @@ pub(crate) fn normalize_logical_path(current_dir: &Path, reference: &str) -> Opt
             Component::CurDir => {}
             Component::Normal(part) => normalized.push(part),
             Component::ParentDir => {
-                normalized.pop();
+                // If the last component is a normal name, collapse it.
+                // Otherwise (empty path or trailing `..`), preserve the
+                // `..` so that leading parent-dir segments survive — these
+                // occur when a bundled workflow lives outside the CWD
+                // (e.g. user-global workflows under ~/.fabro/).
+                if normalized.file_name().is_some() {
+                    normalized.pop();
+                } else {
+                    normalized.push("..");
+                }
             }
             Component::RootDir | Component::Prefix(_) => return None,
         }
@@ -149,5 +158,59 @@ mod tests {
     fn bundle_resolver_returns_none_for_missing_path() {
         let resolver = BundleFileResolver::new(HashMap::new());
         assert!(resolver.resolve(Path::new("."), "missing.md").is_none());
+    }
+
+    #[test]
+    fn normalize_preserves_leading_parent_dir() {
+        // When a bundled workflow lives outside the CWD (e.g. ~/.fabro/),
+        // the manifest builder produces logical paths with leading `..`
+        // segments. The normalizer must preserve these so that the lookup
+        // key matches the stored key.
+        assert_eq!(
+            normalize_logical_path(
+                Path::new("../.fabro/workflows/demo"),
+                "prompts/hello.md"
+            ),
+            Some(PathBuf::from(
+                "../.fabro/workflows/demo/prompts/hello.md"
+            ))
+        );
+    }
+
+    #[test]
+    fn normalize_preserves_multiple_leading_parent_dirs() {
+        assert_eq!(
+            normalize_logical_path(Path::new("../../shared/workflows"), "file.md"),
+            Some(PathBuf::from("../../shared/workflows/file.md"))
+        );
+    }
+
+    #[test]
+    fn normalize_collapses_mid_path_parent_dir() {
+        // ../foo/../bar should normalize to ../bar
+        assert_eq!(
+            normalize_logical_path(Path::new("../foo"), "../bar/file.md"),
+            Some(PathBuf::from("../bar/file.md"))
+        );
+    }
+
+    #[test]
+    fn bundle_resolver_resolves_outside_cwd_paths() {
+        // Reproduces the user-global workflow scenario from issue #175:
+        // files are keyed with leading `..` because the workflow lives
+        // outside the CWD.
+        let resolver = BundleFileResolver::new(HashMap::from([(
+            PathBuf::from("../.fabro/workflows/demo/prompts/hello.md"),
+            "prompt content".to_string(),
+        )]));
+
+        let resolved = resolver
+            .resolve(
+                Path::new("../.fabro/workflows/demo"),
+                "prompts/hello.md",
+            )
+            .expect("file should resolve for out-of-CWD workflow");
+
+        assert_eq!(resolved.content, "prompt content");
     }
 }

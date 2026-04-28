@@ -362,7 +362,11 @@ fn normalize_logical_path(current_dir: &Path, reference: &str) -> Option<PathBuf
             Component::CurDir => {}
             Component::Normal(part) => normalized.push(part),
             Component::ParentDir => {
-                normalized.pop();
+                if normalized.file_name().is_some() {
+                    normalized.pop();
+                } else {
+                    normalized.push("..");
+                }
             }
             Component::RootDir | Component::Prefix(_) => return None,
         }
