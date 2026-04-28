@@ -511,19 +511,18 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
     let run_options = RunOptions {
-        settings:             WorkflowSettings::default(),
-        run_dir:              dir.path().to_path_buf(),
-        cancel_token:         None,
-        run_id:               test_run_id("test-run"),
-        labels:               std::collections::HashMap::new(),
-        workflow_slug:        None,
-        github_app:           None,
-        base_branch:          None,
-        display_base_sha:     None,
-        pre_run_git:          None,
-        fork_source_ref:      None,
-        checkpoints_disabled: false,
-        git:                  None,
+        settings:         WorkflowSettings::default(),
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     None,
+        run_id:           test_run_id("test-run"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
+        display_base_sha: None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
+        git:              None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -692,19 +691,18 @@ async fn daytona_git_checkpoint_remote_emits_events() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env.clone());
     let run_options = RunOptions {
-        settings:             WorkflowSettings::default(),
-        run_dir:              dir.path().to_path_buf(),
-        cancel_token:         None,
-        run_id:               test_run_id("git-cp-test"),
-        labels:               std::collections::HashMap::new(),
-        workflow_slug:        None,
-        github_app:           None,
-        base_branch:          None,
-        display_base_sha:     None,
-        pre_run_git:          None,
-        fork_source_ref:      None,
-        checkpoints_disabled: false,
-        git:                  Some(GitCheckpointOptions {
+        settings:         WorkflowSettings::default(),
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     None,
+        run_id:           test_run_id("git-cp-test"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
+        display_base_sha: None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
+        git:              Some(GitCheckpointOptions {
             base_sha:    Some(base_sha),
             run_branch:  Some(branch_name),
             meta_branch: None,
@@ -876,7 +874,6 @@ async fn daytona_parallel_git_branching_e2e() {
         display_base_sha: None,
         pre_run_git: None,
         fork_source_ref: None,
-        checkpoints_disabled: false,
         git: Some(GitCheckpointOptions {
             base_sha:    Some(base_sha),
             run_branch:  Some(branch_name),
@@ -1207,7 +1204,6 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         display_base_sha: None,
         pre_run_git: None,
         fork_source_ref: None,
-        checkpoints_disabled: false,
         git: Some(GitCheckpointOptions {
             base_sha:    Some(base_sha),
             run_branch:  Some(branch_name),
@@ -1346,7 +1342,7 @@ async fn daytona_asset_collection() {
     graph.edges.push(Edge::new("create_assets", "exit"));
 
     let run_options = RunOptions {
-        settings:             WorkflowSettings {
+        settings:         WorkflowSettings {
             run: fabro_types::settings::RunNamespace {
                 artifacts: fabro_types::settings::run::ArtifactsSettings {
                     include: vec!["test-results/**".to_string()],
@@ -1355,18 +1351,17 @@ async fn daytona_asset_collection() {
             },
             ..WorkflowSettings::default()
         },
-        run_dir:              dir.path().to_path_buf(),
-        cancel_token:         None,
-        run_id:               test_run_id("artifact-test-daytona"),
-        labels:               std::collections::HashMap::new(),
-        workflow_slug:        None,
-        github_app:           None,
-        base_branch:          None,
-        display_base_sha:     None,
-        pre_run_git:          None,
-        fork_source_ref:      None,
-        checkpoints_disabled: false,
-        git:                  None,
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     None,
+        run_id:           test_run_id("artifact-test-daytona"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
+        display_base_sha: None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
+        git:              None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -1624,7 +1619,6 @@ async fn daytona_git_push_run_branch_to_origin() {
         display_base_sha: None,
         pre_run_git: None,
         fork_source_ref: None,
-        checkpoints_disabled: false,
         git: Some(GitCheckpointOptions {
             base_sha:    Some(base_sha),
             run_branch:  Some(branch_name.clone()),

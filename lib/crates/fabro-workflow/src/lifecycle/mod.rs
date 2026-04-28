@@ -106,8 +106,7 @@ impl WorkflowLifecycle {
             .as_ref()
             .and_then(|g| g.run_branch.as_ref())
             .is_some();
-        let local_git_checkpoint = has_run_branch && !run_options.checkpoints_disabled;
-        let working_directory = if local_git_checkpoint {
+        let working_directory = if has_run_branch {
             Some(sandbox.working_directory().to_string())
         } else {
             None

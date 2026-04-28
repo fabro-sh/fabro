@@ -39,5 +39,5 @@ pub use sandbox::{
 };
 pub use sandbox_provider::SandboxProvider;
 pub use sandbox_record::SandboxRecord;
-pub use sandbox_spec::{SandboxSpec, WorkdirStrategy};
+pub use sandbox_spec::SandboxSpec;
 pub use worktree::{WorktreeEvent, WorktreeEventCallback, WorktreeOptions, WorktreeSandbox};

@@ -279,19 +279,18 @@ mod tests {
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings:             WorkflowSettings::default(),
-            run_dir:              run_dir.to_path_buf(),
-            cancel_token:         None,
-            run_id:               test_run_id(),
-            labels:               HashMap::new(),
-            workflow_slug:        None,
-            github_app:           None,
-            pre_run_git:          None,
-            fork_source_ref:      None,
-            checkpoints_disabled: false,
-            base_branch:          None,
-            display_base_sha:     None,
-            git:                  None,
+            settings:         WorkflowSettings::default(),
+            run_dir:          run_dir.to_path_buf(),
+            cancel_token:     None,
+            run_id:           test_run_id(),
+            labels:           HashMap::new(),
+            workflow_slug:    None,
+            github_app:       None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
+            base_branch:      None,
+            display_base_sha: None,
+            git:              None,
         }
     }
 

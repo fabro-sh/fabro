@@ -13,7 +13,6 @@ use fabro_types::RunId;
 
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use crate::clone_source;
-use crate::config::WorktreeMode;
 #[cfg(feature = "daytona")]
 use crate::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 #[cfg(feature = "docker")]
@@ -44,13 +43,6 @@ pub enum SandboxSpec {
         clone_branch:     Option<String>,
         api_key:          Option<String>,
     },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WorkdirStrategy {
-    LocalDirectory,
-    LocalWorktree,
-    Cloud,
 }
 
 impl SandboxSpec {
@@ -130,22 +122,6 @@ impl SandboxSpec {
         }
     }
 
-    pub fn workdir_strategy(
-        &self,
-        _worktree_mode: WorktreeMode,
-        _git_is_clean: bool,
-        _checkpoint_present: bool,
-    ) -> WorkdirStrategy {
-        match self {
-            Self::Local { .. } => WorkdirStrategy::LocalWorktree,
-            #[allow(
-                unreachable_patterns,
-                reason = "Feature-gated variants make this fallback arm reachable on some builds."
-            )]
-            _ => WorkdirStrategy::Cloud,
-        }
-    }
-
     #[allow(
         clippy::unused_async,
         reason = "Only Daytona construction awaits; local and Docker builds share the async API."
@@ -206,32 +182,6 @@ impl SandboxSpec {
                     sandbox.set_event_callback(callback);
                 }
                 Ok(Arc::new(sandbox))
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn local_runs_use_worktrees_for_all_worktree_modes() {
-        let spec = SandboxSpec::Local {
-            working_directory: PathBuf::from("/repo"),
-        };
-
-        for mode in [
-            WorktreeMode::Always,
-            WorktreeMode::Clean,
-            WorktreeMode::Dirty,
-            WorktreeMode::Never,
-        ] {
-            for git_is_clean in [true, false] {
-                assert_eq!(
-                    spec.workdir_strategy(mode, git_is_clean, false),
-                    WorkdirStrategy::LocalWorktree
-                );
             }
         }
     }

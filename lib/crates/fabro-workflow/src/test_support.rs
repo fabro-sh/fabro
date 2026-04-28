@@ -128,7 +128,7 @@ async fn initialized(
         manifest_blob:        None,
         pre_run_git:          run_options.pre_run_git.clone(),
         fork_source_ref:      run_options.fork_source_ref.clone(),
-        checkpoints_disabled: run_options.checkpoints_disabled,
+        checkpoints_disabled: false,
     })
     .await
     .expect("failed to seed run.created event in run store");

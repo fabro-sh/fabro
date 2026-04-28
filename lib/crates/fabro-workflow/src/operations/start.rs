@@ -691,19 +691,18 @@ impl RunSession {
 
         let record = persisted.run_spec();
         let run_options = RunOptions {
-            settings:             record.settings.clone(),
-            run_dir:              persisted.run_dir().to_path_buf(),
-            cancel_token:         self.cancel_token,
-            run_id:               record.run_id,
-            labels:               record.labels.clone(),
-            workflow_slug:        record.workflow_slug.clone(),
-            github_app:           self.github_app.clone(),
-            pre_run_git:          record.pre_run_git.clone(),
-            fork_source_ref:      record.fork_source_ref.clone(),
-            checkpoints_disabled: record.checkpoints_disabled,
-            base_branch:          record.base_branch.clone(),
-            display_base_sha:     None,
-            git:                  self.git.clone(),
+            settings:         record.settings.clone(),
+            run_dir:          persisted.run_dir().to_path_buf(),
+            cancel_token:     self.cancel_token,
+            run_id:           record.run_id,
+            labels:           record.labels.clone(),
+            workflow_slug:    record.workflow_slug.clone(),
+            github_app:       self.github_app.clone(),
+            pre_run_git:      record.pre_run_git.clone(),
+            fork_source_ref:  record.fork_source_ref.clone(),
+            base_branch:      record.base_branch.clone(),
+            display_base_sha: None,
+            git:              self.git.clone(),
         };
 
         let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));

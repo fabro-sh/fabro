@@ -202,20 +202,19 @@ impl Handler for SubWorkflowHandler {
         let child_cancel = Arc::clone(&cancel_token);
 
         let child_run_options = RunOptions {
-            settings:             WorkflowSettings::default(),
-            run_dir:              child_logs,
-            cancel_token:         Some(cancel_token),
+            settings:         WorkflowSettings::default(),
+            run_dir:          child_logs,
+            cancel_token:     Some(cancel_token),
             // Child workflows are part of the parent run's event stream.
-            run_id:               services.run.emitter.run_id(),
-            labels:               HashMap::new(),
-            workflow_slug:        None,
-            github_app:           None,
-            pre_run_git:          None,
-            fork_source_ref:      None,
-            checkpoints_disabled: true,
-            base_branch:          None,
-            display_base_sha:     None,
-            git:                  None,
+            run_id:           services.run.emitter.run_id(),
+            labels:           HashMap::new(),
+            workflow_slug:    None,
+            github_app:       None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
+            base_branch:      None,
+            display_base_sha: None,
+            git:              None,
         };
 
         // Clone parent context for child; inject parent preamble

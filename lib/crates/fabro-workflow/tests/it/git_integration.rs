@@ -153,19 +153,18 @@ fn make_registry() -> HandlerRegistry {
 
 fn test_run_options(run_dir: &Path) -> RunOptions {
     RunOptions {
-        run_dir:              run_dir.to_path_buf(),
-        cancel_token:         None,
-        run_id:               fixtures::RUN_2,
-        settings:             WorkflowSettings::default(),
-        git:                  None,
-        pre_run_git:          None,
-        fork_source_ref:      None,
-        checkpoints_disabled: false,
-        labels:               HashMap::new(),
-        github_app:           None,
-        base_branch:          None,
-        display_base_sha:     None,
-        workflow_slug:        None,
+        run_dir:          run_dir.to_path_buf(),
+        cancel_token:     None,
+        run_id:           fixtures::RUN_2,
+        settings:         WorkflowSettings::default(),
+        git:              None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
+        labels:           HashMap::new(),
+        github_app:       None,
+        base_branch:      None,
+        display_base_sha: None,
+        workflow_slug:    None,
     }
 }
 

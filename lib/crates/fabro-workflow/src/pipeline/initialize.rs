@@ -11,9 +11,10 @@ use fabro_auth::{
 use fabro_config::RunScratch;
 use fabro_graphviz::graph;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
+use fabro_sandbox::config::WorktreeMode;
 use fabro_sandbox::{
-    GitSetupIntent, ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorkdirStrategy,
-    WorktreeOptions, WorktreeSandbox,
+    GitSetupIntent, ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorktreeOptions,
+    WorktreeSandbox,
 };
 use fabro_vault::Vault;
 use futures::future::try_join_all;
@@ -100,17 +101,14 @@ async fn run_hooks(
 }
 
 fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
-    if options.run_options.checkpoints_disabled {
-        options.run_options.display_base_sha = None;
-        return None;
-    }
-
     let Some(worktree_mode) = options.worktree_mode else {
         options.run_options.display_base_sha = None;
         return None;
     };
 
-    if options.checkpoint.is_some() && matches!(options.sandbox, SandboxSpec::Local { .. }) {
+    let is_local = matches!(options.sandbox, SandboxSpec::Local { .. });
+
+    if options.checkpoint.is_some() && is_local {
         if let Some(fork_source) = options.run_options.fork_source_ref.as_ref() {
             let base_sha = fork_source.checkpoint_sha.clone();
             options.run_options.display_base_sha = Some(base_sha.clone());
@@ -121,9 +119,7 @@ fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
                 skip_branch_creation: false,
             });
         }
-    }
 
-    if options.checkpoint.is_some() && matches!(options.sandbox, SandboxSpec::Local { .. }) {
         if let Some(git) = options.run_options.git.as_ref() {
             if let (Some(run_branch), Some(base_sha)) = (&git.run_branch, &git.base_sha) {
                 options.run_options.display_base_sha = Some(base_sha.clone());
@@ -143,18 +139,14 @@ fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
         .pre_run_git
         .as_ref()
         .map(|git| git.local_dirty);
-    let git_is_clean =
-        local_dirty.is_some_and(|status| matches!(status, fabro_types::DirtyStatus::Clean));
-    let strategy =
-        options
-            .sandbox
-            .workdir_strategy(worktree_mode, git_is_clean, options.checkpoint.is_some());
 
     if matches!(local_dirty, Some(fabro_types::DirtyStatus::Dirty)) {
-        let env_name = match strategy {
-            WorkdirStrategy::LocalWorktree => Some("worktree"),
-            WorkdirStrategy::Cloud => Some("remote sandbox"),
-            WorkdirStrategy::LocalDirectory => None,
+        let env_name = if !is_local {
+            Some("remote sandbox")
+        } else if worktree_mode == WorktreeMode::Never {
+            None
+        } else {
+            Some("worktree")
         };
         if let Some(env_name) = env_name {
             options.emitter.notice(
@@ -165,45 +157,43 @@ fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
         }
     }
 
-    match strategy {
-        WorkdirStrategy::LocalWorktree => {
-            let (branch_name, base_sha) =
-                if let Some(fork_source) = options.run_options.fork_source_ref.as_ref() {
-                    (
-                        format!("{RUN_BRANCH_PREFIX}{}", options.run_id),
-                        Some(fork_source.checkpoint_sha.clone()),
-                    )
-                } else {
-                    (
-                        format!("{RUN_BRANCH_PREFIX}{}", options.run_id),
-                        options
-                            .run_options
-                            .pre_run_git
-                            .as_ref()
-                            .and_then(|git| git.display_base_sha.clone()),
-                    )
-                };
-            options.run_options.display_base_sha = base_sha.clone();
-            Some(WorktreePlan {
-                branch_name,
-                base_sha,
-                worktree_path: RunScratch::new(&options.run_options.run_dir).worktree_dir(),
-                skip_branch_creation: false,
-            })
-        }
-        WorkdirStrategy::Cloud => {
-            options.run_options.display_base_sha = options
-                .run_options
-                .pre_run_git
-                .as_ref()
-                .and_then(|git| git.display_base_sha.clone());
-            None
-        }
-        WorkdirStrategy::LocalDirectory => {
-            options.run_options.display_base_sha = None;
-            None
-        }
+    if !is_local {
+        options.run_options.display_base_sha = options
+            .run_options
+            .pre_run_git
+            .as_ref()
+            .and_then(|git| git.display_base_sha.clone());
+        return None;
     }
+
+    if worktree_mode == WorktreeMode::Never {
+        options.run_options.display_base_sha = None;
+        return None;
+    }
+
+    let (branch_name, base_sha) =
+        if let Some(fork_source) = options.run_options.fork_source_ref.as_ref() {
+            (
+                format!("{RUN_BRANCH_PREFIX}{}", options.run_id),
+                Some(fork_source.checkpoint_sha.clone()),
+            )
+        } else {
+            (
+                format!("{RUN_BRANCH_PREFIX}{}", options.run_id),
+                options
+                    .run_options
+                    .pre_run_git
+                    .as_ref()
+                    .and_then(|git| git.display_base_sha.clone()),
+            )
+        };
+    options.run_options.display_base_sha.clone_from(&base_sha);
+    Some(WorktreePlan {
+        branch_name,
+        base_sha,
+        worktree_path: RunScratch::new(&options.run_options.run_dir).worktree_dir(),
+        skip_branch_creation: false,
+    })
 }
 
 fn git_setup_intent(run_options: &RunOptions) -> GitSetupIntent {
@@ -848,19 +838,18 @@ mod tests {
 
     fn test_settings(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings:             WorkflowSettings::default(),
-            run_dir:              run_dir.to_path_buf(),
-            cancel_token:         None,
-            run_id:               test_run_id(),
-            labels:               HashMap::new(),
-            workflow_slug:        None,
-            github_app:           None,
-            pre_run_git:          None,
-            fork_source_ref:      None,
-            checkpoints_disabled: false,
-            base_branch:          None,
-            display_base_sha:     None,
-            git:                  None,
+            settings:         WorkflowSettings::default(),
+            run_dir:          run_dir.to_path_buf(),
+            cancel_token:     None,
+            run_id:           test_run_id(),
+            labels:           HashMap::new(),
+            workflow_slug:    None,
+            github_app:       None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
+            base_branch:      None,
+            display_base_sha: None,
+            git:              None,
         }
     }
 
