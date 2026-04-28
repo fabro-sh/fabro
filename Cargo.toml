@@ -130,6 +130,14 @@ absolute_paths = "warn"
 lto = "thin"
 strip = true
 
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "off"
+
+[profile.test]
+debug = "line-tables-only"
+split-debuginfo = "off"
+
 [profile.dev.package."*"]
 debug = false # Disable debug info for all dependencies
 opt-level = 1  # Shrinks monomorphized generics, reducing test binary size
