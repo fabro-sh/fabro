@@ -359,8 +359,8 @@ impl RunSession {
                 config:           resolve_docker_config(resolved).unwrap_or_default(),
                 github_app:       services.github_app.clone(),
                 run_id:           Some(record.run_id),
-                clone_origin_url: record.repo_origin_url.clone(),
-                clone_branch:     record.base_branch.clone(),
+                clone_origin_url: record.repo_origin_url().map(str::to_string),
+                clone_branch:     record.base_branch().map(str::to_string),
             },
             SandboxProvider::Daytona => {
                 let api_key = match &services.vault {
@@ -375,8 +375,8 @@ impl RunSession {
                     config: resolve_daytona_config(resolved).unwrap_or_default(),
                     github_app: services.github_app.clone(),
                     run_id: Some(record.run_id),
-                    clone_origin_url: record.repo_origin_url.clone(),
-                    clone_branch: record.base_branch.clone(),
+                    clone_origin_url: record.repo_origin_url().map(str::to_string),
+                    clone_branch: record.base_branch().map(str::to_string),
                     api_key,
                 }
             }
@@ -394,7 +394,7 @@ impl RunSession {
             devcontainer_env: HashMap::new(),
             toml_env,
             github_permissions,
-            origin_url: record.repo_origin_url.clone(),
+            origin_url: record.repo_origin_url().map(str::to_string),
         };
 
         let devcontainer = resolved.sandbox.devcontainer.then(|| DevcontainerSpec {
@@ -447,7 +447,7 @@ impl RunSession {
             preserve_sandbox: resolved.sandbox.preserve,
             pr_config,
             pr_github_app: services.github_app,
-            pr_origin_url: record.repo_origin_url.clone(),
+            pr_origin_url: record.repo_origin_url().map(str::to_string),
             pr_model: model,
             workflow_path,
             workflow_bundle,
@@ -698,9 +698,9 @@ impl RunSession {
             labels:           record.labels.clone(),
             workflow_slug:    record.workflow_slug.clone(),
             github_app:       self.github_app.clone(),
-            pre_run_git:      record.pre_run_git.clone(),
+            pre_run_git:      record.git.clone(),
             fork_source_ref:  record.fork_source_ref.clone(),
-            base_branch:      record.base_branch.clone(),
+            base_branch:      record.base_branch().map(str::to_string),
             display_base_sha: None,
             git:              self.git.clone(),
         };
@@ -1074,9 +1074,7 @@ mod tests {
                 workflow_bundle: None,
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_1),
-                repo_origin_url: None,
-                base_branch: None,
-                pre_run_git: None,
+                git: None,
                 fork_source_ref: None,
                 in_place: false,
                 provenance: None,
@@ -1254,9 +1252,7 @@ mod tests {
                 workflow_bundle: Some(workflow_bundle),
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_1),
-                repo_origin_url: None,
-                base_branch: None,
-                pre_run_git: None,
+                git: None,
                 fork_source_ref: None,
                 in_place: false,
                 provenance: None,

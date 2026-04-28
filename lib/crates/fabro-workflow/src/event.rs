@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::{
-    ActorRef, BilledTokenCounts, BlockedReason, FailureReason, ForkSourceRef, ParallelBranchId,
-    PreRunGitContext, PullRequestRecord, RunBlobId, RunControlAction, RunEvent, RunId,
+    ActorRef, BilledTokenCounts, BlockedReason, FailureReason, ForkSourceRef, GitContext,
+    ParallelBranchId, PullRequestRecord, RunBlobId, RunControlAction, RunEvent, RunId,
     RunProvenance, StageId, StageStatus, SuccessReason, run_event as fabro_types,
 };
 use anyhow::{Context, Result};
@@ -49,10 +49,6 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source_directory: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        repo_origin_url:  Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        base_branch:      Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         workflow_slug:    Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         db_prefix:        Option<String>,
@@ -61,7 +57,7 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         manifest_blob:    Option<RunBlobId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pre_run_git:      Option<PreRunGitContext>,
+        git:              Option<GitContext>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fork_source_ref:  Option<ForkSourceRef>,
         #[serde(default)]
@@ -1522,13 +1518,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             labels,
             run_dir,
             source_directory,
-            repo_origin_url,
-            base_branch,
             workflow_slug,
             db_prefix,
             provenance,
             manifest_blob,
-            pre_run_git,
+            git,
             fork_source_ref,
             in_place,
             ..
@@ -1541,13 +1535,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             labels:           labels.clone(),
             run_dir:          run_dir.clone(),
             source_directory: source_directory.clone(),
-            repo_origin_url:  repo_origin_url.clone(),
-            base_branch:      base_branch.clone(),
             workflow_slug:    workflow_slug.clone(),
             db_prefix:        db_prefix.clone(),
             provenance:       provenance.clone(),
             manifest_blob:    *manifest_blob,
-            pre_run_git:      pre_run_git.clone(),
+            git:              git.clone(),
             fork_source_ref:  fork_source_ref.clone(),
             in_place:         *in_place,
         }),
@@ -3679,13 +3671,11 @@ mod tests {
             labels:           BTreeMap::default(),
             run_dir:          "/tmp/run".to_string(),
             source_directory: Some("/tmp/run".to_string()),
-            repo_origin_url:  None,
-            base_branch:      None,
             workflow_slug:    None,
             db_prefix:        None,
             provenance:       Some(provenance),
             manifest_blob:    None,
-            pre_run_git:      None,
+            git:              None,
             fork_source_ref:  None,
             in_place:         false,
         });

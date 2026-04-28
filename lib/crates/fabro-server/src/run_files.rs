@@ -34,8 +34,8 @@ use fabro_sandbox::reconnect::reconnect;
 use fabro_static::EnvVars;
 use fabro_types::RunId;
 use fabro_workflow::sandbox_git::{
-    DiffError, DiffLineStats, DiffNumstat, RawDiffEntry, SubmoduleChange, SymlinkChange,
-    list_changed_files_raw, list_diff_numstat, stream_blob_metadata, stream_blobs,
+    DiffError, DiffNumstat, RawDiffEntry, SubmoduleChange, SymlinkChange, list_changed_files_raw,
+    list_diff_numstat, stream_blob_metadata, stream_blobs,
 };
 use futures_util::FutureExt;
 use serde::Deserialize;
@@ -373,13 +373,6 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
     })
 }
 
-fn line_stats_to_api(stats: DiffLineStats) -> DiffStats {
-    DiffStats {
-        additions: i64::try_from(stats.additions).unwrap_or(i64::MAX),
-        deletions: i64::try_from(stats.deletions).unwrap_or(i64::MAX),
-    }
-}
-
 /// Choose a degraded reason given the current projection. Docker-provider
 /// runs aren't supported by the deployed server; completed runs are "gone";
 /// everything else is a transient "unreachable" (sandbox may come back).
@@ -451,7 +444,7 @@ fn build_fallback_response(
 /// summation we use on the live-sandbox path so the toolbar shows the same
 /// numbers regardless of which response branch we took.
 fn patch_to_stats(patch: &str) -> DiffStats {
-    let mut stats = DiffLineStats::default();
+    let mut stats = DiffStats::default();
     for section in patch.split("diff --git ").skip(1) {
         if patch_section_omits_line_stats(section) {
             continue;
@@ -467,7 +460,7 @@ fn patch_to_stats(patch: &str) -> DiffStats {
             }
         }
     }
-    line_stats_to_api(stats)
+    stats
 }
 
 fn patch_section_omits_line_stats(section: &str) -> bool {
@@ -729,7 +722,7 @@ fn classify_entries(
     is_sensitive_fn: fn(&str) -> bool,
 ) -> ClassifiedEntries {
     let mut out = Vec::with_capacity(raw.len());
-    let mut stats = DiffLineStats::default();
+    let mut stats = DiffStats::default();
 
     for entry in raw {
         let (new_path, old_path) = match entry {
@@ -786,7 +779,7 @@ fn classify_entries(
 
     ClassifiedEntries {
         entries: out,
-        stats:   line_stats_to_api(stats),
+        stats,
     }
 }
 
@@ -1638,7 +1631,7 @@ diff --git a/src/main.rs b/src/main.rs
         ] {
             numstat
                 .line_stats_by_path
-                .insert(path.to_string(), DiffLineStats {
+                .insert(path.to_string(), DiffStats {
                     additions,
                     deletions,
                 });

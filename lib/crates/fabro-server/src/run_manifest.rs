@@ -27,7 +27,7 @@ use fabro_types::settings::run::{
     ApprovalMode, DaytonaNetworkLayer, DaytonaSettings, DockerSettings, DockerfileSource, RunGoal,
     RunMode, RunNamespace, WorktreeMode,
 };
-use fabro_types::{DirtyStatus, PreRunGitContext, PreRunPushOutcome, RunId, WorkflowSettings};
+use fabro_types::{RunId, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::Error as WorkflowError;
@@ -41,7 +41,7 @@ use crate::server::AppState;
 #[derive(Clone)]
 pub(crate) struct PreparedManifest {
     pub cwd:              PathBuf,
-    pub git:              Option<types::ManifestGit>,
+    pub git:              Option<types::GitContext>,
     pub root_source:      String,
     pub run_id:           Option<RunId>,
     pub settings:         WorkflowSettings,
@@ -165,58 +165,11 @@ pub(crate) fn create_run_input(
         workflow_bundle: Some(prepared.workflow_bundle),
         submitted_manifest_bytes: None,
         run_id: prepared.run_id,
-        repo_origin_url: prepared.git.as_ref().and_then(|git| {
-            let origin_url = fabro_github::normalize_repo_origin_url(&git.origin_url);
-            (!origin_url.is_empty()).then_some(origin_url)
-        }),
-        base_branch: prepared.git.as_ref().map(|git| git.branch.clone()),
-        pre_run_git: prepared.git.as_ref().map(pre_run_git_from_manifest),
+        git: prepared.git,
         fork_source_ref: None,
         in_place: prepared.in_place,
         provenance: None,
         configured_providers,
-    }
-}
-
-fn pre_run_git_from_manifest(git: &types::ManifestGit) -> PreRunGitContext {
-    PreRunGitContext {
-        display_base_sha: Some(git.sha.clone()),
-        local_dirty:      if git.clean {
-            DirtyStatus::Clean
-        } else {
-            DirtyStatus::Dirty
-        },
-        push_outcome:     pre_run_push_outcome_from_manifest(&git.push_outcome),
-    }
-}
-
-fn pre_run_push_outcome_from_manifest(
-    outcome: &types::ManifestPreRunPushOutcome,
-) -> PreRunPushOutcome {
-    match outcome.type_ {
-        types::ManifestPreRunPushOutcomeType::NotAttempted => PreRunPushOutcome::NotAttempted,
-        types::ManifestPreRunPushOutcomeType::Succeeded => PreRunPushOutcome::Succeeded {
-            remote: outcome
-                .remote
-                .clone()
-                .unwrap_or_else(|| "origin".to_string()),
-            branch: outcome.branch.clone().unwrap_or_default(),
-        },
-        types::ManifestPreRunPushOutcomeType::Failed => PreRunPushOutcome::Failed {
-            remote:  outcome
-                .remote
-                .clone()
-                .unwrap_or_else(|| "origin".to_string()),
-            branch:  outcome.branch.clone().unwrap_or_default(),
-            message: outcome.message.clone().unwrap_or_default(),
-        },
-        types::ManifestPreRunPushOutcomeType::SkippedNoRemote => PreRunPushOutcome::SkippedNoRemote,
-        types::ManifestPreRunPushOutcomeType::SkippedRemoteMismatch => {
-            PreRunPushOutcome::SkippedRemoteMismatch {
-                remote:          outcome.remote.clone().unwrap_or_default(),
-                repo_origin_url: outcome.repo_origin_url.clone().unwrap_or_default(),
-            }
-        }
     }
 }
 
@@ -565,13 +518,19 @@ fn base_preflight_checks(prepared: &PreparedManifest, graph: &Graph) -> Vec<Chec
                 CheckDetail {
                     text: format!(
                         "Git: {}",
-                        prepared.git.as_ref().map_or("unknown", |git| if git.clean {
-                            "clean"
-                        } else {
-                            "dirty"
-                        })
+                        prepared
+                            .git
+                            .as_ref()
+                            .map_or("unknown", |git| match git.dirty {
+                                fabro_types::DirtyStatus::Clean => "clean",
+                                fabro_types::DirtyStatus::Dirty => "dirty",
+                                fabro_types::DirtyStatus::Unknown => "unknown",
+                            })
                     ),
-                    warn: prepared.git.as_ref().is_some_and(|git| !git.clean),
+                    warn: prepared
+                        .git
+                        .as_ref()
+                        .is_some_and(|git| git.dirty != fabro_types::DirtyStatus::Clean),
                 },
             ],
             remediation: None,

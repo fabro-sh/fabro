@@ -31,7 +31,7 @@ pub(crate) async fn ensure_origin_if_local(
 
     let state = client.get_run_state(run_id).await?;
     if let Some(run_spec) = state.spec {
-        ensure_matching_repo_origin(run_spec.repo_origin_url.as_deref(), verb)?;
+        ensure_matching_repo_origin(run_spec.repo_origin_url(), verb)?;
     }
     Ok(())
 }

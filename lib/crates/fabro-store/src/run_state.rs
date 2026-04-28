@@ -54,13 +54,11 @@ impl RunProjectionReducer for RunProjection {
                     graph: props.graph.clone(),
                     workflow_slug: props.workflow_slug.clone(),
                     source_directory: props.source_directory.clone(),
-                    repo_origin_url: props.repo_origin_url.clone(),
-                    base_branch: props.base_branch.clone(),
                     labels,
                     provenance: props.provenance.clone(),
                     manifest_blob: props.manifest_blob,
                     definition_blob: None,
-                    pre_run_git: props.pre_run_git.clone(),
+                    git: props.git.clone(),
                     fork_source_ref: props.fork_source_ref.clone(),
                     in_place: props.in_place,
                 });
@@ -397,7 +395,8 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
         state
             .spec
             .as_ref()
-            .and_then(|spec| spec.repo_origin_url.clone()),
+            .and_then(|spec| spec.git.as_ref())
+            .map(|git| git.origin_url.clone()),
         state.start.as_ref().map(|start| start.start_time),
         state.status.unwrap_or(RunStatus::Submitted),
         state.pending_control,
@@ -990,13 +989,11 @@ mod tests {
             graph:            fabro_types::Graph::new("test"),
             workflow_slug:    Some("test".to_string()),
             source_directory: Some("/tmp/repo".to_string()),
-            repo_origin_url:  None,
-            base_branch:      None,
+            git:              None,
             labels:           HashMap::new(),
             provenance:       None,
             manifest_blob:    None,
             definition_blob:  None,
-            pre_run_git:      None,
             fork_source_ref:  None,
             in_place:         false,
         });

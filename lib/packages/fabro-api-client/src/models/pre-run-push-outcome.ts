@@ -13,26 +13,26 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PreRunPushOutcomeFailed } from './pre-run-push-outcome-failed';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PreRunPushOutcomeNotAttempted } from './pre-run-push-outcome-not-attempted';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PreRunPushOutcomeSkippedNoRemote } from './pre-run-push-outcome-skipped-no-remote';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PreRunPushOutcomeSkippedRemoteMismatch } from './pre-run-push-outcome-skipped-remote-mismatch';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PreRunPushOutcomeSucceeded } from './pre-run-push-outcome-succeeded';
 
 /**
- * Outcome of the CLI submitter\'s best-effort pre-run push.
+ * @type PreRunPushOutcome
+ * Outcome of the CLI\'s best-effort pre-run push.
  */
-export interface PreRunPushOutcome {
-    'type': PreRunPushOutcomeTypeEnum;
-    'remote'?: string | null;
-    'branch'?: string | null;
-    'message'?: string | null;
-    'repo_origin_url'?: string | null;
-}
-
-export const PreRunPushOutcomeTypeEnum = {
-    NOT_ATTEMPTED: 'not_attempted',
-    SUCCEEDED: 'succeeded',
-    FAILED: 'failed',
-    SKIPPED_NO_REMOTE: 'skipped_no_remote',
-    SKIPPED_REMOTE_MISMATCH: 'skipped_remote_mismatch'
-} as const;
-
-export type PreRunPushOutcomeTypeEnum = typeof PreRunPushOutcomeTypeEnum[keyof typeof PreRunPushOutcomeTypeEnum];
+export type PreRunPushOutcome = { type: 'failed' } & PreRunPushOutcomeFailed | { type: 'not_attempted' } & PreRunPushOutcomeNotAttempted | { type: 'skipped_no_remote' } & PreRunPushOutcomeSkippedNoRemote | { type: 'skipped_remote_mismatch' } & PreRunPushOutcomeSkippedRemoteMismatch | { type: 'succeeded' } & PreRunPushOutcomeSucceeded;
 
 

@@ -138,7 +138,7 @@ fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
         .run_options
         .pre_run_git
         .as_ref()
-        .map(|git| git.local_dirty);
+        .map(|git| git.dirty);
 
     if matches!(local_dirty, Some(fabro_types::DirtyStatus::Dirty)) {
         let env_name = if !is_local {
@@ -162,7 +162,7 @@ fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
             .run_options
             .pre_run_git
             .as_ref()
-            .and_then(|git| git.display_base_sha.clone());
+            .and_then(|git| git.sha.clone());
         return None;
     }
 
@@ -184,7 +184,7 @@ fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
                     .run_options
                     .pre_run_git
                     .as_ref()
-                    .and_then(|git| git.display_base_sha.clone()),
+                    .and_then(|git| git.sha.clone()),
             )
         };
     options.run_options.display_base_sha.clone_from(&base_sha);
@@ -865,13 +865,17 @@ mod tests {
                 graph,
                 workflow_slug: Some("test".to_string()),
                 source_directory: Some(std::env::current_dir().unwrap().display().to_string()),
-                repo_origin_url: None,
-                base_branch: Some("main".to_string()),
+                git: Some(fabro_types::GitContext {
+                    origin_url:   String::new(),
+                    branch:       "main".to_string(),
+                    sha:          None,
+                    dirty:        fabro_types::DirtyStatus::Clean,
+                    push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+                }),
                 labels: HashMap::new(),
                 provenance: None,
                 manifest_blob: None,
                 definition_blob: None,
-                pre_run_git: None,
                 fork_source_ref: None,
                 in_place: false,
             },

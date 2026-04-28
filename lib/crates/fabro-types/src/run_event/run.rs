@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{ActorRef, BilledTokenCounts, RunNoticeLevel};
 use crate::status::{BlockedReason, FailureReason, SuccessReason};
 use crate::{
-    ForkSourceRef, Graph, PreRunGitContext, RunBlobId, RunControlAction, RunId, RunProvenance,
+    ForkSourceRef, GitContext, Graph, RunBlobId, RunControlAction, RunId, RunProvenance,
     WorkflowSettings,
 };
 
@@ -23,10 +23,6 @@ pub struct RunCreatedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_directory: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repo_origin_url:  Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_branch:      Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_slug:    Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub db_prefix:        Option<String>,
@@ -35,7 +31,7 @@ pub struct RunCreatedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_blob:    Option<RunBlobId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pre_run_git:      Option<PreRunGitContext>,
+    pub git:              Option<GitContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_source_ref:  Option<ForkSourceRef>,
     #[serde(default)]

@@ -76,11 +76,13 @@ pub enum PreRunPushOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PreRunGitContext {
+pub struct GitContext {
+    pub origin_url:   String,
+    pub branch:       String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display_base_sha: Option<String>,
-    pub local_dirty:      DirtyStatus,
-    pub push_outcome:     PreRunPushOutcome,
+    pub sha:          Option<String>,
+    pub dirty:        DirtyStatus,
+    pub push_outcome: PreRunPushOutcome,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,10 +100,6 @@ pub struct RunSpec {
     pub workflow_slug:    Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_directory: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repo_origin_url:  Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_branch:      Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub labels:           HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -111,7 +109,7 @@ pub struct RunSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition_blob:  Option<RunBlobId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pre_run_git:      Option<PreRunGitContext>,
+    pub git:              Option<GitContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_source_ref:  Option<ForkSourceRef>,
     #[serde(default)]
@@ -151,17 +149,17 @@ impl RunSpec {
 
     #[must_use]
     pub fn repo_origin_url(&self) -> Option<&str> {
-        self.repo_origin_url.as_deref()
+        self.git.as_ref().map(|git| git.origin_url.as_str())
     }
 
     #[must_use]
     pub fn base_branch(&self) -> Option<&str> {
-        self.base_branch.as_deref()
+        self.git.as_ref().map(|git| git.branch.as_str())
     }
 
     #[must_use]
-    pub fn pre_run_git(&self) -> Option<&PreRunGitContext> {
-        self.pre_run_git.as_ref()
+    pub fn git(&self) -> Option<&GitContext> {
+        self.git.as_ref()
     }
 
     #[must_use]

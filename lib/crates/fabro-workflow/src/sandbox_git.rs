@@ -527,11 +527,7 @@ fn classify_entry(
     })
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct DiffLineStats {
-    pub additions: u64,
-    pub deletions: u64,
-}
+pub use fabro_types::DiffStats;
 
 /// Output of `git diff --numstat`: which paths are binary, plus per-path
 /// `+/-` line totals for text files in the range. Both pieces come from a
@@ -541,7 +537,7 @@ pub struct DiffNumstat {
     /// Repo-relative paths (post-rename) that git classifies as binary.
     pub binary_paths:       HashSet<String>,
     /// Repo-relative paths (post-rename) to line stats for text files.
-    pub line_stats_by_path: HashMap<String, DiffLineStats>,
+    pub line_stats_by_path: HashMap<String, DiffStats>,
 }
 
 /// Run `git diff --numstat` once and return both the set of binary paths and
@@ -593,14 +589,14 @@ pub async fn list_diff_numstat(
         let Some(path_s) = parts.next() else {
             continue;
         };
-        let Ok(adds) = adds_s.parse::<u64>() else {
+        let Ok(adds) = adds_s.parse::<i64>() else {
             continue;
         };
-        let Ok(dels) = dels_s.parse::<u64>() else {
+        let Ok(dels) = dels_s.parse::<i64>() else {
             continue;
         };
         let path = extract_new_path_from_numstat(path_s);
-        out.line_stats_by_path.insert(path, DiffLineStats {
+        out.line_stats_by_path.insert(path, DiffStats {
             additions: adds,
             deletions: dels,
         });
@@ -1186,13 +1182,17 @@ mod tests {
             graph: fabro_types::Graph::new("metadata"),
             workflow_slug: Some("metadata".to_string()),
             source_directory: Some("/Users/client/project".to_string()),
-            repo_origin_url: Some("https://github.com/fabro-sh/fabro.git".to_string()),
-            base_branch: Some("main".to_string()),
+            git: Some(fabro_types::GitContext {
+                origin_url:   "https://github.com/fabro-sh/fabro.git".to_string(),
+                branch:       "main".to_string(),
+                sha:          None,
+                dirty:        fabro_types::DirtyStatus::Clean,
+                push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+            }),
             labels: HashMap::new(),
             provenance: None,
             manifest_blob: None,
             definition_blob: None,
-            pre_run_git: None,
             fork_source_ref: None,
             in_place: false,
         });

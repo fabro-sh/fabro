@@ -35,9 +35,9 @@ pub use fabro_api::types::{
     QuestionType as ApiQuestionType, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest,
     RewindRequest, RewindResponse, RunArtifactEntry, RunArtifactListResponse, RunBilling,
     RunBillingStage, RunBillingTotals, RunError, RunManifest, RunStage, RunStatusResponse,
-    SandboxFileEntry, SandboxFileListResponse, SecretType as ApiSecretType, SshAccessRequest,
-    SshAccessResponse, StageStatus as ApiStageStatus, StartRunRequest, SubmitAnswerRequest,
-    SystemFeatures, SystemInfoResponse, SystemRunCounts, TimelineEntryResponse, WriteBlobResponse,
+    SandboxFileEntry, SandboxFileListResponse, SshAccessRequest, SshAccessResponse,
+    StageStatus as ApiStageStatus, StartRunRequest, SubmitAnswerRequest, SystemFeatures,
+    SystemInfoResponse, SystemRunCounts, TimelineEntryResponse, WriteBlobResponse,
 };
 use fabro_auth::{
     CredentialSource, VaultCredentialSource, auth_issue_message, parse_credential_secret,
@@ -1826,20 +1826,12 @@ async fn list_secrets(_auth: AuthenticatedService, State(state): State<Arc<AppSt
     (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response()
 }
 
-fn secret_type_from_api(secret_type: ApiSecretType) -> SecretType {
-    match secret_type {
-        ApiSecretType::Environment => SecretType::Environment,
-        ApiSecretType::File => SecretType::File,
-        ApiSecretType::Credential => SecretType::Credential,
-    }
-}
-
 async fn create_secret(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateSecretRequest>,
 ) -> Response {
-    let secret_type = secret_type_from_api(body.type_);
+    let secret_type = body.type_;
     let name = body.name;
     let value = body.value;
     let description = body.description;
@@ -5407,14 +5399,14 @@ impl<'a> RunPrInputs<'a> {
                 "Run spec missing from store.",
             )
         })?;
-        let origin_url = run_spec.repo_origin_url.as_deref().ok_or_else(|| {
+        let origin_url = run_spec.repo_origin_url().ok_or_else(|| {
             ApiError::with_code(
                 StatusCode::BAD_REQUEST,
                 "Run has no repo origin URL — pull request creation requires git metadata.",
                 "missing_repo_origin",
             )
         })?;
-        let base_branch = run_spec.base_branch.as_deref().ok_or_else(|| {
+        let base_branch = run_spec.base_branch().ok_or_else(|| {
             ApiError::with_code(
                 StatusCode::BAD_REQUEST,
                 "Run has no base branch — pull request creation requires git metadata.",
@@ -9724,19 +9716,27 @@ strategy = "token"
             "goal".to_string(),
             AttrValue::String("Ship the server-side PR".to_string()),
         );
+        let git = match (repo_origin_url, base_branch) {
+            (Some(origin), Some(branch)) => Some(fabro_types::GitContext {
+                origin_url:   origin.to_string(),
+                branch:       branch.to_string(),
+                sha:          None,
+                dirty:        fabro_types::DirtyStatus::Clean,
+                push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+            }),
+            _ => None,
+        };
         let run_spec = RunSpec {
             run_id,
             settings: fabro_types::WorkflowSettings::default(),
             graph,
             workflow_slug: Some("test".to_string()),
             source_directory: Some("/tmp/project".to_string()),
-            repo_origin_url: repo_origin_url.map(str::to_string),
-            base_branch: base_branch.map(str::to_string),
+            git: git.clone(),
             labels: HashMap::new(),
             provenance: None,
             manifest_blob: None,
             definition_blob: None,
-            pre_run_git: None,
             fork_source_ref: None,
             in_place: false,
         };
@@ -9751,13 +9751,11 @@ strategy = "token"
                 labels: run_spec.labels.clone().into_iter().collect(),
                 run_dir: run_spec.source_directory.clone().unwrap_or_default(),
                 source_directory: run_spec.source_directory.clone(),
-                repo_origin_url: run_spec.repo_origin_url.clone(),
-                base_branch: run_spec.base_branch.clone(),
                 workflow_slug: run_spec.workflow_slug.clone(),
                 db_prefix: None,
                 provenance: run_spec.provenance.clone(),
                 manifest_blob: None,
-                pre_run_git: None,
+                git,
                 fork_source_ref: None,
                 in_place: false,
             },

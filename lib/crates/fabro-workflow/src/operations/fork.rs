@@ -123,7 +123,7 @@ fn validate_source_spec(
             "target checkpoint has an empty git_commit_sha; cannot fork".to_string(),
         ));
     }
-    let Some(origin) = spec.repo_origin_url.as_ref() else {
+    let Some(origin) = spec.repo_origin_url() else {
         return Err(Error::Validation(
             "source run has no repo_origin_url; cannot validate fork origin".to_string(),
         ));
@@ -180,13 +180,11 @@ async fn persist_forked_run(
         labels:           spec.labels.clone().into_iter().collect(),
         run_dir:          String::new(),
         source_directory: spec.source_directory.clone(),
-        repo_origin_url:  spec.repo_origin_url.clone(),
-        base_branch:      spec.base_branch.clone(),
         workflow_slug:    spec.workflow_slug.clone(),
         db_prefix:        None,
         provenance:       spec.provenance.clone(),
         manifest_blob:    spec.manifest_blob,
-        pre_run_git:      spec.pre_run_git.clone(),
+        git:              spec.git.clone(),
         fork_source_ref:  spec.fork_source_ref.clone(),
         in_place:         spec.in_place,
     })
@@ -330,13 +328,17 @@ mod tests {
             labels:           BTreeMap::new(),
             run_dir:          "/tmp/source".to_string(),
             source_directory: Some("/client/source".to_string()),
-            repo_origin_url:  Some("https://github.com/example/repo.git".to_string()),
-            base_branch:      Some("main".to_string()),
             workflow_slug:    Some("fork-source".to_string()),
             db_prefix:        None,
             provenance:       None,
             manifest_blob:    None,
-            pre_run_git:      None,
+            git:              Some(fabro_types::GitContext {
+                origin_url:   "https://github.com/example/repo.git".to_string(),
+                branch:       "main".to_string(),
+                sha:          None,
+                dirty:        fabro_types::DirtyStatus::Clean,
+                push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+            }),
             fork_source_ref:  None,
             in_place:         false,
         })

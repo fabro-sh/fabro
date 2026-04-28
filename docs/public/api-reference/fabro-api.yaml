@@ -3583,7 +3583,7 @@ components:
           description: CLI working directory at invocation time.
           example: "/tmp/project"
         git:
-          $ref: "#/components/schemas/ManifestGit"
+          $ref: "#/components/schemas/GitContext"
         goal:
           $ref: "#/components/schemas/ManifestGoal"
         args:
@@ -3599,14 +3599,13 @@ components:
           additionalProperties:
             $ref: "#/components/schemas/ManifestWorkflow"
 
-    ManifestGit:
-      description: Observable git state from the CLI working directory.
+    GitContext:
+      description: Observable git state captured before the run starts.
       type: object
       required:
         - origin_url
         - branch
-        - sha
-        - clean
+        - dirty
         - push_outcome
       properties:
         origin_url:
@@ -3618,17 +3617,32 @@ components:
           description: Current branch name.
           example: feature/foo
         sha:
-          type: string
-          description: Current commit SHA.
+          type: ["string", "null"]
+          description: Current commit SHA, when known.
           example: abc123def
-        clean:
-          type: boolean
-          description: Whether the working tree has uncommitted changes.
+        dirty:
+          $ref: "#/components/schemas/DirtyStatus"
         push_outcome:
-          $ref: "#/components/schemas/ManifestPreRunPushOutcome"
+          $ref: "#/components/schemas/PreRunPushOutcome"
 
-    ManifestPreRunPushOutcome:
+    PreRunPushOutcome:
       description: Outcome of the CLI's best-effort pre-run push.
+      oneOf:
+        - $ref: "#/components/schemas/PreRunPushOutcomeNotAttempted"
+        - $ref: "#/components/schemas/PreRunPushOutcomeSucceeded"
+        - $ref: "#/components/schemas/PreRunPushOutcomeFailed"
+        - $ref: "#/components/schemas/PreRunPushOutcomeSkippedNoRemote"
+        - $ref: "#/components/schemas/PreRunPushOutcomeSkippedRemoteMismatch"
+      discriminator:
+        propertyName: type
+        mapping:
+          not_attempted: "#/components/schemas/PreRunPushOutcomeNotAttempted"
+          succeeded: "#/components/schemas/PreRunPushOutcomeSucceeded"
+          failed: "#/components/schemas/PreRunPushOutcomeFailed"
+          skipped_no_remote: "#/components/schemas/PreRunPushOutcomeSkippedNoRemote"
+          skipped_remote_mismatch: "#/components/schemas/PreRunPushOutcomeSkippedRemoteMismatch"
+
+    PreRunPushOutcomeNotAttempted:
       type: object
       required:
         - type
@@ -3637,18 +3651,67 @@ components:
           type: string
           enum:
             - not_attempted
+
+    PreRunPushOutcomeSucceeded:
+      type: object
+      required:
+        - type
+        - remote
+        - branch
+      properties:
+        type:
+          type: string
+          enum:
             - succeeded
+        remote:
+          type: string
+        branch:
+          type: string
+
+    PreRunPushOutcomeFailed:
+      type: object
+      required:
+        - type
+        - remote
+        - branch
+        - message
+      properties:
+        type:
+          type: string
+          enum:
             - failed
+        remote:
+          type: string
+        branch:
+          type: string
+        message:
+          type: string
+
+    PreRunPushOutcomeSkippedNoRemote:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
             - skipped_no_remote
+
+    PreRunPushOutcomeSkippedRemoteMismatch:
+      type: object
+      required:
+        - type
+        - remote
+        - repo_origin_url
+      properties:
+        type:
+          type: string
+          enum:
             - skipped_remote_mismatch
         remote:
-          type: ["string", "null"]
-        branch:
-          type: ["string", "null"]
-        message:
-          type: ["string", "null"]
+          type: string
         repo_origin_url:
-          type: ["string", "null"]
+          type: string
 
     ManifestGoal:
       description: Resolved goal with provenance.
@@ -4466,43 +4529,6 @@ components:
         - dirty
         - unknown
 
-    PreRunPushOutcome:
-      description: Outcome of the CLI submitter's best-effort pre-run push.
-      type: object
-      required:
-        - type
-      properties:
-        type:
-          type: string
-          enum:
-            - not_attempted
-            - succeeded
-            - failed
-            - skipped_no_remote
-            - skipped_remote_mismatch
-        remote:
-          type: ["string", "null"]
-        branch:
-          type: ["string", "null"]
-        message:
-          type: ["string", "null"]
-        repo_origin_url:
-          type: ["string", "null"]
-
-    PreRunGitContext:
-      description: Submitter-side git context captured before run creation.
-      type: object
-      required:
-        - local_dirty
-        - push_outcome
-      properties:
-        display_base_sha:
-          type: ["string", "null"]
-        local_dirty:
-          $ref: "#/components/schemas/DirtyStatus"
-        push_outcome:
-          $ref: "#/components/schemas/PreRunPushOutcome"
-
     ForkSourceRef:
       description: Source checkpoint used to initialize a forked or rewound run.
       type: object
@@ -4535,10 +4561,6 @@ components:
           type: ["string", "null"]
         source_directory:
           type: ["string", "null"]
-        repo_origin_url:
-          type: ["string", "null"]
-        base_branch:
-          type: ["string", "null"]
         labels:
           type: object
           additionalProperties:
@@ -4550,9 +4572,9 @@ components:
           type: ["string", "null"]
         definition_blob:
           type: ["string", "null"]
-        pre_run_git:
+        git:
           oneOf:
-            - $ref: "#/components/schemas/PreRunGitContext"
+            - $ref: "#/components/schemas/GitContext"
             - type: "null"
         fork_source_ref:
           oneOf:

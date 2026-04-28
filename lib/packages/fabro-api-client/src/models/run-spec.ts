@@ -18,7 +18,7 @@
 import type { ForkSourceRef } from './fork-source-ref';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PreRunGitContext } from './pre-run-git-context';
+import type { GitContext } from './git-context';
 
 /**
  * Durable workflow run specification reconstructed from run.created events.
@@ -32,13 +32,11 @@ export interface RunSpec {
     'graph': { [key: string]: any; };
     'workflow_slug'?: string | null;
     'source_directory'?: string | null;
-    'repo_origin_url'?: string | null;
-    'base_branch'?: string | null;
     'labels'?: { [key: string]: string; };
     'provenance'?: { [key: string]: any; } | null;
     'manifest_blob'?: string | null;
     'definition_blob'?: string | null;
-    'pre_run_git'?: PreRunGitContext | null;
+    'git'?: GitContext | null;
     'fork_source_ref'?: ForkSourceRef | null;
     'in_place': boolean;
 }

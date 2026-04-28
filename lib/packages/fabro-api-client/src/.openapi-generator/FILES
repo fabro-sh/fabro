@@ -75,6 +75,7 @@ models/file-diff.ts
 models/fork-request.ts
 models/fork-response.ts
 models/fork-source-ref.ts
+models/git-context.ts
 models/git-hub-meta-hooks-entry.ts
 models/github-integration-settings.ts
 models/github-integration-strategy.ts
@@ -113,9 +114,7 @@ models/manifest-args.ts
 models/manifest-config.ts
 models/manifest-file-entry.ts
 models/manifest-file-ref.ts
-models/manifest-git.ts
 models/manifest-goal.ts
-models/manifest-pre-run-push-outcome.ts
 models/manifest-target.ts
 models/manifest-workflow-config.ts
 models/manifest-workflow.ts
@@ -146,7 +145,11 @@ models/paginated-saved-query-list.ts
 models/paginated-stage-turn-list.ts
 models/pagination-meta.ts
 models/pending-interview-record.ts
-models/pre-run-git-context.ts
+models/pre-run-push-outcome-failed.ts
+models/pre-run-push-outcome-not-attempted.ts
+models/pre-run-push-outcome-skipped-no-remote.ts
+models/pre-run-push-outcome-skipped-remote-mismatch.ts
+models/pre-run-push-outcome-succeeded.ts
 models/pre-run-push-outcome.ts
 models/preflight-check-detail.ts
 models/preflight-check-report.ts

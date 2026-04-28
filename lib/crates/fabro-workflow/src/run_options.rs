@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use fabro_types::settings::run::RunMode;
-use fabro_types::{ForkSourceRef, PreRunGitContext, RunId, WorkflowSettings};
+use fabro_types::{ForkSourceRef, GitContext, RunId, WorkflowSettings};
 
 use crate::git::{GitAuthor, git_author_from_settings};
 
@@ -31,7 +31,7 @@ pub struct RunOptions {
     /// GitHub credentials for pushing metadata branches to origin.
     pub github_app:       Option<fabro_github::GitHubCredentials>,
     /// Submitter-side git context captured before the run was created.
-    pub pre_run_git:      Option<PreRunGitContext>,
+    pub pre_run_git:      Option<GitContext>,
     /// Source checkpoint ref used by fork/rewind-created runs.
     pub fork_source_ref:  Option<ForkSourceRef>,
     /// Name of the branch the run was started from (for PR base).

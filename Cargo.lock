@@ -2355,6 +2355,7 @@ name = "fabro-vault"
 version = "0.217.0-nightly.0"
 dependencies = [
  "chrono",
+ "fabro-types",
  "serde",
  "serde_json",
  "tempfile",

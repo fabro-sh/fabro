@@ -318,6 +318,11 @@ fn main() {
             "fabro_types::settings::run::MergeStrategy",
             &[],
         ),
+        ("SecretType", "fabro_types::SecretType", &[]),
+        ("DiffStats", "fabro_types::DiffStats", &[]),
+        ("PreRunPushOutcome", "fabro_types::PreRunPushOutcome", &[]),
+        ("DirtyStatus", "fabro_types::DirtyStatus", &[]),
+        ("GitContext", "fabro_types::GitContext", &[]),
     ];
     for (name, path, impls) in replacements {
         settings.with_replacement(*name, *path, impls.iter().copied());

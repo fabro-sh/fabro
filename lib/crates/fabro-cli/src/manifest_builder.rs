@@ -7,14 +7,14 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
-use fabro_api::types::{self, ManifestPreRunPushOutcome, ManifestPreRunPushOutcomeType};
+use fabro_api::types;
 use fabro_config::project::{self, discover_project_config, resolve_workflow_path};
 use fabro_config::run::{resolve_run_goal_from_layer, resolve_run_goal_from_namespace};
 use fabro_config::{CliLayer, DaytonaDockerfileLayer, RunLayer, WorkflowSettingsBuilder};
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal};
-use fabro_types::{RunId, WorkflowSettings};
+use fabro_types::{DirtyStatus, GitContext, PreRunPushOutcome, RunId, WorkflowSettings};
 use fabro_workflow::git::{GitSyncStatus, branch_needs_push, head_sha, push_branch, sync_status};
 
 use crate::args::{PreflightArgs, RunArgs};
@@ -138,7 +138,7 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
     )?;
 
     let configured_repo_origin_url = configured_repo_origin_url(&workflow_settings);
-    let git = build_manifest_git(&working_directory, configured_repo_origin_url.as_deref());
+    let git = build_git_context(&working_directory, configured_repo_origin_url.as_deref());
     let args = input.args.filter(|args| !manifest_args_is_empty(args));
 
     Ok(BuiltManifest {
@@ -498,14 +498,16 @@ fn resolved_goal_to_manifest(resolved: ResolvedRunGoal) -> types::ManifestGoal {
     }
 }
 
-fn build_manifest_git(
+fn build_git_context(
     repo_path: &Path,
     configured_repo_origin_url: Option<&str>,
-) -> Option<types::ManifestGit> {
+) -> Option<GitContext> {
     let (origin_url, branch) = detect_manifest_repo_info(repo_path)?;
-    let sha = head_sha(repo_path).ok()?;
-    let status = sync_status(repo_path, "origin", Some(&branch));
-    let clean = status != GitSyncStatus::Dirty;
+    let sha = head_sha(repo_path).ok();
+    let dirty = match sync_status(repo_path, "origin", Some(&branch)) {
+        GitSyncStatus::Dirty => DirtyStatus::Dirty,
+        GitSyncStatus::Synced | GitSyncStatus::Unsynced => DirtyStatus::Clean,
+    };
     let repo_origin_url = configured_repo_origin_url
         .map(fabro_github::normalize_repo_origin_url)
         .filter(|url| !url.is_empty())
@@ -522,12 +524,12 @@ fn build_manifest_git(
         origin_url.as_deref(),
         configured_repo_origin_url,
     );
-    Some(types::ManifestGit {
-        branch,
-        clean,
+    Some(GitContext {
         origin_url: repo_origin_url,
-        push_outcome,
+        branch,
         sha,
+        dirty,
+        push_outcome,
     })
 }
 
@@ -565,58 +567,37 @@ fn build_manifest_push_outcome(
     branch: &str,
     origin_url: Option<&str>,
     configured_repo_origin_url: Option<&str>,
-) -> ManifestPreRunPushOutcome {
-    if origin_url.is_none() {
-        return ManifestPreRunPushOutcome {
-            type_:           ManifestPreRunPushOutcomeType::SkippedNoRemote,
-            remote:          None,
-            branch:          Some(branch.to_string()),
-            message:         None,
-            repo_origin_url: None,
-        };
-    }
+) -> PreRunPushOutcome {
+    let Some(origin_url) = origin_url else {
+        return PreRunPushOutcome::SkippedNoRemote;
+    };
+
     if let Some(repo_origin_url) = configured_repo_origin_url
         .map(fabro_github::normalize_repo_origin_url)
         .filter(|url| !url.is_empty())
     {
-        let remote = origin_url
-            .map(fabro_github::normalize_repo_origin_url)
-            .unwrap_or_default();
+        let remote = fabro_github::normalize_repo_origin_url(origin_url);
         if remote != repo_origin_url {
-            return ManifestPreRunPushOutcome {
-                type_:           ManifestPreRunPushOutcomeType::SkippedRemoteMismatch,
-                remote:          Some(remote),
-                branch:          Some(branch.to_string()),
-                message:         None,
-                repo_origin_url: Some(repo_origin_url),
+            return PreRunPushOutcome::SkippedRemoteMismatch {
+                remote,
+                repo_origin_url,
             };
         }
     }
 
     if !branch_needs_push(repo_path, "origin", branch) {
-        return ManifestPreRunPushOutcome {
-            type_:           ManifestPreRunPushOutcomeType::NotAttempted,
-            remote:          None,
-            branch:          None,
-            message:         None,
-            repo_origin_url: None,
-        };
+        return PreRunPushOutcome::NotAttempted;
     }
 
     match push_branch(repo_path, "origin", branch) {
-        Ok(()) => ManifestPreRunPushOutcome {
-            type_:           ManifestPreRunPushOutcomeType::Succeeded,
-            remote:          Some("origin".to_string()),
-            branch:          Some(branch.to_string()),
-            message:         None,
-            repo_origin_url: None,
+        Ok(()) => PreRunPushOutcome::Succeeded {
+            remote: "origin".to_string(),
+            branch: branch.to_string(),
         },
-        Err(err) => ManifestPreRunPushOutcome {
-            type_:           ManifestPreRunPushOutcomeType::Failed,
-            remote:          Some("origin".to_string()),
-            branch:          Some(branch.to_string()),
-            message:         Some(err.to_string()),
-            repo_origin_url: None,
+        Err(err) => PreRunPushOutcome::Failed {
+            remote:  "origin".to_string(),
+            branch:  branch.to_string(),
+            message: err.to_string(),
         },
     }
 }
@@ -1018,18 +999,10 @@ repository = "target"
             .git
             .expect("manifest git info should be detected");
         assert_eq!(git.origin_url, "https://github.com/example/target");
-        assert_eq!(
-            git.push_outcome.type_,
-            ManifestPreRunPushOutcomeType::SkippedRemoteMismatch
-        );
-        assert_eq!(
-            git.push_outcome.remote.as_deref(),
-            Some("https://github.com/user/forked-target")
-        );
-        assert_eq!(
-            git.push_outcome.repo_origin_url.as_deref(),
-            Some("https://github.com/example/target")
-        );
+        assert_eq!(git.push_outcome, PreRunPushOutcome::SkippedRemoteMismatch {
+            remote:          "https://github.com/user/forked-target".to_string(),
+            repo_origin_url: "https://github.com/example/target".to_string(),
+        });
     }
 
     fn init_git_repo(path: &Path, branch: &str, origin_url: &str) {

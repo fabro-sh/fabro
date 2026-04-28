@@ -15,13 +15,13 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { GitContext } from './git-context';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { ManifestArgs } from './manifest-args';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { ManifestConfig } from './manifest-config';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { ManifestGit } from './manifest-git';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { ManifestGoal } from './manifest-goal';
@@ -48,7 +48,7 @@ export interface RunManifest {
      * CLI working directory at invocation time.
      */
     'cwd': string;
-    'git'?: ManifestGit;
+    'git'?: GitContext;
     'goal'?: ManifestGoal;
     'args'?: ManifestArgs;
     'target': ManifestTarget;
