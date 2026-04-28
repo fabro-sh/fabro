@@ -6,8 +6,9 @@ use anyhow::{Result, anyhow, bail};
 use fabro_api::types;
 use fabro_auth::auth_issue_message;
 use fabro_config::{
-    CliLayer, CliOutputLayer, DaytonaDockerfileLayer, DockerSandboxLayer, ReplaceMap,
-    RunExecutionLayer, RunLayer, RunModelLayer, RunSandboxLayer, WorkflowSettingsBuilder,
+    CliLayer, CliOutputLayer, DaytonaDockerfileLayer, DockerSandboxLayer, LocalSandboxLayer,
+    ReplaceMap, RunExecutionLayer, RunLayer, RunModelLayer, RunSandboxLayer,
+    WorkflowSettingsBuilder,
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
@@ -24,7 +25,7 @@ use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
     ApprovalMode, DaytonaNetworkLayer, DaytonaSettings, DockerSettings, DockerfileSource, RunGoal,
-    RunMode, RunNamespace,
+    RunMode, RunNamespace, WorktreeMode,
 };
 use fabro_types::{DirtyStatus, PreRunGitContext, PreRunPushOutcome, RunId, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
@@ -39,16 +40,16 @@ use crate::server::AppState;
 
 #[derive(Clone)]
 pub(crate) struct PreparedManifest {
-    pub cwd:                  PathBuf,
-    pub git:                  Option<types::ManifestGit>,
-    pub root_source:          String,
-    pub run_id:               Option<RunId>,
-    pub settings:             WorkflowSettings,
-    pub target_path:          PathBuf,
-    pub workflow_bundle:      WorkflowBundle,
-    pub workflow_input:       BundledWorkflow,
-    pub source_directory:     PathBuf,
-    pub checkpoints_disabled: bool,
+    pub cwd:              PathBuf,
+    pub git:              Option<types::ManifestGit>,
+    pub root_source:      String,
+    pub run_id:           Option<RunId>,
+    pub settings:         WorkflowSettings,
+    pub target_path:      PathBuf,
+    pub workflow_bundle:  WorkflowBundle,
+    pub workflow_input:   BundledWorkflow,
+    pub source_directory: PathBuf,
+    pub in_place:         bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -68,29 +69,6 @@ pub(crate) fn prepare_manifest(
 ) -> Result<PreparedManifest> {
     if manifest.version != 1 {
         bail!("unsupported manifest version {}", manifest.version);
-    }
-    let (in_place, allow_no_checkpoints) = manifest.args.as_ref().map_or((false, false), |args| {
-        (
-            args.in_place.unwrap_or(false),
-            args.allow_no_checkpoints.unwrap_or(false),
-        )
-    });
-    if in_place && !allow_no_checkpoints {
-        bail!("in_place requires allow_no_checkpoints");
-    }
-    if allow_no_checkpoints && !in_place {
-        bail!("allow_no_checkpoints requires in_place");
-    }
-    if in_place {
-        if let Some(sandbox) = manifest
-            .args
-            .as_ref()
-            .and_then(|args| args.sandbox.as_deref())
-        {
-            if sandbox != "local" {
-                bail!("in_place requires the local sandbox provider");
-            }
-        }
     }
 
     let cwd = PathBuf::from(&manifest.cwd);
@@ -141,6 +119,9 @@ pub(crate) fn prepare_manifest(
         settings.run.goal = Some(RunGoal::Inline(InterpString::parse(&goal.text)));
     }
 
+    let in_place = settings.run.sandbox.provider == "local"
+        && settings.run.sandbox.local.worktree_mode == WorktreeMode::Never;
+
     Ok(PreparedManifest {
         cwd: cwd.clone(),
         git: manifest.git.clone(),
@@ -156,7 +137,7 @@ pub(crate) fn prepare_manifest(
         workflow_bundle,
         workflow_input,
         source_directory: resolve_working_directory(&settings, &cwd),
-        checkpoints_disabled: in_place,
+        in_place,
     })
 }
 
@@ -191,7 +172,7 @@ pub(crate) fn create_run_input(
         base_branch: prepared.git.as_ref().map(|git| git.branch.clone()),
         pre_run_git: prepared.git.as_ref().map(pre_run_git_from_manifest),
         fork_source_ref: None,
-        checkpoints_disabled: prepared.checkpoints_disabled,
+        checkpoints_disabled: prepared.in_place,
         provenance: None,
         configured_providers,
     }
@@ -315,16 +296,21 @@ fn manifest_args_overrides(args: Option<&types::ManifestArgs>) -> ManifestSettin
         name:      args.model.as_deref().map(InterpString::parse),
         fallbacks: Vec::new(),
     });
-    let sandbox_provider = args
-        .sandbox
-        .clone()
-        .or_else(|| (args.in_place == Some(true)).then(|| "local".to_string()));
-    let sandbox = (sandbox_provider.is_some()
+    let local_worktree = args
+        .worktree_mode
+        .as_deref()
+        .and_then(parse_worktree_mode_arg)
+        .map(|mode| LocalSandboxLayer {
+            worktree_mode: Some(mode),
+        });
+    let sandbox = (args.sandbox.is_some()
         || args.preserve_sandbox.is_some()
-        || args.docker_image.is_some())
+        || args.docker_image.is_some()
+        || local_worktree.is_some())
     .then(|| RunSandboxLayer {
-        provider: sandbox_provider,
+        provider: args.sandbox.clone(),
         preserve: args.preserve_sandbox,
+        local: local_worktree,
         docker: args.docker_image.as_ref().map(|image| DockerSandboxLayer {
             image: Some(image.clone()),
             ..DockerSandboxLayer::default()
@@ -371,6 +357,16 @@ fn manifest_args_overrides(args: Option<&types::ManifestArgs>) -> ManifestSettin
     });
 
     ManifestSettingsOverrides { run, cli }
+}
+
+fn parse_worktree_mode_arg(value: &str) -> Option<WorktreeMode> {
+    match value {
+        "always" => Some(WorktreeMode::Always),
+        "clean" => Some(WorktreeMode::Clean),
+        "dirty" => Some(WorktreeMode::Dirty),
+        "never" => Some(WorktreeMode::Never),
+        _ => None,
+    }
 }
 
 fn parse_labels(labels: &[String]) -> HashMap<String, String> {
@@ -1164,18 +1160,17 @@ root = "/srv/fabro"
         )));
         let mut manifest = minimal_manifest();
         manifest.args = Some(types::ManifestArgs {
-            auto_approve:         None,
-            dry_run:              Some(true),
-            label:                Vec::new(),
-            model:                None,
-            no_retro:             None,
-            preserve_sandbox:     None,
-            provider:             None,
-            sandbox:              None,
-            docker_image:         None,
-            verbose:              None,
-            in_place:             None,
-            allow_no_checkpoints: None,
+            auto_approve:     None,
+            dry_run:          Some(true),
+            label:            Vec::new(),
+            model:            None,
+            no_retro:         None,
+            preserve_sandbox: None,
+            provider:         None,
+            sandbox:          None,
+            docker_image:     None,
+            verbose:          None,
+            worktree_mode:    None,
         });
 
         let prepared = prepare_manifest(&server_settings, &manifest).unwrap();

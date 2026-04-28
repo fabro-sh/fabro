@@ -3693,12 +3693,11 @@ components:
           type: boolean
         preserve_sandbox:
           type: boolean
-        in_place:
-          type: boolean
-          description: Run against the submitted source directory directly.
-        allow_no_checkpoints:
-          type: boolean
-          description: Required with `in_place`; disables git checkpointing.
+        worktree_mode:
+          type: string
+          description: |
+            Override `run.sandbox.local.worktree_mode` (e.g. `never` for
+            `--in-place`).
         label:
           type: array
           items:

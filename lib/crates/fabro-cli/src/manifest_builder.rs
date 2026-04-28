@@ -162,44 +162,42 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
 
 pub(crate) fn run_manifest_args(args: &RunArgs) -> Option<types::ManifestArgs> {
     let payload = types::ManifestArgs {
-        auto_approve:         args.auto_approve.then_some(true),
-        dry_run:              args.dry_run.then_some(true),
-        label:                args.label.clone(),
-        model:                args.model.clone(),
-        no_retro:             args.no_retro.then_some(true),
-        preserve_sandbox:     args.preserve_sandbox.then_some(true),
-        provider:             args.provider.clone(),
-        sandbox:              args
+        auto_approve:     args.auto_approve.then_some(true),
+        dry_run:          args.dry_run.then_some(true),
+        label:            args.label.clone(),
+        model:            args.model.clone(),
+        no_retro:         args.no_retro.then_some(true),
+        preserve_sandbox: args.preserve_sandbox.then_some(true),
+        provider:         args.provider.clone(),
+        sandbox:          args
             .sandbox
             .map(|provider| fabro_sandbox::SandboxProvider::from(provider).to_string())
             .or_else(|| {
                 args.in_place
                     .then(|| fabro_sandbox::SandboxProvider::Local.to_string())
             }),
-        docker_image:         None,
-        verbose:              args.verbose.then_some(true),
-        in_place:             args.in_place.then_some(true),
-        allow_no_checkpoints: args.allow_no_checkpoints.then_some(true),
+        docker_image:     None,
+        verbose:          args.verbose.then_some(true),
+        worktree_mode:    args.in_place.then(|| "never".to_string()),
     };
     (!manifest_args_is_empty(&payload)).then_some(payload)
 }
 
 pub(crate) fn preflight_manifest_args(args: &PreflightArgs) -> Option<types::ManifestArgs> {
     let payload = types::ManifestArgs {
-        auto_approve:         None,
-        dry_run:              None,
-        label:                Vec::new(),
-        model:                args.model.clone(),
-        no_retro:             None,
-        preserve_sandbox:     None,
-        provider:             args.provider.clone(),
-        sandbox:              args
+        auto_approve:     None,
+        dry_run:          None,
+        label:            Vec::new(),
+        model:            args.model.clone(),
+        no_retro:         None,
+        preserve_sandbox: None,
+        provider:         args.provider.clone(),
+        sandbox:          args
             .sandbox
             .map(|provider| fabro_sandbox::SandboxProvider::from(provider).to_string()),
-        docker_image:         None,
-        verbose:              args.verbose.then_some(true),
-        in_place:             None,
-        allow_no_checkpoints: None,
+        docker_image:     None,
+        verbose:          args.verbose.then_some(true),
+        worktree_mode:    None,
     };
     (!manifest_args_is_empty(&payload)).then_some(payload)
 }
@@ -700,6 +698,7 @@ fn manifest_args_is_empty(args: &types::ManifestArgs) -> bool {
         && args.sandbox.is_none()
         && args.docker_image.is_none()
         && args.verbose.is_none()
+        && args.worktree_mode.is_none()
 }
 
 #[cfg(test)]

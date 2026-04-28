@@ -237,12 +237,8 @@ pub(crate) struct RunArgs {
     pub(crate) sandbox: Option<CliSandboxProvider>,
 
     /// Run directly in the source checkout without git checkpoints
-    #[arg(long, requires = "allow_no_checkpoints", conflicts_with = "sandbox")]
+    #[arg(long, conflicts_with = "sandbox")]
     pub(crate) in_place: bool,
-
-    /// Acknowledge that --in-place disables checkpoints
-    #[arg(long, requires = "in_place")]
-    pub(crate) allow_no_checkpoints: bool,
 
     /// Attach a label to this run (repeatable, format: KEY=VALUE)
     #[arg(long = "label", value_name = "KEY=VALUE")]

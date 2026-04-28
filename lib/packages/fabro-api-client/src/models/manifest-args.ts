@@ -31,13 +31,9 @@ export interface ManifestArgs {
     'no_retro'?: boolean;
     'preserve_sandbox'?: boolean;
     /**
-     * Run against the submitted source directory directly.
+     * Override `run.sandbox.local.worktree_mode` (e.g. `never` for `--in-place`). 
      */
-    'in_place'?: boolean;
-    /**
-     * Required with `in_place`; disables git checkpointing.
-     */
-    'allow_no_checkpoints'?: boolean;
+    'worktree_mode'?: string;
     'label'?: Array<string>;
 }
 
