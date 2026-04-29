@@ -22,6 +22,7 @@ use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
 use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
+use crate::redact::{classify_credential_refresh_failure, redact_auth_url};
 use crate::sandbox::resolve_path;
 use crate::{
     DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
@@ -423,10 +424,12 @@ impl DockerSandbox {
                 .docker_exec_shell(&command, 10_000, Some(WORKING_DIRECTORY), None, None)
                 .await?;
             if result.exit_code != 0 {
-                let stderr = redact_auth_url(&result.stderr, Some(auth_url));
+                let err = result
+                    .into_exec_error_with_redactor("git remote set-url origin (post-clone)", |s| {
+                        redact_auth_url(s, Some(auth_url))
+                    });
                 tracing::warn!(
-                    exit_code = result.exit_code,
-                    stderr = %stderr.trim(),
+                    error = %err,
                     "Failed to set Docker sandbox push credentials on origin — \
                      subsequent git push from this sandbox will fail"
                 );
@@ -632,13 +635,6 @@ fn bash_remediation(error: &DockerError, image: &str) -> String {
     format!(
         "Failed to start Docker container from image '{image}': {error}. Docker sandboxes require /bin/bash for internal commands; use an image with bash and git, such as buildpack-deps:noble."
     )
-}
-
-fn redact_auth_url(text: &str, auth_url: Option<&fabro_redact::DisplaySafeUrl>) -> String {
-    let Some(auth_url) = auth_url else {
-        return text.to_string();
-    };
-    text.replace(&auth_url.raw_string(), &auth_url.redacted_string())
 }
 
 fn build_single_file_tar(file_name: &str, bytes: &[u8]) -> crate::Result<Vec<u8>> {
@@ -1208,9 +1204,9 @@ impl Sandbox for DockerSandbox {
         )]
     }
 
-    async fn git_push_ref(&self, refspec: &str) -> bool {
+    async fn git_push_ref(&self, refspec: &str) -> crate::Result<()> {
         if !self.repo_cloned() {
-            return false;
+            return Ok(());
         }
         crate::git_push_via_exec(self, refspec).await
     }
@@ -1254,7 +1250,10 @@ impl Sandbox for DockerSandbox {
             origin_url,
         )
         .await
-        .map_err(|e| crate::Error::message(format!("Failed to refresh GitHub App token: {e}")))?;
+        .map_err(|e| {
+            let class = classify_credential_refresh_failure(&format!("token_mint_failed: {e}"));
+            crate::Error::message(format!("Failed to refresh push credentials: {class}"))
+        })?;
 
         let command = format!(
             "git -c maintenance.auto=0 remote set-url origin {}",
@@ -1264,10 +1263,9 @@ impl Sandbox for DockerSandbox {
             .docker_exec_shell(&command, 10_000, Some(WORKING_DIRECTORY), None, None)
             .await?;
         if result.exit_code != 0 {
-            let stderr = redact_auth_url(&result.stderr, Some(&auth_url));
+            let class = classify_credential_refresh_failure("set_url_nonzero");
             return Err(crate::Error::message(format!(
-                "Failed to set refreshed push credentials (exit {}): {}",
-                result.exit_code, stderr
+                "Failed to refresh push credentials: {class}"
             )));
         }
 

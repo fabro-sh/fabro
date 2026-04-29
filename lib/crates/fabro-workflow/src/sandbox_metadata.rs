@@ -78,6 +78,7 @@ pub(crate) struct SandboxMetadataWriter<'a> {
 pub(crate) struct MetadataSnapshot {
     pub commit_sha: String,
     pub pushed:     bool,
+    pub push_error: Option<String>,
 }
 
 impl<'a> SandboxMetadataWriter<'a> {
@@ -178,10 +179,13 @@ impl<'a> SandboxMetadataWriter<'a> {
         .await?;
         let commit = parse_fast_import_mark(&stdout)?;
         let refspec = format!("{full_ref}:{full_ref}");
-        let pushed = self.sandbox.git_push_ref(&refspec).await;
+        let push_result = self.sandbox.git_push_ref(&refspec).await;
+        let pushed = push_result.is_ok();
+        let push_error = push_result.err().map(|err| err.to_string());
         Ok(MetadataSnapshot {
             commit_sha: commit,
             pushed,
+            push_error,
         })
     }
 }

@@ -344,14 +344,17 @@ impl Sandbox for WorktreeSandbox {
         self.inner.resume_setup_commands(run_branch)
     }
 
-    async fn git_push_ref(&self, refspec: &str) -> bool {
-        let has_origin = matches!(
-            self.exec_command("git remote get-url origin", 10_000, None, None, None)
-                .await,
-            Ok(result) if result.exit_code == 0
-        );
+    async fn git_push_ref(&self, refspec: &str) -> crate::Result<()> {
+        let has_origin = match self
+            .exec_command("git remote get-url origin", 10_000, None, None, None)
+            .await
+        {
+            Ok(result) if result.exit_code == 0 => true,
+            Ok(_) => false,
+            Err(err) => return Err(crate::Error::context("git remote get-url origin", err)),
+        };
         if !has_origin {
-            return true;
+            return Ok(());
         }
 
         crate::git_push_via_exec(self, refspec).await

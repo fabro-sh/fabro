@@ -942,7 +942,7 @@ mod tests {
             self.inner.os_version()
         }
 
-        async fn git_push_ref(&self, refspec: &str) -> bool {
+        async fn git_push_ref(&self, refspec: &str) -> fabro_sandbox::Result<()> {
             self.pushes.lock().unwrap().push(refspec.to_string());
             self.inner.git_push_ref(refspec).await
         }
@@ -1351,6 +1351,8 @@ mod tests {
         );
 
         let snapshot = writer.write_snapshot(&dump, "checkpoint").await.unwrap();
+        assert!(snapshot.pushed);
+        assert_eq!(snapshot.push_error, None);
         let commit_sha = snapshot.commit_sha;
 
         let current = std::process::Command::new("git")
@@ -1445,6 +1447,65 @@ mod tests {
         }
         let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
         assert_eq!(sandbox.pushes(), vec![refspec.clone(), refspec]);
+    }
+
+    #[tokio::test]
+    async fn sandbox_metadata_writer_records_log_safe_push_error() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let repo = repo_dir.path();
+        init_git_repo(repo);
+        std::fs::write(repo.join("tracked.txt"), "seed\n").unwrap();
+        git_commit_all(repo, "initial");
+        let missing_origin = repo_dir.path().join("missing-origin.git");
+        let add_remote = std::process::Command::new("git")
+            .args(["remote", "add", "origin", missing_origin.to_str().unwrap()])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(add_remote.status.success());
+
+        let sandbox = fabro_agent::LocalSandbox::new(repo.to_path_buf());
+        let run_id = fabro_types::fixtures::RUN_2.to_string();
+        let branch = crate::sandbox_metadata::metadata_branch_name(&run_id);
+        let mut projection = fabro_store::RunProjection::default();
+        projection.spec = Some(fabro_types::RunSpec {
+            run_id:           fabro_types::fixtures::RUN_2,
+            settings:         fabro_types::WorkflowSettings::default(),
+            graph:            fabro_types::Graph::new("metadata"),
+            workflow_slug:    Some("metadata".to_string()),
+            source_directory: Some("/Users/client/project".to_string()),
+            git:              None,
+            labels:           HashMap::new(),
+            provenance:       None,
+            manifest_blob:    None,
+            definition_blob:  None,
+            fork_source_ref:  None,
+            in_place:         false,
+        });
+        let dump = crate::run_dump::RunDump::from_projection(&projection);
+        let runtime = crate::sandbox_metadata::SandboxGitRuntime::new();
+        let writer = crate::sandbox_metadata::SandboxMetadataWriter::new(
+            &sandbox,
+            &runtime,
+            &run_id,
+            &branch,
+            crate::git::GitAuthor::default(),
+        );
+
+        let snapshot = writer.write_snapshot(&dump, "checkpoint").await.unwrap();
+
+        assert!(!snapshot.pushed);
+        let push_error = snapshot.push_error.unwrap();
+        assert!(push_error.contains("git push origin"));
+        assert!(push_error.contains("hint:"));
+        assert!(
+            !push_error.contains("fatal:"),
+            "push error should be log-safe: {push_error}"
+        );
+        assert!(
+            !push_error.contains(missing_origin.to_str().unwrap()),
+            "push error should not include raw git stderr paths: {push_error}"
+        );
     }
 
     #[tokio::test]

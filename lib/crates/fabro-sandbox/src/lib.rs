@@ -8,6 +8,9 @@ mod clone_source;
 
 pub mod read_guard;
 
+#[cfg(any(feature = "docker", feature = "daytona", test))]
+pub(crate) mod redact;
+
 pub mod reconnect;
 
 pub mod sandbox_provider;

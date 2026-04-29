@@ -179,10 +179,11 @@ pub async fn write_finalize_commit(
     match writer.write_snapshot(&dump, "finalize run").await {
         Ok(snapshot) => {
             if !snapshot.pushed {
+                let detail = snapshot.push_error.as_deref().unwrap_or("unknown error");
                 emit_metadata_warning(
                     services,
                     "checkpoint_metadata_push_failed",
-                    format!("failed to push metadata ref refs/heads/{meta_branch}"),
+                    format!("failed to push metadata ref refs/heads/{meta_branch}: {detail}"),
                 );
             }
         }
