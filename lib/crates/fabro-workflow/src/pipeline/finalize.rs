@@ -3,6 +3,8 @@ use std::time::Instant;
 use fabro_hooks::{HookContext, HookEvent};
 use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
 use fabro_types::{BilledTokenCounts, EventBody};
+use fabro_util::error::collect_causes;
+use fabro_util::time::elapsed_ms;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
 use crate::error::Error;
@@ -171,7 +173,7 @@ pub async fn write_finalize_commit(
                 started,
                 MetadataSnapshotFailureKind::LoadState,
                 message.clone(),
-                anyhow_causes(&err),
+                collect_causes(err.as_ref()),
                 None,
                 None,
                 None,
@@ -221,7 +223,7 @@ pub async fn write_finalize_commit(
                 started,
                 MetadataSnapshotFailureKind::Write,
                 message.clone(),
-                error_causes(&err),
+                collect_causes(&err),
                 None,
                 None,
                 None,
@@ -292,24 +294,6 @@ fn emit_metadata_warning(services: &RunServices, code: &str, message: String) {
     if services.metadata_runtime.mark_metadata_degraded() {
         services.emitter.notice(RunNoticeLevel::Warn, code, message);
     }
-}
-
-fn elapsed_ms(started: Instant) -> u64 {
-    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
-}
-
-fn anyhow_causes(error: &anyhow::Error) -> Vec<String> {
-    error.chain().skip(1).map(ToString::to_string).collect()
-}
-
-fn error_causes(error: &(dyn std::error::Error + 'static)) -> Vec<String> {
-    let mut causes = Vec::new();
-    let mut source = error.source();
-    while let Some(cause) = source {
-        causes.push(cause.to_string());
-        source = cause.source();
-    }
-    causes
 }
 
 /// Failed and cancelled runs use a shorter diff timeout so a corrupted

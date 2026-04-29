@@ -13,6 +13,7 @@ pub mod run_log;
 pub mod session_secret;
 pub mod terminal;
 pub mod text;
+pub mod time;
 pub mod version;
 pub mod warnings;
 

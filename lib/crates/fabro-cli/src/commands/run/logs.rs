@@ -14,6 +14,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use fabro_redact::redact_jsonl_line;
+use fabro_types::run_event::is_metadata_snapshot_compat_notice_code;
 use fabro_util::json::normalize_json_value;
 use fabro_util::terminal::Styles;
 use tokio::time;
@@ -760,13 +761,6 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
 
 fn is_metadata_snapshot_compat_notice(envelope: &serde_json::Value) -> bool {
     prop_str_field(envelope, "code").is_some_and(is_metadata_snapshot_compat_notice_code)
-}
-
-fn is_metadata_snapshot_compat_notice_code(code: &str) -> bool {
-    matches!(
-        code,
-        "checkpoint_metadata_write_failed" | "checkpoint_metadata_push_failed"
-    )
 }
 
 fn str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {

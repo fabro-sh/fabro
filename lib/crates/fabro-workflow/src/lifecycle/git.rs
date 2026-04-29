@@ -9,6 +9,8 @@ use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 use fabro_types::RunId;
 use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
+use fabro_util::error::collect_causes;
+use fabro_util::time::elapsed_ms;
 
 use crate::artifact;
 use crate::event::{Emitter, Event, RunNoticeLevel, StageScope};
@@ -110,7 +112,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                         started,
                         MetadataSnapshotFailureKind::LoadState,
                         message.clone(),
-                        anyhow_causes(&err),
+                        collect_causes(err.as_ref()),
                         None,
                         None,
                         None,
@@ -179,7 +181,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                             started,
                             MetadataSnapshotFailureKind::LoadState,
                             message.clone(),
-                            anyhow_causes(&err),
+                            collect_causes(err.as_ref()),
                             None,
                             None,
                             None,
@@ -355,7 +357,7 @@ impl GitLifecycle {
                     started,
                     MetadataSnapshotFailureKind::Write,
                     message.clone(),
-                    error_causes(&err),
+                    collect_causes(&err),
                     None,
                     None,
                     None,
@@ -453,24 +455,6 @@ impl GitLifecycle {
             });
         }
     }
-}
-
-fn elapsed_ms(started: Instant) -> u64 {
-    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
-}
-
-fn anyhow_causes(error: &anyhow::Error) -> Vec<String> {
-    error.chain().skip(1).map(ToString::to_string).collect()
-}
-
-fn error_causes(error: &(dyn std::error::Error + 'static)) -> Vec<String> {
-    let mut causes = Vec::new();
-    let mut source = error.source();
-    while let Some(cause) = source {
-        causes.push(cause.to_string());
-        source = cause.source();
-    }
-    causes
 }
 
 #[cfg(test)]

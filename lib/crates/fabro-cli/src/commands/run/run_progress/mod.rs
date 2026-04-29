@@ -4,6 +4,7 @@
 )]
 
 use fabro_types::RunEvent;
+use fabro_types::run_event::is_metadata_snapshot_compat_notice_code;
 
 mod event;
 mod info_display;
@@ -440,13 +441,6 @@ impl ProgressUI {
             }
         }
     }
-}
-
-fn is_metadata_snapshot_compat_notice_code(code: &str) -> bool {
-    matches!(
-        code,
-        "checkpoint_metadata_write_failed" | "checkpoint_metadata_push_failed"
-    )
 }
 
 #[cfg(test)]

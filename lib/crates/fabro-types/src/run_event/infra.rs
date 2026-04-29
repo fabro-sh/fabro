@@ -1,5 +1,19 @@
 use serde::{Deserialize, Serialize};
 
+/// Legacy `run.notice` codes paired with the new `metadata.snapshot.failed`
+/// event for backward compatibility. Display layers suppress these so the
+/// typed event renders without a duplicate raw warning.
+pub const NOTICE_CODE_CHECKPOINT_METADATA_WRITE_FAILED: &str = "checkpoint_metadata_write_failed";
+pub const NOTICE_CODE_CHECKPOINT_METADATA_PUSH_FAILED: &str = "checkpoint_metadata_push_failed";
+
+#[must_use]
+pub fn is_metadata_snapshot_compat_notice_code(code: &str) -> bool {
+    matches!(
+        code,
+        NOTICE_CODE_CHECKPOINT_METADATA_WRITE_FAILED | NOTICE_CODE_CHECKPOINT_METADATA_PUSH_FAILED
+    )
+}
+
 #[derive(
     Debug,
     Clone,
