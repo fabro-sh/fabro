@@ -206,7 +206,7 @@
   "status_updated_at": "2026-04-29T18:01:23.368173890Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-04-29T18:01:37.551235398Z",
+    "timestamp": "2026-04-29T18:01:42.119474597Z",
     "current_node": "greet",
     "completed_nodes": [
       "start",
@@ -214,29 +214,25 @@
     ],
     "node_retries": {},
     "context_values": {
-      "last_response": "Added a haiku just below the main heading:\n\n> *Agents write the code*\n> *Graphs keep the process on track*\n> *You review, not watch*\n\nIt captures Fabro's core value proposition in 5-7-5: AI agents do ",
-      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
-      "internal.work_dir": "/workspace",
-      "graph.rankdir": "LR",
-      "internal.retry_count.start": 0,
-      "last_stage": "greet",
-      "internal.thread_id": "start",
-      "response.greet": "Added a haiku just below the main heading:\n\n> *Agents write the code*\n> *Graphs keep the process on track*\n> *You review, not watch*\n\nIt captures Fabro's core value proposition in 5-7-5: AI agents do the work, workflow graphs enforce the process, and you stay in the reviewer's seat instead of babysitting every step.",
-      "thread.start.current_node": "greet",
-      "failure_class": "",
       "internal.fidelity": "compact",
-      "internal.run_id": "01KQD6DTMBQB8CJBEWV86Q8DXK",
-      "internal.retry_count.greet": 0,
       "internal.node_visit_count": 1,
-      "failure_signature": "",
+      "internal.thread_id": "start",
+      "internal.work_dir": "/workspace",
       "outcome": "success",
-      "current_node": "greet"
+      "internal.retry_count.start": 0,
+      "internal.run_id": "01KQD6DTMBQB8CJBEWV86Q8DXK",
+      "failure_class": "",
+      "response.greet": "Added a haiku just below the main heading:\n\n> *Agents write the code*\n> *Graphs keep the process on track*\n> *You review, not watch*\n\nIt captures Fabro's core value proposition in 5-7-5: AI agents do the work, workflow graphs enforce the process, and you stay in the reviewer's seat instead of babysitting every step.",
+      "last_stage": "greet",
+      "internal.retry_count.greet": 0,
+      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+      "thread.start.current_node": "greet",
+      "current_node": "greet",
+      "last_response": "Added a haiku just below the main heading:\n\n> *Agents write the code*\n> *Graphs keep the process on track*\n> *You review, not watch*\n\nIt captures Fabro's core value proposition in 5-7-5: AI agents do ",
+      "graph.rankdir": "LR",
+      "failure_signature": ""
     },
     "node_outcomes": {
-      "start": {
-        "status": "success",
-        "usage": null
-      },
       "greet": {
         "status": "success",
         "context_updates": {
@@ -271,12 +267,17 @@
         "files_touched": [
           "/workspace/README.md"
         ]
+      },
+      "start": {
+        "status": "success",
+        "usage": null
       }
     },
     "next_node_id": "exit",
+    "git_commit_sha": "ecf897b3e2e2ba32c2acd906602b12e1ebce4a39",
     "node_visits": {
-      "start": 1,
-      "greet": 1
+      "greet": 1,
+      "start": 1
     }
   },
   "checkpoints": [
@@ -314,9 +315,117 @@
           "start": 1
         }
       }
+    ],
+    [
+      35,
+      {
+        "timestamp": "2026-04-29T18:01:42.119474597Z",
+        "current_node": "greet",
+        "completed_nodes": [
+          "start",
+          "greet"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.fidelity": "compact",
+          "internal.node_visit_count": 1,
+          "internal.thread_id": "start",
+          "internal.work_dir": "/workspace",
+          "outcome": "success",
+          "internal.retry_count.start": 0,
+          "internal.run_id": "01KQD6DTMBQB8CJBEWV86Q8DXK",
+          "failure_class": "",
+          "response.greet": "Added a haiku just below the main heading:\n\n> *Agents write the code*\n> *Graphs keep the process on track*\n> *You review, not watch*\n\nIt captures Fabro's core value proposition in 5-7-5: AI agents do the work, workflow graphs enforce the process, and you stay in the reviewer's seat instead of babysitting every step.",
+          "last_stage": "greet",
+          "internal.retry_count.greet": 0,
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "thread.start.current_node": "greet",
+          "current_node": "greet",
+          "last_response": "Added a haiku just below the main heading:\n\n> *Agents write the code*\n> *Graphs keep the process on track*\n> *You review, not watch*\n\nIt captures Fabro's core value proposition in 5-7-5: AI agents do ",
+          "graph.rankdir": "LR",
+          "failure_signature": ""
+        },
+        "node_outcomes": {
+          "greet": {
+            "status": "success",
+            "context_updates": {
+              "last_stage": "greet",
+              "response.greet": "Added a haiku just below the main heading:\n\n> *Agents write the code*\n> *Graphs keep the process on track*\n> *You review, not watch*\n\nIt captures Fabro's core value proposition in 5-7-5: AI agents do the work, workflow graphs enforce the process, and you stay in the reviewer's seat instead of babysitting every step.",
+              "last_response": "Added a haiku just below the main heading:\n\n> *Agents write the code*\n> *Graphs keep the process on track*\n> *You review, not watch*\n\nIt captures Fabro's core value proposition in 5-7-5: AI agents do "
+            },
+            "notes": "Stage completed: greet",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 4735,
+                    "output_tokens": 398,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 23427,
+                    "cache_write_tokens": 12004
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 12004,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 72218
+            },
+            "files_touched": [
+              "/workspace/README.md"
+            ]
+          },
+          "start": {
+            "status": "success",
+            "usage": null
+          }
+        },
+        "next_node_id": "exit",
+        "git_commit_sha": "ecf897b3e2e2ba32c2acd906602b12e1ebce4a39",
+        "node_visits": {
+          "greet": 1,
+          "start": 1
+        }
+      }
     ]
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-04-29T18:01:42.134637784Z",
+    "status": "success",
+    "duration_ms": 18752,
+    "final_git_commit_sha": "ecf897b3e2e2ba32c2acd906602b12e1ebce4a39",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "greet",
+        "stage_label": "greet",
+        "duration_ms": 11167,
+        "billing_usd_micros": 72218,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 4735,
+      "output_tokens": 398,
+      "total_tokens": 40564,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 23427,
+      "cache_write_tokens": 12004,
+      "total_usd_micros": 72218
+    },
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -333,22 +442,6 @@
   "superseded_by": null,
   "pending_interviews": {},
   "nodes": {
-    "greet@1": {
-      "prompt": null,
-      "response": null,
-      "status": null,
-      "provider_used": {
-        "mode": "agent",
-        "provider": "anthropic",
-        "model": "claude-sonnet-4-6"
-      },
-      "diff": null,
-      "script_invocation": null,
-      "script_timing": null,
-      "parallel_results": null,
-      "stdout": null,
-      "stderr": null
-    },
     "start@1": {
       "prompt": null,
       "response": null,
@@ -359,6 +452,44 @@
         "timestamp": "2026-04-29T18:01:26.383140106Z"
       },
       "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
+    "exit@1": {
+      "prompt": null,
+      "response": null,
+      "status": {
+        "status": "success",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-04-29T18:01:42.119631474Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
+    "greet@1": {
+      "prompt": null,
+      "response": null,
+      "status": {
+        "status": "success",
+        "notes": "Stage completed: greet",
+        "failure_reason": null,
+        "timestamp": "2026-04-29T18:01:37.551202106Z"
+      },
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
       "diff": null,
       "script_invocation": null,
       "script_timing": null,
