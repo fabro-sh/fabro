@@ -19,10 +19,10 @@ use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
 use crate::operations::{ValidateInput, WorkflowInput, validate};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
-use crate::pipeline;
 use crate::pipeline::types::Initialized;
 use crate::run_dir::visit_from_context;
 use crate::run_options::RunOptions;
+use crate::{ManifestPath, pipeline};
 
 /// Orchestrates a child workflow engine, polling for completion or stop
 /// conditions.
@@ -30,7 +30,7 @@ pub struct SubWorkflowHandler;
 
 struct ParsedChildWorkflow {
     graph:         Graph,
-    workflow_path: Option<PathBuf>,
+    workflow_path: Option<ManifestPath>,
 }
 
 /// Parse a duration string like "45s", "200ms", "5m" into a Duration.
@@ -109,9 +109,8 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
             (None, _) => WorkflowInput::Path(PathBuf::from(path)),
         };
         let workflow_path = match &workflow {
-            WorkflowInput::Bundled(workflow) => Some(workflow.logical_path.clone()),
-            WorkflowInput::Path(path) => Some(path.clone()),
-            WorkflowInput::DotSource { .. } => None,
+            WorkflowInput::Bundled(workflow) => Some(workflow.path.clone()),
+            WorkflowInput::Path(_) | WorkflowInput::DotSource { .. } => None,
         };
         let validated = validate(ValidateInput {
             workflow,
@@ -592,13 +591,14 @@ mod tests {
         );
 
         let mut services = make_services();
-        services.workflow_path = Some(PathBuf::from("workflow.fabro"));
+        services.workflow_path = Some(ManifestPath::from_wire("workflow.fabro").unwrap());
         services.workflow_bundle = Some(Arc::new(WorkflowBundle::new(HashMap::from([(
-            PathBuf::from("children/review.fabro"),
+            ManifestPath::from_wire("children/review.fabro").unwrap(),
             BundledWorkflow {
-                logical_path: PathBuf::from("children/review.fabro"),
-                source:       child_dot_succeeds().to_string(),
-                files:        HashMap::new(),
+                path:   ManifestPath::from_wire("children/review.fabro").unwrap(),
+                source: child_dot_succeeds().to_string(),
+                config: None,
+                files:  HashMap::new(),
             },
         )]))));
 
@@ -633,7 +633,7 @@ mod tests {
         );
 
         let mut services = make_services();
-        services.workflow_path = Some(PathBuf::from("workflow.fabro"));
+        services.workflow_path = Some(ManifestPath::from_wire("workflow.fabro").unwrap());
         services.workflow_bundle = Some(Arc::new(WorkflowBundle::new(HashMap::new())));
 
         let context = Context::new();

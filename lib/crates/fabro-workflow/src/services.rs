@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,6 +14,7 @@ use fabro_model::Provider;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
+use crate::ManifestPath;
 use crate::event::Emitter;
 use crate::handler::HandlerRegistry;
 use crate::runtime_store::RunStoreHandle;
@@ -125,8 +127,8 @@ pub struct EngineServices {
     /// When true, handlers should skip real execution and return simulated
     /// results.
     pub dry_run:          bool,
-    /// Logical path of the current workflow when running from a bundle.
-    pub workflow_path:    Option<PathBuf>,
+    /// Manifest path of the current workflow when running from a bundle.
+    pub workflow_path:    Option<ManifestPath>,
     /// Bundled workflows available for child-workflow resolution.
     pub workflow_bundle:  Option<Arc<WorkflowBundle>>,
 }

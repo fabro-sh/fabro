@@ -110,10 +110,10 @@ impl ImportTransform {
             return Ok(());
         };
 
-        if import_stack.contains(&resolved_file.logical_path) {
+        if import_stack.contains(&resolved_file.path) {
             let cycle = import_stack
                 .iter()
-                .chain(std::iter::once(&resolved_file.logical_path))
+                .chain(std::iter::once(&resolved_file.path))
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>()
                 .join(" -> ");
@@ -137,7 +137,7 @@ impl ImportTransform {
         if let Err(message) = Self::splice_import(
             graph,
             placeholder_id,
-            &resolved_file.logical_path,
+            &resolved_file.path,
             &placeholder,
             prepared,
         ) {
@@ -152,52 +152,47 @@ impl ImportTransform {
         resolved_file: &ResolvedFile,
         import_stack: &mut Vec<PathBuf>,
     ) -> Result<PreparedImport, ImportPrepareError> {
-        Self::with_import_stack(
-            import_stack,
-            resolved_file.logical_path.clone(),
-            |import_stack| {
-                let rendered_source = render_template(
-                    &resolved_file.content,
-                    &TemplateContext::new()
-                        .with_goal("{{ goal }}")
-                        .with_inputs(self.inputs.clone()),
-                )
-                .map_err(|error| ImportPrepareError::Hard(Error::Validation(error.to_string())))?;
+        Self::with_import_stack(import_stack, resolved_file.path.clone(), |import_stack| {
+            let rendered_source = render_template(
+                &resolved_file.content,
+                &TemplateContext::new()
+                    .with_goal("{{ goal }}")
+                    .with_inputs(self.inputs.clone()),
+            )
+            .map_err(|error| ImportPrepareError::Hard(Error::Validation(error.to_string())))?;
 
-                let mut graph = parser::parse(&rendered_source).map_err(|error| {
-                    ImportPrepareError::Soft(format!(
-                        "failed to parse {}: {error}",
-                        resolved_file.logical_path.display()
-                    ))
-                })?;
+            let mut graph = parser::parse(&rendered_source).map_err(|error| {
+                ImportPrepareError::Soft(format!(
+                    "failed to parse {}: {error}",
+                    resolved_file.path.display()
+                ))
+            })?;
 
-                let import_base_dir = resolved_file
-                    .logical_path
-                    .parent()
-                    .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-                graph =
-                    FileInliningTransform::new(import_base_dir.clone(), Arc::clone(&self.resolver))
-                        .apply(graph)
-                        .map_err(ImportPrepareError::Hard)?;
+            let import_base_dir = resolved_file
+                .path
+                .parent()
+                .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+            graph = FileInliningTransform::new(import_base_dir.clone(), Arc::clone(&self.resolver))
+                .apply(graph)
+                .map_err(ImportPrepareError::Hard)?;
 
-                if let Some(message) = Self::unresolved_imported_prompt_error(&graph) {
-                    return Err(ImportPrepareError::Soft(message));
-                }
+            if let Some(message) = Self::unresolved_imported_prompt_error(&graph) {
+                return Err(ImportPrepareError::Soft(message));
+            }
 
-                let nested_imports = Self::collect_import_nodes(&graph);
-                for (placeholder_id, import_path) in nested_imports {
-                    self.expand_import(
-                        &mut graph,
-                        &placeholder_id,
-                        &import_path,
-                        &import_base_dir,
-                        import_stack,
-                    )?;
-                }
+            let nested_imports = Self::collect_import_nodes(&graph);
+            for (placeholder_id, import_path) in nested_imports {
+                self.expand_import(
+                    &mut graph,
+                    &placeholder_id,
+                    &import_path,
+                    &import_base_dir,
+                    import_stack,
+                )?;
+            }
 
-                Self::validate_imported_graph(graph).map_err(ImportPrepareError::Soft)
-            },
-        )
+            Self::validate_imported_graph(graph).map_err(ImportPrepareError::Soft)
+        })
     }
 
     fn splice_import(
