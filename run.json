@@ -206,7 +206,7 @@
   "status_updated_at": "2026-04-29T17:39:01.053032372Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-04-29T17:39:14.600173200Z",
+    "timestamp": "2026-04-29T17:39:18.943708765Z",
     "current_node": "greet",
     "completed_nodes": [
       "start",
@@ -216,21 +216,21 @@
     "context_values": {
       "outcome": "success",
       "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
-      "failure_signature": "",
-      "thread.start.current_node": "greet",
-      "last_response": "Done! I added a haiku right below the main headline:\n\n```\nAgents write the code\nGraphs keep the process on track\nYou review, not babysit\n```\n\nIt captures Fabro's core value proposition in 5-7-5 syllab",
-      "internal.work_dir": "/workspace",
-      "failure_class": "",
-      "internal.retry_count.start": 0,
-      "internal.fidelity": "compact",
       "response.greet": "Done! I added a haiku right below the main headline:\n\n```\nAgents write the code\nGraphs keep the process on track\nYou review, not babysit\n```\n\nIt captures Fabro's core value proposition in 5-7-5 syllables and sits naturally as an epigraph before the prose description kicks in.",
-      "internal.run_id": "01KQD54J8NA8NZ0KPTCE79389Y",
+      "thread.start.current_node": "greet",
+      "failure_signature": "",
       "current_node": "greet",
-      "internal.thread_id": "start",
+      "last_stage": "greet",
       "internal.retry_count.greet": 0,
-      "internal.node_visit_count": 1,
+      "internal.fidelity": "compact",
       "graph.rankdir": "LR",
-      "last_stage": "greet"
+      "failure_class": "",
+      "internal.run_id": "01KQD54J8NA8NZ0KPTCE79389Y",
+      "internal.retry_count.start": 0,
+      "internal.thread_id": "start",
+      "internal.node_visit_count": 1,
+      "internal.work_dir": "/workspace",
+      "last_response": "Done! I added a haiku right below the main headline:\n\n```\nAgents write the code\nGraphs keep the process on track\nYou review, not babysit\n```\n\nIt captures Fabro's core value proposition in 5-7-5 syllab"
     },
     "node_outcomes": {
       "greet": {
@@ -274,6 +274,7 @@
       }
     },
     "next_node_id": "exit",
+    "git_commit_sha": "54a7f635b58ff650fbfbaf25d93535378dabffd2",
     "node_visits": {
       "greet": 1,
       "start": 1
@@ -314,9 +315,117 @@
           "start": 1
         }
       }
+    ],
+    [
+      35,
+      {
+        "timestamp": "2026-04-29T17:39:18.943708765Z",
+        "current_node": "greet",
+        "completed_nodes": [
+          "start",
+          "greet"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "outcome": "success",
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "response.greet": "Done! I added a haiku right below the main headline:\n\n```\nAgents write the code\nGraphs keep the process on track\nYou review, not babysit\n```\n\nIt captures Fabro's core value proposition in 5-7-5 syllables and sits naturally as an epigraph before the prose description kicks in.",
+          "thread.start.current_node": "greet",
+          "failure_signature": "",
+          "current_node": "greet",
+          "last_stage": "greet",
+          "internal.retry_count.greet": 0,
+          "internal.fidelity": "compact",
+          "graph.rankdir": "LR",
+          "failure_class": "",
+          "internal.run_id": "01KQD54J8NA8NZ0KPTCE79389Y",
+          "internal.retry_count.start": 0,
+          "internal.thread_id": "start",
+          "internal.node_visit_count": 1,
+          "internal.work_dir": "/workspace",
+          "last_response": "Done! I added a haiku right below the main headline:\n\n```\nAgents write the code\nGraphs keep the process on track\nYou review, not babysit\n```\n\nIt captures Fabro's core value proposition in 5-7-5 syllab"
+        },
+        "node_outcomes": {
+          "greet": {
+            "status": "success",
+            "context_updates": {
+              "response.greet": "Done! I added a haiku right below the main headline:\n\n```\nAgents write the code\nGraphs keep the process on track\nYou review, not babysit\n```\n\nIt captures Fabro's core value proposition in 5-7-5 syllables and sits naturally as an epigraph before the prose description kicks in.",
+              "last_stage": "greet",
+              "last_response": "Done! I added a haiku right below the main headline:\n\n```\nAgents write the code\nGraphs keep the process on track\nYou review, not babysit\n```\n\nIt captures Fabro's core value proposition in 5-7-5 syllab"
+            },
+            "notes": "Stage completed: greet",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 4768,
+                    "output_tokens": 420,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 23436,
+                    "cache_write_tokens": 12007
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 12007,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 72660
+            },
+            "files_touched": [
+              "/workspace/README.md"
+            ]
+          },
+          "start": {
+            "status": "success",
+            "usage": null
+          }
+        },
+        "next_node_id": "exit",
+        "git_commit_sha": "54a7f635b58ff650fbfbaf25d93535378dabffd2",
+        "node_visits": {
+          "greet": 1,
+          "start": 1
+        }
+      }
     ]
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-04-29T17:39:18.959672692Z",
+    "status": "success",
+    "duration_ms": 17891,
+    "final_git_commit_sha": "54a7f635b58ff650fbfbaf25d93535378dabffd2",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "greet",
+        "stage_label": "greet",
+        "duration_ms": 11135,
+        "billing_usd_micros": 72660,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 4768,
+      "output_tokens": 420,
+      "total_tokens": 40631,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 23436,
+      "cache_write_tokens": 12007,
+      "total_usd_micros": 72660
+    },
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -333,22 +442,6 @@
   "superseded_by": null,
   "pending_interviews": {},
   "nodes": {
-    "greet@1": {
-      "prompt": null,
-      "response": null,
-      "status": null,
-      "provider_used": {
-        "mode": "agent",
-        "provider": "anthropic",
-        "model": "claude-sonnet-4-6"
-      },
-      "diff": null,
-      "script_invocation": null,
-      "script_timing": null,
-      "parallel_results": null,
-      "stdout": null,
-      "stderr": null
-    },
     "start@1": {
       "prompt": null,
       "response": null,
@@ -359,6 +452,44 @@
         "timestamp": "2026-04-29T17:39:03.464578051Z"
       },
       "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
+    "exit@1": {
+      "prompt": null,
+      "response": null,
+      "status": {
+        "status": "success",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-04-29T17:39:18.943939808Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
+    "greet@1": {
+      "prompt": null,
+      "response": null,
+      "status": {
+        "status": "success",
+        "notes": "Stage completed: greet",
+        "failure_reason": null,
+        "timestamp": "2026-04-29T17:39:14.600134033Z"
+      },
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
       "diff": null,
       "script_invocation": null,
       "script_timing": null,

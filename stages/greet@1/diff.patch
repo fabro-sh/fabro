@@ -1,0 +1,22 @@
+diff --git a/README.md b/README.md
+index d2d663b6..78a05277 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,10 @@
+ 
+ ## The open source dark software factory for expert engineers
+ 
++> *Agents write the code*
++> *Graphs keep the process on track*
++> *You review, not babysit*
++
+ AI coding agents are powerful but unpredictable. You either babysit every step or review a 50-file diff you don't trust. Fabro gives you a middle path: define the process as a graph, let agents execute it, and intervene only where it matters. [Why Fabro?](https://docs.fabro.sh/getting-started/why-fabro)
+ 
+ [![Rust](https://github.com/fabro-sh/fabro/actions/workflows/rust.yml/badge.svg)](https://github.com/fabro-sh/fabro/actions/workflows/rust.yml)
+@@ -187,4 +191,4 @@ If you need a capability which is not in-scope for Fabro, you always have the op
+ 
+ ## License
+ 
+-Fabro is licensed under the [MIT License](LICENSE.md).
++Fabro is licensed under the [MIT License](LICENSE.md).
+\ No newline at end of file
