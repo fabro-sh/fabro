@@ -191,7 +191,9 @@ export default function RunGraph() {
       <StageSidebar stages={stages} runId={id!} activeLink="graph" />
 
       <div className="min-w-0 flex-1 space-y-3">
-        <ViewToggle view={view} setView={setView} />
+        <div className="flex justify-end">
+          <ViewToggle view={view} setView={setView} />
+        </div>
 
         {view === "graph" ? (
           <div className="graph-svg relative rounded-md border border-line bg-panel-alt">
