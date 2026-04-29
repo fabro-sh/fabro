@@ -13,7 +13,6 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     EnvVars::FABRO_LOG,
     EnvVars::FABRO_HOME,
     EnvVars::FABRO_STORAGE_ROOT,
-    EnvVars::GITHUB_APP_PRIVATE_KEY,
 ];
 
 const RENDER_GRAPH_ENV_ALLOWLIST: &[&str] = &[EnvVars::PATH, EnvVars::HOME, EnvVars::TMPDIR];
@@ -87,10 +86,7 @@ mod tests {
             ("SESSION_SECRET".to_string(), "leak".to_string()),
             ("FABRO_JWT_PRIVATE_KEY".to_string(), "leak".to_string()),
             ("FABRO_JWT_PUBLIC_KEY".to_string(), "leak".to_string()),
-            (
-                "GITHUB_APP_PRIVATE_KEY".to_string(),
-                "private-key".to_string(),
-            ),
+            ("GITHUB_APP_PRIVATE_KEY".to_string(), "leak".to_string()),
             ("GITHUB_APP_CLIENT_SECRET".to_string(), "leak".to_string()),
             ("GITHUB_APP_WEBHOOK_SECRET".to_string(), "leak".to_string()),
             ("FABRO_DEV_TOKEN".to_string(), "garbage".to_string()),
@@ -118,10 +114,7 @@ mod tests {
         assert!(!actual.contains_key("SESSION_SECRET"));
         assert!(!actual.contains_key("FABRO_JWT_PRIVATE_KEY"));
         assert!(!actual.contains_key("FABRO_JWT_PUBLIC_KEY"));
-        assert_eq!(
-            actual.get("GITHUB_APP_PRIVATE_KEY").map(String::as_str),
-            Some("private-key")
-        );
+        assert!(!actual.contains_key("GITHUB_APP_PRIVATE_KEY"));
         assert!(!actual.contains_key("GITHUB_APP_CLIENT_SECRET"));
         assert!(!actual.contains_key("GITHUB_APP_WEBHOOK_SECRET"));
         assert!(!actual.contains_key("MY_API_KEY"));

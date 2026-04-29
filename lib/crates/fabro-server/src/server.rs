@@ -3907,6 +3907,9 @@ fn worker_command(
     cmd.env(EnvVars::FABRO_LOG_DESTINATION, value);
     cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
     cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
+    if let Some(pem) = state.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY) {
+        cmd.env(EnvVars::GITHUB_APP_PRIVATE_KEY, pem);
+    }
 
     #[cfg(unix)]
     fabro_proc::pre_exec_setpgid(cmd.as_std_mut());
@@ -9174,6 +9177,52 @@ provider = "invalid-provider"
 
     #[cfg(unix)]
     #[test]
+    fn worker_command_forwards_github_app_private_key_from_server_secrets() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state = worker_command_test_state_with_extra_config_and_env_lookup(
+            storage_dir.path(),
+            &["dev-token"],
+            Some(TEST_DEV_TOKEN),
+            "",
+            &[(EnvVars::GITHUB_APP_PRIVATE_KEY, "test-private-key")],
+            |_| None,
+        );
+        let cmd = worker_command(
+            state.as_ref(),
+            RunId::new(),
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            command_env_value(&cmd, EnvVars::GITHUB_APP_PRIVATE_KEY),
+            EnvOverride::Set("test-private-key".to_string())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_omits_github_app_private_key_when_unset() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state =
+            worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
+        let cmd = worker_command(
+            state.as_ref(),
+            RunId::new(),
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            command_env_value(&cmd, EnvVars::GITHUB_APP_PRIVATE_KEY),
+            EnvOverride::Unchanged
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn worker_command_sets_fabro_log_from_server_logging_config() {
         let storage_dir = tempfile::tempdir().unwrap();
         let state = worker_command_test_state_with_extra_config(
@@ -9242,6 +9291,7 @@ destination = "stdout"
 [server.logging]
 destination = "file"
 "#,
+            &[],
             |name| (name == EnvVars::FABRO_LOG_DESTINATION).then(|| "stdout".to_string()),
         );
         let run_id = RunId::new();
@@ -9272,6 +9322,7 @@ destination = "file"
 [server.logging]
 destination = "file"
 "#,
+            &[],
             |name| (name == EnvVars::FABRO_LOG_DESTINATION).then(|| "stdot".to_string()),
         );
         let run_id = RunId::new();
@@ -9347,6 +9398,7 @@ methods = ["dev-token"]
             methods,
             dev_token,
             extra_config,
+            &[],
             |_| None,
         )
     }
@@ -9356,6 +9408,7 @@ methods = ["dev-token"]
         methods: &[&str],
         dev_token: Option<&str>,
         extra_config: &str,
+        extra_server_secrets: &[(&str, &str)],
         env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
     ) -> Arc<AppState> {
         let dev_token = dev_token.map(str::to_owned);
@@ -9390,9 +9443,12 @@ allowed_usernames = ["octocat"]
         .write(&runtime_directory)
         .unwrap();
 
-        let server_secret_env = dev_token
+        let mut server_secret_env: HashMap<String, String> = dev_token
             .map(|token| HashMap::from([("FABRO_DEV_TOKEN".to_string(), token)]))
             .unwrap_or_default();
+        for (key, value) in extra_server_secrets {
+            server_secret_env.insert((*key).to_string(), (*value).to_string());
+        }
         create_app_state_with_env_lookup_and_server_secret_env(
             server_settings_from_toml(&source),
             manifest_run_defaults_from_toml(&source),
