@@ -15,7 +15,7 @@ use fabro_config::user::active_settings_path;
 use fabro_util::terminal::Styles;
 use tracing::debug;
 
-use crate::args::{GraphArgs, GraphDirection};
+use crate::args::{GraphArgs, GraphDirection, GraphOutputFormat};
 use crate::command_context::CommandContext;
 use crate::commands::run::output::api_diagnostics_to_local;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest};
@@ -68,10 +68,7 @@ pub(crate) async fn run(
         std::fs::write(output_path, &rendered)
             .with_context(|| format!("writing rendered graph to {}", output_path.display()))?;
         if ctx.json_output() {
-            print_json_pretty(&serde_json::json!({
-                "path": absolute_or_current(output_path),
-                "format": args.format.to_string(),
-            }))?;
+            print_json_pretty(&output_file_json(output_path, args.format))?;
         }
     } else {
         std::io::stdout().write_all(&rendered)?;
@@ -84,4 +81,30 @@ pub(crate) async fn run(
     );
 
     Ok(())
+}
+
+fn output_file_json(output_path: &std::path::Path, format: GraphOutputFormat) -> serde_json::Value {
+    serde_json::json!({
+        "path": absolute_or_current(output_path),
+        "format": format.to_string(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_file_json_reports_absolute_path_and_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("graph.svg");
+
+        assert_eq!(
+            output_file_json(&path, GraphOutputFormat::Svg),
+            serde_json::json!({
+                "path": path,
+                "format": "svg",
+            })
+        );
+    }
 }

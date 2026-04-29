@@ -206,37 +206,6 @@ fn graph_json_without_output_is_rejected() {
 }
 
 #[test]
-fn graph_json_with_output_reports_file() {
-    let context = test_context!();
-    context.ensure_home_server_auth_methods();
-    let output_path = context.temp_dir.join("graph.svg");
-    let workflow = fixture("simple.fabro");
-
-    let output = context
-        .command()
-        .args([
-            "--json",
-            "graph",
-            workflow.to_str().unwrap(),
-            "--output",
-            output_path.to_str().unwrap(),
-        ])
-        .output()
-        .expect("command should run");
-
-    assert!(
-        output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        output_stdout(&output),
-        output_stderr(&output)
-    );
-    let value: Value = serde_json::from_slice(&output.stdout).expect("graph JSON should parse");
-    assert_eq!(value["format"], "svg");
-    assert_eq!(value["path"], output_path.to_string_lossy().to_string());
-    assert!(output_path.exists());
-}
-
-#[test]
 fn secret_list_json_missing_env_outputs_json_array() {
     let context = test_context!();
     let output = context

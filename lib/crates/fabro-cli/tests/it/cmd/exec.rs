@@ -91,23 +91,6 @@ fn no_prompt() {
 }
 
 #[test]
-fn exec_missing_api_key_exits_with_error() {
-    let context = test_context!();
-    let mut cmd = context.exec_cmd();
-    cmd.arg("test prompt");
-    cmd.env_clear();
-    preserve_coverage_env!(cmd);
-    cmd.env("HOME", &context.home_dir);
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
-    ----- stdout -----
-    ----- stderr -----
-      × LLM credentials not configured for provider 'anthropic'
-    ");
-}
-
-#[test]
 fn exec_uses_user_config_defaults() {
     let context = test_context!();
     context.write_home(

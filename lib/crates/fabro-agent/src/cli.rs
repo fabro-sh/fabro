@@ -748,6 +748,8 @@ pub async fn run() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use fabro_model::Provider;
     use serde_json::json;
 
@@ -859,6 +861,16 @@ mod tests {
     fn build_profile_openai() {
         let profile = build_profile(Provider::OpenAi, "model", None);
         assert_eq!(profile.provider(), Provider::OpenAi);
+    }
+
+    #[test]
+    fn ensure_provider_registered_reports_missing_credentials() {
+        let client = Client::new(HashMap::new(), None, vec![]);
+        let error = ensure_provider_registered(&client, Provider::Anthropic).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "LLM credentials not configured for provider 'anthropic'"
+        );
     }
 
     #[test]

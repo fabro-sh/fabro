@@ -1,6 +1,8 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::{git_filters, setup_git_backed_noop_run, setup_seeded_git_backed_changed_run};
+use super::support::{
+    git_filters, setup_seeded_git_backed_changed_run, setup_seeded_git_backed_noop_run,
+};
 
 #[test]
 fn help() {
@@ -34,9 +36,9 @@ fn help() {
 #[test]
 fn diff_completed_run_without_changes_reports_no_patch() {
     let context = test_context!();
-    let setup = setup_git_backed_noop_run(&context);
+    let run = setup_seeded_git_backed_noop_run(&context);
     let mut cmd = context.command();
-    cmd.args(["diff", &setup.run.run_id]);
+    cmd.args(["diff", &run.run_id]);
 
     fabro_snapshot!(git_filters(&context), cmd, @"
     success: false
