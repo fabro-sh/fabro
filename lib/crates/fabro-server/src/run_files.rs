@@ -431,7 +431,7 @@ fn build_fallback_response(
         Vec::with_capacity(original_section_count.min(FILE_COUNT_CAP));
 
     for section in sections.iter().take(FILE_COUNT_CAP) {
-        let change_kind = classify_section(section).unwrap_or(FileDiffChangeKind::Modified);
+        let change_kind = classify_section(section);
         let (old_name, new_name) = section_paths(section, Some(change_kind));
         let mut diff = degraded_file_diff(old_name, new_name, change_kind);
 
@@ -549,34 +549,34 @@ fn split_patch_sections(patch: &str) -> Vec<PatchSection<'_>> {
         .collect()
 }
 
-fn classify_section(section: &PatchSection<'_>) -> Option<FileDiffChangeKind> {
+fn classify_section(section: &PatchSection<'_>) -> FileDiffChangeKind {
     if section
         .body
         .lines()
         .any(|line| patch_mode_line_matches(line, "120000"))
     {
-        return Some(FileDiffChangeKind::Symlink);
+        return FileDiffChangeKind::Symlink;
     }
     if section
         .body
         .lines()
         .any(|line| patch_mode_line_matches(line, "160000"))
     {
-        return Some(FileDiffChangeKind::Submodule);
+        return FileDiffChangeKind::Submodule;
     }
     if section
         .body
         .lines()
         .any(|line| line.starts_with("new file mode "))
     {
-        return Some(FileDiffChangeKind::Added);
+        return FileDiffChangeKind::Added;
     }
     if section
         .body
         .lines()
         .any(|line| line.starts_with("deleted file mode "))
     {
-        return Some(FileDiffChangeKind::Deleted);
+        return FileDiffChangeKind::Deleted;
     }
     let mut has_rename_from = false;
     let mut has_rename_to = false;
@@ -585,9 +585,9 @@ fn classify_section(section: &PatchSection<'_>) -> Option<FileDiffChangeKind> {
         has_rename_to |= line.starts_with("rename to ");
     }
     if has_rename_from && has_rename_to {
-        return Some(FileDiffChangeKind::Renamed);
+        return FileDiffChangeKind::Renamed;
     }
-    Some(FileDiffChangeKind::Modified)
+    FileDiffChangeKind::Modified
 }
 
 fn section_is_binary(section: &PatchSection<'_>) -> bool {
@@ -643,7 +643,7 @@ fn section_to_stats(section: &PatchSection<'_>, is_sensitive_fn: fn(&str) -> boo
         || section_is_binary(section)
         || matches!(
             classify_section(section),
-            Some(FileDiffChangeKind::Symlink) | Some(FileDiffChangeKind::Submodule)
+            FileDiffChangeKind::Symlink | FileDiffChangeKind::Submodule
         )
     {
         return DiffStats::default();
@@ -1595,7 +1595,7 @@ mod tests {
 
         for (patch, expected) in cases {
             let section = split_patch_sections(patch).pop().expect("section");
-            assert_eq!(classify_section(&section), Some(expected));
+            assert_eq!(classify_section(&section), expected);
         }
     }
 

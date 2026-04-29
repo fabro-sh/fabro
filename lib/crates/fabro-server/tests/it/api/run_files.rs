@@ -47,7 +47,7 @@ async fn append_completed_run_with_final_patch(
     run_id: &RunId,
     final_patch: &str,
 ) {
-    let run_store = store.create_run(run_id).await.unwrap();
+    let run_store = store.create_run(run_id).await.expect("create run store");
     workflow_event::append_event(
         &run_store,
         run_id,
@@ -62,7 +62,7 @@ async fn append_completed_run_with_final_patch(
         },
     )
     .await
-    .unwrap();
+    .expect("append WorkflowRunStarted");
     workflow_event::append_event(
         &run_store,
         run_id,
@@ -78,7 +78,7 @@ async fn append_completed_run_with_final_patch(
         },
     )
     .await
-    .unwrap();
+    .expect("append WorkflowRunCompleted");
 }
 
 #[tokio::test]
