@@ -13,6 +13,7 @@ use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
 use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
+use crate::redact::redact_auth_url;
 use crate::sandbox::resolve_path;
 use crate::{
     DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
@@ -52,6 +53,23 @@ pub async fn validate_daytona_api_key(api_key: String) -> Result<(), daytona_sdk
 
 fn elapsed_ms(start: &Instant) -> u64 {
     u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+fn command_kind(command: &str) -> &'static str {
+    match command.split_whitespace().next().unwrap_or_default() {
+        "git" => "git",
+        "sh" | "/bin/sh" => "sh",
+        "bash" | "/bin/bash" => "bash",
+        "rg" => "rg",
+        "grep" => "grep",
+        "find" => "find",
+        "cat" => "cat",
+        "ls" => "ls",
+        "mkdir" => "mkdir",
+        "rm" => "rm",
+        "printf" => "printf",
+        _ => "other",
+    }
 }
 
 /// Sandbox that runs all operations inside a Daytona cloud sandbox.
@@ -639,22 +657,25 @@ impl Sandbox for DaytonaSandbox {
                                         let wrapped = wrap_bash_command(&cmd);
                                         match ps.execute_command(&wrapped, opts).await {
                                             Ok(r) if r.exit_code != 0 => {
-                                                let stderr = r.result.replace(
-                                                    &auth_url.raw_string(),
-                                                    &auth_url.redacted_string(),
+                                                let err = crate::Error::exec(
+                                                    "git remote set-url origin (Daytona post-clone)",
+                                                    r.exit_code,
+                                                    false,
+                                                    0,
+                                                    redact_auth_url(&r.result, Some(&auth_url)),
+                                                    String::new(),
                                                 );
                                                 tracing::warn!(
-                                                    exit_code = r.exit_code,
-                                                    output = %stderr.trim(),
+                                                    error = %err,
                                                     "Failed to set Daytona sandbox push credentials \
                                                      on origin — subsequent git push from this \
                                                      sandbox will fail"
                                                 );
                                             }
                                             Ok(_) => {}
-                                            Err(e) => {
+                                            Err(_) => {
                                                 tracing::warn!(
-                                                    error = %e,
+                                                    error_class = "daytona_set_url_exec_failed",
                                                     "Daytona exec failed while setting push credentials \
                                                      on origin — subsequent git push from this \
                                                      sandbox will fail"
@@ -788,9 +809,9 @@ impl Sandbox for DaytonaSandbox {
         )]
     }
 
-    async fn git_push_ref(&self, refspec: &str) -> bool {
+    async fn git_push_ref(&self, refspec: &str) -> crate::Result<()> {
         if !self.repo_cloned() {
-            return false;
+            return Ok(());
         }
         crate::git_push_via_exec(self, refspec).await
     }
@@ -857,7 +878,9 @@ impl Sandbox for DaytonaSandbox {
             origin_url,
         )
         .await
-        .map_err(|e| crate::Error::message(format!("Failed to refresh GitHub App token: {e}")))?;
+        .map_err(|_| {
+            crate::Error::message("Failed to refresh push credentials: token_mint_failed")
+        })?;
 
         let cmd = format!(
             "git -c maintenance.auto=0 remote set-url origin {}",
@@ -866,15 +889,14 @@ impl Sandbox for DaytonaSandbox {
         let result = self
             .exec_command(&cmd, 10_000, None, None, None)
             .await
-            .map_err(|e| crate::Error::context("Failed to set refreshed push credentials", e))?;
+            .map_err(|_| {
+                crate::Error::message("Failed to refresh push credentials: set_url_exec_failed")
+            })?;
         if result.exit_code != 0 {
-            let stderr = result
-                .stderr
-                .replace(&auth_url.raw_string(), &auth_url.redacted_string());
-            return Err(crate::Error::message(format!(
-                "Failed to set refreshed push credentials (exit {}): {}",
-                result.exit_code, stderr
-            )));
+            return Err(result.into_exec_error_with_redactor(
+                "git remote set-url origin (refresh push credentials)",
+                |s| redact_auth_url(s, Some(&auth_url)),
+            ));
         }
 
         Ok(())
@@ -1021,7 +1043,12 @@ impl Sandbox for DaytonaSandbox {
         env_vars: Option<&HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
     ) -> crate::Result<ExecResult> {
-        tracing::info!(command, timeout_ms, "exec_command: entered");
+        tracing::info!(
+            timeout_ms,
+            command_kind = command_kind(command),
+            command_len = command.len(),
+            "exec_command: entered"
+        );
 
         let sandbox = self.sandbox()?;
         let start = Instant::now();
@@ -1246,6 +1273,24 @@ mod tests {
         assert!(config.snapshot.is_none());
         assert!(config.auto_stop_interval.is_none());
         assert!(config.labels.is_none());
+    }
+
+    #[test]
+    fn command_kind_classifies_known_prefixes() {
+        assert_eq!(command_kind(" git status"), "git");
+        assert_eq!(command_kind("bash -lc 'echo ok'"), "bash");
+        assert_eq!(command_kind("/bin/sh -c 'echo ok'"), "sh");
+        assert_eq!(command_kind("rg --version"), "rg");
+        assert_eq!(command_kind("find . -maxdepth 1"), "find");
+        assert_eq!(command_kind(""), "other");
+    }
+
+    #[test]
+    fn command_kind_does_not_echo_auth_url_commands() {
+        assert_eq!(
+            command_kind("https://x-access-token:ghs_FAKE@github.com/owner/repo.git"),
+            "other"
+        );
     }
 
     #[test]

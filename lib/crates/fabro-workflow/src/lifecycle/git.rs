@@ -175,7 +175,17 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                         .and_then(|g| g.run_branch.as_ref())
                     {
                         let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
-                        let push_ok = self.sandbox.git_push_ref(&refspec).await;
+                        let push_ok = match self.sandbox.git_push_ref(&refspec).await {
+                            Ok(()) => true,
+                            Err(err) => {
+                                tracing::warn!(
+                                    refspec = %refspec,
+                                    error = %err,
+                                    "git push from run lifecycle failed"
+                                );
+                                false
+                            }
+                        };
                         git_result.push_results.push((refspec, push_ok));
                     }
                 }
@@ -248,10 +258,10 @@ impl GitLifecycle {
         );
         match writer.write_snapshot(dump, message).await {
             Ok(snapshot) => {
-                if !snapshot.pushed {
+                if let Some(detail) = snapshot.push_error.as_deref() {
                     self.emit_metadata_warning(
                         "checkpoint_metadata_push_failed",
-                        format!("failed to push metadata ref refs/heads/{meta_branch}"),
+                        format!("failed to push metadata ref refs/heads/{meta_branch}: {detail}"),
                     );
                 }
                 Some(snapshot.commit_sha)

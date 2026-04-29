@@ -31,6 +31,7 @@ use fabro_vault::Vault;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
 
+use crate::ManifestPath;
 use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
 use crate::error::Error;
@@ -77,7 +78,7 @@ struct RunSession {
     pr_github_app:     Option<fabro_github::GitHubCredentials>,
     pr_origin_url:     Option<String>,
     pr_model:          String,
-    workflow_path:     Option<PathBuf>,
+    workflow_path:     Option<ManifestPath>,
     workflow_bundle:   Option<Arc<WorkflowBundle>>,
     run_control:       Option<Arc<RunControlState>>,
     vault:             Option<Arc<AsyncRwLock<Vault>>>,
@@ -1007,6 +1008,7 @@ mod tests {
     use object_store::memory::InMemory;
 
     use super::*;
+    use crate::ManifestPath;
     use crate::context::Context;
     use crate::event::{Emitter, EventBody};
     use crate::handler::HandlerRegistry;
@@ -1201,9 +1203,11 @@ mod tests {
         let registry = Arc::new(test_registry());
         let store = memory_store();
         let workflow_bundle = WorkflowBundle::new(HashMap::from([
-            (PathBuf::from("workflow.fabro"), BundledWorkflow {
-                logical_path: PathBuf::from("workflow.fabro"),
-                source:       r#"digraph Root {
+            (
+                ManifestPath::from_wire("workflow.fabro").unwrap(),
+                BundledWorkflow {
+                    path:   ManifestPath::from_wire("workflow.fabro").unwrap(),
+                    source: r#"digraph Root {
                         graph [goal="Bundle child"]
                         start [shape=Mdiamond]
                         manager [
@@ -1215,19 +1219,25 @@ mod tests {
                         exit [shape=Msquare]
                         start -> manager -> exit
                     }"#
-                .to_string(),
-                files:        HashMap::new(),
-            }),
-            (PathBuf::from("children/review.fabro"), BundledWorkflow {
-                logical_path: PathBuf::from("children/review.fabro"),
-                source:       r"digraph Review {
+                    .to_string(),
+                    config: None,
+                    files:  HashMap::new(),
+                },
+            ),
+            (
+                ManifestPath::from_wire("children/review.fabro").unwrap(),
+                BundledWorkflow {
+                    path:   ManifestPath::from_wire("children/review.fabro").unwrap(),
+                    source: r"digraph Review {
                         start [shape=Mdiamond]
                         exit [shape=Msquare]
                         start -> exit
                     }"
-                .to_string(),
-                files:        HashMap::new(),
-            }),
+                    .to_string(),
+                    config: None,
+                    files:  HashMap::new(),
+                },
+            ),
         ]));
 
         crate::operations::create(
@@ -1235,7 +1245,7 @@ mod tests {
             crate::operations::CreateRunInput {
                 workflow: crate::operations::WorkflowInput::Bundled(
                     workflow_bundle
-                        .workflow(Path::new("workflow.fabro"))
+                        .workflow(&ManifestPath::from_wire("workflow.fabro").unwrap())
                         .unwrap()
                         .clone(),
                 ),
@@ -1248,7 +1258,7 @@ mod tests {
                 }),
                 cwd: temp.path().to_path_buf(),
                 workflow_slug: Some("bundle-child".to_string()),
-                workflow_path: Some(PathBuf::from("workflow.fabro")),
+                workflow_path: Some(ManifestPath::from_wire("workflow.fabro").unwrap()),
                 workflow_bundle: Some(workflow_bundle),
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_1),

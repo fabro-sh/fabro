@@ -26,6 +26,10 @@ export interface ErrorResponse {
      */
     'errors': Array<ErrorResponseEntry>;
     /**
+     * Server-generated request identifier; matches the x-request-id response header.
+     */
+    'request_id'?: string;
+    /**
      * Optional list of runtime env keys that were written before an install failure. Currently populated by `POST /install/finish` failure responses only.
      */
     'leftover_env_keys'?: Array<string>;

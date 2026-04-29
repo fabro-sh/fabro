@@ -132,6 +132,7 @@ mod hook_context;
     reason = "The lifecycle module remains crate-visible for tests and pending integrations."
 )]
 pub(crate) mod lifecycle;
+mod manifest_path;
 pub(crate) mod node_handler;
 pub mod operations;
 pub mod outcome;
@@ -145,6 +146,7 @@ pub mod run_dump;
 pub mod run_lookup;
 
 pub use error::{Error, FailureCategory, FailureSignature, FailureSignatureExt, Result};
+pub use manifest_path::ManifestPath;
 pub mod run_materialization;
 pub mod run_options;
 pub mod run_status;

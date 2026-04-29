@@ -25,6 +25,7 @@ pub mod install;
 pub mod ip_allowlist;
 pub mod jwt_auth;
 pub mod manifest_validation;
+mod request_id;
 mod run_files;
 mod run_files_security;
 mod run_manifest;
@@ -40,5 +41,6 @@ pub mod web_auth;
 mod worker_token;
 
 pub use error::{ApiError, Error, Result};
+pub use run_manifest::workflow_bundle_from_manifest;
 pub use server_secrets::process_env_snapshot;
 pub use startup::validate_startup;

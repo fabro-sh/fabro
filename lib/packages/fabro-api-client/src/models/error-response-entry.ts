@@ -34,5 +34,9 @@ export interface ErrorResponseEntry {
      * Optional machine-readable error code for structured client handling.
      */
     'code'?: string;
+    /**
+     * Server-generated request identifier; matches the x-request-id response header.
+     */
+    'request_id'?: string;
 }
 

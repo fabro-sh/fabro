@@ -10,6 +10,10 @@ mod gh;
 mod landing;
 mod local_server;
 mod logging;
+#[allow(
+    unreachable_pub,
+    reason = "The library exports manifest builder helpers for tests; the binary includes the same module privately."
+)]
 mod manifest_builder;
 mod server_client;
 mod server_runs;

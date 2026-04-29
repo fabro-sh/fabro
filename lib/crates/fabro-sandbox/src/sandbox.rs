@@ -145,7 +145,7 @@ macro_rules! delegate_sandbox {
                 self.$field.resume_setup_commands(run_branch)
             }
 
-            async fn git_push_ref(&self, refspec: &str) -> bool {
+            async fn git_push_ref(&self, refspec: &str) -> $crate::Result<()> {
                 self.$field.git_push_ref(refspec).await
             }
 
@@ -380,6 +380,48 @@ pub struct ExecResult {
     pub duration_ms: u64,
 }
 
+impl ExecResult {
+    pub fn is_success(&self) -> bool {
+        self.exit_code == 0 && !self.timed_out
+    }
+
+    pub fn into_exec_error(self, label: impl Into<String>) -> crate::Error {
+        crate::Error::exec(
+            label,
+            self.exit_code,
+            self.timed_out,
+            self.duration_ms,
+            self.stderr,
+            self.stdout,
+        )
+    }
+
+    pub fn into_exec_error_with_redactor(
+        self,
+        label: impl Into<String>,
+        redactor: impl Fn(&str) -> String,
+    ) -> crate::Error {
+        let stderr = redactor(&self.stderr);
+        let stdout = redactor(&self.stdout);
+        crate::Error::exec(
+            label,
+            self.exit_code,
+            self.timed_out,
+            self.duration_ms,
+            stderr,
+            stdout,
+        )
+    }
+
+    pub fn into_result(self, label: impl Into<String>) -> crate::Result<Self> {
+        if self.is_success() {
+            Ok(self)
+        } else {
+            Err(self.into_exec_error(label))
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DirEntry {
     pub name:   String,
@@ -478,8 +520,10 @@ pub trait Sandbox: Send + Sync {
     }
 
     /// Push a full refspec to origin from inside the sandbox.
-    async fn git_push_ref(&self, _refspec: &str) -> bool {
-        false
+    async fn git_push_ref(&self, _refspec: &str) -> crate::Result<()> {
+        Err(crate::Error::message(
+            "git_push_ref not implemented for this sandbox",
+        ))
     }
 
     /// Compute the filesystem path for a parallel branch worktree.
@@ -577,13 +621,8 @@ pub async fn setup_git_via_exec(
             let sha_result = sandbox
                 .exec_command("git rev-parse HEAD", 10_000, None, None, None)
                 .await
-                .map_err(|e| crate::Error::message(format!("git rev-parse HEAD failed: {e}")))?;
-            if sha_result.exit_code != 0 {
-                return Err(crate::Error::message(format!(
-                    "git rev-parse HEAD failed (exit {}): {}",
-                    sha_result.exit_code, sha_result.stderr
-                )));
-            }
+                .map_err(|e| crate::Error::context("git rev-parse HEAD", e))?
+                .into_result("git rev-parse HEAD")?;
             (
                 sha_result.stdout.trim().to_string(),
                 format!("fabro/run/{run_id}"),
@@ -604,16 +643,11 @@ pub async fn setup_git_via_exec(
         shell_quote(&branch_name),
         shell_quote(&base_sha)
     );
-    let checkout_result = sandbox
+    sandbox
         .exec_command(&checkout_cmd, 10_000, None, None, None)
         .await
-        .map_err(|e| crate::Error::message(format!("git checkout failed: {e}")))?;
-    if checkout_result.exit_code != 0 {
-        return Err(crate::Error::message(format!(
-            "git checkout -B failed (exit {}): {}",
-            checkout_result.exit_code, checkout_result.stderr
-        )));
-    }
+        .map_err(|e| crate::Error::context("git checkout -B", e))?
+        .into_result("git checkout -B")?;
 
     Ok(GitRunInfo {
         base_sha,
@@ -646,11 +680,9 @@ pub(crate) async fn fetch_source_run_ref(
             .exec_command(&fetch_cmd, 30_000, None, None, None)
             .await?;
         if fetch.exit_code != 0 {
-            last_error = format!(
-                "git fetch source run ref failed (exit {}): {}",
-                fetch.exit_code,
-                fetch.stderr.trim()
-            );
+            last_error = fetch
+                .into_exec_error("git fetch source run ref")
+                .to_string();
         } else {
             let check = sandbox
                 .exec_command(&check_cmd, 10_000, None, None, None)
@@ -658,11 +690,11 @@ pub(crate) async fn fetch_source_run_ref(
             if check.exit_code == 0 {
                 return Ok(());
             }
-            last_error = format!(
-                "checkpoint {checkpoint_sha} is not reachable from {remote_ref} (exit {}): {}",
-                check.exit_code,
-                check.stderr.trim()
-            );
+            last_error = check
+                .into_exec_error(format!(
+                    "checkpoint {checkpoint_sha} is not reachable from {remote_ref}"
+                ))
+                .to_string();
         }
         time::sleep(Duration::from_millis(500)).await;
     }
@@ -672,93 +704,23 @@ pub(crate) async fn fetch_source_run_ref(
 
 /// Helper for sandbox implementations that manage git internally.
 /// Pushes a refspec to origin via exec_command inside the sandbox.
-pub async fn git_push_via_exec(sandbox: &dyn Sandbox, refspec: &str) -> bool {
+pub async fn git_push_via_exec(sandbox: &dyn Sandbox, refspec: &str) -> crate::Result<()> {
     if let Err(e) = sandbox.refresh_push_credentials().await {
         tracing::warn!(
-            refspec,
-            error = %fabro_redact::redact_string(&e.to_string()),
+            refspec = %refspec,
+            error = %e,
             "Failed to refresh push credentials before git push"
         );
     }
     let cmd = format!("{GIT} push origin {}", shell_quote(refspec));
-    match sandbox.exec_command(&cmd, 60_000, None, None, None).await {
-        Ok(r) if r.exit_code == 0 => {
-            tracing::info!(refspec, "Pushed git ref to origin");
-            true
-        }
-        Ok(r) => {
-            tracing::warn!(
-                refspec,
-                exit_code = r.exit_code,
-                timed_out = r.timed_out,
-                stderr = %trim_for_log(&r.stderr, GIT_LOG_TAIL_BYTES),
-                stdout = %trim_for_log(&r.stdout, GIT_LOG_TAIL_BYTES),
-                hint = classify_git_push_failure(&r.stderr).unwrap_or(""),
-                "Failed to push git ref"
-            );
-            false
-        }
-        Err(e) => {
-            tracing::warn!(
-                refspec,
-                error = %fabro_redact::redact_string(&e.to_string()),
-                "Failed to invoke git push in sandbox"
-            );
-            false
-        }
-    }
-}
-
-/// Maximum bytes of git stdout/stderr to include in a single log line.
-/// Long enough to capture the typical 1-3 line `fatal:` / `remote:` output
-/// without flooding the log when git emits a large progress dump.
-const GIT_LOG_TAIL_BYTES: usize = 2048;
-
-/// Redact secrets from `text`, then keep at most the trailing `limit` bytes.
-/// Trailing because git's relevant `fatal:` / `remote: rejected` lines are
-/// emitted at the end of the output.
-fn trim_for_log(text: &str, limit: usize) -> String {
-    let redacted = fabro_redact::redact_string(text);
-    let trimmed = redacted.trim_end();
-    if trimmed.len() <= limit {
-        return trimmed.to_string();
-    }
-    let start = trimmed.len() - limit;
-    let safe_start = (start..=trimmed.len())
-        .find(|i| trimmed.is_char_boundary(*i))
-        .unwrap_or(trimmed.len());
-    format!("…{}", &trimmed[safe_start..])
-}
-
-/// Map a git stderr to a short hint pointing at the likely cause. Returns
-/// `None` when no known pattern matches; callers should still log the raw
-/// (redacted) stderr so unknown failures stay debuggable.
-fn classify_git_push_failure(stderr: &str) -> Option<&'static str> {
-    let lower = stderr.to_ascii_lowercase();
-    if lower.contains("could not read username") || lower.contains("terminal prompts disabled") {
-        Some(
-            "no credentials in origin URL — check that the sandbox forwarded \
-             GITHUB_APP_PRIVATE_KEY (or GITHUB_TOKEN) and that refresh_push_credentials succeeded",
-        )
-    } else if lower.contains("permission to") && lower.contains("denied") {
-        Some(
-            "github denied the push — installation token lacks contents:write \
-             on this repo, or a branch protection / push ruleset is rejecting the ref",
-        )
-    } else if lower.contains("protected branch")
-        || lower.contains("ruleset")
-        || lower.contains("rejected")
-    {
-        Some("github rejected the ref — likely a branch protection rule or push ruleset")
-    } else if lower.contains("authentication failed") || lower.contains("invalid username") {
-        Some("github authentication failed — installation token may be expired or wrong scope")
-    } else if lower.contains("could not resolve host") || lower.contains("network is unreachable") {
-        Some("network failure inside sandbox — check DNS / egress from the run container")
-    } else if lower.contains("repository not found") {
-        Some("github 404 — the App installation may not include this repo")
-    } else {
-        None
-    }
+    let label = format!("git push origin {refspec}");
+    sandbox
+        .exec_command(&cmd, 60_000, None, None, None)
+        .await
+        .map_err(|e| crate::Error::context(label.clone(), e))?
+        .into_result(&label)?;
+    tracing::info!(refspec = %refspec, "Pushed git ref to origin");
+    Ok(())
 }
 
 #[cfg(test)]
@@ -780,57 +742,74 @@ mod tests {
     }
 
     #[test]
-    fn trim_for_log_keeps_short_output_intact() {
-        assert_eq!(trim_for_log("fatal: nope\n", 2048), "fatal: nope");
+    fn exec_result_helpers_convert_failure_to_exec_error() {
+        let result = ExecResult {
+            stdout:      "out".into(),
+            stderr:      "fatal: could not read Username".into(),
+            exit_code:   128,
+            timed_out:   false,
+            duration_ms: 42,
+        };
+        let error = result.into_result("git push").unwrap_err();
+        let crate::Error::Exec {
+            label, exit_code, ..
+        } = &error
+        else {
+            panic!("expected Error::Exec, got {error:?}");
+        };
+        assert_eq!(label, "git push");
+        assert_eq!(*exit_code, 128);
+        assert!(error.to_string().contains("no credentials in origin URL"));
     }
 
     #[test]
-    fn trim_for_log_keeps_trailing_bytes_when_oversized() {
-        let prefix = "x".repeat(3000);
-        let suffix = "fatal: rejected";
-        let trimmed = trim_for_log(&format!("{prefix}{suffix}"), 64);
-        assert!(trimmed.starts_with('…'));
-        assert!(trimmed.ends_with(suffix));
-        assert!(trimmed.chars().count() <= 64 + 1);
+    fn exec_result_success_honors_timeouts() {
+        let success = ExecResult {
+            stdout:      String::new(),
+            stderr:      String::new(),
+            exit_code:   0,
+            timed_out:   false,
+            duration_ms: 1,
+        };
+        assert!(success.is_success());
+
+        let timeout = ExecResult {
+            timed_out: true,
+            ..success
+        };
+        assert!(!timeout.is_success());
     }
 
     #[test]
-    fn trim_for_log_redacts_high_entropy_secrets() {
-        let stderr = "fatal: unable to access \
-                      'https://x-access-token:ghs_xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA@github.com/owner/repo/'";
-        let trimmed = trim_for_log(stderr, 2048);
-        assert!(!trimmed.contains("ghs_xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA"));
-        assert!(trimmed.contains("REDACTED"));
+    fn exec_result_redactor_applies_to_stderr_and_stdout() {
+        let result = ExecResult {
+            stdout:      "stdout https://token@example.com".into(),
+            stderr:      "stderr https://token@example.com".into(),
+            exit_code:   1,
+            timed_out:   false,
+            duration_ms: 1,
+        };
+        let error = result.into_exec_error_with_redactor("git set-url", |s| {
+            s.replace("https://token@example.com", "https://****@example.com")
+        });
+
+        let crate::Error::Exec { stderr, stdout, .. } = &error else {
+            panic!("expected Error::Exec, got {error:?}");
+        };
+        assert_eq!(stderr, "stderr https://****@example.com");
+        assert_eq!(stdout, "stdout https://****@example.com");
     }
 
     #[test]
-    fn classify_git_push_failure_recognises_missing_credentials() {
-        let hint = classify_git_push_failure(
-            "fatal: could not read Username for 'https://github.com': No such device or address",
+    fn sandbox_tracing_events_do_not_log_raw_command_fields() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut failures = Vec::new();
+        scan_for_command_tracing(&root, &mut failures);
+        assert!(
+            failures.is_empty(),
+            "raw command/cmd tracing fields found:\n{}",
+            failures.join("\n")
         );
-        assert!(hint.unwrap().contains("no credentials in origin URL"));
-    }
-
-    #[test]
-    fn classify_git_push_failure_recognises_permission_denied() {
-        let hint = classify_git_push_failure(
-            "remote: Permission to owner/repo.git denied to fabro-app[bot].",
-        );
-        assert!(hint.unwrap().contains("github denied the push"));
-    }
-
-    #[test]
-    fn classify_git_push_failure_recognises_branch_protection() {
-        let hint = classify_git_push_failure(
-            "remote: error: GH013: Repository rule violations found for refs/heads/main\n\
-             remote: - Cannot create ref 'refs/heads/fabro/run/X' due to ruleset",
-        );
-        assert!(hint.unwrap().contains("ruleset"));
-    }
-
-    #[test]
-    fn classify_git_push_failure_returns_none_for_unknown() {
-        assert!(classify_git_push_failure("fatal: weird new git error message").is_none());
     }
 
     #[test]
@@ -959,5 +938,78 @@ mod tests {
     fn shell_quote_basic() {
         assert_eq!(shell_quote("hello"), "hello");
         assert_eq!(shell_quote("hello world"), "'hello world'");
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "unit test performs a small synchronous source scan of local Rust files"
+    )]
+    fn scan_for_command_tracing(path: &std::path::Path, failures: &mut Vec<String>) {
+        for entry in std::fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                scan_for_command_tracing(&path, failures);
+                continue;
+            }
+            if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            for macro_name in [
+                "tracing::trace!",
+                "tracing::debug!",
+                "tracing::info!",
+                "tracing::warn!",
+                "tracing::error!",
+                "trace!",
+                "debug!",
+                "info!",
+                "warn!",
+                "error!",
+            ] {
+                let mut rest = source.as_str();
+                while let Some(idx) = rest.find(macro_name) {
+                    let start = source.len() - rest.len() + idx;
+                    if start > 0 && source.as_bytes()[start - 1] == b'"' {
+                        rest = &source[start + macro_name.len()..];
+                        continue;
+                    }
+                    let Some(call) = tracing_call(&source[start..]) else {
+                        break;
+                    };
+                    if call.contains("command,")
+                        || call.contains("command =")
+                        || call.contains("cmd,")
+                        || call.contains("cmd =")
+                    {
+                        failures.push(format!(
+                            "{}: {}",
+                            path.display(),
+                            call.lines().next().unwrap_or(call)
+                        ));
+                    }
+                    rest = &source[start + call.len()..];
+                }
+            }
+        }
+    }
+
+    fn tracing_call(source: &str) -> Option<&str> {
+        let open = source.find('(')?;
+        let mut depth = 0usize;
+        for (idx, ch) in source.char_indices().skip(open) {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(&source[..=idx]);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 }

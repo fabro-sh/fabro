@@ -120,9 +120,9 @@ pub(crate) fn resolve_workflow(request: ResolveWorkflowInput) -> anyhow::Result<
             Ok(ResolvedWorkflow {
                 raw_source: workflow.source.clone(),
                 settings,
-                workflow_slug: workflow_slug_from_path(&workflow.logical_path),
+                workflow_slug: workflow_slug_from_path(workflow.path.as_path()),
                 workflow_toml_path: None,
-                dot_path: Some(workflow.logical_path.clone()),
+                dot_path: Some(workflow.path.as_path().to_path_buf()),
                 current_dir: Some(workflow.current_dir()),
                 file_resolver: Some(workflow.file_resolver()),
                 goal_override,
