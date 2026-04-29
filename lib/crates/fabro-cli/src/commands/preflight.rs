@@ -5,7 +5,7 @@ use fabro_util::terminal::Styles;
 use crate::args::PreflightArgs;
 use crate::command_context::CommandContext;
 use crate::commands::run::output::{
-    api_check_report_to_local, api_diagnostics_to_local, print_preflight_workflow_summary,
+    api_check_report_to_local, api_diagnostics_to_local, print_workflow_summary,
 };
 use crate::commands::run::overrides::preflight_args_overrides;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, preflight_manifest_args};
@@ -59,7 +59,7 @@ pub(crate) async fn execute(
     if ctx.json_output() {
         print_json_pretty(&response)?;
     } else {
-        print_preflight_workflow_summary(
+        print_workflow_summary(
             &response.workflow,
             Some(&manifest.target_path),
             styles,

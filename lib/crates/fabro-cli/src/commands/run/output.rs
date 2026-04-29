@@ -19,7 +19,7 @@ use indicatif::HumanDuration;
 use crate::server_client;
 use crate::shared::{format_tokens_human, format_usd_micros, print_diagnostics, relative_path};
 
-pub(crate) fn print_preflight_workflow_summary(
+pub(crate) fn print_workflow_summary(
     workflow: &types::PreflightWorkflowSummary,
     graph_path_override: Option<&Path>,
     styles: &Styles,

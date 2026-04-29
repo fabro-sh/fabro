@@ -27,24 +27,6 @@ fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
     })
 }
 
-fn preflight_response() -> serde_json::Value {
-    serde_json::json!({
-        "ok": true,
-        "workflow": {
-            "name": "Simple",
-            "graph_path": null,
-            "nodes": 4,
-            "edges": 3,
-            "goal": "Run tests and report results",
-            "diagnostics": []
-        },
-        "checks": {
-            "title": "Preflight",
-            "sections": []
-        }
-    })
-}
-
 fn remote_run_state_response() -> serde_json::Value {
     serde_json::json!({
         "spec": null,
@@ -472,11 +454,11 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
-    server.mock(|when, then| {
+    let preflight = server.mock(|when, then| {
         when.method("POST").path("/api/v1/preflight");
-        then.status(200)
+        then.status(500)
             .header("Content-Type", "application/json")
-            .body(preflight_response().to_string());
+            .body(serde_json::json!({ "error": "preflight should not run" }).to_string());
     });
     server.mock(|when, then| {
         when.method("POST").path("/api/v1/runs");
@@ -568,6 +550,7 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    preflight.assert_calls(0);
     first_page.assert();
     second_page.assert();
 
@@ -583,6 +566,45 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
         "{stderr}"
     );
     assert!(!stderr.contains("=== Artifacts ==="), "{stderr}");
+}
+
+#[test]
+fn foreground_run_rejects_invalid_workflow_before_creating_remote_run() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let create = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(500)
+            .header("Content-Type", "application/json")
+            .body(serde_json::json!({ "error": "run should not be created" }).to_string());
+    });
+
+    let workflow = context.install_fixture("invalid.fabro");
+    let output = context
+        .run_cmd()
+        .args([
+            "--server",
+            &format!("{}/api/v1", server.base_url()),
+            workflow.to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        !output.status.success(),
+        "invalid run should fail:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    create.assert_calls(0);
+
+    let stderr = output_stderr(&output);
+    assert!(stderr.contains("Workflow: Invalid"), "{stderr}");
+    assert!(
+        stderr.contains("Pipeline must have exactly one start node"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("Validation failed"), "{stderr}");
 }
 
 #[test]
@@ -693,7 +715,7 @@ fn dry_run_simple() {
 fn dry_run_with_goal_file_reads_contents_into_goal() {
     // Regression test for the `--goal-file` flag that was previously
     // being silently ignored in the v2 path. The file content must end
-    // up in the effective goal displayed in the preflight summary.
+    // up in the effective goal displayed in the workflow summary.
     let context = test_context!();
 
     let goal_dir = tempfile::tempdir().unwrap();
@@ -715,7 +737,7 @@ fn dry_run_with_goal_file_reads_contents_into_goal() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("Ship the rate-limiting feature end to end."),
-        "goal file content should appear in preflight summary, got:\n{stderr}"
+        "goal file content should appear in workflow summary, got:\n{stderr}"
     );
 }
 
