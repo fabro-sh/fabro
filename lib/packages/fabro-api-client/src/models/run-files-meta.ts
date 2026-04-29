@@ -43,17 +43,13 @@ export interface RunFilesMeta {
      */
     'to_sha_committed_at'?: string;
     /**
-     * When `true`, this response carries only a unified patch string in `patch` (no per-file contents in `data`). The UI should render via a unified-patch component.
+     * When `true`, every entry in `data` has null `contents` on both sides; non-sensitive non-flagged entries also include `unified_patch`. Entries flagged `sensitive` / `binary` / `symlink` / `submodule` / `truncated` render via the same placeholders used in the live path (the flags drive rendering; contents are null in degraded mode regardless). The data shape is otherwise identical to the live path.
      */
     'degraded'?: boolean;
     /**
-     * Why the response degraded to patch-only form. Absent when `degraded` is `false` or omitted.
+     * Why the response degraded. Absent when `degraded` is `false` or omitted.
      */
     'degraded_reason'?: RunFilesMetaDegradedReasonEnum;
-    /**
-     * Unified-patch text captured at run end. Present only when `degraded` is `true`. Capped at 5 MiB; denylisted file sections are stripped and replaced with a placeholder line.
-     */
-    'patch'?: string;
 }
 
 export const RunFilesMetaDegradedReasonEnum = {

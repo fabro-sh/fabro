@@ -1650,7 +1650,7 @@ paths:
       description: |
         Returns the set of file changes produced by a run as a list of before/after diffs.
 
-        While the run's sandbox is reachable, diffs are resolved live against the sandbox working tree at the current HEAD. Once the sandbox is gone, the response may degrade to the unified-patch string captured at run end (see `meta.degraded` and `meta.patch`).
+        While the run's sandbox is reachable, diffs are resolved live against the sandbox working tree at the current HEAD. Degraded responses keep the same `data: FileDiff[]` shape. File contents are null on every entry; non-sensitive non-flagged entries include `unified_patch`, while sensitive / binary / symlink / submodule / truncated entries render through the same placeholder flags used by the live path.
 
         Responses are bounded by per-file (256 KiB / 20k lines), per-run aggregate (5 MiB), and per-request (200 files) caps. Files exceeding a cap are returned with `truncated: true` and empty `contents`. Sensitive paths (credentials, keys) are elided with `sensitive: true` and empty `contents`.
       parameters:
@@ -5623,8 +5623,8 @@ components:
           description: File path relative to the repository root.
           example: src/commands/run.ts
         contents:
-          type: string
-          description: Full file contents. Empty string for newly created or deleted files.
+          type: ["string", "null"]
+          description: "Full contents at this side. Live path: empty string for added/deleted/binary/sensitive/symlink/submodule/truncated entries (the placeholder flags drive rendering). Degraded path: null for every entry (including placeholder-flagged ones), because the server only holds a checkpoint patch and cannot reconstruct full file bytes — distinguish degraded from live by `meta.degraded`."
           example: 'import { parseArgs } from "node:util";'
 
     FileDiff:
@@ -5636,6 +5636,7 @@ components:
         - Deleted: `new_file.contents` is empty string; `old_file` holds the removed contents.
         - Renamed (no content change): both sides hold identical contents; `old_file.name != new_file.name`.
         - Symlink / submodule / binary / sensitive / truncated: contents are empty strings; consumers must render a placeholder based on the flag set.
+        - Degraded responses: contents are null on every entry; regular text diffs include `unified_patch`.
       type: object
       required:
         - old_file
@@ -5674,11 +5675,13 @@ components:
           type: boolean
           description: When `true`, the file path matched the server's sensitive-path denylist; `contents` on both sides are empty strings regardless of truncation or binary flags.
           example: false
+        unified_patch:
+          type: ["string", "null"]
+          description: Per-file unified-patch text (the `diff --git` section verbatim). Populated only for regular non-flagged text-diff entries in degraded mode. Absent for sensitive, binary, symlink, submodule, truncated, and live-path entries.
 
     DiffStats:
       description: |
-        Aggregate `+/-` line counts across all files in a diff (or the unified
-        patch in degraded mode). Binary, sensitive, symlink, and submodule
+        Aggregate `+/-` line counts across all files in a diff. Binary, sensitive, symlink, and submodule
         files contribute 0/0 since they have no line-level diff. Both fields
         are 0 for empty / pre-start envelopes.
       type: object
@@ -5731,18 +5734,15 @@ components:
           description: Commit time of `to_sha`, used by the UI for the "Checkpoint Xm ago" freshness label on Running runs.
         degraded:
           type: boolean
-          description: When `true`, this response carries only a unified patch string in `patch` (no per-file contents in `data`). The UI should render via a unified-patch component.
+          description: When `true`, every entry in `data` has null `contents` on both sides; non-sensitive non-flagged entries also include `unified_patch`. Entries flagged `sensitive` / `binary` / `symlink` / `submodule` / `truncated` render via the same placeholders used in the live path (the flags drive rendering; contents are null in degraded mode regardless). The data shape is otherwise identical to the live path.
           example: false
         degraded_reason:
           type: string
-          description: Why the response degraded to patch-only form. Absent when `degraded` is `false` or omitted.
+          description: Why the response degraded. Absent when `degraded` is `false` or omitted.
           enum:
             - sandbox_unreachable
             - sandbox_gone
             - provider_unsupported
-        patch:
-          type: string
-          description: Unified-patch text captured at run end. Present only when `degraded` is `true`. Capped at 5 MiB; denylisted file sections are stripped and replaced with a placeholder line.
 
     PaginatedRunFileList:
       description: |

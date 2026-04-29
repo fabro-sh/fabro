@@ -7,18 +7,78 @@
 //! unit tests on the sandbox-git helpers and by `stitch_file_diff` tests
 //! in `run_files.rs`.
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_server::jwt_auth::AuthMode;
-use fabro_server::server::build_router;
+use fabro_server::server::{build_router, create_app_state_with_store};
+use fabro_store::{ArtifactStore, Database};
+use fabro_types::RunId;
+use fabro_workflow::event as workflow_event;
+use fabro_workflow::run_status::SuccessReason;
+use object_store::memory::InMemory as MemoryObjectStore;
 use tower::ServiceExt;
 
 use crate::helpers::{
     MINIMAL_DOT, api, minimal_manifest_json, response_json, response_status, test_app_state,
+    test_settings,
 };
 
 fn files_url(run_id: &str) -> String {
     api(&format!("/runs/{run_id}/files"))
+}
+
+fn store_bundle() -> (Arc<Database>, ArtifactStore) {
+    let object_store: Arc<dyn object_store::ObjectStore> = Arc::new(MemoryObjectStore::new());
+    let store = Arc::new(Database::new(
+        Arc::clone(&object_store),
+        "",
+        Duration::from_millis(1),
+        None,
+    ));
+    let artifact_store = ArtifactStore::new(object_store, "artifacts");
+    (store, artifact_store)
+}
+
+async fn append_completed_run_with_final_patch(
+    store: &Database,
+    run_id: &RunId,
+    final_patch: &str,
+) {
+    let run_store = store.create_run(run_id).await.unwrap();
+    workflow_event::append_event(
+        &run_store,
+        run_id,
+        &workflow_event::Event::WorkflowRunStarted {
+            name:         "test".to_string(),
+            run_id:       *run_id,
+            base_branch:  Some("main".to_string()),
+            base_sha:     Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()),
+            run_branch:   Some("fabro/run/test".to_string()),
+            worktree_dir: None,
+            goal:         Some("Test degraded files".to_string()),
+        },
+    )
+    .await
+    .unwrap();
+    workflow_event::append_event(
+        &run_store,
+        run_id,
+        &workflow_event::Event::WorkflowRunCompleted {
+            duration_ms:          1,
+            artifact_count:       0,
+            status:               "success".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()),
+            final_patch:          Some(final_patch.to_string()),
+            billing:              None,
+        },
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -159,6 +219,65 @@ async fn submitted_run_without_sandbox_returns_empty_envelope() {
     // Degraded is false because there's no final_patch either — the run
     // simply hasn't produced anything to diff.
     assert_eq!(body["meta"]["degraded"].as_bool(), Some(false));
+}
+
+#[tokio::test]
+async fn degraded_run_returns_file_diff_shape_without_meta_patch() {
+    let settings = test_settings();
+    let (store, artifact_store) = store_bundle();
+    let state = create_app_state_with_store(
+        settings.server_settings,
+        settings.manifest_run_defaults,
+        5,
+        Arc::clone(&store),
+        artifact_store,
+    );
+    let app = build_router(state, AuthMode::Disabled);
+    let run_id = RunId::new();
+    let patch = "\
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1 +1,2 @@
+ old
++new
+diff --git a/.env.production b/.env.production
+--- a/.env.production
++++ b/.env.production
+@@ -1 +1 @@
+-SECRET=old
++SECRET=new
+";
+    append_completed_run_with_final_patch(&store, &run_id, patch).await;
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(files_url(&run_id.to_string()))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let body = response_json(
+        resp,
+        StatusCode::OK,
+        format!("GET /api/v1/runs/{run_id}/files"),
+    )
+    .await;
+
+    assert_eq!(body["meta"]["degraded"].as_bool(), Some(true));
+    assert!(body["meta"]["degraded_reason"].is_string());
+    assert!(body["meta"].get("patch").is_none());
+    assert_eq!(body["meta"]["total_changed"], 2);
+    assert_eq!(body["meta"]["truncated"].as_bool(), Some(false));
+
+    let data = body["data"].as_array().expect("data should be an array");
+    assert_eq!(data.len(), 2);
+    assert_eq!(data[0]["old_file"]["contents"], serde_json::Value::Null);
+    assert_eq!(data[0]["new_file"]["contents"], serde_json::Value::Null);
+    assert!(data[0]["unified_patch"].is_string());
+    assert_eq!(data[1]["sensitive"].as_bool(), Some(true));
+    assert_eq!(data[1]["old_file"]["contents"], serde_json::Value::Null);
+    assert_eq!(data[1]["new_file"]["contents"], serde_json::Value::Null);
+    assert!(data[1].get("unified_patch").is_none());
 }
 
 #[tokio::test]

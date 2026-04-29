@@ -9,21 +9,19 @@ import {
 function buildRunFilesPayload({
   files = [],
   degraded = false,
-  patch = null,
 }: {
   files?: string[];
   degraded?: boolean;
-  patch?: string | null;
 }) {
   return {
-    data: files.map((name) => ({
+    data: files.map((name, index) => ({
       change_kind: "modified",
-      old_file: { name },
-      new_file: { name },
+      old_file: { name, contents: degraded ? null : `old ${index}` },
+      new_file: { name, contents: degraded ? null : `new ${index}` },
+      ...(degraded ? { unified_patch: `diff --git a/${name} b/${name}` } : {}),
     })),
     meta: {
       degraded,
-      patch,
       total_changed: files.length,
       stats: { additions: 0, deletions: 0 },
       truncated: false,
@@ -94,18 +92,6 @@ describe("emptyTransitionToastMessage", () => {
 });
 
 describe("deepLinkToastMessage", () => {
-  test("returns the patch-only message when file navigation is unavailable", () => {
-    expect(
-      deepLinkToastMessage(
-        "src/app.tsx",
-        buildRunFilesPayload({
-          degraded: true,
-          patch: "@@ -1 +1 @@",
-        }),
-      ),
-    ).toBe("File-level navigation isn't available in the patch-only view.");
-  });
-
   test("returns the missing-file message when the requested file is absent", () => {
     expect(
       deepLinkToastMessage(
@@ -120,6 +106,18 @@ describe("deepLinkToastMessage", () => {
       deepLinkToastMessage(
         "src/present.ts",
         buildRunFilesPayload({ files: ["src/present.ts"] }),
+      ),
+    ).toBeNull();
+  });
+
+  test("returns null for degraded file-shaped payloads when the file exists", () => {
+    expect(
+      deepLinkToastMessage(
+        "src/present.ts",
+        buildRunFilesPayload({
+          degraded: true,
+          files: ["src/present.ts"],
+        }),
       ),
     ).toBeNull();
   });

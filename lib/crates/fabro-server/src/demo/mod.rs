@@ -178,45 +178,48 @@ fn demo_run_files() -> PaginatedRunFileList {
                 change_kind:       Some(FileDiffChangeKind::Modified),
                 new_file:          DiffFile {
                     name:     "src/commands/run.ts".to_string(),
-                    contents: new_main.to_string(),
+                    contents: Some(new_main.to_string()),
                 },
                 old_file:          DiffFile {
                     name:     "src/commands/run.ts".to_string(),
-                    contents: old_main.to_string(),
+                    contents: Some(old_main.to_string()),
                 },
                 sensitive:         None,
                 truncated:         None,
                 truncation_reason: None,
+                unified_patch:     None,
             },
             FileDiff {
                 binary:            None,
                 change_kind:       Some(FileDiffChangeKind::Added),
                 new_file:          DiffFile {
                     name:     "src/config.ts".to_string(),
-                    contents: new_config.to_string(),
+                    contents: Some(new_config.to_string()),
                 },
                 old_file:          DiffFile {
                     name:     String::new(),
-                    contents: String::new(),
+                    contents: Some(String::new()),
                 },
                 sensitive:         None,
                 truncated:         None,
                 truncation_reason: None,
+                unified_patch:     None,
             },
             FileDiff {
                 binary:            None,
                 change_kind:       Some(FileDiffChangeKind::Renamed),
                 new_file:          DiffFile {
                     name:     "src/legacy/old-runner.ts".to_string(),
-                    contents: "export const legacy = true;\n".to_string(),
+                    contents: Some("export const legacy = true;\n".to_string()),
                 },
                 old_file:          DiffFile {
                     name:     "src/old-runner.ts".to_string(),
-                    contents: "export const legacy = true;\n".to_string(),
+                    contents: Some("export const legacy = true;\n".to_string()),
                 },
                 sensitive:         None,
                 truncated:         None,
                 truncation_reason: None,
+                unified_patch:     None,
             },
         ],
         meta: RunFilesMeta {
@@ -231,7 +234,6 @@ fn demo_run_files() -> PaginatedRunFileList {
             to_sha_committed_at:     None,
             degraded:                Some(false),
             degraded_reason:         None,
-            patch:                   None,
         },
     }
 }

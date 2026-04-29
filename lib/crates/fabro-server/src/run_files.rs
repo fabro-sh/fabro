@@ -256,11 +256,13 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
         return Ok(empty_envelope());
     };
 
-    // Try to reconnect; on failure fall through to the patch-only fallback.
+    // Try to reconnect; on failure fall through to the final-patch fallback.
     let Some(sandbox) = try_reconnect_run_sandbox(state, &projection).await? else {
         return Ok(build_fallback_response(
             &projection,
             reason_for_fallback(&projection),
+            run_id,
+            start,
         ));
     };
 
@@ -276,13 +278,15 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
     );
 
     // Permanent errors (bad_sha, missing object) fall through to the
-    // patch-only fallback; transient errors surface as 503.
+    // final-patch fallback; transient errors surface as 503.
     let raw_entries = match raw_res {
         Ok(v) => v,
         Err(DiffError::Permanent { .. }) => {
             return Ok(build_fallback_response(
                 &projection,
                 RunFilesMetaDegradedReason::SandboxGone,
+                run_id,
+                start,
             ));
         }
         Err(DiffError::Transient { message }) => {
@@ -368,7 +372,6 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
             to_sha_committed_at,
             degraded: Some(false),
             degraded_reason: None,
-            patch: None,
         },
     })
 }
@@ -395,22 +398,77 @@ fn reason_for_fallback(projection: &fabro_store::RunProjection) -> RunFilesMetaD
     }
 }
 
-/// Build the degraded patch-only response from the stored `final_patch`.
+/// Build the degraded response from the stored `final_patch`.
 /// When `final_patch` is `None`, returns the empty envelope (UI maps this to
-/// R4(c)). Applies a 5 MiB cap, strips denylisted file sections from the
-/// patch, and counts `diff --git` headers to populate `total_changed`.
+/// R4(c)). Keeps the same `FileDiff[]` shape as live responses, but leaves
+/// contents unavailable because the server only has a unified patch.
 fn build_fallback_response(
     projection: &fabro_store::RunProjection,
     reason: RunFilesMetaDegradedReason,
+    run_id: &RunId,
+    start: Instant,
 ) -> PaginatedRunFileList {
     let Some(patch) = projection.final_patch.as_deref() else {
         return empty_envelope();
     };
 
-    let (filtered_patch, truncated_by_cap) = apply_patch_cap(patch, AGGREGATE_BYTES_CAP);
-    let filtered_patch = strip_denylisted_sections(&filtered_patch, is_sensitive);
-    let total_changed = count_diff_headers(&filtered_patch);
-    let stats = patch_to_stats(&filtered_patch);
+    let sections = split_patch_sections(patch);
+    let original_section_count = sections.len();
+    let stats = sections
+        .iter()
+        .fold(DiffStats::default(), |mut acc, section| {
+            let stats = section_to_stats(section, is_sensitive);
+            acc.additions = acc.additions.saturating_add(stats.additions);
+            acc.deletions = acc.deletions.saturating_add(stats.deletions);
+            acc
+        });
+
+    let truncated_by_count = original_section_count > FILE_COUNT_CAP;
+    let mut aggregate_bytes: u64 = 0;
+    let mut files_omitted_by_budget: u64 = 0;
+    let mut budget_exhausted = false;
+    let mut response_data: Vec<FileDiff> =
+        Vec::with_capacity(original_section_count.min(FILE_COUNT_CAP));
+
+    for section in sections.iter().take(FILE_COUNT_CAP) {
+        let change_kind = classify_section(section).unwrap_or(FileDiffChangeKind::Modified);
+        let (old_name, new_name) = section_paths(section, Some(change_kind));
+        let mut diff = degraded_file_diff(old_name, new_name, change_kind);
+
+        if section_is_sensitive(section, is_sensitive) {
+            diff.sensitive = Some(true);
+            response_data.push(diff);
+            continue;
+        }
+
+        if section_is_binary(section) {
+            diff.binary = Some(true);
+            response_data.push(diff);
+            continue;
+        }
+
+        if matches!(
+            change_kind,
+            FileDiffChangeKind::Symlink | FileDiffChangeKind::Submodule
+        ) {
+            response_data.push(diff);
+            continue;
+        }
+
+        let section_bytes = u64::try_from(section.text.len()).unwrap_or(u64::MAX);
+        if budget_exhausted || aggregate_bytes.saturating_add(section_bytes) > AGGREGATE_BYTES_CAP {
+            budget_exhausted = true;
+            files_omitted_by_budget = files_omitted_by_budget.saturating_add(1);
+            diff.truncated = Some(true);
+            diff.truncation_reason = Some(FileDiffTruncationReason::BudgetExhausted);
+            response_data.push(diff);
+            continue;
+        }
+
+        aggregate_bytes = aggregate_bytes.saturating_add(section_bytes);
+        diff.unified_patch = Some(section.text.to_string());
+        response_data.push(diff);
+    }
 
     let to_sha = projection
         .conclusion
@@ -423,50 +481,186 @@ fn build_fallback_response(
     // proxy. The client renders this as "Captured Xm ago".
     let to_sha_committed_at = projection.conclusion.as_ref().map(|c| c.timestamp);
 
+    let truncated = truncated_by_count
+        || response_data.iter().any(|f| f.truncated.unwrap_or(false))
+        || files_omitted_by_budget > 0;
+    let (binary_count, sensitive_count, symlink_count, submodule_count) =
+        count_flags(&response_data);
+
+    let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    RunFilesMetrics {
+        file_count: response_data.len(),
+        bytes_total: aggregate_bytes,
+        duration_ms,
+        truncated,
+        binary_count,
+        sensitive_count,
+        symlink_count,
+        submodule_count,
+    }
+    .emit(run_id);
+
     PaginatedRunFileList {
-        data: Vec::new(),
+        data: response_data,
         meta: RunFilesMeta {
-            truncated: truncated_by_cap,
-            files_omitted_by_budget: None,
-            total_changed: i64::try_from(total_changed).unwrap_or(i64::MAX),
+            truncated,
+            files_omitted_by_budget: (files_omitted_by_budget > 0)
+                .then(|| i64::try_from(files_omitted_by_budget).unwrap_or(i64::MAX)),
+            total_changed: i64::try_from(original_section_count).unwrap_or(i64::MAX),
             stats,
             to_sha,
             to_sha_committed_at,
             degraded: Some(true),
             degraded_reason: Some(reason),
-            patch: Some(filtered_patch),
         },
     }
 }
 
-/// Count `+` and `-` line totals in a unified patch, excluding `+++`/`---`
-/// file headers and any non-content lines. Mirrors the `git diff --numstat`
-/// summation we use on the live-sandbox path so the toolbar shows the same
-/// numbers regardless of which response branch we took.
-fn patch_to_stats(patch: &str) -> DiffStats {
+#[derive(Debug, Clone, Copy)]
+struct PatchSection<'a> {
+    header_line: &'a str,
+    body:        &'a str,
+    text:        &'a str,
+}
+
+fn split_patch_sections(patch: &str) -> Vec<PatchSection<'_>> {
+    let mut starts = Vec::new();
+    let mut offset = 0;
+    for line in patch.split_inclusive('\n') {
+        if line.starts_with("diff --git ") {
+            starts.push(offset);
+        }
+        offset += line.len();
+    }
+
+    starts
+        .iter()
+        .enumerate()
+        .map(|(idx, start)| {
+            let end = starts.get(idx + 1).copied().unwrap_or(patch.len());
+            let text = &patch[*start..end];
+            let header_end = text.find('\n').map_or(text.len(), |pos| pos + 1);
+            PatchSection {
+                header_line: &text[..header_end],
+                body: &text[header_end..],
+                text,
+            }
+        })
+        .collect()
+}
+
+fn classify_section(section: &PatchSection<'_>) -> Option<FileDiffChangeKind> {
+    if section
+        .body
+        .lines()
+        .any(|line| patch_mode_line_matches(line, "120000"))
+    {
+        return Some(FileDiffChangeKind::Symlink);
+    }
+    if section
+        .body
+        .lines()
+        .any(|line| patch_mode_line_matches(line, "160000"))
+    {
+        return Some(FileDiffChangeKind::Submodule);
+    }
+    if section
+        .body
+        .lines()
+        .any(|line| line.starts_with("new file mode "))
+    {
+        return Some(FileDiffChangeKind::Added);
+    }
+    if section
+        .body
+        .lines()
+        .any(|line| line.starts_with("deleted file mode "))
+    {
+        return Some(FileDiffChangeKind::Deleted);
+    }
+    let mut has_rename_from = false;
+    let mut has_rename_to = false;
+    for line in section.body.lines() {
+        has_rename_from |= line.starts_with("rename from ");
+        has_rename_to |= line.starts_with("rename to ");
+    }
+    if has_rename_from && has_rename_to {
+        return Some(FileDiffChangeKind::Renamed);
+    }
+    Some(FileDiffChangeKind::Modified)
+}
+
+fn section_is_binary(section: &PatchSection<'_>) -> bool {
+    section
+        .body
+        .lines()
+        .any(|line| line.starts_with("Binary files ") && line.trim_end().ends_with(" differ"))
+}
+
+fn section_paths(section: &PatchSection<'_>, kind: Option<FileDiffChangeKind>) -> (String, String) {
+    let mut old_marker = None;
+    let mut new_marker = None;
+    for line in section.body.lines() {
+        if old_marker.is_none() {
+            old_marker = parse_patch_path_marker(line, "--- ", "a/");
+        }
+        if new_marker.is_none() {
+            new_marker = parse_patch_path_marker(line, "+++ ", "b/");
+        }
+    }
+
+    let (header_old, header_new) = extract_diff_header_paths(section.header_line);
+    let old_name = old_marker
+        .or_else(|| header_old.map(str::to_string))
+        .unwrap_or_default();
+    let new_name = new_marker
+        .or_else(|| header_new.map(str::to_string))
+        .unwrap_or_default();
+
+    match kind {
+        Some(FileDiffChangeKind::Added) => (String::new(), new_name),
+        Some(FileDiffChangeKind::Deleted) => (old_name, String::new()),
+        _ => (old_name, new_name),
+    }
+}
+
+fn parse_patch_path_marker(line: &str, marker: &str, side_prefix: &str) -> Option<String> {
+    let rest = line.strip_prefix(marker)?;
+    let path = rest.split('\t').next().unwrap_or(rest).trim_end();
+    if path == "/dev/null" {
+        return Some(String::new());
+    }
+    Some(path.strip_prefix(side_prefix).unwrap_or(path).to_string())
+}
+
+fn section_is_sensitive(section: &PatchSection<'_>, is_sensitive_fn: fn(&str) -> bool) -> bool {
+    let (old_path, new_path) = extract_diff_header_paths(section.header_line);
+    old_path.is_some_and(is_sensitive_fn) || new_path.is_some_and(is_sensitive_fn)
+}
+
+fn section_to_stats(section: &PatchSection<'_>, is_sensitive_fn: fn(&str) -> bool) -> DiffStats {
+    if section_is_sensitive(section, is_sensitive_fn)
+        || section_is_binary(section)
+        || matches!(
+            classify_section(section),
+            Some(FileDiffChangeKind::Symlink) | Some(FileDiffChangeKind::Submodule)
+        )
+    {
+        return DiffStats::default();
+    }
+
     let mut stats = DiffStats::default();
-    for section in patch.split("diff --git ").skip(1) {
-        if patch_section_omits_line_stats(section) {
+    for line in section.body.lines() {
+        if line.starts_with("+++") || line.starts_with("---") {
             continue;
         }
-        for line in section.lines() {
-            if line.starts_with("+++") || line.starts_with("---") {
-                continue;
-            }
-            match line.as_bytes().first() {
-                Some(b'+') => stats.additions = stats.additions.saturating_add(1),
-                Some(b'-') => stats.deletions = stats.deletions.saturating_add(1),
-                _ => {}
-            }
+        match line.as_bytes().first() {
+            Some(b'+') => stats.additions = stats.additions.saturating_add(1),
+            Some(b'-') => stats.deletions = stats.deletions.saturating_add(1),
+            _ => {}
         }
     }
     stats
-}
-
-fn patch_section_omits_line_stats(section: &str) -> bool {
-    section.lines().any(|line| {
-        patch_mode_line_matches(line, "120000") || patch_mode_line_matches(line, "160000")
-    })
 }
 
 fn patch_mode_line_matches(line: &str, mode: &str) -> bool {
@@ -482,72 +676,6 @@ fn patch_mode_line_matches(line: &str, mode: &str) -> bool {
     line.strip_prefix("index ")
         .and_then(|rest| rest.split_whitespace().last())
         == Some(mode)
-}
-
-/// Truncate a patch at `cap_bytes` on a UTF-8 character boundary. Returns
-/// `(truncated_patch, was_truncated)`.
-fn apply_patch_cap(patch: &str, cap_bytes: u64) -> (String, bool) {
-    let cap = usize::try_from(cap_bytes).unwrap_or(usize::MAX);
-    if patch.len() <= cap {
-        return (patch.to_string(), false);
-    }
-    // Find the largest char boundary at-or-before `cap`.
-    let mut boundary = cap;
-    while boundary > 0 && !patch.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    (patch[..boundary].to_string(), true)
-}
-
-/// Scan a unified patch for `diff --git a/<path> b/<path>` headers and strip
-/// out whole file sections whose EITHER side matches the denylist. Renames
-/// from a sensitive path to a benign one must not leak patch contents, so
-/// both `a/<old>` and `b/<new>` are checked. Matched sections are replaced
-/// with a single `# sensitive file omitted` placeholder line so the client's
-/// `PatchDiff` still renders the surrounding context.
-fn strip_denylisted_sections(patch: &str, is_sensitive_fn: fn(&str) -> bool) -> String {
-    let mut out = String::with_capacity(patch.len());
-    let sections: Vec<&str> = patch.split_inclusive('\n').collect();
-
-    let mut current_section: Vec<&str> = Vec::new();
-    let mut current_sensitive = false;
-
-    let flush = |buf: &mut String, section: &[&str], sensitive: bool| {
-        if section.is_empty() {
-            return;
-        }
-        if sensitive {
-            use std::fmt::Write;
-            let first = section.first().copied().unwrap_or("");
-            // Use whichever side we can surface without leaking the sensitive
-            // side's full path: prefer the new side, fall back to the old.
-            let (old_path, new_path) = extract_diff_header_paths(first);
-            let display = new_path.or(old_path).unwrap_or("<sensitive>");
-            let _ = writeln!(
-                buf,
-                "# sensitive file omitted: {}",
-                display.replace('\n', " ")
-            );
-        } else {
-            for line in section {
-                buf.push_str(line);
-            }
-        }
-    };
-
-    for line in sections {
-        if line.starts_with("diff --git ") {
-            // Finish the previous section.
-            flush(&mut out, &current_section, current_sensitive);
-            current_section.clear();
-            let (old_path, new_path) = extract_diff_header_paths(line);
-            current_sensitive =
-                old_path.is_some_and(is_sensitive_fn) || new_path.is_some_and(is_sensitive_fn);
-        }
-        current_section.push(line);
-    }
-    flush(&mut out, &current_section, current_sensitive);
-    out
 }
 
 /// Parse both `a/<old>` and `b/<new>` paths from a `diff --git` header line.
@@ -570,13 +698,27 @@ fn extract_diff_header_paths(header_line: &str) -> (Option<&str>, Option<&str>) 
     (old_path, new_path)
 }
 
-/// Count `diff --git` header occurrences (each marks one changed file) in the
-/// filtered patch.
-fn count_diff_headers(patch: &str) -> usize {
-    patch
-        .lines()
-        .filter(|l| l.starts_with("diff --git "))
-        .count()
+fn degraded_file_diff(
+    old_name: String,
+    new_name: String,
+    change_kind: FileDiffChangeKind,
+) -> FileDiff {
+    FileDiff {
+        binary:            None,
+        change_kind:       Some(change_kind),
+        new_file:          DiffFile {
+            name:     new_name,
+            contents: None,
+        },
+        old_file:          DiffFile {
+            name:     old_name,
+            contents: None,
+        },
+        sensitive:         None,
+        truncated:         None,
+        truncation_reason: None,
+        unified_patch:     None,
+    }
 }
 
 fn empty_envelope() -> PaginatedRunFileList {
@@ -594,7 +736,6 @@ fn empty_envelope() -> PaginatedRunFileList {
             to_sha_committed_at:     None,
             degraded:                Some(false),
             degraded_reason:         None,
-            patch:                   None,
         },
     }
 }
@@ -800,15 +941,16 @@ fn build_placeholder_file_diff(entry: &RawDiffEntry, kind: &PlaceholderKind) -> 
         change_kind:       Some(change_kind),
         new_file:          DiffFile {
             name:     new_name,
-            contents: String::new(),
+            contents: Some(String::new()),
         },
         old_file:          DiffFile {
             name:     old_name,
-            contents: String::new(),
+            contents: Some(String::new()),
         },
         sensitive:         matches!(kind, PlaceholderKind::Sensitive).then_some(true),
         truncated:         None,
         truncation_reason: None,
+        unified_patch:     None,
     }
 }
 
@@ -940,15 +1082,16 @@ fn stitch_file_diff(
         change_kind:       Some(change_kind),
         new_file:          DiffFile {
             name:     new_name,
-            contents: new_contents_ref.to_string(),
+            contents: Some(new_contents_ref.to_string()),
         },
         old_file:          DiffFile {
             name:     old_name,
-            contents: old_contents_ref.to_string(),
+            contents: Some(old_contents_ref.to_string()),
         },
         sensitive:         None,
         truncated:         None,
         truncation_reason: None,
+        unified_patch:     None,
     }
 }
 
@@ -963,15 +1106,16 @@ fn truncated_file_diff(
         change_kind:       Some(change_kind),
         new_file:          DiffFile {
             name:     new_name,
-            contents: String::new(),
+            contents: Some(String::new()),
         },
         old_file:          DiffFile {
             name:     old_name,
-            contents: String::new(),
+            contents: Some(String::new()),
         },
         sensitive:         None,
         truncated:         Some(true),
         truncation_reason: Some(reason),
+        unified_patch:     None,
     }
 }
 
@@ -1154,7 +1298,6 @@ mod tests {
                 to_sha_committed_at:     None,
                 degraded:                None,
                 degraded_reason:         None,
-                patch:                   None,
             },
         }
     }
@@ -1412,57 +1555,95 @@ mod tests {
     // ── Degraded-fallback helpers (Unit 6) ────────────────────────────────
 
     #[test]
-    fn apply_patch_cap_truncates_at_char_boundary() {
-        let patch = "Hello, world! 你好, 世界!";
-        let (truncated, was) = apply_patch_cap(patch, 16);
-        assert!(was);
-        assert!(truncated.len() <= 16);
-        // Must still be valid UTF-8 (implicit — String::from would have
-        // panicked otherwise).
-        assert!(!truncated.is_empty());
+    fn split_patch_sections_returns_one_section_per_diff_header() {
+        let patch = "preamble\ndiff --git a/a.rs b/a.rs\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/b.rs b/b.rs\n@@ -1 +1 @@\n-c\n+d\n";
+        let sections = split_patch_sections(patch);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].header_line, "diff --git a/a.rs b/a.rs\n");
+        assert!(sections[0].text.contains("-a\n+b\n"));
+        assert_eq!(sections[1].header_line, "diff --git a/b.rs b/b.rs\n");
     }
 
     #[test]
-    fn apply_patch_cap_keeps_short_patches_unchanged() {
-        let (out, was) = apply_patch_cap("small", 100);
-        assert_eq!(out, "small");
-        assert!(!was);
+    fn classify_section_detects_change_kinds() {
+        let cases = [
+            (
+                "diff --git a/new.rs b/new.rs\nnew file mode 100755\n--- /dev/null\n+++ b/new.rs\n",
+                FileDiffChangeKind::Added,
+            ),
+            (
+                "diff --git a/old.rs b/old.rs\ndeleted file mode 100644\n--- a/old.rs\n+++ /dev/null\n",
+                FileDiffChangeKind::Deleted,
+            ),
+            (
+                "diff --git a/old.rs b/new.rs\nrename from old.rs\nrename to new.rs\n",
+                FileDiffChangeKind::Renamed,
+            ),
+            (
+                "diff --git a/link b/link\nnew file mode 120000\n--- /dev/null\n+++ b/link\n",
+                FileDiffChangeKind::Symlink,
+            ),
+            (
+                "diff --git a/vendor/lib b/vendor/lib\nindex 1111111..2222222 160000\n",
+                FileDiffChangeKind::Submodule,
+            ),
+            (
+                "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n",
+                FileDiffChangeKind::Modified,
+            ),
+        ];
+
+        for (patch, expected) in cases {
+            let section = split_patch_sections(patch).pop().expect("section");
+            assert_eq!(classify_section(&section), Some(expected));
+        }
     }
 
     #[test]
-    fn strip_denylisted_sections_replaces_sensitive_files_with_placeholder() {
-        let patch = "\
-diff --git a/src/foo.rs b/src/foo.rs
-@@ -1 +1 @@
--a
-+b
-diff --git a/.env.production b/.env.production
-@@ -1 +1 @@
--SECRET=old
-+SECRET=new
-diff --git a/src/bar.rs b/src/bar.rs
-@@ -1 +1 @@
--x
-+y
-";
-        let out = strip_denylisted_sections(patch, is_sensitive);
-        assert!(out.contains("src/foo.rs"), "kept non-sensitive: {out}");
-        assert!(out.contains("src/bar.rs"), "kept non-sensitive: {out}");
-        assert!(!out.contains("SECRET="), "denylisted content leaked: {out}");
-        assert!(
-            out.contains("# sensitive file omitted: .env.production"),
-            "placeholder missing: {out}"
+    fn section_is_binary_detects_binary_marker() {
+        let section = split_patch_sections(
+            "diff --git a/image.png b/image.png\nBinary files a/image.png and b/image.png differ\n",
+        )
+        .pop()
+        .expect("section");
+        assert!(section_is_binary(&section));
+    }
+
+    #[test]
+    fn section_paths_uses_file_markers_and_missing_side_conventions() {
+        let added = split_patch_sections(
+            "diff --git a/new.rs b/new.rs\nnew file mode 100644\n--- /dev/null\n+++ b/new.rs\n",
+        )
+        .pop()
+        .expect("section");
+        assert_eq!(
+            section_paths(&added, Some(FileDiffChangeKind::Added)),
+            (String::new(), "new.rs".to_string())
+        );
+
+        let deleted = split_patch_sections(
+            "diff --git a/old.rs b/old.rs\ndeleted file mode 100644\n--- a/old.rs\n+++ /dev/null\n",
+        )
+        .pop()
+        .expect("section");
+        assert_eq!(
+            section_paths(&deleted, Some(FileDiffChangeKind::Deleted)),
+            ("old.rs".to_string(), String::new())
+        );
+
+        let renamed = split_patch_sections(
+            "diff --git a/old.rs b/new.rs\nrename from old.rs\nrename to new.rs\n--- a/old.rs\n+++ b/new.rs\n",
+        )
+        .pop()
+        .expect("section");
+        assert_eq!(
+            section_paths(&renamed, Some(FileDiffChangeKind::Renamed)),
+            ("old.rs".to_string(), "new.rs".to_string())
         );
     }
 
     #[test]
-    fn count_diff_headers_counts_file_sections() {
-        let patch = "diff --git a/a.rs b/a.rs\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/b.rs b/b.rs\n@@ -1 +1 @@\n-c\n+d\n";
-        assert_eq!(count_diff_headers(patch), 2);
-    }
-
-    #[test]
-    fn patch_to_stats_counts_content_lines_only() {
+    fn section_to_stats_counts_content_lines_only() {
         let patch = "\
 diff --git a/src/a.rs b/src/a.rs
 --- a/src/a.rs
@@ -1472,20 +1653,36 @@ diff --git a/src/a.rs b/src/a.rs
 +new
 +extra
 ";
-        let stats = patch_to_stats(patch);
+        let section = split_patch_sections(patch).pop().expect("section");
+        let stats = section_to_stats(&section, is_sensitive);
         assert_eq!(stats.additions, 2);
         assert_eq!(stats.deletions, 1);
     }
 
     #[test]
-    fn patch_to_stats_skips_symlink_and_submodule_sections() {
-        let patch = "\
+    fn section_to_stats_skips_sensitive_binary_symlink_and_submodule_sections() {
+        let cases = [
+            "\
+diff --git a/.env.production b/.env.production
+--- a/.env.production
++++ b/.env.production
+@@ -1 +1 @@
+-SECRET=old
++SECRET=new
+",
+            "\
+diff --git a/image.png b/image.png
+Binary files a/image.png and b/image.png differ
+",
+            "\
 diff --git a/link b/link
 new file mode 120000
 --- /dev/null
 +++ b/link
 @@ -0,0 +1 @@
 +target
+",
+            "\
 diff --git a/vendor/lib b/vendor/lib
 index 1111111..2222222 160000
 --- a/vendor/lib
@@ -1493,86 +1690,96 @@ index 1111111..2222222 160000
 @@ -1 +1 @@
 -Subproject commit 1111111
 +Subproject commit 2222222
-diff --git a/src/lib.rs b/src/lib.rs
---- a/src/lib.rs
-+++ b/src/lib.rs
+",
+        ];
+
+        for patch in cases {
+            let section = split_patch_sections(patch).pop().expect("section");
+            let stats = section_to_stats(&section, is_sensitive);
+            assert_eq!(stats.additions, 0);
+            assert_eq!(stats.deletions, 0);
+        }
+    }
+
+    fn fallback_projection(patch: &str) -> fabro_store::RunProjection {
+        let mut projection = fabro_store::RunProjection::default();
+        projection.final_patch = Some(patch.to_string());
+        projection
+    }
+
+    fn fallback_response_json(patch: &str) -> serde_json::Value {
+        serde_json::to_value(build_fallback_response(
+            &fallback_projection(patch),
+            RunFilesMetaDegradedReason::SandboxGone,
+            &RunId::new(),
+            Instant::now(),
+        ))
+        .expect("fallback response should serialize")
+    }
+
+    fn simple_patch(path: &str) -> String {
+        format!(
+            "\
+diff --git a/{path} b/{path}
+--- a/{path}
++++ b/{path}
+@@ -1 +1,2 @@
+ old
++new
+"
+        )
+    }
+
+    #[test]
+    fn fallback_response_emits_file_diffs_instead_of_meta_patch() {
+        let patch = "\
+diff --git a/src/a.rs b/src/a.rs
+--- a/src/a.rs
++++ b/src/a.rs
+@@ -1 +1,2 @@
+-old
++new
++extra
+diff --git a/src/b.rs b/src/b.rs
+--- a/src/b.rs
++++ b/src/b.rs
 @@ -1 +1 @@
--old
-+new
+-before
++after
 ";
-        let stats = patch_to_stats(patch);
-        assert_eq!(stats.additions, 1);
-        assert_eq!(stats.deletions, 1);
+
+        let body = fallback_response_json(patch);
+
+        assert_eq!(body["meta"]["degraded"].as_bool(), Some(true));
+        assert!(
+            body["meta"].get("patch").is_none(),
+            "degraded response should not expose meta.patch: {body}"
+        );
+        let data = body["data"].as_array().expect("data should be an array");
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0]["old_file"]["contents"], serde_json::Value::Null);
+        assert_eq!(data[0]["new_file"]["contents"], serde_json::Value::Null);
+        assert_eq!(
+            data[0]["unified_patch"].as_str(),
+            Some(patch.split("diff --git a/src/b.rs").next().unwrap())
+        );
+        assert_eq!(body["meta"]["total_changed"], 2);
+        assert_eq!(body["meta"]["stats"]["additions"], 3);
+        assert_eq!(body["meta"]["stats"]["deletions"], 2);
+        assert_eq!(body["meta"]["truncated"].as_bool(), Some(false));
     }
 
     #[test]
-    fn patch_to_stats_aggregates_across_multiple_files() {
+    fn fallback_sensitive_sections_emit_placeholders_and_do_not_count_stats() {
         let patch = "\
-diff --git a/a.rs b/a.rs
---- a/a.rs
-+++ b/a.rs
-@@ -1,2 +1,3 @@
- keep
--old1
-+new1
-+new2
-diff --git a/b.rs b/b.rs
---- a/b.rs
-+++ b/b.rs
-@@ -1,3 +1,1 @@
--x
--y
--z
-+only
-";
-        let stats = patch_to_stats(patch);
-        assert_eq!(stats.additions, 3);
-        assert_eq!(stats.deletions, 4);
-    }
-
-    #[test]
-    fn patch_to_stats_ignores_hunk_headers_and_no_newline_marker() {
-        // `@@` hunk headers and `\ No newline at end of file` markers don't
-        // start with `+` or `-`, so the simple line-prefix scan must skip
-        // them. Worth pinning explicitly so a future refactor can't
-        // accidentally start counting them.
-        let patch = "\
-diff --git a/a.rs b/a.rs
---- a/a.rs
-+++ b/a.rs
-@@ -1,2 +1,2 @@
- ctx
--old
-\\ No newline at end of file
-+new
-\\ No newline at end of file
-";
-        let stats = patch_to_stats(patch);
-        assert_eq!(stats.additions, 1);
-        assert_eq!(stats.deletions, 1);
-    }
-
-    #[test]
-    fn patch_to_stats_zero_for_empty_patch() {
-        let stats = patch_to_stats("");
-        assert_eq!(stats.additions, 0);
-        assert_eq!(stats.deletions, 0);
-    }
-
-    #[test]
-    fn patch_to_stats_after_strip_denylisted_ignores_sensitive_section() {
-        // Integration: run the same pipeline the degraded fallback uses —
-        // `strip_denylisted_sections` redacts each sensitive file's content
-        // to a single `# sensitive file omitted: <path>` line, which starts
-        // with `#` and so contributes 0 to the totals. Only the benign file
-        // remains for `patch_to_stats` to count.
-        let patch = "\
-diff --git a/.env.production b/.env.production
+diff --git a/.env.production b/docs/notes.md
+rename from .env.production
+rename to docs/notes.md
 --- a/.env.production
-+++ b/.env.production
++++ b/docs/notes.md
 @@ -1 +1 @@
 -SECRET=old
-+SECRET=new
++not a secret
 diff --git a/src/main.rs b/src/main.rs
 --- a/src/main.rs
 +++ b/src/main.rs
@@ -1580,14 +1787,158 @@ diff --git a/src/main.rs b/src/main.rs
  hi
 +there
 ";
-        let filtered = strip_denylisted_sections(patch, is_sensitive);
-        assert!(
-            filtered.contains("# sensitive file omitted"),
-            "expected redaction placeholder in: {filtered:?}",
+
+        let body = fallback_response_json(patch);
+        let data = body["data"].as_array().expect("data should be an array");
+
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0]["sensitive"].as_bool(), Some(true));
+        assert!(data[0].get("unified_patch").is_none());
+        assert_eq!(data[0]["old_file"]["contents"], serde_json::Value::Null);
+        assert_eq!(data[0]["new_file"]["contents"], serde_json::Value::Null);
+        assert_eq!(body["meta"]["stats"]["additions"], 1);
+        assert_eq!(body["meta"]["stats"]["deletions"], 0);
+    }
+
+    #[test]
+    fn fallback_budget_exhaustion_keeps_sidebar_entries_and_is_sticky() {
+        let section1 = simple_patch("src/one.rs");
+        let oversized = format!(
+            "\
+diff --git a/src/two.rs b/src/two.rs
+--- a/src/two.rs
++++ b/src/two.rs
+@@ -1 +1,2 @@
+ old
++{}
+",
+            "x".repeat(usize::try_from(AGGREGATE_BYTES_CAP).unwrap())
         );
-        let stats = patch_to_stats(&filtered);
-        assert_eq!(stats.additions, 1);
-        assert_eq!(stats.deletions, 0);
+        let section3 = simple_patch("src/three.rs");
+        let patch = format!("{section1}{oversized}{section3}");
+
+        let body = fallback_response_json(&patch);
+        let data = body["data"].as_array().expect("data should be an array");
+
+        assert_eq!(data.len(), 3);
+        assert!(data[0]["unified_patch"].is_string());
+        assert_eq!(data[1]["truncated"].as_bool(), Some(true));
+        assert_eq!(
+            data[1]["truncation_reason"].as_str(),
+            Some("budget_exhausted")
+        );
+        assert!(data[1].get("unified_patch").is_none());
+        assert_eq!(data[2]["truncated"].as_bool(), Some(true));
+        assert_eq!(
+            data[2]["truncation_reason"].as_str(),
+            Some("budget_exhausted")
+        );
+        assert!(data[2].get("unified_patch").is_none());
+        assert_eq!(body["meta"]["files_omitted_by_budget"], 2);
+        assert_eq!(body["meta"]["truncated"].as_bool(), Some(true));
+        assert_eq!(body["meta"]["stats"]["additions"], 3);
+        assert_eq!(body["meta"]["stats"]["deletions"], 0);
+    }
+
+    #[test]
+    fn fallback_first_section_too_large_still_emits_sidebar_entry() {
+        let patch = format!(
+            "\
+diff --git a/src/large.rs b/src/large.rs
+--- a/src/large.rs
++++ b/src/large.rs
+@@ -1 +1,2 @@
+ old
++{}
+",
+            "x".repeat(usize::try_from(AGGREGATE_BYTES_CAP).unwrap())
+        );
+
+        let body = fallback_response_json(&patch);
+        let data = body["data"].as_array().expect("data should be an array");
+
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0]["new_file"]["name"], "src/large.rs");
+        assert_eq!(data[0]["truncated"].as_bool(), Some(true));
+        assert_eq!(
+            data[0]["truncation_reason"].as_str(),
+            Some("budget_exhausted")
+        );
+        assert!(data[0].get("unified_patch").is_none());
+        assert_eq!(body["meta"]["files_omitted_by_budget"], 1);
+        assert_eq!(body["meta"]["truncated"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn fallback_placeholder_entries_omit_patch_and_do_not_consume_budget() {
+        let binary = "\
+diff --git a/assets/image.png b/assets/image.png
+Binary files a/assets/image.png and b/assets/image.png differ
+";
+        let symlink = "\
+diff --git a/link b/link
+new file mode 120000
+--- /dev/null
++++ b/link
+@@ -0,0 +1 @@
++target
+";
+        let submodule = "\
+diff --git a/vendor/lib b/vendor/lib
+index 1111111..2222222 160000
+--- a/vendor/lib
++++ b/vendor/lib
+@@ -1 +1 @@
+-Subproject commit 1111111
++Subproject commit 2222222
+";
+        let regular = format!(
+            "\
+diff --git a/src/regular.rs b/src/regular.rs
+--- a/src/regular.rs
++++ b/src/regular.rs
+@@ -1 +1,2 @@
+ old
++{}
+",
+            "x".repeat(usize::try_from(AGGREGATE_BYTES_CAP).unwrap() - 512)
+        );
+        let patch = format!("{binary}{symlink}{submodule}{regular}");
+
+        let body = fallback_response_json(&patch);
+        let data = body["data"].as_array().expect("data should be an array");
+
+        assert_eq!(data.len(), 4);
+        assert_eq!(data[0]["binary"].as_bool(), Some(true));
+        assert_eq!(data[1]["change_kind"].as_str(), Some("symlink"));
+        assert_eq!(data[2]["change_kind"].as_str(), Some("submodule"));
+        for entry in &data[..3] {
+            assert!(entry.get("unified_patch").is_none());
+            assert_eq!(entry["old_file"]["contents"], serde_json::Value::Null);
+            assert_eq!(entry["new_file"]["contents"], serde_json::Value::Null);
+        }
+        assert!(
+            data[3]["unified_patch"].is_string(),
+            "regular section should fit because placeholders did not consume budget: {body}"
+        );
+        assert_eq!(body["meta"]["truncated"].as_bool(), Some(false));
+        assert!(body["meta"].get("files_omitted_by_budget").is_none());
+    }
+
+    #[test]
+    fn fallback_file_count_cap_drops_entries_but_stats_cover_full_patch() {
+        let patch = (0..=FILE_COUNT_CAP)
+            .map(|idx| simple_patch(&format!("src/{idx}.rs")))
+            .collect::<String>();
+
+        let body = fallback_response_json(&patch);
+        let data = body["data"].as_array().expect("data should be an array");
+
+        assert_eq!(data.len(), FILE_COUNT_CAP);
+        assert_eq!(body["meta"]["total_changed"], FILE_COUNT_CAP + 1);
+        assert_eq!(body["meta"]["truncated"].as_bool(), Some(true));
+        assert_eq!(body["meta"]["stats"]["additions"], FILE_COUNT_CAP + 1);
+        assert_eq!(body["meta"]["stats"]["deletions"], 0);
     }
 
     #[test]
@@ -1658,11 +2009,9 @@ diff --git a/src/main.rs b/src/main.rs
     }
 
     #[test]
-    fn strip_denylisted_sections_catches_rename_with_sensitive_old_side() {
-        // Renaming away from a sensitive path must still strip the patch
-        // — the benign new path alone doesn't reveal the secret but the
-        // hunk body does.
-        let patch = "\
+    fn section_is_sensitive_checks_both_sides_of_rename() {
+        for patch in [
+            "\
 diff --git a/.env.production b/docs/NOTES.md
 rename from .env.production
 rename to docs/NOTES.md
@@ -1671,13 +2020,25 @@ rename to docs/NOTES.md
 @@ -1 +1 @@
 -SECRET=old
 +just a note
-";
-        let out = strip_denylisted_sections(patch, is_sensitive);
-        assert!(!out.contains("SECRET="), "rename leaked secret: {out}");
-        assert!(
-            out.contains("# sensitive file omitted"),
-            "placeholder missing: {out}"
-        );
+",
+            "\
+diff --git a/docs/NOTES.md b/.env.production
+rename from docs/NOTES.md
+rename to .env.production
+--- a/docs/NOTES.md
++++ b/.env.production
+@@ -1 +1 @@
+-just a note
++SECRET=new
+",
+        ] {
+            let section = split_patch_sections(patch).pop().expect("section");
+            assert!(section_is_sensitive(&section, is_sensitive));
+            assert_eq!(
+                section_to_stats(&section, is_sensitive),
+                DiffStats::default()
+            );
+        }
     }
 
     // ── parse_head_show_output ───────────────────────────────────────────
@@ -1757,8 +2118,14 @@ rename to docs/NOTES.md
         let mut agg = 0u64;
         let mut budget = 0u64;
         let diff = stitch_file_diff(&entry, &table, &mut agg, &mut budget);
-        assert_eq!(diff.old_file.contents, "fn main() { println!(\"old\"); }\n");
-        assert_eq!(diff.new_file.contents, "fn main() { println!(\"new\"); }\n");
+        assert_eq!(
+            diff.old_file.contents.as_deref(),
+            Some("fn main() { println!(\"old\"); }\n")
+        );
+        assert_eq!(
+            diff.new_file.contents.as_deref(),
+            Some("fn main() { println!(\"new\"); }\n")
+        );
         assert_ne!(diff.old_file.contents, diff.new_file.contents);
     }
 
@@ -1786,8 +2153,8 @@ rename to docs/NOTES.md
         let diff = stitch_file_diff(&entry, &table, &mut agg, &mut budget);
         assert_eq!(diff.old_file.name, "src/old.rs");
         assert_eq!(diff.new_file.name, "src/new.rs");
-        assert_eq!(diff.old_file.contents, "old body\n");
-        assert_eq!(diff.new_file.contents, "new body\n");
+        assert_eq!(diff.old_file.contents.as_deref(), Some("old body\n"));
+        assert_eq!(diff.new_file.contents.as_deref(), Some("new body\n"));
     }
 
     #[test]

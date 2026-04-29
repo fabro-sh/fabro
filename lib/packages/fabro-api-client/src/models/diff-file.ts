@@ -23,8 +23,8 @@ export interface DiffFile {
      */
     'name': string;
     /**
-     * Full file contents. Empty string for newly created or deleted files.
+     * Full contents at this side. Live path: empty string for added/deleted/binary/sensitive/symlink/submodule/truncated entries (the placeholder flags drive rendering). Degraded path: null for every entry (including placeholder-flagged ones), because the server only holds a checkpoint patch and cannot reconstruct full file bytes — distinguish degraded from live by `meta.degraded`.
      */
-    'contents': string;
+    'contents': string | null;
 }
 

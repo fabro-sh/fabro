@@ -174,12 +174,6 @@ function resolveDeepLinkToast(
   data: PaginatedRunFileList | null,
 ): { key: string; message: string } | null {
   if (!hashFile || !data) return null;
-  if (data.meta.degraded && data.meta.patch) {
-    return {
-      key: `patch-only:${hashFile}`,
-      message: "File-level navigation isn't available in the patch-only view.",
-    };
-  }
 
   const exists = data.data.some(
     (file) => file.new_file.name === hashFile || file.old_file.name === hashFile,
@@ -363,6 +357,34 @@ export default function RunFiles() {
         const isDeepLinkTarget =
           !!hashFile &&
           (file.new_file.name === hashFile || file.old_file.name === hashFile);
+        const oldContents = file.old_file.contents;
+        const newContents = file.new_file.contents;
+        let body: ReactElement | null = null;
+        if (oldContents != null && newContents != null) {
+          const oldFile = { ...file.old_file, contents: oldContents };
+          const newFile = { ...file.new_file, contents: newContents };
+          body = (
+            <MultiFileDiff
+              oldFile={oldFile}
+              newFile={newFile}
+              options={{
+                diffStyle,
+                theme: "pierre-dark",
+                expandUnchanged: isDeepLinkTarget ? true : undefined,
+              }}
+            />
+          );
+        } else if (file.unified_patch) {
+          body = (
+            <PatchDiff
+              patch={file.unified_patch}
+              options={{
+                diffStyle,
+                theme: "pierre-dark",
+              }}
+            />
+          );
+        }
         return (
           <div
             key={`${file.new_file.name}-${idx}`}
@@ -373,15 +395,7 @@ export default function RunFiles() {
             aria-label={`${file.change_kind ?? "modified"}: ${file.new_file.name}`}
             className="focus:outline-2 focus:outline-focus focus:outline-offset-2 rounded-md"
           >
-            <MultiFileDiff
-              oldFile={file.old_file}
-              newFile={file.new_file}
-              options={{
-                diffStyle,
-                theme: "pierre-dark",
-                expandUnchanged: isDeepLinkTarget ? true : undefined,
-              }}
-            />
+            {body}
           </div>
         );
       }),
@@ -443,33 +457,13 @@ export default function RunFiles() {
     />
   );
 
-  // Degraded: render the unified patch string directly.
-  if (meta.degraded && meta.patch) {
-    return (
-      <div ref={containerRef} className="flex flex-col gap-4">
-        {toolbar}
-        {revalidationError ? (
-          <InlineErrorBanner
-            message={revalidationError}
-            onRetry={() => void filesQuery.mutate()}
-          />
-        ) : null}
-        <DegradedBanner reason={meta.degraded_reason} />
-        <PatchDiff
-          patch={meta.patch}
-          options={{
-            diffStyle,
-            theme: "pierre-dark",
-          }}
-        />
-      </div>
-    );
-  }
-
   if (files.length === 0) {
     return (
       <div ref={containerRef} className="flex flex-col gap-4">
         {toolbar}
+        {meta.degraded ? (
+          <DegradedBanner reason={meta.degraded_reason} />
+        ) : null}
         <EmptyState
           kind={deriveEmptyKind({
             runStatus,
@@ -498,6 +492,9 @@ export default function RunFiles() {
           message={revalidationError}
           onRetry={() => void filesQuery.mutate()}
         />
+      ) : null}
+      {meta.degraded ? (
+        <DegradedBanner reason={meta.degraded_reason} />
       ) : null}
       <div className="flex gap-4">
         {!narrow ? (
