@@ -1,23 +1,27 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   ObjectStoreSettings,
   ServerListenSettings,
   ServerSettings,
 } from "@qltysh/fabro-api-client";
 import { useServerSettings } from "../lib/queries";
+import { CollapsibleFile } from "../components/collapsible-file";
 
 export function meta({}: any) {
   return [{ title: "Settings — Fabro" }];
 }
 
+type View = "settings" | "json";
+
 export default function Settings() {
   const settingsQuery = useServerSettings();
   const settings = settingsQuery.data;
+  const [view, setView] = useState<View>("settings");
 
   if (!settings) {
     return (
       <div className="space-y-6">
-        <PageIntro />
+        <PageIntro view={view} setView={setView} />
         <PanelSkeleton />
         <PanelSkeleton />
         <PanelSkeleton />
@@ -27,21 +31,64 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <PageIntro />
-      <ServerPanel settings={settings} />
-      <AccessPanel settings={settings} />
-      <IntegrationsPanel settings={settings} />
+      <PageIntro view={view} setView={setView} />
+      {view === "settings" ? (
+        <>
+          <ServerPanel settings={settings} />
+          <AccessPanel settings={settings} />
+          <IntegrationsPanel settings={settings} />
+        </>
+      ) : (
+        <CollapsibleFile
+          file={{
+            name: "server-settings.json",
+            contents: JSON.stringify(settings, null, 2),
+            lang: "json",
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function PageIntro() {
+function PageIntro({ view, setView }: { view: View; setView: (v: View) => void }) {
   return (
-    <p className="max-w-[64ch] text-sm/6 text-fg-3 text-pretty">
-      Snapshot of the server configuration. Edit via{" "}
-      <code className="font-mono text-fg-2">settings.toml</code>; changes take
-      effect on the next server restart.
-    </p>
+    <div className="flex items-start justify-between gap-6">
+      <p className="max-w-[64ch] text-sm/6 text-fg-3 text-pretty">
+        Snapshot of the server configuration. Edit via{" "}
+        <code className="font-mono text-fg-2">settings.toml</code>; changes take
+        effect on the next server restart.
+      </p>
+      <ViewToggle view={view} setView={setView} />
+    </div>
+  );
+}
+
+function ViewToggle({ view, setView }: { view: View; setView: (v: View) => void }) {
+  const btn = "rounded px-3 py-1.5 text-xs font-medium transition-colors";
+  return (
+    <div
+      role="group"
+      aria-label="Settings view"
+      className="inline-flex shrink-0 rounded-md border border-line bg-panel/80 p-0.5"
+    >
+      <button
+        type="button"
+        onClick={() => setView("settings")}
+        aria-pressed={view === "settings"}
+        className={`${btn} ${view === "settings" ? "bg-overlay text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
+      >
+        Settings
+      </button>
+      <button
+        type="button"
+        onClick={() => setView("json")}
+        aria-pressed={view === "json"}
+        className={`${btn} ${view === "json" ? "bg-overlay text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
+      >
+        JSON
+      </button>
+    </div>
   );
 }
 

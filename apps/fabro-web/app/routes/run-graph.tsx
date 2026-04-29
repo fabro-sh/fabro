@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
+import type { BundledLanguage } from "@pierre/diffs";
 import { graphTheme } from "../lib/graph-theme";
 import { useRunGraph, useRunGraphSource, useRunStages } from "../lib/queries";
-import { CopyButton } from "../components/ui";
 import { LoadingState } from "../components/state";
 import { StageSidebar } from "../components/stage-sidebar";
 import {
@@ -10,6 +10,8 @@ import {
   GRAPH_ZOOM_STEPS,
   GraphToolbar,
 } from "../components/graph-toolbar";
+import { CollapsibleFile } from "../components/collapsible-file";
+import { registerDotLanguage } from "../data/register-dot-language";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 
 export const handle = { wide: true };
@@ -91,6 +93,17 @@ export default function RunGraph() {
   const [error, setError] = useState<string | null>(null);
   const [zoomIndex, setZoomIndex] = useState(GRAPH_DEFAULT_ZOOM_INDEX);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dotReady, setDotReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    registerDotLanguage().then(() => {
+      if (!cancelled) setDotReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const dragState = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const zoom = GRAPH_ZOOM_STEPS[zoomIndex];
 
@@ -191,38 +204,47 @@ export default function RunGraph() {
       <StageSidebar stages={stages} runId={id!} activeLink="graph" />
 
       <div className="min-w-0 flex-1 space-y-3">
-        <ViewToggle view={view} setView={setView} />
+        <div className="flex justify-end">
+          <ViewToggle view={view} setView={setView} />
+        </div>
 
-        {view === "graph" ? (
-          <div className="graph-svg relative rounded-md border border-line bg-panel-alt">
-            <GraphToolbar
-              direction={direction}
-              setDirection={setDirection}
-              fitToWindow={fitToWindow}
-              zoomIndex={zoomIndex}
-              setZoomIndex={setZoomIndex}
-            />
+        <div
+          className="graph-svg relative rounded-md border border-line bg-panel-alt"
+          hidden={view !== "graph"}
+        >
+          <GraphToolbar
+            direction={direction}
+            setDirection={setDirection}
+            fitToWindow={fitToWindow}
+            zoomIndex={zoomIndex}
+            setZoomIndex={setZoomIndex}
+          />
 
+          <div
+            ref={containerRef}
+            className="overflow-hidden p-6"
+            style={{ cursor: dragState.current ? "grabbing" : "grab" }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+          >
             <div
-              ref={containerRef}
-              className="overflow-hidden p-6"
-              style={{ cursor: dragState.current ? "grabbing" : "grab" }}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerCancel={onPointerUp}
+              ref={innerRef}
+              className="flex items-center justify-center"
+              style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom / 100})`, transformOrigin: "center center" }}
             >
-              <div
-                ref={innerRef}
-                className="flex items-center justify-center"
-                style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom / 100})`, transformOrigin: "center center" }}
-              >
-                <p className="text-sm text-fg-muted">Loading diagram...</p>
-              </div>
+              <p className="text-sm text-fg-muted">Loading diagram...</p>
             </div>
           </div>
-        ) : (
-          <SourcePanel source={sourceQuery.data} loading={sourceQuery.data === undefined && !sourceQuery.error} />
+        </div>
+
+        {view === "source" && (
+          <SourcePanel
+            source={sourceQuery.data}
+            loading={sourceQuery.data === undefined && !sourceQuery.error}
+            dotReady={dotReady}
+          />
         )}
       </div>
     </div>
@@ -254,8 +276,16 @@ function ViewToggle({ view, setView }: { view: View; setView: (v: View) => void 
   );
 }
 
-function SourcePanel({ source, loading }: { source: string | null | undefined; loading: boolean }) {
-  if (loading) {
+function SourcePanel({
+  source,
+  loading,
+  dotReady,
+}: {
+  source: string | null | undefined;
+  loading: boolean;
+  dotReady: boolean;
+}) {
+  if (loading || !dotReady) {
     return (
       <div className="rounded-md border border-line bg-panel-alt p-4">
         <LoadingState label="Loading graph source…" />
@@ -270,14 +300,8 @@ function SourcePanel({ source, loading }: { source: string | null | undefined; l
     );
   }
   return (
-    <div className="rounded-md border border-line bg-panel-alt">
-      <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-2">
-        <span className="font-mono text-xs text-fg-muted">workflow.fabro</span>
-        <CopyButton value={source} label="Copy graph source" />
-      </div>
-      <pre className="max-h-[70vh] overflow-auto whitespace-pre p-4 font-mono text-xs leading-5 text-fg-2">
-        {source}
-      </pre>
-    </div>
+    <CollapsibleFile
+      file={{ name: "workflow.fabro", contents: source, lang: "dot" as BundledLanguage }}
+    />
   );
 }
