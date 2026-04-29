@@ -194,14 +194,128 @@
     "in_place": false
   },
   "graph_source": "digraph Hello {\n    graph [goal=\"Say hello and demonstrate a basic Fabro workflow\"]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    greet [label=\"Greet\", prompt=\"Add a haiku to the README\"]\n\n    start -> greet -> exit\n}\n",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "run_id": "01KQD4ZNSA38250XME4ZKDQ2GK",
+    "start_time": "2026-04-29T17:36:23.453851910Z",
+    "run_branch": "fabro/run/01KQD4ZNSA38250XME4ZKDQ2GK",
+    "base_sha": "a6a11cdd82ad2012b68f7e5cc5ce491ad932c72d"
   },
-  "status_updated_at": "2026-04-29T17:35:58.787889504Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-04-29T17:36:23.453865535Z",
   "pending_control": null,
-  "checkpoint": null,
-  "checkpoints": [],
+  "checkpoint": {
+    "timestamp": "2026-04-29T17:36:43.929884258Z",
+    "current_node": "greet",
+    "completed_nodes": [
+      "start",
+      "greet"
+    ],
+    "node_retries": {},
+    "context_values": {
+      "internal.retry_count.greet": 0,
+      "internal.work_dir": "/workspace",
+      "graph.rankdir": "LR",
+      "internal.run_id": "01KQD4ZNSA38250XME4ZKDQ2GK",
+      "internal.fidelity": "compact",
+      "internal.node_visit_count": 1,
+      "outcome": "success",
+      "internal.thread_id": "start",
+      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+      "last_stage": "greet",
+      "failure_class": "",
+      "response.greet": "Done! I added a haiku right below the tagline:\n\n> *Agents race forward*\n> *Workflows hold the steady line*\n> *Ship with confidence*\n\nIt follows the 5-7-5 syllable structure and captures Fabro's core idea: AI agents move fast, but deterministic workflows keep them on track so you can ship with confidence.",
+      "internal.retry_count.start": 0,
+      "last_response": "Done! I added a haiku right below the tagline:\n\n> *Agents race forward*\n> *Workflows hold the steady line*\n> *Ship with confidence*\n\nIt follows the 5-7-5 syllable structure and captures Fabro's core i",
+      "current_node": "greet",
+      "failure_signature": "",
+      "thread.start.current_node": "greet"
+    },
+    "node_outcomes": {
+      "greet": {
+        "status": "success",
+        "context_updates": {
+          "last_stage": "greet",
+          "last_response": "Done! I added a haiku right below the tagline:\n\n> *Agents race forward*\n> *Workflows hold the steady line*\n> *Ship with confidence*\n\nIt follows the 5-7-5 syllable structure and captures Fabro's core i",
+          "response.greet": "Done! I added a haiku right below the tagline:\n\n> *Agents race forward*\n> *Workflows hold the steady line*\n> *Ship with confidence*\n\nIt follows the 5-7-5 syllable structure and captures Fabro's core idea: AI agents move fast, but deterministic workflows keep them on track so you can ship with confidence."
+        },
+        "notes": "Stage completed: greet",
+        "usage": {
+          "input": {
+            "usage": {
+              "model": {
+                "provider": "anthropic",
+                "model_id": "claude-sonnet-4-6"
+              },
+              "tokens": {
+                "input_tokens": 4752,
+                "output_tokens": 411,
+                "reasoning_tokens": 0,
+                "cache_read_tokens": 23442,
+                "cache_write_tokens": 12009
+              }
+            },
+            "facts": {
+              "provider": "anthropic",
+              "cache_write_5m_tokens": 12009,
+              "cache_write_1h_tokens": 0
+            }
+          },
+          "total_usd_micros": 72486
+        },
+        "files_touched": [
+          "/workspace/README.md"
+        ]
+      },
+      "start": {
+        "status": "success",
+        "usage": null
+      }
+    },
+    "next_node_id": "exit",
+    "node_visits": {
+      "start": 1,
+      "greet": 1
+    }
+  },
+  "checkpoints": [
+    [
+      17,
+      {
+        "timestamp": "2026-04-29T17:36:28.259803209Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.fidelity": "compact",
+          "internal.retry_count.start": 0,
+          "internal.node_visit_count": 1,
+          "internal.thread_id": null,
+          "outcome": "success",
+          "graph.rankdir": "LR",
+          "current_node": "start",
+          "failure_class": "",
+          "failure_signature": "",
+          "internal.run_id": "01KQD4ZNSA38250XME4ZKDQ2GK",
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "internal.work_dir": "/workspace"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "success",
+            "usage": null
+          }
+        },
+        "next_node_id": "greet",
+        "node_visits": {
+          "start": 1
+        }
+      }
+    ]
+  ],
   "conclusion": null,
   "retro": null,
   "retro_prompt": null,
@@ -218,5 +332,39 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "nodes": {}
+  "nodes": {
+    "greet@1": {
+      "prompt": null,
+      "response": null,
+      "status": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
+    "start@1": {
+      "prompt": null,
+      "response": null,
+      "status": {
+        "status": "success",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-04-29T17:36:28.259583249Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    }
+  }
 }
