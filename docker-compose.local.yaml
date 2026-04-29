@@ -4,6 +4,8 @@ services:
     restart: unless-stopped
     ports:
       - "32276:32276"
+    environment:
+      FABRO_LOG: debug
     volumes:
       - fabro-storage:/storage
       - /var/run/docker.sock:/var/run/docker.sock
