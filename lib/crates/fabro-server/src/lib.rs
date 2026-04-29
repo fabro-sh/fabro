@@ -25,6 +25,7 @@ pub mod install;
 pub mod ip_allowlist;
 pub mod jwt_auth;
 pub mod manifest_validation;
+mod request_id;
 mod run_files;
 mod run_files_security;
 mod run_manifest;

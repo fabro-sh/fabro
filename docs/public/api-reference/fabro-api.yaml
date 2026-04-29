@@ -89,6 +89,9 @@ paths:
                 $ref: "#/components/schemas/InstallSessionResponse"
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -116,12 +119,18 @@ paths:
                 $ref: "#/components/schemas/InstallLlmValidationResponse"
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Credential validation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -145,12 +154,18 @@ paths:
           description: LLM settings recorded
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Invalid install input
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -174,12 +189,18 @@ paths:
           description: Server configuration recorded
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Invalid canonical URL
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -207,12 +228,18 @@ paths:
                 $ref: "#/components/schemas/InstallObjectStoreValidationResponse"
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Object-store validation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -236,12 +263,18 @@ paths:
           description: Object-store configuration recorded
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Invalid install input
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -269,12 +302,18 @@ paths:
                 $ref: "#/components/schemas/InstallSandboxValidationResponse"
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Sandbox validation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -298,12 +337,18 @@ paths:
           description: Sandbox configuration recorded
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Invalid install input
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -331,12 +376,18 @@ paths:
                 $ref: "#/components/schemas/InstallGithubTokenTestResponse"
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: GitHub token validation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -360,12 +411,18 @@ paths:
           description: GitHub token recorded
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Invalid install input
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -393,12 +450,18 @@ paths:
                 $ref: "#/components/schemas/InstallGithubAppManifestResponse"
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Invalid install input or missing prior steps
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -427,12 +490,18 @@ paths:
           description: Browser redirected back into the install SPA
         "400":
           description: Invalid or expired GitHub App callback state
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "502":
           description: GitHub manifest conversion failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -454,18 +523,27 @@ paths:
                 $ref: "#/components/schemas/InstallFinishResponse"
         "401":
           description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Install session is incomplete
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Install persistence failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -535,6 +613,9 @@ paths:
                 $ref: "#/components/schemas/UserResponse"
         "401":
           description: Not authenticated
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -579,6 +660,9 @@ paths:
                 $ref: "#/components/schemas/RunStatusResponse"
         "400":
           description: Invalid Graphviz source
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -601,12 +685,18 @@ paths:
                 $ref: "#/components/schemas/RunSummary"
         "400":
           description: Selector is invalid or ambiguous
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: No run matched the selector
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -633,6 +723,9 @@ paths:
                 $ref: "#/components/schemas/PreflightResponse"
         "400":
           description: Invalid manifest or workflow
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -659,6 +752,9 @@ paths:
                 $ref: "#/components/schemas/ValidateResponse"
         "400":
           description: Invalid manifest or workflow
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -686,6 +782,9 @@ paths:
                 format: binary
         "400":
           description: Invalid manifest or workflow
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -708,6 +807,9 @@ paths:
                 $ref: "#/components/schemas/RunSummary"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -725,12 +827,18 @@ paths:
           description: Run deleted or already absent
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run is active and requires `force=true`
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -753,12 +861,18 @@ paths:
                 $ref: "#/components/schemas/RunStatusResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run is not running
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -787,12 +901,18 @@ paths:
                 $ref: "#/components/schemas/RunStatusResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run is not in submitted status
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -815,12 +935,18 @@ paths:
                 $ref: "#/components/schemas/RunStatusResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run is not running
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -843,12 +969,18 @@ paths:
                 $ref: "#/components/schemas/RunStatusResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run is not paused
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -875,12 +1007,18 @@ paths:
                 $ref: "#/components/schemas/RunStatusResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run is not terminal and cannot be archived
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -919,24 +1057,36 @@ paths:
                 $ref: "#/components/schemas/RewindResponse"
         "400":
           description: Invalid rewind target
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Source run is archived or is not terminal
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "501":
           description: Operation unsupported for this run
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -967,24 +1117,36 @@ paths:
                 $ref: "#/components/schemas/ForkResponse"
         "400":
           description: Invalid fork target
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Source run is archived
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "501":
           description: Operation unsupported for this run
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1011,12 +1173,18 @@ paths:
                   $ref: "#/components/schemas/TimelineEntryResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "501":
           description: Operation unsupported for this run
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1042,12 +1210,18 @@ paths:
                 $ref: "#/components/schemas/RunStatusResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run is active and cannot be unarchived
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1070,6 +1244,9 @@ paths:
                 type: string
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1092,6 +1269,9 @@ paths:
                 type: string
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1116,6 +1296,9 @@ paths:
                   - type: "null"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1155,6 +1338,9 @@ paths:
                 $ref: "#/components/schemas/RunProjection"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1177,6 +1363,9 @@ paths:
                 type: string
         "404":
           description: Run not found, or no run log has been written yet
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1205,12 +1394,18 @@ paths:
                 $ref: "#/components/schemas/PullRequestRecord"
         "400":
           description: Pull request creation does not apply to this run
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1219,18 +1414,27 @@ paths:
           description: >-
             Pull request already exists for this run. Clients can GET
             /runs/{id}/pull_request to retrieve the stored record.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "502":
           description: GitHub rejected the pull request creation request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: GitHub integration is unavailable on the server
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1251,24 +1455,36 @@ paths:
                 $ref: "#/components/schemas/PullRequestDetail"
         "400":
           description: Pull request lookup does not apply to this run
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run or stored pull request record not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "502":
           description: Stored pull request record exists but GitHub could not find it
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: GitHub integration is unavailable on the server
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1297,24 +1513,36 @@ paths:
                 $ref: "#/components/schemas/MergeRunPullRequestResponse"
         "400":
           description: Pull request merge does not apply to this run
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run or stored pull request record not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "502":
           description: GitHub rejected the merge request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: GitHub integration is unavailable on the server
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1337,24 +1565,36 @@ paths:
                 $ref: "#/components/schemas/CloseRunPullRequestResponse"
         "400":
           description: Pull request close does not apply to this run
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run or stored pull request record not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "502":
           description: GitHub rejected the close request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: GitHub integration is unavailable on the server
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1379,6 +1619,9 @@ paths:
                 $ref: "#/components/schemas/PaginatedEventList"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1405,12 +1648,18 @@ paths:
                 $ref: "#/components/schemas/AppendEventResponse"
         "400":
           description: Invalid event payload
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1434,6 +1683,9 @@ paths:
                 type: string
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1481,6 +1733,9 @@ paths:
                 $ref: "#/components/schemas/WriteBlobResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1505,6 +1760,9 @@ paths:
                 format: binary
         "404":
           description: Run or blob not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1529,6 +1787,9 @@ paths:
                 $ref: "#/components/schemas/PaginatedApiQuestionList"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1554,18 +1815,27 @@ paths:
           description: Answer accepted
         "400":
           description: Invalid option key
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Question no longer exists or already answered
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1590,6 +1860,9 @@ paths:
                 $ref: "#/components/schemas/PaginatedRunStageList"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1615,6 +1888,9 @@ paths:
                 $ref: "#/components/schemas/PaginatedStageTurnList"
         "404":
           description: Run or stage not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1637,6 +1913,9 @@ paths:
                 $ref: "#/components/schemas/RunArtifactListResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1680,18 +1959,27 @@ paths:
                 $ref: "#/components/schemas/PaginatedRunFileList"
         "400":
           description: Malformed query parameter (invalid SHA format, or non-default value for `from_sha`/`to_sha`).
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run not found (or caller lacks access; returned as 404 to prevent enumeration).
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: Transient sandbox subprocess failure (timeout, process kill). Safe to retry.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1715,6 +2003,9 @@ paths:
                 $ref: "#/components/schemas/ArtifactListResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1753,12 +2044,18 @@ paths:
           description: Artifact written
         "400":
           description: Invalid filename, multipart manifest, checksum, or upload body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1784,12 +2081,18 @@ paths:
                 format: binary
         "400":
           description: Missing filename
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run, stage, or artifact not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1812,6 +2115,9 @@ paths:
                 $ref: "#/components/schemas/RunBilling"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1834,6 +2140,9 @@ paths:
                 $ref: "#/components/schemas/WorkflowSettings"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1862,12 +2171,18 @@ paths:
                 $ref: "#/components/schemas/PreviewUrlResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run has no active sandbox
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1896,12 +2211,18 @@ paths:
                 $ref: "#/components/schemas/SshAccessResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run has no active sandbox or provider does not support SSH
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1935,12 +2256,18 @@ paths:
                 $ref: "#/components/schemas/SandboxFileListResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run has no active sandbox
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -1969,12 +2296,18 @@ paths:
                 format: binary
         "404":
           description: Run or file not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run has no active sandbox
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2003,12 +2336,18 @@ paths:
           description: File written
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run has no active sandbox
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2068,6 +2407,9 @@ paths:
                 $ref: "#/components/schemas/SavedQuery"
         "404":
           description: Query not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2094,6 +2436,9 @@ paths:
                 $ref: "#/components/schemas/SavedQuery"
         "404":
           description: Query not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2110,6 +2455,9 @@ paths:
           description: Query deleted
         "404":
           description: Query not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2136,6 +2484,9 @@ paths:
                 $ref: "#/components/schemas/ExecuteQueryResponse"
         "400":
           description: Bad SQL or query error
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2254,6 +2605,9 @@ paths:
                 $ref: "#/components/schemas/PruneRunsResponse"
         "400":
           description: Invalid prune request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2294,6 +2648,9 @@ paths:
                 $ref: "#/components/schemas/SecretMetadata"
         "400":
           description: Invalid secret name or request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2313,18 +2670,27 @@ paths:
           description: Secret deleted
         "400":
           description: Invalid secret name or request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Secret not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Secret store write failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2378,6 +2744,9 @@ paths:
                 $ref: "#/components/schemas/PaginatedModelList"
         "400":
           description: Invalid filter value
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2406,12 +2775,18 @@ paths:
                 $ref: "#/components/schemas/ModelTestResult"
         "400":
           description: Invalid test mode
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Model not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2445,6 +2820,9 @@ paths:
                 $ref: "#/components/schemas/CompletionResponse"
         "400":
           description: Invalid request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
@@ -2651,6 +3029,16 @@ components:
       schema:
         $ref: "#/components/schemas/ModelTestMode"
       example: basic
+
+  headers:
+    XRequestId:
+      description: >
+        Server-generated request identifier emitted on every response and
+        referenced on standard error responses for correlating client errors
+        with server logs.
+      schema:
+        type: string
+        format: uuid
 
   schemas:
     InstallSessionResponse:
@@ -4194,6 +4582,10 @@ components:
           type: string
           description: Optional machine-readable error code for structured client handling.
           example: access_token_expired
+        request_id:
+          type: string
+          format: uuid
+          description: Server-generated request identifier; matches the x-request-id response header.
 
     ErrorResponse:
       description: Standard error response containing one or more error entries.
@@ -4206,6 +4598,10 @@ components:
           description: List of error entries.
           items:
             $ref: "#/components/schemas/ErrorResponseEntry"
+        request_id:
+          type: string
+          format: uuid
+          description: Server-generated request identifier; matches the x-request-id response header.
         leftover_env_keys:
           type: array
           description: >-

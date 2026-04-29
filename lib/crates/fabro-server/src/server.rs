@@ -120,6 +120,7 @@ use crate::github_webhooks::{
 };
 use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{self, AuthMode, AuthenticatedService, AuthenticatedSubject};
+use crate::request_id::{self, RequestId};
 use crate::run_files::{FilesInFlight, list_run_files, new_files_in_flight};
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
 use crate::server_secrets::{LlmClientResult, ServerSecrets};
@@ -1083,6 +1084,7 @@ pub fn build_router_with_options(
         ))
         .layer(middleware::from_fn(security_headers::layer))
         .layer(middleware::from_fn(http_log_middleware))
+        .layer(middleware::from_fn(request_id::layer))
 }
 
 async fn http_log_middleware(req: axum_extract::Request, next: Next) -> Response {
@@ -1091,14 +1093,20 @@ async fn http_log_middleware(req: axum_extract::Request, next: Next) -> Response
     }
     let method = req.method().clone();
     let path = req.uri().path().to_string();
+    let request_id = req
+        .extensions()
+        .get::<RequestId>()
+        .copied()
+        .map(RequestId::render)
+        .unwrap_or_default();
     let start = std::time::Instant::now();
     let response = next.run(req).await;
     let status = response.status().as_u16();
     let latency_ms = start.elapsed().as_millis();
     if status >= 500 {
-        error!(%method, %path, status, latency_ms, "HTTP response");
+        error!(%method, %path, status, latency_ms, request_id = %request_id, "HTTP response");
     } else {
-        info!(%method, %path, status, latency_ms, "HTTP response");
+        info!(%method, %path, status, latency_ms, request_id = %request_id, "HTTP response");
     }
     response
 }
