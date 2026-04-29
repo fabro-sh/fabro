@@ -16,12 +16,13 @@ use fabro_graphviz::parser;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal};
 use fabro_types::{RunId, WorkflowSettings};
+use fabro_workflow::ManifestPath;
 use fabro_workflow::git::{GitSyncStatus, head_sha, sync_status};
 
 use crate::args::{PreflightArgs, RunArgs};
 
 #[derive(Debug)]
-pub(crate) struct ManifestBuildInput {
+pub struct ManifestBuildInput {
     pub workflow:           PathBuf,
     pub cwd:                PathBuf,
     pub run_overrides:      Option<RunLayer>,
@@ -34,7 +35,7 @@ pub(crate) struct ManifestBuildInput {
 }
 
 #[derive(Debug)]
-pub(crate) struct BuiltManifest {
+pub struct BuiltManifest {
     pub manifest:    types::RunManifest,
     pub target_path: PathBuf,
 }
@@ -48,11 +49,11 @@ struct CollectContext<'a> {
 #[derive(Clone)]
 struct WorkflowScanInput {
     absolute_dot_path: PathBuf,
-    logical_dot_path:  PathBuf,
+    dot_path:          ManifestPath,
     source:            String,
 }
 
-pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
+pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
     let root_resolution = resolve_workflow_path(&input.workflow, &input.cwd)?;
     if root_resolution.workflow_toml_path.is_none()
         && !root_resolution.resolved_workflow_path.is_file()
@@ -91,8 +92,8 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
         .build()
         .map_err(|errors| anyhow!("failed to resolve manifest settings: {errors}"))?;
     let target_path = root_resolution.dot_path.clone();
-    let target_logical_path = to_logical_path(&target_path, &input.cwd)?;
-    let target_logical_path_string = logical_path_string(&target_logical_path);
+    let target_manifest_path = manifest_path_from_absolute(&target_path, &input.cwd)?;
+    let target_key = target_manifest_path.to_string();
 
     let mut context = CollectContext {
         cwd:               &input.cwd,
@@ -103,7 +104,7 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
 
     let root_source = context
         .workflows
-        .get(&target_logical_path_string)
+        .get(&target_key)
         .map(|workflow| workflow.source.clone())
         .ok_or_else(|| anyhow!("root workflow missing from manifest bundle"))?;
 
@@ -151,7 +152,7 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
             run_id: input.run_id.map(|run_id| run_id.to_string()),
             target: types::ManifestTarget {
                 identifier: input.workflow.display().to_string(),
-                path:       target_logical_path_string,
+                path:       target_key,
             },
             version: 1,
             workflows: context.workflows,
@@ -210,9 +211,9 @@ fn collect_workflow_entry(
         workflow.to_path_buf()
     };
     let resolution = resolve_workflow_path(&normalized_workflow, resolve_from)?;
-    let logical_dot_path = to_logical_path(&resolution.dot_path, context.cwd)?;
-    let logical_dot_key = logical_path_string(&logical_dot_path);
-    if !context.visited_workflows.insert(logical_dot_key.clone()) {
+    let dot_path = manifest_path_from_absolute(&resolution.dot_path, context.cwd)?;
+    let dot_key = dot_path.to_string();
+    if !context.visited_workflows.insert(dot_key.clone()) {
         return Ok(());
     }
 
@@ -220,7 +221,7 @@ fn collect_workflow_entry(
         .with_context(|| format!("Failed to read {}", resolution.dot_path.display()))?;
     let config = if let Some(workflow_toml_path) = resolution.workflow_toml_path.as_ref() {
         Some(types::ManifestWorkflowConfig {
-            path:   logical_path_string(&to_logical_path(workflow_toml_path, context.cwd)?),
+            path:   manifest_path_from_absolute(workflow_toml_path, context.cwd)?.to_string(),
             source: std::fs::read_to_string(workflow_toml_path)
                 .with_context(|| format!("Failed to read {}", workflow_toml_path.display()))?,
         })
@@ -230,7 +231,7 @@ fn collect_workflow_entry(
 
     let scan = WorkflowScanInput {
         absolute_dot_path: resolution.dot_path,
-        logical_dot_path,
+        dot_path,
         source: source.clone(),
     };
     let mut files = HashMap::new();
@@ -240,13 +241,11 @@ fn collect_workflow_entry(
     }
     collect_workflow_files(context, &scan, &mut files, &mut visited_imports)?;
 
-    context
-        .workflows
-        .insert(logical_dot_key, types::ManifestWorkflow {
-            config,
-            files,
-            source,
-        });
+    context.workflows.insert(dot_key, types::ManifestWorkflow {
+        config,
+        files,
+        source,
+    });
 
     Ok(())
 }
@@ -275,7 +274,7 @@ fn collect_workflow_files(
                 context.cwd,
                 goal_ref.trim_start_matches('@'),
                 types::ManifestFileRefType::FileInline,
-                Some(workflow.logical_dot_path.clone()),
+                Some(workflow.dot_path.clone()),
             )?;
         }
     }
@@ -292,7 +291,7 @@ fn collect_workflow_files(
                     context.cwd,
                     prompt_ref.trim_start_matches('@'),
                     types::ManifestFileRefType::FileInline,
-                    Some(workflow.logical_dot_path.clone()),
+                    Some(workflow.dot_path.clone()),
                 )?;
             }
         }
@@ -307,9 +306,9 @@ fn collect_workflow_files(
                 context.cwd,
                 import_ref,
                 types::ManifestFileRefType::Import,
-                Some(workflow.logical_dot_path.clone()),
+                Some(workflow.dot_path.clone()),
             )?;
-            let import_key = logical_path_string(&imported.logical_path);
+            let import_key = imported.path.to_string();
             if visited_imports.insert(import_key) {
                 let imported_source = std::fs::read_to_string(&imported.absolute_path)
                     .with_context(|| {
@@ -317,7 +316,7 @@ fn collect_workflow_files(
                     })?;
                 let imported_scan = WorkflowScanInput {
                     absolute_dot_path: imported.absolute_path,
-                    logical_dot_path:  imported.logical_path,
+                    dot_path:          imported.path,
                     source:            imported_source,
                 };
                 collect_workflow_files(context, &imported_scan, files, visited_imports)?;
@@ -370,21 +369,25 @@ fn collect_workflow_config_files(
         return Ok(());
     };
 
-    let config_path = context.cwd.join(&config.path);
+    let config_path = ManifestPath::from_wire(&config.path)
+        .ok_or_else(|| anyhow!("invalid manifest workflow config path: {}", config.path))?;
+    let absolute_config_path = context.cwd.join(config_path.as_path());
     collect_bundled_file(
         files,
-        config_path.parent().unwrap_or_else(|| Path::new(".")),
+        absolute_config_path
+            .parent()
+            .unwrap_or_else(|| Path::new(".")),
         context.cwd,
         path,
         types::ManifestFileRefType::Dockerfile,
-        Some(PathBuf::from(&config.path)),
+        Some(config_path),
     )?;
     Ok(())
 }
 
 struct BundledFile {
     absolute_path: PathBuf,
-    logical_path:  PathBuf,
+    path:          ManifestPath,
 }
 
 fn collect_bundled_file(
@@ -393,19 +396,19 @@ fn collect_bundled_file(
     cwd: &Path,
     reference: &str,
     ref_type: types::ManifestFileRefType,
-    from: Option<PathBuf>,
+    from: Option<ManifestPath>,
 ) -> Result<BundledFile> {
     let absolute_path = normalize_absolute_path(base_dir, reference)
         .ok_or_else(|| anyhow!("unsupported manifest reference: {reference}"))?;
-    let logical_path = to_logical_path(&absolute_path, cwd)?;
-    let key = logical_path_string(&logical_path);
+    let path = manifest_path_from_absolute(&absolute_path, cwd)?;
+    let key = path.to_string();
     if !files.contains_key(&key) {
         let content = std::fs::read_to_string(&absolute_path)
             .with_context(|| format!("Failed to read {}", absolute_path.display()))?;
         files.insert(key.clone(), types::ManifestFileEntry {
             content,
             ref_: types::ManifestFileRef {
-                from:     from.map(|value| logical_path_string(&value)),
+                from:     from.map(|value| value.to_string()),
                 original: reference.to_string(),
                 type_:    ref_type,
             },
@@ -414,7 +417,7 @@ fn collect_bundled_file(
 
     Ok(BundledFile {
         absolute_path,
-        logical_path,
+        path,
     })
 }
 
@@ -528,49 +531,9 @@ fn normalize_absolute_path(base_dir: &Path, reference: &str) -> Option<PathBuf> 
     Some(normalized)
 }
 
-fn to_logical_path(path: &Path, cwd: &Path) -> Result<PathBuf> {
-    if let Ok(stripped) = path.strip_prefix(cwd) {
-        return Ok(stripped.to_path_buf());
-    }
-
-    relative_path_from(path, cwd)
-        .ok_or_else(|| anyhow!("Failed to compute logical path for {}", path.display()))
-}
-
-fn relative_path_from(path: &Path, base: &Path) -> Option<PathBuf> {
-    let path_components = path.components().collect::<Vec<_>>();
-    let base_components = base.components().collect::<Vec<_>>();
-    if path_components.is_empty() || base_components.is_empty() {
-        return None;
-    }
-
-    let mut common = 0;
-    while common < path_components.len()
-        && common < base_components.len()
-        && path_components[common] == base_components[common]
-    {
-        common += 1;
-    }
-
-    let mut relative = PathBuf::new();
-    for component in &base_components[common..] {
-        if matches!(component, Component::Normal(_)) {
-            relative.push("..");
-        }
-    }
-    for component in &path_components[common..] {
-        match component {
-            Component::Normal(part) => relative.push(part),
-            Component::CurDir => {}
-            Component::ParentDir => relative.push(".."),
-            Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
-    Some(relative)
-}
-
-fn logical_path_string(path: &Path) -> String {
-    path.to_string_lossy().to_string()
+fn manifest_path_from_absolute(path: &Path, cwd: &Path) -> Result<ManifestPath> {
+    ManifestPath::from_absolute(path, cwd)
+        .ok_or_else(|| anyhow!("Failed to compute manifest path for {}", path.display()))
 }
 
 fn manifest_args_is_empty(args: &types::ManifestArgs) -> bool {

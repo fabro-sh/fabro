@@ -16,6 +16,7 @@ use fabro_validate::{Diagnostic, Severity};
 use fabro_vault::Vault;
 use tokio::sync::RwLock as AsyncRwLock;
 
+use crate::ManifestPath;
 use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
 use crate::error::Error;
@@ -241,7 +242,7 @@ pub struct InitOptions {
     pub interviewer:       Arc<dyn Interviewer>,
     pub lifecycle:         LifecycleOptions,
     pub run_options:       RunOptions,
-    pub workflow_path:     Option<PathBuf>,
+    pub workflow_path:     Option<ManifestPath>,
     pub workflow_bundle:   Option<Arc<WorkflowBundle>>,
     pub hooks:             fabro_hooks::HookSettings,
     pub sandbox_env:       SandboxEnvSpec,

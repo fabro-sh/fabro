@@ -4,7 +4,9 @@
 )]
 
 use std::collections::HashMap;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
+
+use crate::ManifestPath;
 
 pub trait FileResolver: Send + Sync {
     fn resolve(&self, current_dir: &Path, reference: &str) -> Option<ResolvedFile>;
@@ -12,59 +14,30 @@ pub trait FileResolver: Send + Sync {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedFile {
-    pub logical_path: PathBuf,
-    pub content:      String,
+    pub path:    PathBuf,
+    pub content: String,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct BundleFileResolver {
-    files: HashMap<PathBuf, String>,
+    files: HashMap<ManifestPath, String>,
 }
 
 impl BundleFileResolver {
     #[must_use]
-    pub fn new(files: HashMap<PathBuf, String>) -> Self {
+    pub fn new(files: HashMap<ManifestPath, String>) -> Self {
         Self { files }
     }
 }
 
 impl FileResolver for BundleFileResolver {
     fn resolve(&self, current_dir: &Path, reference: &str) -> Option<ResolvedFile> {
-        let logical_path = normalize_logical_path(current_dir, reference)?;
-        self.files.get(&logical_path).map(|content| ResolvedFile {
-            logical_path,
+        let path = ManifestPath::from_reference(current_dir, reference)?;
+        self.files.get(&path).map(|content| ResolvedFile {
+            path:    path.as_path().to_path_buf(),
             content: content.clone(),
         })
     }
-}
-
-pub(crate) fn normalize_logical_path(current_dir: &Path, reference: &str) -> Option<PathBuf> {
-    let path = Path::new(reference);
-    if path.is_absolute() || reference.starts_with('~') {
-        return None;
-    }
-
-    let mut normalized = PathBuf::new();
-    for component in current_dir.join(path).components() {
-        match component {
-            Component::CurDir => {}
-            Component::Normal(part) => normalized.push(part),
-            Component::ParentDir => {
-                // If the last component is a normal name, collapse it.
-                // Otherwise (empty path or trailing `..`), preserve the
-                // `..` so that leading parent-dir segments survive — these
-                // occur when a bundled workflow lives outside the CWD
-                // (e.g. user-global workflows under ~/.fabro/).
-                if normalized.file_name().is_some() {
-                    normalized.pop();
-                } else {
-                    normalized.push("..");
-                }
-            }
-            Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
-    Some(normalized)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -106,7 +79,7 @@ impl FileResolver for FilesystemFileResolver {
 
         match std::fs::read_to_string(&resolved_path) {
             Ok(content) => Some(ResolvedFile {
-                logical_path: resolved_path,
+                path: resolved_path,
                 content,
             }),
             Err(error) => {
@@ -125,10 +98,14 @@ impl FileResolver for FilesystemFileResolver {
 mod tests {
     use super::*;
 
+    fn manifest_path(value: &str) -> ManifestPath {
+        ManifestPath::from_wire(value).expect("path should parse")
+    }
+
     #[test]
     fn bundle_resolver_returns_exact_match() {
         let resolver = BundleFileResolver::new(HashMap::from([(
-            PathBuf::from("prompts/review.md"),
+            manifest_path("prompts/review.md"),
             "check it".to_string(),
         )]));
 
@@ -136,14 +113,14 @@ mod tests {
             .resolve(Path::new("."), "prompts/review.md")
             .expect("file should resolve");
 
-        assert_eq!(resolved.logical_path, PathBuf::from("prompts/review.md"));
+        assert_eq!(resolved.path, PathBuf::from("prompts/review.md"));
         assert_eq!(resolved.content, "check it");
     }
 
     #[test]
     fn bundle_resolver_normalizes_relative_segments() {
         let resolver = BundleFileResolver::new(HashMap::from([(
-            PathBuf::from("prompts/review.md"),
+            manifest_path("prompts/review.md"),
             "check it".to_string(),
         )]));
 
@@ -151,7 +128,7 @@ mod tests {
             .resolve(Path::new("subflows"), "../prompts/review.md")
             .expect("file should resolve");
 
-        assert_eq!(resolved.logical_path, PathBuf::from("prompts/review.md"));
+        assert_eq!(resolved.path, PathBuf::from("prompts/review.md"));
     }
 
     #[test]
@@ -161,41 +138,9 @@ mod tests {
     }
 
     #[test]
-    fn normalize_preserves_leading_parent_dir() {
-        // When a bundled workflow lives outside the CWD (e.g. ~/.fabro/),
-        // the manifest builder produces logical paths with leading `..`
-        // segments. The normalizer must preserve these so that the lookup
-        // key matches the stored key.
-        assert_eq!(
-            normalize_logical_path(Path::new("../.fabro/workflows/demo"), "prompts/hello.md"),
-            Some(PathBuf::from("../.fabro/workflows/demo/prompts/hello.md"))
-        );
-    }
-
-    #[test]
-    fn normalize_preserves_multiple_leading_parent_dirs() {
-        assert_eq!(
-            normalize_logical_path(Path::new("../../shared/workflows"), "file.md"),
-            Some(PathBuf::from("../../shared/workflows/file.md"))
-        );
-    }
-
-    #[test]
-    fn normalize_collapses_mid_path_parent_dir() {
-        // ../foo/../bar should normalize to ../bar
-        assert_eq!(
-            normalize_logical_path(Path::new("../foo"), "../bar/file.md"),
-            Some(PathBuf::from("../bar/file.md"))
-        );
-    }
-
-    #[test]
     fn bundle_resolver_resolves_outside_cwd_paths() {
-        // Reproduces the user-global workflow scenario from issue #175:
-        // files are keyed with leading `..` because the workflow lives
-        // outside the CWD.
         let resolver = BundleFileResolver::new(HashMap::from([(
-            PathBuf::from("../.fabro/workflows/demo/prompts/hello.md"),
+            manifest_path("../.fabro/workflows/demo/prompts/hello.md"),
             "prompt content".to_string(),
         )]));
 

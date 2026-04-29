@@ -38,5 +38,6 @@ pub mod web_auth;
 mod worker_token;
 
 pub use error::{ApiError, Error, Result};
+pub use run_manifest::workflow_bundle_from_manifest;
 pub use server_secrets::process_env_snapshot;
 pub use startup::validate_startup;

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow, bail};
@@ -29,11 +29,11 @@ use fabro_types::settings::run::{
 use fabro_types::{RunId, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
-use fabro_workflow::Error as WorkflowError;
 use fabro_workflow::operations::{CreateRunInput, ValidateInput, WorkflowInput, validate};
 use fabro_workflow::pipeline::Validated;
 use fabro_workflow::run_materialization::materialize_run;
-use fabro_workflow::workflow_bundle::{BundledWorkflow, WorkflowBundle};
+use fabro_workflow::workflow_bundle::{BundledWorkflow, ParsedWorkflowConfig, WorkflowBundle};
+use fabro_workflow::{Error as WorkflowError, ManifestPath};
 
 use crate::server::AppState;
 
@@ -44,7 +44,7 @@ pub(crate) struct PreparedManifest {
     pub root_source:       String,
     pub run_id:            Option<RunId>,
     pub settings:          WorkflowSettings,
-    pub target_path:       PathBuf,
+    pub target_path:       ManifestPath,
     pub workflow_bundle:   WorkflowBundle,
     pub workflow_input:    BundledWorkflow,
     pub working_directory: PathBuf,
@@ -70,7 +70,8 @@ pub(crate) fn prepare_manifest(
     }
 
     let cwd = PathBuf::from(&manifest.cwd);
-    let target_path = PathBuf::from(&manifest.target.path);
+    let target_path = ManifestPath::from_wire(&manifest.target.path)
+        .ok_or_else(|| anyhow!("invalid manifest target path: {}", manifest.target.path))?;
     let workflow_bundle = workflow_bundle_from_manifest(&manifest.workflows)?;
     let workflow_input = workflow_bundle
         .workflow(&target_path)
@@ -79,7 +80,7 @@ pub(crate) fn prepare_manifest(
     let root_source = workflow_input.source.clone();
 
     let args_overrides = manifest_args_overrides(manifest.args.as_ref());
-    let workflow_run_layer = root_workflow_run_layer(manifest, &workflow_input)?;
+    let workflow_run_layer = root_workflow_run_layer(&workflow_input)?;
     let mut workflow_settings_builder =
         WorkflowSettingsBuilder::new().server_run_defaults(manifest_run_defaults.clone());
     if let Some(run) = args_overrides.run {
@@ -178,7 +179,12 @@ pub(crate) async fn run_preflight(
     let (report, checks_ok) = build_preflight_report(state, prepared, validated).await?;
     let preflight_ok = !validated.has_errors() && checks_ok;
     Ok((
-        preflight_response(validated, &prepared.target_path, &report, preflight_ok),
+        preflight_response(
+            validated,
+            prepared.target_path.as_path(),
+            &report,
+            preflight_ok,
+        ),
         preflight_ok,
     ))
 }
@@ -190,35 +196,77 @@ pub(crate) fn graph_source(prepared: &PreparedManifest, direction: Option<&str>)
     )
 }
 
-fn workflow_bundle_from_manifest(
+pub fn workflow_bundle_from_manifest(
     workflows: &HashMap<String, types::ManifestWorkflow>,
 ) -> Result<WorkflowBundle> {
-    let workflows = workflows
-        .iter()
-        .map(|(path, workflow)| {
-            let files = workflow
-                .files
-                .iter()
-                .map(|(key, entry)| (PathBuf::from(key), entry.content.clone()))
-                .collect::<HashMap<_, _>>();
-            Ok::<_, anyhow::Error>((PathBuf::from(path), BundledWorkflow {
-                logical_path: PathBuf::from(path),
-                source: workflow.source.clone(),
-                files,
-            }))
-        })
-        .collect::<Result<HashMap<_, _>>>()?;
-    Ok(WorkflowBundle::new(workflows))
+    let mut bundled = HashMap::new();
+    let mut workflow_wire_keys = HashMap::new();
+
+    for (wire_key, workflow) in workflows {
+        let path = ManifestPath::from_wire(wire_key)
+            .ok_or_else(|| anyhow!("invalid manifest workflow key: {wire_key}"))?;
+        if let Some(previous) = workflow_wire_keys.get(&path) {
+            bail!(
+                "duplicate canonical workflow key: {path} (from wire keys {previous:?} and \
+                 {wire_key:?})"
+            );
+        }
+        workflow_wire_keys.insert(path.clone(), wire_key.clone());
+
+        let files = workflow_files_from_manifest(&workflow.files)?;
+        let config = workflow
+            .config
+            .as_ref()
+            .map(|config| {
+                let path = ManifestPath::from_wire(&config.path).ok_or_else(|| {
+                    anyhow!("invalid manifest workflow config path: {}", config.path)
+                })?;
+                Ok::<_, anyhow::Error>(ParsedWorkflowConfig {
+                    path,
+                    source: config.source.clone(),
+                })
+            })
+            .transpose()?;
+
+        bundled.insert(path.clone(), BundledWorkflow {
+            path,
+            source: workflow.source.clone(),
+            config,
+            files,
+        });
+    }
+
+    Ok(WorkflowBundle::new(bundled))
 }
 
-fn root_workflow_run_layer(
-    manifest: &types::RunManifest,
-    workflow: &BundledWorkflow,
-) -> Result<RunLayer> {
-    let Some(root) = manifest.workflows.get(&manifest.target.path) else {
-        bail!("manifest target path is missing from workflows map");
-    };
-    let Some(config) = root.config.as_ref() else {
+fn workflow_files_from_manifest(
+    files: &HashMap<String, types::ManifestFileEntry>,
+) -> Result<HashMap<ManifestPath, String>> {
+    let mut bundled = HashMap::new();
+    let mut file_wire_keys = HashMap::new();
+
+    for (wire_key, entry) in files {
+        let path = ManifestPath::from_wire(wire_key)
+            .ok_or_else(|| anyhow!("invalid manifest file key: {wire_key}"))?;
+        if let Some(previous) = file_wire_keys.get(&path) {
+            bail!(
+                "duplicate canonical file key: {path} (from wire keys {previous:?} and \
+                 {wire_key:?})"
+            );
+        }
+        if let Some(from) = entry.ref_.from.as_deref() {
+            ManifestPath::from_wire(from)
+                .ok_or_else(|| anyhow!("invalid manifest file ref from: {from}"))?;
+        }
+        file_wire_keys.insert(path.clone(), wire_key.clone());
+        bundled.insert(path, entry.content.clone());
+    }
+
+    Ok(bundled)
+}
+
+fn root_workflow_run_layer(workflow: &BundledWorkflow) -> Result<RunLayer> {
+    let Some(config) = workflow.config.as_ref() else {
         return Ok(RunLayer::default());
     };
 
@@ -232,7 +280,7 @@ fn root_workflow_run_layer(
         .transpose()
         .map_err(|err| anyhow!("Failed to parse run config TOML: {err}"))?
         .unwrap_or_default();
-    resolve_manifest_dockerfile(&mut run, Path::new(&config.path), &workflow.files)?;
+    resolve_manifest_dockerfile(&mut run, &config.path, &workflow.files)?;
     Ok(run)
 }
 
@@ -321,8 +369,8 @@ fn resolve_working_directory(settings: &WorkflowSettings, caller_cwd: &Path) -> 
 
 fn resolve_manifest_dockerfile(
     run: &mut RunLayer,
-    config_path: &Path,
-    files: &HashMap<PathBuf, String>,
+    config_path: &ManifestPath,
+    files: &HashMap<ManifestPath, String>,
 ) -> Result<()> {
     let source = run
         .sandbox
@@ -337,41 +385,17 @@ fn resolve_manifest_dockerfile(
         return Ok(());
     };
     let path_owned = path.clone();
-    let logical_path = normalize_logical_path(
+    let manifest_path = ManifestPath::from_reference(
         config_path.parent().unwrap_or_else(|| Path::new(".")),
         &path_owned,
     )
     .ok_or_else(|| anyhow!("unsupported dockerfile reference: {path_owned}"))?;
     let content = files
-        .get(&logical_path)
+        .get(&manifest_path)
         .cloned()
-        .ok_or_else(|| anyhow!("missing bundled dockerfile: {}", logical_path.display()))?;
+        .ok_or_else(|| anyhow!("missing bundled dockerfile: {manifest_path}"))?;
     *source = DaytonaDockerfileLayer::Inline(content);
     Ok(())
-}
-
-fn normalize_logical_path(current_dir: &Path, reference: &str) -> Option<PathBuf> {
-    let path = Path::new(reference);
-    if path.is_absolute() || reference.starts_with('~') {
-        return None;
-    }
-
-    let mut normalized = PathBuf::new();
-    for component in current_dir.join(path).components() {
-        match component {
-            Component::CurDir => {}
-            Component::Normal(part) => normalized.push(part),
-            Component::ParentDir => {
-                if normalized.file_name().is_some() {
-                    normalized.pop();
-                } else {
-                    normalized.push("..");
-                }
-            }
-            Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
-    Some(normalized)
 }
 
 async fn build_preflight_report(
@@ -989,6 +1013,88 @@ mod tests {
 
     fn default_settings_fixture() -> RunLayer {
         RunLayer::default()
+    }
+
+    fn manifest_workflow() -> types::ManifestWorkflow {
+        types::ManifestWorkflow {
+            config: None,
+            files:  HashMap::new(),
+            source: "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
+                .to_string(),
+        }
+    }
+
+    fn manifest_file(content: &str) -> types::ManifestFileEntry {
+        types::ManifestFileEntry {
+            content: content.to_string(),
+            ref_:    types::ManifestFileRef {
+                from:     Some("workflow.fabro".to_string()),
+                original: "prompt.md".to_string(),
+                type_:    types::ManifestFileRefType::FileInline,
+            },
+        }
+    }
+
+    #[test]
+    fn workflow_bundle_rejects_duplicate_canonical_workflow_keys() {
+        let workflows = HashMap::from([
+            ("bar.fabro".to_string(), manifest_workflow()),
+            ("./foo/../bar.fabro".to_string(), manifest_workflow()),
+        ]);
+
+        let error = workflow_bundle_from_manifest(&workflows).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate canonical workflow key: bar.fabro")
+        );
+    }
+
+    #[test]
+    fn workflow_bundle_rejects_duplicate_canonical_file_keys() {
+        let mut workflow = manifest_workflow();
+        workflow.files = HashMap::from([
+            ("prompts/hello.md".to_string(), manifest_file("first")),
+            ("./prompts/./hello.md".to_string(), manifest_file("second")),
+        ]);
+        let workflows = HashMap::from([("workflow.fabro".to_string(), workflow)]);
+
+        let error = workflow_bundle_from_manifest(&workflows).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate canonical file key: prompts/hello.md")
+        );
+    }
+
+    #[test]
+    fn workflow_bundle_rejects_invalid_workflow_key() {
+        let workflows = HashMap::from([("/abs/path.fabro".to_string(), manifest_workflow())]);
+
+        let error = workflow_bundle_from_manifest(&workflows).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("invalid manifest workflow key: /abs/path.fabro")
+        );
+    }
+
+    #[test]
+    fn workflow_bundle_rejects_invalid_file_key() {
+        let mut workflow = manifest_workflow();
+        workflow.files = HashMap::from([("~/foo.md".to_string(), manifest_file("content"))]);
+        let workflows = HashMap::from([("workflow.fabro".to_string(), workflow)]);
+
+        let error = workflow_bundle_from_manifest(&workflows).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("invalid manifest file key: ~/foo.md")
+        );
     }
 
     #[test]

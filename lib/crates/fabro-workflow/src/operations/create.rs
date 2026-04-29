@@ -21,6 +21,7 @@ use fabro_util::json::normalize_json_value;
 use tokio::task::spawn_blocking;
 
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
+use crate::ManifestPath;
 use crate::error::Error;
 use crate::event::{Event, append_event, to_run_event_at};
 use crate::file_resolver::FileResolver;
@@ -38,7 +39,7 @@ pub struct CreateRunInput {
     pub settings: WorkflowSettings,
     pub cwd: PathBuf,
     pub workflow_slug: Option<String>,
-    pub workflow_path: Option<PathBuf>,
+    pub workflow_path: Option<ManifestPath>,
     pub workflow_bundle: Option<WorkflowBundle>,
     pub submitted_manifest_bytes: Option<Vec<u8>>,
     pub run_id: Option<RunId>,
@@ -657,8 +658,8 @@ mod tests {
     fn validate_from_bundle_resolves_nested_import_files_relative_to_imported_graph() {
         let validated = validate(ValidateInput {
             workflow:          WorkflowInput::Bundled(BundledWorkflow {
-                logical_path: PathBuf::from("workflow.fabro"),
-                source:       r#"digraph Test {
+                path:   ManifestPath::from_wire("workflow.fabro").unwrap(),
+                source: r#"digraph Test {
                     graph [goal="Ship"]
                     start [shape=Mdiamond]
                     validate [import="./child/validate.fabro"]
@@ -666,9 +667,10 @@ mod tests {
                     start -> validate -> exit
                 }"#
                 .to_string(),
-                files:        HashMap::from([
+                config: None,
+                files:  HashMap::from([
                     (
-                        PathBuf::from("child/validate.fabro"),
+                        ManifestPath::from_wire("child/validate.fabro").unwrap(),
                         r#"digraph Validate {
                             start [shape=Mdiamond]
                             lint [prompt="@../prompts/lint.md"]
@@ -678,7 +680,7 @@ mod tests {
                         .to_string(),
                     ),
                     (
-                        PathBuf::from("prompts/lint.md"),
+                        ManifestPath::from_wire("prompts/lint.md").unwrap(),
                         "Lint {{ goal }}".to_string(),
                     ),
                 ]),
