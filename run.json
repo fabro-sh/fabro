@@ -206,7 +206,7 @@
   "status_updated_at": "2026-04-29T19:27:53.316451080Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-04-29T19:28:09.033929866Z",
+    "timestamp": "2026-04-29T19:28:16.822280615Z",
     "current_node": "greet",
     "completed_nodes": [
       "start",
@@ -214,29 +214,25 @@
     ],
     "node_retries": {},
     "context_values": {
+      "failure_class": "",
       "internal.work_dir": "/workspace",
+      "internal.retry_count.greet": 0,
       "internal.run_id": "01KQDBC9SA6C7YW4YBN1T3DR84",
-      "graph.rankdir": "LR",
-      "last_stage": "greet",
       "outcome": "success",
       "thread.start.current_node": "greet",
-      "last_response": "Done! I added a haiku just below the tagline:\n\n```\nAgents run the graph\nYou define where humans pause\nCode ships while you sleep\n```\n\nIt captures Fabro's core ideas in three lines: workflow graphs, hu",
-      "failure_signature": "",
-      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
-      "response.greet": "Done! I added a haiku just below the tagline:\n\n```\nAgents run the graph\nYou define where humans pause\nCode ships while you sleep\n```\n\nIt captures Fabro's core ideas in three lines: workflow graphs, human-in-the-loop gates, and autonomous 24/7 execution — all in the traditional 5-7-5 syllable structure.",
-      "failure_class": "",
-      "internal.node_visit_count": 1,
-      "internal.retry_count.greet": 0,
       "internal.thread_id": "start",
-      "internal.retry_count.start": 0,
       "internal.fidelity": "compact",
-      "current_node": "greet"
+      "internal.node_visit_count": 1,
+      "current_node": "greet",
+      "last_stage": "greet",
+      "response.greet": "Done! I added a haiku just below the tagline:\n\n```\nAgents run the graph\nYou define where humans pause\nCode ships while you sleep\n```\n\nIt captures Fabro's core ideas in three lines: workflow graphs, human-in-the-loop gates, and autonomous 24/7 execution — all in the traditional 5-7-5 syllable structure.",
+      "graph.rankdir": "LR",
+      "internal.retry_count.start": 0,
+      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+      "failure_signature": "",
+      "last_response": "Done! I added a haiku just below the tagline:\n\n```\nAgents run the graph\nYou define where humans pause\nCode ships while you sleep\n```\n\nIt captures Fabro's core ideas in three lines: workflow graphs, hu"
     },
     "node_outcomes": {
-      "start": {
-        "status": "success",
-        "usage": null
-      },
       "greet": {
         "status": "success",
         "context_updates": {
@@ -271,9 +267,14 @@
         "files_touched": [
           "/workspace/README.md"
         ]
+      },
+      "start": {
+        "status": "success",
+        "usage": null
       }
     },
     "next_node_id": "exit",
+    "git_commit_sha": "f8a0c9542cf2a3b340aa0d8f6b71a19bc7fb3fa1",
     "node_visits": {
       "start": 1,
       "greet": 1
@@ -314,9 +315,117 @@
           "start": 1
         }
       }
+    ],
+    [
+      36,
+      {
+        "timestamp": "2026-04-29T19:28:16.822280615Z",
+        "current_node": "greet",
+        "completed_nodes": [
+          "start",
+          "greet"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_class": "",
+          "internal.work_dir": "/workspace",
+          "internal.retry_count.greet": 0,
+          "internal.run_id": "01KQDBC9SA6C7YW4YBN1T3DR84",
+          "outcome": "success",
+          "thread.start.current_node": "greet",
+          "internal.thread_id": "start",
+          "internal.fidelity": "compact",
+          "internal.node_visit_count": 1,
+          "current_node": "greet",
+          "last_stage": "greet",
+          "response.greet": "Done! I added a haiku just below the tagline:\n\n```\nAgents run the graph\nYou define where humans pause\nCode ships while you sleep\n```\n\nIt captures Fabro's core ideas in three lines: workflow graphs, human-in-the-loop gates, and autonomous 24/7 execution — all in the traditional 5-7-5 syllable structure.",
+          "graph.rankdir": "LR",
+          "internal.retry_count.start": 0,
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "failure_signature": "",
+          "last_response": "Done! I added a haiku just below the tagline:\n\n```\nAgents run the graph\nYou define where humans pause\nCode ships while you sleep\n```\n\nIt captures Fabro's core ideas in three lines: workflow graphs, hu"
+        },
+        "node_outcomes": {
+          "greet": {
+            "status": "success",
+            "context_updates": {
+              "last_response": "Done! I added a haiku just below the tagline:\n\n```\nAgents run the graph\nYou define where humans pause\nCode ships while you sleep\n```\n\nIt captures Fabro's core ideas in three lines: workflow graphs, hu",
+              "last_stage": "greet",
+              "response.greet": "Done! I added a haiku just below the tagline:\n\n```\nAgents run the graph\nYou define where humans pause\nCode ships while you sleep\n```\n\nIt captures Fabro's core ideas in three lines: workflow graphs, human-in-the-loop gates, and autonomous 24/7 execution — all in the traditional 5-7-5 syllable structure."
+            },
+            "notes": "Stage completed: greet",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 4746,
+                    "output_tokens": 408,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 23394,
+                    "cache_write_tokens": 11991
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 11991,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 72342
+            },
+            "files_touched": [
+              "/workspace/README.md"
+            ]
+          },
+          "start": {
+            "status": "success",
+            "usage": null
+          }
+        },
+        "next_node_id": "exit",
+        "git_commit_sha": "f8a0c9542cf2a3b340aa0d8f6b71a19bc7fb3fa1",
+        "node_visits": {
+          "start": 1,
+          "greet": 1
+        }
+      }
     ]
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-04-29T19:28:16.838853377Z",
+    "status": "success",
+    "duration_ms": 23506,
+    "final_git_commit_sha": "f8a0c9542cf2a3b340aa0d8f6b71a19bc7fb3fa1",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "greet",
+        "stage_label": "greet",
+        "duration_ms": 13040,
+        "billing_usd_micros": 72342,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 4746,
+      "output_tokens": 408,
+      "total_tokens": 40539,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 23394,
+      "cache_write_tokens": 11991,
+      "total_usd_micros": 72342
+    },
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -333,10 +442,32 @@
   "superseded_by": null,
   "pending_interviews": {},
   "nodes": {
+    "exit@1": {
+      "prompt": null,
+      "response": null,
+      "status": {
+        "status": "success",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-04-29T19:28:16.822508784Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
     "greet@1": {
       "prompt": null,
       "response": null,
-      "status": null,
+      "status": {
+        "status": "success",
+        "notes": "Stage completed: greet",
+        "failure_reason": null,
+        "timestamp": "2026-04-29T19:28:09.033741489Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "anthropic",
