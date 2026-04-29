@@ -12,6 +12,7 @@ fn github_credentials() -> GitHubCredentials {
     GitHubCredentials::App(GitHubAppCredentials {
         app_id:          "42".to_string(),
         private_key_pem: TEST_RSA_KEY.to_string(),
+        slug:            Some("test-app".to_string()),
     })
 }
 

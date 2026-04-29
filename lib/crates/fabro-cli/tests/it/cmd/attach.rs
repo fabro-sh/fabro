@@ -553,7 +553,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               }
             }
           },
-          "host_repo_path": "[TEMP_DIR]",
+          "in_place": false,
           "manifest_blob": "[BLOB_ID]",
           "provenance": {
             "client": {
@@ -623,9 +623,17 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "sandbox": {
                 "daytona": null,
                 "devcontainer": false,
+                "docker": {
+                  "cpu_quota": 200000,
+                  "env_vars": {},
+                  "image": "buildpack-deps:noble",
+                  "memory_limit": 4000000000,
+                  "network_mode": null,
+                  "skip_clone": false
+                },
                 "env": {},
                 "local": {
-                  "worktree_mode": "clean"
+                  "worktree_mode": "always"
                 },
                 "preserve": false,
                 "provider": "local"
@@ -645,9 +653,9 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "name": null
             }
           },
+          "source_directory": "[TEMP_DIR]",
           "workflow_slug": "human-gate",
-          "workflow_source": "digraph HumanGate {/n  graph [goal=\"Wait for approval\"]/n  start [shape=Mdiamond, label=\"Start\"]/n  exit  [shape=Msquare, label=\"Exit\"]/n  approve [shape=hexagon, label=\"Approve?\"]/n  ship   [shape=parallelogram, script=\"echo shipped\"]/n  revise [shape=parallelogram, script=\"echo revised\"]/n  start -> approve/n  approve -> ship   [label=\"[A] Approve\"]/n  approve -> revise [label=\"[R] Revise\"]/n  ship -> exit/n  revise -> exit/n}/n",
-          "working_directory": "[TEMP_DIR]"
+          "workflow_source": "digraph HumanGate {/n  graph [goal=\"Wait for approval\"]/n  start [shape=Mdiamond, label=\"Start\"]/n  exit  [shape=Msquare, label=\"Exit\"]/n  approve [shape=hexagon, label=\"Approve?\"]/n  ship   [shape=parallelogram, script=\"echo shipped\"]/n  revise [shape=parallelogram, script=\"echo revised\"]/n  start -> approve/n  approve -> ship   [label=\"[A] Approve\"]/n  approve -> revise [label=\"[R] Revise\"]/n  ship -> exit/n  revise -> exit/n}/n"
         },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"

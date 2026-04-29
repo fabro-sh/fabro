@@ -34,8 +34,8 @@ use fabro_sandbox::reconnect::reconnect;
 use fabro_static::EnvVars;
 use fabro_types::RunId;
 use fabro_workflow::sandbox_git::{
-    DiffError, DiffLineStats, DiffNumstat, RawDiffEntry, SubmoduleChange, SymlinkChange,
-    list_changed_files_raw, list_diff_numstat, stream_blob_metadata, stream_blobs,
+    DiffError, DiffNumstat, RawDiffEntry, SubmoduleChange, SymlinkChange, list_changed_files_raw,
+    list_diff_numstat, stream_blob_metadata, stream_blobs,
 };
 use futures_util::FutureExt;
 use serde::Deserialize;
@@ -373,13 +373,6 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
     })
 }
 
-fn line_stats_to_api(stats: DiffLineStats) -> DiffStats {
-    DiffStats {
-        additions: i64::try_from(stats.additions).unwrap_or(i64::MAX),
-        deletions: i64::try_from(stats.deletions).unwrap_or(i64::MAX),
-    }
-}
-
 /// Choose a degraded reason given the current projection. Docker-provider
 /// runs aren't supported by the deployed server; completed runs are "gone";
 /// everything else is a transient "unreachable" (sandbox may come back).
@@ -451,7 +444,7 @@ fn build_fallback_response(
 /// summation we use on the live-sandbox path so the toolbar shows the same
 /// numbers regardless of which response branch we took.
 fn patch_to_stats(patch: &str) -> DiffStats {
-    let mut stats = DiffLineStats::default();
+    let mut stats = DiffStats::default();
     for section in patch.split("diff --git ").skip(1) {
         if patch_section_omits_line_stats(section) {
             continue;
@@ -467,7 +460,7 @@ fn patch_to_stats(patch: &str) -> DiffStats {
             }
         }
     }
-    line_stats_to_api(stats)
+    stats
 }
 
 fn patch_section_omits_line_stats(section: &str) -> bool {
@@ -670,7 +663,7 @@ async fn resolve_head_sha_and_time(
             None,
         )
         .await
-        .map_err(|err| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err))?;
+        .map_err(|err| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.display_with_causes()))?;
     if res.exit_code != 0 {
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -729,7 +722,7 @@ fn classify_entries(
     is_sensitive_fn: fn(&str) -> bool,
 ) -> ClassifiedEntries {
     let mut out = Vec::with_capacity(raw.len());
-    let mut stats = DiffLineStats::default();
+    let mut stats = DiffStats::default();
 
     for entry in raw {
         let (new_path, old_path) = match entry {
@@ -786,7 +779,7 @@ fn classify_entries(
 
     ClassifiedEntries {
         entries: out,
-        stats:   line_stats_to_api(stats),
+        stats,
     }
 }
 
@@ -1638,7 +1631,7 @@ diff --git a/src/main.rs b/src/main.rs
         ] {
             numstat
                 .line_stats_by_path
-                .insert(path.to_string(), DiffLineStats {
+                .insert(path.to_string(), DiffStats {
                     additions,
                     deletions,
                 });
@@ -1840,7 +1833,7 @@ rename to docs/NOTES.md
     // ── fetch_blob_table two-phase error isolation ─────────────────────
 
     use async_trait::async_trait;
-    use fabro_sandbox::ExecResult;
+    use fabro_sandbox::{Error as SandboxError, ExecResult, Result as SandboxResult};
 
     /// Scripted sandbox for the two-phase tests — serves different
     /// `exec_command` responses for `cat-file --batch-check` vs
@@ -1860,15 +1853,15 @@ rename to docs/NOTES.md
             _working_dir: Option<&str>,
             _env_vars: Option<&std::collections::HashMap<String, String>>,
             _cancel_token: Option<tokio_util::sync::CancellationToken>,
-        ) -> std::result::Result<ExecResult, String> {
+        ) -> SandboxResult<ExecResult> {
             if command.contains("cat-file --batch-check") {
                 Ok(self.batch_check_result.clone())
             } else if command.contains("cat-file --batch") {
                 Ok(self.batch_result.clone())
             } else {
-                Err(format!(
+                Err(SandboxError::message(format!(
                     "unexpected command in ScriptedBlobSandbox: {command}"
-                ))
+                )))
             }
         }
 
@@ -1879,23 +1872,23 @@ rename to docs/NOTES.md
             _path: &str,
             _offset: Option<usize>,
             _limit: Option<usize>,
-        ) -> std::result::Result<String, String> {
+        ) -> SandboxResult<String> {
             unimplemented!()
         }
-        async fn write_file(&self, _: &str, _: &str) -> std::result::Result<(), String> {
+        async fn write_file(&self, _: &str, _: &str) -> SandboxResult<()> {
             unimplemented!()
         }
-        async fn delete_file(&self, _: &str) -> std::result::Result<(), String> {
+        async fn delete_file(&self, _: &str) -> SandboxResult<()> {
             unimplemented!()
         }
-        async fn file_exists(&self, _: &str) -> std::result::Result<bool, String> {
+        async fn file_exists(&self, _: &str) -> SandboxResult<bool> {
             unimplemented!()
         }
         async fn list_directory(
             &self,
             _path: &str,
             _depth: Option<usize>,
-        ) -> std::result::Result<Vec<fabro_sandbox::DirEntry>, String> {
+        ) -> SandboxResult<Vec<fabro_sandbox::DirEntry>> {
             unimplemented!()
         }
         async fn grep(
@@ -1903,34 +1896,30 @@ rename to docs/NOTES.md
             _pattern: &str,
             _path: &str,
             _options: &fabro_sandbox::GrepOptions,
-        ) -> std::result::Result<Vec<String>, String> {
+        ) -> SandboxResult<Vec<String>> {
             unimplemented!()
         }
-        async fn glob(
-            &self,
-            _pattern: &str,
-            _path: Option<&str>,
-        ) -> std::result::Result<Vec<String>, String> {
+        async fn glob(&self, _pattern: &str, _path: Option<&str>) -> SandboxResult<Vec<String>> {
             unimplemented!()
         }
         async fn download_file_to_local(
             &self,
             _remote: &str,
             _local: &std::path::Path,
-        ) -> std::result::Result<(), String> {
+        ) -> SandboxResult<()> {
             unimplemented!()
         }
         async fn upload_file_from_local(
             &self,
             _local: &std::path::Path,
             _remote: &str,
-        ) -> std::result::Result<(), String> {
+        ) -> SandboxResult<()> {
             unimplemented!()
         }
-        async fn initialize(&self) -> std::result::Result<(), String> {
+        async fn initialize(&self) -> SandboxResult<()> {
             Ok(())
         }
-        async fn cleanup(&self) -> std::result::Result<(), String> {
+        async fn cleanup(&self) -> SandboxResult<()> {
             Ok(())
         }
         fn working_directory(&self) -> &'static str {

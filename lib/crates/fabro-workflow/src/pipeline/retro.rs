@@ -58,7 +58,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     let retro_prompt = build_retro_prompt(RETRO_DATA_DIR);
     services.emitter.emit(&Event::RetroStarted {
         prompt:   Some(retro_prompt),
-        provider: Some(services.provider.as_str().to_string()),
+        provider: Some(services.provider.to_string()),
         model:    Some(options.model.clone()),
     });
 
@@ -211,35 +211,35 @@ mod tests {
         let inner = test_store().create_run(&test_run_id()).await.unwrap();
         let run_store = inner;
         let run_spec = RunSpec {
-            run_id:            test_run_id(),
-            settings:          WorkflowSettings::default(),
-            graph:             Graph::new("test"),
-            workflow_slug:     None,
-            working_directory: run_dir.to_path_buf(),
-            host_repo_path:    None,
-            repo_origin_url:   None,
-            base_branch:       None,
-            labels:            std::collections::HashMap::new(),
-            provenance:        None,
-            manifest_blob:     None,
-            definition_blob:   None,
+            run_id:           test_run_id(),
+            settings:         WorkflowSettings::default(),
+            graph:            Graph::new("test"),
+            workflow_slug:    None,
+            source_directory: Some(run_dir.to_string_lossy().to_string()),
+            git:              None,
+            labels:           std::collections::HashMap::new(),
+            provenance:       None,
+            manifest_blob:    None,
+            definition_blob:  None,
+            fork_source_ref:  None,
+            in_place:         false,
         };
         append_event(&run_store, &test_run_id(), &Event::RunCreated {
-            run_id:            test_run_id(),
-            settings:          serde_json::to_value(&run_spec.settings).unwrap(),
-            graph:             serde_json::to_value(&run_spec.graph).unwrap(),
-            workflow_source:   None,
-            workflow_config:   None,
-            labels:            run_spec.labels.clone().into_iter().collect(),
-            run_dir:           run_dir.to_string_lossy().to_string(),
-            working_directory: run_dir.to_string_lossy().to_string(),
-            host_repo_path:    None,
-            repo_origin_url:   run_spec.repo_origin_url.clone(),
-            base_branch:       None,
-            workflow_slug:     None,
-            db_prefix:         None,
-            provenance:        run_spec.provenance.clone(),
-            manifest_blob:     None,
+            run_id:           test_run_id(),
+            settings:         serde_json::to_value(&run_spec.settings).unwrap(),
+            graph:            serde_json::to_value(&run_spec.graph).unwrap(),
+            workflow_source:  None,
+            workflow_config:  None,
+            labels:           run_spec.labels.clone().into_iter().collect(),
+            run_dir:          run_dir.to_string_lossy().to_string(),
+            source_directory: run_spec.source_directory.clone(),
+            workflow_slug:    None,
+            db_prefix:        None,
+            provenance:       run_spec.provenance.clone(),
+            manifest_blob:    None,
+            git:              None,
+            fork_source_ref:  None,
+            in_place:         false,
         })
         .await
         .unwrap();
@@ -282,7 +282,8 @@ mod tests {
             labels:           HashMap::new(),
             workflow_slug:    None,
             github_app:       None,
-            host_repo_path:   None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
             base_branch:      None,
             display_base_sha: None,
             git:              None,
@@ -315,6 +316,7 @@ mod tests {
             None,
             fabro_llm::Provider::Anthropic,
             test_llm_source(),
+            Arc::new(crate::sandbox_metadata::SandboxGitRuntime::new()),
         );
         let mut engine = EngineServices::test_default();
         engine.run = Arc::clone(&services);
@@ -368,6 +370,7 @@ mod tests {
             None,
             fabro_llm::Provider::Anthropic,
             test_llm_source(),
+            Arc::new(crate::sandbox_metadata::SandboxGitRuntime::new()),
         );
 
         let retro = run_retro(

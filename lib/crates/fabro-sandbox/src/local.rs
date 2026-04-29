@@ -132,35 +132,35 @@ impl Sandbox for LocalSandbox {
         path: &str,
         offset: Option<usize>,
         limit: Option<usize>,
-    ) -> Result<String, String> {
+    ) -> crate::Result<String> {
         let full_path = self.resolve_path(path);
-        let content = fs::read_to_string(&full_path)
-            .await
-            .map_err(|e| format!("Failed to read {}: {e}", full_path.display()))?;
+        let content = fs::read_to_string(&full_path).await.map_err(|e| {
+            crate::Error::context(format!("Failed to read {}", full_path.display()), e)
+        })?;
 
         Ok(format_lines_numbered(&content, offset, limit))
     }
 
-    async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
+    async fn write_file(&self, path: &str, content: &str) -> crate::Result<()> {
         let full_path = self.resolve_path(path);
         if let Some(parent) = full_path.parent() {
             fs::create_dir_all(parent)
                 .await
-                .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
+                .map_err(|e| crate::Error::context("Failed to create parent dirs", e))?;
         }
-        fs::write(&full_path, content)
-            .await
-            .map_err(|e| format!("Failed to write {}: {e}", full_path.display()))
+        fs::write(&full_path, content).await.map_err(|e| {
+            crate::Error::context(format!("Failed to write {}", full_path.display()), e)
+        })
     }
 
-    async fn delete_file(&self, path: &str) -> Result<(), String> {
+    async fn delete_file(&self, path: &str) -> crate::Result<()> {
         let full_path = self.resolve_path(path);
-        fs::remove_file(&full_path)
-            .await
-            .map_err(|e| format!("Failed to delete {}: {e}", full_path.display()))
+        fs::remove_file(&full_path).await.map_err(|e| {
+            crate::Error::context(format!("Failed to delete {}", full_path.display()), e)
+        })
     }
 
-    async fn file_exists(&self, path: &str) -> Result<bool, String> {
+    async fn file_exists(&self, path: &str) -> crate::Result<bool> {
         let full_path = self.resolve_path(path);
         Ok(full_path.exists())
     }
@@ -169,7 +169,7 @@ impl Sandbox for LocalSandbox {
         &self,
         path: &str,
         depth: Option<usize>,
-    ) -> Result<Vec<DirEntry>, String> {
+    ) -> crate::Result<Vec<DirEntry>> {
         #[expect(
             clippy::disallowed_methods,
             reason = "sync recursive read_dir; caller wraps invocation in tokio::task::spawn_blocking"
@@ -180,9 +180,11 @@ impl Sandbox for LocalSandbox {
             current_depth: usize,
             max_depth: usize,
             entries: &mut Vec<DirEntry>,
-        ) -> Result<(), String> {
+        ) -> crate::Result<()> {
             let mut dir_entries: Vec<std::fs::DirEntry> = std::fs::read_dir(base)
-                .map_err(|e| format!("Failed to read directory {}: {e}", base.display()))?
+                .map_err(|e| {
+                    crate::Error::context(format!("Failed to read directory {}", base.display()), e)
+                })?
                 .filter_map(std::result::Result::ok)
                 .collect();
             dir_entries.sort_by_key(std::fs::DirEntry::file_name);
@@ -190,7 +192,7 @@ impl Sandbox for LocalSandbox {
             for entry in dir_entries {
                 let metadata = entry
                     .metadata()
-                    .map_err(|e| format!("Failed to read metadata: {e}"))?;
+                    .map_err(|e| crate::Error::context("Failed to read metadata", e))?;
                 let name = if prefix.is_empty() {
                     entry.file_name().to_string_lossy().into_owned()
                 } else {
@@ -221,7 +223,7 @@ impl Sandbox for LocalSandbox {
             Ok(entries)
         })
         .await
-        .map_err(|e| format!("list_directory task failed: {e}"))?
+        .map_err(|e| crate::Error::context("list_directory task failed", e))?
     }
 
     async fn exec_command(
@@ -231,7 +233,7 @@ impl Sandbox for LocalSandbox {
         working_dir: Option<&str>,
         env_vars: Option<&std::collections::HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
-    ) -> Result<ExecResult, String> {
+    ) -> crate::Result<ExecResult> {
         let start = Instant::now();
 
         let mut filtered_env: Vec<(String, String)> = process_env_vars()
@@ -264,7 +266,7 @@ impl Sandbox for LocalSandbox {
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| format!("Failed to spawn command: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to spawn command", e))?;
 
         let timeout_duration = std::time::Duration::from_millis(timeout_ms);
         let token = cancel_token.unwrap_or_default();
@@ -293,7 +295,8 @@ impl Sandbox for LocalSandbox {
 
         let (timed_out, exit_code) = tokio::select! {
             status_result = child.wait() => {
-                let status = status_result.map_err(|e| format!("Failed to wait for process: {e}"))?;
+                let status = status_result
+                    .map_err(|e| crate::Error::context("Failed to wait for process", e))?;
                 (false, status.code().unwrap_or(-1))
             }
             () = time::sleep(timeout_duration) => {
@@ -325,7 +328,7 @@ impl Sandbox for LocalSandbox {
         pattern: &str,
         path: &str,
         options: &GrepOptions,
-    ) -> Result<Vec<String>, String> {
+    ) -> crate::Result<Vec<String>> {
         let full_path = self.resolve_path(path);
 
         // Try rg (ripgrep) first, fall back to grep
@@ -351,7 +354,7 @@ impl Sandbox for LocalSandbox {
                 .args(&args)
                 .output()
                 .await
-                .map_err(|e| format!("Failed to run rg: {e}"))?
+                .map_err(|e| crate::Error::context("Failed to run rg", e))?
         } else {
             let mut args = vec!["-rn".to_string()];
             if options.case_insensitive {
@@ -372,7 +375,7 @@ impl Sandbox for LocalSandbox {
                 .args(&args)
                 .output()
                 .await
-                .map_err(|e| format!("Failed to run grep: {e}"))?
+                .map_err(|e| crate::Error::context("Failed to run grep", e))?
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -384,7 +387,7 @@ impl Sandbox for LocalSandbox {
         Ok(results)
     }
 
-    async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
+    async fn glob(&self, pattern: &str, path: Option<&str>) -> crate::Result<Vec<String>> {
         let base_dir =
             path.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
 
@@ -395,7 +398,7 @@ impl Sandbox for LocalSandbox {
         };
 
         let mut results: Vec<String> = glob::glob(&full_pattern)
-            .map_err(|e| format!("Invalid glob pattern: {e}"))?
+            .map_err(|e| crate::Error::context("Invalid glob pattern", e))?
             .filter_map(Result::ok)
             .map(|p| p.to_string_lossy().into_owned())
             .collect();
@@ -416,18 +419,21 @@ impl Sandbox for LocalSandbox {
         &self,
         remote_path: &str,
         local_path: &Path,
-    ) -> Result<(), String> {
+    ) -> crate::Result<()> {
         let full_path = self.resolve_path(remote_path);
         if let Some(parent) = local_path.parent() {
             fs::create_dir_all(parent)
                 .await
-                .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
+                .map_err(|e| crate::Error::context("Failed to create parent dirs", e))?;
         }
         fs::copy(&full_path, local_path).await.map_err(|e| {
-            format!(
-                "Failed to copy {} to {}: {e}",
-                full_path.display(),
-                local_path.display()
+            crate::Error::context(
+                format!(
+                    "Failed to copy {} to {}",
+                    full_path.display(),
+                    local_path.display()
+                ),
+                e,
             )
         })?;
         Ok(())
@@ -437,31 +443,34 @@ impl Sandbox for LocalSandbox {
         &self,
         local_path: &Path,
         remote_path: &str,
-    ) -> Result<(), String> {
+    ) -> crate::Result<()> {
         let full_path = self.resolve_path(remote_path);
         if let Some(parent) = full_path.parent() {
             fs::create_dir_all(parent)
                 .await
-                .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
+                .map_err(|e| crate::Error::context("Failed to create parent dirs", e))?;
         }
         fs::copy(local_path, &full_path).await.map_err(|e| {
-            format!(
-                "Failed to copy {} to {}: {e}",
-                local_path.display(),
-                full_path.display()
+            crate::Error::context(
+                format!(
+                    "Failed to copy {} to {}",
+                    local_path.display(),
+                    full_path.display()
+                ),
+                e,
             )
         })?;
         Ok(())
     }
 
-    async fn initialize(&self) -> Result<(), String> {
+    async fn initialize(&self) -> crate::Result<()> {
         self.emit(SandboxEvent::Initializing {
             provider: "local".into(),
         });
         let start = Instant::now();
         let result = fs::create_dir_all(&self.working_directory)
             .await
-            .map_err(|e| format!("Failed to create working directory: {e}"));
+            .map_err(|e| crate::Error::context("Failed to create working directory", e));
         let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
         match &result {
             Ok(()) => self.emit(SandboxEvent::Ready {
@@ -474,14 +483,28 @@ impl Sandbox for LocalSandbox {
             }),
             Err(e) => self.emit(SandboxEvent::InitializeFailed {
                 provider: "local".into(),
-                error: e.clone(),
+                error: e.to_string(),
+                causes: e.causes(),
                 duration_ms,
             }),
         }
         result
     }
 
-    async fn cleanup(&self) -> Result<(), String> {
+    async fn git_push_ref(&self, refspec: &str) -> bool {
+        let has_origin = matches!(
+            self.exec_command("git remote get-url origin", 10_000, None, None, None)
+                .await,
+            Ok(result) if result.exit_code == 0
+        );
+        if !has_origin {
+            return true;
+        }
+
+        crate::git_push_via_exec(self, refspec).await
+    }
+
+    async fn cleanup(&self) -> crate::Result<()> {
         self.emit(SandboxEvent::CleanupStarted {
             provider: "local".into(),
         });

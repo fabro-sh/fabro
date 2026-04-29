@@ -230,9 +230,31 @@ pub struct ServerSchedulerSettings {
     pub max_concurrent_runs: usize,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum LogDestination {
+    #[default]
+    File,
+    Stdout,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerLoggingSettings {
-    pub level: Option<String>,
+    pub level:       Option<String>,
+    #[serde(default)]
+    pub destination: LogDestination,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

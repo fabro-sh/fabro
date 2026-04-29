@@ -152,6 +152,7 @@ pub mod run_options;
 pub mod run_status;
 pub mod runtime_store;
 pub mod sandbox_git;
+pub(crate) mod sandbox_metadata;
 pub mod services;
 #[doc(hidden)]
 pub mod test_support;

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use clap::{Args, ValueEnum};
 
-use super::{PlannedCommand, run_command, shell_arg, workspace_root};
+use super::{PlannedCommand, run_command, shell_arg, spa_refresh, workspace_root};
 
 const ZIG_VERSION: &str = "0.13.0";
 
@@ -14,7 +14,7 @@ pub(crate) struct DockerBuildArgs {
     #[arg(long, value_enum)]
     arch:         Option<DockerArch>,
     /// Docker image tag to build.
-    #[arg(long, default_value = "fabro")]
+    #[arg(long, default_value = "fabro-sh/fabro")]
     tag:          String,
     /// Stage the compiled binary without running docker build.
     #[arg(long)]
@@ -98,6 +98,9 @@ impl DockerBuildPlan {
         reason = "dev docker-build command reports progress directly"
     )]
     fn run(&self) -> Result<()> {
+        println!("Refreshing embedded SPA assets...");
+        spa_refresh::spa_refresh_root(&self.workspace_root)?;
+
         println!(
             "Building fabro-cli for {} inside rust:1-bookworm via cargo-zigbuild...",
             self.arch.target()
@@ -117,7 +120,7 @@ impl DockerBuildPlan {
 
         if self.compile_only {
             println!(
-                "Staged docker-context/{}/fabro (skipping docker build per --compile-only).",
+                "Staged tmp/docker-context/{}/fabro (skipping docker build per --compile-only).",
                 self.arch
             );
             return Ok(());
@@ -130,16 +133,24 @@ impl DockerBuildPlan {
 
     fn dry_run_lines(&self) -> Vec<String> {
         let mut lines = vec![
+            Self::spa_refresh_command().to_shell_line(),
             self.build_command().to_shell_line(),
             format!("mkdir -p {}", shell_arg(self.relative_context_dir())),
             self.extract_command().to_shell_line(),
         ];
         if self.compile_only {
-            lines.push(format!("staged docker-context/{}/fabro", self.arch));
+            lines.push(format!("staged tmp/docker-context/{}/fabro", self.arch));
         } else {
             lines.push(self.image_build_command().to_shell_line());
         }
         lines
+    }
+
+    fn spa_refresh_command() -> PlannedCommand {
+        PlannedCommand::new("cargo")
+            .arg("dev")
+            .arg("spa")
+            .arg("refresh")
     }
 
     fn build_command(&self) -> PlannedCommand {
@@ -202,12 +213,13 @@ impl DockerBuildPlan {
 
     fn context_dir(&self) -> PathBuf {
         self.workspace_root
+            .join("tmp")
             .join("docker-context")
             .join(self.arch.to_string())
     }
 
     fn relative_context_dir(&self) -> String {
-        format!("docker-context/{}", self.arch)
+        format!("tmp/docker-context/{}", self.arch)
     }
 }
 

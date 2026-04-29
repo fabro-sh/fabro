@@ -6,8 +6,9 @@ use anyhow::{Result, anyhow, bail};
 use fabro_api::types;
 use fabro_auth::auth_issue_message;
 use fabro_config::{
-    CliLayer, CliOutputLayer, DaytonaDockerfileLayer, ReplaceMap, RunExecutionLayer, RunLayer,
-    RunModelLayer, RunSandboxLayer, WorkflowSettingsBuilder,
+    CliLayer, CliOutputLayer, DaytonaDockerfileLayer, DockerSandboxLayer, LocalSandboxLayer,
+    ReplaceMap, RunExecutionLayer, RunLayer, RunModelLayer, RunSandboxLayer,
+    WorkflowSettingsBuilder,
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
@@ -23,8 +24,8 @@ use fabro_types::settings::ServerNamespace;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
-    ApprovalMode, DaytonaNetworkLayer, DaytonaSettings, DockerfileSource, RunGoal, RunMode,
-    RunNamespace,
+    ApprovalMode, DaytonaNetworkLayer, DaytonaSettings, DockerSettings, DockerfileSource, RunGoal,
+    RunMode, RunNamespace, WorktreeMode,
 };
 use fabro_types::{RunId, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
@@ -39,15 +40,16 @@ use crate::server::AppState;
 
 #[derive(Clone)]
 pub(crate) struct PreparedManifest {
-    pub cwd:               PathBuf,
-    pub git:               Option<types::ManifestGit>,
-    pub root_source:       String,
-    pub run_id:            Option<RunId>,
-    pub settings:          WorkflowSettings,
-    pub target_path:       ManifestPath,
-    pub workflow_bundle:   WorkflowBundle,
-    pub workflow_input:    BundledWorkflow,
-    pub working_directory: PathBuf,
+    pub cwd:              PathBuf,
+    pub git:              Option<types::GitContext>,
+    pub root_source:      String,
+    pub run_id:           Option<RunId>,
+    pub settings:         WorkflowSettings,
+    pub target_path:      ManifestPath,
+    pub workflow_bundle:  WorkflowBundle,
+    pub workflow_input:   BundledWorkflow,
+    pub source_directory: PathBuf,
+    pub in_place:         bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -118,6 +120,9 @@ pub(crate) fn prepare_manifest(
         settings.run.goal = Some(RunGoal::Inline(InterpString::parse(&goal.text)));
     }
 
+    let in_place = settings.run.sandbox.provider == "local"
+        && settings.run.sandbox.local.worktree_mode == WorktreeMode::Never;
+
     Ok(PreparedManifest {
         cwd: cwd.clone(),
         git: manifest.git.clone(),
@@ -132,7 +137,8 @@ pub(crate) fn prepare_manifest(
         target_path,
         workflow_bundle,
         workflow_input,
-        working_directory: resolve_working_directory(&settings, &cwd),
+        source_directory: resolve_working_directory(&settings, &cwd),
+        in_place,
     })
 }
 
@@ -160,12 +166,9 @@ pub(crate) fn create_run_input(
         workflow_bundle: Some(prepared.workflow_bundle),
         submitted_manifest_bytes: None,
         run_id: prepared.run_id,
-        host_repo_path: Some(prepared.working_directory.display().to_string()),
-        repo_origin_url: prepared
-            .git
-            .as_ref()
-            .map(|git| fabro_github::normalize_repo_origin_url(&git.origin_url)),
-        base_branch: prepared.git.as_ref().map(|git| git.branch.clone()),
+        git: prepared.git,
+        fork_source_ref: None,
+        in_place: prepared.in_place,
         provenance: None,
         configured_providers,
     }
@@ -187,6 +190,16 @@ pub(crate) async fn run_preflight(
         ),
         preflight_ok,
     ))
+}
+
+pub(crate) fn validate_response(
+    prepared: &PreparedManifest,
+    validated: &Validated,
+) -> types::ValidateResponse {
+    types::ValidateResponse {
+        ok:       !validated.has_errors(),
+        workflow: workflow_summary(validated, prepared.target_path.as_path()),
+    }
 }
 
 pub(crate) fn graph_source(prepared: &PreparedManifest, direction: Option<&str>) -> String {
@@ -294,12 +307,27 @@ fn manifest_args_overrides(args: Option<&types::ManifestArgs>) -> ManifestSettin
         name:      args.model.as_deref().map(InterpString::parse),
         fallbacks: Vec::new(),
     });
-    let sandbox =
-        (args.sandbox.is_some() || args.preserve_sandbox.is_some()).then(|| RunSandboxLayer {
-            provider: args.sandbox.clone(),
-            preserve: args.preserve_sandbox,
-            ..RunSandboxLayer::default()
+    let local_worktree = args
+        .worktree_mode
+        .as_deref()
+        .and_then(parse_worktree_mode_arg)
+        .map(|mode| LocalSandboxLayer {
+            worktree_mode: Some(mode),
         });
+    let sandbox = (args.sandbox.is_some()
+        || args.preserve_sandbox.is_some()
+        || args.docker_image.is_some()
+        || local_worktree.is_some())
+    .then(|| RunSandboxLayer {
+        provider: args.sandbox.clone(),
+        preserve: args.preserve_sandbox,
+        local: local_worktree,
+        docker: args.docker_image.as_ref().map(|image| DockerSandboxLayer {
+            image: Some(image.clone()),
+            ..DockerSandboxLayer::default()
+        }),
+        ..RunSandboxLayer::default()
+    });
 
     let execution_has_any =
         args.dry_run.is_some() || args.auto_approve.is_some() || args.no_retro.is_some();
@@ -342,6 +370,16 @@ fn manifest_args_overrides(args: Option<&types::ManifestArgs>) -> ManifestSettin
     ManifestSettingsOverrides { run, cli }
 }
 
+fn parse_worktree_mode_arg(value: &str) -> Option<WorktreeMode> {
+    match value {
+        "always" => Some(WorktreeMode::Always),
+        "clean" => Some(WorktreeMode::Clean),
+        "dirty" => Some(WorktreeMode::Dirty),
+        "never" => Some(WorktreeMode::Never),
+        _ => None,
+    }
+}
+
 fn parse_labels(labels: &[String]) -> HashMap<String, String> {
     labels
         .iter()
@@ -365,6 +403,20 @@ fn resolve_working_directory(settings: &WorkflowSettings, caller_cwd: &Path) -> 
     } else {
         caller_cwd.join(path)
     }
+}
+
+fn resolve_interp(value: &InterpString) -> String {
+    value
+        .resolve(process_env_var)
+        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Manifest preflight interpolation owns a process-env lookup facade for {{ env.* }} values."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 fn resolve_manifest_dockerfile(
@@ -432,8 +484,10 @@ async fn build_preflight_report(
         } else {
             sandbox_provider
         };
-    let needs_github_credentials =
-        sandbox_provider == SandboxProvider::Daytona || !github_integration.permissions.is_empty();
+    let needs_github_credentials = matches!(
+        sandbox_provider,
+        SandboxProvider::Docker | SandboxProvider::Daytona
+    ) || !github_integration.permissions.is_empty();
     let github_app = if needs_github_credentials {
         state
             .github_credentials(github_integration)
@@ -499,13 +553,19 @@ fn base_preflight_checks(prepared: &PreparedManifest, graph: &Graph) -> Vec<Chec
                 CheckDetail {
                     text: format!(
                         "Git: {}",
-                        prepared.git.as_ref().map_or("unknown", |git| if git.clean {
-                            "clean"
-                        } else {
-                            "dirty"
-                        })
+                        prepared
+                            .git
+                            .as_ref()
+                            .map_or("unknown", |git| match git.dirty {
+                                fabro_types::DirtyStatus::Clean => "clean",
+                                fabro_types::DirtyStatus::Dirty => "dirty",
+                                fabro_types::DirtyStatus::Unknown => "unknown",
+                            })
                     ),
-                    warn: prepared.git.as_ref().is_some_and(|git| !git.clean),
+                    warn: prepared
+                        .git
+                        .as_ref()
+                        .is_some_and(|git| git.dirty != fabro_types::DirtyStatus::Clean),
                 },
             ],
             remediation: None,
@@ -541,6 +601,10 @@ fn resolve_daytona_config(settings: &RunNamespace) -> Option<DaytonaConfig> {
         .map(runtime_daytona_config)
 }
 
+fn resolve_docker_config(settings: &RunNamespace) -> Option<DockerSandboxOptions> {
+    settings.sandbox.docker.as_ref().map(runtime_docker_config)
+}
+
 async fn run_sandbox_check(
     checks: &mut Vec<CheckResult>,
     sandbox_provider: SandboxProvider,
@@ -550,18 +614,23 @@ async fn run_sandbox_check(
     daytona_api_key: Option<String>,
 ) -> bool {
     let daytona_config = resolve_daytona_config(resolved_run);
+    let docker_config = resolve_docker_config(resolved_run);
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
         SandboxProvider::Local => SandboxSpec::Local {
-            working_directory: prepared.working_directory.clone(),
+            working_directory: prepared.source_directory.clone(),
         }
         .build(None)
         .await
         .map_err(|err| err.to_string()),
         SandboxProvider::Docker => SandboxSpec::Docker {
-            config: DockerSandboxOptions {
-                host_working_directory: prepared.working_directory.to_string_lossy().to_string(),
-                ..DockerSandboxOptions::default()
-            },
+            config:           docker_config.unwrap_or_default(),
+            github_app:       github_app.clone(),
+            run_id:           None,
+            clone_origin_url: prepared
+                .git
+                .as_ref()
+                .map(|git| fabro_github::normalize_repo_origin_url(&git.origin_url)),
+            clone_branch:     prepared.git.as_ref().map(|git| git.branch.clone()),
         }
         .build(None)
         .await
@@ -570,6 +639,10 @@ async fn run_sandbox_check(
             config: daytona_config.unwrap_or_default(),
             github_app,
             run_id: None,
+            clone_origin_url: prepared
+                .git
+                .as_ref()
+                .map(|git| fabro_github::normalize_repo_origin_url(&git.origin_url)),
             clone_branch: prepared.git.as_ref().map(|git| git.branch.clone()),
             api_key: daytona_api_key,
         }
@@ -581,24 +654,59 @@ async fn run_sandbox_check(
     match sandbox_result {
         Ok(sandbox) => match sandbox.initialize().await {
             Ok(()) => {
-                let _ = sandbox.cleanup().await;
+                let mut details = vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))];
+                if matches!(
+                    sandbox_provider,
+                    SandboxProvider::Docker | SandboxProvider::Daytona
+                ) && prepared.git.is_none()
+                    && !resolved_run
+                        .sandbox
+                        .docker
+                        .as_ref()
+                        .is_some_and(|docker| docker.skip_clone)
+                    && !resolved_run
+                        .sandbox
+                        .daytona
+                        .as_ref()
+                        .is_some_and(|daytona| daytona.skip_clone)
+                {
+                    details.push(CheckDetail {
+                        text: "No clone source present; sandbox workspace will be empty".into(),
+                        warn: true,
+                    });
+                }
+                if let Err(err) = sandbox.cleanup().await {
+                    checks.push(CheckResult {
+                        name: "Sandbox".into(),
+                        status: CheckStatus::Error,
+                        summary: "cleanup failed".into(),
+                        details,
+                        remediation: Some(format!("Sandbox cleanup failed: {err}")),
+                    });
+                    return false;
+                }
                 checks.push(CheckResult {
-                    name:        "Sandbox".into(),
-                    status:      CheckStatus::Pass,
-                    summary:     sandbox_provider.to_string(),
-                    details:     vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
+                    name: "Sandbox".into(),
+                    status: CheckStatus::Pass,
+                    summary: sandbox_provider.to_string(),
+                    details,
                     remediation: None,
                 });
                 true
             }
             Err(err) => {
-                let _ = sandbox.cleanup().await;
+                let cleanup_error = sandbox.cleanup().await.err();
                 checks.push(CheckResult {
                     name:        "Sandbox".into(),
                     status:      CheckStatus::Error,
                     summary:     "failed".into(),
                     details:     vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
-                    remediation: Some(format!("Sandbox init failed: {err}")),
+                    remediation: Some(cleanup_error.map_or_else(
+                        || format!("Sandbox init failed: {err}"),
+                        |cleanup| {
+                            format!("Sandbox init failed: {err}; cleanup also failed: {cleanup}")
+                        },
+                    )),
                 });
                 false
             }
@@ -795,6 +903,25 @@ fn runtime_daytona_config(settings: &DaytonaSettings) -> DaytonaConfig {
     }
 }
 
+fn runtime_docker_config(settings: &DockerSettings) -> DockerSandboxOptions {
+    let mut env_vars = settings
+        .env_vars
+        .iter()
+        .map(|(key, value)| format!("{key}={}", resolve_interp(value)))
+        .collect::<Vec<_>>();
+    env_vars.sort();
+
+    DockerSandboxOptions {
+        image: settings.image.clone(),
+        network_mode: settings.network_mode.clone(),
+        memory_limit: settings.memory_limit,
+        cpu_quota: settings.cpu_quota,
+        env_vars,
+        skip_clone: settings.skip_clone,
+        ..DockerSandboxOptions::default()
+    }
+}
+
 async fn run_github_token_check(
     checks: &mut Vec<CheckResult>,
     prepared: &PreparedManifest,
@@ -867,13 +994,15 @@ async fn mint_github_token(
         .map_err(|err| anyhow!("{err}"))?;
     let client = fabro_http::http_client()?;
     let perms_json = serde_json::to_value(permissions)?;
-    fabro_github::create_installation_access_token_with_permissions(
+    let install_url = creds.installation_url(&owner);
+    fabro_github::create_installation_access_token_with_permissions_and_install_url(
         &client,
         &jwt,
         &owner,
         &repo,
         &fabro_github::github_api_base_url(),
         perms_json,
+        install_url.as_deref(),
     )
     .await
     .map_err(|err| anyhow!("{err}"))
@@ -888,16 +1017,20 @@ fn preflight_response(
     types::PreflightResponse {
         ok,
         checks: report_to_api(report),
-        workflow: types::PreflightWorkflowSummary {
-            diagnostics: diagnostics_to_api(validated.diagnostics()),
-            edges:       i64::try_from(validated.graph().edges.len())
-                .expect("graph edge count should fit in i64"),
-            goal:        validated.graph().goal().to_string(),
-            graph_path:  Some(target_path.display().to_string()),
-            name:        validated.graph().name.clone(),
-            nodes:       i64::try_from(validated.graph().nodes.len())
-                .expect("graph node count should fit in i64"),
-        },
+        workflow: workflow_summary(validated, target_path),
+    }
+}
+
+fn workflow_summary(validated: &Validated, target_path: &Path) -> types::PreflightWorkflowSummary {
+    types::PreflightWorkflowSummary {
+        diagnostics: diagnostics_to_api(validated.diagnostics()),
+        edges:       i64::try_from(validated.graph().edges.len())
+            .expect("graph edge count should fit in i64"),
+        goal:        validated.graph().goal().to_string(),
+        graph_path:  Some(target_path.display().to_string()),
+        name:        validated.graph().name.clone(),
+        nodes:       i64::try_from(validated.graph().nodes.len())
+            .expect("graph node count should fit in i64"),
     }
 }
 
@@ -1117,7 +1250,9 @@ root = "/srv/fabro"
             preserve_sandbox: None,
             provider:         None,
             sandbox:          None,
+            docker_image:     None,
             verbose:          None,
+            worktree_mode:    None,
         });
 
         let prepared = prepare_manifest(&server_settings, &manifest).unwrap();
@@ -1219,12 +1354,15 @@ app_id = "fixture-app-id"
         manifest.configs.push(types::ManifestConfig {
             path:   Some("/tmp/project/.fabro/project.toml".to_string()),
             source: Some(
-                r"
+                r#"
 _version = 1
 
 [run.pull_request]
 enabled = true
-"
+
+[run.sandbox]
+provider = "local"
+"#
                 .to_string(),
             ),
             type_:  types::ManifestConfigType::Project,

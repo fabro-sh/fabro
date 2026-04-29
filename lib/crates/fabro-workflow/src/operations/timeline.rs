@@ -1,20 +1,13 @@
 use std::collections::HashMap;
-use std::fmt::Write;
 use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
-use fabro_checkpoint::META_BRANCH_PREFIX;
-use fabro_checkpoint::branch::{BranchStore, CommitInfo};
-use fabro_checkpoint::git::Store;
 use fabro_graphviz::graph::Graph;
 use fabro_graphviz::parser;
 use fabro_store::{Database, RunProjection};
 use fabro_types::RunId;
-use git2::{Oid, Repository, Signature};
 
-use super::run_git;
 use crate::error::Error;
-use crate::git::{MetadataStore, RUN_BRANCH_PREFIX};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForkTarget {
@@ -54,11 +47,11 @@ impl FromStr for ForkTarget {
 
 #[derive(Debug, Clone)]
 pub struct TimelineEntry {
-    pub ordinal:             usize,
-    pub node_name:           String,
-    pub visit:               usize,
-    pub metadata_commit_oid: Oid,
-    pub run_commit_sha:      Option<String>,
+    pub ordinal:        usize,
+    pub node_name:      String,
+    pub visit:          usize,
+    pub checkpoint_seq: u32,
+    pub run_commit_sha: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -115,112 +108,42 @@ impl RunTimeline {
     }
 }
 
-pub fn build_timeline(store: &Store, run_id: &str) -> Result<RunTimeline> {
-    let branch = MetadataStore::branch_name(run_id);
-    let sig = Signature::now("Fabro", "noreply@fabro.sh")?;
-    let bs = BranchStore::new(store, &branch, &sig);
-
-    let commits = bs
-        .log(10_000)
-        .map_err(|e| anyhow::anyhow!("failed to read metadata branch log: {e}"))?;
-    let commits: Vec<&CommitInfo> = commits.iter().rev().collect();
-
-    let mut timeline = Vec::new();
-    let mut ordinal = 0usize;
-
-    for commit in &commits {
-        if !commit.message.starts_with("checkpoint") {
-            continue;
-        }
-        let Some(projection) = read_projection_at_commit(store, commit.oid)? else {
-            continue;
-        };
-        let cp = projection.checkpoint.with_context(|| {
-            format!(
-                "metadata checkpoint {} is missing projection.checkpoint",
-                commit.oid
-            )
-        })?;
-
-        ordinal += 1;
-        let visit = cp.node_visits.get(&cp.current_node).copied().unwrap_or(1);
-
-        timeline.push(TimelineEntry {
+pub fn build_timeline(state: &RunProjection) -> Result<RunTimeline> {
+    let mut entries = Vec::new();
+    for (seq, checkpoint) in &state.checkpoints {
+        let ordinal = entries.len() + 1;
+        let visit = checkpoint
+            .node_visits
+            .get(&checkpoint.current_node)
+            .copied()
+            .unwrap_or(1);
+        entries.push(TimelineEntry {
             ordinal,
-            node_name: cp.current_node.clone(),
+            node_name: checkpoint.current_node.clone(),
             visit,
-            metadata_commit_oid: commit.oid,
-            run_commit_sha: cp.git_commit_sha.clone(),
+            checkpoint_seq: *seq,
+            run_commit_sha: checkpoint.git_commit_sha.clone(),
         });
     }
 
-    backfill_run_shas(store, run_id, &mut timeline);
     Ok(RunTimeline {
-        entries:      timeline,
-        parallel_map: load_parallel_map(store, run_id),
+        entries,
+        parallel_map: load_parallel_map(state),
     })
 }
 
 pub async fn timeline(store: &Database, run_id: &RunId) -> Result<Vec<TimelineEntry>, Error> {
-    let run_id = *run_id;
-    run_git::with_run_git_store(store, run_id, move |git_store| {
-        build_timeline(&git_store, &run_id.to_string())
-            .map(|timeline| timeline.entries)
-            .map_err(|err| Error::engine(err.to_string()))
-    })
-    .await
-}
-
-fn backfill_run_shas(store: &Store, run_id: &str, timeline: &mut [TimelineEntry]) {
-    if !timeline.iter().any(|e| e.run_commit_sha.is_none()) {
-        return;
-    }
-
-    let node_commits = run_commit_shas_by_node(store, run_id);
-    let mut node_indices: HashMap<String, usize> = HashMap::new();
-
-    for entry in timeline.iter_mut() {
-        if entry.run_commit_sha.is_some() {
-            continue;
-        }
-        if let Some(shas) = node_commits.get(&entry.node_name) {
-            let idx = node_indices.entry(entry.node_name.clone()).or_insert(0);
-            if *idx < shas.len() {
-                entry.run_commit_sha = Some(shas[*idx].clone());
-                *idx += 1;
-            }
-        }
-    }
-}
-
-pub(crate) fn run_commit_shas_by_node(store: &Store, run_id: &str) -> HashMap<String, Vec<String>> {
-    let run_branch = format!("{RUN_BRANCH_PREFIX}{run_id}");
-    let Ok(sig) = Signature::now("Fabro", "noreply@fabro.sh") else {
-        return HashMap::new();
-    };
-    let bs = BranchStore::new(store, &run_branch, &sig);
-    let Ok(run_commits) = bs.log(10_000) else {
-        return HashMap::new();
-    };
-
-    let prefix = format!("fabro({run_id}): ");
-    let mut node_commits: HashMap<String, Vec<String>> = HashMap::new();
-    for commit in &run_commits {
-        if let Some(rest) = commit.message.strip_prefix(&prefix) {
-            if let Some(node_name) = rest.split_whitespace().next() {
-                node_commits
-                    .entry(node_name.to_string())
-                    .or_default()
-                    .push(commit.oid.to_string());
-            }
-        }
-    }
-
-    for shas in node_commits.values_mut() {
-        shas.reverse();
-    }
-
-    node_commits
+    let run = store
+        .open_run(run_id)
+        .await
+        .map_err(|err| Error::engine(err.to_string()))?;
+    let state = run
+        .state()
+        .await
+        .map_err(|err| Error::engine(err.to_string()))?;
+    build_timeline(&state)
+        .map(|timeline| timeline.entries)
+        .map_err(|err| Error::engine(err.to_string()))
 }
 
 fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {
@@ -257,103 +180,51 @@ fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {
     interior_map
 }
 
-pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<RunId> {
-    find_run_id_by_prefix_opt(repo, prefix)?
-        .ok_or_else(|| anyhow::anyhow!("no run found matching '{prefix}'"))
-}
-
-/// Resolve a run id from the metadata branch refs. `Ok(None)` when no run
-/// matches; `Err` when the prefix matches more than one.
-pub(super) fn find_run_id_by_prefix_opt(repo: &Repository, prefix: &str) -> Result<Option<RunId>> {
-    let refs = repo.references()?;
-    let pattern = format!("refs/heads/{META_BRANCH_PREFIX}");
-    let mut matches = Vec::new();
-
-    for reference in refs.flatten() {
-        let Some(name) = reference.name() else {
-            continue;
-        };
-        let Some(run_id) = name.strip_prefix(&pattern) else {
-            continue;
-        };
-        let Ok(run_id) = run_id.parse::<RunId>() else {
-            continue;
-        };
-        if run_id.to_string() == prefix {
-            return Ok(Some(run_id));
-        }
-        if run_id.to_string().starts_with(prefix) {
-            matches.push(run_id);
-        }
-    }
-
-    match matches.len() {
-        0 => Ok(None),
-        1 => Ok(matches.into_iter().next()),
-        _ => {
-            let mut msg = format!("ambiguous run ID prefix '{prefix}', matches:\n");
-            for run_id in &matches {
-                let _ = writeln!(msg, "  {run_id}");
-            }
-            bail!("{msg}")
-        }
-    }
-}
-
-fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
-    let Ok(Some(projection)) = MetadataStore::read_run_projection(store.repo_dir(), run_id) else {
-        return HashMap::new();
-    };
-
-    if let Some(spec) = projection.spec {
+fn load_parallel_map(state: &RunProjection) -> HashMap<String, String> {
+    if let Some(spec) = state.spec.as_ref() {
         return detect_parallel_interior(&spec.graph);
     }
 
-    let Some(dot_source) = projection.graph_source else {
+    let Some(dot_source) = state.graph_source.as_ref() else {
         return HashMap::new();
     };
-    let Ok(graph) = parser::parse(&dot_source) else {
+    let Ok(graph) = parser::parse(dot_source) else {
         return HashMap::new();
     };
     detect_parallel_interior(&graph)
 }
 
-fn read_projection_at_commit(store: &Store, oid: Oid) -> Result<Option<RunProjection>> {
-    let blob = store
-        .read_blob_at(oid, "run.json")
-        .map_err(|e| anyhow::anyhow!("failed to read projection blob: {e}"))?;
-    let Some(bytes) = blob else {
-        return Ok(None);
-    };
-    let projection = serde_json::from_slice(&bytes)
-        .with_context(|| format!("failed to parse projection at {oid}"))?;
-    Ok(Some(projection))
-}
-
 #[cfg(test)]
 mod tests {
-    use fabro_store::RunProjection;
-    use fabro_types::RunId;
-    use git2::Oid;
+    use std::collections::HashMap;
 
-    use super::super::test_support::*;
+    use chrono::Utc;
+    use fabro_types::Checkpoint;
+
     use super::*;
 
-    fn parse_run_id(value: &str) -> RunId {
-        value.parse().unwrap()
-    }
-
-    fn checkpoint_projection_json(
+    fn checkpoint(
+        seq: u32,
         current_node: &str,
         visit: usize,
         git_commit_sha: Option<&str>,
-    ) -> Vec<u8> {
-        let mut projection = RunProjection::default();
-        projection.checkpoint = Some(
-            serde_json::from_slice(&make_checkpoint_bytes(current_node, visit, git_commit_sha))
-                .unwrap(),
-        );
-        serde_json::to_vec_pretty(&projection).unwrap()
+    ) -> (u32, Checkpoint) {
+        let mut node_visits = HashMap::new();
+        node_visits.insert(current_node.to_string(), visit);
+        let checkpoint = Checkpoint {
+            timestamp: Utc::now(),
+            current_node: current_node.to_string(),
+            completed_nodes: Vec::new(),
+            node_retries: HashMap::new(),
+            context_values: HashMap::new(),
+            node_outcomes: HashMap::new(),
+            next_node_id: None,
+            git_commit_sha: git_commit_sha.map(ToOwned::to_owned),
+            loop_failure_signatures: HashMap::new(),
+            restart_failure_signatures: HashMap::new(),
+            node_visits,
+        };
+        (seq, checkpoint)
     }
 
     #[test]
@@ -371,21 +242,16 @@ mod tests {
 
     #[test]
     fn build_timeline_simple() {
-        let (_dir, store) = temp_repo();
-        let sig = test_sig();
-        let branch = MetadataStore::branch_name("test-run-1");
-        let bs = BranchStore::new(&store, &branch, &sig);
-        bs.ensure_branch().unwrap();
+        let mut state = RunProjection::default();
+        state.checkpoints = vec![
+            checkpoint(7, "start", 1, Some("aaa")),
+            checkpoint(9, "build", 1, Some("bbb")),
+        ];
 
-        bs.write_entry("run.json", b"{}", "init run").unwrap();
-        let cp1 = checkpoint_projection_json("start", 1, Some("aaa"));
-        bs.write_entry("run.json", &cp1, "checkpoint").unwrap();
-        let cp2 = checkpoint_projection_json("build", 1, Some("bbb"));
-        bs.write_entry("run.json", &cp2, "checkpoint").unwrap();
-
-        let timeline = build_timeline(&store, "test-run-1").unwrap();
+        let timeline = build_timeline(&state).unwrap();
         assert_eq!(timeline.entries.len(), 2);
         assert_eq!(timeline.entries[0].node_name, "start");
+        assert_eq!(timeline.entries[0].checkpoint_seq, 7);
         assert_eq!(timeline.entries[1].node_name, "build");
     }
 
@@ -394,25 +260,25 @@ mod tests {
         let timeline = RunTimeline {
             entries:      vec![
                 TimelineEntry {
-                    ordinal:             1,
-                    node_name:           "start".to_string(),
-                    visit:               1,
-                    metadata_commit_oid: Oid::zero(),
-                    run_commit_sha:      Some("aaa".to_string()),
+                    ordinal:        1,
+                    node_name:      "start".to_string(),
+                    visit:          1,
+                    checkpoint_seq: 7,
+                    run_commit_sha: Some("aaa".to_string()),
                 },
                 TimelineEntry {
-                    ordinal:             2,
-                    node_name:           "build".to_string(),
-                    visit:               1,
-                    metadata_commit_oid: Oid::zero(),
-                    run_commit_sha:      Some("bbb".to_string()),
+                    ordinal:        2,
+                    node_name:      "build".to_string(),
+                    visit:          1,
+                    checkpoint_seq: 9,
+                    run_commit_sha: Some("bbb".to_string()),
                 },
                 TimelineEntry {
-                    ordinal:             3,
-                    node_name:           "build".to_string(),
-                    visit:               2,
-                    metadata_commit_oid: Oid::zero(),
-                    run_commit_sha:      Some("ccc".to_string()),
+                    ordinal:        3,
+                    node_name:      "build".to_string(),
+                    visit:          2,
+                    checkpoint_seq: 11,
+                    run_commit_sha: Some("ccc".to_string()),
                 },
             ],
             parallel_map: HashMap::new(),
@@ -462,18 +328,5 @@ mod tests {
         let map = detect_parallel_interior(&graph);
         assert_eq!(map.get("a"), Some(&"parallel1".to_string()));
         assert!(!map.contains_key("parallel1"));
-    }
-
-    #[test]
-    fn find_run_id_prefix_match() {
-        let (_dir, store) = temp_repo();
-        let sig = test_sig();
-        let run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-        let branch = MetadataStore::branch_name(&run_id.to_string());
-        let bs = BranchStore::new(&store, &branch, &sig);
-        bs.ensure_branch().unwrap();
-
-        let result = find_run_id_by_prefix(store.repo(), "01ARZ3").unwrap();
-        assert_eq!(result, run_id);
     }
 }

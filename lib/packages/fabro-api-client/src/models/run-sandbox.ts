@@ -24,7 +24,11 @@ export interface RunSandbox {
     /**
      * Sandbox identifier.
      */
-    'id': string;
+    'id'?: string | null;
+    /**
+     * Path where the run executed inside the sandbox.
+     */
+    'working_directory'?: string | null;
     'resources'?: SandboxResources;
 }
 

@@ -56,6 +56,14 @@ fn apply_builtin_defaults_materializes_expected_layer() {
         layer
             .run
             .as_ref()
+            .and_then(|run| run.sandbox.as_ref())
+            .and_then(|sandbox| sandbox.provider.as_deref()),
+        Some("docker")
+    );
+    assert_eq!(
+        layer
+            .run
+            .as_ref()
             .and_then(|run| run.execution.as_ref())
             .and_then(|execution| execution.mode),
         Some(RunMode::Normal)
@@ -75,7 +83,7 @@ fn apply_builtin_defaults_materializes_expected_layer() {
             .and_then(|run| run.sandbox.as_ref())
             .and_then(|sandbox| sandbox.local.as_ref())
             .and_then(|local| local.worktree_mode),
-        Some(WorktreeMode::Clean)
+        Some(WorktreeMode::Always)
     );
     assert_eq!(
         layer

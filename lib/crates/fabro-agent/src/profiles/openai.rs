@@ -55,7 +55,7 @@ impl OpenAiProfile {
             Provider::Zai => "Zhipu AI",
             Provider::Minimax => "MiniMax",
             Provider::Inception => "Inception",
-            other => other.as_str(),
+            other => <&'static str>::from(other),
         }
     }
 }

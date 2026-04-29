@@ -44,7 +44,9 @@ pub(crate) async fn list_command(
                     "labels": run.labels(),
                     "duration_ms": run.duration_ms(),
                     "total_usd_micros": run.total_usd_micros(),
-                    "host_repo_path": run.host_repo_path(),
+                    "source_directory": run.source_directory(),
+                    "repo_origin_url": run.repo_origin_url(),
+                    "in_place": run.in_place(),
                     "goal": run.goal(),
                 })
             })
@@ -81,6 +83,7 @@ pub(crate) async fn list_command(
         "RUN ID".cell().bold(use_color),
         "WORKFLOW".cell().bold(use_color),
         "STATUS".cell().bold(use_color),
+        "IN-PLACE".cell().bold(use_color),
         "DIRECTORY".cell().bold(use_color),
         "DURATION".cell().bold(use_color),
         "GOAL".cell().bold(use_color),
@@ -100,7 +103,7 @@ pub(crate) async fn list_command(
                 },
             };
             let dir_display = run
-                .host_repo_path()
+                .source_directory()
                 .map_or_else(|| "-".to_string(), |p| tilde_path(Path::new(p)));
             let run_id = run.run_id().to_string();
 
@@ -110,6 +113,7 @@ pub(crate) async fn list_command(
                     .foreground_color(color_if(use_color, Color::Ansi256(8))),
                 run.workflow_name().cell(),
                 status_cell(run.status(), use_color),
+                in_place_cell(run.in_place(), use_color),
                 dir_display.cell(),
                 duration_display.cell(),
                 truncate_goal(&run.goal(), 50)
@@ -134,6 +138,16 @@ pub(crate) async fn list_command(
 
     fabro_util::printerr!(printer, "\n{} run(s) listed.", display_runs.len());
     Ok(())
+}
+
+fn in_place_cell(in_place: bool, use_color: bool) -> CellStruct {
+    if in_place {
+        return "yes"
+            .cell()
+            .foreground_color(color_if(use_color, Color::Yellow));
+    }
+    "no".cell()
+        .foreground_color(color_if(use_color, Color::Ansi256(8)))
 }
 
 fn status_cell(status: RunStatus, use_color: bool) -> CellStruct {

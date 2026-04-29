@@ -28,11 +28,14 @@ export const queryKeys = {
   },
   runs: {
     detail: (id: string) => `/api/v1/runs/${pathSegment(id)}`,
+    state: (id: string) => `/api/v1/runs/${pathSegment(id)}/state`,
     files: (id: string) => `/api/v1/runs/${pathSegment(id)}/files`,
     stages: (id: string) => `/api/v1/runs/${pathSegment(id)}/stages`,
     graph: (id: string, direction?: "LR" | "TB") =>
       withQuery(`/api/v1/runs/${pathSegment(id)}/graph`, { direction }),
+    graphSource: (id: string) => `/api/v1/runs/${pathSegment(id)}/graph/source`,
     settings: (id: string) => `/api/v1/runs/${pathSegment(id)}/settings`,
+    logs: (id: string) => `/api/v1/runs/${pathSegment(id)}/logs`,
     billing: (id: string) => `/api/v1/runs/${pathSegment(id)}/billing`,
     questions: (id: string, limit = 1, offset = 0) =>
       withQuery(`/api/v1/runs/${pathSegment(id)}/questions`, {

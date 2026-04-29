@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -17,16 +17,19 @@ use fabro_config::Storage;
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::envfile::EnvFileUpdate;
 use fabro_install::{
-    InstallListenConfig, OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV,
-    PendingSettingsWrite, VaultSecretWrite, merge_server_settings, persist_install_outputs_direct,
-    write_github_app_settings, write_object_store_settings, write_token_settings,
+    InstallListenConfig, InstallSandboxSelection, OBJECT_STORE_ACCESS_KEY_ID_ENV,
+    OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite, VaultSecretWrite,
+    merge_server_settings, persist_install_outputs_direct, write_github_app_settings,
+    write_object_store_settings, write_sandbox_settings, write_token_settings,
 };
 use fabro_model::Provider;
+use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
 use fabro_types::ServerSettings;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::server::ObjectStoreSettings;
+use fabro_types::settings::{is_wildcard_host, validate_public_url_with_label};
 use fabro_util::version::FABRO_VERSION;
 use fabro_util::{Home, dev_token, session_secret};
 use fabro_vault::SecretType as VaultSecretType;
@@ -57,6 +60,7 @@ pub struct InstallAppState {
     first_operator:     Arc<Mutex<Option<InstallOperatorFingerprint>>>,
     finish_in_progress: Arc<AtomicBool>,
     upstreams:          InstallUpstreamConfig,
+    static_asset_root:  Option<Arc<Path>>,
     on_finish:          Option<Arc<dyn Fn() + Send + Sync>>,
     finish_hook:        Option<InstallFinishHook>,
 }
@@ -104,6 +108,7 @@ impl InstallAppState {
             first_operator:     Arc::new(Mutex::new(None)),
             finish_in_progress: Arc::new(AtomicBool::new(false)),
             upstreams:          InstallUpstreamConfig::default(),
+            static_asset_root:  None,
             on_finish:          None,
             finish_hook:        None,
         }
@@ -145,6 +150,7 @@ impl InstallAppState {
             first_operator:     Arc::new(Mutex::new(None)),
             finish_in_progress: Arc::new(AtomicBool::new(false)),
             upstreams:          InstallUpstreamConfig::default(),
+            static_asset_root:  None,
             on_finish:          None,
             finish_hook:        None,
         }
@@ -169,6 +175,12 @@ impl InstallAppState {
     #[must_use]
     pub fn with_home(mut self, home: Home) -> Self {
         self.home = Some(home);
+        self
+    }
+
+    #[must_use]
+    pub fn with_static_asset_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.static_asset_root = Some(Arc::from(root.into()));
         self
     }
 
@@ -209,6 +221,7 @@ struct PendingInstall {
     llm:                Option<LlmProvidersInput>,
     server:             Option<ServerConfigInput>,
     object_store:       Option<InstallObjectStoreState>,
+    sandbox:            Option<InstallSandboxState>,
     github:             Option<GithubInstallState>,
     pending_github_app: Option<PendingGithubApp>,
 }
@@ -384,6 +397,45 @@ impl InstallObjectStoreState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, strum::IntoStaticStr)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+enum InstallSandboxProvider {
+    Docker,
+    Daytona,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct InstallSandboxInput {
+    provider: InstallSandboxProvider,
+    api_key:  Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum InstallSandboxState {
+    Docker,
+    Daytona { api_key: InstallSecret },
+}
+
+impl InstallSandboxState {
+    fn as_session_value(&self) -> serde_json::Value {
+        match self {
+            Self::Docker => serde_json::json!({ "provider": "docker" }),
+            Self::Daytona { .. } => serde_json::json!({
+                "provider": "daytona",
+                "api_key_saved": true,
+            }),
+        }
+    }
+
+    fn to_persistence_selection(&self) -> InstallSandboxSelection {
+        match self {
+            Self::Docker => InstallSandboxSelection::Docker,
+            Self::Daytona { .. } => InstallSandboxSelection::Daytona,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct GithubTokenInput {
     token:    String,
@@ -512,8 +564,8 @@ impl TryFrom<GithubAppOwnerInput> for GitHubAppOwner {
     }
 }
 
-pub async fn build_install_router(state: InstallAppState) -> Router {
-    static_files::assert_install_mode_shell_ready().await;
+pub fn build_install_router(state: InstallAppState) -> Router {
+    let static_asset_root = state.static_asset_root.clone();
 
     Router::new()
         .route("/health", get(health))
@@ -535,6 +587,11 @@ pub async fn build_install_router(state: InstallAppState) -> Router {
             "/install/object-store",
             get(render_install_shell).put(put_install_object_store),
         )
+        .route("/install/sandbox/test", post(post_install_sandbox_test))
+        .route(
+            "/install/sandbox",
+            get(render_install_shell).put(put_install_sandbox),
+        )
         .route(
             "/install/github/token/test",
             post(post_install_github_token_test),
@@ -550,15 +607,25 @@ pub async fn build_install_router(state: InstallAppState) -> Router {
         )
         .route("/install/finish", post(post_install_finish))
         .with_state(state)
-        .fallback_service(service_fn(move |req: Request| async move {
-            let path = req.uri().path().to_string();
-            if path.starts_with("/api/") {
-                Ok::<_, Infallible>(StatusCode::NOT_FOUND.into_response())
-            } else if matches!(req.method(), &Method::GET | &Method::HEAD) {
-                let headers = req.headers().clone();
-                Ok::<_, Infallible>(static_files::serve_install(&path, &headers).await)
-            } else {
-                Ok::<_, Infallible>(StatusCode::NOT_FOUND.into_response())
+        .fallback_service(service_fn(move |req: Request| {
+            let static_asset_root = static_asset_root.clone();
+            async move {
+                let path = req.uri().path().to_string();
+                if path.starts_with("/api/") {
+                    Ok::<_, Infallible>(StatusCode::NOT_FOUND.into_response())
+                } else if matches!(req.method(), &Method::GET | &Method::HEAD) {
+                    let headers = req.headers().clone();
+                    Ok::<_, Infallible>(
+                        static_files::serve_install_with_asset_root(
+                            &path,
+                            &headers,
+                            static_asset_root.as_deref(),
+                        )
+                        .await,
+                    )
+                } else {
+                    Ok::<_, Infallible>(StatusCode::NOT_FOUND.into_response())
+                }
             }
         }))
         .layer(middleware::from_fn(security_headers::layer))
@@ -607,7 +674,7 @@ where
     let bound_listener = bind_install_listener(&bind_request).await?;
     state.set_install_bind(&bound_listener.bind);
     let state = state.with_finish_callback(finish_callback);
-    let router = build_install_router(state).await;
+    let router = build_install_router(state);
     let bind = bound_listener.bind.clone();
     on_ready(&bind)?;
 
@@ -669,6 +736,7 @@ async fn get_install_session(
         "llm": redacted_llm(&pending_install),
         "server": pending_install.server,
         "object_store": redacted_object_store(&pending_install),
+        "sandbox": redacted_sandbox(&pending_install),
         "github": redacted_github(&pending_install),
         "prefill": {
             "canonical_url": detect_canonical_url(&headers),
@@ -699,7 +767,7 @@ async fn post_install_llm_test(
     match validate_llm_provider(&state, &input).await {
         Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(err) => {
-            warn!(provider = %input.provider.as_str(), error = %err, "install LLM validation failed");
+            warn!(provider = %input.provider, error = %err, "install LLM validation failed");
             install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err)
         }
     }
@@ -731,7 +799,7 @@ async fn put_install_llm(
         if provider.api_key.trim().is_empty() {
             return install_error_response(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                format!("api_key is required for {}", provider.provider.as_str()),
+                format!("api_key is required for {}", provider.provider),
             );
         }
     }
@@ -768,10 +836,11 @@ async fn put_install_server(
             .into_response();
     }
 
-    if let Err(err) = validate_canonical_url(canonical_url) {
-        return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err);
-    }
-    input.canonical_url = canonical_url.to_string();
+    let canonical_url = match validate_public_url_with_label(canonical_url, "canonical_url") {
+        Ok(value) => value,
+        Err(err) => return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err),
+    };
+    input.canonical_url = canonical_url;
 
     lock_unpoisoned(&state.pending_install, "install session").server = Some(input);
     info!(step = "server", "install step completed");
@@ -836,6 +905,62 @@ async fn put_install_object_store(
     StatusCode::NO_CONTENT.into_response()
 }
 
+async fn post_install_sandbox_test(
+    State(state): State<InstallAppState>,
+    headers: HeaderMap,
+    Query(query): Query<InstallTokenQuery>,
+    Json(input): Json<InstallSandboxInput>,
+) -> Response {
+    if let Some(response) = require_valid_token(&state, &headers, query.token.as_deref()) {
+        return response;
+    }
+    observe_operator(&state, &headers);
+
+    let api_key = {
+        let pending_install = lock_unpoisoned(&state.pending_install, "install session");
+        match resolve_install_sandbox_state(pending_install.sandbox.as_ref(), input) {
+            Ok(InstallSandboxState::Docker) => {
+                return Json(serde_json::json!({ "ok": true })).into_response();
+            }
+            Ok(InstallSandboxState::Daytona { api_key }) => api_key.expose_secret().to_string(),
+            Err(err) => return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err),
+        }
+    };
+
+    match daytona::validate_daytona_api_key(api_key).await {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(err) => {
+            warn!(error = %err, "install sandbox validation failed");
+            install_error_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("daytona credential validation failed: {err}"),
+            )
+        }
+    }
+}
+
+async fn put_install_sandbox(
+    State(state): State<InstallAppState>,
+    headers: HeaderMap,
+    Query(query): Query<InstallTokenQuery>,
+    Json(input): Json<InstallSandboxInput>,
+) -> Response {
+    if let Some(response) = require_valid_token(&state, &headers, query.token.as_deref()) {
+        return response;
+    }
+    observe_operator(&state, &headers);
+
+    let mut pending_install = lock_unpoisoned(&state.pending_install, "install session");
+    let selection = match resolve_install_sandbox_state(pending_install.sandbox.as_ref(), input) {
+        Ok(selection) => selection,
+        Err(err) => return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err),
+    };
+
+    pending_install.sandbox = Some(selection);
+    info!(step = "sandbox", "install step completed");
+    StatusCode::NO_CONTENT.into_response()
+}
+
 fn trim_install_field(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
@@ -849,6 +974,27 @@ fn default_local_object_store_root(state: &InstallAppState) -> String {
         .join("objects")
         .display()
         .to_string()
+}
+
+fn resolve_install_sandbox_state(
+    current: Option<&InstallSandboxState>,
+    input: InstallSandboxInput,
+) -> Result<InstallSandboxState, String> {
+    match input.provider {
+        InstallSandboxProvider::Docker => Ok(InstallSandboxState::Docker),
+        InstallSandboxProvider::Daytona => {
+            let api_key = match trim_install_field(input.api_key) {
+                Some(value) => InstallSecret::new(value),
+                None => match current {
+                    Some(InstallSandboxState::Daytona { api_key }) => {
+                        InstallSecret::new(api_key.expose_secret())
+                    }
+                    _ => return Err("api_key is required for daytona".to_string()),
+                },
+            };
+            Ok(InstallSandboxState::Daytona { api_key })
+        }
+    }
 }
 
 fn resolve_install_object_store_state(
@@ -1306,6 +1452,9 @@ async fn post_install_finish(
     let Some(object_store) = pending_install.object_store else {
         return missing_step_response("object_store");
     };
+    let Some(sandbox) = pending_install.sandbox else {
+        return missing_step_response("sandbox");
+    };
     let Some(llm) = pending_install.llm else {
         return missing_step_response("llm");
     };
@@ -1329,7 +1478,19 @@ async fn post_install_finish(
             return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
         }
     };
+    if let Err(err) = write_sandbox_settings(&mut settings_doc, sandbox.to_persistence_selection())
+    {
+        return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
+    }
     let mut vault_secrets = Vec::new();
+    if let InstallSandboxState::Daytona { api_key } = &sandbox {
+        vault_secrets.push(VaultSecretWrite {
+            name:        EnvVars::DAYTONA_API_KEY.to_string(),
+            value:       api_key.expose_secret().to_string(),
+            secret_type: VaultSecretType::Environment,
+            description: None,
+        });
+    }
     for provider in llm.providers {
         let credential = AuthCredential {
             provider: provider.provider,
@@ -1491,6 +1652,15 @@ async fn post_install_finish(
     {
         *manual_credentials = None;
     }
+    {
+        let mut pending_install = lock_unpoisoned(&state.pending_install, "install session");
+        if matches!(
+            pending_install.sandbox.as_ref(),
+            Some(InstallSandboxState::Daytona { .. })
+        ) {
+            pending_install.sandbox = Some(InstallSandboxState::Docker);
+        }
+    }
 
     if let Some(finish_hook) = state.finish_hook.clone() {
         let info = InstallFinishInfo {
@@ -1524,8 +1694,17 @@ async fn post_install_finish(
     (StatusCode::ACCEPTED, Json(body)).into_response()
 }
 
-async fn render_install_shell(headers: HeaderMap, uri: OriginalUri) -> Response {
-    static_files::serve_install(uri.path(), &headers).await
+async fn render_install_shell(
+    State(state): State<InstallAppState>,
+    headers: HeaderMap,
+    uri: OriginalUri,
+) -> Response {
+    static_files::serve_install_with_asset_root(
+        uri.path(),
+        &headers,
+        state.static_asset_root.as_deref(),
+    )
+    .await
 }
 
 fn token_is_valid(state: &InstallAppState, headers: &HeaderMap, query_token: Option<&str>) -> bool {
@@ -1620,7 +1799,34 @@ fn detect_canonical_url(headers: &HeaderMap) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("127.0.0.1:32276");
 
-    format!("{scheme}://{host}")
+    format!("{scheme}://{}", sanitize_client_facing_host(host))
+}
+
+fn sanitize_client_facing_host(host: &str) -> String {
+    let host = host.trim();
+    if let Some(end) = host
+        .strip_prefix('[')
+        .and_then(|rest| rest.find(']').map(|end| end + 1))
+    {
+        let address = &host[1..end];
+        let suffix = &host[end + 1..];
+        if is_wildcard_host(address) {
+            return format!("localhost{suffix}");
+        }
+        return host.to_string();
+    }
+
+    if let Some((address, port)) = host.rsplit_once(':') {
+        if !address.contains(':') && is_wildcard_host(address) {
+            return format!("localhost:{port}");
+        }
+    }
+
+    if is_wildcard_host(host) {
+        return "localhost".to_string();
+    }
+
+    host.to_string()
 }
 
 fn completed_steps(pending_install: &PendingInstall) -> Vec<&'static str> {
@@ -1630,6 +1836,9 @@ fn completed_steps(pending_install: &PendingInstall) -> Vec<&'static str> {
     }
     if pending_install.object_store.is_some() {
         steps.push("object_store");
+    }
+    if pending_install.sandbox.is_some() {
+        steps.push("sandbox");
     }
     if pending_install.llm.is_some() {
         steps.push("llm");
@@ -1646,7 +1855,7 @@ fn redacted_llm(pending_install: &PendingInstall) -> serde_json::Value {
         |llm| {
             serde_json::json!({
                 "providers": llm.providers.iter().map(|provider| serde_json::json!({
-                    "provider": provider.provider.as_str(),
+                    "provider": <&'static str>::from(provider.provider),
                     "configured": true,
                 })).collect::<Vec<_>>()
             })
@@ -1680,6 +1889,13 @@ fn redacted_object_store(pending_install: &PendingInstall) -> serde_json::Value 
     )
 }
 
+fn redacted_sandbox(pending_install: &PendingInstall) -> serde_json::Value {
+    pending_install.sandbox.as_ref().map_or_else(
+        || serde_json::Value::Null,
+        InstallSandboxState::as_session_value,
+    )
+}
+
 fn missing_step_response(step: &str) -> Response {
     ApiError::new(
         StatusCode::UNPROCESSABLE_ENTITY,
@@ -1690,35 +1906,6 @@ fn missing_step_response(step: &str) -> Response {
 
 fn install_error_response(status: StatusCode, message: impl Into<String>) -> Response {
     ApiError::new(status, message).into_response()
-}
-
-#[expect(
-    clippy::disallowed_types,
-    reason = "Install canonical_url validation parses a public origin and rejects query/fragment credentials before storage."
-)]
-fn validate_canonical_url(value: &str) -> Result<(), String> {
-    let trimmed = value.trim();
-    let parsed = fabro_http::Url::parse(trimmed).map_err(|err| err.to_string())?;
-    match parsed.scheme() {
-        "http" | "https" => {}
-        other => return Err(format!("canonical_url must use http or https, got {other}")),
-    }
-    if parsed.host_str().is_none() {
-        return Err("canonical_url must include a host".to_string());
-    }
-    if trimmed.ends_with('/') {
-        return Err("canonical_url must not end with a trailing slash".to_string());
-    }
-    if parsed.path() != "/" {
-        return Err("canonical_url must not include a path".to_string());
-    }
-    if parsed.query().is_some() {
-        return Err("canonical_url must not include a query string".to_string());
-    }
-    if parsed.fragment().is_some() {
-        return Err("canonical_url must not include a fragment".to_string());
-    }
-    Ok(())
 }
 
 fn generate_ephemeral_secret() -> String {
@@ -1834,7 +2021,7 @@ async fn validate_llm_provider(
         | Provider::OpenAiCompatible => {
             return Err(format!(
                 "{} is not supported by install validation",
-                input.provider.as_str()
+                input.provider
             ));
         }
     };
@@ -1860,7 +2047,7 @@ async fn validate_llm_provider(
     } else {
         Err(format!(
             "{} model lookup failed ({})",
-            input.provider.as_str(),
+            input.provider,
             response.status()
         ))
     }

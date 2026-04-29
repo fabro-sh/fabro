@@ -7,14 +7,7 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::{fmt, io};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SecretType {
-    #[default]
-    Environment,
-    File,
-    Credential,
-}
+pub use fabro_types::SecretType;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SecretEntry {

@@ -15,7 +15,11 @@ impl GhCli {
     /// Returns `None` if `gh` is not installed or not authenticated
     /// against github.com.
     pub(crate) async fn detect() -> Option<Self> {
-        let version = Command::new("gh").arg("--version").output().await;
+        Self::detect_with_command("gh").await
+    }
+
+    async fn detect_with_command(command: &str) -> Option<Self> {
+        let version = Command::new(command).arg("--version").output().await;
         let Ok(output) = version else {
             debug!("gh CLI not found on PATH");
             return None;
@@ -25,7 +29,7 @@ impl GhCli {
             return None;
         }
 
-        let auth = Command::new("gh")
+        let auth = Command::new(command)
             .args(["auth", "status", "--hostname", "github.com"])
             .output()
             .await;
@@ -96,9 +100,8 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn detect_does_not_panic() {
-        // Validates graceful degradation — in CI where gh may not be installed
-        // this returns None without panicking.
-        let _result = GhCli::detect().await;
+    async fn detect_returns_none_when_gh_is_missing() {
+        let result = GhCli::detect_with_command("fabro-test-gh-that-should-not-exist").await;
+        assert!(result.is_none());
     }
 }

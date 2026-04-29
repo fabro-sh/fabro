@@ -49,6 +49,8 @@ impl InterpString {
 
     /// Parse a raw string into its literal/env-var segments.
     ///
+    /// The [`From<String>`] and [`From<&str>`] impls delegate here.
+    ///
     /// Parsing is infallible: the token grammar is intentionally permissive so
     /// that validation happens at consumption time along with env lookup.
     #[must_use]

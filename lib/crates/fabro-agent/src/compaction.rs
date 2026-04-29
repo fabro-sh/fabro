@@ -112,7 +112,7 @@ function names, error messages, and exact values. Omit pleasantries and conversa
                 "Here is the conversation to summarize:\n\n{rendered}"
             )),
         ],
-        provider:         Some(provider_profile.provider().as_str().to_string()),
+        provider:         Some(provider_profile.provider().to_string()),
         tools:            None,
         tool_choice:      None,
         response_format:  None,

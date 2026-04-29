@@ -1,6 +1,6 @@
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
-    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerfileSource,
+    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerSettings, DockerfileSource,
     GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, LocalSandboxSettings,
     McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
     NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunCheckpointSettings,
@@ -169,6 +169,7 @@ fn resolve_sandbox(
             .expect("defaults.toml should provide run.sandbox.devcontainer"),
         env: sandbox.env.clone().into_inner(),
         local: resolve_local_sandbox(sandbox),
+        docker: sandbox.docker.as_ref().map(resolve_docker),
         daytona: sandbox.daytona.as_ref().map(resolve_daytona),
     }
 }
@@ -183,6 +184,19 @@ fn resolve_local_sandbox(sandbox: &RunSandboxLayer) -> LocalSandboxSettings {
         worktree_mode: local
             .worktree_mode
             .expect("defaults.toml should provide run.sandbox.local.worktree_mode"),
+    }
+}
+
+fn resolve_docker(docker: &crate::DockerSandboxLayer) -> DockerSettings {
+    DockerSettings {
+        image:        docker.image.clone().unwrap_or_default(),
+        network_mode: docker.network_mode.clone(),
+        memory_limit: docker
+            .memory_limit
+            .and_then(|size| i64::try_from(size.as_bytes()).ok()),
+        cpu_quota:    docker.cpu_quota,
+        env_vars:     docker.env_vars.clone().into_inner(),
+        skip_clone:   docker.skip_clone.unwrap_or(false),
     }
 }
 

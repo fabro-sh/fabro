@@ -9,9 +9,9 @@ use crate::providers::common::{
     parse_retry_after, send_and_read_response,
 };
 use crate::types::{
-    AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
-    ResponseFormatType, Role, StreamEvent, ThinkingData, TokenCounts, ToolCall, ToolChoice,
-    ToolDefinition,
+    AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, ReasoningEffort, Request,
+    Response, ResponseFormatType, Role, StreamEvent, ThinkingData, TokenCounts, ToolCall,
+    ToolChoice, ToolDefinition,
 };
 
 /// Provider adapter for the Anthropic Messages API.
@@ -547,13 +547,13 @@ fn extract_thinking_config(
 /// Map a reasoning effort level to a thinking `budget_tokens` value for models
 /// that don't support the `output_config.effort` parameter (e.g.
 /// claude-sonnet-4-5).
-fn effort_to_budget_tokens(effort: &str, max_tokens: i64) -> i64 {
+fn effort_to_budget_tokens(effort: ReasoningEffort, max_tokens: i64) -> i64 {
     let budget = match effort {
-        "low" => max_tokens / 4,
-        "high" => max_tokens * 3 / 4,
-        "xhigh" => max_tokens * 7 / 8,
-        "max" => max_tokens,
-        _ => max_tokens / 2, // "medium" or unknown
+        ReasoningEffort::Low => max_tokens / 4,
+        ReasoningEffort::Medium => max_tokens / 2,
+        ReasoningEffort::High => max_tokens * 3 / 4,
+        ReasoningEffort::XHigh => max_tokens * 7 / 8,
+        ReasoningEffort::Max => max_tokens,
     };
     // Anthropic requires budget_tokens >= 1024
     budget.max(1024)
@@ -1152,12 +1152,12 @@ async fn build_api_request(
         if supports_effort {
             (
                 explicit_thinking,
-                Some(serde_json::json!({"effort": effort.as_str()})),
+                Some(serde_json::json!({"effort": <&'static str>::from(*effort)})),
             )
         } else if explicit_thinking.is_none() {
             // Convert effort level to a thinking budget for models that don't
             // support the effort parameter (e.g. claude-sonnet-4-5).
-            let budget = effort_to_budget_tokens(effort.as_str(), resolved_max_tokens);
+            let budget = effort_to_budget_tokens(*effort, resolved_max_tokens);
             if resolved_max_tokens <= budget {
                 resolved_max_tokens = budget + 1024;
             }
@@ -2251,12 +2251,18 @@ mod tests {
 
     #[test]
     fn effort_to_budget_tokens_xhigh_maps_to_seven_eighths() {
-        assert_eq!(effort_to_budget_tokens("xhigh", 16_000), 14_000);
+        assert_eq!(
+            effort_to_budget_tokens(ReasoningEffort::XHigh, 16_000),
+            14_000
+        );
     }
 
     #[test]
     fn effort_to_budget_tokens_max_maps_to_full_budget() {
-        assert_eq!(effort_to_budget_tokens("max", 16_000), 16_000);
+        assert_eq!(
+            effort_to_budget_tokens(ReasoningEffort::Max, 16_000),
+            16_000
+        );
     }
 
     #[tokio::test]

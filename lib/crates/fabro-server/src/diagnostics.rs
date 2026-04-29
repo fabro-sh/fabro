@@ -146,17 +146,16 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
 }
 
 fn probe_model(provider: Provider) -> String {
-    Catalog::builtin().probe_for_provider(provider).map_or_else(
-        || format!("unknown-{}", provider.as_str()),
-        |m| m.id.clone(),
-    )
+    Catalog::builtin()
+        .probe_for_provider(provider)
+        .map_or_else(|| format!("unknown-{provider}"), |m| m.id.clone())
 }
 
 async fn probe_llm_provider(client: &LlmClient, provider: Provider) -> Result<(), String> {
     let request = Request {
         model:            probe_model(provider),
         messages:         vec![Message::user("hi")],
-        provider:         Some(provider.as_str().to_string()),
+        provider:         Some(provider.to_string()),
         tools:            None,
         tool_choice:      None,
         response_format:  None,

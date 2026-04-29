@@ -884,7 +884,7 @@ mod tests {
                 "graph": graph,
                 "labels": {},
                 "run_dir": "/tmp/run",
-                "working_directory": "/tmp/run"
+                "source_directory": "/tmp/run"
             }
         });
 
@@ -904,7 +904,7 @@ mod tests {
                 "graph": Graph::new("test"),
                 "labels": {},
                 "run_dir": "/tmp/run",
-                "working_directory": "/tmp/run",
+                "source_directory": "/tmp/run",
                 "manifest_blob": RunBlobId::new(br#"{"version":1}"#).to_string()
             }
         });

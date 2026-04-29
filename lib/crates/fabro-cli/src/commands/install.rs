@@ -35,6 +35,7 @@ use fabro_server::serve;
 use fabro_store::ArtifactStore;
 use fabro_types::ServerSettings;
 use fabro_types::settings::server::ServerAuthMethod;
+use fabro_types::settings::validate_public_url_with_label;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::version::FABRO_VERSION;
@@ -120,6 +121,10 @@ fn merge_server_settings(doc: &mut toml::Value, web_url: &str) -> Result<()> {
         web_url,
         &InstallListenConfig::Tcp(authority.to_string()),
     )
+}
+
+fn validate_web_url_arg(value: &str) -> Result<String> {
+    validate_public_url_with_label(value, "--web-url").map_err(anyhow::Error::msg)
 }
 
 #[cfg(test)]
@@ -1453,6 +1458,7 @@ async fn run_install_github_inner(
     printer: Printer,
 ) -> Result<()> {
     let s = Styles::detect_stderr();
+    let web_url = validate_web_url_arg(&args.web_url)?;
     let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
     let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
     if !config_path.exists() {
@@ -1498,7 +1504,7 @@ async fn run_install_github_inner(
             ]);
             let registration = setup_github_app(
                 &s,
-                &args.web_url,
+                &web_url,
                 &owner,
                 username.as_deref(),
                 if args.non_interactive {
@@ -1601,7 +1607,7 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
     let _cli = &ctx.user_settings().cli;
     let printer = ctx.printer();
     let json = ctx.json_output();
-    let web_url = &args.web_url;
+    let web_url = validate_web_url_arg(&args.web_url)?;
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
     let local_config =
@@ -1686,7 +1692,7 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
             )?;
             let registration = setup_github_app(
                 &s,
-                web_url,
+                &web_url,
                 &owner,
                 username.as_deref(),
                 if args.non_interactive {
@@ -1740,7 +1746,7 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
                 );
             }
             ServerConfigSelection::Write => {
-                merge_server_settings(&mut doc, web_url)?;
+                merge_server_settings(&mut doc, &web_url)?;
             }
         }
 
@@ -1821,7 +1827,7 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
     )
     .await?;
     if let Some(token) = dev_token_for_auth_store {
-        let target = ServerTarget::http_url(&args.web_url)?;
+        let target = ServerTarget::http_url(&web_url)?;
         if let Err(err) = AuthStore::default().put(
             &target,
             AuthEntry::DevToken(DevTokenEntry {

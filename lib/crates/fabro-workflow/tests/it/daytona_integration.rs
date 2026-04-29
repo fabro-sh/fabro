@@ -167,7 +167,7 @@ fn test_artifact_store(run_dir: &Path) -> ArtifactStore {
 async fn create_env_with_github_app(
     github_app: Option<fabro_github::GitHubCredentials>,
 ) -> DaytonaSandbox {
-    DaytonaSandbox::new(DaytonaConfig::default(), github_app, None, None, None)
+    DaytonaSandbox::new(DaytonaConfig::default(), github_app, None, None, None, None)
         .await
         .expect("Failed to create Daytona client — is DAYTONA_API_KEY set?")
 }
@@ -207,6 +207,7 @@ fn load_github_app_credentials() -> fabro_github::GitHubCredentials {
     fabro_github::GitHubCredentials::App(fabro_github::GitHubAppCredentials {
         app_id,
         private_key_pem,
+        slug: None,
     })
 }
 
@@ -373,7 +374,7 @@ async fn daytona_snapshot_sandbox() {
     };
 
     let creds = load_github_app_credentials();
-    let env = DaytonaSandbox::new(config, Some(creds), None, None, None)
+    let env = DaytonaSandbox::new(config, Some(creds), None, None, None, None)
         .await
         .expect("Failed to create Daytona client — is DAYTONA_API_KEY set?");
     env.initialize().await.unwrap();
@@ -520,7 +521,8 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine
@@ -699,7 +701,8 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   Some(dir.path().to_path_buf()),
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              Some(GitCheckpointOptions {
             base_sha:    Some(base_sha),
             run_branch:  Some(branch_name),
@@ -870,7 +873,8 @@ async fn daytona_parallel_git_branching_e2e() {
         github_app: None,
         base_branch: None,
         display_base_sha: None,
-        host_repo_path: Some(run_tmp.path().to_path_buf()),
+        pre_run_git: None,
+        fork_source_ref: None,
         git: Some(GitCheckpointOptions {
             base_sha:    Some(base_sha),
             run_branch:  Some(branch_name),
@@ -999,7 +1003,7 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
         }),
         ..DaytonaConfig::default()
     };
-    let env = DaytonaSandbox::new(config, Some(creds), None, None, None)
+    let env = DaytonaSandbox::new(config, Some(creds), None, None, None, None)
         .await
         .expect("Failed to create Daytona client — is DAYTONA_API_KEY set?");
     env.initialize()
@@ -1113,13 +1117,11 @@ async fn daytona_cli_gemini() {
 }
 
 // ---------------------------------------------------------------------------
-// Daytona shadow commit E2E with MetadataStore
+// Daytona shadow commit E2E with sandbox-native metadata
 // ---------------------------------------------------------------------------
 
-use fabro_workflow::git::MetadataStore;
-
 /// End-to-end test: pipeline with git checkpointing enabled + `meta_branch`
-/// writes shadow branch on the host repo and includes `Fabro-Checkpoint`
+/// writes shadow branch in the sandbox repo and includes `Fabro-Checkpoint`
 /// trailer in sandbox commits.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_git_checkpoint_with_shadow_branch() {
@@ -1151,28 +1153,6 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
 
     // Set up git in the sandbox
     let (run_id, base_sha, branch_name) = setup_daytona_git(&*env).await;
-
-    // Create a temp git repo on the host for MetadataStore
-    let host_repo = tempfile::tempdir().unwrap();
-    std::process::Command::new("git")
-        .args(["init"])
-        .current_dir(host_repo.path())
-        .output()
-        .unwrap();
-    std::process::Command::new("git")
-        .args([
-            "-c",
-            "user.name=test",
-            "-c",
-            "user.email=test@test",
-            "commit",
-            "--allow-empty",
-            "-m",
-            "init",
-        ])
-        .current_dir(host_repo.path())
-        .output()
-        .unwrap();
 
     // Pipeline: start -> work -> exit
     let mut graph = Graph::new("DaytonaShadowBranch");
@@ -1211,7 +1191,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
 
-    let meta_branch = MetadataStore::branch_name(&run_id.to_string());
+    let meta_branch = format!("fabro/meta/{run_id}");
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
     let run_options = RunOptions {
         settings: WorkflowSettings::default(),
@@ -1223,11 +1203,12 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         github_app: None,
         base_branch: None,
         display_base_sha: None,
-        host_repo_path: Some(host_repo.path().to_path_buf()),
+        pre_run_git: None,
+        fork_source_ref: None,
         git: Some(GitCheckpointOptions {
             base_sha:    Some(base_sha),
             run_branch:  Some(branch_name),
-            meta_branch: Some(meta_branch),
+            meta_branch: Some(meta_branch.clone()),
         }),
     };
     let outcome = engine
@@ -1236,9 +1217,22 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // Assert shadow branch on host has checkpoint data
-    let checkpoint = MetadataStore::read_checkpoint(host_repo.path(), &run_id.to_string())
-        .expect("read_checkpoint should not error")
+    // Assert shadow branch in the sandbox has checkpoint data
+    let run_json = env
+        .exec_command(
+            &format!("git show refs/heads/{meta_branch}:run.json"),
+            10_000,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("git show should succeed");
+    assert_eq!(run_json.exit_code, 0, "{}", run_json.stderr);
+    let projection: fabro_store::RunProjection =
+        serde_json::from_slice(run_json.stdout.as_bytes()).expect("run.json should parse");
+    let checkpoint = projection
+        .checkpoint
         .expect("shadow branch should contain checkpoint data");
     assert!(
         !checkpoint.completed_nodes.is_empty(),
@@ -1366,7 +1360,8 @@ async fn daytona_asset_collection() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine
@@ -1419,7 +1414,7 @@ async fn daytona_ssh_access_before_init_fails() {
     let result = env.create_ssh_access(Some(60.0)).await;
     assert!(result.is_err(), "should fail before initialize()");
     assert!(
-        result.unwrap_err().contains("not initialized"),
+        result.unwrap_err().to_string().contains("not initialized"),
         "error should mention not initialized"
     );
 }
@@ -1623,7 +1618,8 @@ async fn daytona_git_push_run_branch_to_origin() {
         github_app: None,
         base_branch: None,
         display_base_sha: None,
-        host_repo_path: Some(dir.path().to_path_buf()),
+        pre_run_git: None,
+        fork_source_ref: None,
         git: Some(GitCheckpointOptions {
             base_sha:    Some(base_sha),
             run_branch:  Some(branch_name.clone()),
@@ -1829,11 +1825,12 @@ async fn daytona_cp_upload_download_round_trip() {
 
     // 2. Build a SandboxRecord (same as `fabro run` would persist)
     let record = SandboxRecord {
-        provider:               "daytona".to_string(),
-        working_directory:      env.working_directory().to_string(),
-        identifier:             Some(sandbox_name.clone()),
-        host_working_directory: None,
-        container_mount_point:  None,
+        provider:          "daytona".to_string(),
+        working_directory: env.working_directory().to_string(),
+        identifier:        Some(sandbox_name.clone()),
+        repo_cloned:       Some(false),
+        clone_origin_url:  None,
+        clone_branch:      None,
     };
 
     // 3. Reconnect via the real cp::reconnect path
@@ -1916,7 +1913,7 @@ async fn daytona_computer_use_browser_screenshot() {
         skip_clone: true,
         ..DaytonaConfig::default()
     };
-    let env = DaytonaSandbox::new(config, None, None, None, None)
+    let env = DaytonaSandbox::new(config, None, None, None, None, None)
         .await
         .expect("DAYTONA_API_KEY must be set");
     env.initialize().await.unwrap();
@@ -2070,7 +2067,7 @@ async fn daytona_playwright_mcp_sandbox_transport() {
         skip_clone: true,
         ..DaytonaConfig::default()
     };
-    let sandbox = DaytonaSandbox::new(config, None, None, None, None)
+    let sandbox = DaytonaSandbox::new(config, None, None, None, None, None)
         .await
         .expect("DAYTONA_API_KEY must be set");
     sandbox.initialize().await.unwrap();

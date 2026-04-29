@@ -96,6 +96,7 @@ pub(crate) fn test_settings() -> TestAppSettings {
     TestAppSettings {
         manifest_run_defaults: RunLayer {
             sandbox: Some(RunSandboxLayer {
+                provider: Some("local".to_string()),
                 local: Some(LocalSandboxLayer {
                     worktree_mode: Some(WorktreeMode::Never),
                 }),

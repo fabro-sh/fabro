@@ -13,26 +13,8 @@ env:
   SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}
 
 jobs:
-  verify-spa:
-    name: Verify SPA assets
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          no-cache: true
-      - run: bun install
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-      - run: cargo dev refresh-spa
-      - run: git diff --exit-code -- lib/crates/fabro-spa/assets
-
   compile:
     name: Compile (${{ matrix.target }})
-    needs: verify-spa
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -60,6 +42,17 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+
+      - name: Install unzip (ARM Linux runner image lacks it; setup-bun needs it)
+        if: runner.os == 'Linux' && runner.arch == 'ARM64'
+        run: sudo apt-get update && sudo apt-get install -y unzip
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      - name: Install bun deps
+        run: bun install --frozen-lockfile
 
       - name: Install Linux build tools
         if: runner.os == 'Linux'
@@ -89,6 +82,9 @@ jobs:
           tool: cargo-zigbuild
 
       - uses: taiki-e/install-action@773334c0e05d7e699e4d78234494308223f3a2cf # nextest
+
+      - name: Refresh embedded SPA
+        run: cargo dev spa refresh
 
       - name: Test (x86_64-musl)
         # nextest still shells through cargo test for this target, so
@@ -188,9 +184,9 @@ jobs:
               x86_64-*) arch=amd64 ;;
               aarch64-*) arch=arm64 ;;
             esac
-            mkdir -p "docker-context/$arch"
+            mkdir -p "tmp/docker-context/$arch"
             tar -xzf "target/distrib/fabro-${target}.tar.gz" -C target/distrib
-            cp "target/distrib/fabro-${target}/fabro" "docker-context/$arch/fabro"
+            cp "target/distrib/fabro-${target}/fabro" "tmp/docker-context/$arch/fabro"
           done
 
       - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0

@@ -16,18 +16,21 @@ mod generated {
 pub mod types {
     pub use fabro_types::settings::server::{
         DiscordIntegrationSettings, GithubIntegrationSettings, GithubIntegrationStrategy,
-        IntegrationWebhooksSettings, IpAllowEntry, ObjectStoreSettings, ServerApiSettings,
-        ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings,
-        ServerIntegrationsSettings, ServerIpAllowlistOverrideSettings, ServerIpAllowlistSettings,
-        ServerListenSettings, ServerLoggingSettings, ServerSchedulerSettings,
-        ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
-        TeamsIntegrationSettings, WebhookStrategy,
+        IntegrationWebhooksSettings, IpAllowEntry, LogDestination, ObjectStoreSettings,
+        ServerApiSettings, ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod,
+        ServerAuthSettings, ServerIntegrationsSettings, ServerIpAllowlistOverrideSettings,
+        ServerIpAllowlistSettings, ServerListenSettings, ServerLoggingSettings,
+        ServerSchedulerSettings, ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings,
+        SlackIntegrationSettings, TeamsIntegrationSettings, WebhookStrategy,
     };
     pub use fabro_types::settings::{FeaturesNamespace, ServerNamespace};
     pub use fabro_types::status::{
         BlockedReason, FailureReason, RunControlAction, RunStatus, SuccessReason, TerminalStatus,
     };
-    pub use fabro_types::{ServerSettings, WorkflowSettings};
+    pub use fabro_types::{
+        DiffStats, DirtyStatus, GitContext, PreRunPushOutcome, RepositoryReference, RunSummary,
+        SecretType, ServerSettings, WorkflowSettings,
+    };
 
     pub use crate::generated::types::*;
 }

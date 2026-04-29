@@ -2,8 +2,7 @@ use fabro_test::{fabro_snapshot, run_and_format, test_context};
 use insta::assert_snapshot;
 
 use super::support::{
-    git_filters, git_show_json, git_stdout, metadata_run_ids, run_branch_commits,
-    run_branch_commits_since_base, setup_git_backed_changed_run,
+    git_filters, output_stdout, run_state_by_id, setup_seeded_git_backed_changed_run,
 };
 
 #[test]
@@ -28,7 +27,6 @@ fn help() {
           --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --list              Show the checkpoint timeline instead of forking
-          --no-push           Skip pushing new branches to the remote
           --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet             Suppress non-essential output [env: FABRO_QUIET=]
           --verbose           Enable verbose output [env: FABRO_VERBOSE=]
@@ -55,12 +53,10 @@ fn fork_outside_git_repo_errors() {
 #[test]
 fn fork_latest_prints_new_run_and_resume_hint() {
     let context = test_context!();
-    let setup = setup_git_backed_changed_run(&context);
-    let before = metadata_run_ids(&setup.repo_dir);
+    let setup = setup_seeded_git_backed_changed_run(&context);
 
     let mut cmd = context.command();
-    cmd.current_dir(&setup.repo_dir);
-    cmd.args(["fork", &setup.run.run_id, "--no-push"]);
+    cmd.args(["fork", &setup.run.run_id]);
 
     let (snapshot, output) = run_and_format(&mut cmd, &git_filters(&context));
     assert_snapshot!(snapshot, @"
@@ -73,42 +69,16 @@ fn fork_latest_prints_new_run_and_resume_hint() {
     To resume: fabro resume [RUN_PREFIX]
     ");
     assert!(output.status.success(), "fork should succeed");
-
-    let after = metadata_run_ids(&setup.repo_dir);
-    let new_run_ids: Vec<_> = after.difference(&before).cloned().collect();
-    assert_eq!(
-        new_run_ids.len(),
-        1,
-        "fork should create one new run branch"
-    );
-    let new_run_id = &new_run_ids[0];
-
-    let new_head = git_stdout(&setup.repo_dir, &[
-        "rev-parse",
-        &format!("fabro/run/{new_run_id}"),
-    ]);
-    let expected_head = run_branch_commits(&setup.repo_dir, &setup.run.run_id)
-        .into_iter()
-        .last()
-        .expect("source run should have a last run commit");
-    assert_eq!(new_head.trim(), expected_head);
 }
 
 #[test]
 fn fork_from_earlier_checkpoint_uses_expected_sha() {
     let context = test_context!();
-    let setup = setup_git_backed_changed_run(&context);
-    let before = metadata_run_ids(&setup.repo_dir);
-    let expected_head =
-        run_branch_commits_since_base(&setup.repo_dir, &setup.run.run_id, &setup.base_sha)
-            .into_iter()
-            .next()
-            .expect("source run should have a first run commit");
+    let setup = setup_seeded_git_backed_changed_run(&context);
 
     let output = context
         .command()
-        .current_dir(&setup.repo_dir)
-        .args(["fork", &setup.run.run_id, "@1", "--no-push"])
+        .args(["fork", &setup.run.run_id, "@2", "--json"])
         .output()
         .expect("fork should execute");
     assert!(
@@ -118,37 +88,41 @@ fn fork_from_earlier_checkpoint_uses_expected_sha() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let after = metadata_run_ids(&setup.repo_dir);
-    let new_run_ids: Vec<_> = after.difference(&before).cloned().collect();
+    let fork_response: serde_json::Value =
+        serde_json::from_str(&output_stdout(&output)).expect("fork json should parse");
+    let new_run_id = fork_response["new_run_id"]
+        .as_str()
+        .expect("fork json should include new_run_id");
+    let run_snapshot = run_state_by_id(&context, new_run_id);
     assert_eq!(
-        new_run_ids.len(),
-        1,
-        "fork should create one new run branch"
-    );
-    let new_run_id = &new_run_ids[0];
-
-    let new_head = git_stdout(&setup.repo_dir, &[
-        "rev-parse",
-        &format!("fabro/run/{new_run_id}"),
-    ]);
-    assert_eq!(new_head.trim(), expected_head);
-
-    let run_snapshot = git_show_json(
-        &setup.repo_dir,
-        &format!("fabro/meta/{new_run_id}:run.json"),
-    );
-    assert_eq!(
-        run_snapshot["checkpoint"]["current_node"].as_str(),
+        run_snapshot
+            .checkpoint
+            .as_ref()
+            .map(|checkpoint| checkpoint.current_node.as_str()),
         Some("step_one")
     );
     assert_eq!(
-        run_snapshot["checkpoint"]["git_commit_sha"].as_str(),
-        Some(expected_head.as_str())
+        run_snapshot
+            .checkpoint
+            .as_ref()
+            .and_then(|checkpoint| checkpoint.git_commit_sha.as_deref()),
+        Some(setup.step_one_sha.as_str())
     );
 
-    let expected_branch = format!("fabro/run/{new_run_id}");
     assert_eq!(
-        run_snapshot["start"]["run_branch"].as_str(),
-        Some(expected_branch.as_str())
+        run_snapshot
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.fork_source_ref.as_ref())
+            .map(|source| source.checkpoint_sha.as_str()),
+        Some(setup.step_one_sha.as_str())
+    );
+    assert_eq!(
+        run_snapshot
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.fork_source_ref.as_ref())
+            .map(|source| source.source_run_id.to_string()),
+        Some(setup.run.run_id.clone())
     );
 }

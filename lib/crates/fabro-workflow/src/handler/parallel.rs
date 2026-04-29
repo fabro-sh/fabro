@@ -18,7 +18,9 @@ use crate::hook_context::set_hook_node;
 use crate::millis_u64;
 use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus};
 use crate::run_dir::visit_from_context;
-use crate::sandbox_git::{GIT_REMOTE, git_checkpoint, git_merge_ff_only, git_remove_worktree};
+use crate::sandbox_git::{
+    GIT_REMOTE, checked_git_checkpoint, git_merge_ff_only, git_remove_worktree,
+};
 
 /// Fans out execution to multiple branches concurrently.
 /// Each branch gets an isolated context clone and runs independently.
@@ -183,7 +185,8 @@ impl Handler for ParallelHandler {
 
         // --- Git isolation: checkpoint "parallel base" before fan-out ---
         let base_sha: Option<String> = if let Some(ref gs) = git_state {
-            let result = git_checkpoint(
+            let result = checked_git_checkpoint(
+                &services.run.metadata_runtime,
                 &*services.run.sandbox,
                 &gs.run_id.to_string(),
                 &node.id,
@@ -196,6 +199,9 @@ impl Handler for ParallelHandler {
             .await;
             match result {
                 Ok(sha) => Some(sha),
+                Err(e) if e.starts_with("sandbox git unavailable:") => {
+                    return Err(Error::handler(e));
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "parallel base checkpoint failed");
                     None
@@ -253,6 +259,7 @@ impl Handler for ParallelHandler {
                     base_sha:             bsha.clone(),
                     worktree_path:        wt_path_str.clone(),
                     skip_branch_creation: false,
+                    setup_intent:         None,
                 };
                 let mut wt_sandbox =
                     WorktreeSandbox::new(Arc::clone(&services.run.sandbox), wt_config);

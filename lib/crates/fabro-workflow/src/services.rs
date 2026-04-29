@@ -19,23 +19,25 @@ use crate::event::Emitter;
 use crate::handler::HandlerRegistry;
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::GitState;
+use crate::sandbox_metadata::SandboxGitRuntime;
 use crate::workflow_bundle::WorkflowBundle;
 
 /// Services shared across workflow phases.
 #[derive(Clone)]
 pub struct RunServices {
-    pub run_store:        RunStoreHandle,
-    pub emitter:          Arc<Emitter>,
-    pub sandbox:          Arc<dyn Sandbox>,
-    pub hook_runner:      Option<Arc<HookRunner>>,
-    pub cancel_requested: Option<Arc<AtomicBool>>,
-    pub provider:         Provider,
-    pub llm_source:       Arc<dyn CredentialSource>,
+    pub run_store:               RunStoreHandle,
+    pub emitter:                 Arc<Emitter>,
+    pub sandbox:                 Arc<dyn Sandbox>,
+    pub hook_runner:             Option<Arc<HookRunner>>,
+    pub cancel_requested:        Option<Arc<AtomicBool>>,
+    pub provider:                Provider,
+    pub llm_source:              Arc<dyn CredentialSource>,
+    pub(crate) metadata_runtime: Arc<SandboxGitRuntime>,
 }
 
 impl RunServices {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         run_store: RunStoreHandle,
         emitter: Arc<Emitter>,
         sandbox: Arc<dyn Sandbox>,
@@ -43,6 +45,7 @@ impl RunServices {
         cancel_requested: Option<Arc<AtomicBool>>,
         provider: Provider,
         llm_source: Arc<dyn CredentialSource>,
+        metadata_runtime: Arc<SandboxGitRuntime>,
     ) -> Arc<Self> {
         Arc::new(Self {
             run_store,
@@ -52,6 +55,7 @@ impl RunServices {
             cancel_requested,
             provider,
             llm_source,
+            metadata_runtime,
         })
     }
 
@@ -201,6 +205,7 @@ impl EngineServices {
                 None,
                 Provider::Anthropic,
                 Arc::new(StubCredentialSource),
+                Arc::new(SandboxGitRuntime::new()),
             ),
             registry:        Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
             git_state:       std::sync::RwLock::new(None),

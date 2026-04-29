@@ -21,11 +21,19 @@ export interface ManifestArgs {
     'model'?: string;
     'provider'?: string;
     'sandbox'?: string;
+    /**
+     * Per-run Docker sandbox image override.
+     */
+    'docker_image'?: string;
     'verbose'?: boolean;
     'dry_run'?: boolean;
     'auto_approve'?: boolean;
     'no_retro'?: boolean;
     'preserve_sandbox'?: boolean;
+    /**
+     * Override `run.sandbox.local.worktree_mode` (e.g. `never` for `--in-place`). 
+     */
+    'worktree_mode'?: string;
     'label'?: Array<string>;
 }
 

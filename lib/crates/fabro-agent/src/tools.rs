@@ -103,7 +103,8 @@ pub fn make_read_file_tool() -> RegisteredTool {
                 let content = ctx
                     .env
                     .read_file(file_path, offset_usize, limit_usize)
-                    .await?;
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
                 ctx.env.mark_agent_read(file_path);
                 Ok(content)
             })
@@ -131,7 +132,10 @@ pub fn make_write_file_tool() -> RegisteredTool {
                 let file_path = required_str(&args, "file_path")?;
                 let content = required_str(&args, "content")?;
 
-                ctx.env.write_file(file_path, content).await?;
+                ctx.env
+                    .write_file(file_path, content)
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
                 Ok(format!("Successfully wrote to {file_path}"))
             })
         }),
@@ -165,7 +169,11 @@ pub fn make_edit_file_tool() -> RegisteredTool {
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
 
-                let numbered_content = ctx.env.read_file(file_path, None, None).await?;
+                let numbered_content = ctx
+                    .env
+                    .read_file(file_path, None, None)
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
 
                 // Strip line numbers: each line looks like "  1 | content" or " 10 | content"
                 let raw_lines: Vec<&str> = numbered_content
@@ -190,7 +198,10 @@ pub fn make_edit_file_tool() -> RegisteredTool {
                     raw_content.replacen(old_string, new_string, 1)
                 };
 
-                ctx.env.write_file(file_path, &new_content).await?;
+                ctx.env
+                    .write_file(file_path, &new_content)
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
                 Ok(format!("Successfully edited {file_path}"))
             })
         }),
@@ -245,7 +256,8 @@ pub fn make_shell_tool_with_config(config: &SessionOptions) -> RegisteredTool {
                         ctx.tool_env.as_ref(),
                         Some(ctx.cancel),
                     )
-                    .await?;
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
 
                 let mut output = String::new();
                 if result.timed_out {
@@ -307,7 +319,11 @@ pub fn make_grep_tool() -> RegisteredTool {
                     max_results,
                 };
 
-                let results = ctx.env.grep(pattern, path, &options).await?;
+                let results = ctx
+                    .env
+                    .grep(pattern, path, &options)
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
                 let mut seen_files = std::collections::HashSet::new();
                 for line in &results {
                     if let Some(file_path) = line.split(':').next() {
@@ -342,7 +358,11 @@ pub fn make_glob_tool() -> RegisteredTool {
                 let pattern = required_str(&args, "pattern")?;
                 let path = args.get("path").and_then(serde_json::Value::as_str);
 
-                let results = ctx.env.glob(pattern, path).await?;
+                let results = ctx
+                    .env
+                    .glob(pattern, path)
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
                 Ok(results.join("\n"))
             })
         }),
@@ -414,7 +434,11 @@ pub(crate) fn make_list_dir_tool() -> RegisteredTool {
                 let path = required_str(&args, "path")?;
                 let depth = optional_usize_arg(&args, "depth")?;
 
-                let entries = ctx.env.list_directory(path, depth).await?;
+                let entries = ctx
+                    .env
+                    .list_directory(path, depth)
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
                 let lines: Vec<String> = entries
                     .iter()
                     .map(|e| {
@@ -579,9 +603,17 @@ pub(crate) fn make_web_fetch_tool(summarizer: Option<WebFetchSummarizer>) -> Reg
                     "curl -sL --max-time {timeout_secs} -H 'User-Agent: fabro-agent/0.1' {escaped_url}"
                 );
 
-                let result = ctx.env
-                    .exec_command(&command, timeout_ms, None, ctx.tool_env.as_ref(), Some(ctx.cancel))
-                    .await?;
+                let result = ctx
+                    .env
+                    .exec_command(
+                        &command,
+                        timeout_ms,
+                        None,
+                        ctx.tool_env.as_ref(),
+                        Some(ctx.cancel),
+                    )
+                    .await
+                    .map_err(|e| e.display_with_causes())?;
 
                 if result.exit_code != 0 {
                     return Err(format!(
@@ -605,7 +637,7 @@ pub(crate) fn make_web_fetch_tool(summarizer: Option<WebFetchSummarizer>) -> Reg
                         let request = Request {
                             model: s.model_id.model_id().to_string(),
                             messages: vec![Message::user(summarization_prompt)],
-                            provider: Some(s.model_id.provider().as_str().to_string()),
+                            provider: Some(s.model_id.provider().to_string()),
                             tools: None,
                             tool_choice: None,
                             response_format: None,

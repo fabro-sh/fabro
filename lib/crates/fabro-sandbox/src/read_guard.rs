@@ -62,7 +62,7 @@ impl ReadBeforeWriteSandbox {
             .contains(&normalized)
     }
 
-    async fn guard_write(&self, path: &str) -> Result<(), String> {
+    async fn guard_write(&self, path: &str) -> crate::Result<()> {
         let normalized = self.normalize_path(path);
         if normalized.starts_with("/tmp/") {
             return Ok(());
@@ -70,10 +70,10 @@ impl ReadBeforeWriteSandbox {
         let exists = self.inner.file_exists(path).await?;
         if exists && !self.has_read(path) {
             warn!(path = %path, "Write blocked: file not read by agent");
-            Err(format!(
+            Err(crate::Error::message(format!(
                 "Cannot write to '{path}': file exists but has not been read. \
                  Use read_file to read the file before writing to it."
-            ))
+            )))
         } else {
             Ok(())
         }
@@ -82,12 +82,12 @@ impl ReadBeforeWriteSandbox {
 
 crate::delegate_sandbox! {
     ReadBeforeWriteSandbox => inner {
-        async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
+        async fn write_file(&self, path: &str, content: &str) -> crate::Result<()> {
             self.guard_write(path).await?;
             self.inner.write_file(path, content).await
         }
 
-        async fn delete_file(&self, path: &str) -> Result<(), String> {
+        async fn delete_file(&self, path: &str) -> crate::Result<()> {
             self.guard_write(path).await?;
             self.inner.delete_file(path).await
         }
@@ -124,7 +124,7 @@ mod tests {
         let result = env.write_file("a.ts", "new content").await;
 
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().to_string();
         assert!(err.contains("a.ts"));
         assert!(err.contains("read"));
     }
@@ -253,7 +253,11 @@ mod tests {
         let mock = mock_with_files(HashMap::from([("main.rs".into(), "fn main() {}".into())]));
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
 
-        let err = env.write_file("main.rs", "new").await.unwrap_err();
+        let err = env
+            .write_file("main.rs", "new")
+            .await
+            .unwrap_err()
+            .to_string();
 
         assert!(err.contains("main.rs"));
         assert!(err.contains("read_file"));

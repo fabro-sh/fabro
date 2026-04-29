@@ -4,47 +4,71 @@ use std::sync::OnceLock;
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use fabro_static::EnvVars;
 use tokio::fs;
 
 const INSTALL_MODE_MARKER: &str = "__FABRO_MODE__ = \"install\"";
 
 pub async fn serve(path: &str, headers: &HeaderMap) -> Response {
-    serve_with_mode(path, headers, SpaMode::Normal).await
+    serve_with_asset_root(path, headers, None).await
 }
 
 pub async fn serve_install(path: &str, headers: &HeaderMap) -> Response {
-    serve_with_mode(path, headers, SpaMode::Install).await
+    serve_install_with_asset_root(path, headers, None).await
 }
 
-pub(crate) async fn assert_install_mode_shell_ready() {
-    let shell = match cached_install_mode_shell().await {
-        Some(shell) => shell,
-        None => load_injected_install_shell()
-            .await
-            .expect("install-mode SPA shell asset missing"),
-    };
-    let html = String::from_utf8(shell).expect("install-mode SPA shell must be valid UTF-8");
-    assert!(
-        html.contains(INSTALL_MODE_MARKER),
-        "install-mode SPA shell marker missing after injection"
-    );
+pub async fn serve_with_asset_root(
+    path: &str,
+    headers: &HeaderMap,
+    asset_root: Option<&Path>,
+) -> Response {
+    serve_with_mode(path, headers, SpaMode::Normal, asset_root).await
 }
 
-async fn cached_install_mode_shell() -> Option<Vec<u8>> {
+pub async fn serve_install_with_asset_root(
+    path: &str,
+    headers: &HeaderMap,
+    asset_root: Option<&Path>,
+) -> Response {
+    serve_with_mode(path, headers, SpaMode::Install, asset_root).await
+}
+
+#[must_use]
+pub fn assets_available() -> bool {
+    assets_available_with_root(None)
+}
+
+#[must_use]
+pub fn assets_available_with_root(asset_root: Option<&Path>) -> bool {
+    if spa_assets_disabled_for_test() {
+        return false;
+    }
+    if asset_root.is_some_and(|root| root.join("index.html").is_file()) {
+        return true;
+    }
+    if cfg!(debug_assertions) && disk_asset_root().join("index.html").is_file() {
+        return true;
+    }
+    fabro_spa::get("index.html").is_some()
+}
+
+async fn cached_install_mode_shell(asset_root: Option<&Path>) -> Option<Vec<u8>> {
     static SHELL: OnceLock<Option<Vec<u8>>> = OnceLock::new();
-    if cfg!(debug_assertions) {
+    if asset_root.is_some() || cfg!(debug_assertions) {
         // In debug builds the SPA is reloaded from disk on every request.
-        return load_injected_install_shell().await;
+        return load_injected_install_shell(asset_root).await;
     }
     if let Some(cached) = SHELL.get() {
         return cached.clone();
     }
-    let loaded = load_injected_install_shell().await;
+    let loaded = load_injected_install_shell(None).await;
     SHELL.get_or_init(|| loaded).clone()
 }
 
-async fn load_injected_install_shell() -> Option<Vec<u8>> {
-    Some(inject_install_mode(load_asset("index.html").await?))
+async fn load_injected_install_shell(asset_root: Option<&Path>) -> Option<Vec<u8>> {
+    Some(inject_install_mode(
+        load_asset("index.html", asset_root).await?,
+    ))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -53,14 +77,19 @@ enum SpaMode {
     Install,
 }
 
-async fn serve_with_mode(path: &str, headers: &HeaderMap, mode: SpaMode) -> Response {
+async fn serve_with_mode(
+    path: &str,
+    headers: &HeaderMap,
+    mode: SpaMode,
+    asset_root: Option<&Path>,
+) -> Response {
     let normalized = normalize(path);
 
     if is_source_map(&normalized) {
         return (StatusCode::NOT_FOUND, "Static asset not found").into_response();
     }
 
-    if let Some(asset) = load_asset_for_mode(&normalized, mode).await {
+    if let Some(asset) = load_asset_for_mode(&normalized, mode, asset_root).await {
         return asset_response(&normalized, asset);
     }
 
@@ -69,7 +98,7 @@ async fn serve_with_mode(path: &str, headers: &HeaderMap, mode: SpaMode) -> Resp
     // `Accept: */*`, and similar non-HTML clients get a 404 so typos
     // don't silently return 25KB of UI shell.
     if accepts_html(headers) {
-        if let Some(index) = load_asset_for_mode("index.html", mode).await {
+        if let Some(index) = load_asset_for_mode("index.html", mode, asset_root).await {
             return asset_response("index.html", index);
         }
     }
@@ -100,7 +129,15 @@ fn normalize(path: &str) -> String {
     }
 }
 
-async fn load_asset(path: &str) -> Option<Vec<u8>> {
+async fn load_asset(path: &str, asset_root: Option<&Path>) -> Option<Vec<u8>> {
+    if spa_assets_disabled_for_test() {
+        return None;
+    }
+    if let Some(root) = asset_root {
+        if let Some(bytes) = read_disk_asset_from_root(root, path).await {
+            return Some(bytes);
+        }
+    }
     if cfg!(debug_assertions) {
         if let Some(bytes) = read_disk_asset(path).await {
             return Some(bytes);
@@ -110,11 +147,25 @@ async fn load_asset(path: &str) -> Option<Vec<u8>> {
     fabro_spa::get(path).map(fabro_spa::AssetBytes::into_vec)
 }
 
-async fn load_asset_for_mode(path: &str, mode: SpaMode) -> Option<Vec<u8>> {
+async fn load_asset_for_mode(
+    path: &str,
+    mode: SpaMode,
+    asset_root: Option<&Path>,
+) -> Option<Vec<u8>> {
     if mode == SpaMode::Install && path == "index.html" {
-        return cached_install_mode_shell().await;
+        return cached_install_mode_shell(asset_root).await;
     }
-    load_asset(path).await
+    load_asset(path, asset_root).await
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test-only process-env switch disables SPA discovery for asset-independent tests"
+)]
+fn spa_assets_disabled_for_test() -> bool {
+    std::env::var(EnvVars::FABRO_TEST_DISABLE_SPA_ASSETS)
+        .ok()
+        .is_some_and(|value| !matches!(value.as_str(), "" | "0" | "false" | "no"))
 }
 
 fn inject_install_mode(bytes: Vec<u8>) -> Vec<u8> {

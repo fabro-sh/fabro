@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { BoardColumn, RunListItem } from "@qltysh/fabro-api-client";
 
-import { buildBoardColumns, shouldRefreshBoardForEvent } from "./runs";
+import {
+  buildBoardColumns,
+  runsQuickStartCommands,
+  shouldRefreshBoardForEvent,
+} from "./runs";
 
 function boardRun(id: string, column: BoardColumn, questionText?: string): RunListItem {
   return {
@@ -48,5 +52,20 @@ describe("runs route board mapping", () => {
     expect(shouldRefreshBoardForEvent("interview.started")).toBe(true);
     expect(shouldRefreshBoardForEvent("interview.completed")).toBe(true);
     expect(shouldRefreshBoardForEvent("run.created")).toBe(false);
+  });
+
+  test("includes the configured server argument for GitHub-auth quick starts", () => {
+    expect(runsQuickStartCommands(true, "http://127.0.0.1:32276")).toEqual([
+      "fabro auth login --server http://127.0.0.1:32276",
+      "fabro repo init",
+      "fabro run hello",
+    ]);
+  });
+
+  test("does not show a placeholder server when system info is unavailable", () => {
+    expect(runsQuickStartCommands(true)).toEqual([
+      "fabro repo init",
+      "fabro run hello",
+    ]);
   });
 });

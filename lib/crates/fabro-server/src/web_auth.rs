@@ -1247,6 +1247,7 @@ client_id = "github-client-id"
                         .expect("api base should parse"),
                 ))),
                 github_webhook_ip_allowlist: None,
+                static_asset_root:           None,
             },
         );
 

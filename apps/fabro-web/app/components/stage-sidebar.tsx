@@ -7,7 +7,7 @@ import {
   PauseCircleIcon,
   XCircleIcon,
 } from "@heroicons/react/24/solid";
-import { DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
+import { Bars3BottomLeftIcon, DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { formatDurationSecs } from "../lib/format";
 
 export type StageStatus = "completed" | "running" | "pending" | "failed" | "cancelled";
@@ -32,7 +32,7 @@ interface StageSidebarProps {
   stages: Stage[];
   runId: string;
   selectedStageId?: string;
-  activeLink?: "settings" | "graph";
+  activeLink?: "settings" | "graph" | "logs";
 }
 
 export function StageSidebar({ stages, runId, selectedStageId, activeLink }: StageSidebarProps) {
@@ -133,6 +133,19 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
             >
               <MapIcon className="size-4 shrink-0 text-fg-muted" />
               Workflow Graph
+            </Link>
+          </li>
+          <li>
+            <Link
+              to={`/runs/${runId}/logs`}
+              className={`${linkBase} ${
+                activeLink === "logs"
+                  ? "bg-overlay text-fg"
+                  : "text-fg-3 hover:bg-overlay hover:text-fg"
+              }`}
+            >
+              <Bars3BottomLeftIcon className="size-4 shrink-0 text-fg-muted" />
+              Run Logs
             </Link>
           </li>
         </ul>

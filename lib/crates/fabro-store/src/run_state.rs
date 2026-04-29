@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
@@ -9,10 +8,11 @@ use fabro_types::run_event::{
 };
 use fabro_types::{
     BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
-    InterviewQuestionType, NodeStatusRecord, Outcome, PendingInterviewRecord, PullRequestRecord,
-    RunControlAction, RunId, RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord,
-    StageStatus, StartRecord, TerminalStatus,
+    NodeStatusRecord, Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunId,
+    RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageStatus, StartRecord,
+    TerminalStatus,
 };
+use fabro_util::error::render_with_causes;
 use serde_json::Value;
 
 use crate::{Error, EventEnvelope, Result};
@@ -47,21 +47,20 @@ impl RunProjectionReducer for RunProjection {
 
         match &stored.body {
             EventBody::RunCreated(props) => {
-                let working_directory = PathBuf::from(&props.working_directory);
                 let labels = props.labels.clone().into_iter().collect::<HashMap<_, _>>();
                 self.spec = Some(RunSpec {
                     run_id,
                     settings: props.settings.clone(),
                     graph: props.graph.clone(),
                     workflow_slug: props.workflow_slug.clone(),
-                    working_directory,
-                    host_repo_path: props.host_repo_path.clone(),
-                    repo_origin_url: props.repo_origin_url.clone(),
-                    base_branch: props.base_branch.clone(),
+                    source_directory: props.source_directory.clone(),
                     labels,
                     provenance: props.provenance.clone(),
                     manifest_blob: props.manifest_blob,
                     definition_blob: None,
+                    git: props.git.clone(),
+                    fork_source_ref: props.fork_source_ref.clone(),
+                    in_place: props.in_place,
                 });
                 self.graph_source.clone_from(&props.workflow_source);
             }
@@ -209,11 +208,12 @@ impl RunProjectionReducer for RunProjection {
             }
             EventBody::SandboxInitialized(props) => {
                 self.sandbox = Some(SandboxRecord {
-                    provider:               props.provider.clone(),
-                    working_directory:      props.working_directory.clone(),
-                    identifier:             props.identifier.clone(),
-                    host_working_directory: props.host_working_directory.clone(),
-                    container_mount_point:  props.container_mount_point.clone(),
+                    provider:          props.provider.clone(),
+                    working_directory: props.working_directory.clone(),
+                    identifier:        props.identifier.clone(),
+                    repo_cloned:       props.repo_cloned,
+                    clone_origin_url:  props.clone_origin_url.clone(),
+                    clone_branch:      props.clone_branch.clone(),
                 });
             }
             EventBody::RetroStarted(props) => {
@@ -249,9 +249,7 @@ impl RunProjectionReducer for RunProjection {
                             id:              props.question_id.clone(),
                             text:            props.question.clone(),
                             stage:           props.stage.clone(),
-                            question_type:   InterviewQuestionType::from_wire_name(
-                                &props.question_type,
-                            ),
+                            question_type:   props.question_type.parse().unwrap_or_default(),
                             options:         props.options.clone(),
                             allow_freeform:  props.allow_freeform,
                             timeout_seconds: props.timeout_seconds,
@@ -371,41 +369,48 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
             spec.graph.name.clone()
         }
     });
-    let goal = state.spec.as_ref().and_then(|spec| {
-        let goal = spec.graph.goal();
-        (!goal.is_empty()).then(|| goal.to_string())
-    });
-    RunSummary {
-        run_id: *run_id,
+    let goal = state
+        .spec
+        .as_ref()
+        .map(|spec| spec.graph.goal().to_string())
+        .unwrap_or_default();
+    RunSummary::new(
+        *run_id,
         workflow_name,
-        workflow_slug: state
+        state
             .spec
             .as_ref()
             .and_then(|spec| spec.workflow_slug.clone()),
         goal,
-        labels: state
+        state
             .spec
             .as_ref()
             .map(|spec| spec.labels.clone())
             .unwrap_or_default(),
-        host_repo_path: state
+        state
             .spec
             .as_ref()
-            .and_then(|spec| spec.host_repo_path.clone()),
-        start_time: state.start.as_ref().map(|start| start.start_time),
-        status: state.status.unwrap_or(RunStatus::Submitted),
-        pending_control: state.pending_control,
-        duration_ms: state
+            .and_then(|spec| spec.source_directory.clone()),
+        state.spec.as_ref().is_some_and(|spec| spec.in_place),
+        state
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.git.as_ref())
+            .map(|git| git.origin_url.clone()),
+        state.start.as_ref().map(|start| start.start_time),
+        state.status.unwrap_or(RunStatus::Submitted),
+        state.pending_control,
+        state
             .conclusion
             .as_ref()
             .map(|conclusion| conclusion.duration_ms),
-        total_usd_micros: state
+        state
             .conclusion
             .as_ref()
             .and_then(|conclusion| conclusion.billing.as_ref())
             .and_then(|billing| billing.total_usd_micros),
-        superseded_by: state.superseded_by,
-    }
+        state.superseded_by,
+    )
 }
 
 fn checkpoint_from_props(props: &CheckpointCompletedProps, timestamp: DateTime<Utc>) -> Checkpoint {
@@ -459,7 +464,7 @@ fn conclusion_from_failed(props: &RunFailedProps, timestamp: DateTime<Utc>) -> C
         timestamp,
         status: StageStatus::Fail,
         duration_ms: props.duration_ms,
-        failure_reason: Some(props.error.clone()),
+        failure_reason: Some(render_with_causes(&props.error, &props.causes)),
         final_git_commit_sha: props.git_commit_sha.clone(),
         stages: Vec::new(),
         billing: None,
@@ -651,8 +656,7 @@ mod tests {
                 "settings": WorkflowSettings::default(),
                 "graph": { "name": "ship", "nodes": {}, "edges": [], "attrs": {} },
                 "workflow_slug": "demo",
-                "working_directory": "/tmp/project",
-                "host_repo_path": null,
+                "source_directory": "/tmp/project",
                 "repo_origin_url": null,
                 "base_branch": null,
                 "labels": {},
@@ -980,18 +984,18 @@ mod tests {
     fn summary_synthesizes_submitted_when_run_exists_without_status() {
         let mut state = RunProjection::default();
         state.spec = Some(fabro_types::RunSpec {
-            run_id:            fixtures::RUN_1,
-            settings:          WorkflowSettings::default(),
-            graph:             fabro_types::Graph::new("test"),
-            workflow_slug:     Some("test".to_string()),
-            working_directory: std::path::PathBuf::from("/tmp/run"),
-            host_repo_path:    Some("/tmp/repo".to_string()),
-            repo_origin_url:   None,
-            base_branch:       None,
-            labels:            HashMap::new(),
-            provenance:        None,
-            manifest_blob:     None,
-            definition_blob:   None,
+            run_id:           fixtures::RUN_1,
+            settings:         WorkflowSettings::default(),
+            graph:            fabro_types::Graph::new("test"),
+            workflow_slug:    Some("test".to_string()),
+            source_directory: Some("/tmp/repo".to_string()),
+            git:              None,
+            labels:           HashMap::new(),
+            provenance:       None,
+            manifest_blob:    None,
+            definition_blob:  None,
+            fork_source_ref:  None,
+            in_place:         false,
         });
 
         let summary_json = serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap();
@@ -1021,7 +1025,7 @@ mod tests {
                         },
                         "labels": {},
                         "run_dir": "/tmp/run",
-                        "working_directory": "/tmp/run",
+                        "source_directory": "/tmp/run",
                         "manifest_blob": manifest_blob
                     }
                 }))
@@ -1064,6 +1068,7 @@ mod tests {
                 1,
                 EventBody::RunFailed(RunFailedProps {
                     error:          "boom".to_string(),
+                    causes:         Vec::new(),
                     duration_ms:    42,
                     reason:         FailureReason::WorkflowError,
                     git_commit_sha: Some("abc123".to_string()),
@@ -1074,6 +1079,35 @@ mod tests {
             .unwrap();
 
         assert_eq!(state.final_patch.as_deref(), Some(patch));
+    }
+
+    #[test]
+    fn run_failed_projection_renders_causes() {
+        let mut state = RunProjection::default();
+        state
+            .apply_event(&test_event(
+                1,
+                EventBody::RunFailed(RunFailedProps {
+                    error:          "Engine error: Failed to initialize sandbox".to_string(),
+                    causes:         vec![
+                        "Failed to pull Docker image buildpack-deps:noble".to_string(),
+                        "connection refused".to_string(),
+                    ],
+                    duration_ms:    42,
+                    reason:         FailureReason::WorkflowError,
+                    git_commit_sha: None,
+                    final_patch:    None,
+                }),
+                None,
+            ))
+            .unwrap();
+
+        assert_eq!(
+            state.conclusion.unwrap().failure_reason.as_deref(),
+            Some(
+                "Engine error: Failed to initialize sandbox\n  caused by: Failed to pull Docker image buildpack-deps:noble\n  caused by: connection refused"
+            )
+        );
     }
 
     #[test]

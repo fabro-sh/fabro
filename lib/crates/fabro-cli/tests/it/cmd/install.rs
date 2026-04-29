@@ -144,6 +144,29 @@ fn non_interactive_without_inputs_prints_scripted_usage_and_fails() {
 }
 
 #[test]
+fn install_rejects_wildcard_web_url_before_collecting_inputs() {
+    let context = test_context!();
+    let output = context
+        .command()
+        .args([
+            "install",
+            "--web-url",
+            "http://0.0.0.0:32276",
+            "--non-interactive",
+        ])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("--web-url must not use a wildcard host"));
+    assert!(
+        !stderr.contains("Non-interactive install requires additional flags"),
+        "wildcard web URL should be rejected before scripted input validation: {stderr}"
+    );
+}
+
+#[test]
 fn hidden_non_interactive_args_require_non_interactive() {
     let context = test_context!();
     let output = context

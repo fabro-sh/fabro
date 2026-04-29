@@ -97,7 +97,6 @@ describe("handleLifecycleToastResult", () => {
 
   test("replaying the same archive success result does not enqueue a duplicate toast", () => {
     const { pushed, dismissed, api } = makeToastApi();
-    let unarchiveClicks = 0;
     const result: RunDetailActionResult = {
       intent: "archive",
       ok: true,
@@ -111,20 +110,12 @@ describe("handleLifecycleToastResult", () => {
       },
     };
 
-    const firstState = handleLifecycleToastResult("archive", result, initialState, api, () => {
-      unarchiveClicks += 1;
-    });
+    const firstState = handleLifecycleToastResult("archive", result, initialState, api);
 
-    expect(pushed).toHaveLength(1);
-    expect(pushed[0]?.message).toBe("Run archived.");
-    expect(pushed[0]?.action?.label).toBe("Unarchive");
-    pushed[0]?.action?.onClick();
-    expect(unarchiveClicks).toBe(1);
+    expect(pushed).toEqual([{ message: "Run archived." }]);
     expect(firstState.activeArchiveToastId).toBe("toast-1");
 
-    const replayedState = handleLifecycleToastResult("archive", result, firstState, api, () => {
-      unarchiveClicks += 1;
-    });
+    const replayedState = handleLifecycleToastResult("archive", result, firstState, api);
 
     expect(pushed).toHaveLength(1);
     expect(replayedState).toBe(firstState);

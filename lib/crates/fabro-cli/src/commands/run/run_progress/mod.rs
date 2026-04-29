@@ -673,11 +673,12 @@ mod tests {
         let events = vec![
             stage_started("code", "Code"),
             Event::SandboxInitialized {
-                working_directory:      "/home/daytona/workspace".into(),
-                provider:               "daytona".into(),
-                identifier:             None,
-                host_working_directory: None,
-                container_mount_point:  None,
+                working_directory: "/home/daytona/workspace".into(),
+                provider:          "daytona".into(),
+                identifier:        None,
+                repo_cloned:       None,
+                clone_origin_url:  None,
+                clone_branch:      None,
             },
             agent_event("code", AgentEvent::ToolCallStarted {
                 tool_name:    "read_file".into(),
@@ -864,11 +865,12 @@ mod tests {
 
         emit(&mut ui, stage_started("code", "Code"));
         emit(&mut ui, Event::SandboxInitialized {
-            working_directory:      "/home/daytona/workspace".into(),
-            provider:               "daytona".into(),
-            identifier:             None,
-            host_working_directory: None,
-            container_mount_point:  None,
+            working_directory: "/home/daytona/workspace".into(),
+            provider:          "daytona".into(),
+            identifier:        None,
+            repo_cloned:       None,
+            clone_origin_url:  None,
+            clone_branch:      None,
         });
         emit(
             &mut ui,

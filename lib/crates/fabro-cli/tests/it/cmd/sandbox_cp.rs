@@ -5,7 +5,7 @@
 
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::{read_text, setup_created_dry_run, setup_local_sandbox_run, text_tree};
+use super::support::{read_text, setup_local_sandbox_run, setup_seeded_created_dry_run, text_tree};
 
 #[test]
 fn help() {
@@ -40,7 +40,7 @@ fn help() {
 #[test]
 fn sandbox_cp_run_without_sandbox_json_errors_cleanly() {
     let context = test_context!();
-    let run = setup_created_dry_run(&context);
+    let run = setup_seeded_created_dry_run(&context);
     let dest = context.temp_dir.join("missing.txt");
     let mut cmd = context.cp();
     cmd.args([&format!("{}:foo.txt", run.run_id), dest.to_str().unwrap()]);

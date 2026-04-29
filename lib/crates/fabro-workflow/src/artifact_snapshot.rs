@@ -285,7 +285,8 @@ pub async fn collect_artifacts(
     debug!(cmd = cmd.as_str(), "Collecting artifacts");
     let result = sandbox
         .exec_command(&cmd, FIND_TIMEOUT_MS, None, None, None)
-        .await?;
+        .await
+        .map_err(|e| e.display_with_causes())?;
 
     let discovered = parse_find_output(&result.stdout, platform);
     let discovered = normalize_paths(discovered, root);
@@ -323,9 +324,10 @@ pub async fn collect_artifacts(
                 }
             },
             Err(e) => {
+                let error = e.display_with_causes();
                 warn!(
                     path = file.relative_path.as_str(),
-                    error = e.as_str(),
+                    error = error.as_str(),
                     "Asset download failed"
                 );
                 download_errors += 1;
@@ -384,23 +386,23 @@ mod tests {
             _: &str,
             _: Option<usize>,
             _: Option<usize>,
-        ) -> Result<String, String> {
+        ) -> fabro_sandbox::Result<String> {
             Err("not implemented".into())
         }
-        async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
+        async fn write_file(&self, _: &str, _: &str) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn delete_file(&self, _: &str) -> Result<(), String> {
+        async fn delete_file(&self, _: &str) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn file_exists(&self, _: &str) -> Result<bool, String> {
+        async fn file_exists(&self, _: &str) -> fabro_sandbox::Result<bool> {
             Ok(false)
         }
         async fn list_directory(
             &self,
             _: &str,
             _: Option<usize>,
-        ) -> Result<Vec<fabro_agent::sandbox::DirEntry>, String> {
+        ) -> fabro_sandbox::Result<Vec<fabro_agent::sandbox::DirEntry>> {
             Ok(vec![])
         }
         async fn exec_command(
@@ -410,7 +412,7 @@ mod tests {
             _: Option<&str>,
             _: Option<&std::collections::HashMap<String, String>>,
             _: Option<tokio_util::sync::CancellationToken>,
-        ) -> Result<ExecResult, String> {
+        ) -> fabro_sandbox::Result<ExecResult> {
             Ok(self.exec_result.clone())
         }
         async fn grep(
@@ -418,42 +420,41 @@ mod tests {
             _: &str,
             _: &str,
             _: &fabro_agent::sandbox::GrepOptions,
-        ) -> Result<Vec<String>, String> {
+        ) -> fabro_sandbox::Result<Vec<String>> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _: Option<&str>) -> fabro_sandbox::Result<Vec<String>> {
             Ok(vec![])
         }
         async fn download_file_to_local(
             &self,
             remote_path: &str,
             local_path: &std::path::Path,
-        ) -> Result<(), String> {
-            let content = self
-                .files
-                .get(remote_path)
-                .ok_or_else(|| format!("File not found: {remote_path}"))?;
+        ) -> fabro_sandbox::Result<()> {
+            let content = self.files.get(remote_path).ok_or_else(|| {
+                fabro_sandbox::Error::message(format!("File not found: {remote_path}"))
+            })?;
             if let Some(parent) = local_path.parent() {
                 fs::create_dir_all(parent)
                     .await
-                    .map_err(|e| format!("Failed to create dirs: {e}"))?;
+                    .map_err(|e| fabro_sandbox::Error::context("Failed to create dirs", e))?;
             }
             fs::write(local_path, content.as_bytes())
                 .await
-                .map_err(|e| format!("Failed to write: {e}"))?;
+                .map_err(|e| fabro_sandbox::Error::context("Failed to write", e))?;
             Ok(())
         }
         async fn upload_file_from_local(
             &self,
             _local_path: &std::path::Path,
             _remote_path: &str,
-        ) -> Result<(), String> {
+        ) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn initialize(&self) -> Result<(), String> {
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn cleanup(&self) -> Result<(), String> {
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
         fn working_directory(&self) -> &str {

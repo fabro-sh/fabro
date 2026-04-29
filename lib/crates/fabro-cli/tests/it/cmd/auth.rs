@@ -68,6 +68,9 @@ fn login_help() {
 )]
 fn login_with_dev_token_writes_auth_store_entry() {
     let context = test_context!();
+    let settings_file = context.home_dir.join(".fabro").join("settings.toml");
+    std::fs::write(&settings_file, "_version = 1\n").unwrap();
+
     let mut cmd = context.command();
     cmd.args([
         "auth",
@@ -91,6 +94,10 @@ fn login_with_dev_token_writes_auth_store_entry() {
     let entry = &auth["servers"]["http://127.0.0.1:32276"];
     assert_eq!(entry["kind"], "dev-token");
     assert_eq!(entry["token"], DEV_TOKEN);
+
+    let settings = std::fs::read_to_string(settings_file).unwrap();
+    assert!(settings.contains("[cli.target]"));
+    assert!(settings.contains("http://127.0.0.1:32276"));
 }
 
 #[test]

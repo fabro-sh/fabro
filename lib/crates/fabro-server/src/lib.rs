@@ -9,6 +9,7 @@
 )]
 
 pub mod auth;
+mod canonical_host;
 mod canonical_origin;
 pub mod csp;
 #[allow(
@@ -23,6 +24,7 @@ pub mod github_webhooks;
 pub mod install;
 pub mod ip_allowlist;
 pub mod jwt_auth;
+pub mod manifest_validation;
 mod run_files;
 mod run_files_security;
 mod run_manifest;

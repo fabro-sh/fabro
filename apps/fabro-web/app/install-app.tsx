@@ -19,6 +19,7 @@ import {
   type InstallGithubAppOwner,
   type InstallLlmProviderInput,
   type InstallObjectStoreInput,
+  type InstallSandboxInput,
   type InstallSessionResponse,
   createInstallGithubAppManifest,
   finishInstall,
@@ -27,11 +28,13 @@ import {
   putInstallGithubToken,
   putInstallLlm,
   putInstallObjectStore,
+  putInstallSandbox,
   putInstallServer,
   readStoredInstallToken,
   testInstallGithubToken,
   testInstallLlm,
   testInstallObjectStore,
+  testInstallSandbox,
 } from "./install-api";
 import { INSTALL_PROVIDERS } from "./install-config";
 import { shouldRedirectAfterHealthPoll } from "./install-flow";
@@ -52,7 +55,8 @@ import { LoadingState } from "./components/state";
 const INSTALL_STEPS = [
   { id: "welcome", label: "Welcome", href: "/install/welcome" },
   { id: "server", label: "Server", href: "/install/server" },
-  { id: "object_store", label: "Object store", href: "/install/object-store" },
+  { id: "object_store", label: "Storage", href: "/install/object-store" },
+  { id: "sandbox", label: "Sandbox", href: "/install/sandbox" },
   { id: "llm", label: "LLMs", href: "/install/llm" },
   { id: "github", label: "GitHub", href: "/install/github" },
   { id: "review", label: "Review", href: "/install/review" },
@@ -92,6 +96,12 @@ type ObjectStoreForm = {
   secretAccessKey: string;
   manualCredentialsSaved: boolean;
 };
+type SandboxProvider = NonNullable<InstallSandboxInput["provider"]>;
+type SandboxForm = {
+  provider: SandboxProvider;
+  apiKey:   string;
+  apiKeySaved: boolean;
+};
 
 export default function InstallApp() {
   const navigate = useNavigate();
@@ -107,6 +117,9 @@ export default function InstallApp() {
   );
   const [objectStoreForm, setObjectStoreForm] = useState<ObjectStoreForm>(() =>
     defaultObjectStoreForm(),
+  );
+  const [sandboxForm, setSandboxForm] = useState<SandboxForm>(() =>
+    defaultSandboxForm(),
   );
   const [canonicalUrl, setCanonicalUrl] = useState("");
   const [githubStrategy, setGithubStrategy] = useState<GithubStrategy>("token");
@@ -126,6 +139,7 @@ export default function InstallApp() {
   const regionInputRef = useRef<HTMLInputElement>(null);
   const accessKeyIdInputRef = useRef<HTMLInputElement>(null);
   const secretAccessKeyInputRef = useRef<HTMLInputElement>(null);
+  const sandboxApiKeyInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const { token, sanitizedUrl } = consumeInstallTokenFromUrl(window.location.href);
@@ -164,6 +178,7 @@ export default function InstallApp() {
           current || nextSession.server?.canonical_url || nextSession.prefill.canonical_url,
         );
         setObjectStoreForm(hydrateObjectStoreForm(nextSession));
+        setSandboxForm((current) => hydrateSandboxForm(current, nextSession));
         setLlmSelection((current) =>
           hydrateProviderSelection(current, nextSession),
         );
@@ -296,6 +311,7 @@ export default function InstallApp() {
       if (args.next) {
         const nextSession = await getInstallSession(installToken);
         setSessionState({ status: "ready", data: nextSession });
+        setSandboxForm((current) => hydrateSandboxForm(current, nextSession));
         navigate(args.next);
       }
     } catch (error) {
@@ -346,7 +362,7 @@ export default function InstallApp() {
           description="Each key you enter is validated before it's saved. Skip a provider by leaving it blank."
           error={saveError}
           submitting={submitting}
-          backHref="/install/object-store"
+          backHref="/install/sandbox"
           onSubmit={async () => {
             const providers = INSTALL_PROVIDERS.map(({ id }) => {
               const current = llmSelection[id] ?? { apiKey: "" };
@@ -469,7 +485,7 @@ export default function InstallApp() {
                 await putInstallObjectStore(installToken, payload);
               },
               fallback: "Failed to save object-store settings.",
-              next:     "/install/llm",
+              next:     "/install/sandbox",
             });
           }}
         >
@@ -609,6 +625,88 @@ export default function InstallApp() {
                 Fabro will store SlateDB and run artifacts under this directory.
               </p>
             </div>
+          )}
+        </StepPanel>
+      ) : location.pathname === "/install/sandbox" ? (
+        <StepPanel
+          title="Choose the sandbox runtime"
+          description="Workflows run inside this sandbox. Docker uses the host daemon; Daytona runs each sandbox in its cloud."
+          error={saveError}
+          submitting={submitting}
+          submittingLabel={
+            sandboxForm.provider === "daytona" ? "Checking access..." : "Saving..."
+          }
+          backHref="/install/object-store"
+          onSubmit={async () => {
+            if (sandboxForm.provider === "daytona") {
+              const apiKey = sandboxForm.apiKey.trim();
+              const keepStoredKey = sandboxForm.apiKeySaved && !apiKey;
+              if (!keepStoredKey && !apiKey) {
+                setSaveError("Enter the Daytona API key before continuing.");
+                focusInput(sandboxApiKeyInputRef);
+                return;
+              }
+            }
+
+            const payload = buildSandboxPayload(sandboxForm);
+            await runStepSubmit({
+              action: async () => {
+                if (sandboxForm.provider === "daytona") {
+                  await testInstallSandbox(installToken, payload);
+                }
+                await putInstallSandbox(installToken, payload);
+              },
+              fallback: "Failed to save sandbox settings.",
+              next:     "/install/llm",
+            });
+          }}
+        >
+          <CardPicker
+            legend="Sandbox runtime"
+            options={SANDBOX_PROVIDER_OPTIONS}
+            value={sandboxForm.provider}
+            onChange={(provider) => {
+              setSandboxForm((current) => ({ ...current, provider }));
+              if (provider === "daytona") {
+                focusInput(sandboxApiKeyInputRef);
+              }
+            }}
+          />
+          {sandboxForm.provider === "daytona" ? (
+            <div className="space-y-5">
+              <Field
+                label="Daytona API key"
+                hint={
+                  sandboxForm.apiKeySaved
+                    ? "A key is already saved. Leave blank to keep using it."
+                    : "Stored in the vault and exported to workflows as DAYTONA_API_KEY."
+                }
+              >
+                <input
+                  ref={sandboxApiKeyInputRef}
+                  type="password"
+                  name="sandbox_api_key"
+                  value={sandboxForm.apiKey}
+                  onChange={(event) =>
+                    setSandboxForm((current) => ({
+                      ...current,
+                      apiKey: event.target.value,
+                    }))
+                  }
+                  className={`${INPUT_CLASS} font-mono`}
+                  placeholder={
+                    sandboxForm.apiKeySaved ? "•••• (saved)" : "dtn_..."
+                  }
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </Field>
+            </div>
+          ) : (
+            <p className="rounded-lg bg-overlay px-4 py-3 text-sm/6 text-fg-3 outline-1 -outline-offset-1 outline-white/10">
+              Fabro will use the host Docker daemon. Make sure the server has
+              access to <code className="font-mono text-fg-2">/var/run/docker.sock</code>.
+            </p>
           )}
         </StepPanel>
       ) : location.pathname === "/install/github/done" ? (
@@ -1018,8 +1116,8 @@ function WelcomeScreen() {
       </h1>
       <p className="mt-4 max-w-[56ch] text-base/7 text-fg-3 text-pretty sm:text-[0.9375rem]/7">
         A short walkthrough to confirm the public server URL, choose the shared
-        object store, validate your LLM credentials, and connect GitHub. When
-        you finish, Fabro restarts into normal mode.
+        object store and sandbox runtime, validate your LLM credentials, and
+        connect GitHub. When you finish, Fabro restarts into normal mode.
       </p>
       <ol role="list" className="mt-10 divide-y divide-line border-y border-line">
         {[
@@ -1028,6 +1126,7 @@ function WelcomeScreen() {
             "Object store",
             "Choose local disk or AWS S3 for SlateDB and artifacts.",
           ],
+          ["Sandbox", "Choose Docker or Daytona for workflow execution."],
           ["LLMs", "Validate API keys for Anthropic, OpenAI, or Gemini."],
           ["GitHub", "Choose a personal access token or a GitHub App."],
           ["Review", "Double-check the plan, then write the files."],
@@ -1165,8 +1264,9 @@ function ReviewScreen({
           action={<CopyButton value={serverUrl} label="Copy server URL" />}
         />
         {renderObjectStoreSummaryRows(session?.object_store)}
+        {renderSandboxSummaryRows(session?.sandbox)}
         <SummaryRow label="LLM providers" value={providers || "Not configured"} />
-        {renderGithubSummaryRows(session?.github)}
+        {renderGithubSummaryRows(session?.github, serverUrl)}
       </dl>
       {error ? <ErrorMessage message={error} /> : null}
       <div className="flex items-center justify-between gap-3 pt-2">
@@ -1358,6 +1458,19 @@ const OBJECT_STORE_CREDENTIAL_MODE_OPTIONS: ReadonlyArray<
     id:    "access_key",
     title: "Enter AWS access key credentials",
     body:  "Store an access key pair in server.env for startup and validation.",
+  },
+];
+
+const SANDBOX_PROVIDER_OPTIONS: ReadonlyArray<CardOption<SandboxProvider>> = [
+  {
+    id:    "docker",
+    title: "Docker",
+    body:  "Default. Uses the host Docker daemon to run sandbox containers.",
+  },
+  {
+    id:    "daytona",
+    title: "Daytona",
+    body:  "Each run gets a managed Daytona cloud sandbox. Requires an API key.",
   },
 ];
 
@@ -1716,6 +1829,40 @@ function buildObjectStorePayload(form: ObjectStoreForm): InstallObjectStoreInput
   return payload;
 }
 
+function defaultSandboxForm(): SandboxForm {
+  return { provider: "docker", apiKey: "", apiKeySaved: false };
+}
+
+function hydrateSandboxForm(
+  current: SandboxForm,
+  session: InstallSessionResponse,
+): SandboxForm {
+  const summary = session.sandbox;
+  if (!summary) {
+    return current.apiKey ? { ...current, apiKeySaved: false } : defaultSandboxForm();
+  }
+  if (current.apiKey) {
+    return { ...current, apiKeySaved: Boolean(summary.api_key_saved) };
+  }
+  return {
+    provider:    summary.provider === "daytona" ? "daytona" : "docker",
+    apiKey:      "",
+    apiKeySaved: Boolean(summary.api_key_saved),
+  };
+}
+
+function buildSandboxPayload(form: SandboxForm): InstallSandboxInput {
+  if (form.provider === "docker") {
+    return { provider: "docker" };
+  }
+  const apiKey = form.apiKey.trim();
+  const payload: InstallSandboxInput = { provider: "daytona" };
+  if (apiKey) {
+    payload.api_key = apiKey;
+  }
+  return payload;
+}
+
 function focusInput(ref: { current: HTMLInputElement | null }): void {
   window.setTimeout(() => ref.current?.focus(), 0);
 }
@@ -1727,6 +1874,7 @@ function describeProvider(id: string): string {
 
 function renderGithubSummaryRows(
   github: InstallSessionResponse["github"],
+  serverUrl: string,
 ): ReactNode {
   if (!github) {
     return <SummaryRow label="GitHub" value="Not configured" />;
@@ -1741,6 +1889,11 @@ function renderGithubSummaryRows(
           value={github.allowed_username ? `@${github.allowed_username}` : "Not set"}
           mono={Boolean(github.allowed_username)}
         />
+        <SummaryRow
+          label="GitHub callback URL"
+          value={githubCallbackUrl(serverUrl)}
+          mono
+        />
       </>
     );
   }
@@ -1754,6 +1907,10 @@ function renderGithubSummaryRows(
       />
     </>
   );
+}
+
+function githubCallbackUrl(serverUrl: string): string {
+  return `${serverUrl.replace(/\/+$/, "")}/auth/callback/github`;
 }
 
 function renderObjectStoreSummaryRows(
@@ -1786,6 +1943,26 @@ function renderObjectStoreSummaryRows(
       <SummaryRow label="Prefixes" value="slatedb/, artifacts/" mono />
     </>
   );
+}
+
+function renderSandboxSummaryRows(
+  sandbox: InstallSessionResponse["sandbox"],
+): ReactNode {
+  if (!sandbox) {
+    return <SummaryRow label="Sandbox" value="Not configured" />;
+  }
+  if (sandbox.provider === "daytona") {
+    return (
+      <>
+        <SummaryRow label="Sandbox" value="Daytona" />
+        <SummaryRow
+          label="Daytona API key"
+          value={sandbox.api_key_saved ? "Saved" : "Not set"}
+        />
+      </>
+    );
+  }
+  return <SummaryRow label="Sandbox" value="Docker" />;
 }
 
 function describeGithubAppOwner(

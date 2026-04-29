@@ -13,9 +13,10 @@ use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
 use fabro_config::{Storage, envfile};
+use fabro_static::EnvVars;
 use fabro_test::{
     TestContext, apply_test_isolation, fabro_snapshot, isolated_storage_dir, server_log_files,
-    test_context, wait_for_log_line, wait_for_path,
+    test_context, wait_for_log_line,
 };
 use fabro_util::dev_token;
 
@@ -382,7 +383,7 @@ fn start_already_running_exits_with_error() {
     clippy::disallowed_methods,
     reason = "This integration test needs the real foreground process to verify install-mode startup behavior."
 )]
-fn start_without_default_settings_enters_install_mode_in_foreground() {
+fn start_without_default_settings_reports_missing_web_assets_for_browser_install() {
     let home_dir = tempfile::tempdir_in("/tmp").unwrap();
     let storage_root = isolated_storage_dir();
     let storage_dir = storage_root.path().join("storage");
@@ -390,34 +391,25 @@ fn start_without_default_settings_enters_install_mode_in_foreground() {
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
     apply_test_isolation(&mut cmd, home_dir.path());
     cmd.env("FABRO_STORAGE_DIR", &storage_dir)
+        .env(EnvVars::FABRO_TEST_DISABLE_SPA_ASSETS, "1")
         .args(["server", "start", "--bind", "127.0.0.1:0"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
 
-    let mut child = cmd.spawn().expect("server start should spawn");
-    std::thread::sleep(Duration::from_millis(750));
+    let output = cmd.output().expect("server start should run");
     assert!(
-        child
-            .try_wait()
-            .expect("install-mode server should still be running")
-            .is_none(),
-        "install mode should run in the foreground instead of daemonizing"
+        !output.status.success(),
+        "server start should reject browser install without web assets"
     );
-
-    child.kill().expect("kill install-mode server");
-    let output = child
-        .wait_with_output()
-        .expect("collect install-mode stderr");
     let stderr = String::from_utf8_lossy(&output.stderr);
-
     assert!(
-        stderr.contains("install mode active"),
-        "expected install mode banner, got: {stderr}"
+        stderr.contains("browser install mode requires web UI assets"),
+        "expected missing-assets guidance, got: {stderr}"
     );
     assert!(
-        stderr.contains("/install?token="),
-        "expected install-mode URL with token, got: {stderr}"
+        stderr.contains("fabro install"),
+        "expected terminal install guidance, got: {stderr}"
     );
 }
 
@@ -607,153 +599,55 @@ fn daemon_start_writes_tracing_to_storage_server_log() {
 #[test]
 #[expect(
     clippy::disallowed_methods,
-    reason = "This sync integration test starts two real foreground server processes to verify lock ownership protects log truncation."
+    reason = "This sync integration test needs the real foreground process to verify install-mode startup warnings."
 )]
-fn concurrent_foreground_start_does_not_retruncate_storage_server_log() {
+fn start_with_no_web_and_missing_assets_starts_api_only() {
     let home_dir = tempfile::tempdir_in("/tmp").unwrap();
     let storage_root = isolated_storage_dir();
     let storage_dir = storage_root.path().join("storage");
-    let first_socket_path = storage_root.path().join("foreground-first.sock");
-    let second_socket_path = storage_root.path().join("foreground-second.sock");
     let config_dir = tempfile::tempdir_in("/tmp").unwrap();
     let config_path = config_dir.path().join("settings.toml");
     write_dev_token_server_settings(&config_path, "");
     provision_dev_token_auth(home_dir.path(), &storage_dir);
 
-    let storage_log_path = storage_dir.join("logs").join("server.log");
-    std::fs::create_dir_all(storage_log_path.parent().unwrap()).unwrap();
-    std::fs::write(&storage_log_path, "stale pre-start log entry\n").unwrap();
-
-    let mut first = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
-    apply_test_isolation(&mut first, home_dir.path());
-    first
-        .args(["server", "start", "--foreground"])
+    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
+    apply_test_isolation(&mut cmd, home_dir.path());
+    cmd.env(EnvVars::FABRO_TEST_DISABLE_SPA_ASSETS, "1")
+        .args(["server", "start", "--no-web", "--bind", "127.0.0.1:0"])
         .arg("--storage-dir")
         .arg(&storage_dir)
-        .arg("--bind")
-        .arg(&first_socket_path)
         .arg("--config")
         .arg(&config_path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
 
-    let first_child = first.spawn().expect("first foreground start should spawn");
-    wait_for_path(&storage_dir.join("server.json"));
-    wait_for_log_line(&storage_log_path, "API server started");
-
-    let marker = "marker-after-first-start\n";
-    {
-        use std::io::Write as _;
-
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&storage_log_path)
-            .unwrap();
-        file.write_all(marker.as_bytes()).unwrap();
-    }
-
-    let second_output = {
-        let mut second = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
-        apply_test_isolation(&mut second, home_dir.path());
-        second
-            .args(["server", "start", "--foreground"])
-            .arg("--storage-dir")
-            .arg(&storage_dir)
-            .arg("--bind")
-            .arg(&second_socket_path)
-            .arg("--config")
-            .arg(&config_path)
-            .output()
-            .expect("second foreground start should run")
-    };
-
+    let output = cmd.output().expect("server start should run");
     assert!(
-        !second_output.status.success(),
-        "second foreground start should fail:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&second_output.stdout),
-        String::from_utf8_lossy(&second_output.stderr)
+        output.status.success(),
+        "server start --no-web should succeed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
-    let second_stderr = String::from_utf8_lossy(&second_output.stderr);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        second_stderr.contains("timed out waiting for server lock"),
-        "expected lock timeout failure, got:\n{second_stderr}"
+        !stderr.contains("install mode active"),
+        "server start --no-web should not launch browser install mode: {stderr}"
     );
 
-    let storage_log = std::fs::read_to_string(&storage_log_path).unwrap_or_default();
-    assert!(
-        storage_log.contains(marker.trim_end()),
-        "expected second start to avoid retruncating the log, got:\n{storage_log}",
-    );
-    assert!(
-        !storage_log.contains("stale pre-start log entry"),
-        "expected the first start to truncate stale log contents, got:\n{storage_log}",
-    );
-
-    let stop_output = {
-        let mut stop = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
-        apply_test_isolation(&mut stop, home_dir.path());
-        stop.args(["server", "stop", "--timeout", "0"])
-            .arg("--storage-dir")
-            .arg(&storage_dir)
-            .output()
-            .expect("server stop should run")
-    };
+    let mut stop = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
+    apply_test_isolation(&mut stop, home_dir.path());
+    let stop_output = stop
+        .args(["server", "stop"])
+        .arg("--storage-dir")
+        .arg(&storage_dir)
+        .output()
+        .expect("server stop should run");
     assert!(
         stop_output.status.success(),
         "server stop should succeed:\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&stop_output.stdout),
         String::from_utf8_lossy(&stop_output.stderr)
-    );
-
-    let _ = first_child
-        .wait_with_output()
-        .expect("first child should exit");
-}
-
-#[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "This sync integration test needs the real foreground process to verify install-mode startup warnings."
-)]
-fn start_without_settings_ignores_no_web_during_install() {
-    let home_dir = tempfile::tempdir_in("/tmp").unwrap();
-    let storage_root = isolated_storage_dir();
-    let storage_dir = storage_root.path().join("storage");
-
-    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
-    apply_test_isolation(&mut cmd, home_dir.path());
-    cmd.env("FABRO_STORAGE_DIR", &storage_dir)
-        .args(["server", "start", "--no-web", "--bind", "127.0.0.1:0"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-
-    let mut child = cmd.spawn().expect("server start should spawn");
-    std::thread::sleep(Duration::from_millis(750));
-    assert!(
-        child
-            .try_wait()
-            .expect("install-mode server should still be running")
-            .is_none(),
-        "install mode should keep running in the foreground"
-    );
-
-    child.kill().expect("kill install-mode server");
-    let output = child
-        .wait_with_output()
-        .expect("collect install-mode stderr");
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    assert!(
-        stderr.contains(
-            "Warning: --no-web is ignored during install; will be respected on next start."
-        ),
-        "expected --no-web warning, got: {stderr}"
-    );
-    assert!(
-        stderr.contains("install mode active"),
-        "expected install mode banner, got: {stderr}"
     );
 }
 

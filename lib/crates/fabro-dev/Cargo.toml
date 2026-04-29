@@ -17,9 +17,11 @@ workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
+csv = "1"
 fabro-cli = { path = "../fabro-cli" }
 fabro-config = { path = "../fabro-config" }
 fabro-options-metadata.workspace = true
+quick-xml = "0.36"
 shlex = "1"
 toml_edit.workspace = true
 tracing-subscriber.workspace = true

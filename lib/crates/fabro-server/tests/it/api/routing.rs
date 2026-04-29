@@ -1,4 +1,5 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -40,6 +41,10 @@ methods = ["dev-token"]
     .expect("auth mode should resolve")
 }
 
+fn spa_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/spa")
+}
+
 #[tokio::test]
 async fn old_unversioned_routes_return_404() {
     let app = build_router(create_app_state(), AuthMode::Disabled);
@@ -59,7 +64,15 @@ async fn old_unversioned_routes_return_404() {
 
 #[tokio::test]
 async fn root_and_health_stay_at_root() {
-    let app = build_router(create_app_state(), AuthMode::Disabled);
+    let app = build_router_with_options(
+        create_app_state(),
+        &AuthMode::Disabled,
+        Arc::new(IpAllowlistConfig::default()),
+        RouterOptions {
+            static_asset_root: Some(spa_fixture_root()),
+            ..RouterOptions::default()
+        },
+    );
 
     let root_req = Request::builder()
         .method("GET")
@@ -138,7 +151,15 @@ async fn source_maps_are_not_served() {
 
 #[tokio::test]
 async fn web_enabled_serves_web_only_routes() {
-    let app = build_router(create_app_state(), AuthMode::Disabled);
+    let app = build_router_with_options(
+        create_app_state(),
+        &AuthMode::Disabled,
+        Arc::new(IpAllowlistConfig::default()),
+        RouterOptions {
+            static_asset_root: Some(spa_fixture_root()),
+            ..RouterOptions::default()
+        },
+    );
 
     let auth_me_request = Request::builder()
         .method("GET")
@@ -294,7 +315,15 @@ async fn toggle_demo_allows_authenticated_requests() {
 
 #[tokio::test]
 async fn security_headers_are_applied_to_all_responses() {
-    let app = build_router(create_app_state(), AuthMode::Disabled);
+    let app = build_router_with_options(
+        create_app_state(),
+        &AuthMode::Disabled,
+        Arc::new(IpAllowlistConfig::default()),
+        RouterOptions {
+            static_asset_root: Some(spa_fixture_root()),
+            ..RouterOptions::default()
+        },
+    );
 
     // Plain HTTP: HSTS must NOT be present.
     let api_response = checked_response(

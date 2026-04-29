@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 
 use fabro_agent::Sandbox;
 use fabro_checkpoint::trailer as trailerlink;
 use fabro_checkpoint::trailer::Trailer;
-use fabro_sandbox::daytona::detect_repo_info;
+use fabro_sandbox::shell_quote;
 use fabro_types::RunId;
 
 use crate::artifact_snapshot;
-use crate::git::{GitAuthor, blocking_push_with_timeout, push_ref};
+use crate::git::GitAuthor;
+use crate::sandbox_metadata::SandboxGitRuntime;
 
 /// Captured git state for a workflow run, shared with handlers.
 #[derive(Debug, Clone)]
@@ -36,14 +36,6 @@ fn exec_err(label: &str, r: &fabro_sandbox::ExecResult) -> String {
     } else {
         format!("{label} failed (exit {}): {detail}", r.exit_code)
     }
-}
-
-/// Shell-escape a string using `shlex::try_quote` (POSIX-safe).
-fn shell_quote(s: &str) -> String {
-    shlex::try_quote(s).map_or_else(
-        |_| format!("'{}'", s.replace('\'', "'\\''")),
-        |q| q.to_string(),
-    )
 }
 
 /// Run a git checkpoint commit via the sandbox.
@@ -133,57 +125,37 @@ pub async fn git_checkpoint(
     }
 }
 
-/// Push a refspec from the host repo to origin (best-effort).
-///
-/// Authenticates via resolved GitHub credentials so we don't depend on the
-/// host's ambient git credentials.
-pub async fn git_push_host(
-    repo_path: &Path,
-    refspec: &str,
-    github_app: &Option<fabro_github::GitHubCredentials>,
-    label: &str,
-) -> bool {
-    let (origin_url, _) = match detect_repo_info(repo_path) {
-        Ok(info) => info,
-        Err(e) => {
-            tracing::warn!(error = %e, label, "Cannot detect origin for push");
-            return false;
-        }
-    };
-
-    let https_url = fabro_github::ssh_url_to_https(&origin_url);
-    let push_url = if let Some(creds) = github_app {
-        match fabro_github::resolve_authenticated_url(
-            &fabro_github::GitHubContext::new(creds, &fabro_github::github_api_base_url()),
-            &https_url,
-        )
+/// Run a git checkpoint after the per-run sandbox git capability probe.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Checkpointing needs explicit run metadata, excludes, and author inputs."
+)]
+pub(crate) async fn checked_git_checkpoint(
+    runtime: &SandboxGitRuntime,
+    sandbox: &dyn Sandbox,
+    run_id: &str,
+    node_id: &str,
+    status: &str,
+    completed_count: usize,
+    shadow_sha: Option<String>,
+    exclude_globs: &[String],
+    author: &GitAuthor,
+) -> std::result::Result<String, String> {
+    runtime
+        .ensure_git_available(sandbox)
         .await
-        {
-            Ok(url) => url.raw_string(),
-            Err(e) => {
-                tracing::warn!(error = %e, label, "Failed to get token for push");
-                return false;
-            }
-        }
-    } else {
-        tracing::warn!(label, "No GitHub credentials for push");
-        return false;
-    };
-
-    let rp = repo_path.to_path_buf();
-    let refspec_owned = refspec.to_string();
-    let result =
-        blocking_push_with_timeout(60, move || push_ref(&rp, &push_url, &refspec_owned)).await;
-    match result {
-        Ok(()) => {
-            tracing::info!(label, "Pushed to origin");
-            true
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, label, "Failed to push");
-            false
-        }
-    }
+        .map_err(|err| format!("sandbox git unavailable: {err}"))?;
+    git_checkpoint(
+        sandbox,
+        run_id,
+        node_id,
+        status,
+        completed_count,
+        shadow_sha,
+        exclude_globs,
+        author,
+    )
+    .await
 }
 
 /// Run a git diff via the sandbox (30 s default timeout).
@@ -218,7 +190,7 @@ pub(crate) async fn git_diff_with_timeout(
     {
         Ok(r) if r.exit_code == 0 => Ok(r.stdout),
         Ok(r) => Err(exec_err("git diff", &r)),
-        Err(e) => Err(e.clone()),
+        Err(e) => Err(e.display_with_causes()),
     }
 }
 
@@ -401,7 +373,9 @@ pub async fn list_changed_files_raw(
     let res = sandbox
         .exec_command(&cmd, 10_000, None, Some(&env), None)
         .await
-        .map_err(|e| DiffError::Transient { message: e })?;
+        .map_err(|e| DiffError::Transient {
+            message: e.display_with_causes(),
+        })?;
 
     if res.timed_out {
         return Err(DiffError::Transient {
@@ -553,11 +527,7 @@ fn classify_entry(
     })
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct DiffLineStats {
-    pub additions: u64,
-    pub deletions: u64,
-}
+pub use fabro_types::DiffStats;
 
 /// Output of `git diff --numstat`: which paths are binary, plus per-path
 /// `+/-` line totals for text files in the range. Both pieces come from a
@@ -567,7 +537,7 @@ pub struct DiffNumstat {
     /// Repo-relative paths (post-rename) that git classifies as binary.
     pub binary_paths:       HashSet<String>,
     /// Repo-relative paths (post-rename) to line stats for text files.
-    pub line_stats_by_path: HashMap<String, DiffLineStats>,
+    pub line_stats_by_path: HashMap<String, DiffStats>,
 }
 
 /// Run `git diff --numstat` once and return both the set of binary paths and
@@ -585,7 +555,9 @@ pub async fn list_diff_numstat(
     let res = sandbox
         .exec_command(&cmd, 10_000, None, Some(&env), None)
         .await
-        .map_err(|e| DiffError::Transient { message: e })?;
+        .map_err(|e| DiffError::Transient {
+            message: e.display_with_causes(),
+        })?;
 
     if res.timed_out {
         return Err(DiffError::Transient {
@@ -617,14 +589,14 @@ pub async fn list_diff_numstat(
         let Some(path_s) = parts.next() else {
             continue;
         };
-        let Ok(adds) = adds_s.parse::<u64>() else {
+        let Ok(adds) = adds_s.parse::<i64>() else {
             continue;
         };
-        let Ok(dels) = dels_s.parse::<u64>() else {
+        let Ok(dels) = dels_s.parse::<i64>() else {
             continue;
         };
         let path = extract_new_path_from_numstat(path_s);
-        out.line_stats_by_path.insert(path, DiffLineStats {
+        out.line_stats_by_path.insert(path, DiffStats {
             additions: adds,
             deletions: dels,
         });
@@ -674,7 +646,9 @@ pub async fn stream_blob_metadata(
     let res = sandbox
         .exec_command(&cmd, 10_000, None, Some(&env), None)
         .await
-        .map_err(|e| DiffError::Transient { message: e })?;
+        .map_err(|e| DiffError::Transient {
+            message: e.display_with_causes(),
+        })?;
 
     if res.timed_out {
         return Err(DiffError::Transient {
@@ -739,7 +713,9 @@ pub async fn stream_blobs(
     let res = sandbox
         .exec_command(&cmd, 10_000, None, Some(&env), None)
         .await
-        .map_err(|e| DiffError::Transient { message: e })?;
+        .map_err(|e| DiffError::Transient {
+            message: e.display_with_causes(),
+        })?;
 
     if res.timed_out {
         return Err(DiffError::Transient {
@@ -825,14 +801,152 @@ mod tests {
         reason = "These unit tests use the real git CLI to construct sandbox-git fixture repositories and sync-write fixtures to disk."
     )]
 
-    use std::collections::VecDeque;
-    use std::sync::Mutex;
+    use std::collections::{HashMap, VecDeque};
+    use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
     use fabro_agent::{DirEntry, ExecResult, GrepOptions};
     use tokio_util::sync::CancellationToken;
 
     use super::*;
+
+    struct RecordingSandbox {
+        inner:    Arc<dyn fabro_sandbox::Sandbox>,
+        commands: Arc<Mutex<Vec<String>>>,
+        pushes:   Arc<Mutex<Vec<String>>>,
+    }
+
+    impl RecordingSandbox {
+        fn new(inner: Arc<dyn fabro_sandbox::Sandbox>) -> Self {
+            Self {
+                inner,
+                commands: Arc::new(Mutex::new(Vec::new())),
+                pushes: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn commands_after_probe(&self) -> Vec<String> {
+            self.commands
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|command| !command.contains("probe.txt"))
+                .cloned()
+                .collect()
+        }
+
+        fn pushes(&self) -> Vec<String> {
+            self.pushes.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl Sandbox for RecordingSandbox {
+        async fn read_file(
+            &self,
+            path: &str,
+            offset: Option<usize>,
+            limit: Option<usize>,
+        ) -> fabro_sandbox::Result<String> {
+            self.inner.read_file(path, offset, limit).await
+        }
+
+        async fn write_file(&self, path: &str, content: &str) -> fabro_sandbox::Result<()> {
+            self.inner.write_file(path, content).await
+        }
+
+        async fn delete_file(&self, path: &str) -> fabro_sandbox::Result<()> {
+            self.inner.delete_file(path).await
+        }
+
+        async fn file_exists(&self, path: &str) -> fabro_sandbox::Result<bool> {
+            self.inner.file_exists(path).await
+        }
+
+        async fn list_directory(
+            &self,
+            path: &str,
+            depth: Option<usize>,
+        ) -> fabro_sandbox::Result<Vec<DirEntry>> {
+            self.inner.list_directory(path, depth).await
+        }
+
+        async fn exec_command(
+            &self,
+            command: &str,
+            timeout_ms: u64,
+            working_dir: Option<&str>,
+            env_vars: Option<&std::collections::HashMap<String, String>>,
+            cancel_token: Option<CancellationToken>,
+        ) -> fabro_sandbox::Result<ExecResult> {
+            self.commands.lock().unwrap().push(command.to_string());
+            self.inner
+                .exec_command(command, timeout_ms, working_dir, env_vars, cancel_token)
+                .await
+        }
+
+        async fn grep(
+            &self,
+            pattern: &str,
+            path: &str,
+            options: &GrepOptions,
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            self.inner.grep(pattern, path, options).await
+        }
+
+        async fn glob(
+            &self,
+            pattern: &str,
+            path: Option<&str>,
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            self.inner.glob(pattern, path).await
+        }
+
+        async fn download_file_to_local(
+            &self,
+            remote_path: &str,
+            local_path: &std::path::Path,
+        ) -> fabro_sandbox::Result<()> {
+            self.inner
+                .download_file_to_local(remote_path, local_path)
+                .await
+        }
+
+        async fn upload_file_from_local(
+            &self,
+            local_path: &std::path::Path,
+            remote_path: &str,
+        ) -> fabro_sandbox::Result<()> {
+            self.inner
+                .upload_file_from_local(local_path, remote_path)
+                .await
+        }
+
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
+            self.inner.initialize().await
+        }
+
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
+            self.inner.cleanup().await
+        }
+
+        fn working_directory(&self) -> &str {
+            self.inner.working_directory()
+        }
+
+        fn platform(&self) -> &str {
+            self.inner.platform()
+        }
+
+        fn os_version(&self) -> String {
+            self.inner.os_version()
+        }
+
+        async fn git_push_ref(&self, refspec: &str) -> bool {
+            self.pushes.lock().unwrap().push(refspec.to_string());
+            self.inner.git_push_ref(refspec).await
+        }
+    }
 
     struct ScriptedSandbox {
         exec_results: Mutex<VecDeque<ExecResult>>,
@@ -853,19 +967,19 @@ mod tests {
             _path: &str,
             _offset: Option<usize>,
             _limit: Option<usize>,
-        ) -> Result<String, String> {
-            Err("read_file not implemented for ScriptedSandbox".to_string())
+        ) -> fabro_sandbox::Result<String> {
+            Err("read_file not implemented for ScriptedSandbox".into())
         }
 
-        async fn write_file(&self, _path: &str, _content: &str) -> Result<(), String> {
+        async fn write_file(&self, _path: &str, _content: &str) -> fabro_sandbox::Result<()> {
             Ok(())
         }
 
-        async fn delete_file(&self, _path: &str) -> Result<(), String> {
+        async fn delete_file(&self, _path: &str) -> fabro_sandbox::Result<()> {
             Ok(())
         }
 
-        async fn file_exists(&self, _path: &str) -> Result<bool, String> {
+        async fn file_exists(&self, _path: &str) -> fabro_sandbox::Result<bool> {
             Ok(false)
         }
 
@@ -873,7 +987,7 @@ mod tests {
             &self,
             _path: &str,
             _depth: Option<usize>,
-        ) -> Result<Vec<DirEntry>, String> {
+        ) -> fabro_sandbox::Result<Vec<DirEntry>> {
             Ok(Vec::new())
         }
 
@@ -884,12 +998,12 @@ mod tests {
             _working_dir: Option<&str>,
             _env_vars: Option<&std::collections::HashMap<String, String>>,
             _cancel_token: Option<CancellationToken>,
-        ) -> Result<ExecResult, String> {
+        ) -> fabro_sandbox::Result<ExecResult> {
             self.exec_results
                 .lock()
                 .expect("exec_results lock poisoned")
                 .pop_front()
-                .ok_or_else(|| "unexpected exec_command call".to_string())
+                .ok_or_else(|| fabro_sandbox::Error::message("unexpected exec_command call"))
         }
 
         async fn grep(
@@ -897,11 +1011,15 @@ mod tests {
             _pattern: &str,
             _path: &str,
             _options: &GrepOptions,
-        ) -> Result<Vec<String>, String> {
+        ) -> fabro_sandbox::Result<Vec<String>> {
             Ok(Vec::new())
         }
 
-        async fn glob(&self, _pattern: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
+        async fn glob(
+            &self,
+            _pattern: &str,
+            _path: Option<&str>,
+        ) -> fabro_sandbox::Result<Vec<String>> {
             Ok(Vec::new())
         }
 
@@ -909,7 +1027,7 @@ mod tests {
             &self,
             _remote_path: &str,
             _local_path: &std::path::Path,
-        ) -> Result<(), String> {
+        ) -> fabro_sandbox::Result<()> {
             Ok(())
         }
 
@@ -917,15 +1035,15 @@ mod tests {
             &self,
             _local_path: &std::path::Path,
             _remote_path: &str,
-        ) -> Result<(), String> {
+        ) -> fabro_sandbox::Result<()> {
             Ok(())
         }
 
-        async fn initialize(&self) -> Result<(), String> {
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
 
-        async fn cleanup(&self) -> Result<(), String> {
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
 
@@ -995,6 +1113,29 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(err, "git add timed out after 77ms");
+    }
+
+    #[tokio::test]
+    async fn checked_git_checkpoint_fails_before_checkpoint_when_probe_fails() {
+        let sandbox = ScriptedSandbox::new(vec![exec_failed(127, "", "git missing\n")]);
+        let runtime = crate::sandbox_metadata::SandboxGitRuntime::new();
+
+        let err = checked_git_checkpoint(
+            &runtime,
+            &sandbox,
+            "run1",
+            "work",
+            "success",
+            1,
+            None,
+            &[],
+            &crate::git::GitAuthor::default(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.starts_with("sandbox git unavailable:"));
+        assert!(err.contains("git missing"));
     }
 
     #[tokio::test]
@@ -1160,6 +1301,150 @@ mod tests {
             .output()
             .unwrap();
         String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    #[tokio::test]
+    async fn sandbox_metadata_writer_preserves_worktree_and_writes_binary_run_dump() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let repo = repo_dir.path();
+        init_git_repo(repo);
+        std::fs::write(repo.join("tracked.txt"), "seed\n").unwrap();
+        let head = git_commit_all(repo, "initial");
+
+        let sandbox =
+            RecordingSandbox::new(Arc::new(fabro_agent::LocalSandbox::new(repo.to_path_buf())));
+        let run_id = fabro_types::fixtures::RUN_1;
+        let mut projection = fabro_store::RunProjection::default();
+        projection.spec = Some(fabro_types::RunSpec {
+            run_id,
+            settings: fabro_types::WorkflowSettings::default(),
+            graph: fabro_types::Graph::new("metadata"),
+            workflow_slug: Some("metadata".to_string()),
+            source_directory: Some("/Users/client/project".to_string()),
+            git: Some(fabro_types::GitContext {
+                origin_url:   "https://github.com/fabro-sh/fabro.git".to_string(),
+                branch:       "main".to_string(),
+                sha:          None,
+                dirty:        fabro_types::DirtyStatus::Clean,
+                push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+            }),
+            labels: HashMap::new(),
+            provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
+            fork_source_ref: None,
+            in_place: false,
+        });
+        let mut dump = crate::run_dump::RunDump::from_projection(&projection);
+        dump.add_file_bytes("binary/payload.bin", vec![0, 159, 146, 150]);
+        dump.add_file_bytes("path with spaces.txt", b"quoted path\n".to_vec());
+
+        let runtime = crate::sandbox_metadata::SandboxGitRuntime::new();
+        let run_id_string = run_id.to_string();
+        let branch = crate::sandbox_metadata::metadata_branch_name(&run_id_string);
+        let writer = crate::sandbox_metadata::SandboxMetadataWriter::new(
+            &sandbox,
+            &runtime,
+            &run_id_string,
+            &branch,
+            crate::git::GitAuthor::default(),
+        );
+
+        let snapshot = writer.write_snapshot(&dump, "checkpoint").await.unwrap();
+        let commit_sha = snapshot.commit_sha;
+
+        let current = std::process::Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8(current.stdout).unwrap().trim(), "main");
+        let head_after = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8(head_after.stdout).unwrap().trim(), head);
+
+        let run_json = std::process::Command::new("git")
+            .args(["show", &format!("{commit_sha}:run.json")])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(run_json.status.success());
+        let stored_projection: serde_json::Value =
+            serde_json::from_slice(&run_json.stdout).unwrap();
+        assert!(stored_projection.get("spec").is_some());
+
+        let binary = std::process::Command::new("git")
+            .args(["show", &format!("{commit_sha}:binary/payload.bin")])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert_eq!(binary.stdout, vec![0, 159, 146, 150]);
+
+        let spaced_path = std::process::Command::new("git")
+            .args(["show", &format!("{commit_sha}:path with spaces.txt")])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert_eq!(spaced_path.stdout, b"quoted path\n");
+
+        let status = std::process::Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(String::from_utf8(status.stdout).unwrap().trim().is_empty());
+
+        dump.add_file_bytes("second.txt", b"second\n".to_vec());
+        let second_snapshot = writer.write_snapshot(&dump, "checkpoint 2").await.unwrap();
+        let second_commit_sha = second_snapshot.commit_sha;
+        let second_parent = std::process::Command::new("git")
+            .args(["rev-list", "--parents", "-n", "1", &second_commit_sha])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(second_parent.status.success());
+        let parent_line = String::from_utf8(second_parent.stdout).unwrap();
+        let parents: Vec<_> = parent_line.split_whitespace().collect();
+        assert_eq!(parents, vec![
+            second_commit_sha.as_str(),
+            commit_sha.as_str()
+        ]);
+
+        let second_file = std::process::Command::new("git")
+            .args(["show", &format!("{second_commit_sha}:second.txt")])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert_eq!(second_file.stdout, b"second\n");
+
+        let metadata_commands = sandbox.commands_after_probe();
+        assert_eq!(
+            metadata_commands
+                .iter()
+                .filter(|command| command.contains(" fast-import "))
+                .count(),
+            2,
+            "metadata writer should use one fast-import per snapshot, got: {metadata_commands:?}"
+        );
+        for forbidden in [
+            "hash-object",
+            "update-index",
+            "write-tree",
+            "commit-tree",
+            "update-ref",
+        ] {
+            assert!(
+                !metadata_commands
+                    .iter()
+                    .any(|command| command.contains(forbidden)),
+                "metadata writer should not run {forbidden} after probe, got: {metadata_commands:?}"
+            );
+        }
+        let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+        assert_eq!(sandbox.pushes(), vec![refspec.clone(), refspec]);
     }
 
     #[tokio::test]

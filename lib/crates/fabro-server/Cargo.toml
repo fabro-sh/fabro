@@ -97,6 +97,7 @@ serde_yaml = "0.9"
 tracing-subscriber.workspace = true
 async-trait.workspace = true
 tokio-util.workspace = true
+fabro-macros = { path = "../fabro-macros" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }
 fabro-test = { workspace = true }
 fabro-types = { path = "../fabro-types", features = ["test-support"] }

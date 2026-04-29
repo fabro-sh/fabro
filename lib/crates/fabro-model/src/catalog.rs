@@ -152,7 +152,7 @@ impl Catalog {
             return Vec::new();
         };
 
-        let Some(fallback_providers) = fallbacks.get(primary.as_str()) else {
+        let Some(fallback_providers) = fallbacks.get(<&'static str>::from(primary)) else {
             return Vec::new();
         };
 
@@ -417,13 +417,13 @@ mod tests {
     }
 
     #[test]
-    fn catalog_providers_roundtrip_through_as_str() {
+    fn catalog_providers_roundtrip_through_static_str() {
         for model in Catalog::builtin().list(None) {
-            let roundtripped = Provider::from_str(model.provider.as_str());
+            let roundtripped = Provider::from_str(<&'static str>::from(model.provider));
             assert_eq!(
                 roundtripped,
                 Ok(model.provider),
-                "catalog model '{}' provider {:?} does not roundtrip through as_str",
+                "catalog model '{}' provider {:?} does not roundtrip through IntoStaticStr",
                 model.id,
                 model.provider
             );
@@ -431,13 +431,13 @@ mod tests {
     }
 
     #[test]
-    fn provider_as_str_roundtrips_through_from_str() {
+    fn provider_static_str_roundtrips_through_from_str() {
         for &provider in Provider::ALL {
-            let roundtripped = Provider::from_str(provider.as_str());
+            let roundtripped = Provider::from_str(<&'static str>::from(provider));
             assert_eq!(
                 roundtripped,
                 Ok(provider),
-                "Provider::{provider:?}.as_str() does not round-trip through from_str"
+                "Provider::{provider:?} IntoStaticStr does not round-trip through from_str"
             );
         }
     }

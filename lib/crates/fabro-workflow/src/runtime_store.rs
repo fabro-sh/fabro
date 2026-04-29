@@ -104,7 +104,6 @@ impl RunStoreBackend for LocalRunStoreBackend {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -131,18 +130,18 @@ mod tests {
 
     fn test_run_spec() -> RunSpec {
         RunSpec {
-            run_id:            fixtures::RUN_1,
-            settings:          WorkflowSettings::default(),
-            graph:             Graph::new("test"),
-            workflow_slug:     Some("test".to_string()),
-            working_directory: PathBuf::from("/tmp/test"),
-            host_repo_path:    None,
-            repo_origin_url:   None,
-            base_branch:       None,
-            labels:            HashMap::new(),
-            provenance:        None,
-            manifest_blob:     None,
-            definition_blob:   None,
+            run_id:           fixtures::RUN_1,
+            settings:         WorkflowSettings::default(),
+            graph:            Graph::new("test"),
+            workflow_slug:    Some("test".to_string()),
+            source_directory: Some("/tmp/test".to_string()),
+            git:              None,
+            labels:           HashMap::new(),
+            provenance:       None,
+            manifest_blob:    None,
+            definition_blob:  None,
+            fork_source_ref:  None,
+            in_place:         false,
         }
     }
 
@@ -151,21 +150,21 @@ mod tests {
         let run_store = test_run_store().await;
         let record = test_run_spec();
         append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
-            run_id:            fixtures::RUN_1,
-            settings:          serde_json::to_value(&record.settings).unwrap(),
-            graph:             serde_json::to_value(&record.graph).unwrap(),
-            workflow_source:   Some("digraph test {}".to_string()),
-            workflow_config:   None,
-            labels:            std::collections::BTreeMap::new(),
-            run_dir:           "/tmp/test".to_string(),
-            working_directory: "/tmp/test".to_string(),
-            host_repo_path:    None,
-            repo_origin_url:   None,
-            base_branch:       None,
-            workflow_slug:     Some("test".to_string()),
-            db_prefix:         None,
-            provenance:        None,
-            manifest_blob:     None,
+            run_id:           fixtures::RUN_1,
+            settings:         serde_json::to_value(&record.settings).unwrap(),
+            graph:            serde_json::to_value(&record.graph).unwrap(),
+            workflow_source:  Some("digraph test {}".to_string()),
+            workflow_config:  None,
+            labels:           std::collections::BTreeMap::new(),
+            run_dir:          "/tmp/test".to_string(),
+            source_directory: Some("/tmp/test".to_string()),
+            workflow_slug:    Some("test".to_string()),
+            db_prefix:        None,
+            provenance:       None,
+            manifest_blob:    None,
+            git:              None,
+            fork_source_ref:  None,
+            in_place:         false,
         })
         .await
         .unwrap();

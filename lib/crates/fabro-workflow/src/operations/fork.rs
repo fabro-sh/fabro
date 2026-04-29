@@ -1,23 +1,16 @@
-use anyhow::{Context, Result};
-use fabro_checkpoint::branch::BranchStore;
-use fabro_checkpoint::git::Store;
-use fabro_store::{Database, RunProjection};
-use fabro_types::RunId;
-use git2::{Oid, Signature};
+use anyhow::Result as AnyResult;
+use fabro_store::{Database, RunProjection, RunProjectionReducer};
+use fabro_types::{EventBody, EventEnvelope, ForkSourceRef, RunId};
 
-use super::run_git;
 use super::timeline::{ForkTarget, RunTimeline, TimelineEntry, build_timeline};
 use crate::error::Error;
 use crate::event::{self, Event};
-use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
-use crate::records::{Checkpoint, RunSpec, StartRecord};
-use crate::run_dump::RunDump;
+use crate::records::{Checkpoint, RunSpec};
 
 #[derive(Debug, Clone)]
 pub struct ForkRunInput {
     pub source_run_id: RunId,
     pub target:        Option<ForkTarget>,
-    pub push:          bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,60 +34,113 @@ pub struct ForkOutcome {
     pub target:        ResolvedForkTarget,
 }
 
-#[derive(Debug)]
-struct ForkedRun {
-    new_run_id: RunId,
-    projection: RunProjection,
-}
-
-/// Create a new run that branches from an existing run at a specific
-/// checkpoint.
-///
-/// Returns the new run ID.
-#[cfg(test)]
-fn fork(store: &Store, input: &ForkRunInput) -> Result<RunId> {
-    let timeline = build_timeline(store, &input.source_run_id.to_string())?;
-    let entry = resolve_fork_entry(&timeline, &input.source_run_id, input.target.as_ref())?;
-    Ok(fork_from_entry(store, &input.source_run_id, entry, input.push)?.new_run_id)
-}
-
-pub async fn fork_run(store: &Database, input: &ForkRunInput) -> Result<ForkOutcome, Error> {
+pub async fn fork_run(
+    store: &Database,
+    input: &ForkRunInput,
+) -> std::result::Result<ForkOutcome, Error> {
     let source_run_id = input.source_run_id;
-    let target = input.target.clone();
-    let push = input.push;
+    let run_store = store
+        .open_run(&source_run_id)
+        .await
+        .map_err(|err| Error::engine(err.to_string()))?;
+    let state = run_store
+        .state()
+        .await
+        .map_err(|err| Error::engine(err.to_string()))?;
+    let timeline = build_timeline(&state).map_err(|err| Error::engine(err.to_string()))?;
+    let entry = resolve_fork_entry(&timeline, &source_run_id, input.target.as_ref())
+        .map_err(|err| Error::Validation(err.to_string()))?;
+    let checkpoint_sha = entry.run_commit_sha.clone().ok_or_else(|| {
+        Error::Validation(format!(
+            "checkpoint @{} has no git_commit_sha; cannot fork",
+            entry.ordinal
+        ))
+    })?;
 
-    let (outcome, projection) =
-        run_git::with_run_git_store(store, source_run_id, move |git_store| {
-            let timeline = build_timeline(&git_store, &source_run_id.to_string())
-                .map_err(|err| Error::engine(err.to_string()))?;
-            let entry = resolve_fork_entry(&timeline, &source_run_id, target.as_ref())
-                .map_err(|err| Error::Validation(err.to_string()))?;
-            let resolved = ResolvedForkTarget {
-                checkpoint_ordinal: entry.ordinal,
-                node_id:            entry.node_name.clone(),
-                visit:              entry.visit,
-            };
-            let forked = fork_from_entry(&git_store, &source_run_id, entry, push)
-                .map_err(|err| Error::engine(err.to_string()))?;
-            let outcome = ForkOutcome {
-                source_run_id,
-                new_run_id: forked.new_run_id,
-                target: resolved,
-            };
-            Ok((outcome, forked.projection))
-        })
-        .await?;
+    validate_source_spec(state.spec.as_ref(), &checkpoint_sha)?;
 
-    persist_forked_run(store, &projection).await?;
+    let events = run_store
+        .list_events()
+        .await
+        .map_err(|err| Error::engine(err.to_string()))?;
+    let historical_events = events
+        .into_iter()
+        .filter(|event| event.seq <= entry.checkpoint_seq)
+        .collect::<Vec<_>>();
+    let mut projection = RunProjection::apply_events(&historical_events)
+        .map_err(|err| Error::engine(err.to_string()))?;
+    let mut run_spec = projection
+        .spec
+        .clone()
+        .ok_or_else(|| Error::engine("source run projection has no spec"))?;
 
-    Ok(outcome)
+    let new_run_id = RunId::new();
+    run_spec.run_id = new_run_id;
+    run_spec.fork_source_ref = Some(ForkSourceRef {
+        source_run_id,
+        checkpoint_sha: checkpoint_sha.clone(),
+    });
+    projection.spec = Some(run_spec);
+    projection.start = None;
+    projection.sandbox = None;
+    projection.conclusion = None;
+    projection.retro = None;
+    projection.retro_prompt = None;
+    projection.retro_response = None;
+    projection.final_patch = None;
+    projection.pull_request = None;
+    projection.superseded_by = None;
+    if let Some(checkpoint) = projection.checkpoint.as_mut() {
+        checkpoint.git_commit_sha = Some(checkpoint_sha);
+    }
+
+    persist_forked_run(store, &projection, &historical_events).await?;
+
+    Ok(ForkOutcome {
+        source_run_id,
+        new_run_id,
+        target: ResolvedForkTarget {
+            checkpoint_ordinal: entry.ordinal,
+            node_id:            entry.node_name.clone(),
+            visit:              entry.visit,
+        },
+    })
+}
+
+fn validate_source_spec(
+    spec: Option<&RunSpec>,
+    checkpoint_sha: &str,
+) -> std::result::Result<(), Error> {
+    let spec = spec.ok_or_else(|| Error::engine("source run projection has no spec"))?;
+    if spec.in_place {
+        return Err(Error::Validation(
+            "source run was created with --in-place; cannot fork (no git checkpoint history)"
+                .to_string(),
+        ));
+    }
+    if checkpoint_sha.trim().is_empty() {
+        return Err(Error::Validation(
+            "target checkpoint has an empty git_commit_sha; cannot fork".to_string(),
+        ));
+    }
+    let Some(origin) = spec.repo_origin_url() else {
+        return Err(Error::Validation(
+            "source run has no repo_origin_url; cannot validate fork origin".to_string(),
+        ));
+    };
+    if fabro_github::normalize_repo_origin_url(origin).is_empty() {
+        return Err(Error::Validation(
+            "source run has an empty repo_origin_url; cannot validate fork origin".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn resolve_fork_entry<'a>(
     timeline: &'a RunTimeline,
     source_run_id: &RunId,
     target: Option<&ForkTarget>,
-) -> Result<&'a TimelineEntry> {
+) -> AnyResult<&'a TimelineEntry> {
     match target {
         Some(target) => timeline.resolve(target),
         None => timeline
@@ -104,145 +150,15 @@ fn resolve_fork_entry<'a>(
     }
 }
 
-fn fork_from_entry(
-    store: &Store,
-    source_run_id: &RunId,
-    entry: &TimelineEntry,
-    push: bool,
-) -> Result<ForkedRun> {
-    let new_run_id = RunId::new();
-    let sig = Signature::now("Fabro", "noreply@fabro.sh")?;
-
-    let new_run_branch = format!("{RUN_BRANCH_PREFIX}{new_run_id}");
-    match &entry.run_commit_sha {
-        Some(sha) => {
-            let oid =
-                Oid::from_str(sha).with_context(|| format!("invalid run commit SHA: {sha}"))?;
-            store
-                .update_ref(&new_run_branch, oid)
-                .map_err(|e| anyhow::anyhow!("failed to create run branch ref: {e}"))?;
-        }
-        None => {
-            anyhow::bail!(
-                "checkpoint @{} has no git_commit_sha; cannot fork",
-                entry.ordinal
-            );
-        }
-    }
-
-    let source_meta_branch = MetadataStore::branch_name(&source_run_id.to_string());
-    let new_meta_branch = MetadataStore::branch_name(&new_run_id.to_string());
-    let source_bs = BranchStore::new(store, &source_meta_branch, &sig);
-    let new_bs = BranchStore::new(store, &new_meta_branch, &sig);
-
-    new_bs
-        .ensure_branch()
-        .map_err(|e| anyhow::anyhow!("failed to create metadata branch: {e}"))?;
-
-    let source_projection = source_bs
-        .read_entry("run.json")
-        .map_err(|e| anyhow::anyhow!("failed to read source metadata: {e}"))?
-        .context("source run has no run.json")
-        .and_then(|bytes| {
-            serde_json::from_slice::<RunProjection>(&bytes)
-                .context("failed to parse source run.json")
-        })?;
-
-    let mut run_spec: RunSpec = source_projection
-        .spec
-        .clone()
-        .context("source run projection has no spec")?;
-    run_spec.run_id = new_run_id;
-
-    let start_record = StartRecord {
-        run_id:     new_run_id,
-        start_time: new_run_id.created_at(),
-        run_branch: Some(new_run_branch.clone()),
-        base_sha:   entry.run_commit_sha.clone(),
-    };
-
-    let mut init_projection = RunProjection::default();
-    init_projection.spec = Some(run_spec.clone());
-    init_projection
-        .graph_source
-        .clone_from(&source_projection.graph_source);
-    init_projection.start = Some(start_record.clone());
-    init_projection
-        .sandbox
-        .clone_from(&source_projection.sandbox);
-
-    let checkpoint_bytes = store
-        .read_blob_at(entry.metadata_commit_oid, "run.json")
-        .map_err(|e| anyhow::anyhow!("failed to read checkpoint snapshot: {e}"))?
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "no run.json at metadata commit {}",
-                entry.metadata_commit_oid
-            )
-        })?;
-    let mut checkpoint_projection: RunProjection = serde_json::from_slice(&checkpoint_bytes)
-        .context("failed to parse source checkpoint snapshot")?;
-    let mut checkpoint: Checkpoint = checkpoint_projection
-        .checkpoint
-        .clone()
-        .context("source checkpoint snapshot has no checkpoint")?;
-    checkpoint.git_commit_sha.clone_from(&entry.run_commit_sha);
-    checkpoint_projection.spec = Some(run_spec);
-    checkpoint_projection.graph_source = source_projection.graph_source;
-    checkpoint_projection.start = Some(start_record);
-    checkpoint_projection.sandbox = source_projection.sandbox;
-    checkpoint_projection.checkpoint = Some(checkpoint);
-
-    let init_entries = RunDump::from_projection(&init_projection)
-        .git_entries()
-        .context("failed to build init metadata snapshot")?;
-    let init_refs: Vec<(&str, &[u8])> = init_entries
-        .iter()
-        .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
-        .collect();
-    new_bs
-        .write_entries(&init_refs, "init run")
-        .map_err(|e| anyhow::anyhow!("failed to write init metadata snapshot: {e}"))?;
-
-    let checkpoint_entries = RunDump::from_projection(&checkpoint_projection)
-        .git_entries()
-        .context("failed to build checkpoint metadata snapshot")?;
-    let checkpoint_refs: Vec<(&str, &[u8])> = checkpoint_entries
-        .iter()
-        .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
-        .collect();
-    new_bs
-        .write_entries(&checkpoint_refs, "checkpoint")
-        .map_err(|e| anyhow::anyhow!("failed to write metadata snapshot: {e}"))?;
-
-    if push {
-        let source_run_branch = format!("{RUN_BRANCH_PREFIX}{source_run_id}");
-        let run_refspec = format!("refs/heads/{new_run_branch}:refs/heads/{new_run_branch}");
-        let meta_refspec = format!("refs/heads/{new_meta_branch}:refs/heads/{new_meta_branch}");
-        push_run_branches(
-            store,
-            &source_run_branch,
-            Some(&run_refspec),
-            &meta_refspec,
-            "new",
-        )?;
-    }
-
-    Ok(ForkedRun {
-        new_run_id,
-        projection: checkpoint_projection,
-    })
-}
-
-async fn persist_forked_run(store: &Database, projection: &RunProjection) -> Result<(), Error> {
+async fn persist_forked_run(
+    store: &Database,
+    projection: &RunProjection,
+    historical_events: &[EventEnvelope],
+) -> std::result::Result<(), Error> {
     let spec = projection
         .spec
         .as_ref()
         .ok_or_else(|| Error::engine("forked run projection has no spec"))?;
-    let start = projection
-        .start
-        .as_ref()
-        .ok_or_else(|| Error::engine("forked run projection has no start record"))?;
     let checkpoint = projection
         .checkpoint
         .as_ref()
@@ -254,63 +170,89 @@ async fn persist_forked_run(store: &Database, projection: &RunProjection) -> Res
         .map_err(|err| Error::engine(err.to_string()))?;
 
     event::append_event(&run_store, &spec.run_id, &Event::RunCreated {
-        run_id:            spec.run_id,
-        settings:          serde_json::to_value(&spec.settings)
+        run_id:           spec.run_id,
+        settings:         serde_json::to_value(&spec.settings)
             .map_err(|err| Error::engine(err.to_string()))?,
-        graph:             serde_json::to_value(&spec.graph)
+        graph:            serde_json::to_value(&spec.graph)
             .map_err(|err| Error::engine(err.to_string()))?,
-        workflow_source:   projection.graph_source.clone(),
-        workflow_config:   None,
-        labels:            spec.labels.clone().into_iter().collect(),
-        run_dir:           String::new(),
-        working_directory: spec.working_directory.display().to_string(),
-        host_repo_path:    spec.host_repo_path.clone(),
-        repo_origin_url:   spec.repo_origin_url.clone(),
-        base_branch:       spec.base_branch.clone(),
-        workflow_slug:     spec.workflow_slug.clone(),
-        db_prefix:         None,
-        provenance:        spec.provenance.clone(),
-        manifest_blob:     spec.manifest_blob,
+        workflow_source:  projection.graph_source.clone(),
+        workflow_config:  None,
+        labels:           spec.labels.clone().into_iter().collect(),
+        run_dir:          String::new(),
+        source_directory: spec.source_directory.clone(),
+        workflow_slug:    spec.workflow_slug.clone(),
+        db_prefix:        None,
+        provenance:       spec.provenance.clone(),
+        manifest_blob:    spec.manifest_blob,
+        git:              spec.git.clone(),
+        fork_source_ref:  spec.fork_source_ref.clone(),
+        in_place:         spec.in_place,
     })
     .await
     .map_err(|err| Error::engine(err.to_string()))?;
 
-    event::append_event(&run_store, &spec.run_id, &Event::WorkflowRunStarted {
-        name:         spec.graph.name.clone(),
-        run_id:       spec.run_id,
-        base_branch:  spec.base_branch.clone(),
-        base_sha:     start.base_sha.clone(),
-        run_branch:   start.run_branch.clone(),
-        worktree_dir: None,
-        goal:         None,
-    })
-    .await
-    .map_err(|err| Error::engine(err.to_string()))?;
-
-    if let Some(sandbox) = projection.sandbox.as_ref() {
-        event::append_event(&run_store, &spec.run_id, &Event::SandboxInitialized {
-            provider:               sandbox.provider.clone(),
-            working_directory:      sandbox.working_directory.clone(),
-            identifier:             sandbox.identifier.clone(),
-            host_working_directory: sandbox.host_working_directory.clone(),
-            container_mount_point:  sandbox.container_mount_point.clone(),
-        })
+    let replayed_checkpoint =
+        replay_historical_projection_events(&run_store, spec.run_id, historical_events).await?;
+    if !replayed_checkpoint {
+        event::append_event(
+            &run_store,
+            &spec.run_id,
+            &checkpoint_completed_event(checkpoint),
+        )
         .await
         .map_err(|err| Error::engine(err.to_string()))?;
     }
-
-    event::append_event(
-        &run_store,
-        &spec.run_id,
-        &checkpoint_completed_event(checkpoint),
-    )
-    .await
-    .map_err(|err| Error::engine(err.to_string()))?;
     event::append_event(&run_store, &spec.run_id, &Event::RunSubmitted {
         definition_blob: spec.definition_blob,
     })
     .await
     .map_err(|err| Error::engine(err.to_string()))
+}
+
+async fn replay_historical_projection_events(
+    run_store: &fabro_store::RunDatabase,
+    new_run_id: RunId,
+    historical_events: &[EventEnvelope],
+) -> std::result::Result<bool, Error> {
+    let mut replayed_checkpoint = false;
+    for envelope in historical_events {
+        if !replay_event_for_fork_projection(&envelope.event.body) {
+            continue;
+        }
+        if matches!(envelope.event.body, EventBody::CheckpointCompleted(_)) {
+            replayed_checkpoint = true;
+        }
+        let mut event = envelope.event.clone();
+        event.id = format!("{new_run_id}-fork-{}", envelope.seq);
+        event.run_id = new_run_id;
+        let payload = event::build_redacted_event_payload(&event, &new_run_id)
+            .map_err(|err| Error::engine(err.to_string()))?;
+        run_store
+            .append_event(&payload)
+            .await
+            .map_err(|err| Error::engine(err.to_string()))?;
+    }
+    Ok(replayed_checkpoint)
+}
+
+fn replay_event_for_fork_projection(body: &EventBody) -> bool {
+    matches!(
+        body,
+        EventBody::StageCompleted(_)
+            | EventBody::StageFailed(_)
+            | EventBody::StagePrompt(_)
+            | EventBody::PromptCompleted(_)
+            | EventBody::CheckpointCompleted(_)
+            | EventBody::InterviewStarted(_)
+            | EventBody::InterviewCompleted(_)
+            | EventBody::InterviewTimeout(_)
+            | EventBody::InterviewInterrupted(_)
+            | EventBody::AgentSessionStarted(_)
+            | EventBody::AgentCliStarted(_)
+            | EventBody::CommandStarted(_)
+            | EventBody::CommandCompleted(_)
+            | EventBody::ParallelCompleted(_)
+    )
 }
 
 fn checkpoint_completed_event(checkpoint: &Checkpoint) -> Event {
@@ -349,187 +291,129 @@ fn checkpoint_completed_event(checkpoint: &Checkpoint) -> Event {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::time::Duration;
 
-    use fabro_store::RunProjection;
-    use fabro_types::{RunId, WorkflowSettings};
-    use git2::Oid;
+    use fabro_graphviz::graph::Graph;
+    use fabro_store::{Database, RunProjectionReducer};
+    use fabro_types::{StageId, WorkflowSettings, fixtures};
+    use object_store::memory::InMemory;
 
-    use super::super::test_support::*;
     use super::*;
-    use crate::operations::find_run_id_by_prefix;
 
-    fn parse_run_id(value: &str) -> RunId {
-        value.parse().unwrap()
+    fn test_store() -> Database {
+        Database::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+            None,
+        )
     }
 
-    fn make_run_projection(run_id: &RunId) -> RunProjection {
-        let mut projection = RunProjection::default();
-        let settings = serde_json::to_value(WorkflowSettings::default()).unwrap();
-        projection.spec = Some(
-            serde_json::from_value(serde_json::json!({
-                "run_id": run_id.to_string(),
-                "created_at": "2025-01-01T00:00:00Z",
-                "settings": settings,
-                "graph": {
-                    "name": "test_workflow",
-                    "nodes": {
-                        "start": {"id": "start", "attrs": {}},
-                        "build": {"id": "build", "attrs": {}},
-                        "test": {"id": "test", "attrs": {}}
-                    },
-                    "edges": [
-                        {"from": "start", "to": "build", "attrs": {}},
-                        {"from": "build", "to": "test", "attrs": {}}
-                    ],
-                    "attrs": {}
-                },
-                "working_directory": "/tmp/test",
-            }))
-            .unwrap(),
-        );
-        projection
-    }
+    #[tokio::test]
+    async fn fork_persists_historical_node_projection_through_target_checkpoint() {
+        let store = test_store();
+        let source_run_id = fixtures::RUN_1;
+        let source = store.create_run(&source_run_id).await.unwrap();
+        let graph = Graph::new("fork-source");
+        let settings = WorkflowSettings::default();
 
-    fn make_start_record_json(run_id: &RunId) -> Vec<u8> {
-        let record = serde_json::json!({
-            "run_id": run_id.to_string(),
-            "start_time": "2025-01-01T00:00:00Z",
-            "run_branch": format!("{}{}", RUN_BRANCH_PREFIX, run_id),
-        });
-        serde_json::to_vec_pretty(&record).unwrap()
-    }
-
-    fn setup_source_run(store: &Store, run_id: &RunId, nodes: &[&str]) -> Vec<Oid> {
-        let sig = test_sig();
-
-        let run_branch = format!("{RUN_BRANCH_PREFIX}{run_id}");
-        let empty_tree = store.write_empty_tree().unwrap();
-        let mut run_oids = Vec::new();
-        let mut parent: Option<Oid> = None;
-
-        for node in nodes {
-            let parents = match parent {
-                Some(p) => vec![p],
-                None => vec![],
-            };
-            let oid = store
-                .write_commit(
-                    empty_tree,
-                    &parents,
-                    &format!("fabro({run_id}): {node} (completed)"),
-                    &sig,
-                )
-                .unwrap();
-            store.update_ref(&run_branch, oid).unwrap();
-            run_oids.push(oid);
-            parent = Some(oid);
-        }
-
-        let meta_branch = MetadataStore::branch_name(&run_id.to_string());
-        let bs = BranchStore::new(store, &meta_branch, &sig);
-        bs.ensure_branch().unwrap();
-
-        let mut init_projection = make_run_projection(run_id);
-        init_projection.start =
-            Some(serde_json::from_slice(&make_start_record_json(run_id)).unwrap());
-        let init_json = serde_json::to_vec_pretty(&init_projection).unwrap();
-        bs.write_entries(&[("run.json", &init_json)], "init run")
-            .unwrap();
-
-        for (i, node) in nodes.iter().enumerate() {
-            let mut projection = init_projection.clone();
-            projection.checkpoint = Some(
-                serde_json::from_slice(&make_checkpoint_bytes(
-                    node,
-                    1,
-                    Some(&run_oids[i].to_string()),
-                ))
-                .unwrap(),
-            );
-            let projection_json = serde_json::to_vec_pretty(&projection).unwrap();
-            bs.write_entry("run.json", &projection_json, "checkpoint")
-                .unwrap();
-        }
-
-        run_oids
-    }
-
-    #[test]
-    fn fork_creates_new_run_and_metadata_branches() {
-        let (_dir, store) = temp_repo();
-        let source_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-        let run_oids = setup_source_run(&store, &source_run_id, &["start", "build", "test"]);
-
-        let new_run_id = fork(&store, &ForkRunInput {
-            source_run_id,
-            target: Some(ForkTarget::from_str("@2").unwrap()),
-            push: false,
+        event::append_event(&source, &source_run_id, &Event::RunCreated {
+            run_id:           source_run_id,
+            settings:         serde_json::to_value(&settings).unwrap(),
+            graph:            serde_json::to_value(&graph).unwrap(),
+            workflow_source:  Some("digraph fork_source {}".to_string()),
+            workflow_config:  None,
+            labels:           BTreeMap::new(),
+            run_dir:          "/tmp/source".to_string(),
+            source_directory: Some("/client/source".to_string()),
+            workflow_slug:    Some("fork-source".to_string()),
+            db_prefix:        None,
+            provenance:       None,
+            manifest_blob:    None,
+            git:              Some(fabro_types::GitContext {
+                origin_url:   "https://github.com/example/repo.git".to_string(),
+                branch:       "main".to_string(),
+                sha:          None,
+                dirty:        fabro_types::DirtyStatus::Clean,
+                push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+            }),
+            fork_source_ref:  None,
+            in_place:         false,
         })
+        .await
         .unwrap();
 
-        let new_run_branch = format!("{RUN_BRANCH_PREFIX}{new_run_id}");
-        let new_meta_branch = MetadataStore::branch_name(&new_run_id.to_string());
+        let mut node_visits = BTreeMap::new();
+        node_visits.insert("work".to_string(), 1);
+        event::append_event(&source, &source_run_id, &Event::StageCompleted {
+            node_id: "work".to_string(),
+            name: "Work".to_string(),
+            index: 1,
+            duration_ms: 10,
+            status: "success".to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: Some(node_visits.clone()),
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: Some("historical response".to_string()),
+            attempt: 1,
+            max_attempts: 1,
+        })
+        .await
+        .unwrap();
 
-        assert!(store.resolve_ref(&new_run_branch).unwrap().is_some());
-        assert!(store.resolve_ref(&new_meta_branch).unwrap().is_some());
+        event::append_event(&source, &source_run_id, &Event::CheckpointCompleted {
+            node_id: "work".to_string(),
+            status: "success".to_string(),
+            current_node: "work".to_string(),
+            completed_nodes: vec!["work".to_string()],
+            node_retries: BTreeMap::new(),
+            context_values: BTreeMap::new(),
+            node_outcomes: BTreeMap::new(),
+            next_node_id: None,
+            git_commit_sha: Some("abc123".to_string()),
+            loop_failure_signatures: BTreeMap::new(),
+            restart_failure_signatures: BTreeMap::new(),
+            node_visits,
+            diff: None,
+        })
+        .await
+        .unwrap();
 
-        let sig = test_sig();
-        let bs = BranchStore::new(&store, &new_meta_branch, &sig);
-        let run_json = bs.read_entry("run.json").unwrap().unwrap();
-        let run_spec: RunProjection = serde_json::from_slice(&run_json).unwrap();
+        let outcome = fork_run(&store, &ForkRunInput {
+            source_run_id,
+            target: None,
+        })
+        .await
+        .unwrap();
+
+        let forked = store.open_run(&outcome.new_run_id).await.unwrap();
+        let forked_events = forked.list_events().await.unwrap();
+        let forked_state = fabro_store::RunProjection::apply_events(&forked_events).unwrap();
+        let node = forked_state
+            .node(&StageId::new("work", 1))
+            .expect("forked state should retain historical node projection");
+
+        assert_eq!(node.response.as_deref(), Some("historical response"));
+        assert_eq!(forked_state.checkpoints.len(), 1);
         assert_eq!(
-            run_spec.spec.as_ref().map(|run| run.run_id),
-            Some(new_run_id)
+            forked_state
+                .spec
+                .unwrap()
+                .fork_source_ref
+                .unwrap()
+                .source_run_id,
+            source_run_id
         );
-
-        let timeline = build_timeline(&store, &new_run_id.to_string()).unwrap();
-        assert_eq!(timeline.entries.len(), 1);
-        assert_eq!(timeline.entries[0].node_name, "build");
-        assert_eq!(
-            timeline.entries[0].run_commit_sha,
-            Some(run_oids[1].to_string())
-        );
-    }
-
-    #[test]
-    fn fork_rejects_checkpoint_without_run_sha() {
-        let (_dir, store) = temp_repo();
-        let sig = test_sig();
-        let run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAW");
-        let meta_branch = MetadataStore::branch_name(&run_id.to_string());
-        let bs = BranchStore::new(&store, &meta_branch, &sig);
-        bs.ensure_branch().unwrap();
-        let init_projection = serde_json::to_vec_pretty(&make_run_projection(&run_id)).unwrap();
-        bs.write_entry("run.json", &init_projection, "init")
-            .unwrap();
-
-        let mut checkpoint_projection = make_run_projection(&run_id);
-        checkpoint_projection.checkpoint =
-            Some(serde_json::from_slice(&make_checkpoint_bytes("start", 1, None)).unwrap());
-        let cp = serde_json::to_vec_pretty(&checkpoint_projection).unwrap();
-        let oid = bs.write_entry("run.json", &cp, "checkpoint").unwrap();
-        let entry = TimelineEntry {
-            ordinal:             1,
-            node_name:           "start".to_string(),
-            visit:               1,
-            metadata_commit_oid: oid,
-            run_commit_sha:      None,
-        };
-
-        let err = fork_from_entry(&store, &run_id, &entry, false)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("cannot fork"));
-    }
-
-    #[test]
-    fn fork_supports_prefix_resolved_source_run_ids() {
-        let (_dir, store) = temp_repo();
-        let source_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAX");
-        setup_source_run(&store, &source_run_id, &["start", "build"]);
-
-        let resolved = find_run_id_by_prefix(store.repo(), "01ARZ3").unwrap();
-        assert_eq!(resolved, source_run_id);
     }
 }

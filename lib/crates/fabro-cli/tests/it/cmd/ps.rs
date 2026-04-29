@@ -4,7 +4,9 @@ use fabro_util::dev_token;
 use httpmock::MockServer;
 use serde_json::Value;
 
-use super::support::{local_dev_token, setup_completed_fast_dry_run, setup_created_fast_dry_run};
+use super::support::{
+    local_dev_token, setup_seeded_completed_dry_run, setup_seeded_created_dry_run,
+};
 use crate::support::{fatal_error_line, unique_run_id};
 
 const TEST_DEV_TOKEN: &str =
@@ -165,7 +167,7 @@ fn ps_explicit_local_tcp_server_target_accepts_explicit_dev_token() {
 #[test]
 fn ps_default_excludes_non_running_runs() {
     let context = test_context!();
-    setup_completed_fast_dry_run(&context);
+    setup_seeded_completed_dry_run(&context);
     let mut cmd = context.ps();
     cmd.args(["--label", &context.test_case_label()]);
 
@@ -181,8 +183,8 @@ fn ps_default_excludes_non_running_runs() {
 #[test]
 fn ps_all_json_lists_created_and_completed_runs() {
     let context = test_context!();
-    setup_completed_fast_dry_run(&context);
-    setup_created_fast_dry_run(&context);
+    setup_seeded_completed_dry_run(&context);
+    setup_seeded_created_dry_run(&context);
     let output = context
         .ps()
         .args(["-a", "--json", "--label", &context.test_case_label()])
@@ -219,11 +221,11 @@ fn ps_all_json_lists_created_and_completed_runs() {
 }
 
 #[test]
-fn setup_completed_fast_dry_run_preserves_handle_when_another_run_exists() {
+fn setup_seeded_run_helpers_preserve_handle_when_another_run_exists() {
     let context = test_context!();
 
-    let created = setup_created_fast_dry_run(&context);
-    let completed = setup_completed_fast_dry_run(&context);
+    let created = setup_seeded_created_dry_run(&context);
+    let completed = setup_seeded_completed_dry_run(&context);
 
     assert_ne!(created.run_id, completed.run_id);
     assert_ne!(created.run_dir, completed.run_dir);
@@ -234,8 +236,8 @@ fn setup_completed_fast_dry_run_preserves_handle_when_another_run_exists() {
 #[test]
 fn ps_quiet_outputs_run_ids_only() {
     let context = test_context!();
-    setup_completed_fast_dry_run(&context);
-    setup_created_fast_dry_run(&context);
+    setup_seeded_completed_dry_run(&context);
+    setup_seeded_created_dry_run(&context);
     let mut cmd = context.ps();
     cmd.args(["-a", "--quiet", "--label", &context.test_case_label()]);
 
@@ -351,7 +353,7 @@ fn ps_uses_configured_server_target_without_server_flag() {
                         "labels": {
                             "suite": "remote"
                         },
-                        "host_repo_path": "/srv/repo",
+                        "source_directory": "/srv/repo",
                         "repository": { "name": "repo" },
                         "start_time": "2026-04-05T12:00:00Z",
                         "created_at": "2026-04-05T12:00:00Z",
@@ -386,7 +388,7 @@ fn ps_uses_configured_server_target_without_server_flag() {
     mock.assert();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0]["workflow_name"], "Remote Workflow");
-    assert_eq!(runs[0]["host_repo_path"], "/srv/repo");
+    assert_eq!(runs[0]["source_directory"], "/srv/repo");
 }
 
 #[test]
@@ -407,7 +409,7 @@ fn ps_explicit_remote_target_ignores_broken_local_storage_settings() {
                         "goal": "Remote goal",
                         "title": "Remote goal",
                         "labels": {},
-                        "host_repo_path": "/srv/repo",
+                        "source_directory": "/srv/repo",
                         "repository": { "name": "repo" },
                         "start_time": "2026-04-20T12:00:00Z",
                         "created_at": "2026-04-20T12:00:00Z",

@@ -299,7 +299,7 @@ impl Session {
         let launch_result = sandbox
             .exec_command(&launch_script, 30_000, None, env_ref, None)
             .await
-            .map_err(|e| format!("Failed to launch MCP server: {e}"))?;
+            .map_err(|e| format!("Failed to launch MCP server: {}", e.display_with_causes()))?;
 
         let pid = launch_result.stdout.trim();
         info!(pid, port, "MCP server process launched in sandbox");
@@ -311,7 +311,12 @@ impl Session {
         let poll_result = sandbox
             .exec_command(&poll_cmd, 60_000, None, None, None)
             .await
-            .map_err(|e| format!("Failed to poll MCP server readiness: {e}"))?;
+            .map_err(|e| {
+                format!(
+                    "Failed to poll MCP server readiness: {}",
+                    e.display_with_causes()
+                )
+            })?;
 
         if poll_result.stdout.trim() != "ready" {
             // Grab stderr for debugging
@@ -333,7 +338,11 @@ impl Session {
 
         // Get the preview URL for the port, or fall back to localhost for local
         // sandboxes
-        if let Some(url_and_headers) = sandbox.get_preview_url(port).await? {
+        if let Some(url_and_headers) = sandbox
+            .get_preview_url(port)
+            .await
+            .map_err(|e| e.display_with_causes())?
+        {
             Ok(url_and_headers)
         } else {
             info!(port, "No preview URL available, using localhost");
@@ -726,7 +735,7 @@ impl Session {
             // Call LLM (streaming) with retry for transient errors
             let retry_emitter = self.event_emitter.clone();
             let retry_session_id = self.id.clone();
-            let retry_provider = self.provider_profile.provider().as_str().to_string();
+            let retry_provider = self.provider_profile.provider().to_string();
             let retry_model = self.provider_profile.model().to_string();
             let retry_policy = RetryPolicy {
                 max_retries: 3,
@@ -991,7 +1000,7 @@ impl Session {
         Request {
             model: self.provider_profile.model().to_string(),
             messages,
-            provider: Some(self.provider_profile.provider().as_str().to_string()),
+            provider: Some(self.provider_profile.provider().to_string()),
             tools: if has_tools { Some(tools) } else { None },
             tool_choice: if has_tools {
                 Some(ToolChoice::Auto)

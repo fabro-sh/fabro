@@ -7,6 +7,7 @@ pub mod blob_ref;
 pub mod checkpoint;
 pub mod conclusion;
 pub mod dense;
+pub mod diff;
 pub mod event_envelope;
 pub mod failure_signature;
 pub mod graph;
@@ -14,6 +15,7 @@ pub mod interview;
 pub mod node_status;
 pub mod outcome;
 pub mod pull_request;
+pub mod repository;
 pub mod retro;
 pub mod run;
 pub mod run_blob_id;
@@ -22,6 +24,7 @@ pub mod run_id;
 pub mod run_projection;
 pub mod run_summary;
 pub mod sandbox_record;
+pub mod secret;
 pub mod settings;
 pub mod stage_id;
 pub mod start;
@@ -41,6 +44,7 @@ pub use blob_ref::{
 pub use checkpoint::Checkpoint;
 pub use conclusion::{Conclusion, StageSummary};
 pub use dense::{ServerSettings, UserSettings, WorkflowSettings};
+pub use diff::DiffStats;
 pub use event_envelope::EventEnvelope;
 pub use failure_signature::FailureSignature;
 pub use graph::{AttrValue, Edge, Graph, Node, is_llm_handler_type, shape_to_handler_type};
@@ -50,13 +54,14 @@ pub use outcome::{FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMe
 pub use pull_request::{
     PullRequestDetail, PullRequestGithubDetail, PullRequestRecord, PullRequestRef, PullRequestUser,
 };
+pub use repository::RepositoryReference;
 pub use retro::{
     AggregateStats, FrictionKind, FrictionPoint, Learning, LearningCategory, OpenItem,
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,
 };
 pub use run::{
-    RunAuthMethod, RunClientProvenance, RunProvenance, RunServerProvenance, RunSpec,
-    RunSubjectProvenance,
+    DirtyStatus, ForkSourceRef, GitContext, PreRunPushOutcome, RunAuthMethod, RunClientProvenance,
+    RunProvenance, RunServerProvenance, RunSpec, RunSubjectProvenance,
 };
 pub use run_blob_id::RunBlobId;
 pub use run_event::{ActorKind, ActorRef, EventBody, RunEvent, RunNoticeLevel};
@@ -64,6 +69,7 @@ pub use run_id::{RunId, fixtures};
 pub use run_projection::{NodeState, PendingInterviewRecord, RunProjection};
 pub use run_summary::RunSummary;
 pub use sandbox_record::SandboxRecord;
+pub use secret::SecretType;
 pub use stage_id::{ParallelBranchId, StageId};
 pub use start::StartRecord;
 pub use status::{

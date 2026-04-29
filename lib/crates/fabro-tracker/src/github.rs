@@ -634,6 +634,7 @@ mod tests {
             GitHubCredentials::App(GitHubAppCredentials {
                 app_id:          "test-app".to_string(),
                 private_key_pem: pem,
+                slug:            None,
             }),
             test_http_client(),
             "owner".to_string(),

@@ -125,16 +125,22 @@ impl RunInfo {
             .and_then(|summary| summary.total_usd_micros)
     }
 
-    pub fn host_repo_path(&self) -> Option<&str> {
+    pub fn source_directory(&self) -> Option<&str> {
         self.summary
             .as_ref()
-            .and_then(|summary| summary.host_repo_path.as_deref())
+            .and_then(|summary| summary.source_directory.as_deref())
+    }
+
+    pub fn repo_origin_url(&self) -> Option<&str> {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.repo_origin_url.as_deref())
     }
 
     pub fn goal(&self) -> String {
         self.summary
             .as_ref()
-            .and_then(|summary| summary.goal.clone())
+            .map(|summary| summary.goal.clone())
             .unwrap_or_default()
     }
 }
@@ -336,11 +342,19 @@ fn resolve_run_from_infos(runs: &[RunInfo], identifier: &str) -> Result<RunInfo>
         count if count > 1 => {
             let ids: Vec<String> = id_matches
                 .iter()
-                .map(|run| run.run_id().to_string())
+                .map(|run| {
+                    format!(
+                        "{} created_at={} workflow={} origin={}",
+                        run.run_id(),
+                        run.run_id().created_at().to_rfc3339(),
+                        run.workflow_name(),
+                        run.repo_origin_url().unwrap_or("-")
+                    )
+                })
                 .collect();
             bail!(
-                "Ambiguous prefix '{identifier}': {count} runs match: {}",
-                ids.join(", ")
+                "Ambiguous prefix '{identifier}': {count} runs match:\n{}",
+                ids.join("\n")
             )
         }
         _ => {}
@@ -396,7 +410,6 @@ fn run_id_matches(run_id: RunId, prefix: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -421,18 +434,24 @@ mod tests {
 
     fn sample_run_spec() -> RunSpec {
         RunSpec {
-            run_id:            fixtures::RUN_1,
-            settings:          WorkflowSettings::default(),
-            graph:             Graph::new("test"),
-            workflow_slug:     Some("test".to_string()),
-            working_directory: PathBuf::from("/tmp/project"),
-            host_repo_path:    Some("/tmp/project".to_string()),
-            repo_origin_url:   None,
-            base_branch:       Some("main".to_string()),
-            labels:            HashMap::new(),
-            provenance:        None,
-            manifest_blob:     None,
-            definition_blob:   None,
+            run_id:           fixtures::RUN_1,
+            settings:         WorkflowSettings::default(),
+            graph:            Graph::new("test"),
+            workflow_slug:    Some("test".to_string()),
+            source_directory: Some("/tmp/project".to_string()),
+            git:              Some(fabro_types::GitContext {
+                origin_url:   String::new(),
+                branch:       "main".to_string(),
+                sha:          None,
+                dirty:        fabro_types::DirtyStatus::Clean,
+                push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+            }),
+            labels:           HashMap::new(),
+            provenance:       None,
+            manifest_blob:    None,
+            definition_blob:  None,
+            fork_source_ref:  None,
+            in_place:         false,
         }
     }
 
@@ -446,21 +465,21 @@ mod tests {
         let run_spec = sample_run_spec();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
-            run_id:            fixtures::RUN_1,
-            settings:          serde_json::to_value(&run_spec.settings).unwrap(),
-            graph:             serde_json::to_value(&run_spec.graph).unwrap(),
-            workflow_source:   None,
-            workflow_config:   None,
-            labels:            run_spec.labels.clone().into_iter().collect(),
-            run_dir:           run_dir.display().to_string(),
-            working_directory: run_spec.working_directory.display().to_string(),
-            host_repo_path:    run_spec.host_repo_path.clone(),
-            repo_origin_url:   run_spec.repo_origin_url.clone(),
-            base_branch:       run_spec.base_branch.clone(),
-            workflow_slug:     run_spec.workflow_slug.clone(),
-            db_prefix:         None,
-            provenance:        run_spec.provenance.clone(),
-            manifest_blob:     None,
+            run_id:           fixtures::RUN_1,
+            settings:         serde_json::to_value(&run_spec.settings).unwrap(),
+            graph:            serde_json::to_value(&run_spec.graph).unwrap(),
+            workflow_source:  None,
+            workflow_config:  None,
+            labels:           run_spec.labels.clone().into_iter().collect(),
+            run_dir:          run_dir.display().to_string(),
+            source_directory: run_spec.source_directory.clone(),
+            workflow_slug:    run_spec.workflow_slug.clone(),
+            db_prefix:        None,
+            provenance:       run_spec.provenance.clone(),
+            manifest_blob:    None,
+            git:              run_spec.git.clone(),
+            fork_source_ref:  run_spec.fork_source_ref.clone(),
+            in_place:         run_spec.in_place,
         })
         .await
         .unwrap();

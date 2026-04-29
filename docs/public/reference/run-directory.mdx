@@ -1,0 +1,85 @@
+---
+title: "Run Directory"
+description: "Structure of Fabro's per-run directory"
+---
+
+<Warning>
+  The run directory structure and file formats described here are internal implementation details and subject to change without notice. Do not build tooling that relies on them. The authoritative source of run state is the event-sourced run store; the scratch directory is now mostly local runtime state and caches.
+</Warning>
+
+Each `fabro run` invocation creates a timestamped directory under `~/.fabro/storage/scratch/`:
+
+```
+~/.fabro/storage/scratch/20260307-01JQXYZ123ABC456DEF789/
+```
+
+The naming format is `YYYYMMDD-{run_id}`, where `run_id` is the ULID assigned to the run. You can override the base storage directory with the global `--storage-dir` flag (the scratch directory will be `<storage-dir>/scratch/`).
+
+## Root-level files
+
+| File | Format | When written | Description |
+|---|---|---|---|
+| `workflow_bundle.json` | JSON | Run create | Bundled workflow input used to restart the run without re-reading the original workflow files. Includes the root workflow path plus bundled child workflow sources and inline files. |
+| `run.pid` | Text | Legacy only | Legacy process ID file from older runs. Current detached launches use launcher records instead, and current attach/resume no longer read `run.pid`. |
+
+## Local-only directories
+
+These paths are local runtime state and caches, not the canonical run state.
+
+- **`worktree/`** — When running in worktree mode, Fabro creates a Git worktree here as the working directory for agents and commands.
+- **`runtime/`** — Local runtime files. Today this is mainly materialized blob payloads under `runtime/blobs/`.
+- **`nodes/{manager_node}_{visit}/child/`** — Nested scratch directories for manager-loop child workflows.
+
+Large durable values, event streams, checkpoints, diffs, conclusions, and retros are no longer projected into live scratch by default. Use `fabro logs`, `fabro inspect`, the API, or `fabro dump` for those surfaces.
+
+## Reconstructed and export-only layouts
+
+Metadata branch snapshots and `fabro dump` exports now use the same core layout:
+
+- `run.json` for the current projection snapshot, including the current checkpoint
+- `graph.fabro` for workflow source
+- `stages/retro/*.md` for retro prompt/response text
+- `stages/{node_id}@{visit}/...` for per-stage prompt, response, status, diff, stdout, and stderr files
+
+`fabro dump` adds export-only history surfaces on top of that shared layout:
+
+- `events.jsonl` for the durable event stream
+- `checkpoints/*.json` for checkpoint history snapshots
+- `artifacts/{node_id}@{visit}/...` for exported artifact payloads
+
+## Browsing runs
+
+Use `fabro ps` to scan the scratch directory and display a table of all runs with their status, workflow name, and timestamps. Pass `--json` for machine-readable output.
+
+```bash
+fabro ps
+fabro ps --json
+fabro ps --filter workflow=my-workflow
+```
+
+## Full directory tree
+
+```
+~/.fabro/storage/scratch/
+├── 20260307-01JQXYZ123ABC456DEF789/  # One directory per run
+│   ├── workflow_bundle.json
+│   ├── run.pid                      # Legacy only; older runs may contain this
+│   ├── runtime/
+│   │   └── blobs/
+│   │       └── 01JT5Y3KJ0N5S9E1Y7YFBR2G4D.json
+│   ├── cache/
+│   │   └── artifacts/
+│   │       └── files/
+│   │           └── test/
+│   │               └── retry_1/
+│   │                   ├── test-results/
+│   │                   │   └── screenshot.png
+│   ├── nodes/
+│   │   └── manager/
+│   │       └── child/
+│   │           ├── workflow_bundle.json
+│   │           ├── runtime/
+│   │           ├── cache/
+│   │           └── worktree/
+│   └── worktree/                     # Git worktree (git checkpoint mode)
+```

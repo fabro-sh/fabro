@@ -1,5 +1,6 @@
 mod combine;
 mod defaults;
+mod log_filter;
 mod resolve_cli;
 mod resolve_features;
 mod resolve_project;

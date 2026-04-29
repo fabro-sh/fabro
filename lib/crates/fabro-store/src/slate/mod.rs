@@ -299,8 +299,6 @@ pub(crate) fn normalize_base_prefix(prefix: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use chrono::{DateTime, Utc};
     use fabro_types::{
         AttrValue, FailureReason, Graph, RunControlAction, RunSpec, RunStatus, SuccessReason,
@@ -358,14 +356,20 @@ mod tests {
             settings: WorkflowSettings::default(),
             graph,
             workflow_slug: Some("night-sky".to_string()),
-            working_directory: PathBuf::from(format!("/tmp/{label}")),
-            host_repo_path: Some("github.com/fabro-sh/fabro".to_string()),
-            repo_origin_url: Some("https://github.com/fabro-sh/fabro".to_string()),
-            base_branch: Some("main".to_string()),
+            source_directory: Some(format!("/tmp/{label}")),
             labels: std::collections::HashMap::from([("team".to_string(), "infra".to_string())]),
             provenance: None,
             manifest_blob: None,
             definition_blob: None,
+            git: Some(fabro_types::GitContext {
+                origin_url:   "https://github.com/fabro-sh/fabro".to_string(),
+                branch:       "main".to_string(),
+                sha:          None,
+                dirty:        fabro_types::DirtyStatus::Clean,
+                push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+            }),
+            fork_source_ref: None,
+            in_place: false,
         }
     }
 
@@ -398,10 +402,9 @@ mod tests {
                 "settings": run_spec.settings,
                 "graph": run_spec.graph,
                 "workflow_slug": run_spec.workflow_slug,
-                "working_directory": run_spec.working_directory,
+                "source_directory": run_spec.source_directory,
                 "run_dir": format!("/tmp/{label}"),
-                "host_repo_path": run_spec.host_repo_path,
-                "base_branch": run_spec.base_branch,
+                "git": run_spec.git,
                 "labels": run_spec.labels,
             }),
         ))
@@ -463,7 +466,7 @@ mod tests {
         assert_eq!(summary[0].run_id, test_run_id("run-2"));
         assert_eq!(summary[1].run_id, test_run_id("run-1"));
         assert_eq!(summary[1].workflow_name, Some("night-sky".to_string()));
-        assert_eq!(summary[1].goal, Some("map the constellations".to_string()));
+        assert_eq!(summary[1].goal, "map the constellations");
         assert_eq!(summary[1].status, RunStatus::Succeeded {
             reason: SuccessReason::Completed,
         });

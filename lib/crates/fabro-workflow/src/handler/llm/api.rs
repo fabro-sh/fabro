@@ -294,7 +294,7 @@ impl CodergenBackend for AgentApiBackend {
         let provider = node
             .provider()
             .map(String::from)
-            .or_else(|| Some(self.provider.as_str().to_string()));
+            .or_else(|| Some(self.provider.to_string()));
 
         let max_tokens = node.max_tokens().or_else(|| {
             fabro_model::Catalog::builtin()
@@ -335,7 +335,7 @@ impl CodergenBackend for AgentApiBackend {
 
         let result = client.complete(&request).await;
 
-        let default_provider = self.provider.as_str().to_string();
+        let default_provider = self.provider.to_string();
 
         let (response, actual_model, actual_provider) = match result {
             Ok(resp) => (
@@ -500,7 +500,7 @@ impl CodergenBackend for AgentApiBackend {
                 if sdk_err.failover_eligible() && !self.fallback_chain.is_empty() =>
             {
                 let error_msg = sdk_err.to_string();
-                let from_provider = self.provider.as_str().to_string();
+                let from_provider = self.provider.to_string();
                 let from_model = self.model.clone();
 
                 let mut last_err = Error::Llm(sdk_err.clone());

@@ -21,7 +21,7 @@ use tower::ServiceExt;
 use super::helpers::{read_repo_file, test_app_state, test_settings};
 
 fn load_spec() -> Value {
-    let text = read_repo_file("docs/api-reference/fabro-api.yaml");
+    let text = read_repo_file("docs/public/api-reference/fabro-api.yaml");
     serde_yaml::from_str(&text).expect("failed to parse spec")
 }
 
@@ -80,7 +80,7 @@ fn request_for(method: &Method, uri: &str) -> Request<Body> {
 async fn all_spec_routes_are_routable() {
     let spec = load_spec();
     let normal_app = build_router(test_app_state(), AuthMode::Disabled);
-    let install_app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let install_app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let paths = spec
         .get("paths")
@@ -175,7 +175,7 @@ async fn github_webhook_spec_route_is_routable_when_webhook_secret_is_present() 
 async fn install_and_normal_routes_stay_isolated() {
     let spec = load_spec();
     let normal_app = build_router(test_app_state(), AuthMode::Disabled);
-    let install_app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let install_app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let paths = spec
         .get("paths")

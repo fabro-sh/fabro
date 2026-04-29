@@ -132,7 +132,7 @@ fn spec_path_from_manifest_dir(manifest_dir: &Path) -> PathBuf {
         .ancestors()
         .nth(3)
         .expect("fabro-api manifest dir should be nested under <repo>/lib/crates/fabro-api")
-        .join("docs/api-reference/fabro-api.yaml")
+        .join("docs/public/api-reference/fabro-api.yaml")
 }
 
 fn main() {
@@ -171,9 +171,10 @@ fn main() {
             "fabro_types::status::RunControlAction",
             &[],
         ),
+        ("RunSummary", "fabro_types::RunSummary", &[]),
         (
-            "RunStatusRecord",
-            "fabro_types::status::RunStatusRecord",
+            "RepositoryReference",
+            "fabro_types::RepositoryReference",
             &[],
         ),
         ("WorkflowSettings", "fabro_types::WorkflowSettings", &[]),
@@ -264,6 +265,11 @@ fn main() {
             &[],
         ),
         (
+            "LogDestination",
+            "fabro_types::settings::server::LogDestination",
+            &[],
+        ),
+        (
             "ServerIntegrationsSettings",
             "fabro_types::settings::server::ServerIntegrationsSettings",
             &[],
@@ -312,6 +318,11 @@ fn main() {
             "fabro_types::settings::run::MergeStrategy",
             &[],
         ),
+        ("SecretType", "fabro_types::SecretType", &[]),
+        ("DiffStats", "fabro_types::DiffStats", &[]),
+        ("PreRunPushOutcome", "fabro_types::PreRunPushOutcome", &[]),
+        ("DirtyStatus", "fabro_types::DirtyStatus", &[]),
+        ("GitContext", "fabro_types::GitContext", &[]),
     ];
     for (name, path, impls) in replacements {
         settings.with_replacement(*name, *path, impls.iter().copied());

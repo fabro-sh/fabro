@@ -1,8 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use fabro_api::types as api_types;
 use fabro_config::user::active_settings_path;
+use fabro_types::settings::replace_wildcard_host;
 pub(crate) use fabro_util::check_report::{
     CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
 };
@@ -19,15 +20,30 @@ pub(crate) fn check_config(settings_path: Option<PathBuf>) -> CheckResult {
     match settings_path {
         Some(path) => {
             let display = contract_tilde(&path);
-            CheckResult {
-                name:        "Configuration".to_string(),
-                status:      CheckStatus::Pass,
-                summary:     display.display().to_string(),
-                details:     vec![CheckDetail::new(format!(
-                    "Loaded from {}",
-                    display.display()
-                ))],
-                remediation: None,
+            let wildcard_urls = wildcard_public_url_details(&path);
+            let mut details = vec![CheckDetail::new(format!(
+                "Loaded from {}",
+                display.display()
+            ))];
+            if wildcard_urls.is_empty() {
+                CheckResult {
+                    name: "Configuration".to_string(),
+                    status: CheckStatus::Pass,
+                    summary: display.display().to_string(),
+                    details,
+                    remediation: None,
+                }
+            } else {
+                details.extend(wildcard_urls);
+                CheckResult {
+                    name:        "Configuration".to_string(),
+                    status:      CheckStatus::Warning,
+                    summary:     "wildcard public URL configured".to_string(),
+                    details,
+                    remediation: Some(
+                        "Replace wildcard public URLs with loopback or proxy URLs, then update the GitHub App callback URL.".to_string(),
+                    ),
+                }
             }
         }
         None => CheckResult {
@@ -40,6 +56,94 @@ pub(crate) fn check_config(settings_path: Option<PathBuf>) -> CheckResult {
             remediation: Some("Create ~/.fabro/settings.toml".to_string()),
         },
     }
+}
+
+struct WildcardPublicUrl {
+    field:      &'static str,
+    value:      String,
+    suggestion: String,
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Doctor synchronously reads one small local settings file while assembling a CLI report."
+)]
+fn wildcard_public_url_details(path: &Path) -> Vec<CheckDetail> {
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(doc) = contents.parse::<toml::Value>() else {
+        return Vec::new();
+    };
+
+    let mut bad_urls = Vec::new();
+    for (field, value) in [
+        (
+            "server.web.url",
+            toml_string_at(&doc, &["server", "web", "url"]),
+        ),
+        (
+            "server.api.url",
+            toml_string_at(&doc, &["server", "api", "url"]),
+        ),
+        (
+            "cli.target.url",
+            toml_string_at(&doc, &["cli", "target", "url"]),
+        ),
+    ] {
+        let Some(value) = value else {
+            continue;
+        };
+        let Some(suggestion) = replace_wildcard_host(value, "127.0.0.1") else {
+            continue;
+        };
+        bad_urls.push(WildcardPublicUrl {
+            field,
+            value: value.to_string(),
+            suggestion,
+        });
+    }
+
+    if bad_urls.is_empty() {
+        return Vec::new();
+    }
+
+    let mut details = bad_urls
+        .iter()
+        .map(|entry| CheckDetail {
+            text: format!(
+                "{} uses wildcard host {}; set it to {}",
+                entry.field, entry.value, entry.suggestion
+            ),
+            warn: true,
+        })
+        .collect::<Vec<_>>();
+
+    let callback_base = bad_urls
+        .iter()
+        .find(|entry| entry.field == "server.web.url")
+        .unwrap_or(&bad_urls[0])
+        .suggestion
+        .as_str();
+    let github_settings_url = toml_string_at(&doc, &["server", "integrations", "github", "slug"])
+        .map_or_else(
+            || "the GitHub App settings page".to_string(),
+            |slug| format!("https://github.com/settings/apps/{slug}"),
+        );
+    details.push(CheckDetail {
+        text: format!(
+            "Update the GitHub App Callback URL at {github_settings_url} -> General -> Callback URL to {callback_base}/auth/callback/github"
+        ),
+        warn: true,
+    });
+
+    details
+}
+
+fn toml_string_at<'a>(doc: &'a toml::Value, path: &[&str]) -> Option<&'a str> {
+    path.iter()
+        .try_fold(doc, |value, key| value.get(*key))
+        .and_then(toml::Value::as_str)
 }
 
 fn check_version_parity(server_version: &str) -> CheckResult {
@@ -331,6 +435,51 @@ mod tests {
         let result = check_config(None);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.remediation.is_some());
+    }
+
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "unit test stages a temporary settings.toml fixture with sync std::fs"
+    )]
+    fn check_config_warns_about_wildcard_public_urls() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("settings.toml");
+        std::fs::write(
+            &settings_path,
+            r#"
+_version = 1
+
+[server.web]
+url = "http://0.0.0.0:32276"
+
+[server.api]
+url = "http://0.0.0.0:32276"
+
+[server.integrations.github]
+slug = "octocat-fabro"
+
+[cli.target]
+type = "http"
+url = "http://0.0.0.0:32276"
+"#,
+        )
+        .unwrap();
+
+        let result = check_config(Some(settings_path));
+        assert_eq!(result.status, CheckStatus::Warning);
+        let details = result
+            .details
+            .iter()
+            .map(|detail| detail.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(details.contains("server.web.url"));
+        assert!(details.contains("server.api.url"));
+        assert!(details.contains("cli.target.url"));
+        assert!(details.contains("http://127.0.0.1:32276/auth/callback/github"));
+        assert!(details.contains("https://github.com/settings/apps/octocat-fabro"));
     }
 
     #[test]

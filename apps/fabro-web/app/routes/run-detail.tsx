@@ -10,7 +10,7 @@ import {
   isRunStatus,
   mapRunSummaryToRunItem,
   runStatusDisplay,
-  type RunSummaryResponse,
+  type RunSummary,
 } from "../data/runs";
 import { useDemoMode } from "../lib/demo-mode";
 import {
@@ -22,7 +22,7 @@ import {
   type PreviewMutationResult,
 } from "../lib/mutations";
 import { useRunEvents } from "../lib/run-events";
-import { useRun, useRunQuestionText } from "../lib/queries";
+import { useRun, useRunQuestionText, useRunState } from "../lib/queries";
 import {
   canArchive,
   canCancel,
@@ -78,7 +78,7 @@ export function lifecycleActionVisibility(status: string | null | undefined) {
   };
 }
 
-function buildRunDetailRun(summary: RunSummaryResponse): RunDetailRun {
+function buildRunDetailRun(summary: RunSummary): RunDetailRun {
   const item = mapRunSummaryToRunItem(summary);
   const rawStatus = summary.status;
   const statusKind = rawStatus.kind;
@@ -94,13 +94,22 @@ function buildRunDetailRun(summary: RunSummaryResponse): RunDetailRun {
   };
 }
 
+function sandboxWorkingDirectoryFromState(
+  state: { sandbox?: { working_directory?: unknown } | null } | null | undefined,
+): string | undefined {
+  const value = state?.sandbox?.working_directory;
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 export function meta({ data }: any) {
   const run = data?.run;
   return [{ title: run ? `${run.title} — Fabro` : "Run — Fabro" }];
 }
 
 export default function RunDetail({ params }: { params: { id: string } }) {
+  const demoMode = useDemoMode();
   const runQuery = useRun(params.id);
+  const runStateQuery = useRunState(demoMode ? undefined : params.id);
   const run = runQuery.data ? buildRunDetailRun(runQuery.data) : null;
   const statusKind = runQuery.data?.status?.kind;
   const blockedQuestion = useRunQuestionText(params.id, statusKind === "blocked");
@@ -111,7 +120,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const archiveMutation = useArchiveRun(params.id);
   const unarchiveMutation = useUnarchiveRun(params.id);
   const { push, dismiss } = useToast();
-  const demoMode = useDemoMode();
   const tabs = allTabs.filter((t) => !t.demoOnly || demoMode);
   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
 
@@ -138,9 +146,8 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       archiveMutation.data,
       lifecycleToastStateRef.current,
       { push, dismiss },
-      () => void unarchiveMutation.trigger(),
     );
-  }, [archiveMutation.data, dismiss, push, unarchiveMutation]);
+  }, [archiveMutation.data, dismiss, push]);
 
   useEffect(() => {
     lifecycleToastStateRef.current = handleLifecycleToastResult(
@@ -171,6 +178,8 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const cancelPending = cancelMutation.isMutating;
   const archivePending = archiveMutation.isMutating;
   const unarchivePending = unarchiveMutation.isMutating;
+  const sandboxWorkingDirectory =
+    run.sandboxWorkingDirectory ?? sandboxWorkingDirectoryFromState(runStateQuery.data);
 
   return (
     <div>
@@ -201,6 +210,22 @@ export default function RunDetail({ params }: { params: { id: string } }) {
               <span className="font-mono text-xs text-fg-muted">{run.elapsed}</span>
             )}
           </div>
+          {(run.sourceDirectory || sandboxWorkingDirectory) && (
+            <div className="mt-2 flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-xs text-fg-muted">
+              {run.sourceDirectory && (
+                <span className="min-w-0 max-w-full">
+                  <span className="text-fg-3">Source</span>{" "}
+                  <code className="font-mono break-all">{run.sourceDirectory}</code>
+                </span>
+              )}
+              {sandboxWorkingDirectory && (
+                <span className="min-w-0 max-w-full">
+                  <span className="text-fg-3">Sandbox</span>{" "}
+                  <code className="font-mono break-all">{sandboxWorkingDirectory}</code>
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
@@ -322,7 +347,6 @@ export function handleLifecycleToastResult(
   result: RunDetailActionResult | undefined,
   state: LifecycleToastState,
   toastApi: ToastApi,
-  onUnarchive?: () => void,
 ): LifecycleToastState {
   if (!result || result.intent !== intent) return state;
   if (state.lastProcessed[intent] === result) return state;
@@ -349,15 +373,9 @@ export function handleLifecycleToastResult(
   }
 
   if (intent === "archive") {
-    const archiveToast: Parameters<ToastApi["push"]>[0] = {
-      message: "Run archived.",
-    };
-    if (onUnarchive) {
-      archiveToast.action = { label: "Unarchive", onClick: onUnarchive };
-    }
     return {
       ...nextState,
-      activeArchiveToastId: toastApi.push(archiveToast),
+      activeArchiveToastId: toastApi.push({ message: "Run archived." }),
     };
   }
 

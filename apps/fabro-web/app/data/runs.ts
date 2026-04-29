@@ -2,7 +2,7 @@ import { formatElapsedSecs, formatDurationSecs } from "../lib/format";
 import type {
   RunListItem,
   RunStatus as ApiRunStatus,
-  StoreRunSummary,
+  RunSummary,
 } from "@qltysh/fabro-api-client";
 
 export type CiStatus = "passing" | "failing" | "pending";
@@ -33,6 +33,8 @@ export interface RunItem {
   comments?: number;
   question?: string;
   sandboxId?: string;
+  sandboxWorkingDirectory?: string;
+  sourceDirectory?: string;
 }
 
 export type ColumnStatus = "initializing" | "running" | "blocked" | "succeeded" | "failed";
@@ -80,13 +82,15 @@ export function mapRunListItem(item: RunListItem): RunItem {
     resources: item.sandbox?.resources ? `${item.sandbox.resources.cpu} CPU / ${item.sandbox.resources.memory} GB` : undefined,
     comments: item.pull_request?.comments,
     question: item.question?.text,
-    sandboxId: item.sandbox?.id,
+    sandboxId: item.sandbox?.id ?? undefined,
+    sandboxWorkingDirectory: item.sandbox?.working_directory ?? undefined,
+    sourceDirectory: item.source_directory ?? undefined,
   };
 }
 
-export type RunSummaryResponse = StoreRunSummary;
+export type { RunSummary };
 
-export function mapRunSummaryToRunItem(summary: RunSummaryResponse): RunItem {
+export function mapRunSummaryToRunItem(summary: RunSummary): RunItem {
   const lifecycleStatus = runStatusKind(summary.status);
   return {
     id: summary.run_id,
@@ -95,6 +99,7 @@ export function mapRunSummaryToRunItem(summary: RunSummaryResponse): RunItem {
     workflow: summary.workflow_slug ?? summary.workflow_name ?? "unknown",
     lifecycleStatus,
     lifecycleStatusLabel: lifecycleStatusLabel(summary.status),
+    sourceDirectory: summary.source_directory ?? undefined,
     elapsed:
       summary.elapsed_secs != null
         ? formatElapsedSecs(summary.elapsed_secs)

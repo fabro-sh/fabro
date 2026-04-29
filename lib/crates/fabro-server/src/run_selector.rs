@@ -30,19 +30,33 @@ impl fmt::Display for ResolveRunError {
     }
 }
 
-pub(crate) fn resolve_run_by_selector<'a, T, FRunId, FWorkflowSlug, FWorkflowName, FCreatedAt, K>(
+pub(crate) fn resolve_run_by_selector<
+    'a,
+    T,
+    FRunId,
+    FWorkflowSlug,
+    FWorkflowName,
+    FCreatedAt,
+    FCreatedAtLabel,
+    FRepoOriginUrl,
+    K,
+>(
     runs: &'a [T],
     selector: &str,
     run_id: FRunId,
     workflow_slug: FWorkflowSlug,
     workflow_name: FWorkflowName,
     created_at: FCreatedAt,
+    created_at_label: FCreatedAtLabel,
+    repo_origin_url: FRepoOriginUrl,
 ) -> Result<&'a T, ResolveRunError>
 where
     FRunId: Fn(&T) -> String,
     FWorkflowSlug: Fn(&T) -> Option<String>,
     FWorkflowName: Fn(&T) -> Option<String>,
     FCreatedAt: Fn(&T) -> K,
+    FCreatedAtLabel: Fn(&T) -> String,
+    FRepoOriginUrl: Fn(&T) -> Option<String>,
     K: Ord,
 {
     let selector = selector.trim();
@@ -59,7 +73,22 @@ where
         count if count > 1 => {
             return Err(ResolveRunError::AmbiguousPrefix {
                 selector: selector.to_string(),
-                matches:  id_matches.iter().map(|run| run_id(run)).collect(),
+                matches:  id_matches
+                    .iter()
+                    .map(|run| {
+                        let workflow = workflow_name(run)
+                            .or_else(|| workflow_slug(run))
+                            .unwrap_or_else(|| "-".to_string());
+                        let origin = repo_origin_url(run).unwrap_or_else(|| "-".to_string());
+                        format!(
+                            "{} created_at={} workflow={} origin={}",
+                            run_id(run),
+                            created_at_label(run),
+                            workflow,
+                            origin
+                        )
+                    })
+                    .collect(),
             });
         }
         _ => {}

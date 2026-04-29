@@ -97,7 +97,7 @@ pub fn credential_id_for(credential: &AuthCredential) -> Result<String, String> 
             "codex_oauth credentials are only valid for OpenAI, got {}",
             credential.provider
         )),
-        (provider, AuthDetails::ApiKey { .. }) => Ok(provider.as_str().to_string()),
+        (provider, AuthDetails::ApiKey { .. }) => Ok(provider.to_string()),
     }
 }
 

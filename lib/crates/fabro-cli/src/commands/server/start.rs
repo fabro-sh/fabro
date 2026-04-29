@@ -15,7 +15,7 @@ use fabro_server::jwt_auth::auth_method_name;
 use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs, resolve_runtime_server_settings_for_start};
 use fabro_server::{process_env_snapshot, validate_startup};
 use fabro_static::EnvVars;
-use fabro_types::settings::ServerAuthMethod;
+use fabro_types::settings::{LogDestination, ServerAuthMethod};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use tokio::net::{TcpStream, UnixStream};
@@ -67,6 +67,7 @@ pub(crate) async fn execute(
 
 pub(crate) async fn prepare_foreground_server_log(
     runtime_directory: &RuntimeDirectory,
+    destination: LogDestination,
 ) -> Result<ForegroundServerLogBootstrap> {
     let lock_file = acquire_lock(runtime_directory).await?;
     if let Some(existing) = ServerDaemon::load_running(runtime_directory)? {
@@ -77,13 +78,15 @@ pub(crate) async fn prepare_foreground_server_log(
         );
     }
 
-    let log_path = runtime_directory.log_path();
-    if let Some(parent) = log_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("creating log directory {}", parent.display()))?;
+    if destination == LogDestination::File {
+        let log_path = runtime_directory.log_path();
+        if let Some(parent) = log_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating log directory {}", parent.display()))?;
+        }
+        std::fs::File::create(&log_path)
+            .with_context(|| format!("creating server log file {}", log_path.display()))?;
     }
-    std::fs::File::create(&log_path)
-        .with_context(|| format!("creating server log file {}", log_path.display()))?;
 
     Ok(ForegroundServerLogBootstrap { lock_file })
 }
@@ -265,6 +268,12 @@ async fn execute_daemon(
     }
 
     let resolved_settings = resolve_runtime_server_settings_for_start(serve_args, storage_dir)?;
+    let destination = fabro_config::resolve_log_destination(resolved_settings.logging.destination)?;
+    if matches!(destination, LogDestination::Stdout) {
+        bail!(
+            "[server.logging].destination = \"stdout\" is incompatible with daemon mode; use `fabro server start --foreground`"
+        );
+    }
     validate_startup(
         runtime_directory.env_path().as_path(),
         process_env_snapshot(),
@@ -317,7 +326,7 @@ async fn execute_daemon(
 
     cmd.arg("--storage-dir").arg(storage_dir);
 
-    cmd.env_remove("FABRO_JSON");
+    cmd.env_remove(EnvVars::FABRO_JSON);
     cmd.stdout(stdout_log)
         .stderr(log_file)
         .stdin(std::process::Stdio::null());
@@ -363,8 +372,7 @@ async fn execute_daemon(
                         pid,
                         daemon.bind
                     );
-                    if let Bind::Tcp(addr) = &daemon.bind {
-                        let url = format!("http://{addr}");
+                    if let Some(url) = super::bind_to_browser_url(&daemon.bind) {
                         let styled = match styles {
                             Some(s) => format!("{}", s.cyan.apply_to(&url)),
                             None => url,
@@ -487,9 +495,55 @@ fn read_log_tail(log_path: &Path, lines: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use fabro_config::bind::BindRequest;
+    use fabro_server::serve::ServeArgs;
+    use fabro_static::EnvVars;
+    use fabro_types::settings::LogDestination;
     use fabro_util::Home;
+    use fabro_util::printer::Printer;
+    use temp_env::with_var;
+    use tokio::runtime::Runtime;
 
-    use super::ensure_storage_server_autostart_allowed;
+    use super::{
+        ensure_storage_server_autostart_allowed, execute_daemon, prepare_foreground_server_log,
+    };
+
+    fn runtime() -> Runtime {
+        Runtime::new().expect("runtime should build")
+    }
+
+    fn write_server_settings(path: &std::path::Path, destination: &str) {
+        std::fs::write(
+            path,
+            format!(
+                r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.logging]
+destination = "{destination}"
+"#
+            ),
+        )
+        .expect("settings fixture should write");
+    }
+
+    fn serve_args_with_config(config_path: &std::path::Path) -> ServeArgs {
+        ServeArgs {
+            bind: Some("127.0.0.1:0".to_string()),
+            web: false,
+            no_web: false,
+            model: None,
+            provider: None,
+            sandbox: None,
+            max_concurrent_runs: None,
+            config: Some(config_path.to_path_buf()),
+            #[cfg(debug_assertions)]
+            watch_web: false,
+        }
+    }
 
     #[test]
     fn ensure_server_running_for_storage_errors_when_install_mode_is_required() {
@@ -515,6 +569,89 @@ mod tests {
         assert!(
             message.contains("fabro install"),
             "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn prepare_foreground_server_log_with_stdout_does_not_create_server_log() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let runtime_directory = fabro_config::RuntimeDirectory::new(storage_dir.path());
+
+        let _bootstrap = runtime()
+            .block_on(prepare_foreground_server_log(
+                &runtime_directory,
+                LogDestination::Stdout,
+            ))
+            .expect("stdout foreground bootstrap should succeed");
+
+        assert!(
+            !runtime_directory.log_path().exists(),
+            "stdout destination should not create server.log"
+        );
+    }
+
+    #[test]
+    fn execute_daemon_rejects_configured_stdout_before_creating_server_log() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        let config_path = config_dir.path().join("settings.toml");
+        write_server_settings(&config_path, "stdout");
+
+        let bind = BindRequest::Tcp("127.0.0.1:0".parse().unwrap());
+        let serve_args = serve_args_with_config(&config_path);
+        let err = runtime()
+            .block_on(execute_daemon(
+                &bind,
+                &serve_args,
+                storage_dir.path(),
+                false,
+                None,
+                Printer::Silent,
+            ))
+            .expect_err("daemon mode should reject stdout logging");
+
+        assert!(
+            err.to_string().contains("incompatible with daemon mode"),
+            "unexpected error: {err}"
+        );
+        let runtime_directory = fabro_config::RuntimeDirectory::new(storage_dir.path());
+        assert!(
+            !runtime_directory.log_path().exists(),
+            "daemon rejection should happen before server.log is created"
+        );
+    }
+
+    #[test]
+    fn execute_daemon_rejects_invalid_env_destination_before_creating_server_log() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        let config_path = config_dir.path().join("settings.toml");
+        write_server_settings(&config_path, "file");
+
+        let bind = BindRequest::Tcp("127.0.0.1:0".parse().unwrap());
+        let serve_args = serve_args_with_config(&config_path);
+
+        with_var(EnvVars::FABRO_LOG_DESTINATION, Some("stdot"), || {
+            let err = runtime()
+                .block_on(execute_daemon(
+                    &bind,
+                    &serve_args,
+                    storage_dir.path(),
+                    false,
+                    None,
+                    Printer::Silent,
+                ))
+                .expect_err("daemon mode should reject invalid env destination");
+
+            let message = err.to_string();
+            assert!(message.contains(EnvVars::FABRO_LOG_DESTINATION));
+            assert!(message.contains("stdot"));
+        });
+
+        let runtime_directory = fabro_config::RuntimeDirectory::new(storage_dir.path());
+        assert!(
+            !runtime_directory.log_path().exists(),
+            "invalid env rejection should happen before server.log is created"
         );
     }
 }

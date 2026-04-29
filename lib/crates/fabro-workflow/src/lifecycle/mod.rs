@@ -41,6 +41,7 @@ use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt};
 use crate::run_control::RunControlState;
 use crate::run_options::RunOptions;
 use crate::runtime_store::RunStoreHandle;
+use crate::sandbox_metadata::SandboxGitRuntime;
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -87,6 +88,7 @@ impl WorkflowLifecycle {
         run_store: &RunStoreHandle,
         artifact_sink: Option<ArtifactSink>,
         run_options: &Arc<RunOptions>,
+        metadata_runtime: Arc<SandboxGitRuntime>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,
         run_control: Option<Arc<RunControlState>>,
@@ -104,8 +106,7 @@ impl WorkflowLifecycle {
             .as_ref()
             .and_then(|g| g.run_branch.as_ref())
             .is_some();
-        let local_git_checkpoint = has_run_branch && sandbox.host_git_dir().is_some();
-        let working_directory = if local_git_checkpoint {
+        let working_directory = if has_run_branch {
             Some(sandbox.working_directory().to_string())
         } else {
             None
@@ -149,6 +150,7 @@ impl WorkflowLifecycle {
             run_id: run_options.run_id,
             run_store: run_store.clone(),
             run_options: Arc::clone(run_options),
+            metadata_runtime,
             start_node_id,
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             last_git_sha,

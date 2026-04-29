@@ -1,7 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 use httpmock::MockServer;
 
-use super::support::setup_created_fast_dry_run;
+use super::support::setup_seeded_created_dry_run;
 
 #[test]
 fn help() {
@@ -158,7 +158,7 @@ fn system_prune_yes_uses_server_target_and_reports_deleted_runs() {
 #[test]
 fn system_prune_does_not_delete_active_or_submitted_runs() {
     let context = test_context!();
-    let run = setup_created_fast_dry_run(&context);
+    let run = setup_seeded_created_dry_run(&context);
     let mut cmd = context.command();
     cmd.args([
         "system",

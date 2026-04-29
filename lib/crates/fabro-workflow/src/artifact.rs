@@ -566,11 +566,11 @@ mod tests {
             _path: &str,
             _offset: Option<usize>,
             _limit: Option<usize>,
-        ) -> std::result::Result<String, String> {
-            Err("not implemented".to_string())
+        ) -> fabro_sandbox::Result<String> {
+            Err("not implemented".into())
         }
 
-        async fn write_file(&self, path: &str, content: &str) -> std::result::Result<(), String> {
+        async fn write_file(&self, path: &str, content: &str) -> fabro_sandbox::Result<()> {
             self.written
                 .lock()
                 .unwrap()
@@ -578,11 +578,11 @@ mod tests {
             Ok(())
         }
 
-        async fn delete_file(&self, _path: &str) -> std::result::Result<(), String> {
-            Err("not implemented".to_string())
+        async fn delete_file(&self, _path: &str) -> fabro_sandbox::Result<()> {
+            Err("not implemented".into())
         }
 
-        async fn file_exists(&self, _path: &str) -> std::result::Result<bool, String> {
+        async fn file_exists(&self, _path: &str) -> fabro_sandbox::Result<bool> {
             Ok(self.accessible)
         }
 
@@ -590,8 +590,8 @@ mod tests {
             &self,
             _path: &str,
             _depth: Option<usize>,
-        ) -> std::result::Result<Vec<fabro_agent::DirEntry>, String> {
-            Err("not implemented".to_string())
+        ) -> fabro_sandbox::Result<Vec<fabro_agent::DirEntry>> {
+            Err("not implemented".into())
         }
 
         async fn exec_command(
@@ -601,8 +601,8 @@ mod tests {
             _working_dir: Option<&str>,
             _env_vars: Option<&std::collections::HashMap<String, String>>,
             _cancel_token: Option<tokio_util::sync::CancellationToken>,
-        ) -> std::result::Result<fabro_agent::ExecResult, String> {
-            Err("not implemented".to_string())
+        ) -> fabro_sandbox::Result<fabro_agent::ExecResult> {
+            Err("not implemented".into())
         }
 
         async fn grep(
@@ -610,39 +610,39 @@ mod tests {
             _pattern: &str,
             _path: &str,
             _options: &fabro_agent::GrepOptions,
-        ) -> std::result::Result<Vec<String>, String> {
-            Err("not implemented".to_string())
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            Err("not implemented".into())
         }
 
         async fn glob(
             &self,
             _pattern: &str,
             _path: Option<&str>,
-        ) -> std::result::Result<Vec<String>, String> {
-            Err("not implemented".to_string())
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            Err("not implemented".into())
         }
 
         async fn download_file_to_local(
             &self,
             _remote_path: &str,
             _local_path: &std::path::Path,
-        ) -> std::result::Result<(), String> {
-            Err("not implemented".to_string())
+        ) -> fabro_sandbox::Result<()> {
+            Err("not implemented".into())
         }
 
         async fn upload_file_from_local(
             &self,
             _local_path: &std::path::Path,
             _remote_path: &str,
-        ) -> std::result::Result<(), String> {
-            Err("not implemented".to_string())
+        ) -> fabro_sandbox::Result<()> {
+            Err("not implemented".into())
         }
 
-        async fn initialize(&self) -> std::result::Result<(), String> {
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
 
-        async fn cleanup(&self) -> std::result::Result<(), String> {
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
 

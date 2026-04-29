@@ -1,11 +1,13 @@
 //! Sparse `[server]` settings layer definitions.
 
 use fabro_types::settings::server::{
-    GithubIntegrationStrategy, ObjectStoreProvider, ServerAuthMethod, WebhookStrategy,
+    GithubIntegrationStrategy, LogDestination, ObjectStoreProvider, ServerAuthMethod,
+    WebhookStrategy,
 };
 use fabro_types::settings::{Duration, InterpString};
 use serde::{Deserialize, Serialize};
 
+use super::LogFilter;
 use super::maps::StickyMap;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
@@ -179,11 +181,13 @@ pub struct ServerSchedulerLayer {
 }
 
 /// `[server.logging]` — process-owned logging configuration for the server.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerLoggingLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub level: Option<String>,
+    pub level:       Option<LogFilter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination: Option<LogDestination>,
 }
 
 /// `[server.integrations.<provider>]` — cohesive integration surface for chat

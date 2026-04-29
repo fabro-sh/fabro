@@ -6,6 +6,8 @@ import type {
   InstallLlmProviderInput,
   InstallObjectStoreInput,
   InstallObjectStoreSummary,
+  InstallSandboxInput,
+  InstallSandboxSummary,
   InstallSessionResponse,
 } from "@qltysh/fabro-api-client";
 
@@ -17,6 +19,8 @@ export type {
   InstallLlmProviderInput,
   InstallObjectStoreInput,
   InstallObjectStoreSummary,
+  InstallSandboxInput,
+  InstallSandboxSummary,
   InstallSessionResponse,
 };
 
@@ -154,6 +158,30 @@ export async function putInstallObjectStore(
     method:        "PUT",
     body:          input,
     errorFallback: "install object store request failed",
+  });
+}
+
+export async function testInstallSandbox(
+  token: string,
+  input: InstallSandboxInput,
+): Promise<void> {
+  await installRequest(token, {
+    path:          "/install/sandbox/test",
+    method:        "POST",
+    body:          input,
+    errorFallback: "install sandbox validation failed",
+  });
+}
+
+export async function putInstallSandbox(
+  token: string,
+  input: InstallSandboxInput,
+): Promise<void> {
+  await installRequest(token, {
+    path:          "/install/sandbox",
+    method:        "PUT",
+    body:          input,
+    errorFallback: "install sandbox request failed",
   });
 }
 

@@ -5,7 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
-use crate::{DirEntry, ExecResult, GrepOptions, Sandbox, shell_quote};
+use crate::sandbox::fetch_source_run_ref;
+use crate::{DirEntry, ExecResult, GitRunInfo, GitSetupIntent, GrepOptions, Sandbox, shell_quote};
 
 /// Git command prefix that disables background maintenance.
 const GIT: &str = "git -c maintenance.auto=0 -c gc.auto=0";
@@ -32,6 +33,7 @@ pub struct WorktreeOptions {
     /// Skip branch creation and hard reset (for resume, where branch already
     /// exists).
     pub skip_branch_creation: bool,
+    pub setup_intent:         Option<GitSetupIntent>,
 }
 
 /// Wraps any `Sandbox`, manages a git worktree lifecycle in
@@ -92,6 +94,18 @@ impl WorktreeSandbox {
             format!("{}/{path}", self.config.worktree_path)
         }
     }
+
+    async fn fetch_fork_source_if_needed(&self) -> crate::Result<()> {
+        if let Some(GitSetupIntent::ForkFromCheckpoint {
+            source_run_id,
+            checkpoint_sha,
+            ..
+        }) = self.config.setup_intent.as_ref()
+        {
+            fetch_source_run_ref(&*self.inner, source_run_id, checkpoint_sha).await?;
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +124,7 @@ impl Sandbox for WorktreeSandbox {
     /// 3. Add the worktree, emit `WorktreeAdded`.
     ///
     /// Does NOT call `inner.initialize()`.
-    async fn initialize(&self) -> Result<(), String> {
+    async fn initialize(&self) -> crate::Result<()> {
         if self
             .initialized
             .swap(true, std::sync::atomic::Ordering::Relaxed)
@@ -120,6 +134,8 @@ impl Sandbox for WorktreeSandbox {
         let path = shell_quote(&self.config.worktree_path);
         let branch = shell_quote(&self.config.branch_name);
         let sha = shell_quote(&self.config.base_sha);
+
+        self.fetch_fork_source_if_needed().await?;
 
         // Best-effort remove any stale worktree registration + directory first,
         // so that the branch is not "in use" when we try to force-update it.
@@ -145,11 +161,11 @@ impl Sandbox for WorktreeSandbox {
                 .exec_command(&cmd, 30_000, None, None, None)
                 .await?;
             if result.exit_code != 0 {
-                return Err(format!(
+                return Err(crate::Error::message(format!(
                     "git branch --force failed (exit {}): {}",
                     result.exit_code,
                     result.stderr.trim()
-                ));
+                )));
             }
             self.emit(WorktreeEvent::BranchCreated {
                 branch: self.config.branch_name.clone(),
@@ -171,11 +187,11 @@ impl Sandbox for WorktreeSandbox {
                     .exec_command(&rollback_cmd, 30_000, None, None, None)
                     .await;
             }
-            return Err(format!(
+            return Err(crate::Error::message(format!(
                 "git worktree add failed (exit {}): {}",
                 result.exit_code,
                 result.stderr.trim()
-            ));
+            )));
         }
         self.emit(WorktreeEvent::WorktreeAdded {
             path:   self.config.worktree_path.clone(),
@@ -187,7 +203,7 @@ impl Sandbox for WorktreeSandbox {
 
     /// No-op — the worktree must survive cleanup for `fabro cp` access.
     /// Worktrees are pruned separately by `system prune`.
-    async fn cleanup(&self) -> Result<(), String> {
+    async fn cleanup(&self) -> crate::Result<()> {
         Ok(())
     }
 
@@ -204,7 +220,7 @@ impl Sandbox for WorktreeSandbox {
         working_dir: Option<&str>,
         env_vars: Option<&HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
-    ) -> Result<ExecResult, String> {
+    ) -> crate::Result<ExecResult> {
         let wd = working_dir.unwrap_or(&self.config.worktree_path);
         self.inner
             .exec_command(command, timeout_ms, Some(wd), env_vars, cancel_token)
@@ -218,22 +234,22 @@ impl Sandbox for WorktreeSandbox {
         path: &str,
         offset: Option<usize>,
         limit: Option<usize>,
-    ) -> Result<String, String> {
+    ) -> crate::Result<String> {
         let resolved = self.resolve_path(path);
         self.inner.read_file(&resolved, offset, limit).await
     }
 
-    async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
+    async fn write_file(&self, path: &str, content: &str) -> crate::Result<()> {
         let resolved = self.resolve_path(path);
         self.inner.write_file(&resolved, content).await
     }
 
-    async fn delete_file(&self, path: &str) -> Result<(), String> {
+    async fn delete_file(&self, path: &str) -> crate::Result<()> {
         let resolved = self.resolve_path(path);
         self.inner.delete_file(&resolved).await
     }
 
-    async fn file_exists(&self, path: &str) -> Result<bool, String> {
+    async fn file_exists(&self, path: &str) -> crate::Result<bool> {
         let resolved = self.resolve_path(path);
         self.inner.file_exists(&resolved).await
     }
@@ -242,7 +258,7 @@ impl Sandbox for WorktreeSandbox {
         &self,
         path: &str,
         depth: Option<usize>,
-    ) -> Result<Vec<DirEntry>, String> {
+    ) -> crate::Result<Vec<DirEntry>> {
         let resolved = self.resolve_path(path);
         self.inner.list_directory(&resolved, depth).await
     }
@@ -252,12 +268,12 @@ impl Sandbox for WorktreeSandbox {
         pattern: &str,
         path: &str,
         options: &GrepOptions,
-    ) -> Result<Vec<String>, String> {
+    ) -> crate::Result<Vec<String>> {
         let resolved = self.resolve_path(path);
         self.inner.grep(pattern, &resolved, options).await
     }
 
-    async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
+    async fn glob(&self, pattern: &str, path: Option<&str>) -> crate::Result<Vec<String>> {
         let resolved = path.map(|p| self.resolve_path(p));
         let glob_path = resolved.as_deref().unwrap_or(&self.config.worktree_path);
         self.inner.glob(pattern, Some(glob_path)).await
@@ -267,7 +283,7 @@ impl Sandbox for WorktreeSandbox {
         &self,
         remote_path: &str,
         local_path: &Path,
-    ) -> Result<(), String> {
+    ) -> crate::Result<()> {
         let resolved = self.resolve_path(remote_path);
         self.inner
             .download_file_to_local(&resolved, local_path)
@@ -278,7 +294,7 @@ impl Sandbox for WorktreeSandbox {
         &self,
         local_path: &Path,
         remote_path: &str,
-    ) -> Result<(), String> {
+    ) -> crate::Result<()> {
         let resolved = self.resolve_path(remote_path);
         self.inner
             .upload_file_from_local(local_path, &resolved)
@@ -297,28 +313,48 @@ impl Sandbox for WorktreeSandbox {
         self.inner.sandbox_info()
     }
 
-    async fn refresh_push_credentials(&self) -> Result<(), String> {
+    async fn refresh_push_credentials(&self) -> crate::Result<()> {
         self.inner.refresh_push_credentials().await
     }
 
-    async fn set_autostop_interval(&self, minutes: i32) -> Result<(), String> {
+    async fn set_autostop_interval(&self, minutes: i32) -> crate::Result<()> {
         self.inner.set_autostop_interval(minutes).await
     }
 
-    fn host_git_dir(&self) -> Option<&str> {
-        Some(&self.config.worktree_path)
-    }
-
-    async fn setup_git_for_run(&self, run_id: &str) -> Result<Option<crate::GitRunInfo>, String> {
-        self.inner.setup_git_for_run(run_id).await
+    async fn setup_git(
+        &self,
+        intent: &crate::GitSetupIntent,
+    ) -> crate::Result<Option<crate::GitRunInfo>> {
+        if let GitSetupIntent::ForkFromCheckpoint {
+            source_run_id,
+            checkpoint_sha,
+            ..
+        } = intent
+        {
+            fetch_source_run_ref(&*self.inner, source_run_id, checkpoint_sha).await?;
+        }
+        Ok(Some(GitRunInfo {
+            base_sha:    self.config.base_sha.clone(),
+            run_branch:  self.config.branch_name.clone(),
+            base_branch: None,
+        }))
     }
 
     fn resume_setup_commands(&self, run_branch: &str) -> Vec<String> {
         self.inner.resume_setup_commands(run_branch)
     }
 
-    async fn git_push_branch(&self, branch: &str) -> bool {
-        self.inner.git_push_branch(branch).await
+    async fn git_push_ref(&self, refspec: &str) -> bool {
+        let has_origin = matches!(
+            self.exec_command("git remote get-url origin", 10_000, None, None, None)
+                .await,
+            Ok(result) if result.exit_code == 0
+        );
+        if !has_origin {
+            return true;
+        }
+
+        crate::git_push_via_exec(self, refspec).await
     }
 
     fn parallel_worktree_path(
@@ -332,7 +368,7 @@ impl Sandbox for WorktreeSandbox {
             .parallel_worktree_path(run_dir, run_id, node_id, key)
     }
 
-    async fn ssh_access_command(&self) -> Result<Option<String>, String> {
+    async fn ssh_access_command(&self) -> crate::Result<Option<String>> {
         self.inner.ssh_access_command().await
     }
 
@@ -343,7 +379,7 @@ impl Sandbox for WorktreeSandbox {
     async fn get_preview_url(
         &self,
         port: u16,
-    ) -> Result<Option<(String, HashMap<String, String>)>, String> {
+    ) -> crate::Result<Option<(String, HashMap<String, String>)>> {
         self.inner.get_preview_url(port).await
     }
 
@@ -375,6 +411,7 @@ mod tests {
             base_sha:             "abc123def456".to_string(),
             worktree_path:        wt_path.to_string(),
             skip_branch_creation: false,
+            setup_intent:         None,
         }
     }
 
@@ -384,6 +421,7 @@ mod tests {
             base_sha:             "abc123def456".to_string(),
             worktree_path:        wt_path.to_string(),
             skip_branch_creation: true,
+            setup_intent:         None,
         }
     }
 
@@ -450,6 +488,7 @@ mod tests {
             base_sha:             "deadbeef".to_string(),
             worktree_path:        "/tmp/my worktree".to_string(), // path with space
             skip_branch_creation: false,
+            setup_intent:         None,
         };
         let wt = WorktreeSandbox::new(inner, config);
 
@@ -531,7 +570,7 @@ mod tests {
         let result = wt.initialize().await;
 
         assert!(result.is_err(), "should return Err on non-zero exit");
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().to_string();
         assert!(
             err.contains("branch --force failed") || err.contains("128"),
             "error should mention the failure: {err}"
@@ -670,6 +709,7 @@ mod tests {
             base_sha:             "abc123".into(),
             worktree_path:        worktree.to_string_lossy().to_string(),
             skip_branch_creation: false,
+            setup_intent:         None,
         };
         let wt = WorktreeSandbox::new(inner, config);
 
@@ -711,6 +751,7 @@ mod tests {
             base_sha:             "abc123".into(),
             worktree_path:        worktree.to_string_lossy().to_string(),
             skip_branch_creation: false,
+            setup_intent:         None,
         };
         let wt = WorktreeSandbox::new(inner, config);
 
@@ -745,6 +786,7 @@ mod tests {
             base_sha:             "abc123".into(),
             worktree_path:        worktree.to_string_lossy().to_string(),
             skip_branch_creation: false,
+            setup_intent:         None,
         };
         let wt = WorktreeSandbox::new(inner, config);
 
@@ -771,6 +813,7 @@ mod tests {
             base_sha:             "sha123".to_string(),
             worktree_path:        "/path/to/wt".to_string(),
             skip_branch_creation: false,
+            setup_intent:         None,
         };
         let wt = WorktreeSandbox::new(inner, config);
 

@@ -1,0 +1,77 @@
+---
+title: "Server-backed rewind, setup polish, and diff stats"
+date: "2026-04-24"
+---
+
+<Warning>
+**`fabro rewind` now creates a replacement run instead of mutating the source run.** The source run is archived after rewind succeeds, and the new run ID is the one you should resume.
+
+To migrate:
+1. Read the new run ID printed by `fabro rewind`.
+2. Resume or inspect that replacement run instead of assuming the original run ID changed in place.
+</Warning>
+
+<Warning>
+**`fabro pr list` has been removed.** Remove scripts that still call it and use the run detail surfaces that own pull request creation state.
+</Warning>
+
+## Server-backed rewind and fork
+
+`fabro rewind` now creates a replacement run at the target checkpoint and archives the source run instead of mutating the source run in place. The command prints the new run ID:
+
+```bash
+fabro rewind <run-id> plan@2
+fabro resume <new-run-id>
+```
+
+The source run records which run superseded it, so archived run history keeps a clear audit trail. Rewind requires the source to be terminal (`succeeded`, `failed`, or `dead`).
+
+`fabro fork`, `fabro rewind`, and their `--list` modes now use the server API. The server must be able to read the run's recorded working directory. Timeline listing no longer rebuilds a missing metadata branch; if the metadata branch is gone, the timeline is empty until metadata is restored.
+
+## Smoother setup and local auth
+
+Self-hosted setup is easier to complete from the browser and the CLI. The install wizard now works from the server root, exposes the local object store root, treats the AWS access key ID as readable text, and the server start banner prints the install token on its own copyable line.
+
+Dev-token credentials are now stored in the same auth store as OAuth credentials, so CLI targets resolve credentials consistently whether the server is reached through TCP or a Unix socket.
+
+```bash
+fabro auth login --dev-token
+```
+
+## More
+
+<Accordion title="API">
+- New `POST /api/v1/runs/{id}/rewind` endpoint creates the replacement run and archives the source run
+- New `POST /api/v1/runs/{id}/fork` endpoint forks a run from the server-side run record
+- New `GET /api/v1/runs/{id}/timeline` endpoint returns checkpoint timeline entries from run metadata
+- `GET /api/v1/runs/{id}/files` responses now include aggregate additions and deletions in `meta.stats`
+- Install prefill and object-store responses now include local object store root details
+- Run summaries now include `superseded_by` data for rewound source runs
+</Accordion>
+
+<Accordion title="CLI">
+- Removed the obsolete `fabro pr list` command
+- `fabro fork`, `fabro rewind`, and timeline listing now call the server API
+- Fatal CLI errors now use styled diagnostics while preserving exit codes, telemetry, and auth help hints
+- Server start output now prints the install token on a separate copyable line
+- Added `fabro auth login --dev-token` for saving dev-token credentials in the auth store
+</Accordion>
+
+<Accordion title="Workflows">
+- Disabled git signing for sandbox checkpoint commits so local signing configuration does not block workflow bookkeeping
+</Accordion>
+
+<Accordion title="Improvements">
+- Run Files now shows aggregate `+/-` diff stats beside the file count
+- Run Files now uses a PR-style header with captured time, refresh, and Split/Stacked controls in one row
+- Credentials embedded in URLs are redacted in logs and error output
+- CLI and user-configuration reference docs are generated and checked for drift
+- Updated the quick start with supported platform details
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed the install wizard not mounting at the root route
+- Fixed the local object store root missing from install wizard configuration
+- Changed the AWS access key ID field to a readable text input
+- Changed the install wizard token field to a single-line input
+</Accordion>

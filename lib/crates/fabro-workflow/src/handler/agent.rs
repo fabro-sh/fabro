@@ -254,7 +254,7 @@ impl Handler for AgentHandler {
         let prompt_provider = node
             .provider()
             .map(String::from)
-            .or_else(|| Some(services.run.provider.as_str().to_string()));
+            .or_else(|| Some(services.run.provider.to_string()));
         let prompt_model = node.model().map(String::from);
         let stage_scope = StageScope::for_handler(context, &node.id);
         services.run.emitter.emit_scoped(
@@ -331,7 +331,7 @@ impl Handler for AgentHandler {
         let response_provider = node
             .provider()
             .map(String::from)
-            .or_else(|| Some(services.run.provider.as_str().to_string()))
+            .or_else(|| Some(services.run.provider.to_string()))
             .unwrap_or_default();
         services.run.emitter.emit_scoped(
             &Event::PromptCompleted {

@@ -120,13 +120,6 @@ impl Provider {
             Self::OpenAiCompatible => "OpenAI Compatible",
         }
     }
-
-    /// Stable lowercase string representation used in `Request.provider`,
-    /// adapter names, and other serialization boundaries.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        self.into()
-    }
 }
 
 #[cfg(test)]
@@ -150,17 +143,20 @@ mod tests {
 
     #[test]
     fn kimi_as_str() {
-        assert_eq!(Provider::Kimi.as_str(), "kimi");
+        assert_eq!(Provider::Kimi.to_string(), "kimi");
+        assert_eq!(<&'static str>::from(Provider::Kimi), "kimi");
     }
 
     #[test]
     fn zai_as_str() {
-        assert_eq!(Provider::Zai.as_str(), "zai");
+        assert_eq!(Provider::Zai.to_string(), "zai");
+        assert_eq!(<&'static str>::from(Provider::Zai), "zai");
     }
 
     #[test]
     fn minimax_as_str() {
-        assert_eq!(Provider::Minimax.as_str(), "minimax");
+        assert_eq!(Provider::Minimax.to_string(), "minimax");
+        assert_eq!(<&'static str>::from(Provider::Minimax), "minimax");
     }
 
     #[test]
@@ -177,7 +173,8 @@ mod tests {
 
     #[test]
     fn inception_as_str() {
-        assert_eq!(Provider::Inception.as_str(), "inception");
+        assert_eq!(Provider::Inception.to_string(), "inception");
+        assert_eq!(<&'static str>::from(Provider::Inception), "inception");
     }
 
     #[test]

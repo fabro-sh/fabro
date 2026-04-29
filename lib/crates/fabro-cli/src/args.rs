@@ -236,6 +236,10 @@ pub(crate) struct RunArgs {
     #[arg(long, value_enum)]
     pub(crate) sandbox: Option<CliSandboxProvider>,
 
+    /// Run directly in the source checkout without git checkpoints
+    #[arg(long, conflicts_with = "sandbox")]
+    pub(crate) in_place: bool,
+
     /// Attach a label to this run (repeatable, format: KEY=VALUE)
     #[arg(long = "label", value_name = "KEY=VALUE")]
     pub(crate) label: Vec<String>,
@@ -384,9 +388,6 @@ pub(crate) struct LogsArgs {
 
 #[derive(Args)]
 pub(crate) struct ValidateArgs {
-    #[command(flatten)]
-    pub(crate) target: ServerTargetArgs,
-
     /// Path to the .fabro workflow file
     pub(crate) workflow: PathBuf,
 }
@@ -633,10 +634,6 @@ pub(crate) struct RewindArgs {
     /// Show the checkpoint timeline instead of rewinding
     #[arg(long)]
     pub(crate) list: bool,
-
-    /// Skip force-pushing rewound refs to the remote
-    #[arg(long)]
-    pub(crate) no_push: bool,
 }
 
 #[derive(Debug, Args)]
@@ -654,10 +651,6 @@ pub(crate) struct ForkArgs {
     /// Show the checkpoint timeline instead of forking
     #[arg(long)]
     pub(crate) list: bool,
-
-    /// Skip pushing new branches to the remote
-    #[arg(long)]
-    pub(crate) no_push: bool,
 }
 
 #[derive(Args)]

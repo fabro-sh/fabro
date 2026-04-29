@@ -2,9 +2,3 @@ _version = 1
 
 [workflow]
 graph = "workflow.fabro"
-
-[run.sandbox]
-provider = "local"
-
-[run.sandbox.local]
-worktree_mode = "always"

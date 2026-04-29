@@ -97,6 +97,7 @@ pub struct AppInfo {
 pub struct GitHubAppCredentials {
     pub app_id:          String,
     pub private_key_pem: String,
+    pub slug:            Option<String>,
 }
 
 impl GitHubAppCredentials {
@@ -112,6 +113,13 @@ impl GitHubAppCredentials {
     }
 
     pub fn from_env(app_id: Option<&str>) -> Result<Option<Self>, String> {
+        Self::from_env_with_slug(app_id, None)
+    }
+
+    pub fn from_env_with_slug(
+        app_id: Option<&str>,
+        slug: Option<&str>,
+    ) -> Result<Option<Self>, String> {
         let Some(app_id) = app_id else {
             return Ok(None);
         };
@@ -121,7 +129,17 @@ impl GitHubAppCredentials {
         Ok(Some(Self {
             app_id: app_id.to_string(),
             private_key_pem,
+            slug: slug
+                .map(str::trim)
+                .filter(|slug| !slug.is_empty())
+                .map(str::to_string),
         }))
+    }
+
+    pub fn installation_url(&self, owner: &str) -> Option<String> {
+        self.slug.as_ref().map(|slug| {
+            format!("https://github.com/organizations/{owner}/settings/apps/{slug}/installations")
+        })
     }
 }
 
@@ -136,6 +154,13 @@ impl GitHubCredentials {
         Ok(GitHubAppCredentials::from_env(app_id)?.map(Self::App))
     }
 
+    pub fn from_env_with_slug(
+        app_id: Option<&str>,
+        slug: Option<&str>,
+    ) -> Result<Option<Self>, String> {
+        Ok(GitHubAppCredentials::from_env_with_slug(app_id, slug)?.map(Self::App))
+    }
+
     async fn resolve_bearer_token(
         &self,
         client: &impl HttpClient,
@@ -147,13 +172,15 @@ impl GitHubCredentials {
         match self {
             Self::App(creds) => {
                 let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
-                create_installation_access_token_with_permissions(
+                let install_url = creds.installation_url(owner);
+                create_installation_access_token_with_permissions_and_install_url(
                     client,
                     &jwt,
                     owner,
                     repo,
                     base_url,
                     permissions,
+                    install_url.as_deref(),
                 )
                 .await
             }
@@ -358,6 +385,27 @@ pub async fn create_installation_access_token_with_permissions(
     base_url: &str,
     permissions: serde_json::Value,
 ) -> Result<String, String> {
+    create_installation_access_token_with_permissions_and_install_url(
+        client,
+        jwt,
+        owner,
+        repo,
+        base_url,
+        permissions,
+        None,
+    )
+    .await
+}
+
+pub async fn create_installation_access_token_with_permissions_and_install_url(
+    client: &impl HttpClient,
+    jwt: &str,
+    owner: &str,
+    repo: &str,
+    base_url: &str,
+    permissions: serde_json::Value,
+    install_url: Option<&str>,
+) -> Result<String, String> {
     #[derive(Deserialize)]
     struct Installation {
         id: u64,
@@ -369,19 +417,28 @@ pub async fn create_installation_access_token_with_permissions(
     }
 
     // Step 1: Find the installation for this repo
-    let install_url = format!("{base_url}/repos/{owner}/{repo}/installation");
+    let installation_endpoint = format!("{base_url}/repos/{owner}/{repo}/installation");
     let auth = format!("Bearer {jwt}");
     let resp = client
-        .request(HttpMethod::Get, &install_url, &github_headers(&auth), None)
+        .request(
+            HttpMethod::Get,
+            &installation_endpoint,
+            &github_headers(&auth),
+            None,
+        )
         .await
         .map_err(|e| format!("Failed to look up GitHub App installation: {e}"))?;
 
     match resp.status {
         200 => {}
         404 => {
+            let install_url = install_url.map_or_else(
+                || format!("https://github.com/organizations/{owner}/settings/installations"),
+                str::to_string,
+            );
             return Err(format!(
                 "GitHub App is not installed for {owner}. \
-                 Install it at https://github.com/organizations/{owner}/settings/installations"
+                 Install it at {install_url}"
             ));
         }
         403 => {
@@ -1601,6 +1658,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_iat_not_installed_uses_app_specific_install_url() {
+        let mock =
+            MockHttpClient::new().on(HttpMethod::Get, "/repos/owner/repo/installation", 404, "");
+        let install_url =
+            "https://github.com/organizations/owner/settings/apps/fabro-test/installations";
+
+        let err = create_installation_access_token_with_permissions_and_install_url(
+            &mock,
+            "jwt",
+            "owner",
+            "repo",
+            "",
+            serde_json::json!({ "contents": "write" }),
+            Some(install_url),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.contains("not installed"), "got: {err}");
+        assert!(err.contains(install_url), "got: {err}");
+        assert!(
+            !err.contains("https://github.com/organizations/owner/settings/installations"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
     async fn create_iat_suspended() {
         let mock =
             MockHttpClient::new().on(HttpMethod::Get, "/repos/owner/repo/installation", 403, "");
@@ -1706,6 +1790,7 @@ mod tests {
         let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
+            slug:            None,
         });
         let result = branch_exists_with_client(
             &mock,
@@ -1744,6 +1829,7 @@ mod tests {
         let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
+            slug:            None,
         });
         let result = branch_exists_with_client(
             &mock,
@@ -1782,6 +1868,7 @@ mod tests {
         let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
+            slug:            None,
         });
         let result = branch_exists_with_client(
             &mock,
@@ -1943,6 +2030,7 @@ mod tests {
         let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
+            slug:            None,
         });
         let detail = get_pull_request_with_client(
             &mock,
@@ -1988,6 +2076,7 @@ mod tests {
         let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
+            slug:            None,
         });
         let err = get_pull_request_with_client(
             &mock,
@@ -2084,6 +2173,7 @@ mod tests {
         let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
+            slug:            None,
         });
         merge_pull_request_with_client(
             &mock,
@@ -2118,6 +2208,7 @@ mod tests {
         let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
+            slug:            None,
         });
         let err = merge_pull_request_with_client(
             &mock,
@@ -2153,6 +2244,7 @@ mod tests {
         let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
+            slug:            None,
         });
         let err = merge_pull_request_with_client(
             &mock,
@@ -2197,6 +2289,7 @@ mod tests {
         let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
+            slug:            None,
         });
         close_pull_request_with_client(&mock, &GitHubContext::new(&creds, ""), "owner", "repo", 42)
             .await
@@ -2224,6 +2317,7 @@ mod tests {
         let creds = GitHubCredentials::App(GitHubAppCredentials {
             app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
+            slug:            None,
         });
         let err = close_pull_request_with_client(
             &mock,

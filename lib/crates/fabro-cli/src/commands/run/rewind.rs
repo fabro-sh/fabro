@@ -35,7 +35,6 @@ pub(crate) async fn run(
     let result = client
         .rewind_run(&run_id, RewindRequest {
             target: Some(target),
-            push:   Some(!args.no_push),
         })
         .await?;
     let response = result.response;

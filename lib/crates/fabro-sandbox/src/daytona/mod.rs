@@ -12,6 +12,7 @@ use tokio::sync::OnceCell;
 use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
+use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
 use crate::sandbox::resolve_path;
 use crate::{
     DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
@@ -39,26 +40,37 @@ async fn build_daytona_client(
     daytona_sdk::Client::new_with_config(sdk_config).await
 }
 
+/// Validate a Daytona API key by performing a single authenticated call. Used
+/// at install time to confirm the operator-provided credential is accepted by
+/// the Daytona control plane before persisting it. The call requests a single
+/// sandbox listing entry to keep latency and quota impact minimal.
+pub async fn validate_daytona_api_key(api_key: String) -> Result<(), daytona_sdk::DaytonaError> {
+    let client = build_daytona_client(Some(api_key)).await?;
+    client.list(None, Some(1), Some(1)).await?;
+    Ok(())
+}
+
 fn elapsed_ms(start: &Instant) -> u64 {
     u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 /// Sandbox that runs all operations inside a Daytona cloud sandbox.
 pub struct DaytonaSandbox {
-    config:         DaytonaConfig,
-    client:         daytona_sdk::Client,
-    github_app:     Option<GitHubCredentials>,
-    sandbox:        OnceCell<daytona_sdk::Sandbox>,
-    rg_available:   OnceCell<bool>,
-    event_callback: Option<SandboxEventCallback>,
+    config:           DaytonaConfig,
+    client:           daytona_sdk::Client,
+    github_app:       Option<GitHubCredentials>,
+    sandbox:          OnceCell<daytona_sdk::Sandbox>,
+    rg_available:     OnceCell<bool>,
+    event_callback:   Option<SandboxEventCallback>,
     /// HTTPS origin URL stored after clone so we can refresh push credentials
     /// later.
-    origin_url:     OnceCell<String>,
-    run_id:         Option<RunId>,
+    origin_url:       OnceCell<String>,
+    repo_cloned:      OnceCell<bool>,
+    run_id:           Option<RunId>,
+    clone_origin_url: Option<String>,
     /// Explicit branch to clone. When set, overrides the branch detected by
-    /// `detect_repo_info` — avoids cloning a local-only worktree branch
-    /// (e.g. `fabro/run/...`) that was never pushed to origin.
-    clone_branch:   Option<String>,
+    /// the submitted run spec.
+    clone_branch:     Option<String>,
 }
 
 impl DaytonaSandbox {
@@ -70,12 +82,13 @@ impl DaytonaSandbox {
         config: DaytonaConfig,
         github_app: Option<GitHubCredentials>,
         run_id: Option<RunId>,
+        clone_origin_url: Option<String>,
         clone_branch: Option<String>,
         api_key: Option<String>,
-    ) -> Result<Self, String> {
+    ) -> crate::Result<Self> {
         let client = build_daytona_client(api_key)
             .await
-            .map_err(|e| format!("Failed to create Daytona client: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to create Daytona client", e))?;
         Ok(Self {
             config,
             client,
@@ -84,7 +97,9 @@ impl DaytonaSandbox {
             rg_available: OnceCell::const_new(),
             event_callback: None,
             origin_url: OnceCell::new(),
+            repo_cloned: OnceCell::new(),
             run_id,
+            clone_origin_url,
             clone_branch,
         })
     }
@@ -93,16 +108,32 @@ impl DaytonaSandbox {
     ///
     /// Creates the client internally and fetches the sandbox, replacing the old
     /// `from_existing()` + manual client/get boilerplate at call sites.
-    pub async fn reconnect(sandbox_name: &str, api_key: Option<String>) -> Result<Self, String> {
+    pub async fn reconnect(
+        sandbox_name: &str,
+        api_key: Option<String>,
+        repo_cloned: bool,
+        clone_origin_url: Option<String>,
+        clone_branch: Option<String>,
+    ) -> crate::Result<Self> {
         let client = build_daytona_client(api_key)
             .await
-            .map_err(|e| format!("Failed to create Daytona client: {e}"))?;
-        let sdk_sandbox = client
-            .get(sandbox_name)
-            .await
-            .map_err(|e| format!("Failed to reconnect to Daytona sandbox '{sandbox_name}': {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to create Daytona client", e))?;
+        let sdk_sandbox = client.get(sandbox_name).await.map_err(|e| {
+            crate::Error::context(
+                format!("Failed to reconnect to Daytona sandbox '{sandbox_name}'"),
+                e,
+            )
+        })?;
         let sandbox_cell = OnceCell::new();
         let _ = sandbox_cell.set(sdk_sandbox);
+        let origin_url = OnceCell::new();
+        if repo_cloned {
+            if let Some(origin) = clone_origin_url.as_ref() {
+                let _ = origin_url.set(origin.clone());
+            }
+        }
+        let repo_cloned_cell = OnceCell::new();
+        let _ = repo_cloned_cell.set(repo_cloned);
         Ok(Self {
             config: DaytonaConfig::default(),
             client,
@@ -110,9 +141,11 @@ impl DaytonaSandbox {
             sandbox: sandbox_cell,
             rg_available: OnceCell::const_new(),
             event_callback: None,
-            origin_url: OnceCell::new(),
+            origin_url,
+            repo_cloned: repo_cloned_cell,
             run_id: None,
-            clone_branch: None,
+            clone_origin_url,
+            clone_branch,
         })
     }
 
@@ -123,31 +156,30 @@ impl DaytonaSandbox {
     /// Get the `ComputerUseService` for this sandbox.
     ///
     /// Requires the sandbox to be initialized first.
-    pub async fn computer_use(&self) -> Result<daytona_sdk::ComputerUseService, String> {
+    pub async fn computer_use(&self) -> crate::Result<daytona_sdk::ComputerUseService> {
         let sandbox = self.sandbox()?;
         sandbox
             .computer_use()
             .await
-            .map_err(|e| format!("Failed to get computer use service: {e}"))
+            .map_err(|e| crate::Error::context("Failed to get computer use service", e))
     }
 
     /// Create SSH access and return the connection command string.
-    pub async fn create_ssh_access(&self, ttl_minutes: Option<f64>) -> Result<String, String> {
+    pub async fn create_ssh_access(&self, ttl_minutes: Option<f64>) -> crate::Result<String> {
         let sandbox = self.sandbox()?;
         let dto = sandbox
             .create_ssh_access(ttl_minutes)
             .await
-            .map_err(|e| format!("Failed to create SSH access: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to create SSH access", e))?;
         Ok(dto.ssh_command)
     }
 
     /// Get a preview link (URL + token) for a port on this sandbox.
-    pub async fn get_preview_link(&self, port: u16) -> Result<daytona_sdk::PreviewLink, String> {
+    pub async fn get_preview_link(&self, port: u16) -> crate::Result<daytona_sdk::PreviewLink> {
         let sandbox = self.sandbox()?;
-        sandbox
-            .get_preview_link(port)
-            .await
-            .map_err(|e| format!("Failed to get preview link for port {port}: {e}"))
+        sandbox.get_preview_link(port).await.map_err(|e| {
+            crate::Error::context(format!("Failed to get preview link for port {port}"), e)
+        })
     }
 
     /// Get a signed preview URL for a port on this sandbox.
@@ -155,12 +187,17 @@ impl DaytonaSandbox {
         &self,
         port: u16,
         expires_in_seconds: Option<i32>,
-    ) -> Result<SignedPortPreviewUrl, String> {
+    ) -> crate::Result<SignedPortPreviewUrl> {
         let sandbox = self.sandbox()?;
         sandbox
             .get_signed_preview_url(i32::from(port), expires_in_seconds)
             .await
-            .map_err(|e| format!("Failed to get signed preview URL for port {port}: {e}"))
+            .map_err(|e| {
+                crate::Error::context(
+                    format!("Failed to get signed preview URL for port {port}"),
+                    e,
+                )
+            })
     }
 
     fn emit(&self, event: SandboxEvent) {
@@ -168,6 +205,17 @@ impl DaytonaSandbox {
         if let Some(ref cb) = self.event_callback {
             cb(event);
         }
+    }
+
+    fn fail_init(&self, init_start: Instant, err: crate::Error) -> crate::Error {
+        let duration_ms = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.emit(SandboxEvent::InitializeFailed {
+            provider: "daytona".into(),
+            error: err.to_string(),
+            causes: err.causes(),
+            duration_ms,
+        });
+        err
     }
 
     #[allow(
@@ -179,10 +227,14 @@ impl DaytonaSandbox {
     }
 
     /// Get the sandbox, returning an error if not yet initialized.
-    fn sandbox(&self) -> Result<&daytona_sdk::Sandbox, String> {
-        self.sandbox
-            .get()
-            .ok_or_else(|| "Daytona sandbox not initialized — call initialize() first".to_string())
+    fn sandbox(&self) -> crate::Result<&daytona_sdk::Sandbox> {
+        self.sandbox.get().ok_or_else(|| {
+            crate::Error::message("Daytona sandbox not initialized — call initialize() first")
+        })
+    }
+
+    fn repo_cloned(&self) -> bool {
+        self.repo_cloned.get().copied().unwrap_or(false)
     }
 
     /// Build `SandboxBaseParams` from config, generating a unique sandbox name.
@@ -218,19 +270,19 @@ impl DaytonaSandbox {
     /// If the snapshot doesn't exist and a dockerfile is provided, creates it
     /// and polls until it reaches `Active` state. Returns an error if the
     /// snapshot is in a terminal failure state.
-    async fn ensure_snapshot(&self, snap_cfg: &DaytonaSnapshotConfig) -> Result<(), String> {
+    async fn ensure_snapshot(&self, snap_cfg: &DaytonaSnapshotConfig) -> crate::Result<()> {
         match self.client.snapshot.get(&snap_cfg.name).await {
             Ok(dto) => {
                 use daytona_api_client::models::SnapshotState;
                 match dto.state {
                     SnapshotState::Active => return Ok(()),
                     SnapshotState::Error | SnapshotState::BuildFailed => {
-                        return Err(format!(
+                        return Err(crate::Error::message(format!(
                             "Snapshot '{}' is in state '{}': {}",
                             snap_cfg.name,
                             dto.state,
                             dto.error_reason.unwrap_or_default()
-                        ));
+                        )));
                     }
                     _ => {
                         // Building/Pending/Pulling — fall through to poll
@@ -241,16 +293,16 @@ impl DaytonaSandbox {
                 let dockerfile = match &snap_cfg.dockerfile {
                     Some(DockerfileSource::Inline(s)) => s.as_str(),
                     Some(DockerfileSource::Path { .. }) => {
-                        return Err(format!(
+                        return Err(crate::Error::message(format!(
                             "Snapshot '{}': dockerfile path should have been resolved to inline content before sandbox creation",
                             snap_cfg.name
-                        ));
+                        )));
                     }
                     None => {
-                        return Err(format!(
+                        return Err(crate::Error::message(format!(
                             "Snapshot '{}' does not exist and no dockerfile provided to create it",
                             snap_cfg.name
-                        ));
+                        )));
                     }
                 };
 
@@ -267,14 +319,18 @@ impl DaytonaSandbox {
                     }),
                     entrypoint: None,
                 };
-                self.client
-                    .snapshot
-                    .create(&params)
-                    .await
-                    .map_err(|e| format!("Failed to create snapshot '{}': {e}", snap_cfg.name))?;
+                self.client.snapshot.create(&params).await.map_err(|e| {
+                    crate::Error::context(
+                        format!("Failed to create snapshot '{}'", snap_cfg.name),
+                        e,
+                    )
+                })?;
             }
             Err(e) => {
-                return Err(format!("Failed to get snapshot '{}': {e}", snap_cfg.name));
+                return Err(crate::Error::context(
+                    format!("Failed to get snapshot '{}'", snap_cfg.name),
+                    e,
+                ));
             }
         }
 
@@ -284,7 +340,7 @@ impl DaytonaSandbox {
 
     /// Poll a snapshot until it reaches `Active` state, with exponential
     /// back-off.
-    async fn poll_snapshot_active(&self, name: &str) -> Result<(), String> {
+    async fn poll_snapshot_active(&self, name: &str) -> crate::Result<()> {
         use daytona_api_client::models::SnapshotState;
         let mut delay = std::time::Duration::from_secs(2);
         let max_delay = std::time::Duration::from_secs(30);
@@ -292,21 +348,18 @@ impl DaytonaSandbox {
 
         while Instant::now() < deadline {
             time::sleep(delay).await;
-            let dto = self
-                .client
-                .snapshot
-                .get(name)
-                .await
-                .map_err(|e| format!("Failed to poll snapshot '{name}': {e}"))?;
+            let dto = self.client.snapshot.get(name).await.map_err(|e| {
+                crate::Error::context(format!("Failed to poll snapshot '{name}'"), e)
+            })?;
 
             match dto.state {
                 SnapshotState::Active => return Ok(()),
                 SnapshotState::Error | SnapshotState::BuildFailed => {
-                    return Err(format!(
+                    return Err(crate::Error::message(format!(
                         "Snapshot '{name}' failed ({}): {}",
                         dto.state,
                         dto.error_reason.unwrap_or_default()
-                    ));
+                    )));
                 }
                 _ => {
                     delay = (delay * 2).min(max_delay);
@@ -314,48 +367,29 @@ impl DaytonaSandbox {
             }
         }
 
-        Err(format!(
+        Err(crate::Error::message(format!(
             "Timed out waiting for snapshot '{name}' to become active"
-        ))
+        )))
     }
-}
-
-use fabro_github::ssh_url_to_https;
-
-/// Parameters for cloning a git repo into the sandbox during initialization.
-#[derive(Clone, Debug)]
-pub struct GitCloneParams {
-    /// Clean HTTPS URL (no embedded credentials).
-    pub url:    String,
-    /// Branch to clone. If None, uses the remote's default.
-    pub branch: Option<String>,
-}
-
-pub fn detect_clone_params(cwd: &Path) -> Option<GitCloneParams> {
-    let (detected_url, branch) = match detect_repo_info(cwd) {
-        Ok(info) => info,
-        Err(err) => {
-            tracing::warn!("No git repo detected for sandbox clone: {err}");
-            return None;
-        }
-    };
-    let url = fabro_github::ssh_url_to_https(&detected_url);
-    Some(GitCloneParams { url, branch })
 }
 
 /// Detect the git remote URL and current branch from a local repository.
 ///
 /// Uses `git2` to discover the repo at `path`, reads the `origin` remote URL
 /// and the HEAD branch name.
-pub fn detect_repo_info(path: &Path) -> Result<(String, Option<String>), String> {
-    let repo = git2::Repository::discover(path)
-        .map_err(|e| format!("Failed to discover git repo at {}: {e}", path.display()))?;
+pub fn detect_repo_info(path: &Path) -> crate::Result<(String, Option<String>)> {
+    let repo = git2::Repository::discover(path).map_err(|e| {
+        crate::Error::context(
+            format!("Failed to discover git repo at {}", path.display()),
+            e,
+        )
+    })?;
 
     let url = repo
         .find_remote("origin")
-        .map_err(|e| format!("Failed to find 'origin' remote: {e}"))?
+        .map_err(|e| crate::Error::context("Failed to find 'origin' remote", e))?
         .url()
-        .ok_or_else(|| "origin remote URL is not valid UTF-8".to_string())?
+        .ok_or_else(|| crate::Error::message("origin remote URL is not valid UTF-8"))?
         .to_string();
 
     let branch = repo
@@ -372,28 +406,28 @@ impl Sandbox for DaytonaSandbox {
         &self,
         remote_path: &str,
         local_path: &Path,
-    ) -> Result<(), String> {
+    ) -> crate::Result<()> {
         let sandbox = self.sandbox()?;
         let resolved = self.resolve_path(remote_path);
 
         let fs_svc = sandbox
             .fs()
             .await
-            .map_err(|e| format!("Failed to get fs service: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to get fs service", e))?;
 
         let bytes = fs_svc
             .download_file(&resolved)
             .await
-            .map_err(|e| format!("Failed to download file {resolved}: {e}"))?;
+            .map_err(|e| crate::Error::context(format!("Failed to download file {resolved}"), e))?;
 
         if let Some(parent) = local_path.parent() {
             fs::create_dir_all(parent)
                 .await
-                .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
+                .map_err(|e| crate::Error::context("Failed to create parent dirs", e))?;
         }
-        fs::write(local_path, &bytes)
-            .await
-            .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
+        fs::write(local_path, &bytes).await.map_err(|e| {
+            crate::Error::context(format!("Failed to write {}", local_path.display()), e)
+        })?;
 
         Ok(())
     }
@@ -402,7 +436,7 @@ impl Sandbox for DaytonaSandbox {
         &self,
         local_path: &Path,
         remote_path: &str,
-    ) -> Result<(), String> {
+    ) -> crate::Result<()> {
         let sandbox = self.sandbox()?;
         let resolved = self.resolve_path(remote_path);
 
@@ -413,35 +447,33 @@ impl Sandbox for DaytonaSandbox {
                 let fs_svc = sandbox
                     .fs()
                     .await
-                    .map_err(|e| format!("Failed to get fs service: {e}"))?;
+                    .map_err(|e| crate::Error::context("Failed to get fs service", e))?;
                 let _ = fs_svc.create_folder(&parent_str, None).await;
             }
         }
 
-        let bytes = fs::read(local_path)
-            .await
-            .map_err(|e| format!("Failed to read {}: {e}", local_path.display()))?;
+        let bytes = fs::read(local_path).await.map_err(|e| {
+            crate::Error::context(format!("Failed to read {}", local_path.display()), e)
+        })?;
 
         let fs_svc = sandbox
             .fs()
             .await
-            .map_err(|e| format!("Failed to get fs service: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to get fs service", e))?;
 
         fs_svc
             .upload_file_bytes(&resolved, &bytes)
             .await
-            .map_err(|e| format!("Failed to upload file {resolved}: {e}"))?;
+            .map_err(|e| crate::Error::context(format!("Failed to upload file {resolved}"), e))?;
 
         Ok(())
     }
 
-    async fn initialize(&self) -> Result<(), String> {
+    async fn initialize(&self) -> crate::Result<()> {
         self.emit(SandboxEvent::Initializing {
             provider: "daytona".into(),
         });
         let init_start = Instant::now();
-
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
         let params = if let Some(ref snap_cfg) = self.config.snapshot {
             self.emit(SandboxEvent::SnapshotEnsuring {
@@ -450,17 +482,11 @@ impl Sandbox for DaytonaSandbox {
             let snap_start = Instant::now();
             if let Err(e) = self.ensure_snapshot(snap_cfg).await {
                 self.emit(SandboxEvent::SnapshotFailed {
-                    name:  snap_cfg.name.clone(),
-                    error: e.clone(),
+                    name:   snap_cfg.name.clone(),
+                    error:  e.to_string(),
+                    causes: e.causes(),
                 });
-                let duration_ms =
-                    u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                self.emit(SandboxEvent::InitializeFailed {
-                    provider: "daytona".into(),
-                    error: e.clone(),
-                    duration_ms,
-                });
-                return Err(e);
+                return Err(self.fail_init(init_start, e));
             }
             let snap_duration = u64::try_from(snap_start.elapsed().as_millis()).unwrap_or(u64::MAX);
             self.emit(SandboxEvent::SnapshotReady {
@@ -485,208 +511,193 @@ impl Sandbox for DaytonaSandbox {
             .create(params, daytona_sdk::CreateSandboxOptions::default())
             .await
             .map_err(|e| {
-                let err = format!("Failed to create Daytona sandbox: {e}");
-                let duration_ms =
-                    u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                self.emit(SandboxEvent::InitializeFailed {
-                    provider: "daytona".into(),
-                    error: err.clone(),
-                    duration_ms,
-                });
-                err
+                self.fail_init(
+                    init_start,
+                    crate::Error::context("Failed to create Daytona sandbox", e),
+                )
             })?;
 
-        // Clone the repo into the sandbox
-        if self.config.skip_clone {
-            // Create working directory without cloning
-            let fs_svc = sandbox
-                .fs()
-                .await
-                .map_err(|e| format!("Failed to get Daytona fs service: {e}"))?;
-            fs_svc
-                .create_folder(WORKING_DIRECTORY, None)
-                .await
-                .map_err(|e| format!("Failed to create working directory: {e}"))?;
-        } else {
-            match detect_repo_info(&cwd) {
-                Ok((detected_url, detected_branch)) => {
-                    // Use explicit clone_branch if provided (avoids cloning a local-only
-                    // worktree branch like fabro/run/... that hasn't been pushed).
-                    let branch = self.clone_branch.clone().or(detected_branch);
-                    // Daytona clones over HTTPS with token auth, so rewrite SSH URLs.
-                    let url = ssh_url_to_https(&detected_url);
-                    self.emit(SandboxEvent::GitCloneStarted {
-                        url:    url.clone(),
-                        branch: branch.clone(),
-                    });
-                    let clone_start = Instant::now();
+        let clone_decision = clone_source::decide_clone(
+            self.config.skip_clone,
+            self.clone_origin_url.as_deref(),
+            self.clone_branch.as_deref(),
+        )
+        .map_err(|e| self.fail_init(init_start, e))?;
 
-                    // Resolve clone credentials via GitHub App or fall back to no auth
-                    let (username, password) = match &self.github_app {
-                        Some(creds) => {
-                            let (owner, repo) = fabro_github::parse_github_owner_repo(&url)
-                                .map_err(|e| {
-                                    let err = format!("Failed to parse GitHub URL for clone: {e}");
-                                    self.emit(SandboxEvent::GitCloneFailed {
-                                        url:   url.clone(),
-                                        error: err.clone(),
-                                    });
-                                    err
-                                })?;
-                            fabro_github::resolve_clone_credentials(
-                                &fabro_github::GitHubContext::new(
-                                    creds,
-                                    &fabro_github::github_api_base_url(),
-                                ),
-                                &owner,
-                                &repo,
-                            )
-                            .await
+        match clone_decision {
+            CloneDecision::EmptyWorkspace { reason } => {
+                if matches!(reason, EmptyWorkspaceReason::MissingOrigin) {
+                    tracing::warn!(
+                        provider = "daytona",
+                        reason = reason.message(),
+                        "Clone source missing for clone-based sandbox"
+                    );
+                }
+                let fs_svc = sandbox
+                    .fs()
+                    .await
+                    .map_err(|e| crate::Error::context("Failed to get Daytona fs service", e))?;
+                fs_svc
+                    .create_folder(WORKING_DIRECTORY, None)
+                    .await
+                    .map_err(|e| crate::Error::context("Failed to create working directory", e))?;
+                let _ = self.repo_cloned.set(false);
+            }
+            CloneDecision::GitHub { origin_url, branch } => {
+                self.emit(SandboxEvent::GitCloneStarted {
+                    url:    origin_url.clone(),
+                    branch: branch.clone(),
+                });
+                let clone_start = Instant::now();
+
+                let (username, password) = match &self.github_app {
+                    Some(creds) => {
+                        let (owner, repo) = fabro_github::parse_github_owner_repo(&origin_url)
                             .map_err(|e| {
-                                let err =
-                                    format!("Failed to get GitHub App credentials for clone: {e}");
+                                let err = crate::Error::message(format!(
+                                    "Failed to parse GitHub URL for clone: {e}"
+                                ));
                                 self.emit(SandboxEvent::GitCloneFailed {
-                                    url:   url.clone(),
-                                    error: err.clone(),
-                                });
-                                let duration_ms = u64::try_from(init_start.elapsed().as_millis())
-                                    .unwrap_or(u64::MAX);
-                                self.emit(SandboxEvent::InitializeFailed {
-                                    provider: "daytona".into(),
-                                    error: err.clone(),
-                                    duration_ms,
+                                    url:    origin_url.clone(),
+                                    error:  err.to_string(),
+                                    causes: err.causes(),
                                 });
                                 err
-                            })?
-                        }
-                        None => (None, None),
-                    };
-
-                    let git_svc = sandbox
-                        .git()
+                            })?;
+                        fabro_github::resolve_clone_credentials(
+                            &fabro_github::GitHubContext::new(
+                                creds,
+                                &fabro_github::github_api_base_url(),
+                            ),
+                            &owner,
+                            &repo,
+                        )
                         .await
-                        .map_err(|e| format!("Failed to get Daytona git service: {e}"));
-                    let git_svc = match git_svc {
-                        Ok(g) => g,
-                        Err(e) => {
+                        .map_err(|e| {
+                            let err = crate::Error::message(format!(
+                                "Failed to get GitHub App credentials for clone: {e}"
+                            ));
                             self.emit(SandboxEvent::GitCloneFailed {
-                                url:   url.clone(),
-                                error: e.clone(),
+                                url:    origin_url.clone(),
+                                error:  err.to_string(),
+                                causes: err.causes(),
                             });
-                            let duration_ms =
-                                u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                            self.emit(SandboxEvent::InitializeFailed {
-                                provider: "daytona".into(),
-                                error: e.clone(),
-                                duration_ms,
-                            });
-                            return Err(e);
-                        }
-                    };
+                            self.fail_init(init_start, err)
+                        })?
+                    }
+                    None => (None, None),
+                };
 
-                    let clone_token = password.clone();
-                    let clone_result = git_svc
-                        .clone(&url, WORKING_DIRECTORY, daytona_sdk::GitCloneOptions {
+                let git_svc = sandbox.git().await.map_err(|e| {
+                    let err = crate::Error::context("Failed to get Daytona git service", e);
+                    self.emit(SandboxEvent::GitCloneFailed {
+                        url:    origin_url.clone(),
+                        error:  err.to_string(),
+                        causes: err.causes(),
+                    });
+                    self.fail_init(init_start, err)
+                })?;
+
+                let clone_token = password.clone();
+                let clone_result = git_svc
+                    .clone(
+                        &origin_url,
+                        WORKING_DIRECTORY,
+                        daytona_sdk::GitCloneOptions {
                             branch,
                             username,
                             password,
                             ..Default::default()
-                        })
-                        .await;
+                        },
+                    )
+                    .await;
 
-                    match clone_result {
-                        Ok(()) => {
-                            let clone_duration = u64::try_from(clone_start.elapsed().as_millis())
-                                .unwrap_or(u64::MAX);
-                            self.emit(SandboxEvent::GitCloneCompleted {
-                                url:         url.clone(),
-                                duration_ms: clone_duration,
-                            });
+                match clone_result {
+                    Ok(()) => {
+                        let clone_duration =
+                            u64::try_from(clone_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        self.emit(SandboxEvent::GitCloneCompleted {
+                            url:         origin_url.clone(),
+                            duration_ms: clone_duration,
+                        });
 
-                            // Store origin URL and set push credentials for later pushes
-                            if let Some(token) = clone_token {
-                                let _ = self.origin_url.set(url);
-                                let process_svc = sandbox.process().await.ok();
-                                if let Some(ps) = process_svc {
-                                    let origin = self.origin_url.get().expect("just set");
-                                    match fabro_github::embed_token_in_url(origin, &token) {
-                                        Ok(auth_url) => {
-                                            let cmd = format!(
-                                                "git -c maintenance.auto=0 remote set-url origin {}",
-                                                shell_quote(auth_url.as_raw_url().as_str()),
-                                            );
-                                            let opts = daytona_sdk::ExecuteCommandOptions {
-                                                cwd: Some(WORKING_DIRECTORY.to_string()),
-                                                ..Default::default()
-                                            };
-                                            let wrapped = wrap_bash_command(&cmd);
-                                            if let Ok(r) = ps.execute_command(&wrapped, opts).await
-                                            {
-                                                if r.exit_code != 0 {
-                                                    tracing::warn!(
-                                                        exit_code = r.exit_code,
-                                                        "Failed to set push credentials on origin"
-                                                    );
-                                                }
+                        let _ = self.repo_cloned.set(true);
+                        let _ = self.origin_url.set(origin_url.clone());
+                        if let Some(token) = clone_token {
+                            let process_svc = sandbox.process().await.ok();
+                            if let Some(ps) = process_svc {
+                                match fabro_github::embed_token_in_url(&origin_url, &token) {
+                                    Ok(auth_url) => {
+                                        let cmd = format!(
+                                            "git -c maintenance.auto=0 remote set-url origin {}",
+                                            shell_quote(auth_url.as_raw_url().as_str()),
+                                        );
+                                        let opts = daytona_sdk::ExecuteCommandOptions {
+                                            cwd: Some(WORKING_DIRECTORY.to_string()),
+                                            ..Default::default()
+                                        };
+                                        let wrapped = wrap_bash_command(&cmd);
+                                        match ps.execute_command(&wrapped, opts).await {
+                                            Ok(r) if r.exit_code != 0 => {
+                                                let stderr = r.result.replace(
+                                                    &auth_url.raw_string(),
+                                                    &auth_url.redacted_string(),
+                                                );
+                                                tracing::warn!(
+                                                    exit_code = r.exit_code,
+                                                    output = %stderr.trim(),
+                                                    "Failed to set Daytona sandbox push credentials \
+                                                     on origin — subsequent git push from this \
+                                                     sandbox will fail"
+                                                );
+                                            }
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    error = %e,
+                                                    "Daytona exec failed while setting push credentials \
+                                                     on origin — subsequent git push from this \
+                                                     sandbox will fail"
+                                                );
                                             }
                                         }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                error = %e,
-                                                "Failed to build authenticated origin URL"
-                                            );
-                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            origin = %origin_url,
+                                            error = %e,
+                                            "Failed to build authenticated origin URL — \
+                                             subsequent git push from this sandbox will fail"
+                                        );
                                     }
                                 }
                             }
                         }
-                        Err(e) if self.github_app.is_none() => {
-                            let err = format!(
-                                "Git clone failed: {e}. If this is a private repository, \
-                             configure a GitHub App with `fabro install` and install it \
-                             for your organization."
-                            );
-                            self.emit(SandboxEvent::GitCloneFailed {
-                                url,
-                                error: err.clone(),
-                            });
-                            let duration_ms =
-                                u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                            self.emit(SandboxEvent::InitializeFailed {
-                                provider: "daytona".into(),
-                                error: err.clone(),
-                                duration_ms,
-                            });
-                            return Err(err);
-                        }
-                        Err(e) => {
-                            let err = format!("Failed to clone repo into Daytona sandbox: {e}");
-                            self.emit(SandboxEvent::GitCloneFailed {
-                                url,
-                                error: err.clone(),
-                            });
-                            let duration_ms =
-                                u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                            self.emit(SandboxEvent::InitializeFailed {
-                                provider: "daytona".into(),
-                                error: err.clone(),
-                                duration_ms,
-                            });
-                            return Err(err);
-                        }
                     }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "Could not detect git repo for Daytona clone");
-                    // Create working directory even without a repo
-                    let fs_svc = sandbox
-                        .fs()
-                        .await
-                        .map_err(|e| format!("Failed to get Daytona fs service: {e}"))?;
-                    fs_svc
-                        .create_folder(WORKING_DIRECTORY, None)
-                        .await
-                        .map_err(|e| format!("Failed to create working directory: {e}"))?;
+                    Err(e) if self.github_app.is_none() => {
+                        let err = crate::Error::context(
+                            "Git clone failed. If this is a private repository, \
+                             configure a GitHub App with `fabro install` and install it \
+                             for your organization.",
+                            e,
+                        );
+                        self.emit(SandboxEvent::GitCloneFailed {
+                            url:    origin_url,
+                            error:  err.to_string(),
+                            causes: err.causes(),
+                        });
+                        return Err(self.fail_init(init_start, err));
+                    }
+                    Err(e) => {
+                        let err =
+                            crate::Error::context("Failed to clone repo into Daytona sandbox", e);
+                        self.emit(SandboxEvent::GitCloneFailed {
+                            url:    origin_url,
+                            error:  err.to_string(),
+                            causes: err.causes(),
+                        });
+                        return Err(self.fail_init(init_start, err));
+                    }
                 }
             }
         }
@@ -696,7 +707,7 @@ impl Sandbox for DaytonaSandbox {
         let sandbox_memory = sandbox.memory;
         self.sandbox
             .set(sandbox)
-            .map_err(|_| "Daytona sandbox already initialized".to_string())?;
+            .map_err(|_| crate::Error::message("Daytona sandbox already initialized"))?;
         tracing::info!("Daytona sandbox ready");
 
         let init_duration = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -712,7 +723,7 @@ impl Sandbox for DaytonaSandbox {
         Ok(())
     }
 
-    async fn cleanup(&self) -> Result<(), String> {
+    async fn cleanup(&self) -> crate::Result<()> {
         self.emit(SandboxEvent::CleanupStarted {
             provider: "daytona".into(),
         });
@@ -720,10 +731,11 @@ impl Sandbox for DaytonaSandbox {
         if let Some(sandbox) = self.sandbox.get() {
             tracing::info!("Destroying Daytona sandbox");
             if let Err(e) = sandbox.delete().await {
-                let err = format!("Failed to delete Daytona sandbox: {e}");
+                let err = crate::Error::context("Failed to delete Daytona sandbox", e);
                 self.emit(SandboxEvent::CleanupFailed {
                     provider: "daytona".into(),
-                    error:    err.clone(),
+                    error:    err.to_string(),
+                    causes:   err.causes(),
                 });
                 return Err(err);
             }
@@ -755,18 +767,32 @@ impl Sandbox for DaytonaSandbox {
             .unwrap_or_default()
     }
 
-    async fn setup_git_for_run(&self, run_id: &str) -> Result<Option<crate::GitRunInfo>, String> {
-        crate::setup_git_via_exec(self, run_id).await.map(Some)
+    async fn setup_git(
+        &self,
+        intent: &crate::GitSetupIntent,
+    ) -> crate::Result<Option<crate::GitRunInfo>> {
+        if !self.repo_cloned() {
+            return Ok(None);
+        }
+        crate::setup_git_via_exec(self, intent).await.map(Some)
     }
 
     fn resume_setup_commands(&self, run_branch: &str) -> Vec<String> {
+        if !self.repo_cloned() {
+            return Vec::new();
+        }
         vec![format!(
-            "git fetch origin {run_branch} && git checkout {run_branch}"
+            "git fetch origin {} && git checkout {}",
+            shell_quote(run_branch),
+            shell_quote(run_branch)
         )]
     }
 
-    async fn git_push_branch(&self, branch: &str) -> bool {
-        crate::git_push_via_exec(self, branch).await
+    async fn git_push_ref(&self, refspec: &str) -> bool {
+        if !self.repo_cloned() {
+            return false;
+        }
+        crate::git_push_via_exec(self, refspec).await
     }
 
     fn parallel_worktree_path(
@@ -785,23 +811,25 @@ impl Sandbox for DaytonaSandbox {
         )
     }
 
-    async fn ssh_access_command(&self) -> Result<Option<String>, String> {
+    async fn ssh_access_command(&self) -> crate::Result<Option<String>> {
         self.create_ssh_access(Some(60.0)).await.map(Some)
     }
 
     fn origin_url(&self) -> Option<&str> {
+        if !self.repo_cloned() {
+            return None;
+        }
         self.origin_url.get().map(String::as_str)
     }
 
     async fn get_preview_url(
         &self,
         port: u16,
-    ) -> Result<Option<(String, HashMap<String, String>)>, String> {
+    ) -> crate::Result<Option<(String, HashMap<String, String>)>> {
         let sandbox = self.sandbox()?;
-        let preview = sandbox
-            .get_preview_link(port)
-            .await
-            .map_err(|e| format!("Failed to get preview link for port {port}: {e}"))?;
+        let preview = sandbox.get_preview_link(port).await.map_err(|e| {
+            crate::Error::context(format!("Failed to get preview link for port {port}"), e)
+        })?;
         let mut headers = HashMap::new();
         if !preview.token.is_empty() {
             headers.insert("x-daytona-preview-token".to_string(), preview.token);
@@ -813,7 +841,10 @@ impl Sandbox for DaytonaSandbox {
         Ok(Some((preview.url, headers)))
     }
 
-    async fn refresh_push_credentials(&self) -> Result<(), String> {
+    async fn refresh_push_credentials(&self) -> crate::Result<()> {
+        if !self.repo_cloned() {
+            return Ok(());
+        }
         let Some(origin_url) = self.origin_url.get() else {
             return Ok(()); // no authenticated origin — nothing to refresh
         };
@@ -826,30 +857,39 @@ impl Sandbox for DaytonaSandbox {
             origin_url,
         )
         .await
-        .map_err(|e| format!("Failed to refresh GitHub App token: {e}"))?;
+        .map_err(|e| crate::Error::message(format!("Failed to refresh GitHub App token: {e}")))?;
 
         let cmd = format!(
             "git -c maintenance.auto=0 remote set-url origin {}",
             shell_quote(auth_url.as_raw_url().as_str()),
         );
-        self.exec_command(&cmd, 10_000, None, None, None)
+        let result = self
+            .exec_command(&cmd, 10_000, None, None, None)
             .await
-            .map_err(|e| format!("Failed to set refreshed push credentials: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to set refreshed push credentials", e))?;
+        if result.exit_code != 0 {
+            let stderr = result
+                .stderr
+                .replace(&auth_url.raw_string(), &auth_url.redacted_string());
+            return Err(crate::Error::message(format!(
+                "Failed to set refreshed push credentials (exit {}): {}",
+                result.exit_code, stderr
+            )));
+        }
 
         Ok(())
     }
 
-    async fn set_autostop_interval(&self, minutes: i32) -> Result<(), String> {
+    async fn set_autostop_interval(&self, minutes: i32) -> crate::Result<()> {
         let sandbox_id = self.sandbox()?.id.clone();
-        let mut sandbox = self
-            .client
-            .get(&sandbox_id)
-            .await
-            .map_err(|e| format!("Failed to get sandbox for autostop update: {e}"))?;
+        let mut sandbox =
+            self.client.get(&sandbox_id).await.map_err(|e| {
+                crate::Error::context("Failed to get sandbox for autostop update", e)
+            })?;
         sandbox
             .set_autostop_interval(minutes)
             .await
-            .map_err(|e| format!("Failed to set autostop interval: {e}"))
+            .map_err(|e| crate::Error::context("Failed to set autostop interval", e))
     }
 
     async fn read_file(
@@ -857,27 +897,27 @@ impl Sandbox for DaytonaSandbox {
         path: &str,
         offset: Option<usize>,
         limit: Option<usize>,
-    ) -> Result<String, String> {
+    ) -> crate::Result<String> {
         let sandbox = self.sandbox()?;
         let resolved = self.resolve_path(path);
 
         let fs_svc = sandbox
             .fs()
             .await
-            .map_err(|e| format!("Failed to get fs service: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to get fs service", e))?;
 
         let bytes = fs_svc
             .download_file(&resolved)
             .await
-            .map_err(|e| format!("Failed to read file {resolved}: {e}"))?;
+            .map_err(|e| crate::Error::context(format!("Failed to read file {resolved}"), e))?;
 
-        let content =
-            String::from_utf8(bytes).map_err(|e| format!("File is not valid UTF-8: {e}"))?;
+        let content = String::from_utf8(bytes)
+            .map_err(|e| crate::Error::context("File is not valid UTF-8", e))?;
 
         Ok(format_lines_numbered(&content, offset, limit))
     }
 
-    async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
+    async fn write_file(&self, path: &str, content: &str) -> crate::Result<()> {
         let sandbox = self.sandbox()?;
         let resolved = self.resolve_path(path);
 
@@ -888,7 +928,7 @@ impl Sandbox for DaytonaSandbox {
                 let fs_svc = sandbox
                     .fs()
                     .await
-                    .map_err(|e| format!("Failed to get fs service: {e}"))?;
+                    .map_err(|e| crate::Error::context("Failed to get fs service", e))?;
                 let _ = fs_svc.create_folder(&parent_str, None).await;
             }
         }
@@ -896,46 +936,49 @@ impl Sandbox for DaytonaSandbox {
         let fs_svc = sandbox
             .fs()
             .await
-            .map_err(|e| format!("Failed to get fs service: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to get fs service", e))?;
 
         fs_svc
             .upload_file_bytes(&resolved, content.as_bytes())
             .await
-            .map_err(|e| format!("Failed to write file {resolved}: {e}"))?;
+            .map_err(|e| crate::Error::context(format!("Failed to write file {resolved}"), e))?;
 
         Ok(())
     }
 
-    async fn delete_file(&self, path: &str) -> Result<(), String> {
+    async fn delete_file(&self, path: &str) -> crate::Result<()> {
         let sandbox = self.sandbox()?;
         let resolved = self.resolve_path(path);
 
         let fs_svc = sandbox
             .fs()
             .await
-            .map_err(|e| format!("Failed to get fs service: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to get fs service", e))?;
 
         fs_svc
             .delete_file(&resolved, false)
             .await
-            .map_err(|e| format!("Failed to delete file {resolved}: {e}"))?;
+            .map_err(|e| crate::Error::context(format!("Failed to delete file {resolved}"), e))?;
 
         Ok(())
     }
 
-    async fn file_exists(&self, path: &str) -> Result<bool, String> {
+    async fn file_exists(&self, path: &str) -> crate::Result<bool> {
         let sandbox = self.sandbox()?;
         let resolved = self.resolve_path(path);
 
         let fs_svc = sandbox
             .fs()
             .await
-            .map_err(|e| format!("Failed to get fs service: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to get fs service", e))?;
 
         match fs_svc.get_file_info(&resolved).await {
             Ok(_) => Ok(true),
             Err(daytona_sdk::DaytonaError::NotFound { .. }) => Ok(false),
-            Err(e) => Err(format!("Failed to check file existence {resolved}: {e}")),
+            Err(e) => Err(crate::Error::context(
+                format!("Failed to check file existence {resolved}"),
+                e,
+            )),
         }
     }
 
@@ -943,19 +986,18 @@ impl Sandbox for DaytonaSandbox {
         &self,
         path: &str,
         _depth: Option<usize>,
-    ) -> Result<Vec<DirEntry>, String> {
+    ) -> crate::Result<Vec<DirEntry>> {
         let sandbox = self.sandbox()?;
         let resolved = self.resolve_path(path);
 
         let fs_svc = sandbox
             .fs()
             .await
-            .map_err(|e| format!("Failed to get fs service: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to get fs service", e))?;
 
-        let files = fs_svc
-            .list_files(&resolved)
-            .await
-            .map_err(|e| format!("Failed to list directory {resolved}: {e}"))?;
+        let files = fs_svc.list_files(&resolved).await.map_err(|e| {
+            crate::Error::context(format!("Failed to list directory {resolved}"), e)
+        })?;
 
         Ok(files
             .into_iter()
@@ -978,7 +1020,7 @@ impl Sandbox for DaytonaSandbox {
         working_dir: Option<&str>,
         env_vars: Option<&HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
-    ) -> Result<ExecResult, String> {
+    ) -> crate::Result<ExecResult> {
         tracing::info!(command, timeout_ms, "exec_command: entered");
 
         let sandbox = self.sandbox()?;
@@ -990,7 +1032,7 @@ impl Sandbox for DaytonaSandbox {
         let process_svc = sandbox
             .process()
             .await
-            .map_err(|e| format!("Failed to get process service: {e}"))?;
+            .map_err(|e| crate::Error::context("Failed to get process service", e))?;
 
         tracing::info!(
             elapsed_ms = elapsed_ms(&start),
@@ -1036,7 +1078,7 @@ impl Sandbox for DaytonaSandbox {
                     ok = res.is_ok(),
                     "exec_command: HTTP response received"
                 );
-                res.map_err(|e| format!("Failed to execute command: {e}"))?
+                res.map_err(|e| crate::Error::context("Failed to execute command", e))?
             }
             () = time::sleep(timeout_duration) => {
                 tracing::info!(
@@ -1085,7 +1127,7 @@ impl Sandbox for DaytonaSandbox {
         pattern: &str,
         path: &str,
         options: &GrepOptions,
-    ) -> Result<Vec<String>, String> {
+    ) -> crate::Result<Vec<String>> {
         let resolved = self.resolve_path(path);
 
         // Detect ripgrep availability (cached)
@@ -1144,16 +1186,16 @@ impl Sandbox for DaytonaSandbox {
             return Ok(Vec::new());
         }
         if result.exit_code != 0 {
-            return Err(format!(
+            return Err(crate::Error::message(format!(
                 "grep failed (exit {}): {}",
                 result.exit_code, result.stderr
-            ));
+            )));
         }
 
         Ok(result.stdout.lines().map(String::from).collect())
     }
 
-    async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
+    async fn glob(&self, pattern: &str, path: Option<&str>) -> crate::Result<Vec<String>> {
         let base = path.map_or_else(|| WORKING_DIRECTORY.to_string(), |p| self.resolve_path(p));
 
         let cmd = format!(
@@ -1165,10 +1207,10 @@ impl Sandbox for DaytonaSandbox {
         let result = self.exec_command(&cmd, 30_000, None, None, None).await?;
 
         if result.exit_code != 0 {
-            return Err(format!(
+            return Err(crate::Error::message(format!(
                 "glob failed (exit {}): {}",
                 result.exit_code, result.stderr
-            ));
+            )));
         }
 
         Ok(result

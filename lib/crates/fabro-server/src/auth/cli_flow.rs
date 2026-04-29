@@ -38,6 +38,16 @@ const ACCESS_TOKEN_TTL_MINUTES: i64 = 10;
 const REFRESH_TOKEN_TTL_DAYS: i64 = 30;
 const REFRESH_TOKEN_PREFIX: &str = "fabro_refresh_";
 const GITHUB_NOT_CONFIGURED: &str = "GitHub login is not configured for this server.";
+const DEV_TOKEN_LOGIN_INSTRUCTIONS: &str = concat!(
+    "This server uses dev-token auth.\n\n",
+    "Find the dev token:\n",
+    "  - In the server terminal output\n",
+    "  - In the install output\n",
+    "  - For file-based installs, in `server.dev-token` under the configured server storage ",
+    "directory\n\n",
+    "Then run:\n",
+    "  fabro auth login --server <SERVER> --dev-token <TOKEN>"
+);
 const INVALID_REDIRECT_URI: &str = "The provided redirect URI is not valid for CLI login.";
 const INVALID_OR_MISSING_STATE: &str = "The login state is missing or invalid.";
 const MISSING_FLOW_COOKIE: &str = "Your login session has expired. Please start again.";
@@ -131,7 +141,7 @@ async fn start(
             &redirect_uri,
             state_token,
             "github_not_configured",
-            "This server uses dev-token auth. Copy the token from the server and run: `fabro auth login --dev-token <TOKEN>`",
+            DEV_TOKEN_LOGIN_INSTRUCTIONS,
         );
     }
 
@@ -1138,8 +1148,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        CliFlowCookie, add_cli_flow_cookie, read_private_cli_flow, user_agent_fingerprint,
-        web_routes,
+        CliFlowCookie, DEV_TOKEN_LOGIN_INSTRUCTIONS, add_cli_flow_cookie, read_private_cli_flow,
+        user_agent_fingerprint, web_routes,
     };
     use crate::auth::{self, AuthCode, RefreshToken};
     use crate::jwt_auth::{AuthMode, ConfiguredAuth};
@@ -1159,6 +1169,16 @@ mod tests {
         );
         config.jwt_issuer = Some("https://fabro.example".to_string());
         AuthMode::Enabled(config)
+    }
+
+    fn dev_token_auth_mode() -> AuthMode {
+        AuthMode::Enabled(ConfiguredAuth::new(
+            vec![ServerAuthMethod::DevToken],
+            Some(
+                "fabro_dev_abababababababababababababababababababababababababababababababab"
+                    .to_string(),
+            ),
+        ))
     }
 
     fn github_settings(web_url: &str) -> fabro_types::ServerSettings {
@@ -1186,6 +1206,13 @@ client_id = "github-client-id"
     fn test_router(
         settings: fabro_types::ServerSettings,
     ) -> (axum::Router, Arc<crate::server::AppState>) {
+        test_router_with_auth_mode(settings, github_auth_mode())
+    }
+
+    fn test_router_with_auth_mode(
+        settings: fabro_types::ServerSettings,
+        auth_mode: AuthMode,
+    ) -> (axum::Router, Arc<crate::server::AppState>) {
         let state = server::create_test_app_state_with_runtime_settings_and_session_key(
             settings,
             RunLayer::default(),
@@ -1193,7 +1220,7 @@ client_id = "github-client-id"
         );
         let app = axum::Router::new()
             .nest("/auth", web_routes())
-            .layer(Extension(github_auth_mode()))
+            .layer(Extension(auth_mode))
             .with_state(Arc::clone(&state));
         (app, state)
     }
@@ -1367,6 +1394,47 @@ client_id = "github-client-id"
             state:          "abcdefghijklmnop".to_string(),
             code_challenge: "challenge".to_string(),
         });
+    }
+
+    #[tokio::test]
+    async fn start_without_github_auth_redirects_with_dev_token_instructions() {
+        let (app, _state) = test_router_with_auth_mode(
+            github_settings("https://fabro.example"),
+            dev_token_auth_mode(),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/cli/start?redirect_uri=http://127.0.0.1:4444/callback&state=abcdefghijklmnop&code_challenge=challenge&code_challenge_method=S256")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .expect("redirect location should be present");
+        let url = url::Url::parse(location).expect("location should be a valid URL");
+        let query = url
+            .query_pairs()
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(
+            query.get("error").map(std::borrow::Cow::as_ref),
+            Some("github_not_configured")
+        );
+        assert_eq!(
+            query.get("error_description").map(std::borrow::Cow::as_ref),
+            Some(DEV_TOKEN_LOGIN_INSTRUCTIONS)
+        );
+        assert_eq!(
+            query.get("state").map(std::borrow::Cow::as_ref),
+            Some("abcdefghijklmnop")
+        );
     }
 
     #[tokio::test]

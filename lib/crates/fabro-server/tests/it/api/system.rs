@@ -116,6 +116,7 @@ async fn load_questions(app: &axum::Router, run_id: &str) -> serde_json::Value {
 #[tokio::test]
 async fn get_system_info_returns_runtime_fields() {
     let (_temp, settings, expected_storage_dir) = temp_storage_settings();
+    let configured_server_url = settings.server_settings.server.web.url.as_source();
     let app = fabro_server::server::build_router(
         test_app_state_with_options(settings, 5),
         fabro_server::jwt_auth::AuthMode::Disabled,
@@ -130,6 +131,7 @@ async fn get_system_info_returns_runtime_fields() {
 
     let body = response_json(response, StatusCode::OK, "GET /api/v1/system/info").await;
     assert!(body["version"].as_str().is_some());
+    assert_eq!(body["server_url"], configured_server_url);
     assert_eq!(body["storage_engine"], "slatedb");
     assert_eq!(
         body["storage_dir"],

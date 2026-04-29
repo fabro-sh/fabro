@@ -27,13 +27,16 @@ import type { RunCheckpoint } from './run-checkpoint';
 import type { RunProjectionCheckpointsInnerInner } from './run-projection-checkpoints-inner-inner';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunSpec } from './run-spec';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunStatus } from './run-status';
 
 /**
  * Raw internal run projection derived from the event log.
  */
 export interface RunProjection {
-    'spec'?: { [key: string]: any; } | null;
+    'spec'?: RunSpec | null;
     'graph_source'?: string | null;
     'start'?: { [key: string]: any; } | null;
     'status'?: RunStatus | null;

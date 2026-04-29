@@ -67,7 +67,7 @@ async fn ensure_cli(
 ) -> Result<(), Error> {
     let start = std::time::Instant::now();
     let cli_name = cli.name();
-    let provider_str = provider.as_str();
+    let provider_str = <&'static str>::from(provider);
 
     emitter.emit(&Event::CliEnsureStarted {
         cli_name: cli_name.to_string(),
@@ -520,7 +520,7 @@ impl CodergenBackend for AgentCliBackend {
                 node_id:  node.id.clone(),
                 visit:    stage_scope.visit,
                 mode:     "cli".to_string(),
-                provider: provider.as_str().to_string(),
+                provider: provider.to_string(),
                 model:    model.to_string(),
                 command:  command.clone(),
             },
@@ -890,23 +890,23 @@ mod tests {
             _path: &str,
             _offset: Option<usize>,
             _limit: Option<usize>,
-        ) -> Result<String, String> {
+        ) -> fabro_sandbox::Result<String> {
             Ok(String::new())
         }
-        async fn write_file(&self, _path: &str, _content: &str) -> Result<(), String> {
+        async fn write_file(&self, _path: &str, _content: &str) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn delete_file(&self, _path: &str) -> Result<(), String> {
+        async fn delete_file(&self, _path: &str) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn file_exists(&self, _path: &str) -> Result<bool, String> {
+        async fn file_exists(&self, _path: &str) -> fabro_sandbox::Result<bool> {
             Ok(false)
         }
         async fn list_directory(
             &self,
             _path: &str,
             _depth: Option<usize>,
-        ) -> Result<Vec<DirEntry>, String> {
+        ) -> fabro_sandbox::Result<Vec<DirEntry>> {
             Ok(vec![])
         }
         async fn exec_command(
@@ -916,35 +916,47 @@ mod tests {
             _working_dir: Option<&str>,
             _env_vars: Option<&std::collections::HashMap<String, String>>,
             _cancel_token: Option<tokio_util::sync::CancellationToken>,
-        ) -> Result<ExecResult, String> {
+        ) -> fabro_sandbox::Result<ExecResult> {
             self.commands.lock().unwrap().push(command.to_string());
             self.results
                 .lock()
                 .unwrap()
                 .pop_front()
-                .ok_or_else(|| "no more mock results".to_string())
+                .ok_or_else(|| fabro_sandbox::Error::message("no more mock results"))
         }
         async fn grep(
             &self,
             _pattern: &str,
             _path: &str,
             _options: &GrepOptions,
-        ) -> Result<Vec<String>, String> {
+        ) -> fabro_sandbox::Result<Vec<String>> {
             Ok(vec![])
         }
-        async fn glob(&self, _pattern: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
+        async fn glob(
+            &self,
+            _pattern: &str,
+            _path: Option<&str>,
+        ) -> fabro_sandbox::Result<Vec<String>> {
             Ok(vec![])
         }
-        async fn download_file_to_local(&self, _remote: &str, _local: &Path) -> Result<(), String> {
+        async fn download_file_to_local(
+            &self,
+            _remote: &str,
+            _local: &Path,
+        ) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn upload_file_from_local(&self, _local: &Path, _remote: &str) -> Result<(), String> {
+        async fn upload_file_from_local(
+            &self,
+            _local: &Path,
+            _remote: &str,
+        ) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn initialize(&self) -> Result<(), String> {
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn cleanup(&self) -> Result<(), String> {
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
         fn working_directory(&self) -> &str {
@@ -956,7 +968,7 @@ mod tests {
         fn os_version(&self) -> String {
             "Ubuntu 22.04".to_string()
         }
-        async fn set_autostop_interval(&self, _minutes: i32) -> Result<(), String> {
+        async fn set_autostop_interval(&self, _minutes: i32) -> fabro_sandbox::Result<()> {
             Ok(())
         }
     }

@@ -350,7 +350,8 @@ async fn end_to_end_linear_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -479,7 +480,8 @@ async fn end_to_end_branching_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -598,7 +600,8 @@ async fn end_to_end_human_gate_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -693,7 +696,8 @@ async fn human_gate_interrupted_input_fails_closed_without_fail_route() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -803,7 +807,8 @@ async fn human_gate_interrupted_input_routes_via_outcome_fail_condition() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -916,7 +921,8 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -1036,7 +1042,8 @@ async fn goal_gate_routes_to_retry_target_when_present() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -1350,7 +1357,8 @@ async fn retry_on_failure_then_succeed() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine
@@ -1424,7 +1432,8 @@ async fn pipeline_with_many_nodes() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -1770,7 +1779,8 @@ async fn smoke_test_with_mock_codergen_backend() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -1871,7 +1881,8 @@ async fn end_to_end_parallel_fan_out_fan_in() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -1983,7 +1994,8 @@ async fn resume_from_checkpoint_completes_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -2081,7 +2093,8 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     // This should succeed because goal gate for gated_work is satisfied
@@ -2123,7 +2136,8 @@ async fn graph_goal_in_context() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -2161,7 +2175,8 @@ async fn event_streaming_lifecycle() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -2240,7 +2255,8 @@ async fn context_flow_between_stages() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -2295,7 +2311,8 @@ async fn tool_handler_e2e() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, _state) = engine
@@ -2369,7 +2386,8 @@ async fn auto_approve_interviewer_e2e() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, _state) = engine
@@ -2408,7 +2426,8 @@ async fn codergen_without_backend_simulated() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -2512,7 +2531,8 @@ async fn branching_loop_back_on_failure() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, _state) = engine
@@ -2597,7 +2617,8 @@ async fn human_gate_loops_back() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, _state) = engine
@@ -2661,7 +2682,8 @@ async fn scenario_ship_a_feature() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, _state) = engine
@@ -2745,7 +2767,8 @@ async fn scenario_parallel_expert_review() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -2831,7 +2854,8 @@ async fn scenario_node_retries_on_retry_status() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -2895,7 +2919,8 @@ async fn scenario_loop_restart_resets_context() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
@@ -2962,7 +2987,8 @@ async fn scenario_bug_triage_router() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -3023,7 +3049,8 @@ async fn scenario_crash_recovery() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -3132,7 +3159,8 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -3213,7 +3241,8 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -3353,7 +3382,8 @@ async fn conditional_branching_success_fail_paths() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -3408,7 +3438,8 @@ async fn edge_selection_condition_match_wins_over_weight() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -3457,7 +3488,8 @@ async fn edge_selection_weight_breaks_ties() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -3498,7 +3530,8 @@ async fn edge_selection_lexical_tiebreak() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -3558,7 +3591,8 @@ async fn context_updates_visible_across_nodes() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -3604,7 +3638,8 @@ async fn stylesheet_applies_model_override() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
@@ -3659,7 +3694,8 @@ async fn custom_handler_registration_and_execution() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -3736,7 +3772,8 @@ async fn integration_smoke_plan_implement_review_done() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -3827,7 +3864,8 @@ async fn manager_loop_runs_child_engine_e2e() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -3960,7 +3998,8 @@ async fn manager_loop_context_flows_e2e() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -4035,7 +4074,8 @@ async fn manager_loop_child_dotfile_e2e() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
@@ -4138,7 +4178,8 @@ async fn import_e2e_through_engine() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -4292,7 +4333,8 @@ async fn fidelity_default_is_compact() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -4348,7 +4390,8 @@ async fn fidelity_graph_default_applied() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -4400,7 +4443,8 @@ async fn fidelity_node_overrides_graph_default() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -4458,7 +4502,8 @@ async fn fidelity_edge_overrides_node_and_graph() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -4506,7 +4551,8 @@ async fn fidelity_full_produces_empty_preamble() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -4564,7 +4610,8 @@ async fn fidelity_truncate_preamble_minimal() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -4635,7 +4682,8 @@ async fn fidelity_summary_low_mode() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -4701,7 +4749,8 @@ async fn fidelity_summary_medium_mode() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -4767,7 +4816,8 @@ async fn fidelity_summary_high_mode() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -4826,7 +4876,8 @@ async fn fidelity_full_sets_thread_id_in_context() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -4896,7 +4947,8 @@ async fn fidelity_full_nodes_share_thread_id() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -4976,7 +5028,8 @@ async fn fidelity_resume_degrades_full_to_summary_high() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine
@@ -5072,7 +5125,8 @@ async fn fidelity_resume_degrade_only_affects_first_hop() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine
@@ -5155,7 +5209,8 @@ async fn fidelity_resume_no_degrade_when_not_full() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine
@@ -5196,7 +5251,8 @@ async fn fidelity_stored_in_checkpoint_context() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -5288,7 +5344,8 @@ async fn fidelity_precedence_multi_node_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -5355,7 +5412,8 @@ async fn fidelity_compact_preamble_includes_completed_stages_and_context() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -5429,7 +5487,8 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine_low
@@ -5495,7 +5554,8 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine_med
@@ -5566,7 +5626,8 @@ async fn fidelity_thread_id_fallback_to_previous_node_in_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -5619,7 +5680,8 @@ async fn fidelity_thread_id_from_node_class_in_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -5675,7 +5737,8 @@ async fn fidelity_edge_thread_id_override_in_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -5732,7 +5795,8 @@ async fn fidelity_full_without_explicit_thread_id_uses_previous_node() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -5799,7 +5863,8 @@ async fn fidelity_from_parsed_dot_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -5847,7 +5912,8 @@ async fn fidelity_checkpoint_roundtrip_preserves_fidelity() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -5919,7 +5985,8 @@ async fn fidelity_node_thread_id_overrides_edge_thread_id_in_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     engine.run(&graph, &run_options).await.expect("run");
@@ -6005,7 +6072,8 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -6240,7 +6308,8 @@ mod real_llm {
             github_app:       None,
             base_branch:      None,
             display_base_sha: None,
-            host_repo_path:   None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
             git:              None,
         };
         let (outcome, state) = tokio::time::timeout(
@@ -6348,7 +6417,8 @@ mod real_llm {
             github_app:       None,
             base_branch:      None,
             display_base_sha: None,
-            host_repo_path:   None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
             git:              None,
         };
         let outcome = tokio::time::timeout(
@@ -6480,7 +6550,8 @@ mod real_llm {
             github_app:       None,
             base_branch:      None,
             display_base_sha: None,
-            host_repo_path:   None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
             git:              None,
         };
         let outcome = tokio::time::timeout(
@@ -6580,7 +6651,8 @@ mod real_llm {
             github_app:       None,
             base_branch:      None,
             display_base_sha: None,
-            host_repo_path:   None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
             git:              None,
         };
         let (outcome, state) = tokio::time::timeout(
@@ -6717,7 +6789,8 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, _) = engine
@@ -6828,7 +6901,8 @@ async fn human_gate_freeform_only_routes_text() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -6958,7 +7032,8 @@ async fn human_gate_freeform_with_fixed_choice_match() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -7074,7 +7149,8 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -7201,7 +7277,8 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine
@@ -7309,7 +7386,8 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine
@@ -7612,7 +7690,8 @@ fn make_run_options(dir: &std::path::Path) -> RunOptions {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     }
 }
@@ -8550,7 +8629,8 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine
@@ -8751,7 +8831,8 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, _state) = engine
@@ -8823,11 +8904,11 @@ impl fabro_agent::Sandbox for RemoteMockEnv {
         _path: &str,
         _offset: Option<usize>,
         _limit: Option<usize>,
-    ) -> std::result::Result<String, String> {
-        Err("not implemented".to_string())
+    ) -> fabro_sandbox::Result<String> {
+        Err("not implemented".into())
     }
 
-    async fn write_file(&self, path: &str, content: &str) -> std::result::Result<(), String> {
+    async fn write_file(&self, path: &str, content: &str) -> fabro_sandbox::Result<()> {
         self.written
             .lock()
             .unwrap()
@@ -8836,11 +8917,11 @@ impl fabro_agent::Sandbox for RemoteMockEnv {
         Ok(())
     }
 
-    async fn delete_file(&self, _path: &str) -> std::result::Result<(), String> {
-        Err("not implemented".to_string())
+    async fn delete_file(&self, _path: &str) -> fabro_sandbox::Result<()> {
+        Err("not implemented".into())
     }
 
-    async fn file_exists(&self, path: &str) -> std::result::Result<bool, String> {
+    async fn file_exists(&self, path: &str) -> fabro_sandbox::Result<bool> {
         Ok(self.existing_paths.lock().unwrap().contains(path))
     }
 
@@ -8848,8 +8929,8 @@ impl fabro_agent::Sandbox for RemoteMockEnv {
         &self,
         _path: &str,
         _depth: Option<usize>,
-    ) -> std::result::Result<Vec<fabro_agent::DirEntry>, String> {
-        Err("not implemented".to_string())
+    ) -> fabro_sandbox::Result<Vec<fabro_agent::DirEntry>> {
+        Err("not implemented".into())
     }
 
     async fn exec_command(
@@ -8859,8 +8940,8 @@ impl fabro_agent::Sandbox for RemoteMockEnv {
         _working_dir: Option<&str>,
         _env_vars: Option<&std::collections::HashMap<String, String>>,
         _cancel_token: Option<tokio_util::sync::CancellationToken>,
-    ) -> std::result::Result<fabro_agent::ExecResult, String> {
-        Err("not implemented".to_string())
+    ) -> fabro_sandbox::Result<fabro_agent::ExecResult> {
+        Err("not implemented".into())
     }
 
     async fn grep(
@@ -8868,23 +8949,23 @@ impl fabro_agent::Sandbox for RemoteMockEnv {
         _pattern: &str,
         _path: &str,
         _options: &fabro_agent::GrepOptions,
-    ) -> std::result::Result<Vec<String>, String> {
-        Err("not implemented".to_string())
+    ) -> fabro_sandbox::Result<Vec<String>> {
+        Err("not implemented".into())
     }
 
     async fn glob(
         &self,
         _pattern: &str,
         _path: Option<&str>,
-    ) -> std::result::Result<Vec<String>, String> {
-        Err("not implemented".to_string())
+    ) -> fabro_sandbox::Result<Vec<String>> {
+        Err("not implemented".into())
     }
 
-    async fn initialize(&self) -> std::result::Result<(), String> {
+    async fn initialize(&self) -> fabro_sandbox::Result<()> {
         Ok(())
     }
 
-    async fn cleanup(&self) -> std::result::Result<(), String> {
+    async fn cleanup(&self) -> fabro_sandbox::Result<()> {
         Ok(())
     }
 
@@ -8892,16 +8973,16 @@ impl fabro_agent::Sandbox for RemoteMockEnv {
         &self,
         _: &str,
         _: &std::path::Path,
-    ) -> std::result::Result<(), String> {
-        Err("not implemented".to_string())
+    ) -> fabro_sandbox::Result<()> {
+        Err("not implemented".into())
     }
 
     async fn upload_file_from_local(
         &self,
         _: &std::path::Path,
         _: &str,
-    ) -> std::result::Result<(), String> {
-        Err("not implemented".to_string())
+    ) -> fabro_sandbox::Result<()> {
+        Err("not implemented".into())
     }
 
     fn working_directory(&self) -> &str {
@@ -8955,7 +9036,8 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, _state) = engine
@@ -9042,7 +9124,8 @@ async fn downstream_local_execution_materializes_blob_refs_to_runtime_files() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, _state) = engine
@@ -9129,7 +9212,8 @@ async fn downstream_remote_execution_materializes_blob_refs_to_sandbox_files() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, _state) = engine
@@ -9259,7 +9343,8 @@ async fn node_dir_uses_visit_count_on_revisit() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -9338,11 +9423,11 @@ impl fabro_agent::Sandbox for CliTestEnv {
         _path: &str,
         _offset: Option<usize>,
         _limit: Option<usize>,
-    ) -> Result<String, String> {
+    ) -> fabro_sandbox::Result<String> {
         Ok(String::new())
     }
 
-    async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
+    async fn write_file(&self, path: &str, content: &str) -> fabro_sandbox::Result<()> {
         self.written_files
             .lock()
             .unwrap()
@@ -9350,11 +9435,11 @@ impl fabro_agent::Sandbox for CliTestEnv {
         Ok(())
     }
 
-    async fn delete_file(&self, _path: &str) -> Result<(), String> {
+    async fn delete_file(&self, _path: &str) -> fabro_sandbox::Result<()> {
         Ok(())
     }
 
-    async fn file_exists(&self, _path: &str) -> Result<bool, String> {
+    async fn file_exists(&self, _path: &str) -> fabro_sandbox::Result<bool> {
         Ok(false)
     }
 
@@ -9362,7 +9447,7 @@ impl fabro_agent::Sandbox for CliTestEnv {
         &self,
         _path: &str,
         _depth: Option<usize>,
-    ) -> Result<Vec<fabro_agent::DirEntry>, String> {
+    ) -> fabro_sandbox::Result<Vec<fabro_agent::DirEntry>> {
         Ok(vec![])
     }
 
@@ -9373,7 +9458,7 @@ impl fabro_agent::Sandbox for CliTestEnv {
         _working_dir: Option<&str>,
         _env_vars: Option<&std::collections::HashMap<String, String>>,
         _cancel_token: Option<tokio_util::sync::CancellationToken>,
-    ) -> Result<fabro_agent::ExecResult, String> {
+    ) -> fabro_sandbox::Result<fabro_agent::ExecResult> {
         self.commands.lock().unwrap().push(command.to_string());
 
         // git diff calls: first pair returns empty (before), second pair returns
@@ -9467,28 +9552,40 @@ impl fabro_agent::Sandbox for CliTestEnv {
         _pattern: &str,
         _path: &str,
         _options: &fabro_agent::GrepOptions,
-    ) -> Result<Vec<String>, String> {
+    ) -> fabro_sandbox::Result<Vec<String>> {
         Ok(vec![])
     }
 
-    async fn glob(&self, _pattern: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
+    async fn glob(
+        &self,
+        _pattern: &str,
+        _path: Option<&str>,
+    ) -> fabro_sandbox::Result<Vec<String>> {
         Ok(vec![])
     }
 
-    async fn initialize(&self) -> Result<(), String> {
+    async fn initialize(&self) -> fabro_sandbox::Result<()> {
         Ok(())
     }
 
-    async fn cleanup(&self) -> Result<(), String> {
+    async fn cleanup(&self) -> fabro_sandbox::Result<()> {
         Ok(())
     }
 
-    async fn download_file_to_local(&self, _: &str, _: &std::path::Path) -> Result<(), String> {
-        Err("not implemented".to_string())
+    async fn download_file_to_local(
+        &self,
+        _: &str,
+        _: &std::path::Path,
+    ) -> fabro_sandbox::Result<()> {
+        Err("not implemented".into())
     }
 
-    async fn upload_file_from_local(&self, _: &std::path::Path, _: &str) -> Result<(), String> {
-        Err("not implemented".to_string())
+    async fn upload_file_from_local(
+        &self,
+        _: &std::path::Path,
+        _: &str,
+    ) -> fabro_sandbox::Result<()> {
+        Err("not implemented".into())
     }
 
     fn working_directory(&self) -> &str {
@@ -9664,23 +9761,23 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
             _: &str,
             _: Option<usize>,
             _: Option<usize>,
-        ) -> Result<String, String> {
+        ) -> fabro_sandbox::Result<String> {
             Ok(String::new())
         }
-        async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
+        async fn write_file(&self, _: &str, _: &str) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn delete_file(&self, _: &str) -> Result<(), String> {
+        async fn delete_file(&self, _: &str) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn file_exists(&self, _: &str) -> Result<bool, String> {
+        async fn file_exists(&self, _: &str) -> fabro_sandbox::Result<bool> {
             Ok(false)
         }
         async fn list_directory(
             &self,
             _: &str,
             _: Option<usize>,
-        ) -> Result<Vec<fabro_agent::DirEntry>, String> {
+        ) -> fabro_sandbox::Result<Vec<fabro_agent::DirEntry>> {
             Ok(vec![])
         }
         async fn exec_command(
@@ -9690,7 +9787,7 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
             _: Option<&str>,
             _: Option<&std::collections::HashMap<String, String>>,
             _: Option<tokio_util::sync::CancellationToken>,
-        ) -> Result<fabro_agent::ExecResult, String> {
+        ) -> fabro_sandbox::Result<fabro_agent::ExecResult> {
             if command.starts_with("git") {
                 return Ok(fabro_agent::ExecResult {
                     stdout:      String::new(),
@@ -9743,23 +9840,31 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
             _: &str,
             _: &str,
             _: &fabro_agent::GrepOptions,
-        ) -> Result<Vec<String>, String> {
+        ) -> fabro_sandbox::Result<Vec<String>> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _: Option<&str>) -> fabro_sandbox::Result<Vec<String>> {
             Ok(vec![])
         }
-        async fn initialize(&self) -> Result<(), String> {
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn cleanup(&self) -> Result<(), String> {
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn download_file_to_local(&self, _: &str, _: &std::path::Path) -> Result<(), String> {
-            Err("not implemented".to_string())
+        async fn download_file_to_local(
+            &self,
+            _: &str,
+            _: &std::path::Path,
+        ) -> fabro_sandbox::Result<()> {
+            Err("not implemented".into())
         }
-        async fn upload_file_from_local(&self, _: &std::path::Path, _: &str) -> Result<(), String> {
-            Err("not implemented".to_string())
+        async fn upload_file_from_local(
+            &self,
+            _: &std::path::Path,
+            _: &str,
+        ) -> fabro_sandbox::Result<()> {
+            Err("not implemented".into())
         }
         fn working_directory(&self) -> &str {
             "/tmp"
@@ -10129,7 +10234,8 @@ async fn full_pipeline_with_cli_backend_node() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -10247,7 +10353,8 @@ async fn stylesheet_backend_property_routes_to_cli() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine
@@ -10443,7 +10550,8 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   Some(worktree_path.clone()),
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              Some(GitCheckpointOptions {
             base_sha:    Some(base_sha.clone()),
             run_branch:  Some(run_branch),
@@ -10510,8 +10618,6 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
 /// trailer in run-branch commits.
 #[tokio::test]
 async fn git_checkpoint_host_writes_shadow_branch() {
-    use fabro_workflow::git::MetadataStore;
-
     // 1. Create a temporary git repo with an initial commit
     let repo = tempfile::tempdir().unwrap();
     std::process::Command::new("git")
@@ -10599,7 +10705,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env);
 
-    let meta_branch = MetadataStore::branch_name(&run_id.to_string());
+    let meta_branch = format!("fabro/meta/{run_id}");
     let run_options = RunOptions {
         settings: WorkflowSettings::default(),
         run_dir: run_dir.path().to_path_buf(),
@@ -10610,11 +10716,12 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         github_app: None,
         base_branch: None,
         display_base_sha: None,
-        host_repo_path: Some(worktree_path.clone()),
+        pre_run_git: None,
+        fork_source_ref: None,
         git: Some(GitCheckpointOptions {
             base_sha:    Some(base_sha),
             run_branch:  Some(format!("fabro/run/{run_id}")),
-            meta_branch: Some(meta_branch),
+            meta_branch: Some(meta_branch.clone()),
         }),
     };
     // 5. Run pipeline
@@ -10624,9 +10731,21 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // 6. Assert shadow branch has checkpoint data on the host repo
-    let checkpoint = MetadataStore::read_checkpoint(repo.path(), &run_id.to_string())
-        .expect("read_checkpoint should not error")
+    // 6. Assert shadow branch has checkpoint data in run.json
+    let run_json = std::process::Command::new("git")
+        .args(["show", &format!("refs/heads/{meta_branch}:run.json")])
+        .current_dir(repo.path())
+        .output()
+        .expect("git show should run");
+    assert!(
+        run_json.status.success(),
+        "metadata run.json should exist: {}",
+        String::from_utf8_lossy(&run_json.stderr)
+    );
+    let projection: fabro_store::RunProjection =
+        serde_json::from_slice(&run_json.stdout).expect("run.json should parse");
+    let checkpoint = projection
+        .checkpoint
         .expect("shadow branch should contain checkpoint data");
     assert!(
         !checkpoint.completed_nodes.is_empty(),
@@ -10658,9 +10777,9 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         "run-branch commit should have Fabro-Completed trailer, got:\n{commit_msg}"
     );
 
-    // 8. Verify round-trip: shadow checkpoint's completed_nodes matches expected
-    let run_spec = MetadataStore::read_run_spec(repo.path(), &run_id.to_string())
-        .expect("read_run_spec should not error")
+    // 8. Verify round-trip: shadow run.json contains the run spec
+    let run_spec = projection
+        .spec
         .expect("shadow branch should contain run spec");
     assert_eq!(run_spec.run_id, run_id);
 
@@ -10809,7 +10928,8 @@ async fn parallel_git_branching_host_e2e() {
         github_app: None,
         base_branch: None,
         display_base_sha: None,
-        host_repo_path: Some(worktree_path.clone()),
+        pre_run_git: None,
+        fork_source_ref: None,
         git: Some(GitCheckpointOptions {
             base_sha:    Some(base_sha.clone()),
             run_branch:  Some(run_branch.clone()),
@@ -11058,7 +11178,8 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   Some(worktree_path.clone()),
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              Some(GitCheckpointOptions {
             base_sha:    Some(base_sha.clone()),
             run_branch:  Some(run_branch),
@@ -11428,7 +11549,8 @@ async fn e2e_circuit_breaker_deterministic_self_loop() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -11474,7 +11596,8 @@ async fn e2e_circuit_breaker_custom_limit() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -11513,7 +11636,8 @@ async fn e2e_circuit_breaker_ignores_transient_failures() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -11559,7 +11683,8 @@ async fn e2e_circuit_breaker_different_reasons_separate_counters() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -11598,7 +11723,8 @@ async fn e2e_circuit_breaker_loop_restart() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -11660,7 +11786,8 @@ async fn e2e_failure_signature_persisted_in_context() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
@@ -11723,7 +11850,8 @@ async fn e2e_failure_signature_hint_overrides_reason_in_context() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (_outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
@@ -11780,7 +11908,8 @@ async fn e2e_signature_maps_persist_in_checkpoint() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
@@ -11907,7 +12036,8 @@ async fn e2e_circuit_breaker_emits_events_before_abort() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -11973,7 +12103,8 @@ async fn e2e_circuit_breaker_does_not_fire_below_limit() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
@@ -12068,7 +12199,8 @@ async fn e2e_circuit_breaker_multi_stage_impl_verify_cycle() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -12165,7 +12297,8 @@ async fn e2e_loop_restart_blocked_for_deterministic_failure() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -12204,7 +12337,8 @@ async fn e2e_loop_restart_blocked_for_structural_failure() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -12243,7 +12377,8 @@ async fn e2e_loop_restart_blocked_for_budget_exhausted_failure() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -12282,7 +12417,8 @@ async fn e2e_loop_restart_blocked_for_canceled_failure() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -12318,7 +12454,8 @@ async fn e2e_loop_restart_blocked_for_compilation_loop_failure() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -12358,7 +12495,8 @@ async fn e2e_loop_restart_allowed_for_transient_infra() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -12465,7 +12603,8 @@ async fn e2e_stall_watchdog_triggers_from_dot_parsed_pipeline() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let result = engine.run(&graph, &run_options).await;
@@ -12520,7 +12659,8 @@ async fn e2e_stall_watchdog_kept_alive_by_handler_events() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine
@@ -12565,7 +12705,8 @@ async fn e2e_stall_watchdog_disabled_with_zero_timeout() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine
@@ -12630,7 +12771,8 @@ async fn e2e_stall_watchdog_with_explicit_timeout_override() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let start = std::time::Instant::now();
@@ -12771,7 +12913,8 @@ async fn asset_collection_local_sandbox_success() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine
@@ -12903,7 +13046,8 @@ async fn asset_collection_local_sandbox_on_failure() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine
@@ -12935,21 +13079,22 @@ async fn asset_collection_local_sandbox_on_failure() {
     );
 }
 
-/// Docker sandbox: artifact collection works across the bind-mount boundary.
-/// Requires Docker with `fabro-agent:latest` image available locally.
+/// Docker sandbox: artifact collection works through archive copy.
+/// Requires Docker with the default sandbox image available locally.
 #[tokio::test]
 #[ignore]
 async fn asset_collection_docker_sandbox() {
-    let host_dir = tempfile::tempdir().unwrap();
     let run_dir = tempfile::tempdir().unwrap();
 
     let config = fabro_agent::DockerSandboxOptions {
-        host_working_directory: host_dir.path().to_str().unwrap().to_string(),
         auto_pull: false,
+        skip_clone: true,
         ..Default::default()
     };
-    let sandbox: Arc<dyn fabro_agent::Sandbox> =
-        Arc::new(fabro_agent::DockerSandbox::new(config).expect("Docker not available"));
+    let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(
+        fabro_agent::DockerSandbox::new(config, None, None, None, None)
+            .expect("Docker not available"),
+    );
     sandbox.initialize().await.expect("Docker init failed");
 
     let mut registry = HandlerRegistry::new(Box::new(AssetCreatorHandler::success()));
@@ -13008,7 +13153,8 @@ async fn asset_collection_docker_sandbox() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine
@@ -13076,7 +13222,8 @@ async fn wait_timer_e2e() {
         github_app:       None,
         base_branch:      None,
         display_base_sha: None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         git:              None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");

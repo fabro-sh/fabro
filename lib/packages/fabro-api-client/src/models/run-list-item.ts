@@ -53,7 +53,9 @@ export interface RunListItem {
     'title': string;
     'status': RunStatus;
     'labels': { [key: string]: string; };
-    'host_repo_path'?: string | null;
+    'source_directory'?: string | null;
+    'in_place'?: boolean;
+    'repo_origin_url'?: string | null;
     'start_time'?: string | null;
     'pending_control'?: RunControlAction | null;
     'duration_ms'?: number | null;

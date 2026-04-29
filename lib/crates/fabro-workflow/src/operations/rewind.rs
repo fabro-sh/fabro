@@ -2,9 +2,9 @@ use fabro_store::Database;
 use fabro_types::{ActorRef, RunId};
 use tracing::error;
 
+use super::archive;
 use super::fork::{self, ForkOutcome, ForkRunInput, ResolvedForkTarget};
 use super::timeline::ForkTarget;
-use super::{archive, run_git};
 use crate::error::Error;
 use crate::event::{self, Event};
 
@@ -12,7 +12,6 @@ use crate::event::{self, Event};
 pub struct RewindInput {
     pub run_id: RunId,
     pub target: Option<ForkTarget>,
-    pub push:   bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,7 +34,13 @@ pub async fn rewind(
     input: &RewindInput,
     actor: Option<ActorRef>,
 ) -> Result<RewindOutcome, Error> {
-    let projection = run_git::load_projection(store, &input.run_id).await?;
+    let projection = store
+        .open_run(&input.run_id)
+        .await
+        .map_err(|err| Error::engine(err.to_string()))?
+        .state()
+        .await
+        .map_err(|err| Error::engine(err.to_string()))?;
     let current = projection.status.ok_or_else(|| {
         Error::Precondition(format!("run {} has no status; cannot rewind", input.run_id))
     })?;
@@ -48,11 +53,10 @@ pub async fn rewind(
         )));
     }
 
-    let forked = fork::fork_run(store, &ForkRunInput {
+    let forked = Box::pin(fork::fork_run(store, &ForkRunInput {
         source_run_id: input.run_id,
         target:        input.target.clone(),
-        push:          input.push,
-    })
+    }))
     .await?;
 
     match archive::archive(store, &input.run_id, actor).await {

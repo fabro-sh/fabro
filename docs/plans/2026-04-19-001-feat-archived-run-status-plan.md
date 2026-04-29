@@ -96,7 +96,7 @@ No billing / usage / reporting site reads `is_terminal()` — those roll up from
 
 No `docs/solutions/` entries exist in this repo; the institutional-knowledge base is empty. Substitute docs to follow:
 - `docs-internal/events-strategy.md` (the 7-step event checklist)
-- `files-internal/testing-strategy.md` (layering: `cmd/*` for single-command CLI tests, `scenario/*` for cross-command lifecycle)
+- `docs-internal/testing-strategy.md` (layering: `cmd/*` for single-command CLI tests, `scenario/*` for cross-command lifecycle)
 - `AGENTS.md` §"API workflow" (OpenAPI source-of-truth and regen sequence) and §"Rust import style" (types by name, functions via parent module)
 
 ### External References
@@ -554,7 +554,7 @@ flowchart TB
 
 - **Origin document:** [docs/brainstorms/2026-04-19-run-archived-status-requirements.md](../brainstorms/2026-04-19-run-archived-status-requirements.md)
 - **Events strategy:** [docs-internal/events-strategy.md](../../docs-internal/events-strategy.md)
-- **Testing strategy:** [files-internal/testing-strategy.md](../../files-internal/testing-strategy.md)
+- **Testing strategy:** [docs-internal/testing-strategy.md](../../docs-internal/testing-strategy.md)
 - **API workflow convention:** `AGENTS.md` §"API workflow"
 - **Bulk-by-ID CLI template:** `lib/crates/fabro-cli/src/commands/runs/rm.rs`
 - **Actor-carrying event precedent:** `lib/crates/fabro-workflow/src/event.rs:93-96` (`RunCancelRequested`)

@@ -615,6 +615,35 @@ methods = ["dev-token"]
     }
 
     #[tokio::test]
+    async fn full_router_does_not_demo_dispatch_auth_routes() {
+        let state = test_state();
+        let app = server::build_router_with_options(
+            state,
+            &auth_mode(),
+            Arc::new(crate::ip_allowlist::IpAllowlistConfig::default()),
+            RouterOptions::default(),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/auth/login/github")
+                    .header(header::COOKIE, "fabro-demo=1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "demo cookie must not steal /auth/* routes from the real router",
+        );
+    }
+
+    #[tokio::test]
     async fn full_router_accepts_dev_token_bearer_when_web_is_disabled() {
         let state = test_state();
         let app = server::build_router_with_options(
@@ -625,6 +654,7 @@ methods = ["dev-token"]
                 web_enabled:                 false,
                 github_endpoints:            None,
                 github_webhook_ip_allowlist: None,
+                static_asset_root:           None,
             },
         );
 

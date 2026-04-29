@@ -29,6 +29,10 @@ export interface SystemInfoResponse {
      */
     'version'?: string;
     /**
+     * Configured public server URL for browser and CLI authentication flows.
+     */
+    'server_url'?: string;
+    /**
      * Build git SHA when available.
      */
     'git_sha'?: string | null;

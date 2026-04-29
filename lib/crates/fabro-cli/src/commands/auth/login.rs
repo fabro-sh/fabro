@@ -7,6 +7,7 @@ use fabro_http::header::CONTENT_TYPE;
 use fabro_util::browser;
 use fabro_util::dev_token::validate_dev_token_format;
 use fabro_util::printer::Printer;
+use fabro_util::terminal::Styles;
 use serde::Deserialize;
 use tokio::time::timeout;
 
@@ -49,6 +50,7 @@ pub(super) async fn login_command(args: AuthLoginArgs, base_ctx: &CommandContext
                 logged_in_at: Utc::now(),
             }),
         )?;
+        configure_cli_target_after_login(base_ctx, &target)?;
         fabro_util::printerr!(printer, "Logged in to {} with dev-token", target);
         return Ok(());
     }
@@ -89,9 +91,15 @@ pub(super) async fn login_command(args: AuthLoginArgs, base_ctx: &CommandContext
         let code = match callback {
             Ok(success) => success.code,
             Err(failure) => {
+                let styles = Styles::detect_stderr();
                 bail!(
                     "{}",
-                    login_failure_message(&failure.error_code, Some(&failure.error_description))
+                    login_failure_message(
+                        &failure.error_code,
+                        Some(&failure.error_description),
+                        &target,
+                        &styles,
+                    )
                 );
             }
         };
@@ -113,9 +121,22 @@ pub(super) async fn login_command(args: AuthLoginArgs, base_ctx: &CommandContext
         };
         let summary = identity_summary(&entry.subject);
         AuthStore::default().put(&target, AuthEntry::OAuth(entry))?;
+        configure_cli_target_after_login(base_ctx, &target)?;
         fabro_util::printerr!(printer, "Logged in to {} as {}", target, summary);
         Ok(())
     }
+}
+
+fn configure_cli_target_after_login(
+    base_ctx: &CommandContext,
+    target: &ServerTarget,
+) -> Result<()> {
+    user_config::configure_cli_target_if_missing(
+        base_ctx.base_config_path(),
+        base_ctx.user_settings(),
+        target,
+    )?;
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -210,14 +231,17 @@ fn open_browser_or_print(browser_url: &str, no_browser: bool, printer: Printer) 
     }
 }
 
-fn login_failure_message(error_code: &str, error_description: Option<&str>) -> String {
+fn login_failure_message(
+    error_code: &str,
+    error_description: Option<&str>,
+    target: &ServerTarget,
+    styles: &Styles,
+) -> String {
     match error_code {
         "github_session_required" => {
             "GitHub session required. Complete sign-in in the browser and try again.".to_string()
         }
-        "github_not_configured" => {
-            "This server uses dev-token auth. Copy the token from the server and run: `fabro auth login --dev-token <TOKEN>`".to_string()
-        }
+        "github_not_configured" => dev_token_auth_required_message_with_styles(target, styles),
         "access_denied" => "Authorization denied.".to_string(),
         "unauthorized" => "Login not permitted.".to_string(),
         "server_error" => error_description
@@ -229,6 +253,14 @@ fn login_failure_message(error_code: &str, error_description: Option<&str>) -> S
             .unwrap_or("Could not complete login.")
             .to_string(),
     }
+}
+
+fn dev_token_auth_required_message_with_styles(target: &ServerTarget, styles: &Styles) -> String {
+    let command = format!("fabro auth login --server {target} --dev-token <TOKEN>");
+    let command = styles.bold_cyan.apply_to(command);
+    format!(
+        "This server uses dev-token auth.\n\nFind the dev token:\n  - In the server terminal output\n  - In the install output\n  - For file-based installs, in `server.dev-token` under the configured server storage directory\n\nThen run:\n  {command}"
+    )
 }
 
 fn identity_summary(subject: &StoredSubject) -> String {
@@ -252,10 +284,14 @@ struct OAuthErrorBody {
 mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use fabro_util::terminal::Styles;
     use insta::assert_snapshot;
     use sha2::{Digest, Sha256};
 
-    use super::{browser_origin, build_browser_url, login_failure_message};
+    use super::{
+        browser_origin, build_browser_url, dev_token_auth_required_message_with_styles,
+        login_failure_message,
+    };
     use crate::user_config::ServerTarget;
 
     #[test]
@@ -280,28 +316,74 @@ mod tests {
 
     #[test]
     fn login_failure_messages_render_known_server_codes() {
+        let target = ServerTarget::http_url("http://127.0.0.1:32276").unwrap();
+        let styles = Styles::new(false);
         assert_eq!(
-            login_failure_message("github_session_required", Some("GitHub session required")),
+            login_failure_message(
+                "github_session_required",
+                Some("GitHub session required"),
+                &target,
+                &styles
+            ),
             "GitHub session required. Complete sign-in in the browser and try again."
         );
         assert_eq!(
-            login_failure_message("access_denied", Some("Authorization denied")),
+            login_failure_message(
+                "access_denied",
+                Some("Authorization denied"),
+                &target,
+                &styles
+            ),
             "Authorization denied."
         );
         assert_eq!(
-            login_failure_message("unauthorized", Some("Login not permitted")),
+            login_failure_message(
+                "unauthorized",
+                Some("Login not permitted"),
+                &target,
+                &styles
+            ),
             "Login not permitted."
         );
         assert_eq!(
             login_failure_message(
                 "github_not_configured",
-                Some("GitHub authentication is not enabled on this server")
+                Some("GitHub authentication is not enabled on this server"),
+                &target,
+                &styles
             ),
-            "This server uses dev-token auth. Copy the token from the server and run: `fabro auth login --dev-token <TOKEN>`"
+            "This server uses dev-token auth.\n\nFind the dev token:\n  - In the server terminal output\n  - In the install output\n  - For file-based installs, in `server.dev-token` under the configured server storage directory\n\nThen run:\n  fabro auth login --server http://127.0.0.1:32276 --dev-token <TOKEN>"
         );
         assert_eq!(
-            login_failure_message("server_error", Some("SESSION_SECRET is not configured")),
+            login_failure_message(
+                "server_error",
+                Some("SESSION_SECRET is not configured"),
+                &target,
+                &styles
+            ),
             "SESSION_SECRET is not configured"
+        );
+    }
+
+    #[test]
+    fn dev_token_auth_required_message_formats_recovery_steps() {
+        let target = ServerTarget::http_url("http://127.0.0.1:32276").unwrap();
+
+        assert_eq!(
+            dev_token_auth_required_message_with_styles(&target, &Styles::new(false)),
+            "This server uses dev-token auth.\n\nFind the dev token:\n  - In the server terminal output\n  - In the install output\n  - For file-based installs, in `server.dev-token` under the configured server storage directory\n\nThen run:\n  fabro auth login --server http://127.0.0.1:32276 --dev-token <TOKEN>"
+        );
+    }
+
+    #[test]
+    fn dev_token_auth_required_message_colors_example_command_when_enabled() {
+        let target = ServerTarget::http_url("http://127.0.0.1:32276").unwrap();
+        let message = dev_token_auth_required_message_with_styles(&target, &Styles::new(true));
+
+        assert!(message.contains("\x1b["));
+        assert!(
+            message
+                .contains("fabro auth login --server http://127.0.0.1:32276 --dev-token <TOKEN>")
         );
     }
 

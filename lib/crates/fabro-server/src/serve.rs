@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use clap::Args;
 use fabro_config::bind::{self, Bind, BindRequest};
 use fabro_config::{
@@ -40,6 +40,7 @@ use crate::server::{
 };
 use crate::server_secrets::{ServerSecrets, process_env_snapshot};
 use crate::startup::resolve_startup;
+use crate::static_files;
 
 pub const DEFAULT_TCP_PORT: u16 = 32276;
 type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -640,7 +641,18 @@ where
     std::fs::create_dir_all(&data_dir)
         .with_context(|| format!("creating data directory {}", data_dir.display()))?;
     let max_concurrent_runs = resolved_server_settings.scheduler.max_concurrent_runs;
-    let web_enabled = resolved_server_settings.web.enabled;
+    let web_enabled = if resolved_server_settings.web.enabled {
+        if static_files::assets_available() {
+            true
+        } else if args.web {
+            bail!("--web requires web UI assets, but none were found");
+        } else {
+            warn!("Web UI assets unavailable, serving API-only mode");
+            false
+        }
+    } else {
+        false
+    };
     let github_meta_resolver = GitHubMetaResolver::from_cache_dir(&storage.cache_dir())?;
 
     let (object_store, slatedb_prefix, flush_interval, disk_cache) =

@@ -20,11 +20,6 @@ pub enum ModelTestMode {
 
 impl ModelTestMode {
     #[must_use]
-    pub fn as_str(self) -> &'static str {
-        self.into()
-    }
-
-    #[must_use]
     pub const fn timeout_secs(self) -> u64 {
         match self {
             Self::Basic => 30,
@@ -38,13 +33,6 @@ impl ModelTestMode {
 pub enum ModelTestStatus {
     Ok,
     Error,
-}
-
-impl ModelTestStatus {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        self.into()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,7 +72,7 @@ pub async fn run_model_test(
 
 async fn run_basic_test(info: &Model, client: Arc<Client>) -> ModelTestOutcome {
     let params = GenerateParams::new(&info.id, client)
-        .provider(info.provider.as_str())
+        .provider(<&'static str>::from(info.provider))
         .prompt("Say OK")
         .max_tokens(16);
 
@@ -152,7 +140,7 @@ fn build_deep_test_params(info: &Model, client: Arc<Client>) -> Option<GenerateP
     );
 
     let mut params = GenerateParams::new(&info.id, client)
-        .provider(info.provider.as_str())
+        .provider(<&'static str>::from(info.provider))
         .prompt(
             "Use the add tool twice: first add 15 and 27, then add that result to 42. \
              Finally, tell me whether the grand total is even or odd and why.",

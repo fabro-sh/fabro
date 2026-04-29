@@ -209,9 +209,10 @@ impl Handler for SubWorkflowHandler {
             labels:           HashMap::new(),
             workflow_slug:    None,
             github_app:       None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
             base_branch:      None,
             display_base_sha: None,
-            host_repo_path:   None,
             git:              None,
         };
 

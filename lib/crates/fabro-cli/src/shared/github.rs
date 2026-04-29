@@ -7,11 +7,12 @@ use fabro_vault::Vault;
 pub(crate) fn build_github_credentials(
     strategy: GithubIntegrationStrategy,
     app_id: Option<&str>,
+    app_slug: Option<&str>,
     vault: Option<&Vault>,
 ) -> anyhow::Result<Option<GitHubCredentials>> {
     match strategy {
         GithubIntegrationStrategy::App => {
-            GitHubCredentials::from_env(app_id).map_err(|err| anyhow!(err))
+            GitHubCredentials::from_env_with_slug(app_id, app_slug).map_err(|err| anyhow!(err))
         }
         GithubIntegrationStrategy::Token => {
             let token = lookup_github_token(vault);

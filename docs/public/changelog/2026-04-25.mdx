@@ -1,0 +1,28 @@
+---
+title: "Files Changed sidebar and settings panels"
+date: "2026-04-25"
+---
+
+## Files Changed sidebar
+
+Large diffs are easier to navigate from the run detail page. The Files Changed tab now has a GitHub-style file tree sidebar that lists only changed files, shows each file's git status, supports search, and keeps selection tied to the existing `#file=<path>` deep-link behavior.
+
+Clicking a file in the tree scrolls and focuses the matching diff, while mobile layouts keep the stacked diff view uncluttered. The tree lazy-loads on desktop and reserves its column while loading, so the diff layout no longer jumps as sidebar data arrives.
+
+## Settings panels
+
+The Settings page now presents server configuration as curated panels instead of a raw JSON dump. Server, access, integration, and artifact values are rendered with typed controls and readable summaries, so operators can scan what matters without parsing the full settings payload.
+
+## More
+
+<Accordion title="Improvements">
+- Added the captured commit short SHA to the Files Changed freshness label
+- Unboxed the Files Changed tree so it sits directly in the sidebar layout
+- Styled web OAuth callback state-validation errors with the same browser shell as the CLI auth flow
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed aggregate diff stats counting sensitive, binary, symlink, and submodule entries that are not visible in the diff
+- Fixed Files Changed tree selection so it only targets valid file paths after filtering or reloads
+- Fixed sidebar loading and filtering behavior to keep the desktop layout stable
+</Accordion>

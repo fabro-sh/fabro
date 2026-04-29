@@ -39,6 +39,7 @@ mod tests {
     use super::get;
 
     #[test]
+    #[ignore = "requires cargo dev spa refresh"]
     fn embeds_index_html() {
         let index = get("index.html").expect("expected embedded index.html");
         let html = std::str::from_utf8(index.as_ref()).expect("index.html should be valid UTF-8");
@@ -46,7 +47,7 @@ mod tests {
     }
 
     #[test]
-    fn committed_assets_do_not_include_source_maps() {
+    fn embedded_assets_do_not_include_source_maps() {
         let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
         assert!(
             collect_source_maps(&assets_dir).is_empty(),

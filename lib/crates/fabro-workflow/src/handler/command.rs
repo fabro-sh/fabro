@@ -739,23 +739,23 @@ mod tests {
             _: &str,
             _: Option<usize>,
             _: Option<usize>,
-        ) -> Result<String, String> {
+        ) -> fabro_sandbox::Result<String> {
             unimplemented!()
         }
-        async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
+        async fn write_file(&self, _: &str, _: &str) -> fabro_sandbox::Result<()> {
             unimplemented!()
         }
-        async fn delete_file(&self, _: &str) -> Result<(), String> {
+        async fn delete_file(&self, _: &str) -> fabro_sandbox::Result<()> {
             unimplemented!()
         }
-        async fn file_exists(&self, _: &str) -> Result<bool, String> {
+        async fn file_exists(&self, _: &str) -> fabro_sandbox::Result<bool> {
             unimplemented!()
         }
         async fn list_directory(
             &self,
             _: &str,
             _: Option<usize>,
-        ) -> Result<Vec<fabro_agent::sandbox::DirEntry>, String> {
+        ) -> fabro_sandbox::Result<Vec<fabro_agent::sandbox::DirEntry>> {
             unimplemented!()
         }
         async fn exec_command(
@@ -765,7 +765,7 @@ mod tests {
             _working_dir: Option<&str>,
             env_vars: Option<&std::collections::HashMap<String, String>>,
             cancel_token: Option<tokio_util::sync::CancellationToken>,
-        ) -> Result<fabro_agent::sandbox::ExecResult, String> {
+        ) -> fabro_sandbox::Result<fabro_agent::sandbox::ExecResult> {
             *self.captured_command.lock().unwrap() = Some(command.to_string());
             *self.captured_env_vars.lock().unwrap() = env_vars.cloned();
             *self.captured_cancel_token.lock().unwrap() = Some(cancel_token.is_some());
@@ -776,22 +776,30 @@ mod tests {
             _: &str,
             _: &str,
             _: &fabro_agent::sandbox::GrepOptions,
-        ) -> Result<Vec<String>, String> {
+        ) -> fabro_sandbox::Result<Vec<String>> {
             unimplemented!()
         }
-        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _: Option<&str>) -> fabro_sandbox::Result<Vec<String>> {
             unimplemented!()
         }
-        async fn download_file_to_local(&self, _: &str, _: &std::path::Path) -> Result<(), String> {
+        async fn download_file_to_local(
+            &self,
+            _: &str,
+            _: &std::path::Path,
+        ) -> fabro_sandbox::Result<()> {
             unimplemented!()
         }
-        async fn upload_file_from_local(&self, _: &std::path::Path, _: &str) -> Result<(), String> {
+        async fn upload_file_from_local(
+            &self,
+            _: &std::path::Path,
+            _: &str,
+        ) -> fabro_sandbox::Result<()> {
             unimplemented!()
         }
-        async fn initialize(&self) -> Result<(), String> {
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn cleanup(&self) -> Result<(), String> {
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
         fn working_directory(&self) -> &str {

@@ -15,6 +15,7 @@ pub mod features;
 pub mod interp;
 pub mod model_ref;
 pub mod project;
+pub mod public_url;
 pub mod run;
 pub mod server;
 pub mod size;
@@ -31,8 +32,11 @@ pub use model_ref::{
     AmbiguousModelRef, ModelRef, ModelRegistry, ParseModelRefError, ResolvedModelRef,
 };
 pub use project::ProjectNamespace;
+pub use public_url::{
+    is_wildcard_host, replace_wildcard_host, validate_public_url, validate_public_url_with_label,
+};
 pub use run::{
-    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerfileSource,
+    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerSettings, DockerfileSource,
     GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, McpServerSettings,
     McpTransport, NotificationProviderSettings, NotificationRouteSettings, PullRequestSettings,
     RunAgentSettings, RunCheckpointSettings, RunExecutionSettings, RunGitSettings, RunGoal,
@@ -41,7 +45,7 @@ pub use run::{
 };
 pub use server::{
     DiscordIntegrationSettings, GithubIntegrationSettings, IntegrationWebhooksSettings,
-    IpAllowEntry, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
+    IpAllowEntry, LogDestination, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
     ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings, ServerIntegrationsSettings,
     ServerIpAllowlistOverrideSettings, ServerIpAllowlistSettings, ServerListenSettings,
     ServerLoggingSettings, ServerNamespace, ServerSchedulerSettings, ServerSlateDbSettings,

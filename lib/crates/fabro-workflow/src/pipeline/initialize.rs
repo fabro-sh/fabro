@@ -11,8 +11,9 @@ use fabro_auth::{
 use fabro_config::RunScratch;
 use fabro_graphviz::graph;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
+use fabro_sandbox::config::WorktreeMode;
 use fabro_sandbox::{
-    ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorkdirStrategy, WorktreeOptions,
+    GitSetupIntent, ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorktreeOptions,
     WorktreeSandbox,
 };
 use fabro_vault::Vault;
@@ -21,24 +22,70 @@ use shlex::try_quote;
 use tokio::process::Command as TokioCommand;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
-use tokio::task::spawn_blocking;
 use tokio::time::timeout as tokio_timeout;
 
 use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec};
 use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
 use crate::error::Error;
 use crate::event::{Emitter, Event, RunNoticeLevel};
-use crate::git::{self, GitSyncStatus, MetadataStore};
+use crate::git::RUN_BRANCH_PREFIX;
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use crate::handler::{HandlerRegistry, default_registry, sandbox_cancel_token};
-use crate::run_options::GitCheckpointOptions;
+use crate::run_options::{GitCheckpointOptions, RunOptions};
+use crate::sandbox_git::GIT_REMOTE;
+use crate::sandbox_metadata::{SandboxGitRuntime, metadata_branch_name};
 use crate::services::{EngineServices, RunServices};
 
 struct WorktreePlan {
     branch_name:          String,
-    base_sha:             String,
+    base_sha:             Option<String>,
     worktree_path:        PathBuf,
     skip_branch_creation: bool,
+}
+
+async fn resolve_worktree_base_sha(
+    sandbox: &dyn Sandbox,
+    plan: &WorktreePlan,
+) -> Result<Option<String>, Error> {
+    if let Some(base_sha) = plan.base_sha.as_ref() {
+        return Ok(Some(base_sha.clone()));
+    }
+
+    let result = sandbox
+        .exec_command(
+            &format!("{GIT_REMOTE} rev-parse HEAD"),
+            10_000,
+            None,
+            None,
+            None,
+        )
+        .await
+        .map_err(|err| Error::engine(format!("git rev-parse HEAD failed: {err}")))?;
+    if result.exit_code != 0 {
+        let output = result.stderr.trim();
+        let output = if output.is_empty() {
+            result.stdout.trim()
+        } else {
+            output
+        };
+        if is_not_git_repository(output) {
+            return Ok(None);
+        }
+        return Err(Error::engine(format!(
+            "git rev-parse HEAD failed (exit {}): {}",
+            result.exit_code, output
+        )));
+    }
+
+    let base_sha = result.stdout.trim();
+    if base_sha.is_empty() {
+        return Err(Error::engine("git rev-parse HEAD returned no commit sha"));
+    }
+    Ok(Some(base_sha.to_string()))
+}
+
+fn is_not_git_repository(output: &str) -> bool {
+    output.contains("not a git repository") || output.contains("ambiguous argument 'HEAD'")
 }
 
 async fn run_hooks(
@@ -53,52 +100,53 @@ async fn run_hooks(
     runner.run(hook_context, sandbox, work_dir).await
 }
 
-async fn resolve_worktree_plan(options: &mut InitOptions) -> Result<Option<WorktreePlan>, Error> {
+fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
     let Some(worktree_mode) = options.worktree_mode else {
         options.run_options.display_base_sha = None;
-        return Ok(None);
+        return None;
     };
 
-    if options.checkpoint.is_some() && matches!(options.sandbox, SandboxSpec::Local { .. }) {
+    let is_local = matches!(options.sandbox, SandboxSpec::Local { .. });
+
+    if options.checkpoint.is_some() && is_local {
+        if let Some(fork_source) = options.run_options.fork_source_ref.as_ref() {
+            let base_sha = fork_source.checkpoint_sha.clone();
+            options.run_options.display_base_sha = Some(base_sha.clone());
+            return Some(WorktreePlan {
+                branch_name:          format!("{RUN_BRANCH_PREFIX}{}", options.run_id),
+                base_sha:             Some(base_sha),
+                worktree_path:        RunScratch::new(&options.run_options.run_dir).worktree_dir(),
+                skip_branch_creation: false,
+            });
+        }
+
         if let Some(git) = options.run_options.git.as_ref() {
             if let (Some(run_branch), Some(base_sha)) = (&git.run_branch, &git.base_sha) {
                 options.run_options.display_base_sha = Some(base_sha.clone());
-                return Ok(Some(WorktreePlan {
+                return Some(WorktreePlan {
                     branch_name:          run_branch.clone(),
-                    base_sha:             base_sha.clone(),
+                    base_sha:             Some(base_sha.clone()),
                     worktree_path:        RunScratch::new(&options.run_options.run_dir)
                         .worktree_dir(),
                     skip_branch_creation: true,
-                }));
+                });
             }
         }
     }
 
-    let host_repo_path = options
+    let local_dirty = options
         .run_options
-        .host_repo_path
-        .clone()
-        .or_else(|| options.sandbox.host_repo_path());
-    let git_status = if let Some(path) = host_repo_path.as_ref() {
-        let path = path.clone();
-        let base_branch = options.run_options.base_branch.clone();
-        spawn_blocking(move || git::sync_status(&path, "origin", base_branch.as_deref()))
-            .await
-            .unwrap_or(GitSyncStatus::Dirty)
-    } else {
-        GitSyncStatus::Dirty
-    };
-    let strategy = options.sandbox.workdir_strategy(
-        worktree_mode,
-        git_status.is_clean(),
-        options.checkpoint.is_some(),
-    );
+        .pre_run_git
+        .as_ref()
+        .map(|git| git.dirty);
 
-    if git_status == GitSyncStatus::Dirty {
-        let env_name = match strategy {
-            WorkdirStrategy::LocalWorktree => Some("worktree"),
-            WorkdirStrategy::Cloud => Some("remote sandbox"),
-            WorkdirStrategy::LocalDirectory => None,
+    if matches!(local_dirty, Some(fabro_types::DirtyStatus::Dirty)) {
+        let env_name = if !is_local {
+            Some("remote sandbox")
+        } else if worktree_mode == WorktreeMode::Never {
+            None
+        } else {
+            Some("worktree")
         };
         if let Some(env_name) = env_name {
             options.emitter.notice(
@@ -109,97 +157,55 @@ async fn resolve_worktree_plan(options: &mut InitOptions) -> Result<Option<Workt
         }
     }
 
-    if !options.dry_run
-        && matches!(
-            strategy,
-            WorkdirStrategy::LocalWorktree | WorkdirStrategy::Cloud
-        )
-    {
-        if let (Some(repo_path), Some(branch)) = (
-            host_repo_path.as_ref(),
-            options.run_options.base_branch.as_ref(),
-        ) {
-            let needs_push = match git_status {
-                GitSyncStatus::Synced => false,
-                GitSyncStatus::Unsynced => true,
-                GitSyncStatus::Dirty => {
-                    let repo_path = repo_path.clone();
-                    let branch = branch.clone();
-                    spawn_blocking(move || git::branch_needs_push(&repo_path, "origin", &branch))
-                        .await
-                        .unwrap_or(true)
-                }
-            };
-
-            if needs_push {
-                let repo_path = repo_path.clone();
-                let branch = branch.clone();
-                let branch_for_push = branch.clone();
-                match git::blocking_push_with_timeout(60, move || {
-                    git::push_branch(&repo_path, "origin", &branch_for_push)
-                })
-                .await
-                {
-                    Ok(()) => options.emitter.notice(
-                        RunNoticeLevel::Info,
-                        "git_push_succeeded",
-                        format!("{branch} (synced local commits to remote)"),
-                    ),
-                    Err(e) => options.emitter.notice(
-                        RunNoticeLevel::Warn,
-                        "git_push_failed",
-                        format!("Failed to push {branch} to origin: {e}"),
-                    ),
-                }
-            }
-        }
+    if !is_local {
+        options.run_options.display_base_sha = options
+            .run_options
+            .pre_run_git
+            .as_ref()
+            .and_then(|git| git.sha.clone());
+        return None;
     }
 
-    match strategy {
-        WorkdirStrategy::LocalWorktree => {
-            let Some(repo_path) = host_repo_path else {
-                options.run_options.display_base_sha = None;
-                return Ok(None);
-            };
-            match spawn_blocking(move || git::head_sha(&repo_path))
-                .await
-                .unwrap_or_else(|_| Err(Error::engine("git head_sha task panicked")))
-            {
-                Ok(base_sha) => {
-                    options.run_options.display_base_sha = Some(base_sha.clone());
-                    Ok(Some(WorktreePlan {
-                        branch_name: format!("{}{}", git::RUN_BRANCH_PREFIX, options.run_id),
-                        base_sha,
-                        worktree_path: RunScratch::new(&options.run_options.run_dir).worktree_dir(),
-                        skip_branch_creation: false,
-                    }))
-                }
-                Err(e) => {
-                    options.emitter.notice(
-                        RunNoticeLevel::Warn,
-                        "worktree_setup_failed",
-                        format!("Git worktree setup failed ({e}), running without worktree."),
-                    );
-                    options.run_options.display_base_sha = None;
-                    Ok(None)
-                }
-            }
+    if worktree_mode == WorktreeMode::Never {
+        options.run_options.display_base_sha = None;
+        return None;
+    }
+
+    let (branch_name, base_sha) =
+        if let Some(fork_source) = options.run_options.fork_source_ref.as_ref() {
+            (
+                format!("{RUN_BRANCH_PREFIX}{}", options.run_id),
+                Some(fork_source.checkpoint_sha.clone()),
+            )
+        } else {
+            (
+                format!("{RUN_BRANCH_PREFIX}{}", options.run_id),
+                options
+                    .run_options
+                    .pre_run_git
+                    .as_ref()
+                    .and_then(|git| git.sha.clone()),
+            )
+        };
+    options.run_options.display_base_sha.clone_from(&base_sha);
+    Some(WorktreePlan {
+        branch_name,
+        base_sha,
+        worktree_path: RunScratch::new(&options.run_options.run_dir).worktree_dir(),
+        skip_branch_creation: false,
+    })
+}
+
+fn git_setup_intent(run_options: &RunOptions) -> GitSetupIntent {
+    if let Some(source) = run_options.fork_source_ref.as_ref() {
+        GitSetupIntent::ForkFromCheckpoint {
+            new_run_id:     run_options.run_id.to_string(),
+            source_run_id:  source.source_run_id.to_string(),
+            checkpoint_sha: source.checkpoint_sha.clone(),
         }
-        WorkdirStrategy::Cloud => {
-            options.run_options.display_base_sha = if let Some(path) = host_repo_path.as_ref() {
-                let path = path.clone();
-                spawn_blocking(move || git::head_sha(&path))
-                    .await
-                    .ok()
-                    .and_then(std::result::Result::ok)
-            } else {
-                None
-            };
-            Ok(None)
-        }
-        WorkdirStrategy::LocalDirectory => {
-            options.run_options.display_base_sha = None;
-            Ok(None)
+    } else {
+        GitSetupIntent::NewRun {
+            run_id: run_options.run_id.to_string(),
         }
     }
 }
@@ -223,13 +229,15 @@ async fn mint_github_token(
         .map_err(|e| Error::engine(e.clone()))?;
     let client = fabro_http::http_client().map_err(|e| Error::engine(e.to_string()))?;
     let perms_json = serde_json::to_value(permissions).map_err(|e| Error::engine(e.to_string()))?;
-    fabro_github::create_installation_access_token_with_permissions(
+    let install_url = creds.installation_url(&owner);
+    fabro_github::create_installation_access_token_with_permissions_and_install_url(
         &client,
         &jwt,
         &owner,
         &repo,
         &fabro_github::github_api_base_url(),
         perms_json,
+        install_url.as_deref(),
     )
     .await
     .map_err(|e| Error::engine(e.clone()))
@@ -456,6 +464,7 @@ pub async fn initialize(
 
     let llm_source = build_llm_source(options.vault.clone());
     let cli_resolver = options.vault.clone().map(CredentialResolver::new);
+    let metadata_runtime = Arc::new(SandboxGitRuntime::new());
 
     let hook_runner = if options.hooks.hooks.is_empty() {
         None
@@ -468,14 +477,7 @@ pub async fn initialize(
 
     resolve_devcontainer(&mut options).await?;
 
-    let worktree_plan = resolve_worktree_plan(&mut options).await?;
-    if let Some(plan) = worktree_plan.as_ref() {
-        options.run_options.git = Some(GitCheckpointOptions {
-            base_sha:    Some(plan.base_sha.clone()),
-            run_branch:  Some(plan.branch_name.clone()),
-            meta_branch: Some(MetadataStore::branch_name(&options.run_id.to_string())),
-        });
-    }
+    let worktree_plan = resolve_worktree_plan(&mut options);
 
     let sandbox_event_callback: SandboxEventCallback = {
         let emitter = Arc::clone(&options.emitter);
@@ -490,32 +492,36 @@ pub async fn initialize(
             .build(Some(Arc::clone(&sandbox_event_callback)))
             .await
             .map_err(|e| Error::engine(e.to_string()))?;
-        let mut worktree = WorktreeSandbox::new(inner, WorktreeOptions {
-            branch_name:          plan.branch_name.clone(),
-            base_sha:             plan.base_sha.clone(),
-            worktree_path:        plan.worktree_path.to_string_lossy().into_owned(),
-            skip_branch_creation: plan.skip_branch_creation,
-        });
-        worktree.set_event_callback(Arc::clone(&options.emitter).worktree_callback());
-        match worktree.initialize().await {
-            Ok(()) => {
-                worktree_created = true;
-                Arc::new(ReadBeforeWriteSandbox::new(Arc::new(worktree)))
+        if let Some(base_sha) = resolve_worktree_base_sha(&*inner, plan).await? {
+            metadata_runtime
+                .ensure_git_available(&*inner)
+                .await
+                .map_err(|err| Error::engine(format!("sandbox git unavailable: {err}")))?;
+            options.run_options.display_base_sha = Some(base_sha.clone());
+            options.run_options.git = Some(GitCheckpointOptions {
+                base_sha:    Some(base_sha.clone()),
+                run_branch:  Some(plan.branch_name.clone()),
+                meta_branch: Some(metadata_branch_name(&options.run_id.to_string())),
+            });
+            let mut worktree = WorktreeSandbox::new(inner, WorktreeOptions {
+                branch_name: plan.branch_name.clone(),
+                base_sha,
+                worktree_path: plan.worktree_path.to_string_lossy().into_owned(),
+                skip_branch_creation: plan.skip_branch_creation,
+                setup_intent: Some(git_setup_intent(&options.run_options)),
+            });
+            worktree.set_event_callback(Arc::clone(&options.emitter).worktree_callback());
+            match worktree.initialize().await {
+                Ok(()) => {
+                    worktree_created = true;
+                    Arc::new(ReadBeforeWriteSandbox::new(Arc::new(worktree)))
+                }
+                Err(e) => {
+                    return Err(Error::engine(format!("Git worktree setup failed: {e}")));
+                }
             }
-            Err(e) => {
-                options.emitter.notice(
-                    RunNoticeLevel::Warn,
-                    "worktree_setup_failed",
-                    format!("Git worktree setup failed ({e}), running without worktree."),
-                );
-                Arc::new(ReadBeforeWriteSandbox::new(
-                    options
-                        .sandbox
-                        .build(Some(Arc::clone(&sandbox_event_callback)))
-                        .await
-                        .map_err(|e| Error::engine(e.to_string()))?,
-                ))
-            }
+        } else {
+            Arc::new(ReadBeforeWriteSandbox::new(inner))
         }
     } else {
         Arc::new(ReadBeforeWriteSandbox::new(
@@ -540,7 +546,7 @@ pub async fn initialize(
     sandbox
         .initialize()
         .await
-        .map_err(|e| Error::engine(format!("Failed to initialize sandbox: {e}")))?;
+        .map_err(|e| Error::engine_with_source("Failed to initialize sandbox", &e))?;
 
     let hook_ctx = HookContext::new(
         HookEvent::SandboxReady,
@@ -561,11 +567,12 @@ pub async fn initialize(
 
     let sandbox_record = options.sandbox.to_sandbox_record(&*sandbox);
     options.emitter.emit(&Event::SandboxInitialized {
-        working_directory:      sandbox_record.working_directory.clone(),
-        provider:               sandbox_record.provider.clone(),
-        identifier:             sandbox_record.identifier.clone(),
-        host_working_directory: sandbox_record.host_working_directory.clone(),
-        container_mount_point:  sandbox_record.container_mount_point.clone(),
+        working_directory: sandbox_record.working_directory.clone(),
+        provider:          sandbox_record.provider.clone(),
+        identifier:        sandbox_record.identifier.clone(),
+        repo_cloned:       sandbox_record.repo_cloned,
+        clone_origin_url:  sandbox_record.clone_origin_url.clone(),
+        clone_branch:      sandbox_record.clone_branch.clone(),
     });
 
     let env = build_sandbox_env(
@@ -602,10 +609,14 @@ pub async fn initialize(
         .and_then(|g| g.run_branch.as_ref())
         .is_some();
     if !has_run_branch {
-        match sandbox
-            .setup_git_for_run(&options.run_options.run_id.to_string())
-            .await
-        {
+        let intent = git_setup_intent(&options.run_options);
+        if sandbox.origin_url().is_some() {
+            metadata_runtime
+                .ensure_git_available(&*sandbox)
+                .await
+                .map_err(|err| Error::engine(format!("sandbox git unavailable: {err}")))?;
+        }
+        match sandbox.setup_git(&intent).await {
             Ok(Some(info)) => {
                 let base_sha = options
                     .run_options
@@ -617,7 +628,7 @@ pub async fn initialize(
                 options.run_options.git = Some(GitCheckpointOptions {
                     base_sha,
                     run_branch: Some(info.run_branch.clone()),
-                    meta_branch: Some(MetadataStore::branch_name(
+                    meta_branch: Some(metadata_branch_name(
                         &options.run_options.run_id.to_string(),
                     )),
                 });
@@ -627,10 +638,7 @@ pub async fn initialize(
             }
             Ok(None) => {}
             Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "Sandbox git setup failed, running without git checkpoints"
-                );
+                return Err(Error::engine(format!("Sandbox git setup failed: {e}")));
             }
         }
     }
@@ -708,6 +716,7 @@ pub async fn initialize(
         options.run_options.cancel_token.clone(),
         options.llm.provider,
         Arc::clone(&llm_source),
+        metadata_runtime,
     );
     let engine = Arc::new(EngineServices {
         run: Arc::clone(&run_services),
@@ -747,6 +756,7 @@ mod tests {
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
+    use fabro_sandbox::config::WorktreeMode;
     use fabro_store::Database;
     use fabro_types::{RunId, WorkflowSettings, fixtures};
     use fabro_vault::{SecretType, Vault};
@@ -837,7 +847,8 @@ mod tests {
             labels:           HashMap::new(),
             workflow_slug:    None,
             github_app:       None,
-            host_repo_path:   None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
             base_branch:      None,
             display_base_sha: None,
             git:              None,
@@ -855,16 +866,80 @@ mod tests {
                 settings: WorkflowSettings::default(),
                 graph,
                 workflow_slug: Some("test".to_string()),
-                working_directory: std::env::current_dir().unwrap(),
-                host_repo_path: Some(std::env::current_dir().unwrap().display().to_string()),
-                repo_origin_url: None,
-                base_branch: Some("main".to_string()),
+                source_directory: Some(std::env::current_dir().unwrap().display().to_string()),
+                git: Some(fabro_types::GitContext {
+                    origin_url:   String::new(),
+                    branch:       "main".to_string(),
+                    sha:          None,
+                    dirty:        fabro_types::DirtyStatus::Clean,
+                    push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+                }),
                 labels: HashMap::new(),
                 provenance: None,
                 manifest_blob: None,
                 definition_blob: None,
+                fork_source_ref: None,
+                in_place: false,
             },
         )
+    }
+
+    #[tokio::test]
+    async fn resolve_worktree_plan_uses_local_worktree_without_pre_run_git_context() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let store = memory_store();
+        let mut options = InitOptions {
+            run_id:            test_run_id(),
+            run_store:         {
+                let inner = store.create_run(&test_run_id()).await.unwrap();
+                inner.into()
+            },
+            dry_run:           false,
+            emitter:           Arc::new(crate::event::Emitter::new(test_run_id())),
+            sandbox:           SandboxSpec::Local {
+                working_directory: std::env::current_dir().unwrap(),
+            },
+            llm:               LlmSpec {
+                model:          "test-model".to_string(),
+                provider:       fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers:    Vec::new(),
+                dry_run:        true,
+            },
+            interviewer:       Arc::new(AutoApproveInterviewer),
+            lifecycle:         crate::run_options::LifecycleOptions {
+                setup_commands:           vec![],
+                setup_command_timeout_ms: 1_000,
+                devcontainer_phases:      vec![],
+            },
+            run_options:       test_settings(&run_dir),
+            workflow_path:     None,
+            workflow_bundle:   None,
+            hooks:             fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env:       SandboxEnvSpec {
+                devcontainer_env:   HashMap::new(),
+                toml_env:           HashMap::new(),
+                github_permissions: None,
+                origin_url:         None,
+            },
+            vault:             None,
+            devcontainer:      None,
+            git:               None,
+            worktree_mode:     Some(WorktreeMode::Always),
+            run_control:       None,
+            registry_override: None,
+            artifact_sink:     None,
+            checkpoint:        None,
+            seed_context:      None,
+        };
+
+        let plan = resolve_worktree_plan(&mut options);
+
+        assert!(plan.is_some());
+        assert!(options.run_options.display_base_sha.is_none());
+        assert!(options.run_options.git.is_none());
     }
 
     #[tokio::test]

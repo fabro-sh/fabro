@@ -228,6 +228,8 @@ pub struct RunSandboxLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local:        Option<LocalSandboxLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker:       Option<DockerSandboxLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daytona:      Option<DaytonaSandboxLayer>,
 }
 
@@ -236,6 +238,23 @@ pub struct RunSandboxLayer {
 pub struct LocalSandboxLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_mode: Option<WorktreeMode>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct DockerSandboxLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image:        Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_limit: Option<Size>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_quota:    Option<i64>,
+    #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
+    pub env_vars:     StickyMap<InterpString>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_clone:   Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]

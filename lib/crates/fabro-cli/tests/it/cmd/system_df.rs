@@ -6,7 +6,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 use serde_json::Value;
 
-use super::support::setup_completed_fast_dry_run;
+use super::support::setup_seeded_completed_dry_run;
 
 #[test]
 fn help() {
@@ -37,7 +37,7 @@ fn help() {
 #[test]
 fn system_df_summarizes_runs_and_logs() {
     let context = test_context!();
-    setup_completed_fast_dry_run(&context);
+    setup_seeded_completed_dry_run(&context);
     std::fs::create_dir_all(context.storage_dir.join("logs")).unwrap();
     std::fs::write(context.storage_dir.join("logs/cli.log"), b"log line\n").unwrap();
 
@@ -66,7 +66,7 @@ fn system_df_summarizes_runs_and_logs() {
 #[test]
 fn system_df_verbose_lists_runs_with_reclaimable_marker() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
 
     let output = context
         .command()
@@ -101,7 +101,7 @@ fn system_df_verbose_lists_runs_with_reclaimable_marker() {
 #[test]
 fn system_df_json_verbose_includes_runs() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
 
     let output = context
         .command()

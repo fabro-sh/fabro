@@ -1,11 +1,11 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::setup_completed_fast_dry_run;
+use super::support::setup_seeded_completed_dry_run;
 
 #[test]
 fn artifact_list_empty_run_reports_no_artifacts() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let mut cmd = context.command();
     cmd.args(["artifact", "list", &run.run_id]);
 

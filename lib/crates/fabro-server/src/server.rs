@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::str::FromStr;
@@ -12,7 +13,7 @@ use axum::body::Body;
 use axum::body::to_bytes;
 use axum::extract::{self as axum_extract, DefaultBodyLimit, Path, Query, State};
 use axum::http::{HeaderMap, Method, StatusCode, header};
-use axum::middleware::{self};
+use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -34,9 +35,9 @@ pub use fabro_api::types::{
     QuestionType as ApiQuestionType, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest,
     RewindRequest, RewindResponse, RunArtifactEntry, RunArtifactListResponse, RunBilling,
     RunBillingStage, RunBillingTotals, RunError, RunManifest, RunStage, RunStatusResponse,
-    SandboxFileEntry, SandboxFileListResponse, SecretType as ApiSecretType, SshAccessRequest,
-    SshAccessResponse, StageStatus as ApiStageStatus, StartRunRequest, SubmitAnswerRequest,
-    SystemFeatures, SystemInfoResponse, SystemRunCounts, TimelineEntryResponse, WriteBlobResponse,
+    SandboxFileEntry, SandboxFileListResponse, SshAccessRequest, SshAccessResponse,
+    StageStatus as ApiStageStatus, StartRunRequest, SubmitAnswerRequest, SystemFeatures,
+    SystemInfoResponse, SystemRunCounts, TimelineEntryResponse, WriteBlobResponse,
 };
 use fabro_auth::{
     CredentialSource, VaultCredentialSource, auth_issue_message, parse_credential_secret,
@@ -70,14 +71,16 @@ use fabro_store::{
 #[cfg(test)]
 use fabro_types::BlockedReason;
 use fabro_types::settings::run::RunMode;
-use fabro_types::settings::server::{GithubIntegrationSettings, GithubIntegrationStrategy};
+use fabro_types::settings::server::{
+    GithubIntegrationSettings, GithubIntegrationStrategy, LogDestination,
+};
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
     ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, PullRequestRecord,
     RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
     RunServerProvenance, RunSubjectProvenance, ServerSettings,
 };
-use fabro_util::text::strip_goal_decoration;
+use fabro_util::error::{collect_causes, render_with_causes};
 use fabro_util::version::FABRO_VERSION;
 use fabro_vault::{Error as VaultError, SecretType, Vault};
 use fabro_workflow::artifact_upload::ArtifactSink;
@@ -106,8 +109,7 @@ use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
 use tower::{ServiceExt, service_fn};
-use tower_http::trace::TraceLayer;
-use tracing::{debug, error, info, warn};
+use tracing::{Instrument, debug, error, info, warn};
 use ulid::Ulid;
 
 use crate::auth::{self, GithubEndpoints, auth_translation_middleware, demo_routing_middleware};
@@ -126,7 +128,9 @@ use crate::worker_token::{
     AuthorizeRunBlob, AuthorizeRunScoped, AuthorizeStageArtifact, WorkerTokenKeys,
     issue_worker_token,
 };
-use crate::{demo, diagnostics, run_manifest, security_headers, static_files, web_auth};
+use crate::{
+    canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
+};
 
 pub(crate) type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
@@ -438,7 +442,7 @@ impl SlackService {
                     id:              props.question_id.clone(),
                     text:            props.question.clone(),
                     stage:           props.stage.clone(),
-                    question_type:   InterviewQuestionType::from_wire_name(&props.question_type),
+                    question_type:   props.question_type.parse().unwrap_or_default(),
                     options:         props.options.clone(),
                     allow_freeform:  props.allow_freeform,
                     timeout_seconds: props.timeout_seconds,
@@ -797,6 +801,7 @@ impl AppState {
                     fabro_github::GitHubAppCredentials {
                         app_id,
                         private_key_pem,
+                        slug: settings.slug.as_ref().map(InterpString::as_source),
                     },
                 )))
             }
@@ -945,6 +950,7 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
 #[derive(Clone, Debug)]
 pub struct RouterOptions {
     pub web_enabled:                 bool,
+    pub static_asset_root:           Option<PathBuf>,
     pub github_endpoints:            Option<Arc<GithubEndpoints>>,
     pub github_webhook_ip_allowlist: Option<Arc<IpAllowlistConfig>>,
 }
@@ -953,6 +959,7 @@ impl Default for RouterOptions {
     fn default() -> Self {
         Self {
             web_enabled:                 true,
+            static_asset_root:           None,
             github_endpoints:            None,
             github_webhook_ip_allowlist: None,
         }
@@ -972,8 +979,10 @@ pub fn build_router_with_options(
 ) -> Router {
     start_optional_slack_service(&state);
     let web_enabled = options.web_enabled;
+    let static_asset_root = options.static_asset_root.clone();
     let webhook_ip_allowlist = options.github_webhook_ip_allowlist;
     let translation_state = Arc::clone(&state);
+    let state_for_canonical_host = Arc::clone(&state);
     let github_endpoints = options
         .github_endpoints
         .clone()
@@ -1005,7 +1014,10 @@ pub fn build_router_with_options(
         let demo = demo_router.clone();
         let real = real_router.clone();
         async move {
-            if web_enabled && req.headers().get("x-fabro-demo").is_some_and(|v| v == "1") {
+            let demo_active = web_enabled
+                && req.uri().path().starts_with("/api/")
+                && req.headers().get("x-fabro-demo").is_some_and(|v| v == "1");
+            if demo_active {
                 demo.oneshot(req).await
             } else {
                 real.oneshot(req).await
@@ -1013,31 +1025,11 @@ pub fn build_router_with_options(
         }
     });
 
-    let trace_layer = TraceLayer::new_for_http()
-        .make_span_with(|req: &axum_extract::Request| {
-            let method = req.method().as_str();
-            let path = req.uri().path();
-            tracing::debug_span!("http_request", method, path)
-        })
-        .on_request(|req: &axum_extract::Request, _span: &tracing::Span| {
-            debug!(method = %req.method(), path = %req.uri().path(), "HTTP request");
-        })
-        .on_response(
-            |response: &Response, latency: std::time::Duration, _span: &tracing::Span| {
-                let status = response.status().as_u16();
-                let latency_ms = latency.as_millis();
-                if status >= 500 {
-                    error!(status, latency_ms, "HTTP response");
-                } else {
-                    info!(status, latency_ms, "HTTP response");
-                }
-            },
-        );
-
     let mut app_router = Router::new()
         .route("/health", get(health))
         .fallback_service(service_fn(move |req: axum_extract::Request| {
             let dispatch = dispatch.clone();
+            let static_asset_root = static_asset_root.clone();
             async move {
                 let path = req.uri().path().to_string();
                 let dispatch_path = path.starts_with("/api/")
@@ -1049,7 +1041,14 @@ pub fn build_router_with_options(
                     Ok::<_, std::convert::Infallible>(StatusCode::NOT_FOUND.into_response())
                 } else if web_enabled && matches!(req.method(), &Method::GET | &Method::HEAD) {
                     let headers = req.headers().clone();
-                    Ok::<_, std::convert::Infallible>(static_files::serve(&path, &headers).await)
+                    Ok::<_, std::convert::Infallible>(
+                        static_files::serve_with_asset_root(
+                            &path,
+                            &headers,
+                            static_asset_root.as_deref(),
+                        )
+                        .await,
+                    )
                 } else {
                     Ok::<_, std::convert::Infallible>(StatusCode::NOT_FOUND.into_response())
                 }
@@ -1075,8 +1074,33 @@ pub fn build_router_with_options(
     }
 
     router
+        .layer(middleware::from_fn_with_state(
+            canonical_host::Config {
+                state: state_for_canonical_host,
+                web_enabled,
+            },
+            canonical_host::redirect_middleware,
+        ))
         .layer(middleware::from_fn(security_headers::layer))
-        .layer(trace_layer)
+        .layer(middleware::from_fn(http_log_middleware))
+}
+
+async fn http_log_middleware(req: axum_extract::Request, next: Next) -> Response {
+    if req.uri().path().starts_with("/assets/") {
+        return next.run(req).await;
+    }
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let start = std::time::Instant::now();
+    let response = next.run(req).await;
+    let status = response.status().as_u16();
+    let latency_ms = start.elapsed().as_millis();
+    if status >= 500 {
+        error!(%method, %path, status, latency_ms, "HTTP response");
+    } else {
+        info!(%method, %path, status, latency_ms, "HTTP response");
+    }
+    response
 }
 
 fn github_webhook_routes(secret: Arc<[u8]>, ip_allowlist_config: Arc<IpAllowlistConfig>) -> Router {
@@ -1095,12 +1119,14 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/resolve", get(demo::resolve_run))
         .route("/boards/runs", get(demo::list_board_runs))
         .route("/preflight", post(run_preflight))
+        .route("/validate", post(validate_run_manifest))
         .route("/graph/render", post(render_graph_from_manifest))
         .route("/attach", get(demo::attach_events_stub))
         .route("/runs/{id}", get(demo::get_run_status))
         .route("/runs/{id}/questions", get(demo::get_questions_stub))
         .route("/runs/{id}/questions/{qid}/answer", post(demo::answer_stub))
         .route("/runs/{id}/state", get(not_implemented))
+        .route("/runs/{id}/logs", get(not_implemented))
         .route(
             "/runs/{id}/events",
             get(not_implemented).post(not_implemented),
@@ -1114,6 +1140,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/pause", post(demo::pause_stub))
         .route("/runs/{id}/unpause", post(demo::unpause_stub))
         .route("/runs/{id}/graph", get(demo::get_run_graph))
+        .route("/runs/{id}/graph/source", get(demo::get_run_graph_source))
         .route("/runs/{id}/stages", get(demo::get_run_stages))
         .route("/runs/{id}/artifacts", get(demo::list_run_artifacts_stub))
         .route("/runs/{id}/files", get(demo::list_run_files_stub))
@@ -1176,6 +1203,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs", get(list_runs).post(create_run))
         .route("/runs/resolve", get(resolve_run))
         .route("/preflight", post(run_preflight))
+        .route("/validate", post(validate_run_manifest))
         .route("/graph/render", post(render_graph_from_manifest))
         .route("/attach", get(attach_events))
         .route("/boards/runs", get(list_board_runs))
@@ -1183,6 +1211,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/questions", get(get_questions))
         .route("/runs/{id}/questions/{qid}/answer", post(submit_answer))
         .route("/runs/{id}/state", get(get_run_state))
+        .route("/runs/{id}/logs", get(get_run_logs))
         .route(
             "/runs/{id}/pull_request",
             get(get_run_pull_request).post(create_run_pull_request),
@@ -1213,6 +1242,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/timeline", get(run_timeline))
         .route("/runs/{id}/unarchive", post(unarchive_run))
         .route("/runs/{id}/graph", get(get_graph))
+        .route("/runs/{id}/graph/source", get(get_graph_source))
         .route("/runs/{id}/stages", get(list_run_stages))
         .route("/runs/{id}/artifacts", get(list_run_artifacts))
         .route("/runs/{id}/files", get(list_run_files))
@@ -1366,6 +1396,7 @@ async fn get_system_info(
 
     let response = SystemInfoResponse {
         version:          Some(FABRO_VERSION.to_string()),
+        server_url:       Some(server_settings.server.web.url.as_source()),
         git_sha:          option_env!("FABRO_GIT_SHA").map(str::to_string),
         build_date:       option_env!("FABRO_BUILD_DATE").map(str::to_string),
         profile:          option_env!("FABRO_BUILD_PROFILE").map(str::to_string),
@@ -1713,6 +1744,10 @@ fn system_sandbox_provider(
     )
 }
 
+fn clone_sandbox_can_use_github_credentials(provider: &str) -> bool {
+    matches!(provider, "docker" | "daytona")
+}
+
 fn parse_system_duration(raw: &str) -> anyhow::Result<chrono::Duration> {
     let raw = raw.trim();
     anyhow::ensure!(!raw.is_empty(), "empty duration string");
@@ -1799,20 +1834,12 @@ async fn list_secrets(_auth: AuthenticatedService, State(state): State<Arc<AppSt
     (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response()
 }
 
-fn secret_type_from_api(secret_type: ApiSecretType) -> SecretType {
-    match secret_type {
-        ApiSecretType::Environment => SecretType::Environment,
-        ApiSecretType::File => SecretType::File,
-        ApiSecretType::Credential => SecretType::Credential,
-    }
-}
-
 async fn create_secret(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateSecretRequest>,
 ) -> Response {
-    let secret_type = secret_type_from_api(body.type_);
+    let secret_type = body.type_;
     let name = body.name;
     let value = body.value;
     let description = body.description;
@@ -2011,13 +2038,14 @@ async fn get_github_repo(
                     .into_response();
             }
 
-            match fabro_github::create_installation_access_token_with_permissions(
+            match fabro_github::create_installation_access_token_with_permissions_and_install_url(
                 client_ref,
                 &jwt,
                 &owner,
                 &name,
                 &base_url,
                 serde_json::json!({ "contents": "write", "pull_requests": "write" }),
+                Some(&install_url),
             )
             .await
             {
@@ -2139,7 +2167,7 @@ async fn run_diagnostics(
 }
 
 async fn openapi_spec() -> Response {
-    let yaml = include_str!("../../../../docs/api-reference/fabro-api.yaml");
+    let yaml = include_str!("../../../../docs/public/api-reference/fabro-api.yaml");
     let value: serde_json::Value =
         serde_yaml::from_str(yaml).expect("embedded OpenAPI YAML is invalid");
     Json(value).into_response()
@@ -2853,56 +2881,6 @@ pub(crate) fn board_columns() -> serde_json::Value {
     ])
 }
 
-pub(crate) fn truncate_goal(goal: &str) -> String {
-    const MAX_LEN: usize = 100;
-
-    let stripped = strip_goal_decoration(goal);
-    let char_count = stripped.chars().count();
-    if char_count <= MAX_LEN {
-        return stripped.to_string();
-    }
-
-    let truncated: String = stripped.chars().take(MAX_LEN - 3).collect();
-    format!("{truncated}...")
-}
-
-fn repository_name(host_repo_path: Option<&str>) -> String {
-    host_repo_path
-        .and_then(|path| path.rsplit(['/', '\\']).find(|segment| !segment.is_empty()))
-        .unwrap_or("unknown")
-        .to_string()
-}
-
-fn elapsed_secs(duration_ms: Option<u64>) -> Option<f64> {
-    duration_ms.map(|ms| ms as f64 / 1000.0)
-}
-
-fn summary_to_api_run_summary(summary: fabro_types::RunSummary) -> serde_json::Value {
-    let goal = summary.goal.unwrap_or_default();
-    let title = truncate_goal(&goal);
-    let repository = repository_name(summary.host_repo_path.as_deref());
-    let created_at = summary.run_id.created_at().to_rfc3339();
-
-    serde_json::json!({
-        "run_id": summary.run_id.to_string(),
-        "workflow_name": summary.workflow_name,
-        "workflow_slug": summary.workflow_slug,
-        "goal": goal,
-        "title": title,
-        "labels": summary.labels,
-        "host_repo_path": summary.host_repo_path,
-        "repository": { "name": repository },
-        "start_time": summary.start_time.map(|time| time.to_rfc3339()),
-        "status": summary.status,
-        "pending_control": summary.pending_control,
-        "duration_ms": summary.duration_ms,
-        "elapsed_secs": elapsed_secs(summary.duration_ms),
-        "total_usd_micros": summary.total_usd_micros,
-        "superseded_by": summary.superseded_by.map(|run_id| run_id.to_string()),
-        "created_at": created_at,
-    })
-}
-
 async fn board_run_metadata(
     state: &AppState,
     run_id: RunId,
@@ -2925,14 +2903,18 @@ async fn board_run_metadata(
     }
 
     if let Some(sandbox) = run_state.sandbox {
+        let mut sandbox_metadata = serde_json::Map::new();
+        sandbox_metadata.insert(
+            "working_directory".to_string(),
+            serde_json::json!(sandbox.working_directory),
+        );
         if let Some(identifier) = sandbox.identifier {
-            metadata.insert(
-                "sandbox".to_string(),
-                serde_json::json!({
-                    "id": identifier,
-                }),
-            );
+            sandbox_metadata.insert("id".to_string(), serde_json::json!(identifier));
         }
+        metadata.insert(
+            "sandbox".to_string(),
+            serde_json::Value::Object(sandbox_metadata),
+        );
     }
 
     if let Some((_, record)) =
@@ -2995,7 +2977,8 @@ async fn list_board_runs(
     let mut data = Vec::with_capacity(page_summaries.len());
     for (summary, column) in page_summaries {
         let run_id = summary.run_id;
-        let mut item = summary_to_api_run_summary(summary);
+        let mut item =
+            serde_json::to_value(&summary).expect("RunSummary serialization is infallible");
         item["column"] = serde_json::json!(column);
         if let Some(object) = item.as_object_mut() {
             object.extend(board_run_metadata(state.as_ref(), run_id).await);
@@ -3030,7 +3013,6 @@ async fn list_runs(
                 .filter(|summary| {
                     include_archived || !matches!(summary.status, RunStatus::Archived { .. })
                 })
-                .map(summary_to_api_run_summary)
                 .collect::<Vec<_>>();
             let (data, has_more) = paginate_items(items, &params.pagination());
             (
@@ -3083,12 +3065,10 @@ async fn resolve_run(
         |run| run.workflow_slug.clone(),
         |run| run.workflow_name.clone(),
         |run| run.run_id.created_at(),
+        |run| run.run_id.created_at().to_rfc3339(),
+        |run| run.repo_origin_url.clone(),
     ) {
-        Ok(run) => (
-            StatusCode::OK,
-            Json(summary_to_api_run_summary(run.clone())),
-        )
-            .into_response(),
+        Ok(run) => (StatusCode::OK, Json(run.clone())).into_response(),
         Err(err @ (ResolveRunError::InvalidSelector | ResolveRunError::AmbiguousPrefix { .. })) => {
             ApiError::bad_request(err.to_string()).into_response()
         }
@@ -3664,6 +3644,55 @@ async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow
     .await
 }
 
+async fn finish_cancelled_run_before_execution(state: &Arc<AppState>, run_id: RunId) {
+    if let Err(err) = persist_cancelled_run_status(state.as_ref(), run_id).await {
+        error!(run_id = %run_id, error = %err, "Failed to persist cancelled run status");
+    }
+
+    let mut runs = state.runs.lock().expect("runs lock poisoned");
+    if let Some(managed_run) = runs.get_mut(&run_id) {
+        managed_run.status = RunStatus::Failed {
+            reason: FailureReason::Cancelled,
+        };
+        clear_live_run_state(managed_run);
+    }
+    drop(runs);
+    state.scheduler_notify.notify_one();
+}
+
+async fn fail_run_before_execution(
+    state: &Arc<AppState>,
+    run_id: RunId,
+    reason: FailureReason,
+    message: String,
+) {
+    match state.store.open_run(&run_id).await {
+        Ok(run_store) => {
+            if let Err(err) = workflow_event::append_event(
+                &run_store,
+                &run_id,
+                &workflow_event::Event::WorkflowRunFailed {
+                    error: WorkflowError::engine(message.clone()),
+                    duration_ms: 0,
+                    reason,
+                    git_commit_sha: None,
+                    final_patch: None,
+                },
+            )
+            .await
+            {
+                error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
+            }
+        }
+        Err(err) => {
+            error!(run_id = %run_id, error = %err, "Failed to open run store while persisting run failure");
+        }
+    }
+
+    fail_managed_run(state, run_id, reason, message);
+    state.scheduler_notify.notify_one();
+}
+
 async fn forward_run_events_to_global(
     state: Arc<AppState>,
     run_id: RunId,
@@ -3902,6 +3931,11 @@ fn worker_command(
     let server_target = daemon.bind.to_target();
     let worker_token = issue_worker_token(state.worker_token_keys(), &run_id)
         .map_err(|_| anyhow::anyhow!("failed to sign worker token"))?;
+    let server_destination = resolved_log_destination(state)?;
+    let worker_stdout = match server_destination {
+        LogDestination::Stdout => Stdio::inherit(),
+        LogDestination::File => Stdio::null(),
+    };
     let mut cmd = Command::new(exe);
     cmd.arg("__run-worker")
         .arg("--server")
@@ -3915,17 +3949,35 @@ fn worker_command(
         .arg("--mode")
         .arg(worker_mode_arg(mode))
         .stdin(Stdio::piped())
-        .stdout(Stdio::null())
+        .stdout(worker_stdout)
         .stderr(Stdio::piped());
 
     apply_worker_env(&mut cmd);
+    if (state.env_lookup)(EnvVars::FABRO_LOG).is_none() {
+        if let Some(level) = state.server_settings().server.logging.level.as_deref() {
+            cmd.env(EnvVars::FABRO_LOG, level);
+        }
+    }
+    let value: &'static str = server_destination.into();
+    cmd.env(EnvVars::FABRO_LOG_DESTINATION, value);
     cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
     cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
+    if let Some(pem) = state.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY) {
+        cmd.env(EnvVars::GITHUB_APP_PRIVATE_KEY, pem);
+    }
 
     #[cfg(unix)]
     fabro_proc::pre_exec_setpgid(cmd.as_std_mut());
 
     Ok(cmd)
+}
+
+fn resolved_log_destination(state: &AppState) -> anyhow::Result<LogDestination> {
+    let env_value = (state.env_lookup)(EnvVars::FABRO_LOG_DESTINATION);
+    fabro_config::resolve_log_destination_with_env(
+        state.server_settings().server.logging.destination,
+        env_value.as_deref(),
+    )
 }
 
 fn api_question_type(question_type: InterviewQuestionType) -> ApiQuestionType {
@@ -4331,6 +4383,30 @@ async fn run_preflight(
     (StatusCode::OK, Json(response)).into_response()
 }
 
+async fn validate_run_manifest(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RunManifest>,
+) -> Response {
+    let manifest_run_defaults = state.manifest_run_defaults();
+    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
+        Ok(prepared) => prepared,
+        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+    };
+    let validated = match run_manifest::validate_prepared_manifest(&prepared) {
+        Ok(validated) => validated,
+        Err(WorkflowError::Parse(_)) => {
+            return ApiError::bad_request("Validation failed").into_response();
+        }
+        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+    };
+    (
+        StatusCode::OK,
+        Json(run_manifest::validate_response(&prepared, &validated)),
+    )
+        .into_response()
+}
+
 async fn render_graph_from_manifest(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
@@ -4594,28 +4670,35 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         Ok(persisted) => persisted,
         Err(e) => {
             tracing::error!(run_id = %run_id, error = %e, "Failed to load persisted run");
-            let mut runs = state.runs.lock().expect("runs lock poisoned");
-            if let Some(managed_run) = runs.get_mut(&run_id) {
-                managed_run.status = RunStatus::Failed {
-                    reason: FailureReason::WorkflowError,
-                };
-                managed_run.error = Some(format!("Failed to load persisted run: {e}"));
-                clear_live_run_state(managed_run);
-            }
-            state.scheduler_notify.notify_one();
+            fail_run_before_execution(
+                &state,
+                run_id,
+                FailureReason::WorkflowError,
+                format!("Failed to load persisted run: {e}"),
+            )
+            .await;
             return;
         }
     };
     let server_settings = state.server_settings();
     let github_settings = &server_settings.server.integrations.github;
+    if cancel_token.load(Ordering::SeqCst) {
+        finish_cancelled_run_before_execution(&state, run_id).await;
+        return;
+    }
     let github_app_result = {
-        let settings = &persisted.run_spec().settings.run;
-        let required_github_credentials = (settings.execution.mode != RunMode::DryRun
-            && settings.sandbox.provider == "daytona")
-            || !github_settings.permissions.is_empty();
-        if required_github_credentials {
+        let run_spec = persisted.run_spec();
+        let settings = &run_spec.settings.run;
+        let clone_can_use_github_credentials = settings.execution.mode != RunMode::DryRun
+            && clone_sandbox_can_use_github_credentials(&settings.sandbox.provider)
+            && run_spec
+                .repo_origin_url()
+                .is_some_and(|origin| !origin.trim().is_empty());
+        let pull_request_can_use_github_credentials =
+            settings.execution.mode != RunMode::DryRun && settings.pull_request.is_some();
+        if !github_settings.permissions.is_empty() {
             state.github_credentials(github_settings)
-        } else if settings.execution.mode != RunMode::DryRun && settings.pull_request.is_some() {
+        } else if clone_can_use_github_credentials || pull_request_can_use_github_credentials {
             match state.github_credentials(github_settings) {
                 Ok(github_app) => Ok(github_app),
                 Err(err) => {
@@ -4634,16 +4717,18 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     let github_app = match github_app_result {
         Ok(github_app) => github_app,
         Err(e) => {
-            tracing::error!(run_id = %run_id, error = %e, "Invalid GitHub credentials");
-            let mut runs = state.runs.lock().expect("runs lock poisoned");
-            if let Some(managed_run) = runs.get_mut(&run_id) {
-                managed_run.status = RunStatus::Failed {
-                    reason: FailureReason::WorkflowError,
-                };
-                managed_run.error = Some(format!("Invalid GitHub credentials: {e}"));
-                clear_live_run_state(managed_run);
+            if cancel_token.load(Ordering::SeqCst) {
+                finish_cancelled_run_before_execution(&state, run_id).await;
+                return;
             }
-            state.scheduler_notify.notify_one();
+            tracing::error!(run_id = %run_id, error = %e, "Invalid GitHub credentials");
+            fail_run_before_execution(
+                &state,
+                run_id,
+                FailureReason::WorkflowError,
+                format!("Invalid GitHub credentials: {e}"),
+            )
+            .await;
             return;
         }
     };
@@ -5112,7 +5197,10 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
                 match run_to_start {
                     Some(id) => {
                         let state_clone = Arc::clone(&state);
-                        tokio::spawn(execute_run(state_clone, id));
+                        tokio::spawn(
+                            execute_run(state_clone, id)
+                                .instrument(tracing::info_span!("run", id = %id)),
+                        );
                     }
                     None => break,
                 }
@@ -5136,7 +5224,7 @@ async fn get_run_status(
         .await
     {
         Ok(runs) => match runs.into_iter().find(|run| run.run_id == id) {
-            Some(run) => (StatusCode::OK, Json(summary_to_api_run_summary(run))).into_response(),
+            Some(run) => (StatusCode::OK, Json(run)).into_response(),
             None => ApiError::not_found("Run not found.").into_response(),
         },
         Err(err) => {
@@ -5248,6 +5336,29 @@ async fn get_run_state(
             }
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
+async fn get_run_logs(
+    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if state.store.open_run_reader(&id).await.is_err() {
+        return ApiError::not_found("Run not found.").into_response();
+    }
+
+    let path = Storage::new(state.server_storage_dir())
+        .run_scratch(&id)
+        .runtime_dir()
+        .join("server.log");
+    match fs::read(&path).await {
+        Ok(bytes) => ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], bytes).into_response(),
+        Err(err) if err.kind() == ErrorKind::NotFound => {
+            ApiError::not_found("Run log not available.").into_response()
+        }
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
     }
 }
 
@@ -5382,14 +5493,14 @@ impl<'a> RunPrInputs<'a> {
                 "Run spec missing from store.",
             )
         })?;
-        let origin_url = run_spec.repo_origin_url.as_deref().ok_or_else(|| {
+        let origin_url = run_spec.repo_origin_url().ok_or_else(|| {
             ApiError::with_code(
                 StatusCode::BAD_REQUEST,
                 "Run has no repo origin URL — pull request creation requires git metadata.",
                 "missing_repo_origin",
             )
         })?;
-        let base_branch = run_spec.base_branch.as_deref().ok_or_else(|| {
+        let base_branch = run_spec.base_branch().ok_or_else(|| {
             ApiError::with_code(
                 StatusCode::BAD_REQUEST,
                 "Run has no base branch — pull request creation requires git metadata.",
@@ -6466,7 +6577,8 @@ async fn generate_preview_url(
                 url:   preview.url,
             },
             Err(err) => {
-                return ApiError::new(StatusCode::CONFLICT, err).into_response();
+                return ApiError::new(StatusCode::CONFLICT, err.display_with_causes())
+                    .into_response();
             }
         }
     } else {
@@ -6476,7 +6588,8 @@ async fn generate_preview_url(
                 url:   preview.url,
             },
             Err(err) => {
-                return ApiError::new(StatusCode::CONFLICT, err).into_response();
+                return ApiError::new(StatusCode::CONFLICT, err.display_with_causes())
+                    .into_response();
             }
         }
     };
@@ -6500,7 +6613,7 @@ async fn create_ssh_access(
     };
     match sandbox.create_ssh_access(Some(request.ttl_minutes)).await {
         Ok(command) => (StatusCode::CREATED, Json(SshAccessResponse { command })).into_response(),
-        Err(err) => ApiError::new(StatusCode::CONFLICT, err).into_response(),
+        Err(err) => ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response(),
     }
 }
 
@@ -6530,7 +6643,7 @@ async fn list_sandbox_files(
                 .collect(),
         })
         .into_response(),
-        Err(err) => ApiError::new(StatusCode::NOT_FOUND, err).into_response(),
+        Err(err) => ApiError::new(StatusCode::NOT_FOUND, err.display_with_causes()).into_response(),
     }
 }
 
@@ -6559,7 +6672,7 @@ async fn get_sandbox_file(
         .download_file_to_local(&params.path, temp.path())
         .await
     {
-        return ApiError::new(StatusCode::NOT_FOUND, err).into_response();
+        return ApiError::new(StatusCode::NOT_FOUND, err.display_with_causes()).into_response();
     }
     match fs::read(temp.path()).await {
         Ok(bytes) => octet_stream_response(bytes.into()),
@@ -6602,7 +6715,8 @@ async fn put_sandbox_file(
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+        Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.display_with_causes())
+            .into_response(),
     }
 }
 
@@ -6612,9 +6726,10 @@ async fn reconnect_run_sandbox(
 ) -> Result<Box<dyn Sandbox>, Response> {
     let record = load_run_sandbox_record(state, run_id).await?;
     let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
-    reconnect(&record, daytona_api_key)
-        .await
-        .map_err(|err| ApiError::new(StatusCode::CONFLICT, format!("{err}")).into_response())
+    reconnect(&record, daytona_api_key).await.map_err(|err| {
+        let detail = render_with_causes(&err.to_string(), &collect_causes(err.as_ref()));
+        ApiError::new(StatusCode::CONFLICT, detail).into_response()
+    })
 }
 
 async fn reconnect_daytona_sandbox(
@@ -6636,10 +6751,23 @@ async fn reconnect_daytona_sandbox(
         )
         .into_response());
     };
+    let Some(repo_cloned) = record.repo_cloned else {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "Sandbox record is missing clone metadata.",
+        )
+        .into_response());
+    };
     let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
-    DaytonaSandbox::reconnect(name, daytona_api_key)
-        .await
-        .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.clone()).into_response())
+    DaytonaSandbox::reconnect(
+        name,
+        daytona_api_key,
+        repo_cloned,
+        record.clone_origin_url.clone(),
+        record.clone_branch.clone(),
+    )
+    .await
+    .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response())
 }
 
 async fn load_run_sandbox_record(
@@ -7122,11 +7250,7 @@ async fn rewind_run(
         Ok(target) => target,
         Err(err) => return err.into_response(),
     };
-    let input = operations::RewindInput {
-        run_id: id,
-        target,
-        push: request.push.unwrap_or(true),
-    };
+    let input = operations::RewindInput { run_id: id, target };
     match Box::pin(operations::rewind(
         &state.store,
         &input,
@@ -7190,9 +7314,8 @@ async fn fork_run(
     let input = operations::ForkRunInput {
         source_run_id: id,
         target,
-        push: request.push.unwrap_or(true),
     };
-    match operations::fork_run(&state.store, &input).await {
+    match Box::pin(operations::fork_run(&state.store, &input)).await {
         Ok(outcome) => (
             StatusCode::OK,
             Json(ForkResponse {
@@ -7225,6 +7348,8 @@ async fn run_timeline(
                     node_name:      entry.node_name,
                     visit:          std::num::NonZeroU64::new(entry.visit as u64)
                         .expect("timeline visits start at 1"),
+                    checkpoint_seq: std::num::NonZeroU64::new(u64::from(entry.checkpoint_seq))
+                        .expect("checkpoint event sequence starts at 1"),
                     run_commit_sha: entry.run_commit_sha,
                 })
                 .collect::<Vec<_>>(),
@@ -7458,11 +7583,8 @@ async fn test_model(
     {
         return ApiError::bad_request(auth_issue_message(info.provider, issue)).into_response();
     }
-    if !llm_result
-        .client
-        .provider_names()
-        .contains(&info.provider.as_str())
-    {
+    let provider_name = <&'static str>::from(info.provider);
+    if !llm_result.client.provider_names().contains(&provider_name) {
         return Json(serde_json::json!({
             "model_id": info.id,
             "status": "skip",
@@ -7474,7 +7596,7 @@ async fn test_model(
     let outcome = run_model_test(info, mode, client).await;
     Json(serde_json::json!({
         "model_id": info.id,
-        "status": outcome.status.as_str(),
+        "status": <&'static str>::from(outcome.status),
         "error_message": outcome.error_message,
     }))
     .into_response()
@@ -7900,6 +8022,33 @@ struct GraphParams {
     direction: Option<String>,
 }
 
+async fn load_run_dot_source(state: &AppState, id: &RunId) -> Result<String, Response> {
+    let live_dot_source = {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        runs.get(id)
+            .map(|managed_run| managed_run.dot_source.clone())
+    };
+
+    let dot_source = if let Some(dot) = live_dot_source.filter(|d| !d.is_empty()) {
+        Some(dot)
+    } else {
+        match state.store.open_run_reader(id).await {
+            Ok(run_store) => match run_store.state().await {
+                Ok(run_state) => run_state.graph_source,
+                Err(err) => {
+                    return Err(
+                        ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response()
+                    );
+                }
+            },
+            Err(_) => return Err(ApiError::not_found("Run not found.").into_response()),
+        }
+    };
+
+    dot_source
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Graph not found.").into_response())
+}
+
 async fn get_graph(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
@@ -7911,28 +8060,9 @@ async fn get_graph(
         Err(response) => return response,
     };
 
-    let live_dot_source = {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        runs.get(&id)
-            .map(|managed_run| managed_run.dot_source.clone())
-    };
-
-    let dot_source = if let Some(dot) = live_dot_source.filter(|d| !d.is_empty()) {
-        Some(dot)
-    } else {
-        match state.store.open_run_reader(&id).await {
-            Ok(run_store) => match run_store.state().await {
-                Ok(run_state) => run_state.graph_source,
-                Err(err) => {
-                    return ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response();
-                }
-            },
-            Err(_) => return ApiError::not_found("Run not found.").into_response(),
-        }
-    };
-
-    let Some(dot) = dot_source else {
-        return ApiError::new(StatusCode::NOT_FOUND, "Graph not found.").into_response();
+    let dot = match load_run_dot_source(&state, &id).await {
+        Ok(dot) => dot,
+        Err(response) => return response,
     };
 
     let dot = match params.direction.as_deref() {
@@ -7946,6 +8076,22 @@ async fn get_graph(
     render_graph_bytes(&dot).await
 }
 
+async fn get_graph_source(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+
+    match load_run_dot_source(&state, &id).await {
+        Ok(dot) => (StatusCode::OK, [("content-type", "text/vnd.graphviz")], dot).into_response(),
+        Err(response) => response,
+    }
+}
+
 #[cfg(test)]
 #[expect(
     clippy::disallowed_methods,
@@ -7955,7 +8101,6 @@ mod tests {
     use std::collections::HashMap;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-    #[cfg(unix)]
     use std::path::{Path, PathBuf};
     #[cfg(unix)]
     use std::process::Stdio;
@@ -8021,12 +8166,47 @@ mod tests {
 
     fn test_app_with() -> Router {
         let state = create_app_state();
-        build_router(state, AuthMode::Disabled)
+        build_router_with_options(
+            state,
+            &AuthMode::Disabled,
+            Arc::new(IpAllowlistConfig::default()),
+            RouterOptions {
+                static_asset_root: Some(spa_fixture_root()),
+                ..RouterOptions::default()
+            },
+        )
+    }
+
+    fn spa_fixture_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/spa")
     }
 
     fn test_app_with_scheduler(state: Arc<AppState>) -> Router {
         spawn_scheduler(Arc::clone(&state));
         build_router(state, AuthMode::Disabled)
+    }
+
+    fn create_app_state_with_isolated_storage() -> Arc<AppState> {
+        let storage_dir = std::env::temp_dir().join(format!("fabro-server-test-{}", Ulid::new()));
+        std::fs::create_dir_all(&storage_dir).expect("test storage dir should be creatable");
+        let source = format!(
+            r#"
+_version = 1
+
+[server.storage]
+root = "{}"
+
+[server.auth]
+methods = ["dev-token"]
+"#,
+            storage_dir.display()
+        );
+
+        create_app_state_with_options(
+            server_settings_from_toml(&source),
+            manifest_run_defaults_from_toml(&source),
+            5,
+        )
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
@@ -8242,9 +8422,70 @@ url = "{url}"
         ))
     }
 
+    fn canonical_host_test_app() -> Router {
+        let state = create_app_state_with_options(
+            canonical_origin_settings("http://127.0.0.1:32276"),
+            RunLayer::default(),
+            5,
+        );
+        build_router_with_options(
+            state,
+            &AuthMode::Disabled,
+            Arc::new(IpAllowlistConfig::default()),
+            RouterOptions::default(),
+        )
+    }
+
+    #[tokio::test]
+    async fn router_redirects_web_page_requests_to_canonical_host() {
+        let app = canonical_host_test_app();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/login")
+                    .header(header::HOST, "localhost:32276")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let response = checked_response!(response, StatusCode::PERMANENT_REDIRECT).await;
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            "http://127.0.0.1:32276/login"
+        );
+    }
+
+    #[tokio::test]
+    async fn router_does_not_redirect_api_requests_to_canonical_host() {
+        let app = canonical_host_test_app();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(api("/openapi.json"))
+                    .header(header::HOST, "localhost:32276")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_status!(response, StatusCode::OK).await;
+    }
+
     #[test]
     fn replace_settings_rejects_invalid_canonical_origin_and_keeps_previous_settings() {
-        for invalid in ["", "/relative/path", "ftp://fabro.example.com"] {
+        for invalid in [
+            "",
+            "/relative/path",
+            "ftp://fabro.example.com",
+            "http://0.0.0.0:32276",
+        ] {
             let state = create_app_state_with_env_lookup(
                 canonical_origin_settings("http://valid.example.com"),
                 RunLayer::default(),
@@ -8488,6 +8729,13 @@ provider = "invalid-provider"
             system_sandbox_provider(&manifest_run_settings),
             SandboxProvider::default().to_string()
         );
+    }
+
+    #[test]
+    fn clone_sandbox_credentials_are_available_for_clone_based_providers() {
+        assert!(clone_sandbox_can_use_github_credentials("docker"));
+        assert!(clone_sandbox_can_use_github_credentials("daytona"));
+        assert!(!clone_sandbox_can_use_github_credentials("local"));
     }
 
     #[tokio::test]
@@ -8998,6 +9246,172 @@ provider = "invalid-provider"
         assert_eq!(dev_claims.run_id, dev_token_run_id.to_string());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_forwards_github_app_private_key_from_server_secrets() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state = worker_command_test_state_with_extra_config_and_env_lookup(
+            storage_dir.path(),
+            &["dev-token"],
+            Some(TEST_DEV_TOKEN),
+            "",
+            &[(EnvVars::GITHUB_APP_PRIVATE_KEY, "test-private-key")],
+            |_| None,
+        );
+        let cmd = worker_command(
+            state.as_ref(),
+            RunId::new(),
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            command_env_value(&cmd, EnvVars::GITHUB_APP_PRIVATE_KEY),
+            EnvOverride::Set("test-private-key".to_string())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_omits_github_app_private_key_when_unset() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state =
+            worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
+        let cmd = worker_command(
+            state.as_ref(),
+            RunId::new(),
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            command_env_value(&cmd, EnvVars::GITHUB_APP_PRIVATE_KEY),
+            EnvOverride::Unchanged
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_sets_fabro_log_from_server_logging_config() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state = worker_command_test_state_with_extra_config(
+            storage_dir.path(),
+            &["dev-token"],
+            Some(TEST_DEV_TOKEN),
+            r#"
+[server.logging]
+level = "debug"
+"#,
+        );
+        let run_id = RunId::new();
+
+        let cmd = worker_command(
+            state.as_ref(),
+            run_id,
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            command_env_value(&cmd, EnvVars::FABRO_LOG),
+            EnvOverride::Set("debug".to_string())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_sets_fabro_log_destination_from_server_logging_config() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state = worker_command_test_state_with_extra_config(
+            storage_dir.path(),
+            &["dev-token"],
+            Some(TEST_DEV_TOKEN),
+            r#"
+[server.logging]
+destination = "stdout"
+"#,
+        );
+        let run_id = RunId::new();
+
+        let cmd = worker_command(
+            state.as_ref(),
+            run_id,
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            command_env_value(&cmd, EnvVars::FABRO_LOG_DESTINATION),
+            EnvOverride::Set("stdout".to_string())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_env_log_destination_overrides_server_logging_config() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state = worker_command_test_state_with_extra_config_and_env_lookup(
+            storage_dir.path(),
+            &["dev-token"],
+            Some(TEST_DEV_TOKEN),
+            r#"
+[server.logging]
+destination = "file"
+"#,
+            &[],
+            |name| (name == EnvVars::FABRO_LOG_DESTINATION).then(|| "stdout".to_string()),
+        );
+        let run_id = RunId::new();
+
+        let cmd = worker_command(
+            state.as_ref(),
+            run_id,
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            command_env_value(&cmd, EnvVars::FABRO_LOG_DESTINATION),
+            EnvOverride::Set("stdout".to_string())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_command_rejects_invalid_env_log_destination() {
+        let storage_dir = tempfile::tempdir().unwrap();
+        let state = worker_command_test_state_with_extra_config_and_env_lookup(
+            storage_dir.path(),
+            &["dev-token"],
+            Some(TEST_DEV_TOKEN),
+            r#"
+[server.logging]
+destination = "file"
+"#,
+            &[],
+            |name| (name == EnvVars::FABRO_LOG_DESTINATION).then(|| "stdot".to_string()),
+        );
+        let run_id = RunId::new();
+
+        let Err(err) = worker_command(
+            state.as_ref(),
+            run_id,
+            RunExecutionMode::Start,
+            storage_dir.path(),
+        ) else {
+            panic!("invalid env destination should fail");
+        };
+
+        let message = err.to_string();
+        assert!(message.contains(EnvVars::FABRO_LOG_DESTINATION));
+        assert!(message.contains("stdot"));
+    }
+
     #[test]
     fn build_app_state_requires_session_secret_for_worker_tokens() {
         let server_settings = server_settings_from_toml(
@@ -9041,6 +9455,33 @@ methods = ["dev-token"]
         methods: &[&str],
         dev_token: Option<&str>,
     ) -> Arc<AppState> {
+        worker_command_test_state_with_extra_config(storage_dir, methods, dev_token, "")
+    }
+
+    fn worker_command_test_state_with_extra_config(
+        storage_dir: &Path,
+        methods: &[&str],
+        dev_token: Option<&str>,
+        extra_config: &str,
+    ) -> Arc<AppState> {
+        worker_command_test_state_with_extra_config_and_env_lookup(
+            storage_dir,
+            methods,
+            dev_token,
+            extra_config,
+            &[],
+            |_| None,
+        )
+    }
+
+    fn worker_command_test_state_with_extra_config_and_env_lookup(
+        storage_dir: &Path,
+        methods: &[&str],
+        dev_token: Option<&str>,
+        extra_config: &str,
+        extra_server_secrets: &[(&str, &str)],
+        env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
+    ) -> Arc<AppState> {
         let dev_token = dev_token.map(str::to_owned);
         std::fs::create_dir_all(storage_dir).unwrap();
         let source = format!(
@@ -9055,6 +9496,7 @@ methods = [{}]
 
 [server.auth.github]
 allowed_usernames = ["octocat"]
+{extra_config}
 "#,
             storage_dir.display(),
             methods
@@ -9072,14 +9514,17 @@ allowed_usernames = ["octocat"]
         .write(&runtime_directory)
         .unwrap();
 
-        let server_secret_env = dev_token
+        let mut server_secret_env: HashMap<String, String> = dev_token
             .map(|token| HashMap::from([("FABRO_DEV_TOKEN".to_string(), token)]))
             .unwrap_or_default();
+        for (key, value) in extra_server_secrets {
+            server_secret_env.insert((*key).to_string(), (*value).to_string());
+        }
         create_app_state_with_env_lookup_and_server_secret_env(
             server_settings_from_toml(&source),
             manifest_run_defaults_from_toml(&source),
             5,
-            |_| None,
+            env_lookup,
             &server_secret_env,
         )
     }
@@ -9175,6 +9620,29 @@ allowed_usernames = ["octocat"]
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
         body["id"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn validate_endpoint_returns_workflow_summary_without_preflight_checks() {
+        let app = test_app_with();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(api("/validate"))
+                    .header("content-type", "application/json")
+                    .body(manifest_body(MINIMAL_DOT))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::OK).await;
+
+        assert_eq!(body["ok"], true);
+        assert_eq!(body["workflow"]["name"], "Test");
+        assert_eq!(body["workflow"]["nodes"], 2);
+        assert_eq!(body["workflow"]["edges"], 1);
+        assert!(body.get("checks").is_none());
     }
 
     async fn create_run_for_target(app: &Router, target_path: &str, dot_source: &str) -> String {
@@ -9425,19 +9893,29 @@ strategy = "token"
             "goal".to_string(),
             AttrValue::String("Ship the server-side PR".to_string()),
         );
+        let git = match (repo_origin_url, base_branch) {
+            (Some(origin), Some(branch)) => Some(fabro_types::GitContext {
+                origin_url:   origin.to_string(),
+                branch:       branch.to_string(),
+                sha:          None,
+                dirty:        fabro_types::DirtyStatus::Clean,
+                push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+            }),
+            _ => None,
+        };
         let run_spec = RunSpec {
             run_id,
             settings: fabro_types::WorkflowSettings::default(),
             graph,
             workflow_slug: Some("test".to_string()),
-            working_directory: PathBuf::from("/tmp/project"),
-            host_repo_path: Some("/tmp/project".to_string()),
-            repo_origin_url: repo_origin_url.map(str::to_string),
-            base_branch: base_branch.map(str::to_string),
+            source_directory: Some("/tmp/project".to_string()),
+            git: git.clone(),
             labels: HashMap::new(),
             provenance: None,
             manifest_blob: None,
             definition_blob: None,
+            fork_source_ref: None,
+            in_place: false,
         };
 
         create_durable_run_with_events(state, run_id, &[
@@ -9448,15 +9926,15 @@ strategy = "token"
                 workflow_source: None,
                 workflow_config: None,
                 labels: run_spec.labels.clone().into_iter().collect(),
-                run_dir: run_spec.working_directory.display().to_string(),
-                working_directory: run_spec.working_directory.display().to_string(),
-                host_repo_path: run_spec.host_repo_path.clone(),
-                repo_origin_url: run_spec.repo_origin_url.clone(),
-                base_branch: run_spec.base_branch.clone(),
+                run_dir: run_spec.source_directory.clone().unwrap_or_default(),
+                source_directory: run_spec.source_directory.clone(),
                 workflow_slug: run_spec.workflow_slug.clone(),
                 db_prefix: None,
                 provenance: run_spec.provenance.clone(),
                 manifest_blob: None,
+                git,
+                fork_source_ref: None,
+                in_place: false,
             },
             workflow_event::Event::WorkflowRunStarted {
                 name: "test".to_string(),
@@ -9848,6 +10326,18 @@ slug = "fabro"
             detail.contains(&run_id_b),
             "detail should mention second run: {detail}"
         );
+        assert!(
+            detail.contains("created_at="),
+            "detail should include creation timestamps: {detail}"
+        );
+        assert!(
+            detail.contains("workflow="),
+            "detail should include workflow names: {detail}"
+        );
+        assert!(
+            detail.contains("origin="),
+            "detail should include origin URLs: {detail}"
+        );
     }
 
     #[tokio::test]
@@ -10052,6 +10542,80 @@ slug = "fabro"
         let response = app.oneshot(req).await.unwrap();
         let body = response_json!(response, StatusCode::OK).await;
         assert!(body["nodes"].is_object());
+    }
+
+    #[tokio::test]
+    async fn get_run_logs_returns_per_run_log_file() {
+        let state = create_app_state_with_isolated_storage();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = RunId::new();
+        create_durable_run_with_events(&state, run_id, &[workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        }])
+        .await;
+        let log_path = Storage::new(state.server_storage_dir())
+            .run_scratch(&run_id)
+            .runtime_dir()
+            .join("server.log");
+        tokio::fs::create_dir_all(log_path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&log_path, b"worker log line\nsecond line\n")
+            .await
+            .unwrap();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/logs")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = response_bytes!(response, StatusCode::OK).await;
+
+        assert_eq!(content_type.as_deref(), Some("text/plain; charset=utf-8"));
+        assert_eq!(&body[..], b"worker log line\nsecond line\n");
+    }
+
+    #[tokio::test]
+    async fn get_run_logs_returns_not_found_for_missing_run() {
+        let state = create_app_state_with_isolated_storage();
+        let app = build_router(state, AuthMode::Disabled);
+        let missing_run_id = RunId::new();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{missing_run_id}/logs")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_status!(response, StatusCode::NOT_FOUND).await;
+    }
+
+    #[tokio::test]
+    async fn get_run_logs_returns_not_found_when_log_file_is_missing() {
+        let state = create_app_state_with_isolated_storage();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = RunId::new();
+        create_durable_run_with_events(&state, run_id, &[workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        }])
+        .await;
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/logs")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_status!(response, StatusCode::NOT_FOUND).await;
     }
 
     #[tokio::test]
@@ -11424,6 +11988,7 @@ slug = "fabro"
             (Method::POST, "/runs".to_string()),
             (Method::GET, "/runs/resolve".to_string()),
             (Method::POST, "/preflight".to_string()),
+            (Method::POST, "/validate".to_string()),
             (Method::POST, "/graph/render".to_string()),
             (Method::GET, "/attach".to_string()),
             (Method::GET, "/boards/runs".to_string()),
@@ -11440,6 +12005,7 @@ slug = "fabro"
             (Method::POST, format!("/runs/{run_id}/archive")),
             (Method::POST, format!("/runs/{run_id}/unarchive")),
             (Method::GET, format!("/runs/{run_id}/graph")),
+            (Method::GET, format!("/runs/{run_id}/graph/source")),
             (Method::GET, format!("/runs/{run_id}/stages")),
             (Method::GET, format!("/runs/{run_id}/artifacts")),
             (Method::GET, format!("/runs/{run_id}/files")),
@@ -11774,6 +12340,60 @@ slug = "fabro"
             "expected SVG content, got: {}",
             &svg[..svg.len().min(200)]
         );
+    }
+
+    #[tokio::test]
+    async fn get_graph_source_returns_dot() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({
+                    "version": 1,
+                    "cwd": "/tmp",
+                    "target": {
+                        "identifier": "workflow.fabro",
+                        "path": "workflow.fabro",
+                    },
+                    "workflows": {
+                        "workflow.fabro": {
+                            "source": MINIMAL_DOT,
+                            "files": {},
+                        },
+                    },
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/graph/source")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        let response = checked_response!(response, StatusCode::OK).await;
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .expect("content-type header should be present")
+            .to_str()
+            .unwrap();
+        assert_eq!(content_type, "text/vnd.graphviz");
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let dot = String::from_utf8(bytes.to_vec()).unwrap();
+        assert_eq!(dot, MINIMAL_DOT);
     }
 
     #[tokio::test]
@@ -12864,6 +13484,9 @@ script = "sleep 5"
 
 [run.prepare]
 timeout = "30s"
+
+[run.sandbox]
+provider = "local"
 "#;
         let state = create_app_state_with_settings_and_registry_factory(
             server_settings_from_toml(source),
@@ -12875,7 +13498,10 @@ timeout = "30s"
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
-        let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id));
+        let runner = tokio::spawn(
+            execute_run(Arc::clone(&state), run_id)
+                .instrument(tracing::info_span!("run", id = %run_id)),
+        );
         let mut live_status_before_cancel = None;
         for _ in 0..50 {
             live_status_before_cancel = {
@@ -12971,7 +13597,10 @@ timeout = "30s"
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
-        let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id));
+        let runner = tokio::spawn(
+            execute_run(Arc::clone(&state), run_id)
+                .instrument(tracing::info_span!("run", id = %run_id)),
+        );
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let req = Request::builder()
@@ -13119,18 +13748,24 @@ timeout = "30s"
     }
 
     #[tokio::test]
-    async fn demo_get_run_returns_store_run_summary_shape() {
+    async fn demo_get_run_returns_run_summary_shape() {
         let state = create_app_state();
         let app = build_router(state, AuthMode::Disabled);
+        let run_id = RunId::with_timestamp(
+            "2026-03-06T14:30:00Z"
+                .parse()
+                .expect("demo timestamp should parse"),
+            1,
+        );
         let req = Request::builder()
             .method("GET")
-            .uri(api("/runs/run-1"))
+            .uri(api(&format!("/runs/{run_id}")))
             .header("X-Fabro-Demo", "1")
             .body(Body::empty())
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
         let body = response_json!(response, StatusCode::OK).await;
-        // Should have StoreRunSummary fields, not RunStatusResponse fields
+        // Should have RunSummary fields, not RunStatusResponse fields
         assert!(body["run_id"].is_string(), "should have run_id field");
         assert!(body["goal"].is_string(), "should have goal field");
         assert!(
@@ -13465,11 +14100,12 @@ timeout = "30s"
             workflow_event::Event::RunStarting,
             workflow_event::Event::RunRunning,
             workflow_event::Event::SandboxInitialized {
-                provider:               "local".to_string(),
-                working_directory:      "/sandbox/workdir".to_string(),
-                identifier:             Some("sb-test".to_string()),
-                host_working_directory: Some("/tmp/repo".to_string()),
-                container_mount_point:  None,
+                provider:          "local".to_string(),
+                working_directory: "/sandbox/workdir".to_string(),
+                identifier:        Some("sb-test".to_string()),
+                repo_cloned:       None,
+                clone_origin_url:  None,
+                clone_branch:      None,
             },
             workflow_event::Event::PullRequestCreated {
                 pr_url:      "https://github.com/acme/repo/pull/42".to_string(),
@@ -13512,6 +14148,10 @@ timeout = "30s"
 
         assert_eq!(item["pull_request"]["number"].as_u64(), Some(42));
         assert_eq!(item["sandbox"]["id"].as_str(), Some("sb-test"));
+        assert_eq!(
+            item["sandbox"]["working_directory"].as_str(),
+            Some("/sandbox/workdir")
+        );
         assert_eq!(item["question"]["text"].as_str(), Some("Ship it?"));
     }
 
@@ -13535,11 +14175,12 @@ timeout = "30s"
                 workflow_event::Event::RunStarting,
                 workflow_event::Event::RunRunning,
                 workflow_event::Event::SandboxInitialized {
-                    provider:               "local".to_string(),
-                    working_directory:      "/sandbox/workdir".to_string(),
-                    identifier:             Some(sandbox_id.to_string()),
-                    host_working_directory: Some("/tmp/repo".to_string()),
-                    container_mount_point:  None,
+                    provider:          "local".to_string(),
+                    working_directory: "/sandbox/workdir".to_string(),
+                    identifier:        Some(sandbox_id.to_string()),
+                    repo_cloned:       None,
+                    clone_origin_url:  None,
+                    clone_branch:      None,
                 },
             ] {
                 workflow_event::append_event(&run_store, &run_id, &event)

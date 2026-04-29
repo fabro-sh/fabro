@@ -571,6 +571,31 @@ methods = ["dev-token"]
     let server_log =
         std::fs::read_to_string(storage_dir.join("logs/server.log")).unwrap_or_default();
     assert_no_worker_env_leak("server log", &server_log);
+    assert!(
+        server_log.contains("Workflow run started"),
+        "main server log should include worker tracing, got:\n{server_log}"
+    );
+    assert!(
+        server_log.contains(&run_id),
+        "main server log should include the run id, got:\n{server_log}"
+    );
+
+    let run_log_path = run_dir.join("runtime/server.log");
+    assert!(
+        run_log_path.is_file(),
+        "run log should be written at {}",
+        run_log_path.display()
+    );
+    let run_log = std::fs::read_to_string(&run_log_path).expect("run log should be readable");
+    assert!(
+        run_log.contains("Workflow run started"),
+        "per-run log should include worker tracing, got:\n{run_log}"
+    );
+    assert!(
+        run_log.contains(&run_id),
+        "per-run log should include the run id, got:\n{run_log}"
+    );
+    assert_no_worker_env_leak("per-run log", &run_log);
 }
 
 #[test]

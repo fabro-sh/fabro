@@ -3,10 +3,11 @@ pub(crate) mod start;
 pub(crate) mod status;
 pub(crate) mod stop;
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use fabro_client::{AuthEntry, AuthStore, DevTokenEntry, ServerTarget};
@@ -14,6 +15,7 @@ use fabro_config::bind::{self, Bind, BindRequest};
 use fabro_config::user::{active_settings_path, default_storage_dir};
 use fabro_server::install::{self, InstallAppState, InstallFinishHook, InstallFinishInfo};
 use fabro_server::serve::{self, ServeArgs};
+use fabro_server::static_files;
 use fabro_static::EnvVars;
 use fabro_util::browser;
 use fabro_util::printer::Printer;
@@ -170,6 +172,10 @@ fn maybe_install_bootstrap(
     storage_dir: Option<&std::path::Path>,
     serve_args: &ServeArgs,
 ) -> Result<Option<InstallBootstrap>> {
+    if serve_args.no_web {
+        return Ok(None);
+    }
+
     if explicit_config.is_some() || has_config_env_override() {
         return Ok(None);
     }
@@ -177,6 +183,12 @@ fn maybe_install_bootstrap(
     let config_path = active_settings_path(None);
     if config_path.exists() {
         return Ok(None);
+    }
+
+    if !static_files::assets_available() {
+        bail!(
+            "browser install mode requires web UI assets, but none were found.\n\nRun one of:\n  cargo dev build    # build a binary with the web UI\n  fabro install      # terminal wizard\n  fabro server start --no-web"
+        );
     }
 
     let bind_request = match serve_args.bind.as_deref() {
@@ -303,10 +315,24 @@ fn install_url_hint(bind: &Bind, token: &str) -> Option<String> {
         return Some(format!("https://{domain}/install?token={token}"));
     }
 
-    match bind {
-        Bind::Tcp(addr) => Some(format!("http://{addr}/install?token={token}")),
-        Bind::Unix(_) => None,
-    }
+    bind_to_browser_url(bind).map(|url| format!("{url}/install?token={token}"))
+}
+
+pub(super) fn bind_to_browser_url(bind: &Bind) -> Option<String> {
+    let Bind::Tcp(addr) = bind else {
+        return None;
+    };
+
+    let browser_addr = match addr.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => {
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), addr.port())
+        }
+        IpAddr::V6(ip) if ip.is_unspecified() => {
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), addr.port())
+        }
+        _ => *addr,
+    };
+    Some(format!("http://{browser_addr}"))
 }
 
 fn default_install_bind_request() -> BindRequest {
@@ -345,7 +371,9 @@ fn generate_install_token() -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::install_mode_next_step_message;
+    use fabro_config::bind::Bind;
+
+    use super::{bind_to_browser_url, install_mode_next_step_message};
 
     #[test]
     fn install_mode_next_step_message_recommends_manual_restart_locally() {
@@ -360,6 +388,26 @@ mod tests {
         assert_eq!(
             install_mode_next_step_message(true),
             "  After install, the server should restart automatically."
+        );
+    }
+
+    #[test]
+    fn bind_to_browser_url_uses_loopback_for_ipv4_wildcard_bind() {
+        let bind = Bind::Tcp("0.0.0.0:32276".parse().unwrap());
+
+        assert_eq!(
+            bind_to_browser_url(&bind).as_deref(),
+            Some("http://127.0.0.1:32276")
+        );
+    }
+
+    #[test]
+    fn bind_to_browser_url_uses_loopback_for_ipv6_wildcard_bind() {
+        let bind = Bind::Tcp("[::]:32276".parse().unwrap());
+
+        assert_eq!(
+            bind_to_browser_url(&bind).as_deref(),
+            Some("http://[::1]:32276")
         );
     }
 }

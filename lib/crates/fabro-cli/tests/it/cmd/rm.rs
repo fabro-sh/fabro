@@ -3,7 +3,7 @@ use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{
-    setup_completed_fast_dry_run, setup_created_fast_dry_run, setup_local_sandbox_run,
+    setup_local_sandbox_run, setup_seeded_completed_dry_run, setup_seeded_created_dry_run,
 };
 use crate::support::unique_run_id;
 
@@ -39,7 +39,7 @@ fn help() {
 #[test]
 fn rm_deletes_completed_run() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -71,7 +71,7 @@ fn rm_deletes_completed_run() {
 #[test]
 fn rm_rejects_submitted_run_without_force() {
     let context = test_context!();
-    let run = setup_created_fast_dry_run(&context);
+    let run = setup_seeded_created_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -92,7 +92,7 @@ fn rm_rejects_submitted_run_without_force() {
 #[test]
 fn rm_force_deletes_submitted_run() {
     let context = test_context!();
-    let run = setup_created_fast_dry_run(&context);
+    let run = setup_seeded_created_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -166,7 +166,7 @@ fn rm_force_removes_active_run() {
                     "goal": "Active goal",
                     "title": "Active goal",
                     "labels": {},
-                    "host_repo_path": null,
+                    "source_directory": null,
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",
@@ -232,7 +232,7 @@ fn rm_without_force_uses_resolve_then_surfaces_server_conflict() {
                     "goal": "Active goal",
                     "title": "Active goal",
                     "labels": {},
-                    "host_repo_path": null,
+                    "source_directory": null,
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",
@@ -295,7 +295,7 @@ fn rm_without_force_uses_resolve_then_surfaces_server_conflict() {
 #[test]
 fn rm_partial_failure_reports_which_identifiers_failed() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -321,7 +321,7 @@ fn rm_partial_failure_reports_which_identifiers_failed() {
 #[test]
 fn rm_partial_failure_json_includes_removed_and_errors() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
 
     let output = context
         .command()
@@ -366,7 +366,7 @@ fn rm_uses_configured_server_target_without_local_run_dir() {
                     "goal": "Remote goal",
                     "title": "Remote goal",
                     "labels": {},
-                    "host_repo_path": null,
+                    "source_directory": null,
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",

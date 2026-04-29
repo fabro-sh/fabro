@@ -13,7 +13,7 @@ fn remote_run_summary(run_id: &str) -> serde_json::Value {
         "goal": "Preview test",
         "title": "Preview test",
         "labels": {},
-        "host_repo_path": "/srv/repo",
+        "source_directory": "/srv/repo",
         "repository": { "name": "repo" },
         "start_time": "2026-04-19T12:00:00Z",
         "created_at": "2026-04-19T12:00:00Z",

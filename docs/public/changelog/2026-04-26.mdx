@@ -1,0 +1,31 @@
+---
+title: "Per-run logs and clone-based Docker sandboxes"
+date: "2026-04-26"
+---
+
+<Warning>
+**Docker is now the default runtime sandbox provider.** Docker sandboxes no longer bind-mount the caller's working directory. They create a container workspace and clone the run manifest's GitHub origin into `/workspace`.
+</Warning>
+
+## Clone-based Docker sandboxes
+
+Docker now uses the same clone-shaped runtime model as Daytona. When the run manifest includes a GitHub origin, Fabro clones that repository into the sandbox workspace and configures git lifecycle operations inside the sandbox.
+
+This is a breaking sandbox change:
+
+- Docker no longer bind-mounts host workspaces.
+- Docker and Daytona accept GitHub origins only when cloning.
+- Present non-GitHub origins fail unless `skip_clone = true`.
+- Absent origins and `skip_clone = true` runs create empty workspaces without repository files.
+
+The packaged Docker Compose service mounts the host Docker socket so the server can create sibling run containers. Operators remain responsible for Docker socket permissions, Docker Desktop behavior, `DOCKER_HOST`, TLS, and remote daemon security.
+
+## Run logs
+
+Each server-dispatched run now gets its own worker tracing log at `runtime/server.log`. The server also exposes the log through `GET /api/v1/runs/{id}/logs`, so tools can fetch execution-time tracing for a single run without grepping the process-wide server log.
+
+`fabro dump` now includes the same log as `run.log` when it is available. Dumps still succeed for older runs or submitted runs that do not have a worker log yet.
+
+## Operators
+
+Worker subprocesses continue writing to the main `<storage>/logs/server.log`, and also mirror worker tracing into the per-run file. `FABRO_LOG` still controls log verbosity; if a server config sets `[server.logging] level`, that level is now propagated to workers unless the parent process already set `FABRO_LOG`.

@@ -1,5 +1,7 @@
 use anyhow::bail;
+use fabro_config::RunLayer;
 use fabro_config::user::active_settings_path;
+use fabro_server::manifest_validation;
 use fabro_util::terminal::Styles;
 
 use crate::args::ValidateArgs;
@@ -8,27 +10,25 @@ use crate::commands::run::output::api_diagnostics_to_local;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest};
 use crate::shared::{print_diagnostics, print_json_pretty, relative_path};
 
-pub(crate) async fn run(
+pub(crate) fn run(
     args: &ValidateArgs,
     styles: &Styles,
     base_ctx: &CommandContext,
 ) -> anyhow::Result<()> {
     let printer = base_ctx.printer();
-    let ctx = base_ctx.with_target(&args.target)?;
     let built = build_run_manifest(ManifestBuildInput {
         workflow:           args.workflow.clone(),
-        cwd:                ctx.cwd().to_path_buf(),
+        cwd:                base_ctx.cwd().to_path_buf(),
         run_overrides:      None,
         cli_overrides:      None,
         args:               None,
         run_id:             None,
         user_settings_path: Some(active_settings_path(None)),
     })?;
-    let client = ctx.server().await?;
-    let response = client.run_preflight(built.manifest).await?;
+    let response = manifest_validation::validate_manifest(&RunLayer::default(), &built.manifest)?;
     let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);
 
-    if ctx.json_output() {
+    if base_ctx.json_output() {
         print_json_pretty(&serde_json::json!({
             "workflow_name": response.workflow.name,
             "nodes": response.workflow.nodes,

@@ -2,7 +2,7 @@ use fabro_test::{fabro_snapshot, test_context};
 use httpmock::MockServer;
 use serde_json::Value;
 
-use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
+use super::support::{setup_seeded_completed_dry_run, setup_seeded_created_dry_run};
 use crate::support::unique_run_id;
 
 fn ulid_filter() -> (String, String) {
@@ -62,7 +62,7 @@ fn unarchive_requires_at_least_one_id() {
 #[test]
 fn unarchive_archived_run_restores_prior_terminal_status() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
 
     // Archive first.
     let archive = context
@@ -102,7 +102,7 @@ fn unarchive_archived_run_restores_prior_terminal_status() {
 fn unarchive_on_non_archived_terminal_is_idempotent() {
     // Unarchiving a succeeded (not-archived) run returns success with no event.
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
 
     let output = context
         .command()
@@ -119,7 +119,7 @@ fn unarchive_on_non_archived_terminal_is_idempotent() {
 #[test]
 fn unarchive_on_active_run_rejects_with_not_archived_message() {
     let context = test_context!();
-    let run = setup_created_fast_dry_run(&context);
+    let run = setup_seeded_created_dry_run(&context);
 
     let output = context
         .command()
@@ -154,7 +154,7 @@ fn unarchive_unknown_id_renders_clean_error() {
 #[test]
 fn unarchive_json_output_shape() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     context
         .command()
         .args(["archive", &run.run_id])
@@ -178,13 +178,13 @@ fn unarchive_json_output_shape() {
 #[test]
 fn unarchive_mixed_batch_aggregates_errors() {
     let context = test_context!();
-    let archived_run = setup_completed_fast_dry_run(&context);
+    let archived_run = setup_seeded_completed_dry_run(&context);
     context
         .command()
         .args(["archive", &archived_run.run_id])
         .output()
         .expect("archive should execute");
-    let active_run = setup_created_fast_dry_run(&context);
+    let active_run = setup_seeded_created_dry_run(&context);
 
     let output = context
         .command()
@@ -226,7 +226,7 @@ fn unarchive_resolves_selector_via_server_endpoint() {
                     "goal": "Nightly run",
                     "title": "Nightly run",
                     "labels": {},
-                    "host_repo_path": null,
+                    "source_directory": null,
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",

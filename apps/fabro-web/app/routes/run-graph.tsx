@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
+import type { BundledLanguage } from "@pierre/diffs";
 import { graphTheme } from "../lib/graph-theme";
-import { useRunGraph, useRunStages } from "../lib/queries";
+import { useRunGraph, useRunGraphSource, useRunStages } from "../lib/queries";
+import { LoadingState } from "../components/state";
 import { StageSidebar } from "../components/stage-sidebar";
 import {
   GRAPH_DEFAULT_ZOOM_INDEX,
   GRAPH_ZOOM_STEPS,
   GraphToolbar,
 } from "../components/graph-toolbar";
+import { CollapsibleFile } from "../components/collapsible-file";
+import { registerDotLanguage } from "../data/register-dot-language";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 
 export const handle = { wide: true };
@@ -69,11 +73,15 @@ function stripGraphTitle(svg: SVGSVGElement) {
   title.remove();
 }
 
+type View = "graph" | "source";
+
 export default function RunGraph() {
   const { id } = useParams();
   const [direction, setDirection] = useState<Direction>("LR");
+  const [view, setView] = useState<View>("graph");
   const stagesQuery = useRunStages(id);
   const graphQuery = useRunGraph(id, direction);
+  const sourceQuery = useRunGraphSource(id, view === "source");
   const stages = useMemo(
     () => mapRunStagesToSidebarStages(stagesQuery.data),
     [stagesQuery.data],
@@ -85,6 +93,17 @@ export default function RunGraph() {
   const [error, setError] = useState<string | null>(null);
   const [zoomIndex, setZoomIndex] = useState(GRAPH_DEFAULT_ZOOM_INDEX);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dotReady, setDotReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    registerDotLanguage().then(() => {
+      if (!cancelled) setDotReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const dragState = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const zoom = GRAPH_ZOOM_STEPS[zoomIndex];
 
@@ -184,8 +203,15 @@ export default function RunGraph() {
     <div className="flex gap-6">
       <StageSidebar stages={stages} runId={id!} activeLink="graph" />
 
-      <div className="min-w-0 flex-1">
-        <div className="graph-svg relative rounded-md border border-line bg-panel-alt">
+      <div className="min-w-0 flex-1 space-y-3">
+        <div className="flex justify-end">
+          <ViewToggle view={view} setView={setView} />
+        </div>
+
+        <div
+          className="graph-svg relative rounded-md border border-line bg-panel-alt"
+          hidden={view !== "graph"}
+        >
           <GraphToolbar
             direction={direction}
             setDirection={setDirection}
@@ -212,7 +238,70 @@ export default function RunGraph() {
             </div>
           </div>
         </div>
+
+        {view === "source" && (
+          <SourcePanel
+            source={sourceQuery.data}
+            loading={sourceQuery.data === undefined && !sourceQuery.error}
+            dotReady={dotReady}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+function ViewToggle({ view, setView }: { view: View; setView: (v: View) => void }) {
+  const btn =
+    "rounded px-3 py-1.5 text-xs font-medium transition-colors";
+  return (
+    <div role="group" aria-label="Graph view" className="inline-flex rounded-md border border-line bg-panel/80 p-0.5">
+      <button
+        type="button"
+        onClick={() => setView("graph")}
+        aria-pressed={view === "graph"}
+        className={`${btn} ${view === "graph" ? "bg-overlay text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
+      >
+        Graph
+      </button>
+      <button
+        type="button"
+        onClick={() => setView("source")}
+        aria-pressed={view === "source"}
+        className={`${btn} ${view === "source" ? "bg-overlay text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
+      >
+        Source
+      </button>
+    </div>
+  );
+}
+
+function SourcePanel({
+  source,
+  loading,
+  dotReady,
+}: {
+  source: string | null | undefined;
+  loading: boolean;
+  dotReady: boolean;
+}) {
+  if (loading || !dotReady) {
+    return (
+      <div className="rounded-md border border-line bg-panel-alt p-4">
+        <LoadingState label="Loading graph source…" />
+      </div>
+    );
+  }
+  if (!source) {
+    return (
+      <div className="rounded-md border border-line bg-panel-alt p-4">
+        <p className="text-sm text-fg-muted">No graph source available for this run.</p>
+      </div>
+    );
+  }
+  return (
+    <CollapsibleFile
+      file={{ name: "workflow.fabro", contents: source, lang: "dot" as BundledLanguage }}
+    />
   );
 }

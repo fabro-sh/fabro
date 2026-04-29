@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ManifestPreRunPushOutcome } from './manifest-pre-run-push-outcome';
 
 /**
  * Observable git state from the CLI working directory.
@@ -34,5 +37,6 @@ export interface ManifestGit {
      * Whether the working tree has uncommitted changes.
      */
     'clean': boolean;
+    'push_outcome': ManifestPreRunPushOutcome;
 }
 

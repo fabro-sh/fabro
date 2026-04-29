@@ -54,6 +54,12 @@ pub enum InstallObjectStoreSelection {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallSandboxSelection {
+    Docker,
+    Daytona,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallObjectStoreEnvPlan {
     pub writes:   Vec<envfile::EnvFileUpdate>,
@@ -379,6 +385,24 @@ pub fn write_object_store_settings(
     }
 }
 
+pub fn write_sandbox_settings(
+    doc: &mut toml::Value,
+    selection: InstallSandboxSelection,
+) -> Result<()> {
+    let provider = match selection {
+        InstallSandboxSelection::Docker => "docker",
+        InstallSandboxSelection::Daytona => "daytona",
+    };
+    let root = root_table_mut(doc)?;
+    let run = ensure_table(root, "run")?;
+    let sandbox = ensure_table(run, "sandbox")?;
+    sandbox.insert(
+        "provider".to_string(),
+        toml::Value::String(provider.to_string()),
+    );
+    Ok(())
+}
+
 fn restore_optional_file(path: &Path, previous_contents: Option<&str>) -> Result<()> {
     match previous_contents {
         Some(contents) => {
@@ -505,10 +529,10 @@ mod tests {
 
     use super::{
         InstallListenConfig, InstallObjectStoreCredentialMode, InstallObjectStoreSelection,
-        OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_MANAGED_COMMENT,
+        InstallSandboxSelection, OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_MANAGED_COMMENT,
         OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite, VaultSecretWrite,
         default_web_url, merge_server_settings, persist_install_outputs_direct,
-        write_github_app_settings, write_object_store_settings,
+        write_github_app_settings, write_object_store_settings, write_sandbox_settings,
     };
 
     fn format_config_toml() -> String {
@@ -852,6 +876,40 @@ name = "custom"
                 .find(|write| write.key == OBJECT_STORE_SECRET_ACCESS_KEY_ENV)
                 .map(|write| write.value.as_str()),
             Some("secret-test")
+        );
+    }
+
+    #[test]
+    fn write_sandbox_settings_records_docker_provider() {
+        let mut doc = toml::Value::Table(toml::Table::default());
+        write_sandbox_settings(&mut doc, InstallSandboxSelection::Docker)
+            .expect("docker sandbox selection should succeed");
+
+        assert_eq!(
+            doc.get("run")
+                .and_then(toml::Value::as_table)
+                .and_then(|run| run.get("sandbox"))
+                .and_then(toml::Value::as_table)
+                .and_then(|sandbox| sandbox.get("provider"))
+                .and_then(toml::Value::as_str),
+            Some("docker")
+        );
+    }
+
+    #[test]
+    fn write_sandbox_settings_records_daytona_provider() {
+        let mut doc = toml::Value::Table(toml::Table::default());
+        write_sandbox_settings(&mut doc, InstallSandboxSelection::Daytona)
+            .expect("daytona sandbox selection should succeed");
+
+        assert_eq!(
+            doc.get("run")
+                .and_then(toml::Value::as_table)
+                .and_then(|run| run.get("sandbox"))
+                .and_then(toml::Value::as_table)
+                .and_then(|sandbox| sandbox.get("provider"))
+                .and_then(toml::Value::as_str),
+            Some("daytona")
         );
     }
 

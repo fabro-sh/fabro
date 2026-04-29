@@ -2,7 +2,7 @@ use fabro_test::{fabro_snapshot, test_context};
 use httpmock::MockServer;
 use serde_json::Value;
 
-use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
+use super::support::{setup_seeded_completed_dry_run, setup_seeded_created_dry_run};
 use crate::support::unique_run_id;
 
 fn ulid_filter() -> (String, String) {
@@ -62,7 +62,7 @@ fn archive_requires_at_least_one_id() {
 #[test]
 fn archive_succeeded_run_hides_it_from_default_ps() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let mut filters = context.filters();
     filters.push(ulid_filter());
 
@@ -106,7 +106,7 @@ fn archive_succeeded_run_hides_it_from_default_ps() {
 fn archive_running_run_rejects_with_must_be_terminal_message() {
     // A `create`d run is in `submitted` — not yet terminal.
     let context = test_context!();
-    let run = setup_created_fast_dry_run(&context);
+    let run = setup_seeded_created_dry_run(&context);
     let output = context
         .command()
         .args(["archive", &run.run_id])
@@ -123,7 +123,7 @@ fn archive_running_run_rejects_with_must_be_terminal_message() {
 #[test]
 fn archive_already_archived_is_idempotent() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
 
     let first = context
         .command()
@@ -164,7 +164,7 @@ fn archive_unknown_id_renders_clean_error() {
 #[test]
 fn archive_json_output_shape() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
 
     let output = context
         .command()
@@ -183,7 +183,7 @@ fn archive_json_output_shape() {
 #[test]
 fn archive_mixed_batch_aggregates_errors() {
     let context = test_context!();
-    let good = setup_completed_fast_dry_run(&context);
+    let good = setup_seeded_completed_dry_run(&context);
     let bad = unique_run_id();
 
     let output = context
@@ -221,7 +221,7 @@ fn archive_resolves_selector_via_server_endpoint() {
                     "goal": "Nightly run",
                     "title": "Nightly run",
                     "labels": {},
-                    "host_repo_path": null,
+                    "source_directory": null,
                     "repository": { "name": "unknown" },
                     "start_time": "2026-04-05T12:00:00Z",
                     "created_at": "2026-04-05T12:00:00Z",

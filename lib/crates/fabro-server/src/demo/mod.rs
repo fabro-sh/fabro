@@ -93,10 +93,12 @@ pub(crate) async fn resolve_run(
     match resolve_run_by_selector(
         &runs,
         &params.selector,
-        |run| run.run_id.clone(),
+        |run| run.run_id.to_string(),
         |run| run.workflow_slug.clone(),
         |run| run.workflow_name.clone(),
         |run| run.created_at,
+        |run| run.created_at.to_rfc3339(),
+        |run| run.repo_origin_url.clone(),
     ) {
         Ok(run) => (StatusCode::OK, Json(run.clone())).into_response(),
         Err(ResolveRunError::InvalidSelector | ResolveRunError::AmbiguousPrefix { .. }) => {
@@ -312,7 +314,10 @@ pub(crate) async fn get_run_status(
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    match runs::summaries().into_iter().find(|run| run.run_id == id) {
+    match runs::summaries()
+        .into_iter()
+        .find(|run| run.run_id.to_string() == id)
+    {
         Some(run) => (StatusCode::OK, Json(run)).into_response(),
         None => ApiError::not_found("Run not found.").into_response(),
     }
@@ -411,15 +416,27 @@ pub(crate) async fn unpause_stub(
     (StatusCode::OK, Json(serde_json::json!({"id": id, "status": "running", "created_at": "2026-03-06T14:30:00Z"}))).into_response()
 }
 
+const DEMO_GRAPH_DOT: &str = "digraph demo {\n  graph [goal=\"Demo\"]\n  rankdir=LR\n  start [shape=Mdiamond, label=\"Start\"]\n  detect [label=\"Detect\\nDrift\"]\n  exit [shape=Msquare, label=\"Exit\"]\n  propose [label=\"Propose\\nChanges\"]\n  review [label=\"Review\\nChanges\"]\n  apply [label=\"Apply\\nChanges\"]\n  start -> detect\n  detect -> exit [label=\"No drift\"]\n  detect -> propose [label=\"Drift found\"]\n  propose -> review\n  review -> propose [label=\"Revise\"]\n  review -> apply [label=\"Accept\"]\n  apply -> exit\n}";
+
 pub(crate) async fn get_run_graph(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
-    // Use graphviz to render the demo DOT source
-    let dot_source = "digraph demo {\n  graph [goal=\"Demo\"]\n  rankdir=LR\n  start [shape=Mdiamond, label=\"Start\"]\n  detect [label=\"Detect\\nDrift\"]\n  exit [shape=Msquare, label=\"Exit\"]\n  propose [label=\"Propose\\nChanges\"]\n  review [label=\"Review\\nChanges\"]\n  apply [label=\"Apply\\nChanges\"]\n  start -> detect\n  detect -> exit [label=\"No drift\"]\n  detect -> propose [label=\"Drift found\"]\n  propose -> review\n  review -> propose [label=\"Revise\"]\n  review -> apply [label=\"Accept\"]\n  apply -> exit\n}";
+    crate::server::render_graph_bytes(DEMO_GRAPH_DOT).await
+}
 
-    crate::server::render_graph_bytes(dot_source).await
+pub(crate) async fn get_run_graph_source(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<String>,
+) -> Response {
+    (
+        StatusCode::OK,
+        [("content-type", "text/vnd.graphviz")],
+        DEMO_GRAPH_DOT,
+    )
+        .into_response()
 }
 
 pub(crate) async fn list_secrets(
@@ -651,6 +668,7 @@ pub(crate) async fn get_system_info(
         StatusCode::OK,
         Json(json!({
             "version": env!("CARGO_PKG_VERSION"),
+            "server_url": "http://localhost:3000",
             "git_sha": option_env!("FABRO_GIT_SHA"),
             "build_date": option_env!("FABRO_BUILD_DATE"),
             "profile": option_env!("FABRO_BUILD_PROFILE"),
@@ -755,18 +773,18 @@ fn ts(s: &str) -> DateTime<Utc> {
 
 mod runs {
     use std::collections::HashMap;
+    use std::sync::OnceLock;
     use std::time::Duration;
 
     use fabro_api::types::*;
-    use fabro_types::WorkflowSettings;
     use fabro_types::settings::run::{
         DaytonaSettings, DaytonaSnapshotSettings, LocalSandboxSettings, RunGoal, RunModelSettings,
         RunNamespace, RunPrepareSettings, RunSandboxSettings,
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
+    use fabro_types::{RunId, WorkflowSettings};
 
     use super::ts;
-    use crate::server::truncate_goal;
 
     fn labels(entries: &[(&str, &str)]) -> HashMap<String, String> {
         entries
@@ -775,8 +793,26 @@ mod runs {
             .collect()
     }
 
+    fn demo_run_ids() -> &'static [RunId; 6] {
+        static IDS: OnceLock<[RunId; 6]> = OnceLock::new();
+        IDS.get_or_init(|| {
+            [
+                RunId::with_timestamp(ts("2026-03-06T14:30:00Z"), 1),
+                RunId::with_timestamp(ts("2026-03-06T12:00:00Z"), 2),
+                RunId::with_timestamp(ts("2026-03-04T15:00:00Z"), 3),
+                RunId::with_timestamp(ts("2026-03-04T10:00:00Z"), 4),
+                RunId::with_timestamp(ts("2026-03-03T16:45:00Z"), 5),
+                RunId::with_timestamp(ts("2026-02-28T14:00:00Z"), 6),
+            ]
+        })
+    }
+
+    fn demo_run_id(index: usize) -> RunId {
+        demo_run_ids()[index - 1]
+    }
+
     fn summary(
-        run_id: &str,
+        sequence: u128,
         repo_name: &str,
         workflow_slug: &str,
         workflow_name: &str,
@@ -788,28 +824,26 @@ mod runs {
         pending_control: Option<RunControlAction>,
         total_usd_micros: Option<i64>,
         entries: &[(&str, &str)],
-    ) -> StoreRunSummary {
-        StoreRunSummary {
-            created_at: ts(created_at),
-            duration_ms: elapsed_secs.and_then(duration_ms_from_secs),
-            elapsed_secs,
-            goal: goal.into(),
-            host_repo_path: Some(format!("/demo/{repo_name}")),
-            labels: labels(entries),
-            pending_control,
-            repository: RepositoryReference {
-                name: repo_name.into(),
-            },
-            run_id: run_id.into(),
-            start_time: Some(ts(created_at)),
-            status: parse_run_status(status, status_reason)
+    ) -> RunSummary {
+        let created_at = ts(created_at);
+        let run_id = RunId::with_timestamp(created_at, sequence);
+        RunSummary::new(
+            run_id,
+            Some(workflow_name.into()),
+            Some(workflow_slug.into()),
+            goal.into(),
+            labels(entries),
+            Some(format!("/demo/{repo_name}")),
+            false,
+            Some(format!("https://github.com/demo/{repo_name}.git")),
+            Some(created_at),
+            parse_run_status(status, status_reason)
                 .unwrap_or_else(|| panic!("invalid demo run status: {status}")),
-            superseded_by: None,
-            title: truncate_goal(goal),
+            pending_control,
+            elapsed_secs.and_then(duration_ms_from_secs),
             total_usd_micros,
-            workflow_name: Some(workflow_name.into()),
-            workflow_slug: Some(workflow_slug.into()),
-        }
+            None,
+        )
     }
 
     fn parse_run_status(status: &str, status_reason: Option<&str>) -> Option<RunStatus> {
@@ -860,22 +894,19 @@ mod runs {
         }
     }
 
-    fn duration_ms_from_secs(secs: f64) -> Option<i64> {
+    fn duration_ms_from_secs(secs: f64) -> Option<u64> {
         let duration = Duration::try_from_secs_f64(secs).ok()?;
         duration.as_millis().try_into().ok()
     }
 
-    fn take_summary(
-        summaries: &mut HashMap<String, StoreRunSummary>,
-        run_id: &str,
-    ) -> StoreRunSummary {
+    fn take_summary(summaries: &mut HashMap<RunId, RunSummary>, run_id: RunId) -> RunSummary {
         summaries
-            .remove(run_id)
+            .remove(&run_id)
             .unwrap_or_else(|| panic!("missing demo summary: {run_id}"))
     }
 
     fn board_item(
-        summary: StoreRunSummary,
+        summary: RunSummary,
         column: BoardColumn,
         pull_request: Option<RunPullRequest>,
         sandbox: Option<RunSandbox>,
@@ -884,16 +915,18 @@ mod runs {
         RunListItem {
             column,
             created_at: summary.created_at,
-            duration_ms: summary.duration_ms,
+            duration_ms: summary.duration_ms.and_then(|ms| i64::try_from(ms).ok()),
             elapsed_secs: summary.elapsed_secs,
             goal: summary.goal,
-            host_repo_path: summary.host_repo_path,
+            source_directory: summary.source_directory,
+            in_place: Some(summary.in_place),
+            repo_origin_url: summary.repo_origin_url,
             labels: summary.labels,
             pending_control: summary.pending_control,
             pull_request,
             question,
             repository: summary.repository,
-            run_id: summary.run_id,
+            run_id: summary.run_id.to_string(),
             sandbox,
             start_time: summary.start_time,
             status: summary.status,
@@ -914,8 +947,9 @@ mod runs {
 
     fn sandbox(id: &str, cpu: i64, memory: i64) -> RunSandbox {
         RunSandbox {
-            id:        id.into(),
-            resources: Some(SandboxResources { cpu, memory }),
+            id:                Some(id.to_string()),
+            working_directory: Some("/workspace".to_string()),
+            resources:         Some(SandboxResources { cpu, memory }),
         }
     }
 
@@ -960,10 +994,10 @@ mod runs {
         ]
     }
 
-    pub(super) fn summaries() -> Vec<StoreRunSummary> {
+    pub(super) fn summaries() -> Vec<RunSummary> {
         vec![
             summary(
-                "run-1",
+                1,
                 "api-server",
                 "implement",
                 "Implement",
@@ -977,7 +1011,7 @@ mod runs {
                 &[("branch", "rate-limit"), ("team", "platform")],
             ),
             summary(
-                "run-2",
+                2,
                 "web-dashboard",
                 "implement",
                 "Implement",
@@ -991,7 +1025,7 @@ mod runs {
                 &[("owner", "frontend")],
             ),
             summary(
-                "run-3",
+                3,
                 "shared-types",
                 "expand",
                 "Expand",
@@ -1005,7 +1039,7 @@ mod runs {
                 &[("priority", "high")],
             ),
             summary(
-                "run-4",
+                4,
                 "shared-types",
                 "implement",
                 "Implement",
@@ -1019,7 +1053,7 @@ mod runs {
                 &[("owner", "runtime")],
             ),
             summary(
-                "run-5",
+                5,
                 "web-dashboard",
                 "implement",
                 "Implement",
@@ -1033,7 +1067,7 @@ mod runs {
                 &[("environment", "staging")],
             ),
             summary(
-                "run-6",
+                6,
                 "api-server",
                 "implement",
                 "Implement",
@@ -1052,26 +1086,26 @@ mod runs {
     pub(super) fn board_items() -> Vec<RunListItem> {
         let mut summaries = summaries()
             .into_iter()
-            .map(|summary| (summary.run_id.clone(), summary))
+            .map(|summary| (summary.run_id, summary))
             .collect::<HashMap<_, _>>();
 
         vec![
             board_item(
-                take_summary(&mut summaries, "run-1"),
+                take_summary(&mut summaries, demo_run_id(1)),
                 BoardColumn::Running,
                 None,
                 Some(sandbox("sb-a1b2c3d4", 4, 8)),
                 None,
             ),
             board_item(
-                take_summary(&mut summaries, "run-2"),
+                take_summary(&mut summaries, demo_run_id(2)),
                 BoardColumn::Running,
                 None,
                 Some(sandbox("sb-e5f6g7h8", 8, 16)),
                 None,
             ),
             board_item(
-                take_summary(&mut summaries, "run-3"),
+                take_summary(&mut summaries, demo_run_id(3)),
                 BoardColumn::Initializing,
                 Some(pull_request(0, 567, 234, 0, vec![])),
                 Some(sandbox("sb-q7r8s9t0", 4, 8)),
@@ -1080,7 +1114,7 @@ mod runs {
                 }),
             ),
             board_item(
-                take_summary(&mut summaries, "run-4"),
+                take_summary(&mut summaries, demo_run_id(4)),
                 BoardColumn::Blocked,
                 Some(pull_request(0, 145, 23, 0, vec![])),
                 Some(sandbox("sb-u1v2w3x4", 4, 8)),
@@ -1089,7 +1123,7 @@ mod runs {
                 }),
             ),
             board_item(
-                take_summary(&mut summaries, "run-5"),
+                take_summary(&mut summaries, demo_run_id(5)),
                 BoardColumn::Failed,
                 Some(pull_request(889, 234, 67, 4, vec![
                     check("lint", CheckRunStatus::Success, Some(23.0)),
@@ -1102,7 +1136,7 @@ mod runs {
                 None,
             ),
             board_item(
-                take_summary(&mut summaries, "run-6"),
+                take_summary(&mut summaries, demo_run_id(6)),
                 BoardColumn::Succeeded,
                 Some(pull_request(1249, 189, 45, 7, vec![
                     check("lint", CheckRunStatus::Success, Some(21.0)),
@@ -1378,6 +1412,7 @@ mod runs {
                     devcontainer: false,
                     env:          HashMap::new(),
                     local:        LocalSandboxSettings::default(),
+                    docker:       None,
                     daytona:      Some(DaytonaSettings {
                         auto_stop_interval: Some(60),
                         labels:             HashMap::from([(
@@ -1409,7 +1444,7 @@ mod runs {
         #[test]
         fn summary_parses_known_status_reason_values() {
             let summary = summary(
-                "run-test",
+                99,
                 "demo-repo",
                 "implement",
                 "Implement",
@@ -1431,7 +1466,7 @@ mod runs {
         #[test]
         fn summary_ignores_unknown_status_reason() {
             let summary = summary(
-                "run-test",
+                99,
                 "demo-repo",
                 "implement",
                 "Implement",
@@ -1454,7 +1489,7 @@ mod runs {
         fn summary_derives_title_like_server() {
             let goal = format!("## Plan: {}", "a".repeat(120));
             let summary = summary(
-                "run-test",
+                99,
                 "demo-repo",
                 "implement",
                 "Implement",

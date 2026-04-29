@@ -4,6 +4,7 @@
 )]
 
 use std::fmt::Write as _;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
@@ -27,6 +28,10 @@ use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::{Layer, Registry};
 
 use crate::helpers::{checked_response, response_json, response_status, response_text};
+
+fn spa_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/spa")
+}
 
 #[derive(Default)]
 struct EventCapture {
@@ -163,16 +168,40 @@ async fn put_install_object_store_local(app: &axum::Router, token: &str) {
     put_install_object_store(app, token, r#"{"provider":"local"}"#).await;
 }
 
+async fn put_install_sandbox(app: &axum::Router, token: &str, body: &str) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/install/sandbox")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("sandbox install request should build"),
+        )
+        .await
+        .unwrap();
+    response_status(response, StatusCode::NO_CONTENT, "PUT /install/sandbox").await;
+}
+
+async fn put_install_sandbox_docker(app: &axum::Router, token: &str) {
+    put_install_sandbox(app, token, r#"{"provider":"docker"}"#).await;
+}
+
 async fn configure_token_install(app: &axum::Router, token: &str) {
     put_install_server(app, token, "https://fabro.example.com").await;
     put_install_object_store_local(app, token).await;
+    put_install_sandbox_docker(app, token).await;
     put_install_llm(app, token).await;
     put_install_github_token(app, token, "brynary").await;
 }
 
 #[tokio::test]
 async fn install_router_isolated_from_normal_api_surface() {
-    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let app = build_install_router(
+        InstallAppState::for_test("test-install-token").with_static_asset_root(spa_fixture_root()),
+    );
 
     let health_response = app
         .clone()
@@ -222,7 +251,7 @@ async fn install_router_isolated_from_normal_api_surface() {
 
 #[tokio::test]
 async fn install_session_requires_valid_install_token() {
-    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let unauthorized = app
         .clone()
@@ -263,8 +292,29 @@ async fn install_session_requires_valid_install_token() {
 }
 
 #[tokio::test]
+async fn install_session_sanitizes_wildcard_host_prefill() {
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/install/session")
+                .header("authorization", "Bearer test-install-token")
+                .header("host", "0.0.0.0:32276")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let body = response_json(response, StatusCode::OK, "GET /install/session").await;
+    assert_eq!(body["prefill"]["canonical_url"], "http://localhost:32276");
+}
+
+#[tokio::test]
 async fn install_endpoints_reject_missing_and_wrong_tokens() {
-    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
     let cases = [
         ("GET", "/install/session", None),
         (
@@ -292,6 +342,12 @@ async fn install_endpoints_reject_missing_and_wrong_tokens() {
             "/install/object-store",
             Some(r#"{"provider":"local"}"#),
         ),
+        (
+            "POST",
+            "/install/sandbox/test",
+            Some(r#"{"provider":"docker"}"#),
+        ),
+        ("PUT", "/install/sandbox", Some(r#"{"provider":"docker"}"#)),
         (
             "POST",
             "/install/github/token/test",
@@ -359,7 +415,7 @@ async fn install_endpoints_reject_missing_and_wrong_tokens() {
 
 #[tokio::test]
 async fn install_endpoints_accept_query_token_when_authorization_header_is_wrong() {
-    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let response = app
         .oneshot(
@@ -378,7 +434,7 @@ async fn install_endpoints_accept_query_token_when_authorization_header_is_wrong
 
 #[tokio::test]
 async fn object_store_local_validation_and_save_update_install_session() {
-    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let validation_response = app
         .clone()
@@ -428,7 +484,7 @@ async fn object_store_local_validation_and_save_update_install_session() {
 
 #[tokio::test]
 async fn object_store_validation_rejects_runtime_mode_access_keys_without_echoing_secrets() {
-    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
     let access_key_id = "AKIA_RUNTIME_SHOULD_NOT_LEAK";
     let secret_access_key = "runtime-secret-should-not-leak";
 
@@ -464,7 +520,7 @@ async fn object_store_validation_rejects_runtime_mode_access_keys_without_echoin
 
 #[tokio::test]
 async fn install_finish_requires_object_store_step() {
-    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
     put_install_llm(&app, "test-install-token").await;
@@ -501,8 +557,7 @@ async fn manual_object_store_session_is_redacted_and_blank_resubmit_preserves_cr
         "test-install-token",
         temp_dir.path(),
         &config_path,
-    ))
-    .await;
+    ));
 
     put_install_object_store(
         &app,
@@ -547,6 +602,7 @@ async fn manual_object_store_session_is_redacted_and_blank_resubmit_preserves_cr
     )
     .await;
     put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_sandbox_docker(&app, "test-install-token").await;
     put_install_llm(&app, "test-install-token").await;
     put_install_github_token(&app, "test-install-token", "brynary").await;
 
@@ -583,8 +639,7 @@ async fn switching_object_store_from_manual_to_runtime_clears_saved_manual_crede
         "test-install-token",
         temp_dir.path(),
         &config_path,
-    ))
-    .await;
+    ));
 
     put_install_object_store(
         &app,
@@ -624,6 +679,7 @@ async fn switching_object_store_from_manual_to_runtime_clears_saved_manual_crede
     assert!(!rendered_session.contains("switch-secret-value"));
 
     put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_sandbox_docker(&app, "test-install-token").await;
     put_install_llm(&app, "test-install-token").await;
     put_install_github_token(&app, "test-install-token", "brynary").await;
 
@@ -669,8 +725,7 @@ async fn runtime_object_store_finish_removes_managed_aws_keys_but_keeps_unmarked
         "test-install-token",
         temp_dir.path(),
         &config_path,
-    ))
-    .await;
+    ));
 
     put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
     put_install_object_store(
@@ -679,6 +734,7 @@ async fn runtime_object_store_finish_removes_managed_aws_keys_but_keeps_unmarked
         r#"{"provider":"s3","bucket":"fabro-data","region":"us-east-1","credential_mode":"runtime"}"#,
     )
     .await;
+    put_install_sandbox_docker(&app, "test-install-token").await;
     put_install_llm(&app, "test-install-token").await;
     put_install_github_token(&app, "test-install-token", "brynary").await;
 
@@ -714,8 +770,7 @@ async fn token_install_finish_persists_settings_env_and_vault() {
         "test-install-token",
         temp_dir.path(),
         &config_path,
-    ))
-    .await;
+    ));
     configure_token_install(&app, "test-install-token").await;
 
     let finish_response = app
@@ -746,6 +801,14 @@ async fn token_install_finish_persists_settings_env_and_vault() {
     let settings = std::fs::read_to_string(&config_path).unwrap();
     assert!(settings.contains("https://fabro.example.com"));
     assert!(settings.contains("strategy = \"token\""));
+    assert!(
+        settings.contains("[run.sandbox]"),
+        "settings.toml should contain [run.sandbox]"
+    );
+    assert!(
+        settings.contains("provider = \"docker\""),
+        "settings.toml should record explicit docker sandbox provider"
+    );
     let resolved = ServerSettingsBuilder::from_toml(&settings)
         .expect("settings should resolve")
         .server;
@@ -791,8 +854,7 @@ async fn token_install_finish_invokes_finish_hook_before_response_returns() {
     let app = build_install_router(
         InstallAppState::for_test_with_paths("test-install-token", temp_dir.path(), &config_path)
             .with_finish_hook(hook),
-    )
-    .await;
+    );
     configure_token_install(&app, "test-install-token").await;
 
     let finish_response = app
@@ -853,8 +915,7 @@ async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
         InstallAppState::for_test_with_paths("test-install-token", temp_dir.path(), &config_path)
             .with_home(home.clone())
             .with_github_api_base_url(github_mock.url("")),
-    )
-    .await;
+    );
 
     let llm_response = app
         .clone()
@@ -896,6 +957,7 @@ async fn app_install_finish_omits_dev_token_and_does_not_write_it() {
     .await;
 
     put_install_object_store_local(&app, "test-install-token").await;
+    put_install_sandbox_docker(&app, "test-install-token").await;
 
     let manifest_response = app
         .clone()
@@ -1003,8 +1065,7 @@ async fn token_install_finish_invokes_shutdown_callback_after_accepting() {
             .with_finish_callback(Arc::new(move || {
                 callback_flag.store(true, Ordering::Release);
             })),
-    )
-    .await;
+    );
 
     configure_token_install(&app, "test-install-token").await;
 
@@ -1066,8 +1127,7 @@ async fn install_validation_endpoints_validate_credentials_and_github_token() {
         InstallAppState::for_test("test-install-token")
             .with_provider_base_url(Provider::Anthropic, format!("{}/v1", llm_mock.url("")))
             .with_github_api_base_url(github_mock.url("")),
-    )
-    .await;
+    );
 
     let llm_response = app
         .clone()
@@ -1132,8 +1192,7 @@ async fn github_app_manifest_round_trip_updates_install_session() {
     let app = build_install_router(
         InstallAppState::for_test("test-install-token")
             .with_github_api_base_url(github_mock.url("")),
-    )
-    .await;
+    );
 
     let server_response = app
         .clone()
@@ -1250,7 +1309,7 @@ async fn github_app_manifest_round_trip_updates_install_session() {
 
 #[tokio::test]
 async fn github_app_manifest_retry_replaces_pending_and_preserves_prior_token_strategy() {
-    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let server_response = app
         .clone()
@@ -1422,8 +1481,7 @@ async fn github_app_redirect_rejects_invalid_or_missing_state_without_mutating_s
     let app = build_install_router(
         InstallAppState::for_test("test-install-token")
             .with_github_api_base_url(github_mock.url("")),
-    )
-    .await;
+    );
 
     let server_response = app
         .clone()
@@ -1583,8 +1641,7 @@ async fn github_app_redirect_exchange_failure_returns_to_wizard_and_keeps_pendin
     let app = build_install_router(
         InstallAppState::for_test("test-install-token")
             .with_github_api_base_url(github_mock.url("")),
-    )
-    .await;
+    );
 
     let server_response = app
         .clone()
@@ -1690,7 +1747,7 @@ async fn github_app_redirect_exchange_failure_returns_to_wizard_and_keeps_pendin
 
 #[tokio::test]
 async fn install_server_rejects_trailing_slash_canonical_urls() {
-    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let response = app
         .oneshot(
@@ -1720,6 +1777,44 @@ async fn install_server_rejects_trailing_slash_canonical_urls() {
 }
 
 #[tokio::test]
+async fn install_server_rejects_wildcard_canonical_urls() {
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
+
+    for canonical_url in [
+        "http://0.0.0.0:32276",
+        "http://[::]:32276",
+        "http://0:32276",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/install/server")
+                    .header("authorization", "Bearer test-install-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"canonical_url":"{canonical_url}"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let body = response_json(
+            response,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "PUT /install/server",
+        )
+        .await;
+        assert_eq!(
+            body["errors"][0]["detail"],
+            "canonical_url must not use a wildcard host"
+        );
+    }
+}
+
+#[tokio::test]
 async fn install_finish_failure_restores_settings_and_vault_but_leaves_env_keys() {
     let temp_dir = tempfile::tempdir().unwrap();
     let home_root = tempfile::tempdir().unwrap();
@@ -1739,8 +1834,7 @@ async fn install_finish_failure_restores_settings_and_vault_but_leaves_env_keys(
             .with_finish_callback(Arc::new(move || {
                 callback_flag.store(true, Ordering::Release);
             })),
-    )
-    .await;
+    );
 
     configure_token_install(&app, "test-install-token").await;
 
@@ -1832,8 +1926,7 @@ async fn install_finish_failure_with_manual_credentials_does_not_leak_values() {
         "test-install-token",
         temp_dir.path(),
         &config_path,
-    ))
-    .await;
+    ));
 
     let access_key_id = "AKIA_FINISH_SHOULD_NOT_LEAK";
     let secret_access_key = "finish-secret-should-not-leak";
@@ -1847,6 +1940,7 @@ async fn install_finish_failure_with_manual_credentials_does_not_leak_values() {
         ),
     )
     .await;
+    put_install_sandbox_docker(&app, "test-install-token").await;
     put_install_llm(&app, "test-install-token").await;
     put_install_github_token(&app, "test-install-token", "brynary").await;
 
@@ -1912,8 +2006,7 @@ async fn install_finish_failure_reports_only_env_keys_actually_removed() {
         "test-install-token",
         temp_dir.path(),
         &config_path,
-    ))
-    .await;
+    ));
 
     put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
     put_install_object_store(
@@ -1922,6 +2015,7 @@ async fn install_finish_failure_reports_only_env_keys_actually_removed() {
         r#"{"provider":"s3","bucket":"fabro-data","region":"us-east-1","credential_mode":"runtime"}"#,
     )
     .await;
+    put_install_sandbox_docker(&app, "test-install-token").await;
     put_install_llm(&app, "test-install-token").await;
     put_install_github_token(&app, "test-install-token", "brynary").await;
 
@@ -1973,8 +2067,7 @@ async fn install_finish_failure_does_not_create_home_dev_token() {
     let app = build_install_router(
         InstallAppState::for_test_with_paths("test-install-token", temp_dir.path(), &config_path)
             .with_home(home.clone()),
-    )
-    .await;
+    );
 
     configure_token_install(&app, "test-install-token").await;
 
@@ -2006,4 +2099,366 @@ async fn install_finish_failure_does_not_create_home_dev_token() {
 
     let server_env = std::fs::read_to_string(storage.runtime_directory().env_path()).unwrap();
     assert!(server_env.contains(&format!("FABRO_DEV_TOKEN={storage_dev_token}")));
+}
+
+#[tokio::test]
+async fn sandbox_docker_save_records_explicit_provider_in_session() {
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
+
+    let validation_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/sandbox/test")
+                .header("authorization", "Bearer test-install-token")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"provider":"docker"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let validation_body = response_json(
+        validation_response,
+        StatusCode::OK,
+        "POST /install/sandbox/test",
+    )
+    .await;
+    assert_eq!(validation_body["ok"], true);
+
+    put_install_sandbox_docker(&app, "test-install-token").await;
+
+    let session_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/install/session")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_body =
+        response_json(session_response, StatusCode::OK, "GET /install/session").await;
+    assert_eq!(session_body["sandbox"]["provider"], "docker");
+    assert!(
+        session_body["completed_steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "sandbox")
+    );
+}
+
+#[tokio::test]
+async fn sandbox_daytona_without_api_key_is_rejected() {
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/install/sandbox")
+                .header("authorization", "Bearer test-install-token")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"provider":"daytona"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json(
+        response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "PUT /install/sandbox without api_key",
+    )
+    .await;
+    assert_eq!(
+        body["errors"][0]["detail"],
+        "api_key is required for daytona"
+    );
+}
+
+#[tokio::test]
+async fn sandbox_daytona_test_endpoint_without_api_key_is_rejected() {
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/sandbox/test")
+                .header("authorization", "Bearer test-install-token")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"provider":"daytona"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json(
+        response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "POST /install/sandbox/test without api_key",
+    )
+    .await;
+    assert_eq!(
+        body["errors"][0]["detail"],
+        "api_key is required for daytona"
+    );
+}
+
+#[tokio::test]
+async fn sandbox_daytona_resave_without_api_key_preserves_saved_key() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join("settings.toml");
+    let app = build_install_router(InstallAppState::for_test_with_paths(
+        "test-install-token",
+        temp_dir.path(),
+        &config_path,
+    ));
+
+    let api_key = "dtn_keep_me";
+    put_install_sandbox(
+        &app,
+        "test-install-token",
+        &format!(r#"{{"provider":"daytona","api_key":"{api_key}"}}"#),
+    )
+    .await;
+    put_install_sandbox(&app, "test-install-token", r#"{"provider":"daytona"}"#).await;
+
+    let session_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/install/session")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_body =
+        response_json(session_response, StatusCode::OK, "GET /install/session").await;
+    assert_eq!(session_body["sandbox"]["provider"], "daytona");
+    assert_eq!(session_body["sandbox"]["api_key_saved"], true);
+
+    put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_object_store_local(&app, "test-install-token").await;
+    put_install_llm(&app, "test-install-token").await;
+    put_install_github_token(&app, "test-install-token", "brynary").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    response_status(
+        finish_response,
+        StatusCode::ACCEPTED,
+        "POST /install/finish",
+    )
+    .await;
+
+    let vault = Vault::load(Storage::new(temp_dir.path()).secrets_path()).unwrap();
+    assert_eq!(vault.get("DAYTONA_API_KEY"), Some(api_key));
+}
+
+#[tokio::test]
+async fn sandbox_switching_from_daytona_to_docker_drops_saved_key() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join("settings.toml");
+    let app = build_install_router(InstallAppState::for_test_with_paths(
+        "test-install-token",
+        temp_dir.path(),
+        &config_path,
+    ));
+
+    put_install_sandbox(
+        &app,
+        "test-install-token",
+        r#"{"provider":"daytona","api_key":"dtn_will_be_dropped"}"#,
+    )
+    .await;
+    put_install_sandbox_docker(&app, "test-install-token").await;
+
+    put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_object_store_local(&app, "test-install-token").await;
+    put_install_llm(&app, "test-install-token").await;
+    put_install_github_token(&app, "test-install-token", "brynary").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    response_status(
+        finish_response,
+        StatusCode::ACCEPTED,
+        "POST /install/finish",
+    )
+    .await;
+
+    let settings = std::fs::read_to_string(&config_path).unwrap();
+    assert!(settings.contains("provider = \"docker\""));
+    let vault = Vault::load(Storage::new(temp_dir.path()).secrets_path()).unwrap();
+    assert_eq!(vault.get("DAYTONA_API_KEY"), None);
+}
+
+#[tokio::test]
+async fn sandbox_daytona_save_redacts_api_key_in_session() {
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
+    let api_key = "dtn_should_not_leak";
+
+    put_install_sandbox(
+        &app,
+        "test-install-token",
+        &format!(r#"{{"provider":"daytona","api_key":"{api_key}"}}"#),
+    )
+    .await;
+
+    let session_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/install/session")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_body =
+        response_json(session_response, StatusCode::OK, "GET /install/session").await;
+    assert_eq!(session_body["sandbox"]["provider"], "daytona");
+    assert_eq!(session_body["sandbox"]["api_key_saved"], true);
+    let rendered = session_body.to_string();
+    assert!(!rendered.contains(api_key));
+}
+
+#[tokio::test]
+async fn install_finish_requires_sandbox_step() {
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
+
+    put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_object_store_local(&app, "test-install-token").await;
+    put_install_llm(&app, "test-install-token").await;
+    put_install_github_token(&app, "test-install-token", "brynary").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let finish_body = response_json(
+        finish_response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "POST /install/finish",
+    )
+    .await;
+    assert_eq!(
+        finish_body["errors"][0]["detail"],
+        "install step 'sandbox' is incomplete"
+    );
+}
+
+#[tokio::test]
+async fn daytona_install_finish_writes_settings_and_vault_secret() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join("settings.toml");
+    let app = build_install_router(InstallAppState::for_test_with_paths(
+        "test-install-token",
+        temp_dir.path(),
+        &config_path,
+    ));
+
+    let api_key = "dtn_test_secret";
+    put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_object_store_local(&app, "test-install-token").await;
+    put_install_sandbox(
+        &app,
+        "test-install-token",
+        &format!(r#"{{"provider":"daytona","api_key":"{api_key}"}}"#),
+    )
+    .await;
+    put_install_llm(&app, "test-install-token").await;
+    put_install_github_token(&app, "test-install-token", "brynary").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    response_status(
+        finish_response,
+        StatusCode::ACCEPTED,
+        "POST /install/finish",
+    )
+    .await;
+
+    let settings = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        settings.contains("[run.sandbox]"),
+        "settings.toml should contain [run.sandbox]"
+    );
+    assert!(
+        settings.contains("provider = \"daytona\""),
+        "settings.toml should record daytona sandbox provider"
+    );
+
+    let vault = Vault::load(Storage::new(temp_dir.path()).secrets_path()).unwrap();
+    assert_eq!(vault.get("DAYTONA_API_KEY"), Some(api_key));
+}
+
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"))]
+async fn sandbox_daytona_test_endpoint_validates_real_api_key() {
+    let api_key = std::env::var(fabro_static::EnvVars::DAYTONA_API_KEY)
+        .expect("DAYTONA_API_KEY must be set for live test");
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/sandbox/test")
+                .header("authorization", "Bearer test-install-token")
+                .header("content-type", "application/json")
+                .body(Body::from(format!(
+                    r#"{{"provider":"daytona","api_key":"{api_key}"}}"#
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json(
+        response,
+        StatusCode::OK,
+        "POST /install/sandbox/test (live daytona)",
+    )
+    .await;
+    assert_eq!(body["ok"], true);
 }

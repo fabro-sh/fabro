@@ -937,7 +937,7 @@ fn check_provider_known(
     }
     let valid: Vec<&str> = fabro_model::Provider::ALL
         .iter()
-        .map(|p| p.as_str())
+        .map(|&p| <&'static str>::from(p))
         .collect();
     let valid_str = valid.join(", ");
     Some(Diagnostic {

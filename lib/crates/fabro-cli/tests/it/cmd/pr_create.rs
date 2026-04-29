@@ -6,7 +6,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 use httpmock::MockServer;
 
-use super::support::{mock_resolved_run, setup_completed_fast_dry_run};
+use super::support::{mock_resolved_run, setup_seeded_completed_dry_run};
 use crate::support::unique_run_id;
 
 #[test]
@@ -42,7 +42,7 @@ fn help() {
 #[test]
 fn pr_create_nongit_run_reports_missing_repo_origin() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
 
     let mut cmd = context.command();
     cmd.args(["pr", "create", &run.run_id]);

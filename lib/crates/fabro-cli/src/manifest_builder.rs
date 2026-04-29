@@ -13,11 +13,12 @@ use fabro_config::run::{resolve_run_goal_from_layer, resolve_run_goal_from_names
 use fabro_config::{CliLayer, DaytonaDockerfileLayer, RunLayer, WorkflowSettingsBuilder};
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
-use fabro_sandbox::daytona::detect_repo_info;
 use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal};
-use fabro_types::{RunId, WorkflowSettings};
+use fabro_types::{DirtyStatus, GitContext, PreRunPushOutcome, RunId, WorkflowSettings};
 use fabro_workflow::ManifestPath;
-use fabro_workflow::git::{GitSyncStatus, head_sha, sync_status};
+use fabro_workflow::git::{
+    GitSyncStatus, branch_needs_push, head_sha, push_branch_noninteractive, sync_status,
+};
 
 use crate::args::{PreflightArgs, RunArgs};
 
@@ -139,7 +140,8 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
         &working_directory,
     )?;
 
-    let git = build_manifest_git(&working_directory);
+    let configured_repo_origin_url = configured_repo_origin_url(&workflow_settings);
+    let git = build_git_context(&working_directory, configured_repo_origin_url.as_deref());
     let args = input.args.filter(|args| !manifest_args_is_empty(args));
 
     Ok(BuiltManifest {
@@ -172,8 +174,14 @@ pub(crate) fn run_manifest_args(args: &RunArgs) -> Option<types::ManifestArgs> {
         provider:         args.provider.clone(),
         sandbox:          args
             .sandbox
-            .map(|provider| fabro_sandbox::SandboxProvider::from(provider).to_string()),
+            .map(|provider| fabro_sandbox::SandboxProvider::from(provider).to_string())
+            .or_else(|| {
+                args.in_place
+                    .then(|| fabro_sandbox::SandboxProvider::Local.to_string())
+            }),
+        docker_image:     None,
         verbose:          args.verbose.then_some(true),
+        worktree_mode:    args.in_place.then(|| "never".to_string()),
     };
     (!manifest_args_is_empty(&payload)).then_some(payload)
 }
@@ -190,7 +198,9 @@ pub(crate) fn preflight_manifest_args(args: &PreflightArgs) -> Option<types::Man
         sandbox:          args
             .sandbox
             .map(|provider| fabro_sandbox::SandboxProvider::from(provider).to_string()),
+        docker_image:     None,
         verbose:          args.verbose.then_some(true),
+        worktree_mode:    None,
     };
     (!manifest_args_is_empty(&payload)).then_some(payload)
 }
@@ -493,21 +503,108 @@ fn resolved_goal_to_manifest(resolved: ResolvedRunGoal) -> types::ManifestGoal {
     }
 }
 
-fn build_manifest_git(repo_path: &Path) -> Option<types::ManifestGit> {
-    let (origin_url, branch) = detect_repo_info(repo_path).ok()?;
-    let branch = branch?;
-    let sha = head_sha(repo_path).ok()?;
-    let clean = sync_status(repo_path, "origin", Some(&branch)) != GitSyncStatus::Dirty;
-    Some(types::ManifestGit {
+fn build_git_context(
+    repo_path: &Path,
+    configured_repo_origin_url: Option<&str>,
+) -> Option<GitContext> {
+    let (origin_url, branch) = detect_manifest_repo_info(repo_path)?;
+    let sha = head_sha(repo_path).ok();
+    let dirty = match sync_status(repo_path, "origin", Some(&branch)) {
+        GitSyncStatus::Dirty => DirtyStatus::Dirty,
+        GitSyncStatus::Synced | GitSyncStatus::Unsynced => DirtyStatus::Clean,
+    };
+    let repo_origin_url = configured_repo_origin_url
+        .map(fabro_github::normalize_repo_origin_url)
+        .filter(|url| !url.is_empty())
+        .or_else(|| {
+            origin_url
+                .as_deref()
+                .map(fabro_github::normalize_repo_origin_url)
+                .filter(|url| !url.is_empty())
+        })
+        .unwrap_or_default();
+    let push_outcome = build_manifest_push_outcome(
+        repo_path,
+        &branch,
+        origin_url.as_deref(),
+        configured_repo_origin_url,
+    );
+    Some(GitContext {
+        origin_url: repo_origin_url,
         branch,
-        clean,
-        origin_url: sanitize_origin_url(&origin_url),
         sha,
+        dirty,
+        push_outcome,
     })
 }
 
-fn sanitize_origin_url(origin_url: &str) -> String {
-    fabro_github::normalize_repo_origin_url(origin_url)
+fn configured_repo_origin_url(settings: &WorkflowSettings) -> Option<String> {
+    let scm = &settings.run.scm;
+    if !scm
+        .provider
+        .as_deref()
+        .is_none_or(|provider| provider.eq_ignore_ascii_case("github"))
+    {
+        return None;
+    }
+    let owner = scm.owner.as_ref()?.as_source();
+    let repository = scm.repository.as_ref()?.as_source();
+    if owner.trim().is_empty() || repository.trim().is_empty() {
+        return None;
+    }
+    let origin = format!("https://github.com/{owner}/{repository}");
+    let normalized = fabro_github::normalize_repo_origin_url(&origin);
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn detect_manifest_repo_info(repo_path: &Path) -> Option<(Option<String>, String)> {
+    let repo = git2::Repository::discover(repo_path).ok()?;
+    let branch = repo.head().ok()?.shorthand().map(ToOwned::to_owned)?;
+    let origin_url = repo
+        .find_remote("origin")
+        .ok()
+        .and_then(|remote| remote.url().map(ToOwned::to_owned));
+    Some((origin_url, branch))
+}
+
+fn build_manifest_push_outcome(
+    repo_path: &Path,
+    branch: &str,
+    origin_url: Option<&str>,
+    configured_repo_origin_url: Option<&str>,
+) -> PreRunPushOutcome {
+    let Some(origin_url) = origin_url else {
+        return PreRunPushOutcome::SkippedNoRemote;
+    };
+
+    if let Some(repo_origin_url) = configured_repo_origin_url
+        .map(fabro_github::normalize_repo_origin_url)
+        .filter(|url| !url.is_empty())
+    {
+        let remote = fabro_github::normalize_repo_origin_url(origin_url);
+        if remote != repo_origin_url {
+            return PreRunPushOutcome::SkippedRemoteMismatch {
+                remote,
+                repo_origin_url,
+            };
+        }
+    }
+
+    if !branch_needs_push(repo_path, "origin", branch) {
+        return PreRunPushOutcome::NotAttempted;
+    }
+
+    match push_branch_noninteractive(repo_path, "origin", branch) {
+        Ok(()) => PreRunPushOutcome::Succeeded {
+            remote: "origin".to_string(),
+            branch: branch.to_string(),
+        },
+        Err(err) => PreRunPushOutcome::Failed {
+            remote:  "origin".to_string(),
+            branch:  branch.to_string(),
+            message: err.to_string(),
+        },
+    }
 }
 
 fn normalize_absolute_path(base_dir: &Path, reference: &str) -> Option<PathBuf> {
@@ -545,7 +642,9 @@ fn manifest_args_is_empty(args: &types::ManifestArgs) -> bool {
         && args.preserve_sandbox.is_none()
         && args.provider.is_none()
         && args.sandbox.is_none()
+        && args.docker_image.is_none()
         && args.verbose.is_none()
+        && args.worktree_mode.is_none()
 }
 
 #[cfg(test)]
@@ -767,11 +866,13 @@ file = "prompts/goal.md"
             "workspace-branch",
             "https://github.com/example/workspace.git",
         );
+        mark_origin_branch_synced(workspace, "workspace-branch");
         init_git_repo(
             &target,
             "target-branch",
             "https://github.com/example/target.git",
         );
+        mark_origin_branch_synced(&target, "target-branch");
 
         let workflow_dir = workspace.join(".fabro/workflows/demo");
         std::fs::create_dir_all(&workflow_dir).unwrap();
@@ -812,30 +913,144 @@ working_dir = "repos/target"
             .expect("manifest git info should be detected");
         assert_eq!(git.branch, "target-branch");
         assert_eq!(git.origin_url, "https://github.com/example/target");
+        assert_eq!(git.push_outcome, PreRunPushOutcome::NotAttempted);
+    }
+
+    #[test]
+    fn build_manifest_git_skips_push_when_configured_repository_differs_from_origin() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path();
+
+        init_git_repo(
+            workspace,
+            "feature",
+            "https://github.com/user/forked-target.git",
+        );
+
+        let workflow_dir = workspace.join(".fabro/workflows/demo");
+        std::fs::create_dir_all(&workflow_dir).unwrap();
+        std::fs::write(
+            workspace.join(".fabro/project.toml"),
+            r#"_version = 1
+
+[run.scm]
+provider = "github"
+owner = "example"
+repository = "target"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.toml"),
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.fabro"),
+            r"digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+        )
+        .unwrap();
+
+        let built = build_run_manifest(ManifestBuildInput {
+            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd:                workspace.to_path_buf(),
+            run_overrides:      None,
+            cli_overrides:      None,
+            args:               None,
+            run_id:             None,
+            user_settings_path: None,
+        })
+        .unwrap();
+
+        let git = built
+            .manifest
+            .git
+            .expect("manifest git info should be detected");
+        assert_eq!(git.origin_url, "https://github.com/example/target");
+        assert_eq!(git.push_outcome, PreRunPushOutcome::SkippedRemoteMismatch {
+            remote:          "https://github.com/user/forked-target".to_string(),
+            repo_origin_url: "https://github.com/example/target".to_string(),
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_manifest_push_attempt_disables_terminal_prompts() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        init_git_repo(&workspace, "feature", "fabro-prompt-test::target");
+
+        let helper_dir = temp.path().join("bin");
+        std::fs::create_dir_all(&helper_dir).unwrap();
+        let helper_path = helper_dir.join("git-remote-fabro-prompt-test");
+        std::fs::write(
+            &helper_path,
+            r#"#!/bin/sh
+printf '%s\n' "${GIT_TERMINAL_PROMPT-unset}" > "$FABRO_PROMPT_ENV_LOG"
+echo "helper saw GIT_TERMINAL_PROMPT=${GIT_TERMINAL_PROMPT-unset}" >&2
+exit 1
+"#,
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&helper_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&helper_path, permissions).unwrap();
+
+        let workflow_dir = workspace.join(".fabro/workflows/demo");
+        std::fs::create_dir_all(&workflow_dir).unwrap();
+        std::fs::write(workspace.join(".fabro/project.toml"), "_version = 1\n").unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.toml"),
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.fabro"),
+            r"digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+        )
+        .unwrap();
+
+        let helper_log = temp.path().join("prompt-env.txt");
+        let mut path_entries = vec![helper_dir];
+        if let Some(path) = std::env::var_os("PATH") {
+            path_entries.extend(std::env::split_paths(&path));
+        }
+        let path = std::env::join_paths(path_entries).unwrap();
+        temp_env::with_var("PATH", Some(path), || {
+            temp_env::with_var("FABRO_PROMPT_ENV_LOG", Some(helper_log.as_os_str()), || {
+                let built = build_run_manifest(ManifestBuildInput {
+                    workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+                    cwd:                workspace.clone(),
+                    run_overrides:      None,
+                    cli_overrides:      None,
+                    args:               None,
+                    run_id:             None,
+                    user_settings_path: None,
+                })
+                .unwrap();
+
+                let git = built
+                    .manifest
+                    .git
+                    .expect("manifest git info should be detected");
+                assert!(matches!(git.push_outcome, PreRunPushOutcome::Failed { .. }));
+            });
+        });
+
+        assert_eq!(std::fs::read_to_string(helper_log).unwrap(), "0\n");
     }
 
     fn init_git_repo(path: &Path, branch: &str, origin_url: &str) {
-        use std::process::Command;
-        let run = |args: &[&str]| {
-            let output = Command::new("git")
-                .args(args)
-                .current_dir(path)
-                .output()
-                .unwrap_or_else(|e| panic!("failed to spawn git {args:?}: {e}"));
-            assert!(
-                output.status.success(),
-                "git {args:?} failed: stdout={} stderr={}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr),
-            );
-        };
-        run(&[
+        run_git(path, &[
             "-c",
             &format!("init.defaultBranch={branch}"),
             "init",
             "--quiet",
         ]);
-        run(&[
+        run_git(path, &[
             "-c",
             "user.name=test",
             "-c",
@@ -846,6 +1061,26 @@ working_dir = "repos/target"
             "-m",
             "init",
         ]);
-        run(&["remote", "add", "origin", origin_url]);
+        run_git(path, &["remote", "add", "origin", origin_url]);
+    }
+
+    fn mark_origin_branch_synced(path: &Path, branch: &str) {
+        let remote_ref = format!("refs/remotes/origin/{branch}");
+        run_git(path, &["update-ref", &remote_ref, "HEAD"]);
+    }
+
+    fn run_git(path: &Path, args: &[&str]) {
+        use std::process::Command;
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(path)
+            .output()
+            .unwrap_or_else(|e| panic!("failed to spawn git {args:?}: {e}"));
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 }

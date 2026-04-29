@@ -7,7 +7,10 @@ import type {
   PaginatedRunStageList,
   PaginatedStageTurnList,
   RunBilling,
+  RunProjection,
   ServerSettings,
+  RunSummary,
+  SystemInfoResponse,
 } from "@qltysh/fabro-api-client";
 
 import type { PaginatedWorkflowListResponse, WorkflowDetailResponse } from "./workflow-api";
@@ -20,7 +23,6 @@ import {
   type PaginatedEnvelope,
 } from "./api-client";
 import { queryKeys } from "./query-keys";
-import type { RunSummaryResponse } from "../data/runs";
 
 const immutableOptions: SWRConfiguration = {
   revalidateIfStale: false,
@@ -47,7 +49,7 @@ export function useAuthMe() {
 }
 
 export function useSystemInfo() {
-  return useSWR<{ features: { session_sandboxes: boolean; retros: boolean } }>(
+  return useSWR<SystemInfoResponse>(
     queryKeys.system.info(),
     apiFetcher,
     immutableOptions,
@@ -63,8 +65,15 @@ export function useBoardsRuns() {
 }
 
 export function useRun(id: string | undefined) {
-  return useSWR<RunSummaryResponse | null>(
+  return useSWR<RunSummary | null>(
     id ? queryKeys.runs.detail(id) : null,
+    apiNullableFetcher,
+  );
+}
+
+export function useRunState(id: string | undefined) {
+  return useSWR<RunProjection | null>(
+    id ? queryKeys.runs.state(id) : null,
     apiNullableFetcher,
   );
 }
@@ -88,6 +97,21 @@ export function useRunGraph(id: string | undefined, direction?: "LR" | "TB") {
   return useSWR<string | null>(
     id ? queryKeys.runs.graph(id, direction) : null,
     apiNullableTextFetcher,
+  );
+}
+
+export function useRunGraphSource(id: string | undefined, enabled: boolean) {
+  return useSWR<string | null>(
+    id && enabled ? queryKeys.runs.graphSource(id) : null,
+    apiNullableTextFetcher,
+  );
+}
+
+export function useRunLogs(id: string | undefined, refreshInterval?: number) {
+  return useSWR<string | null>(
+    id ? queryKeys.runs.logs(id) : null,
+    apiNullableTextFetcher,
+    refreshInterval ? { refreshInterval } : undefined,
   );
 }
 

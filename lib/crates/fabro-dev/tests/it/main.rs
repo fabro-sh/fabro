@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
 mod docker_build;
-mod generate_cli_reference;
-mod generate_options_reference;
+#[cfg(unix)]
+mod docker_entrypoint;
+mod docs;
 mod release;
 mod spa;
 
@@ -41,6 +42,14 @@ fn read_file(root: &Path, path: &str) -> String {
     std::fs::read_to_string(root.join(path)).expect("reading fixture file")
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "integration tests inspect fixture files with sync std::fs::read"
+)]
+fn read_bytes(root: &Path, path: &str) -> Vec<u8> {
+    std::fs::read(root.join(path)).expect("reading fixture file")
+}
+
 #[test]
 fn help_lists_scaffolded_commands() {
     let output = fabro_dev()
@@ -51,19 +60,76 @@ fn help_lists_scaffolded_commands() {
         .clone();
     let stdout = output_text(&output.stdout);
 
-    for command in [
-        "docker-build",
-        "generate-cli-reference",
-        "generate-options-reference",
-        "release",
-        "refresh-spa",
-        "check-spa-budgets",
-    ] {
+    for command in ["build", "docker-build", "docs", "release", "spa"] {
         assert!(
             stdout.contains(command),
             "top-level help should list {command}:\n{stdout}"
         );
     }
+
+    for removed_command in [
+        concat!("generate-cli", "-reference"),
+        concat!("generate-options", "-reference"),
+        concat!("refresh", "-spa"),
+        concat!("check-spa", "-budgets"),
+    ] {
+        assert!(
+            !stdout.contains(removed_command),
+            "top-level help should not list removed command {removed_command}:\n{stdout}"
+        );
+    }
+}
+
+#[test]
+fn group_only_spa_prints_subcommand_help_successfully() {
+    let output = fabro_dev()
+        .arg("spa")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = output_text(&output.stdout);
+
+    for command in ["refresh", "check"] {
+        assert!(
+            stdout.contains(command),
+            "spa help should list {command}:\n{stdout}"
+        );
+    }
+}
+
+#[test]
+fn group_only_docs_prints_subcommand_help_successfully() {
+    let output = fabro_dev()
+        .arg("docs")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = output_text(&output.stdout);
+
+    for command in ["refresh", "check"] {
+        assert!(
+            stdout.contains(command),
+            "docs help should list {command}:\n{stdout}"
+        );
+    }
+}
+
+#[test]
+fn build_help_lists_forwarded_cargo_args() {
+    let output = fabro_dev()
+        .args(["build", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = output_text(&output.stdout);
+
+    assert!(
+        stdout.contains("Arguments forwarded to `cargo build`"),
+        "build help should explain forwarded cargo args:\n{stdout}"
+    );
 }
 
 #[test]

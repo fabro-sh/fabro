@@ -16,7 +16,7 @@ describe("mapRunListItem", () => {
       title: "Server supplied title",
       workflow_slug: "fix_build",
       workflow_name: "Fix Build",
-      host_repo_path: "/home/user/myrepo",
+      source_directory: "/home/user/myrepo",
       repository: { name: "myrepo" },
       status: { kind: "paused", prior_block: null },
       labels: {},
@@ -33,6 +33,7 @@ describe("mapRunListItem", () => {
     expect(item.title).toBe("Server supplied title");
     expect(item.workflow).toBe("fix_build");
     expect(item.repo).toBe("myrepo");
+    expect(item.sourceDirectory).toBe("/home/user/myrepo");
     expect(item.elapsed).toBeDefined();
     expect(item.column).toBe("running");
     expect(item.lifecycleStatus).toBe("paused");
@@ -45,7 +46,7 @@ describe("mapRunListItem", () => {
       title: "",
       workflow_slug: "fix_build",
       workflow_name: "Fix Build",
-      host_repo_path: "/home/user/myrepo",
+      source_directory: "/home/user/myrepo",
       repository: { name: "myrepo" },
       status: { kind: "running" },
       labels: {},
@@ -70,7 +71,7 @@ describe("mapRunSummaryToRunItem", () => {
       title: "Fix the build",
       workflow_slug: "fix_build",
       workflow_name: "Fix Build",
-      host_repo_path: "/home/user/myrepo",
+      source_directory: "/home/user/myrepo",
       repository: { name: "myrepo" },
       status: { kind: "running" },
       duration_ms: 65000,
@@ -86,6 +87,7 @@ describe("mapRunSummaryToRunItem", () => {
     expect(item.title).toBe("Fix the build");
     expect(item.workflow).toBe("fix_build");
     expect(item.repo).toBe("myrepo");
+    expect(item.sourceDirectory).toBe("/home/user/myrepo");
     expect(item.elapsed).toBeDefined();
     expect(item.lifecycleStatus).toBe("running");
   });
@@ -97,7 +99,7 @@ describe("mapRunSummaryToRunItem", () => {
       title: "",
       workflow_slug: null,
       workflow_name: null,
-      host_repo_path: null,
+      source_directory: null,
       repository: { name: "unknown" },
       status: { kind: "submitted" },
       duration_ms: null,
@@ -113,6 +115,7 @@ describe("mapRunSummaryToRunItem", () => {
     expect(item.title).toBe("Untitled run");
     expect(item.workflow).toBe("unknown");
     expect(item.repo).toBe("unknown");
+    expect(item.sourceDirectory).toBeUndefined();
   });
 
   test("recognizes canonical blocked and queued run statuses", () => {

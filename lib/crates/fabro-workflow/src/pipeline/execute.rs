@@ -84,6 +84,7 @@ pub async fn execute(init: Initialized) -> Executed {
         &engine.run.run_store,
         artifact_sink,
         &settings_arc,
+        Arc::clone(&engine.run.metadata_runtime),
         checkpoint.is_some(),
         on_node,
         run_control,

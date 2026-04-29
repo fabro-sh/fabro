@@ -109,6 +109,7 @@ impl RealAuthHarness {
                     github_base,
                 ))),
                 github_webhook_ip_allowlist: None,
+                static_asset_root:           None,
             },
         );
 

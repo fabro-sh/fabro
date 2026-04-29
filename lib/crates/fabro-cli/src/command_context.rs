@@ -111,6 +111,10 @@ impl CommandContext {
         &self.user_settings
     }
 
+    pub(crate) fn base_config_path(&self) -> &Path {
+        &self.base_config_path
+    }
+
     pub(crate) fn json_output(&self) -> bool {
         self.user_settings.cli.output.format == OutputFormat::Json
     }

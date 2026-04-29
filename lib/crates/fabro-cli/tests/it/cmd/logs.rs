@@ -1,7 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 use serde_json::Value;
 
-use super::support::{setup_completed_dry_run, setup_detached_dry_run};
+use super::support::{setup_detached_dry_run, setup_seeded_completed_dry_run};
 
 fn parse_ndjson(stdout: &[u8]) -> Vec<Value> {
     String::from_utf8(stdout.to_vec())
@@ -78,7 +78,7 @@ fn help() {
 #[test]
 fn logs_completed_run_outputs_raw_ndjson() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let mut cmd = context.command();
     cmd.args(["logs", &run.run_id]);
     let output = cmd.output().expect("command should execute");
@@ -104,7 +104,7 @@ fn logs_completed_run_outputs_raw_ndjson() {
 #[test]
 fn logs_completed_run_reads_store_without_progress_jsonl() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
 
     let mut filters = context.filters();
     filters.push((
@@ -140,7 +140,7 @@ fn logs_completed_run_reads_store_without_progress_jsonl() {
 #[test]
 fn logs_tail_limits_output() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z".to_string(),
@@ -174,7 +174,7 @@ fn logs_tail_limits_output() {
 #[test]
 fn logs_pretty_formats_small_run() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let mut filters = context.filters();
     filters.push((r"\b\d{2}:\d{2}:\d{2}\b".to_string(), "[CLOCK]".to_string()));
     filters.push((
@@ -184,7 +184,7 @@ fn logs_pretty_formats_small_run() {
     let mut cmd = context.command();
     cmd.args(["logs", "--pretty", &run.run_id]);
 
-    fabro_snapshot!(filters, cmd, @r#"
+    fabro_snapshot!(filters, cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -205,7 +205,7 @@ fn logs_pretty_formats_small_run() {
     [CLOCK] ✓ Exit    [DURATION]
     [CLOCK] ✓ SUCCESS [DURATION]  
     ----- stderr -----
-    "#);
+    ");
 }
 
 #[test]

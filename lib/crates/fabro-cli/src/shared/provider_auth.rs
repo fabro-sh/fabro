@@ -85,13 +85,12 @@ pub(crate) async fn validate_api_key(provider: Provider, api_key: &str) -> Resul
     .await
     .map_err(|e| e.to_string())?;
 
-    let probe_model = Catalog::builtin().probe_for_provider(provider).map_or_else(
-        || format!("unknown-{}", provider.as_str()),
-        |model| model.id.clone(),
-    );
+    let probe_model = Catalog::builtin()
+        .probe_for_provider(provider)
+        .map_or_else(|| format!("unknown-{provider}"), |model| model.id.clone());
 
     let params = GenerateParams::new(probe_model, Arc::new(client))
-        .provider(provider.as_str())
+        .provider(<&'static str>::from(provider))
         .prompt("Say OK")
         .max_tokens(16);
 

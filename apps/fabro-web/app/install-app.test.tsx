@@ -102,6 +102,25 @@ function renderTreeText(
   return (node.children ?? []).map(renderTreeText).join("");
 }
 
+function findOptionButton(
+  renderer: TestRenderer.ReactTestRenderer,
+  title: string,
+): TestRenderer.ReactTestInstance {
+  const button = renderer.root.findAll((node) => {
+    if (node.type !== "button" || node.props["aria-pressed"] === undefined) {
+      return false;
+    }
+    const titleSpan = node.findAll(
+      (child) => child.type === "span" && child.children[0] === title,
+    );
+    return titleSpan.length > 0;
+  })[0];
+  if (!button) {
+    throw new Error(`option button "${title}" not found`);
+  }
+  return button;
+}
+
 async function waitFor(assertion: () => void, timeoutMs = 1000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
@@ -249,7 +268,7 @@ describe("InstallApp", () => {
     }
   });
 
-  test("saves local disk object-store settings and advances to the LLM step", async () => {
+  test("saves local disk object-store settings and advances to the sandbox step", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const originalConsoleError = console.error;
     console.error = ((...args: unknown[]) => {
@@ -335,7 +354,7 @@ describe("InstallApp", () => {
       });
 
       await waitFor(() => {
-        expect(renderTreeText(renderer!.toJSON())).toContain("Add your LLM credentials");
+        expect(renderTreeText(renderer!.toJSON())).toContain("Choose the sandbox runtime");
       });
       const backLink = renderer!.root.findAll(
         (node) =>
@@ -501,6 +520,348 @@ describe("InstallApp", () => {
         expect(text).toContain("us-east-1");
         expect(text).toContain("Access key");
         expect(text).toContain("slatedb/, artifacts/");
+      });
+
+      await act(async () => {
+        renderer?.unmount();
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  test("shows the sandbox provider on the review step", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const originalConsoleError = console.error;
+    console.error = ((...args: unknown[]) => {
+      if (
+        typeof args[0] === "string" &&
+        args[0].startsWith("react-test-renderer is deprecated")
+      ) {
+        return;
+      }
+      originalConsoleError(...args);
+    }) as typeof console.error;
+    try {
+      const fetchMock = mock(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              completed_steps: ["server", "object_store", "sandbox", "llm", "github"],
+              llm: { providers: [{ provider: "anthropic" }] },
+              server: { canonical_url: "https://fabro.example.com" },
+              object_store: { provider: "local" },
+              sandbox: { provider: "daytona", api_key_saved: true },
+              github: { strategy: "token", username: "octocat" },
+              prefill: INSTALL_PREFILL,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        ),
+      );
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      const testWindow = createTestWindow("https://fabro.example.com/install/review");
+      testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
+      (globalThis as { window?: unknown }).window = testWindow;
+
+      let renderer: TestRenderer.ReactTestRenderer | null = null;
+      await act(async () => {
+        renderer = TestRenderer.create(
+          <MemoryRouter initialEntries={["/install/review"]}>
+            <Routes>
+              <Route path="/install/*" element={<InstallApp />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+
+      await waitFor(() => {
+        const text = renderTreeText(renderer!.toJSON());
+        expect(text).toContain("Daytona");
+        expect(text).toContain("Saved");
+      });
+
+      await act(async () => {
+        renderer?.unmount();
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  test("validates Daytona key, saves sandbox, and advances to the LLM step", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const originalConsoleError = console.error;
+    console.error = ((...args: unknown[]) => {
+      if (
+        typeof args[0] === "string" &&
+        args[0].startsWith("react-test-renderer is deprecated")
+      ) {
+        return;
+      }
+      originalConsoleError(...args);
+    }) as typeof console.error;
+    try {
+      const fetchCalls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+      const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
+        fetchCalls.push({ input, init });
+        if (String(input) === "/install/session" && fetchCalls.length === 1) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                completed_steps: ["server", "object_store"],
+                llm: null,
+                server: { canonical_url: "https://fabro.example.com" },
+                object_store: { provider: "local" },
+                sandbox: null,
+                github: null,
+                prefill: INSTALL_PREFILL,
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            ),
+          );
+        }
+        if (
+          String(input) === "/install/sandbox/test"
+          || String(input) === "/install/sandbox"
+        ) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ ok: true }), {
+              status: String(input).endsWith("/test") ? 200 : 204,
+            }),
+          );
+        }
+        if (String(input) === "/install/session") {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                completed_steps: ["server", "object_store", "sandbox"],
+                llm: null,
+                server: { canonical_url: "https://fabro.example.com" },
+                object_store: { provider: "local" },
+                sandbox: { provider: "daytona", api_key_saved: true },
+                github: null,
+                prefill: INSTALL_PREFILL,
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            ),
+          );
+        }
+        throw new Error(`unexpected fetch: ${String(input)}`);
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      const testWindow = createTestWindow("https://fabro.example.com/install/sandbox");
+      testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
+      (globalThis as { window?: unknown }).window = testWindow;
+
+      let renderer: TestRenderer.ReactTestRenderer | null = null;
+      await act(async () => {
+        renderer = TestRenderer.create(
+          <MemoryRouter initialEntries={["/install/sandbox"]}>
+            <Routes>
+              <Route path="/install/*" element={<InstallApp />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+
+      await waitFor(() => {
+        expect(renderTreeText(renderer!.toJSON())).toContain("Choose the sandbox runtime");
+      });
+
+      const daytonaButton = findOptionButton(renderer!, "Daytona");
+      await act(async () => {
+        daytonaButton.props.onClick();
+      });
+
+      const apiKeyInput = renderer!.root.findByProps({ name: "sandbox_api_key" });
+      await act(async () => {
+        apiKeyInput.props.onChange({ target: { value: "dtn_secret" } });
+      });
+
+      const form = renderer!.root.findByType("form");
+      await act(async () => {
+        form.props.onSubmit({ preventDefault() {} });
+      });
+
+      await waitFor(() => {
+        expect(renderTreeText(renderer!.toJSON())).toContain("Add your LLM credentials");
+      });
+      const calls = fetchCalls.map((call) => String(call.input));
+      const testIdx = calls.indexOf("/install/sandbox/test");
+      const putIdx = calls.indexOf("/install/sandbox");
+      expect(testIdx).toBeGreaterThanOrEqual(0);
+      expect(putIdx).toBeGreaterThan(testIdx);
+      const sandboxTestCall = fetchCalls[testIdx];
+      expect(sandboxTestCall?.init?.body).toBe(
+        JSON.stringify({ provider: "daytona", api_key: "dtn_secret" }),
+      );
+
+      await act(async () => {
+        renderer?.unmount();
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  test("blocks Daytona save when the API key is missing", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const originalConsoleError = console.error;
+    console.error = ((...args: unknown[]) => {
+      if (
+        typeof args[0] === "string" &&
+        args[0].startsWith("react-test-renderer is deprecated")
+      ) {
+        return;
+      }
+      originalConsoleError(...args);
+    }) as typeof console.error;
+    try {
+      const fetchCalls: Array<{ input: RequestInfo | URL }> = [];
+      const fetchMock = mock((input: RequestInfo | URL) => {
+        fetchCalls.push({ input });
+        if (String(input) === "/install/session") {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                completed_steps: ["server", "object_store"],
+                llm: null,
+                server: { canonical_url: "https://fabro.example.com" },
+                object_store: { provider: "local" },
+                sandbox: null,
+                github: null,
+                prefill: INSTALL_PREFILL,
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            ),
+          );
+        }
+        throw new Error(`unexpected fetch: ${String(input)}`);
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      const testWindow = createTestWindow("https://fabro.example.com/install/sandbox");
+      testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
+      (globalThis as { window?: unknown }).window = testWindow;
+
+      let renderer: TestRenderer.ReactTestRenderer | null = null;
+      await act(async () => {
+        renderer = TestRenderer.create(
+          <MemoryRouter initialEntries={["/install/sandbox"]}>
+            <Routes>
+              <Route path="/install/*" element={<InstallApp />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+
+      await waitFor(() => {
+        expect(renderTreeText(renderer!.toJSON())).toContain("Choose the sandbox runtime");
+      });
+
+      const daytonaButton = findOptionButton(renderer!, "Daytona");
+      await act(async () => {
+        daytonaButton.props.onClick();
+      });
+
+      const form = renderer!.root.findByType("form");
+      await act(async () => {
+        form.props.onSubmit({ preventDefault() {} });
+      });
+
+      await waitFor(() => {
+        expect(renderTreeText(renderer!.toJSON())).toContain(
+          "Enter the Daytona API key before continuing.",
+        );
+      });
+      expect(fetchCalls.map((call) => String(call.input))).toEqual([
+        "/install/session",
+      ]);
+
+      await act(async () => {
+        renderer?.unmount();
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  test("shows the GitHub App callback URL on the review step", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const originalConsoleError = console.error;
+    console.error = ((...args: unknown[]) => {
+      if (
+        typeof args[0] === "string" &&
+        args[0].startsWith("react-test-renderer is deprecated")
+      ) {
+        return;
+      }
+      originalConsoleError(...args);
+    }) as typeof console.error;
+    try {
+      const fetchMock = mock((input: RequestInfo | URL) => {
+        expect(String(input)).toBe("/install/session");
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              completed_steps: ["server", "object_store", "llm", "github"],
+              llm: {
+                providers: [{ provider: "anthropic" }],
+              },
+              server: { canonical_url: "https://fabro.example.com" },
+              object_store: { provider: "local" },
+              github: {
+                strategy: "app",
+                owner: { kind: "personal" },
+                app_name: "octocat-fabro",
+                slug: "octocat-fabro",
+                allowed_username: "octocat",
+              },
+              prefill: INSTALL_PREFILL,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      const testWindow = createTestWindow("https://fabro.example.com/install/review");
+      testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
+      (globalThis as { window?: unknown }).window = testWindow;
+
+      let renderer: TestRenderer.ReactTestRenderer | null = null;
+      await act(async () => {
+        renderer = TestRenderer.create(
+          <MemoryRouter initialEntries={["/install/review"]}>
+            <Routes>
+              <Route path="/install/*" element={<InstallApp />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+
+      await waitFor(() => {
+        const text = renderTreeText(renderer!.toJSON());
+        expect(text).toContain("GitHub callback URL");
+        expect(text).toContain("https://fabro.example.com/auth/callback/github");
       });
 
       await act(async () => {

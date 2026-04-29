@@ -5,7 +5,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-version = "0.214.0-nightly.1"
+version = "0.218.0-nightly.0"
 license = "MIT"
 
 [workspace.dependencies]
@@ -129,6 +129,14 @@ absolute_paths = "warn"
 [profile.release]
 lto = "thin"
 strip = true
+
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "off"
+
+[profile.test]
+debug = "line-tables-only"
+split-debuginfo = "off"
 
 [profile.dev.package."*"]
 debug = false # Disable debug info for all dependencies

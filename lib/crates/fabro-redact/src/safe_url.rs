@@ -46,20 +46,12 @@ pub enum DisplaySafeUrlError {
 pub struct DisplaySafeUrl(Url);
 
 impl DisplaySafeUrl {
+    /// Parse user-provided URL text; [`FromStr`] delegates here.
     #[inline]
     pub fn parse(input: &str) -> Result<Self, DisplaySafeUrlError> {
         let url = Url::parse(input)?;
         Self::reject_ambiguous_credentials(input, &url)?;
         Ok(Self(url))
-    }
-
-    /// Create a `DisplaySafeUrl` from an already parsed [`Url`].
-    ///
-    /// This does not perform ambiguity checks because parsed URLs from trusted
-    /// HTTP libraries are not human-entered strings.
-    #[inline]
-    pub fn from_url(url: Url) -> Self {
-        Self(url)
     }
 
     /// Cast a `&Url` to a `&DisplaySafeUrl` without allocation.

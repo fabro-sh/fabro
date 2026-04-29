@@ -396,7 +396,7 @@ async fn build_api_request(request: &Request, stream: bool, codex_mode: bool) ->
     let reasoning = request
         .reasoning_effort
         .as_ref()
-        .map(|effort| serde_json::json!({"effort": effort.as_str()}));
+        .map(|effort| serde_json::json!({"effort": <&'static str>::from(*effort)}));
     let text = request
         .response_format
         .as_ref()

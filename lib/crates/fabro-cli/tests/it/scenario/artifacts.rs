@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use fabro_test::{fabro_snapshot, test_context};
 
-use crate::cmd::support::{read_text, setup_artifact_run, text_tree};
+use crate::cmd::support::{read_text, setup_seeded_artifact_run, text_tree};
 
 fn artifact_filters(context: &fabro_test::TestContext) -> Vec<(String, String)> {
     let mut filters = context.filters();
@@ -16,11 +16,11 @@ fn artifact_filters(context: &fabro_test::TestContext) -> Vec<(String, String)> 
 #[test]
 fn artifact_commands_share_populated_run_fixture() {
     let context = test_context!();
-    let setup = setup_artifact_run(&context);
+    let run = setup_seeded_artifact_run(&context);
     let filters = artifact_filters(&context);
 
     let mut list_json = context.command();
-    list_json.args(["artifact", "list", &setup.run.run_id, "--json"]);
+    list_json.args(["artifact", "list", &run.run_id, "--json"]);
     fabro_snapshot!(filters.clone(), list_json, @r#"
     success: true
     exit_code: 0
@@ -70,7 +70,7 @@ fn artifact_commands_share_populated_run_fixture() {
     list_filtered.args([
         "artifact",
         "list",
-        &setup.run.run_id,
+        &run.run_id,
         "--node",
         "retry_assets",
         "--retry",
@@ -97,7 +97,7 @@ fn artifact_commands_share_populated_run_fixture() {
     cp_single.args([
         "artifact",
         "cp",
-        &format!("{}:assets/shared/report.txt", setup.run.run_id),
+        &format!("{}:assets/shared/report.txt", run.run_id),
         single_dest.to_str().unwrap(),
         "--node",
         "create_assets",
@@ -116,7 +116,7 @@ fn artifact_commands_share_populated_run_fixture() {
     cp_tree.args([
         "artifact",
         "cp",
-        &setup.run.run_id,
+        &run.run_id,
         tree_dest.to_str().unwrap(),
         "--tree",
     ]);
@@ -145,7 +145,7 @@ fn artifact_commands_share_populated_run_fixture() {
     cp_ambiguous.args([
         "artifact",
         "cp",
-        &format!("{}:assets/retry/report.txt", setup.run.run_id),
+        &format!("{}:assets/retry/report.txt", run.run_id),
         ambiguous_dest.to_str().unwrap(),
     ]);
     fabro_snapshot!(context.filters(), cp_ambiguous, @"
@@ -158,12 +158,7 @@ fn artifact_commands_share_populated_run_fixture() {
 
     let flat_dest = context.temp_dir.join("artifact-flat");
     let mut cp_flat = context.command();
-    cp_flat.args([
-        "artifact",
-        "cp",
-        &setup.run.run_id,
-        flat_dest.to_str().unwrap(),
-    ]);
+    cp_flat.args(["artifact", "cp", &run.run_id, flat_dest.to_str().unwrap()]);
     fabro_snapshot!(context.filters(), cp_flat, @"
     success: false
     exit_code: 1

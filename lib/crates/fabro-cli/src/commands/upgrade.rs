@@ -255,8 +255,15 @@ impl Backend {
 }
 
 async fn select_backend() -> Backend {
+    select_backend_for_gh_command("gh").await
+}
+
+async fn select_backend_for_gh_command(gh_command: &str) -> Backend {
     // Check if gh is available
-    let gh_version = TokioCommand::new("gh").arg("--version").output().await;
+    let gh_version = TokioCommand::new(gh_command)
+        .arg("--version")
+        .output()
+        .await;
     let Ok(output) = gh_version else {
         debug!("gh CLI not found, using HTTP backend");
         return Backend::Http(http_client().expect("failed to build HTTP client"));
@@ -267,7 +274,7 @@ async fn select_backend() -> Backend {
     }
 
     // Check if gh is authenticated
-    let auth_status = TokioCommand::new("gh")
+    let auth_status = TokioCommand::new(gh_command)
         .args(["auth", "status"])
         .output()
         .await;
@@ -888,9 +895,9 @@ mod tests {
     // -- Backend selection --
 
     #[tokio::test]
-    async fn select_backend_returns_a_variant() {
-        // Just ensure it doesn't panic; actual variant depends on environment
-        let _backend = select_backend().await;
+    async fn select_backend_falls_back_to_http_when_gh_is_missing() {
+        let backend = select_backend_for_gh_command("fabro-test-gh-that-should-not-exist").await;
+        assert!(matches!(backend, Backend::Http(_)));
     }
 
     // -- Release selection --

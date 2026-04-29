@@ -4,8 +4,8 @@ use insta::assert_snapshot;
 use serde_json::json;
 
 use super::support::{
-    compact_git_inspect, compact_inspect, run_success, setup_completed_fast_dry_run,
-    setup_created_fast_dry_run, setup_git_backed_changed_run,
+    compact_git_inspect, compact_inspect, run_success, setup_seeded_completed_dry_run,
+    setup_seeded_created_dry_run, setup_seeded_git_backed_changed_run,
 };
 use crate::support::unique_run_id;
 
@@ -17,7 +17,7 @@ fn remote_run_summary(run_id: &str, status: &serde_json::Value) -> serde_json::V
         "goal": "Inspect remote state",
         "title": "Inspect remote state",
         "labels": {},
-        "host_repo_path": "/srv/repo",
+        "source_directory": "/srv/repo",
         "repository": { "name": "repo" },
         "start_time": "2026-04-19T12:00:00Z",
         "created_at": "2026-04-19T12:00:00Z",
@@ -122,7 +122,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
 #[test]
 fn inspect_created_run_shows_run_spec_without_start_or_conclusion() {
     let context = test_context!();
-    let run = setup_created_fast_dry_run(&context);
+    let run = setup_seeded_created_dry_run(&context);
     let output = run_success(&context, &["inspect", &run.run_id]);
 
     assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r#"
@@ -160,7 +160,7 @@ fn inspect_created_run_shows_run_spec_without_start_or_conclusion() {
 #[test]
 fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let output = run_success(&context, &["inspect", &run.run_id]);
 
     assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r#"
@@ -215,7 +215,7 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
 #[test]
 fn inspect_json_omits_run_dir() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let output = run_success(&context, &["inspect", &run.run_id]);
     let items: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("inspect output should parse");
@@ -232,7 +232,7 @@ fn inspect_json_omits_run_dir() {
 #[test]
 fn inspect_completed_run_reads_store_without_disk_metadata_files() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let output = run_success(&context, &["inspect", &run.run_id]);
 
     assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r#"
@@ -287,7 +287,7 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
 #[test]
 fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
     let context = test_context!();
-    let setup = setup_git_backed_changed_run(&context);
+    let setup = setup_seeded_git_backed_changed_run(&context);
     let output = run_success(&context, &["inspect", &setup.run.run_id]);
 
     assert_snapshot!(

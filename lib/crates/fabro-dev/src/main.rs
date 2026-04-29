@@ -18,29 +18,29 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run the test suite N times and capture per-test timing to CSV.
+    BenchTests(commands::BenchTestsArgs),
+    /// Refresh embedded SPA assets and run cargo build.
+    Build(commands::BuildArgs),
     /// Build Fabro Docker images with the release pipeline layout.
     DockerBuild(commands::DockerBuildArgs),
-    /// Generate docs/reference/cli.mdx from the Fabro clap command tree.
-    GenerateCliReference(commands::GenerateCliReferenceArgs),
-    /// Generate docs/reference/user-configuration.mdx from settings metadata.
-    GenerateOptionsReference(commands::GenerateOptionsReferenceArgs),
+    /// Manage generated reference documentation.
+    Docs(commands::DocsArgs),
     /// Run Fabro release automation.
     Release(commands::ReleaseArgs),
-    /// Refresh the embedded Fabro web SPA bundle.
-    RefreshSpa(commands::RefreshSpaArgs),
-    /// Check embedded Fabro web SPA asset budgets.
-    CheckSpaBudgets(commands::CheckSpaBudgetsArgs),
+    /// Manage embedded Fabro web SPA assets.
+    Spa(commands::SpaArgs),
 }
 
 impl Command {
     fn run(self) -> Result<()> {
         match self {
+            Self::BenchTests(args) => commands::bench_tests(args),
+            Self::Build(args) => commands::build(args),
             Self::DockerBuild(args) => commands::docker_build(args),
-            Self::GenerateCliReference(args) => commands::generate_cli_reference(args),
-            Self::GenerateOptionsReference(args) => commands::generate_options_reference(args),
+            Self::Docs(args) => commands::docs(args),
             Self::Release(args) => commands::release(args),
-            Self::RefreshSpa(args) => commands::refresh_spa(args),
-            Self::CheckSpaBudgets(args) => commands::check_spa_budgets(args),
+            Self::Spa(args) => commands::spa(args),
         }
     }
 }

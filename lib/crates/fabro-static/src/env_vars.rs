@@ -19,6 +19,8 @@ impl EnvVars {
     pub const FABRO_HOME: &'static str = "FABRO_HOME";
     pub const FABRO_HTTP_PROXY_POLICY: &'static str = "FABRO_HTTP_PROXY_POLICY";
     pub const FABRO_JSON: &'static str = "FABRO_JSON";
+    pub const FABRO_LOG: &'static str = "FABRO_LOG";
+    pub const FABRO_LOG_DESTINATION: &'static str = "FABRO_LOG_DESTINATION";
     pub const FABRO_NO_UPGRADE_CHECK: &'static str = "FABRO_NO_UPGRADE_CHECK";
     pub const FABRO_QUIET: &'static str = "FABRO_QUIET";
     pub const FABRO_SERVER: &'static str = "FABRO_SERVER";
@@ -30,6 +32,7 @@ impl EnvVars {
     pub const FABRO_SUPPRESS_OPEN_BROWSER: &'static str = "FABRO_SUPPRESS_OPEN_BROWSER";
     pub const FABRO_TELEMETRY: &'static str = "FABRO_TELEMETRY";
     pub const FABRO_TEST_IN_MEMORY_STORE: &'static str = "FABRO_TEST_IN_MEMORY_STORE";
+    pub const FABRO_TEST_DISABLE_SPA_ASSETS: &'static str = "FABRO_TEST_DISABLE_SPA_ASSETS";
     pub const FABRO_TEST_MODE: &'static str = "FABRO_TEST_MODE";
     pub const FABRO_VERBOSE: &'static str = "FABRO_VERBOSE";
     pub const FABRO_WEB_URL: &'static str = "FABRO_WEB_URL";
@@ -134,6 +137,8 @@ mod tests {
     #[test]
     fn env_var_constants_match_their_names() {
         assert_eq!(EnvVars::FABRO_CONFIG, "FABRO_CONFIG");
+        assert_eq!(EnvVars::FABRO_LOG, "FABRO_LOG");
+        assert_eq!(EnvVars::FABRO_LOG_DESTINATION, "FABRO_LOG_DESTINATION");
     }
 
     #[test]
@@ -151,6 +156,8 @@ mod tests {
             EnvVars::FABRO_HOME,
             EnvVars::FABRO_HTTP_PROXY_POLICY,
             EnvVars::FABRO_JSON,
+            EnvVars::FABRO_LOG,
+            EnvVars::FABRO_LOG_DESTINATION,
             EnvVars::FABRO_NO_UPGRADE_CHECK,
             EnvVars::FABRO_QUIET,
             EnvVars::FABRO_SERVER,
@@ -162,6 +169,7 @@ mod tests {
             EnvVars::FABRO_SUPPRESS_OPEN_BROWSER,
             EnvVars::FABRO_TELEMETRY,
             EnvVars::FABRO_TEST_IN_MEMORY_STORE,
+            EnvVars::FABRO_TEST_DISABLE_SPA_ASSETS,
             EnvVars::FABRO_TEST_MODE,
             EnvVars::FABRO_VERBOSE,
             EnvVars::FABRO_WEB_URL,

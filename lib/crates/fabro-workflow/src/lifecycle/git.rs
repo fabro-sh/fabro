@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -11,14 +10,14 @@ use fabro_types::RunId;
 
 use crate::artifact;
 use crate::event::{Emitter, Event, RunNoticeLevel};
-use crate::git::MetadataStore;
 use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::lifecycle::event::stage_scope_for;
 use crate::outcome::BilledModelUsage;
 use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 use crate::runtime_store::RunStoreHandle;
-use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
+use crate::sandbox_git::{checked_git_checkpoint, git_diff};
+use crate::sandbox_metadata::{SandboxGitRuntime, SandboxMetadataWriter};
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -67,6 +66,7 @@ pub(crate) struct GitLifecycle {
     pub run_id:                RunId,
     pub run_store:             RunStoreHandle,
     pub run_options:           Arc<RunOptions>,
+    pub metadata_runtime:      Arc<SandboxGitRuntime>,
     pub start_node_id:         Option<String>,
     // Cross-lifecycle data (shared with EventLifecycle)
     pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
@@ -79,33 +79,24 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         // Reset last_git_sha (diff base parity)
         *self.last_git_sha.lock().unwrap() = None;
         *self.checkpoint_git_result.lock().unwrap() = None;
-
-        // Init metadata branch (best-effort)
-        if let (Some(_), Some(repo_path)) = (
-            self.run_options
-                .git
-                .as_ref()
-                .and_then(|g| g.meta_branch.as_ref()),
-            self.run_options.host_repo_path.as_ref(),
-        ) {
-            let git_author = self.run_options.git_author();
-            let store = MetadataStore::new(repo_path, &git_author);
-            let state = self.run_store.state().await.ok();
-            let init_dump = state.as_ref().map(RunDump::from_projection);
-            let init_entries = init_dump
-                .as_ref()
-                .and_then(|dump| dump.git_entries().ok())
-                .unwrap_or_default();
-            let refs: Vec<(&str, &[u8])> = init_entries
-                .iter()
-                .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
-                .collect();
-            if let Err(e) = store.init_run(&self.run_id.to_string(), &refs) {
-                tracing::warn!(
-                    run_id = %self.run_id,
-                    error = %e,
-                    "Metadata branch init failed"
-                );
+        if self
+            .run_options
+            .git
+            .as_ref()
+            .and_then(|g| g.meta_branch.as_ref())
+            .is_some()
+        {
+            match self.run_store.state().await {
+                Ok(state) => {
+                    let dump = RunDump::from_projection(&state);
+                    let _ = self.write_metadata_snapshot(&dump, "init run").await;
+                }
+                Err(err) => {
+                    self.emit_metadata_warning(
+                        "checkpoint_metadata_write_failed",
+                        format!("failed to load run state for metadata init: {err}"),
+                    );
+                }
             }
         }
 
@@ -127,84 +118,35 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             return Ok(());
         }
 
-        // Shadow commit (best-effort, metadata branch)
-        let shadow_sha: Option<String> = if let (Some(_), Some(repo_path)) = (
-            self.run_options
-                .git
-                .as_ref()
-                .and_then(|g| g.meta_branch.as_ref()),
-            self.run_options.host_repo_path.as_ref(),
-        ) {
-            let git_author = self.run_options.git_author();
-            let store = MetadataStore::new(repo_path, &git_author);
-            let checkpoint = build_checkpoint(
-                node,
-                result,
-                next_node_id,
-                state,
-                HashMap::new(),
-                HashMap::new(),
-                None,
-            );
-            match self.run_store.state().await {
-                Ok(mut snapshot_state) => {
-                    snapshot_state.checkpoint = Some(checkpoint);
-                    let dump = RunDump::from_projection(&snapshot_state);
-                    match dump.git_entries() {
-                        Ok(dump_entries) => {
-                            let refs: Vec<(&str, &[u8])> = dump_entries
-                                .iter()
-                                .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
-                                .collect();
-                            match store.write_snapshot(
-                                &self.run_id.to_string(),
-                                &refs,
-                                "checkpoint",
-                            ) {
-                                Ok(sha) => Some(sha),
-                                Err(e) => {
-                                    self.emitter.emit(&Event::RunNotice {
-                                        level:   RunNoticeLevel::Warn,
-                                        code:    "checkpoint_metadata_write_failed".to_string(),
-                                        message: format!(
-                                            "[node: {node_id}] metadata checkpoint write failed: {e}"
-                                        ),
-                                    });
-                                    None
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            self.emitter.emit(&Event::RunNotice {
-                                level:   RunNoticeLevel::Warn,
-                                code:    "checkpoint_metadata_write_failed".to_string(),
-                                message: format!(
-                                    "[node: {node_id}] metadata checkpoint serialization failed: {e}"
-                                ),
-                            });
-                            None
-                        }
-                    }
-                }
-                Err(e) => {
-                    self.emitter.emit(&Event::RunNotice {
-                        level:   RunNoticeLevel::Warn,
-                        code:    "checkpoint_metadata_write_failed".to_string(),
-                        message: format!(
-                            "[node: {node_id}] failed to load run state for metadata snapshot: {e}"
-                        ),
-                    });
-                    None
-                }
+        let checkpoint = build_checkpoint(
+            node,
+            result,
+            next_node_id,
+            state,
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+            None,
+        );
+        let shadow_sha = match self.run_store.state().await {
+            Ok(mut projection) => {
+                projection.checkpoint = Some(checkpoint);
+                let dump = RunDump::from_projection(&projection);
+                self.write_metadata_snapshot(&dump, "checkpoint").await
             }
-        } else {
-            None
+            Err(err) => {
+                self.emit_metadata_warning(
+                    "checkpoint_metadata_write_failed",
+                    format!("failed to load run state for metadata checkpoint: {err}"),
+                );
+                None
+            }
         };
 
         // Run branch commit via sandbox
         let completed_count = state.completed_nodes.len();
         let git_author = self.run_options.git_author();
-        let commit_result = git_checkpoint(
+        let commit_result = checked_git_checkpoint(
+            &self.metadata_runtime,
             &*self.sandbox,
             &self.run_id.to_string(),
             node_id,
@@ -232,68 +174,32 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                         .as_ref()
                         .and_then(|g| g.run_branch.as_ref())
                     {
-                        let push_ok = if self.sandbox.git_push_branch(branch).await {
-                            true
-                        } else if let Some(repo_path) = self.run_options.host_repo_path.as_ref() {
-                            let refspec = format!("refs/heads/{branch}");
-                            git_push_host(
-                                repo_path,
-                                &refspec,
-                                &self.run_options.github_app,
-                                "run branch",
-                            )
-                            .await
-                        } else {
-                            false
-                        };
-                        git_result.push_results.push((branch.clone(), push_ok));
-                    }
-                    // Push metadata branch (always from host)
-                    if let (Some(meta_branch), Some(repo_path)) = (
-                        self.run_options
-                            .git
-                            .as_ref()
-                            .and_then(|g| g.meta_branch.as_ref()),
-                        self.run_options.host_repo_path.as_ref(),
-                    ) {
-                        let refspec = format!("refs/heads/{meta_branch}");
-                        let meta_push_ok = git_push_host(
-                            repo_path,
-                            &refspec,
-                            &self.run_options.github_app,
-                            "metadata branch",
-                        )
-                        .await;
-                        git_result
-                            .push_results
-                            .push((meta_branch.clone(), meta_push_ok));
+                        let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+                        let push_ok = self.sandbox.git_push_ref(&refspec).await;
+                        git_result.push_results.push((refspec, push_ok));
                     }
                 }
 
                 // Save diff.patch
-                let prev = self
-                    .last_git_sha
-                    .lock()
-                    .unwrap()
-                    .clone()
-                    .or_else(|| {
-                        self.run_options
-                            .git
-                            .as_ref()
-                            .and_then(|g| g.base_sha.clone())
-                    })
-                    .unwrap_or_else(|| sha.clone());
-                match git_diff(&*self.sandbox, &prev).await {
-                    Ok(patch) if !patch.is_empty() => {
-                        git_result.diff = Some(patch);
-                    }
-                    Ok(_) => {}
-                    Err(err) => {
-                        self.emitter.emit(&Event::RunNotice {
-                            level:   RunNoticeLevel::Warn,
-                            code:    "git_diff_failed".to_string(),
-                            message: format!("[node: {node_id}] git diff failed: {err}"),
-                        });
+                let prev = self.last_git_sha.lock().unwrap().clone().or_else(|| {
+                    self.run_options
+                        .git
+                        .as_ref()
+                        .and_then(|g| g.base_sha.clone())
+                });
+                if let Some(prev) = prev.filter(|p| p != &sha) {
+                    match git_diff(&*self.sandbox, &prev).await {
+                        Ok(patch) if !patch.is_empty() => {
+                            git_result.diff = Some(patch);
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            self.emitter.emit(&Event::RunNotice {
+                                level:   RunNoticeLevel::Warn,
+                                code:    "git_diff_failed".to_string(),
+                                message: format!("[node: {node_id}] git diff failed: {err}"),
+                            });
+                        }
                     }
                 }
 
@@ -318,5 +224,55 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         }
 
         Ok(())
+    }
+}
+
+impl GitLifecycle {
+    async fn write_metadata_snapshot(&self, dump: &RunDump, message: &str) -> Option<String> {
+        if self.metadata_runtime.metadata_degraded() {
+            return None;
+        }
+        let meta_branch = self
+            .run_options
+            .git
+            .as_ref()
+            .and_then(|git| git.meta_branch.as_deref())?;
+
+        let run_id = self.run_id.to_string();
+        let writer = SandboxMetadataWriter::new(
+            &*self.sandbox,
+            &self.metadata_runtime,
+            &run_id,
+            meta_branch,
+            self.run_options.git_author(),
+        );
+        match writer.write_snapshot(dump, message).await {
+            Ok(snapshot) => {
+                if !snapshot.pushed {
+                    self.emit_metadata_warning(
+                        "checkpoint_metadata_push_failed",
+                        format!("failed to push metadata ref refs/heads/{meta_branch}"),
+                    );
+                }
+                Some(snapshot.commit_sha)
+            }
+            Err(err) => {
+                self.emit_metadata_warning(
+                    "checkpoint_metadata_write_failed",
+                    format!("failed to write checkpoint metadata: {err}"),
+                );
+                None
+            }
+        }
+    }
+
+    fn emit_metadata_warning(&self, code: &str, message: String) {
+        if self.metadata_runtime.mark_metadata_degraded() {
+            self.emitter.emit(&Event::RunNotice {
+                level: RunNoticeLevel::Warn,
+                code: code.to_string(),
+                message,
+            });
+        }
     }
 }

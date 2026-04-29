@@ -2,6 +2,7 @@ use fabro_graphviz::Error as GraphvizError;
 use fabro_llm::{Error as LlmError, ProviderErrorKind};
 pub use fabro_types::failure_signature::FailureSignature;
 pub use fabro_types::outcome::FailureCategory;
+use fabro_util::error::{collect_causes, collect_chain, render_with_causes};
 use fabro_validate::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
@@ -209,12 +210,16 @@ pub enum Error {
     Engine {
         message:       String,
         failure_class: FailureCategory,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        causes:        Vec<String>,
     },
 
     #[error("Handler error: {message}")]
     Handler {
         message:       String,
         failure_class: FailureCategory,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        causes:        Vec<String>,
     },
 
     #[error("LLM error: {0}")]
@@ -251,6 +256,22 @@ impl Error {
         Self::Handler {
             message,
             failure_class,
+            causes: Vec::new(),
+        }
+    }
+
+    pub fn handler_with_source(
+        message: impl Into<String>,
+        source: &(dyn std::error::Error + 'static),
+    ) -> Self {
+        let message = message.into();
+        let causes = collect_chain(source);
+        let rendered = render_with_causes(&message, &causes);
+        let failure_class = classify_failure_reason(&rendered);
+        Self::Handler {
+            message,
+            failure_class,
+            causes,
         }
     }
 
@@ -262,7 +283,37 @@ impl Error {
         Self::Engine {
             message,
             failure_class,
+            causes: Vec::new(),
         }
+    }
+
+    pub fn engine_with_source(
+        message: impl Into<String>,
+        source: &(dyn std::error::Error + 'static),
+    ) -> Self {
+        let message = message.into();
+        let causes = collect_chain(source);
+        let rendered = render_with_causes(&message, &causes);
+        let failure_class = classify_failure_reason(&rendered);
+        Self::Engine {
+            message,
+            failure_class,
+            causes,
+        }
+    }
+
+    #[must_use]
+    pub fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Engine { causes, .. } | Self::Handler { causes, .. } => causes.clone(),
+            Self::Llm(err) => collect_causes(err),
+            _ => Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn display_with_causes(&self) -> String {
+        render_with_causes(&self.to_string(), &self.causes())
     }
 
     /// Whether this error category is retryable (transient) or terminal.
@@ -322,7 +373,7 @@ impl Error {
     /// Build a fail `Outcome` with structured `FailureDetail`.
     pub fn to_fail_outcome(&self) -> Outcome {
         let failure = FailureDetail {
-            message:   self.to_string(),
+            message:   self.display_with_causes(),
             category:  self.failure_category(),
             signature: self.failure_signature_hint(),
         };
@@ -390,6 +441,35 @@ mod tests {
     use super::*;
     use crate::outcome::OutcomeExt;
 
+    #[derive(Debug)]
+    struct TestCause(&'static str);
+
+    impl std::fmt::Display for TestCause {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+
+    impl std::error::Error for TestCause {}
+
+    #[derive(Debug)]
+    struct TestOuterError {
+        message: &'static str,
+        source:  TestCause,
+    }
+
+    impl std::fmt::Display for TestOuterError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.message)
+        }
+    }
+
+    impl std::error::Error for TestOuterError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.source)
+        }
+    }
+
     #[test]
     fn parse_error_display() {
         let err = Error::Parse("unexpected token".to_string());
@@ -421,6 +501,29 @@ mod tests {
     fn engine_error_display() {
         let err = Error::engine("no outgoing edge");
         assert_eq!(err.to_string(), "Engine error: no outgoing edge");
+    }
+
+    #[test]
+    fn engine_error_with_source_preserves_cause_chain() {
+        let source = TestOuterError {
+            message: "Failed to pull Docker image buildpack-deps:noble",
+            source:  TestCause("connection refused"),
+        };
+        let err = Error::engine_with_source("Failed to initialize sandbox", &source);
+
+        assert_eq!(
+            err.to_string(),
+            "Engine error: Failed to initialize sandbox"
+        );
+        assert_eq!(err.causes(), vec![
+            "Failed to pull Docker image buildpack-deps:noble".to_string(),
+            "connection refused".to_string(),
+        ]);
+        assert_eq!(
+            err.display_with_causes(),
+            "Engine error: Failed to initialize sandbox\n  caused by: Failed to pull Docker image buildpack-deps:noble\n  caused by: connection refused"
+        );
+        assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
     }
 
     #[test]

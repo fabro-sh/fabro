@@ -278,23 +278,23 @@ mod tests {
             _path: &str,
             _offset: Option<usize>,
             _limit: Option<usize>,
-        ) -> Result<String, String> {
+        ) -> fabro_sandbox::Result<String> {
             Ok(String::new())
         }
-        async fn write_file(&self, _path: &str, _content: &str) -> Result<(), String> {
+        async fn write_file(&self, _path: &str, _content: &str) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn delete_file(&self, _path: &str) -> Result<(), String> {
+        async fn delete_file(&self, _path: &str) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn file_exists(&self, _path: &str) -> Result<bool, String> {
+        async fn file_exists(&self, _path: &str) -> fabro_sandbox::Result<bool> {
             Ok(false)
         }
         async fn list_directory(
             &self,
             _path: &str,
             _depth: Option<usize>,
-        ) -> Result<Vec<fabro_agent::sandbox::DirEntry>, String> {
+        ) -> fabro_sandbox::Result<Vec<fabro_agent::sandbox::DirEntry>> {
             Ok(vec![])
         }
         async fn exec_command(
@@ -304,14 +304,15 @@ mod tests {
             _working_dir: Option<&str>,
             _env_vars: Option<&std::collections::HashMap<String, String>>,
             cancel_token: Option<CancellationToken>,
-        ) -> Result<ExecResult, String> {
+        ) -> fabro_sandbox::Result<ExecResult> {
             self.commands.lock().unwrap().push(command.to_string());
             self.cancel_tokens
                 .lock()
                 .unwrap()
                 .push(cancel_token.is_some());
             if self.wait_for_cancel {
-                let token = cancel_token.ok_or_else(|| "missing cancel token".to_string())?;
+                let token = cancel_token
+                    .ok_or_else(|| fabro_sandbox::Error::message("missing cancel token"))?;
                 token.cancelled().await;
                 return Ok(ExecResult {
                     stdout:      String::new(),
@@ -338,30 +339,34 @@ mod tests {
             _pattern: &str,
             _path: &str,
             _options: &GrepOptions,
-        ) -> Result<Vec<String>, String> {
+        ) -> fabro_sandbox::Result<Vec<String>> {
             Ok(vec![])
         }
-        async fn glob(&self, _pattern: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
+        async fn glob(
+            &self,
+            _pattern: &str,
+            _path: Option<&str>,
+        ) -> fabro_sandbox::Result<Vec<String>> {
             Ok(vec![])
         }
         async fn download_file_to_local(
             &self,
             _remote_path: &str,
             _local_path: &std::path::Path,
-        ) -> Result<(), String> {
+        ) -> fabro_sandbox::Result<()> {
             Ok(())
         }
         async fn upload_file_from_local(
             &self,
             _local_path: &std::path::Path,
             _remote_path: &str,
-        ) -> Result<(), String> {
+        ) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn initialize(&self) -> Result<(), String> {
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
-        async fn cleanup(&self) -> Result<(), String> {
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
             Ok(())
         }
         fn working_directory(&self) -> &str {

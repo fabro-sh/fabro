@@ -14,13 +14,13 @@ use fabro_sandbox::config::{
     self as sandbox_config, DaytonaNetwork, DaytonaSnapshotSettings,
     DockerfileSource as SandboxDockerfileSource, WorktreeMode, bridge_worktree_mode,
 };
-use fabro_sandbox::daytona::{DaytonaConfig, detect_repo_info};
-use fabro_sandbox::{SandboxProvider, SandboxSpec};
+use fabro_sandbox::daytona::DaytonaConfig;
+use fabro_sandbox::{DockerSandboxOptions, SandboxProvider, SandboxSpec};
 use fabro_static::EnvVars;
 use fabro_types::RunId;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
-    ApprovalMode, DaytonaNetworkLayer, DaytonaSettings,
+    ApprovalMode, DaytonaNetworkLayer, DaytonaSettings, DockerSettings,
     DockerfileSource as ResolvedDockerfileSource, HookDefinition as ResolvedHookDefinition,
     HookEvent as ResolvedHookEvent, HookType as ResolvedHookType,
     McpServerSettings as ResolvedMcpServerSettings, McpTransport as ResolvedMcpTransport,
@@ -38,7 +38,6 @@ use crate::error::Error;
 use crate::event::{
     Emitter, Event, EventBody, RunEventLogger, RunEventSink, RunNoticeLevel, append_event_to_sink,
 };
-use crate::git::MetadataStore;
 use crate::handler::HandlerRegistry;
 use crate::outcome::{Outcome, StageStatus};
 use crate::pipeline::{
@@ -51,6 +50,7 @@ use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{FailureReason, RunStatus};
 use crate::runtime_store::RunStoreHandle;
+use crate::sandbox_metadata::metadata_branch_name;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 
 struct RunSession {
@@ -282,7 +282,10 @@ impl RunSession {
     async fn new(persisted: &Persisted, services: StartServices) -> Result<Self, Error> {
         let record = persisted.run_spec();
         let settings = &record.settings;
-        let working_directory = record.working_directory.clone();
+        let working_directory = record
+            .source_directory
+            .as_deref()
+            .map_or_else(|| PathBuf::from("."), PathBuf::from);
         let state = services
             .run_store
             .state()
@@ -292,7 +295,7 @@ impl RunSession {
             start.run_branch.as_ref().map(|_| GitCheckpointOptions {
                 base_sha:    start.base_sha.clone(),
                 run_branch:  start.run_branch.clone(),
-                meta_branch: Some(MetadataStore::branch_name(&record.run_id.to_string())),
+                meta_branch: Some(metadata_branch_name(&record.run_id.to_string())),
             })
         });
         let definition_blob = state.spec.as_ref().and_then(|run| run.definition_blob);
@@ -307,9 +310,6 @@ impl RunSession {
             .map(|definition| definition.workflow_path.clone());
         let workflow_bundle =
             accepted_definition.map(|definition| Arc::new(definition.workflow_bundle()));
-
-        let (origin_url, detected_base_branch) = detect_repo_info(&working_directory)
-            .map_or((None, None), |(url, branch)| (Some(url), branch));
 
         let resolved = &settings.run;
 
@@ -357,10 +357,11 @@ impl RunSession {
                 working_directory: working_directory.clone(),
             },
             SandboxProvider::Docker => SandboxSpec::Docker {
-                config: fabro_agent::DockerSandboxOptions {
-                    host_working_directory: working_directory.to_string_lossy().to_string(),
-                    ..Default::default()
-                },
+                config:           resolve_docker_config(resolved).unwrap_or_default(),
+                github_app:       services.github_app.clone(),
+                run_id:           Some(record.run_id),
+                clone_origin_url: record.repo_origin_url().map(str::to_string),
+                clone_branch:     record.base_branch().map(str::to_string),
             },
             SandboxProvider::Daytona => {
                 let api_key = match &services.vault {
@@ -375,7 +376,8 @@ impl RunSession {
                     config: resolve_daytona_config(resolved).unwrap_or_default(),
                     github_app: services.github_app.clone(),
                     run_id: Some(record.run_id),
-                    clone_branch: detected_base_branch.or_else(|| record.base_branch.clone()),
+                    clone_origin_url: record.repo_origin_url().map(str::to_string),
+                    clone_branch: record.base_branch().map(str::to_string),
                     api_key,
                 }
             }
@@ -393,7 +395,7 @@ impl RunSession {
             devcontainer_env: HashMap::new(),
             toml_env,
             github_permissions,
-            origin_url: origin_url.clone(),
+            origin_url: record.repo_origin_url().map(str::to_string),
         };
 
         let devcontainer = resolved.sandbox.devcontainer.then(|| DevcontainerSpec {
@@ -446,7 +448,7 @@ impl RunSession {
             preserve_sandbox: resolved.sandbox.preserve,
             pr_config,
             pr_github_app: services.github_app,
-            pr_origin_url: origin_url,
+            pr_origin_url: record.repo_origin_url().map(str::to_string),
             pr_model: model,
             workflow_path,
             workflow_bundle,
@@ -504,6 +506,10 @@ fn resolve_daytona_config(settings: &ResolvedRunSettings) -> Option<DaytonaConfi
         .daytona
         .as_ref()
         .map(runtime_daytona_config)
+}
+
+fn resolve_docker_config(settings: &ResolvedRunSettings) -> Option<DockerSandboxOptions> {
+    settings.sandbox.docker.as_ref().map(runtime_docker_config)
 }
 
 fn resolve_fallback_chain(
@@ -586,6 +592,25 @@ fn runtime_daytona_config(settings: &DaytonaSettings) -> DaytonaConfig {
             }
         }),
         skip_clone:         settings.skip_clone,
+    }
+}
+
+fn runtime_docker_config(settings: &DockerSettings) -> DockerSandboxOptions {
+    let mut env_vars = settings
+        .env_vars
+        .iter()
+        .map(|(key, value)| format!("{key}={}", resolve_interp(value)))
+        .collect::<Vec<_>>();
+    env_vars.sort();
+
+    DockerSandboxOptions {
+        image: settings.image.clone(),
+        network_mode: settings.network_mode.clone(),
+        memory_limit: settings.memory_limit,
+        cpu_quota: settings.cpu_quota,
+        env_vars,
+        skip_clone: settings.skip_clone,
+        ..DockerSandboxOptions::default()
     }
 }
 
@@ -674,8 +699,9 @@ impl RunSession {
             labels:           record.labels.clone(),
             workflow_slug:    record.workflow_slug.clone(),
             github_app:       self.github_app.clone(),
-            host_repo_path:   record.host_repo_path.as_deref().map(PathBuf::from),
-            base_branch:      record.base_branch.clone(),
+            pre_run_git:      record.git.clone(),
+            fork_source_ref:  record.fork_source_ref.clone(),
+            base_branch:      record.base_branch().map(str::to_string),
             display_base_sha: None,
             git:              self.git.clone(),
         };
@@ -1050,9 +1076,9 @@ mod tests {
                 workflow_bundle: None,
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_1),
-                host_repo_path: None,
-                repo_origin_url: None,
-                base_branch: None,
+                git: None,
+                fork_source_ref: None,
+                in_place: false,
                 provenance: None,
                 configured_providers: Vec::new(),
             },
@@ -1236,9 +1262,9 @@ mod tests {
                 workflow_bundle: Some(workflow_bundle),
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_1),
-                host_repo_path: None,
-                repo_origin_url: None,
-                base_branch: None,
+                git: None,
+                fork_source_ref: None,
+                in_place: false,
                 provenance: None,
                 configured_providers: Vec::new(),
             },

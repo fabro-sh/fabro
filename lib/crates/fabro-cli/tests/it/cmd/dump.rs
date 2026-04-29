@@ -9,7 +9,10 @@ use std::time::Duration;
 use fabro_test::{fabro_snapshot, test_context};
 use insta::assert_snapshot;
 
-use super::support::{local_dev_token, server_target, setup_completed_dry_run};
+use super::support::{
+    local_dev_token, server_target, setup_completed_dry_run, setup_seeded_completed_dry_run,
+    setup_seeded_created_dry_run,
+};
 use crate::support::{LightweightCli, unique_run_id};
 
 #[test]
@@ -44,7 +47,7 @@ fn help() {
 #[test]
 fn dump_accepts_server_target_from_separate_home() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let cli = LightweightCli::new();
     let output_dir = context.temp_dir.join("remote-export");
     let server = server_target(&context.storage_dir);
@@ -263,7 +266,7 @@ fn dump_exports_completed_run_snapshot() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Exported 12 files for run [ULID] to [TEMP_DIR]/export
+    Exported 13 files for run [ULID] to [TEMP_DIR]/export
     ----- stderr -----
     ");
 
@@ -274,6 +277,7 @@ fn dump_exports_completed_run_snapshot() {
     events.jsonl
     graph.fabro
     run.json
+    run.log
     stages/exit@1/status.json
     stages/report@1/response.md
     stages/report@1/status.json
@@ -284,9 +288,35 @@ fn dump_exports_completed_run_snapshot() {
 }
 
 #[test]
+fn dump_succeeds_when_run_log_is_missing() {
+    let context = test_context!();
+    let run = setup_seeded_created_dry_run(&context);
+    let output_dir = context.temp_dir.join("export-missing-log");
+
+    let mut cmd = context.command();
+    cmd.args([
+        "dump",
+        "--output",
+        output_dir.to_str().unwrap(),
+        &run.run_id,
+    ]);
+    let output = cmd.output().expect("dump should execute");
+    assert!(
+        output.status.success(),
+        "dump failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !output_dir.join("run.log").exists(),
+        "dump should skip run.log when the server has no run log"
+    );
+}
+
+#[test]
 fn dump_rejects_non_empty_output_dir() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let output_dir = context.temp_dir.join("nonempty");
     std::fs::create_dir_all(&output_dir).unwrap();
     std::fs::write(output_dir.join("file.txt"), "x").unwrap();

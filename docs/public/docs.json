@@ -1,0 +1,368 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "almond",
+  "name": "Fabro",
+  "colors": {
+    "primary": "#357F9E",
+    "light": "#67B2D7",
+    "dark": "#357F9E"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "icon": "book",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "icon": "rocket",
+            "pages": [
+              "getting-started/introduction",
+              "getting-started/why-fabro",
+              "getting-started/quick-start"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "icon": "lightbulb",
+            "pages": [
+              "core-concepts/how-fabro-works",
+              "getting-started/dark-factory",
+              "core-concepts/workflows",
+              "core-concepts/agents",
+              "core-concepts/models"
+            ]
+          },
+          {
+            "group": "Defining Workflows",
+            "icon": "diagram-project",
+            "pages": [
+              "workflows/stages-and-nodes",
+              "workflows/transitions",
+              "workflows/variables",
+              "workflows/human-in-the-loop",
+              "workflows/stylesheets"
+            ]
+          },
+          {
+            "group": "Executing Workflows",
+            "icon": "play",
+            "pages": [
+              "execution/run-configuration",
+              "execution/environments",
+              "execution/context",
+              "execution/checkpoints",
+              "execution/outcomes",
+              "execution/failures",
+              "execution/retros",
+              "execution/observability",
+              "execution/devcontainers"
+            ]
+          },
+          {
+            "group": "Human Tools",
+            "icon": "hand",
+            "pages": [
+              "human-tools/interviews",
+              "human-tools/steering",
+              "human-tools/ssh-access",
+              "human-tools/vs-code",
+              "human-tools/preview",
+              "human-tools/vnc-access",
+              "human-tools/vpn-connections"
+            ]
+          },
+          {
+            "group": "Agents",
+            "icon": "robot",
+            "pages": [
+              "agents/prompts",
+              "agents/skills",
+              "agents/tools",
+              "agents/mcp",
+              "agents/hooks",
+              "agents/subagents",
+              "agents/permissions",
+              "agents/outputs"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "icon": "puzzle-piece",
+            "pages": [
+              "integrations/github",
+              "integrations/daytona",
+              "integrations/slack",
+              "integrations/brave-search"
+            ]
+          },
+          {
+            "group": "Reference",
+            "icon": "book",
+            "pages": [
+              "reference/dot-language",
+              "reference/cli",
+              "reference/shell-completions",
+              "reference/user-configuration",
+              "reference/run-directory",
+              "reference/sdk",
+              "reference/architecture",
+              "reference/verifying-releases",
+              "administration/server-configuration",
+              "administration/troubleshooting",
+              "getting-started/comparison",
+              "administration/security",
+              "reference/acknowledgements"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "icon": "graduation-cap",
+        "groups": [
+          {
+            "group": "Overview",
+            "icon": "compass",
+            "pages": []
+          },
+          {
+            "group": "Workflow Tutorials",
+            "icon": "graduation-cap",
+            "pages": [
+              "tutorials/hello-world",
+              "tutorials/plan-implement",
+              "tutorials/branch-loop",
+              "tutorials/parallel-review",
+              "tutorials/multi-model",
+              "tutorials/ensemble",
+              "tutorials/sub-workflow"
+            ]
+          },
+          {
+            "group": "Example Workflows",
+            "icon": "flask",
+            "pages": [
+              "examples/repl-handoff",
+              "examples/solitaire",
+              "examples/semantic-port",
+              "examples/definition-of-done",
+              "examples/nlspec-conformance",
+              "examples/clone-substack"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "icon": "server",
+            "pages": [
+              "administration/deploy-server",
+              "administration/deploy-railway",
+              "administration/deploy-render",
+              "administration/deploy-fly-io",
+              "administration/deploy-digital-ocean"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "icon": "code",
+        "openapi": "api-reference/fabro-api.yaml",
+        "groups": [
+          {
+            "group": "Using the API",
+            "icon": "code",
+            "pages": [
+              "api-reference/overview",
+              "api-reference/demo-mode",
+              "api-reference/client-sdks"
+            ]
+          },
+          {
+            "group": "Runs",
+            "icon": "play",
+            "pages": [
+              "GET /api/v1/runs",
+              "POST /api/v1/runs",
+              "GET /api/v1/runs/{id}",
+              "POST /api/v1/runs/{id}/start",
+              "POST /api/v1/runs/{id}/cancel",
+              "POST /api/v1/runs/{id}/pause",
+              "POST /api/v1/runs/{id}/unpause",
+              "GET /api/v1/runs/{id}/graph",
+              "GET /api/v1/runs/{id}/events"
+            ]
+          },
+          {
+            "group": "Human-in-the-Loop",
+            "icon": "hand",
+            "pages": [
+              "GET /api/v1/runs/{id}/questions",
+              "POST /api/v1/runs/{id}/questions/{qid}/answer",
+              "POST /api/v1/runs/{id}/preview"
+            ]
+          },
+          {
+            "group": "Run Outputs",
+            "icon": "file-export",
+            "pages": [
+              "GET /api/v1/runs/{id}/artifacts",
+              "GET /api/v1/runs/{id}/billing",
+              {
+                "group": "Run Internals",
+                "icon": "microchip",
+                "pages": [
+                  "GET /api/v1/runs/{id}/checkpoint",
+                  "GET /api/v1/runs/{id}/stages",
+                  "GET /api/v1/runs/{id}/stages/{stageId}/turns",
+                  "GET /api/v1/runs/{id}/settings"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "More",
+            "icon": "ellipsis",
+            "pages": [
+              {
+                "group": "Administration",
+                "icon": "gear",
+                "pages": [
+                  "GET /api/v1/settings"
+                ]
+              },
+              {
+                "group": "Models",
+                "icon": "microchip",
+                "pages": [
+                  "GET /api/v1/models",
+                  "POST /api/v1/models/{id}/test"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Changelog",
+        "icon": "clock-rotate-left",
+        "groups": [
+          {
+            "group": "April 2026",
+            "icon": "clock-rotate-left",
+            "pages": [
+              "changelog/2026-04-26",
+              "changelog/2026-04-25",
+              "changelog/2026-04-24",
+              "changelog/2026-04-23",
+              "changelog/2026-04-22",
+              "changelog/2026-04-21",
+              "changelog/2026-04-20",
+              "changelog/2026-04-19",
+              "changelog/2026-04-18",
+              "changelog/2026-04-17",
+              "changelog/2026-04-16",
+              "changelog/2026-04-15",
+              "changelog/2026-04-14",
+              "changelog/2026-04-13",
+              "changelog/2026-04-12",
+              "changelog/2026-04-11",
+              "changelog/2026-04-10",
+              "changelog/2026-04-09",
+              "changelog/2026-04-08",
+              "changelog/2026-04-07",
+              "changelog/2026-04-06",
+              "changelog/2026-04-04",
+              "changelog/2026-04-02",
+              "changelog/2026-04-01"
+            ]
+          },
+          {
+            "group": "March 2026",
+            "icon": "clock-rotate-left",
+            "pages": [
+              "changelog/2026-03-31",
+              "changelog/2026-03-30",
+              "changelog/2026-03-29",
+              "changelog/2026-03-28",
+              "changelog/2026-03-27",
+              "changelog/2026-03-26",
+              "changelog/2026-03-23",
+              "changelog/2026-03-22",
+              "changelog/2026-03-21",
+              "changelog/2026-03-20",
+              "changelog/2026-03-19",
+              "changelog/2026-03-18",
+              "changelog/2026-03-17",
+              "changelog/2026-03-16",
+              "changelog/2026-03-15",
+              "changelog/2026-03-14",
+              "changelog/2026-03-13",
+              "changelog/2026-03-12",
+              "changelog/2026-03-11",
+              "changelog/2026-03-10",
+              "changelog/2026-03-09",
+              "changelog/2026-03-08",
+              "changelog/2026-03-07",
+              "changelog/2026-03-06",
+              "changelog/2026-03-05",
+              "changelog/2026-03-04",
+              "changelog/2026-03-03",
+              "changelog/2026-03-02",
+              "changelog/2026-03-01"
+            ]
+          },
+          {
+            "group": "February 2026",
+            "icon": "clock-rotate-left",
+            "pages": [
+              "changelog/2026-02-28",
+              "changelog/2026-02-27",
+              "changelog/2026-02-26",
+              "changelog/2026-02-25",
+              "changelog/2026-02-24",
+              "changelog/2026-02-23"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "Get Started",
+      "href": "/getting-started/introduction"
+    }
+  },
+  "contextual": {
+    "options": [
+     "copy",
+     "view",
+     "chatgpt",
+     "claude",
+     "perplexity",
+     "mcp",
+     "cursor",
+     "vscode"
+   ]
+  },
+  "styling": {
+    "codeblocks": {
+      "languages": {
+        "custom": ["/languages/dot.json", "/languages/fabro.json"]
+      }
+    }
+  },
+  "footer": {
+    "socials": {
+      "x": "https://x.com/fabro_sh",
+      "github": "https://github.com/fabro-sh"
+    }
+  }
+}

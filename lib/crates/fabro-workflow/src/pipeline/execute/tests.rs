@@ -95,7 +95,8 @@ fn test_run_options(run_dir: &Path, run_id: &str) -> RunOptions {
         run_id:           test_run_id(run_id),
         settings:         WorkflowSettings::default(),
         git:              None,
-        host_repo_path:   None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
         labels:           HashMap::new(),
         github_app:       None,
         base_branch:      None,
@@ -138,19 +139,25 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunI
             settings: WorkflowSettings::default(),
             graph,
             workflow_slug: Some("test".to_string()),
-            working_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            host_repo_path: Some(
+            source_directory: Some(
                 std::env::current_dir()
                     .unwrap_or_else(|_| PathBuf::from("."))
                     .display()
                     .to_string(),
             ),
-            repo_origin_url: None,
-            base_branch: Some("main".to_string()),
+            git: Some(fabro_types::GitContext {
+                origin_url:   String::new(),
+                branch:       "main".to_string(),
+                sha:          None,
+                dirty:        fabro_types::DirtyStatus::Clean,
+                push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+            }),
             labels: HashMap::new(),
             provenance: None,
             manifest_blob: None,
             definition_blob: None,
+            fork_source_ref: None,
+            in_place: false,
         },
     )
 }

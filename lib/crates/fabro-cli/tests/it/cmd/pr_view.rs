@@ -8,7 +8,7 @@ use fabro_types::run_event::PullRequestCreatedProps;
 use fabro_types::{EventBody, RunEvent, RunId};
 use httpmock::MockServer;
 
-use super::support::{mock_resolved_run, server_endpoint, setup_completed_fast_dry_run};
+use super::support::{mock_resolved_run, server_endpoint, setup_seeded_completed_dry_run};
 use crate::support::unique_run_id;
 
 #[test]
@@ -42,7 +42,7 @@ fn help() {
 #[test]
 fn pr_view_missing_pull_request_json_errors() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let mut cmd = context.command();
     cmd.args(["pr", "view", &run.run_id]);
 
@@ -58,7 +58,7 @@ fn pr_view_missing_pull_request_json_errors() {
 #[test]
 fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let run_id: RunId = run.run_id.parse().unwrap();
 
     let runtime = tokio::runtime::Runtime::new().unwrap();

@@ -107,6 +107,7 @@ pub struct RunSandboxSettings {
     pub devcontainer: bool,
     pub env:          HashMap<String, InterpString>,
     pub local:        LocalSandboxSettings,
+    pub docker:       Option<DockerSettings>,
     pub daytona:      Option<DaytonaSettings>,
 }
 
@@ -118,6 +119,7 @@ impl Default for RunSandboxSettings {
             devcontainer: false,
             env:          HashMap::new(),
             local:        LocalSandboxSettings::default(),
+            docker:       None,
             daytona:      None,
         }
     }
@@ -126,6 +128,16 @@ impl Default for RunSandboxSettings {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LocalSandboxSettings {
     pub worktree_mode: WorktreeMode,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DockerSettings {
+    pub image:        String,
+    pub network_mode: Option<String>,
+    pub memory_limit: Option<i64>,
+    pub cpu_quota:    Option<i64>,
+    pub env_vars:     HashMap<String, InterpString>,
+    pub skip_clone:   bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

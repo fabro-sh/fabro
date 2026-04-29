@@ -67,4 +67,4 @@ jobs:
           git remote set-url origin \
             "https://x-access-token:${release_token}@github.com/${GITHUB_REPOSITORY}.git"
           unset release_token
-          cargo dev release nightly
+          cargo dev release --nightly

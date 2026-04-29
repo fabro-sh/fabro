@@ -2,7 +2,7 @@ use fabro_test::{fabro_snapshot, test_context};
 use httpmock::MockServer;
 use serde_json::json;
 
-use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
+use super::support::{setup_seeded_completed_dry_run, setup_seeded_created_dry_run};
 use crate::support::unique_run_id;
 
 fn remote_run_summary(run_id: &str, status: &serde_json::Value) -> serde_json::Value {
@@ -13,7 +13,7 @@ fn remote_run_summary(run_id: &str, status: &serde_json::Value) -> serde_json::V
         "goal": "Wait for approval",
         "title": "Wait for approval",
         "labels": {},
-        "host_repo_path": "/srv/repo",
+        "source_directory": "/srv/repo",
         "repository": { "name": "repo" },
         "start_time": "2026-04-19T12:00:00Z",
         "created_at": "2026-04-19T12:00:00Z",
@@ -56,7 +56,7 @@ fn help() {
 #[test]
 fn wait_completed_run_prints_success_summary() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b\d+(\.\d+)?(ms|s)\b".to_string(),
@@ -77,7 +77,7 @@ fn wait_completed_run_prints_success_summary() {
 #[test]
 fn wait_completed_run_reads_store_without_status_or_conclusion_files() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b\d+(\.\d+)?(ms|s)\b".to_string(),
@@ -98,7 +98,7 @@ fn wait_completed_run_reads_store_without_status_or_conclusion_files() {
 #[test]
 fn wait_completed_run_json_outputs_status_and_duration() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let run = setup_seeded_completed_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r#""duration_ms":\s*\d+"#.to_string(),
@@ -123,16 +123,16 @@ fn wait_completed_run_json_outputs_status_and_duration() {
 #[test]
 fn wait_submitted_run_times_out() {
     let context = test_context!();
-    let run = setup_created_fast_dry_run(&context);
+    let run = setup_seeded_created_dry_run(&context);
     let mut cmd = context.command();
-    cmd.args(["wait", "--timeout", "1", "--interval", "10", &run.run_id]);
+    cmd.args(["wait", "--timeout", "0", "--interval", "10", &run.run_id]);
 
     fabro_snapshot!(context.filters(), cmd, @"
     success: false
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-      × Timed out after 1s waiting for run '[ULID]'
+      × Timed out after 0s waiting for run '[ULID]'
     ");
 }
 
@@ -178,7 +178,7 @@ fn wait_blocked_run_times_out_without_treating_it_as_terminal() {
         "--server",
         &format!("{}/api/v1", server.base_url()),
         "--timeout",
-        "1",
+        "0",
         "--interval",
         "10",
         run_id.as_str(),
@@ -189,7 +189,7 @@ fn wait_blocked_run_times_out_without_treating_it_as_terminal() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-      × Timed out after 1s waiting for run '[ULID]'
+      × Timed out after 0s waiting for run '[ULID]'
     ");
     resolve_run.assert();
     assert!(

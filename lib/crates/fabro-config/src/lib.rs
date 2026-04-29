@@ -16,6 +16,7 @@ pub mod envfile;
 pub mod error;
 pub mod home;
 mod load;
+pub mod logging;
 pub mod parse;
 pub mod project;
 pub mod resolve;
@@ -37,20 +38,21 @@ pub use home::Home;
 pub use layers::{
     CliAuthLayer, CliExecAgentLayer, CliExecLayer, CliExecModelLayer, CliLayer, CliLoggingLayer,
     CliOutputLayer, CliTargetLayer, CliUpdatesLayer, DaytonaDockerfileLayer, DaytonaSandboxLayer,
-    DaytonaSnapshotLayer, DiscordIntegrationLayer, FeaturesLayer, GitAuthorLayer,
-    GithubIntegrationLayer, HookAgentMarker, HookEntry, HookTlsMode, IntegrationWebhooksLayer,
-    InterviewProviderLayer, InterviewsLayer, LocalSandboxLayer, McpEntryLayer, MergeMap,
-    ModelRefOrSplice, NotificationProviderLayer, NotificationRouteLayer, ObjectStoreLocalLayer,
-    ObjectStoreS3Layer, PrepareStep, ProjectLayer, ReplaceMap, RunAgentLayer, RunArtifactsLayer,
-    RunCheckpointLayer, RunExecutionLayer, RunGitLayer, RunGoalLayer, RunLayer, RunModelLayer,
-    RunPrepareLayer, RunPullRequestLayer, RunSandboxLayer, RunScmLayer, ScmGitHubLayer,
-    ServerApiLayer, ServerArtifactsLayer, ServerAuthGithubLayer, ServerAuthLayer,
-    ServerIntegrationsLayer, ServerIpAllowlistLayer, ServerIpAllowlistOverrideLayer, ServerLayer,
-    ServerListenLayer, ServerLoggingLayer, ServerSchedulerLayer, ServerSlateDbLayer,
-    ServerStorageLayer, ServerWebLayer, SlackIntegrationLayer, StickyMap, StringOrSplice,
-    TeamsIntegrationLayer, WorkflowLayer,
+    DaytonaSnapshotLayer, DiscordIntegrationLayer, DockerSandboxLayer, FeaturesLayer,
+    GitAuthorLayer, GithubIntegrationLayer, HookAgentMarker, HookEntry, HookTlsMode,
+    IntegrationWebhooksLayer, InterviewProviderLayer, InterviewsLayer, LocalSandboxLayer,
+    LogFilter, McpEntryLayer, MergeMap, ModelRefOrSplice, NotificationProviderLayer,
+    NotificationRouteLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer, PrepareStep, ProjectLayer,
+    ReplaceMap, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunExecutionLayer,
+    RunGitLayer, RunGoalLayer, RunLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer,
+    RunSandboxLayer, RunScmLayer, ScmGitHubLayer, ServerApiLayer, ServerArtifactsLayer,
+    ServerAuthGithubLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerIpAllowlistLayer,
+    ServerIpAllowlistOverrideLayer, ServerLayer, ServerListenLayer, ServerLoggingLayer,
+    ServerSchedulerLayer, ServerSlateDbLayer, ServerStorageLayer, ServerWebLayer,
+    SlackIntegrationLayer, StickyMap, StringOrSplice, TeamsIntegrationLayer, WorkflowLayer,
 };
 pub(crate) use layers::{Combine, SettingsLayer};
+pub use logging::{resolve_log_destination, resolve_log_destination_with_env};
 pub use parse::ParseError;
 pub use resolve::{
     ResolveError, resolve_cli, resolve_features, resolve_project, resolve_run, resolve_server,

@@ -4,14 +4,14 @@ use fabro_types::{BilledTokenCounts, EventBody};
 use super::types::{Concluded, FinalizeOptions, Retroed};
 use crate::error::Error;
 use crate::event::{Event, RunNoticeLevel};
-use crate::git::MetadataStore;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
 use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 use crate::run_status::{FailureReason, RunStatus, SuccessReason};
 use crate::runtime_store::RunStoreHandle;
-use crate::sandbox_git::{git_diff_with_timeout, git_push_host};
+use crate::sandbox_git::git_diff_with_timeout;
+use crate::sandbox_metadata::SandboxMetadataWriter;
 use crate::services::RunServices;
 
 pub fn classify_engine_result(
@@ -43,7 +43,7 @@ pub fn classify_engine_result(
         ),
         Err(err) => (
             StageStatus::Fail,
-            Some(err.to_string()),
+            Some(err.display_with_causes()),
             RunStatus::Failed {
                 reason: FailureReason::WorkflowError,
             },
@@ -139,43 +139,65 @@ fn build_conclusion_from_parts(
 /// yet — the run store's `projection.conclusion` is still `None` at this point.
 pub async fn write_finalize_commit(
     run_options: &RunOptions,
-    run_store: &RunStoreHandle,
+    services: &RunServices,
     conclusion: &Conclusion,
 ) {
-    let (Some(meta_branch), Some(repo_path)) = (
-        run_options
-            .git
-            .as_ref()
-            .and_then(|g| g.meta_branch.as_ref()),
-        run_options.host_repo_path.as_ref(),
-    ) else {
+    if services.metadata_runtime.metadata_degraded() {
+        return;
+    }
+    let Some(meta_branch) = run_options
+        .git
+        .as_ref()
+        .and_then(|git| git.meta_branch.as_deref())
+    else {
         return;
     };
 
-    let git_author = run_options.git_author();
-    let store = MetadataStore::new(repo_path, &git_author);
-    let Ok(mut store_state) = run_store.state().await else {
+    let mut projection = match services.run_store.state().await {
+        Ok(state) => state,
+        Err(err) => {
+            emit_metadata_warning(
+                services,
+                "checkpoint_metadata_write_failed",
+                format!("failed to load run state for final metadata snapshot: {err}"),
+            );
+            return;
+        }
+    };
+    projection.conclusion = Some(conclusion.clone());
+    let dump = RunDump::from_projection(&projection);
+    let Some(spec_run_id) = projection.spec.as_ref().map(|spec| spec.run_id.to_string()) else {
         return;
     };
-    if store_state.conclusion.is_none() {
-        store_state.conclusion = Some(conclusion.clone());
+    let writer = SandboxMetadataWriter::new(
+        &*services.sandbox,
+        &services.metadata_runtime,
+        &spec_run_id,
+        meta_branch,
+        run_options.git_author(),
+    );
+    match writer.write_snapshot(&dump, "finalize run").await {
+        Ok(snapshot) => {
+            if !snapshot.pushed {
+                emit_metadata_warning(
+                    services,
+                    "checkpoint_metadata_push_failed",
+                    format!("failed to push metadata ref refs/heads/{meta_branch}"),
+                );
+            }
+        }
+        Err(err) => emit_metadata_warning(
+            services,
+            "checkpoint_metadata_write_failed",
+            format!("failed to write final checkpoint metadata: {err}"),
+        ),
     }
-    let dump = RunDump::from_projection(&store_state);
-    if let Err(e) =
-        dump.write_to_metadata_store(&store, &run_options.run_id.to_string(), "finalize run")
-    {
-        tracing::warn!(error = %e, "Failed to write finalize commit to metadata branch");
-        return;
-    }
+}
 
-    let refspec = format!("refs/heads/{meta_branch}");
-    git_push_host(
-        repo_path,
-        &refspec,
-        &run_options.github_app,
-        "finalize metadata",
-    )
-    .await;
+fn emit_metadata_warning(services: &RunServices, code: &str, message: String) {
+    if services.metadata_runtime.mark_metadata_degraded() {
+        services.emitter.notice(RunNoticeLevel::Warn, code, message);
+    }
 }
 
 /// Failed and cancelled runs use a shorter diff timeout so a corrupted
@@ -284,7 +306,11 @@ async fn cleanup_sandbox(
     );
     let _ = services.run_hooks(&hook_ctx).await;
     if !preserve {
-        services.sandbox.cleanup().await?;
+        services
+            .sandbox
+            .cleanup()
+            .await
+            .map_err(|e| e.display_with_causes())?;
     }
     Ok(())
 }
@@ -333,8 +359,16 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
 
     let (final_patch, ()) = tokio::join!(
         compute_final_patch(&run_options, &services, final_status),
-        write_finalize_commit(&run_options, &services.run_store, &conclusion),
+        write_finalize_commit(&run_options, &services, &conclusion),
     );
+
+    if services.metadata_runtime.metadata_degraded() {
+        services.emitter.notice(
+            RunNoticeLevel::Warn,
+            "checkpoint_metadata_degraded",
+            "checkpoint metadata archive writes were degraded for this run".to_string(),
+        );
+    }
 
     let terminal_event = build_terminal_event(
         &outcome,
@@ -411,7 +445,8 @@ mod tests {
             labels:           HashMap::new(),
             workflow_slug:    None,
             github_app:       None,
-            host_repo_path:   None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
             base_branch:      None,
             display_base_sha: None,
             git:              None,
@@ -447,6 +482,7 @@ mod tests {
             None,
             fabro_model::Provider::Anthropic,
             Arc::new(fabro_auth::EnvCredentialSource::new()),
+            Arc::new(crate::sandbox_metadata::SandboxGitRuntime::new()),
         );
         let retroed = Retroed {
             graph: Graph::new("test"),

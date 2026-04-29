@@ -1,6 +1,6 @@
 ---
 name: update-docs
-description: Update documentation in docs/ based on recent code changes. Reads git history since a watermark commit, maps changed files to doc pages, and makes surgical edits to keep docs in sync with code.
+description: Update documentation in docs/public/ based on recent code changes. Reads git history since a watermark commit, maps changed files to doc pages, and makes surgical edits to keep docs in sync with code.
 ---
 
 # Update Docs
@@ -8,7 +8,7 @@ description: Update documentation in docs/ based on recent code changes. Reads g
 Detect code changes since the last run and update affected documentation pages.
 
 - [references/mapping.md](references/mapping.md) — code-to-doc page mapping
-- Follow `docs/CONTRIBUTING.md` and `docs/AGENTS.md` for writing style
+- Follow `CONTRIBUTING.md` and `AGENTS.md` (repo root) for writing style
 
 ## Workflow
 
@@ -50,7 +50,7 @@ Surgical edits only — change only affected sections. Preserve existing voice, 
 - Insert rows into reference tables in logical position
 - Add new sections for entirely new capabilities
 - Update existing descriptions when behavior changes
-- Never edit `docs/api-reference/fabro-api.yaml` — that is the API workflow's source of truth
+- Never edit `docs/public/api-reference/fabro-api.yaml` — that is the API workflow's source of truth
 
 ### 6. Validate DOT examples
 

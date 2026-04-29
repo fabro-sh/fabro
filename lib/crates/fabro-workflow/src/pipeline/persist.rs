@@ -56,7 +56,6 @@ pub(crate) async fn load_from_store(
 #[expect(clippy::disallowed_methods, reason = "tests stage pipeline fixtures")]
 mod tests {
     use std::collections::HashMap;
-    use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -137,10 +136,14 @@ mod tests {
             },
             graph,
             workflow_slug: Some("ship".to_string()),
-            working_directory: PathBuf::from("/tmp/project"),
-            host_repo_path: Some("/tmp/project".to_string()),
-            repo_origin_url: None,
-            base_branch: Some("main".to_string()),
+            source_directory: Some("/tmp/project".to_string()),
+            git: Some(fabro_types::GitContext {
+                origin_url:   String::new(),
+                branch:       "main".to_string(),
+                sha:          None,
+                dirty:        fabro_types::DirtyStatus::Clean,
+                push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+            }),
             labels: HashMap::from([
                 ("env".to_string(), "test".to_string()),
                 ("team".to_string(), "workflow".to_string()),
@@ -148,6 +151,8 @@ mod tests {
             provenance: None,
             manifest_blob: None,
             definition_blob: None,
+            fork_source_ref: None,
+            in_place: false,
         }
     }
 
@@ -155,21 +160,21 @@ mod tests {
         let store = memory_store();
         let run_store = store.create_run(&record.run_id).await.unwrap();
         append_event(&run_store, &record.run_id, &Event::RunCreated {
-            run_id:            record.run_id,
-            settings:          serde_json::to_value(&record.settings).unwrap(),
-            graph:             serde_json::to_value(&record.graph).unwrap(),
-            workflow_source:   source.map(ToOwned::to_owned),
-            workflow_config:   None,
-            labels:            record.labels.clone().into_iter().collect(),
-            run_dir:           run_dir.to_string_lossy().to_string(),
-            working_directory: record.working_directory.display().to_string(),
-            host_repo_path:    record.host_repo_path.clone(),
-            repo_origin_url:   record.repo_origin_url.clone(),
-            base_branch:       record.base_branch.clone(),
-            workflow_slug:     record.workflow_slug.clone(),
-            db_prefix:         None,
-            provenance:        record.provenance.clone(),
-            manifest_blob:     None,
+            run_id:           record.run_id,
+            settings:         serde_json::to_value(&record.settings).unwrap(),
+            graph:            serde_json::to_value(&record.graph).unwrap(),
+            workflow_source:  source.map(ToOwned::to_owned),
+            workflow_config:  None,
+            labels:           record.labels.clone().into_iter().collect(),
+            run_dir:          run_dir.to_string_lossy().to_string(),
+            source_directory: record.source_directory.clone(),
+            workflow_slug:    record.workflow_slug.clone(),
+            db_prefix:        None,
+            provenance:       record.provenance.clone(),
+            manifest_blob:    None,
+            git:              record.git.clone(),
+            fork_source_ref:  record.fork_source_ref.clone(),
+            in_place:         record.in_place,
         })
         .await
         .unwrap();
@@ -261,9 +266,8 @@ mod tests {
             serde_json::to_value(&expected.graph).unwrap()
         );
         assert_eq!(loaded_record.workflow_slug, expected.workflow_slug);
-        assert_eq!(loaded_record.working_directory, expected.working_directory);
-        assert_eq!(loaded_record.host_repo_path, expected.host_repo_path);
-        assert_eq!(loaded_record.base_branch, expected.base_branch);
+        assert_eq!(loaded_record.source_directory, expected.source_directory);
+        assert_eq!(loaded_record.base_branch(), expected.base_branch());
         assert_eq!(loaded_record.labels, expected.labels);
         assert_eq!(loaded.source(), source);
         assert!(loaded.diagnostics().is_empty());

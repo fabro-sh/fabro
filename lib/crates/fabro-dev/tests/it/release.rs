@@ -56,12 +56,17 @@ fn help_lists_release_flags() {
         .clone();
     let stdout = output_text(&output.stdout);
 
-    for flag in ["--dry-run", "--skip-tests", "--release-date"] {
+    for flag in ["--dry-run", "--skip-tests", "--release-date", "--nightly"] {
         assert!(
             stdout.contains(flag),
             "release help should list {flag}:\n{stdout}"
         );
     }
+
+    assert!(
+        !stdout.contains("[PRERELEASE_LABEL]"),
+        "release help should not list a prerelease positional:\n{stdout}"
+    );
 }
 
 #[test]
@@ -91,6 +96,14 @@ fn dry_run_computes_stable_version_from_date() {
         "dry-run should compute base version from date:\n{stdout}"
     );
     assert!(
+        stdout.contains("cargo dev spa refresh"),
+        "dry-run should print one SPA refresh command:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("git diff --exit-code -- lib/crates/fabro-spa/assets"),
+        "dry-run should not print a separate SPA asset diff command:\n{stdout}"
+    );
+    assert!(
         stdout.contains("git tag -a v0.100.0 -m v0.100.0"),
         "dry-run should print release tag command:\n{stdout}"
     );
@@ -118,7 +131,7 @@ fn dry_run_increments_existing_prerelease_number() {
             "--release-date",
             "2026-01-01",
             "--dry-run",
-            "nightly",
+            "--nightly",
         ])
         .assert()
         .success()
@@ -133,9 +146,9 @@ fn dry_run_increments_existing_prerelease_number() {
 }
 
 #[test]
-fn invalid_prerelease_label_fails_with_clap_error() {
+fn positional_nightly_fails_with_clap_error() {
     let output = fabro_dev()
-        .args(["release", "beta"])
+        .args(["release", "nightly"])
         .assert()
         .failure()
         .code(2)
@@ -144,8 +157,8 @@ fn invalid_prerelease_label_fails_with_clap_error() {
     let stderr = output_text(&output.stderr);
 
     assert!(
-        stderr.contains("invalid value 'beta'"),
-        "invalid prerelease label should be rejected by clap:\n{stderr}"
+        stderr.contains("unexpected argument 'nightly'"),
+        "nightly positional should be rejected by clap:\n{stderr}"
     );
 }
 

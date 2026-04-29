@@ -434,12 +434,6 @@ pub enum ReasoningEffort {
     Max,
 }
 
-impl ReasoningEffort {
-    pub fn as_str(&self) -> &'static str {
-        (*self).into()
-    }
-}
-
 // --- 3.6 Request ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1298,8 +1292,10 @@ mod tests {
             Ok(ReasoningEffort::XHigh)
         );
         assert_eq!(ReasoningEffort::from_str("max"), Ok(ReasoningEffort::Max));
-        assert_eq!(ReasoningEffort::XHigh.as_str(), "xhigh");
-        assert_eq!(ReasoningEffort::Max.as_str(), "max");
+        assert_eq!(ReasoningEffort::XHigh.to_string(), "xhigh");
+        assert_eq!(<&'static str>::from(ReasoningEffort::XHigh), "xhigh");
+        assert_eq!(ReasoningEffort::Max.to_string(), "max");
+        assert_eq!(<&'static str>::from(ReasoningEffort::Max), "max");
     }
 
     #[test]

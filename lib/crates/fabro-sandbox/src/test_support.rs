@@ -89,12 +89,12 @@ impl Sandbox for MockSandbox {
         path: &str,
         offset: Option<usize>,
         limit: Option<usize>,
-    ) -> Result<String, String> {
+    ) -> crate::Result<String> {
         let content = self
             .files
             .get(path)
             .cloned()
-            .ok_or_else(|| format!("File not found: {path}"))?;
+            .ok_or_else(|| crate::Error::message(format!("File not found: {path}")))?;
 
         if self.apply_read_offset_limit {
             let lines: Vec<&str> = content.lines().collect();
@@ -107,7 +107,7 @@ impl Sandbox for MockSandbox {
         }
     }
 
-    async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
+    async fn write_file(&self, path: &str, content: &str) -> crate::Result<()> {
         self.written_files
             .lock()
             .expect("written_files lock poisoned")
@@ -115,11 +115,11 @@ impl Sandbox for MockSandbox {
         Ok(())
     }
 
-    async fn delete_file(&self, _path: &str) -> Result<(), String> {
+    async fn delete_file(&self, _path: &str) -> crate::Result<()> {
         Ok(())
     }
 
-    async fn file_exists(&self, path: &str) -> Result<bool, String> {
+    async fn file_exists(&self, path: &str) -> crate::Result<bool> {
         Ok(self.files.contains_key(path))
     }
 
@@ -127,7 +127,7 @@ impl Sandbox for MockSandbox {
         &self,
         _path: &str,
         _depth: Option<usize>,
-    ) -> Result<Vec<DirEntry>, String> {
+    ) -> crate::Result<Vec<DirEntry>> {
         Ok(vec![])
     }
 
@@ -138,7 +138,7 @@ impl Sandbox for MockSandbox {
         working_dir: Option<&str>,
         env_vars: Option<&std::collections::HashMap<String, String>>,
         _cancel_token: Option<CancellationToken>,
-    ) -> Result<ExecResult, String> {
+    ) -> crate::Result<ExecResult> {
         *self
             .captured_timeout
             .lock()
@@ -167,11 +167,11 @@ impl Sandbox for MockSandbox {
         _pattern: &str,
         _path: &str,
         _options: &GrepOptions,
-    ) -> Result<Vec<String>, String> {
+    ) -> crate::Result<Vec<String>> {
         Ok(self.grep_results.clone())
     }
 
-    async fn glob(&self, _pattern: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
+    async fn glob(&self, _pattern: &str, _path: Option<&str>) -> crate::Result<Vec<String>> {
         Ok(self.glob_results.clone())
     }
 
@@ -179,19 +179,21 @@ impl Sandbox for MockSandbox {
         &self,
         remote_path: &str,
         local_path: &std::path::Path,
-    ) -> Result<(), String> {
+    ) -> crate::Result<()> {
         let content = self
             .files
             .get(remote_path)
-            .ok_or_else(|| format!("File not found: {remote_path}"))?;
+            .ok_or_else(|| crate::Error::message(format!("File not found: {remote_path}")))?;
         if let Some(parent) = local_path.parent() {
             fs::create_dir_all(parent)
                 .await
-                .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
+                .map_err(|e| crate::Error::context("Failed to create parent dirs", e))?;
         }
         fs::write(local_path, content.as_bytes())
             .await
-            .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
+            .map_err(|e| {
+                crate::Error::context(format!("Failed to write {}", local_path.display()), e)
+            })?;
         Ok(())
     }
 
@@ -199,14 +201,17 @@ impl Sandbox for MockSandbox {
         &self,
         local_path: &std::path::Path,
         _remote_path: &str,
-    ) -> Result<(), String> {
+    ) -> crate::Result<()> {
         if !local_path.exists() {
-            return Err(format!("File not found: {}", local_path.display()));
+            return Err(crate::Error::message(format!(
+                "File not found: {}",
+                local_path.display()
+            )));
         }
         Ok(())
     }
 
-    async fn initialize(&self) -> Result<(), String> {
+    async fn initialize(&self) -> crate::Result<()> {
         self.emit(SandboxEvent::Initializing {
             provider: "mock".into(),
         });
@@ -221,7 +226,7 @@ impl Sandbox for MockSandbox {
         Ok(())
     }
 
-    async fn cleanup(&self) -> Result<(), String> {
+    async fn cleanup(&self) -> crate::Result<()> {
         self.emit(SandboxEvent::CleanupStarted {
             provider: "mock".into(),
         });
@@ -269,16 +274,16 @@ impl Sandbox for MutableMockSandbox {
         path: &str,
         _offset: Option<usize>,
         _limit: Option<usize>,
-    ) -> Result<String, String> {
+    ) -> crate::Result<String> {
         self.files
             .lock()
             .expect("files lock poisoned")
             .get(path)
             .cloned()
-            .ok_or_else(|| format!("File not found: {path}"))
+            .ok_or_else(|| crate::Error::message(format!("File not found: {path}")))
     }
 
-    async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
+    async fn write_file(&self, path: &str, content: &str) -> crate::Result<()> {
         self.files
             .lock()
             .expect("files lock poisoned")
@@ -286,12 +291,12 @@ impl Sandbox for MutableMockSandbox {
         Ok(())
     }
 
-    async fn delete_file(&self, path: &str) -> Result<(), String> {
+    async fn delete_file(&self, path: &str) -> crate::Result<()> {
         self.files.lock().expect("files lock poisoned").remove(path);
         Ok(())
     }
 
-    async fn file_exists(&self, path: &str) -> Result<bool, String> {
+    async fn file_exists(&self, path: &str) -> crate::Result<bool> {
         Ok(self
             .files
             .lock()
@@ -303,7 +308,7 @@ impl Sandbox for MutableMockSandbox {
         &self,
         _path: &str,
         _depth: Option<usize>,
-    ) -> Result<Vec<DirEntry>, String> {
+    ) -> crate::Result<Vec<DirEntry>> {
         Ok(vec![])
     }
 
@@ -314,7 +319,7 @@ impl Sandbox for MutableMockSandbox {
         _working_dir: Option<&str>,
         _env_vars: Option<&std::collections::HashMap<String, String>>,
         _cancel_token: Option<CancellationToken>,
-    ) -> Result<ExecResult, String> {
+    ) -> crate::Result<ExecResult> {
         Ok(ExecResult {
             stdout:      String::new(),
             stderr:      String::new(),
@@ -329,7 +334,7 @@ impl Sandbox for MutableMockSandbox {
         pattern: &str,
         _path: &str,
         _options: &GrepOptions,
-    ) -> Result<Vec<String>, String> {
+    ) -> crate::Result<Vec<String>> {
         let files = self.files.lock().expect("files lock poisoned");
         let mut results = Vec::new();
         for (path, content) in files.iter() {
@@ -342,7 +347,7 @@ impl Sandbox for MutableMockSandbox {
         Ok(results)
     }
 
-    async fn glob(&self, _pattern: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
+    async fn glob(&self, _pattern: &str, _path: Option<&str>) -> crate::Result<Vec<String>> {
         Ok(vec![])
     }
 
@@ -350,22 +355,24 @@ impl Sandbox for MutableMockSandbox {
         &self,
         remote_path: &str,
         local_path: &std::path::Path,
-    ) -> Result<(), String> {
+    ) -> crate::Result<()> {
         let content = self
             .files
             .lock()
             .expect("files lock poisoned")
             .get(remote_path)
             .cloned()
-            .ok_or_else(|| format!("File not found: {remote_path}"))?;
+            .ok_or_else(|| crate::Error::message(format!("File not found: {remote_path}")))?;
         if let Some(parent) = local_path.parent() {
             fs::create_dir_all(parent)
                 .await
-                .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
+                .map_err(|e| crate::Error::context("Failed to create parent dirs", e))?;
         }
         fs::write(local_path, content.as_bytes())
             .await
-            .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
+            .map_err(|e| {
+                crate::Error::context(format!("Failed to write {}", local_path.display()), e)
+            })?;
         Ok(())
     }
 
@@ -373,10 +380,10 @@ impl Sandbox for MutableMockSandbox {
         &self,
         local_path: &std::path::Path,
         remote_path: &str,
-    ) -> Result<(), String> {
-        let content = fs::read_to_string(local_path)
-            .await
-            .map_err(|e| format!("Failed to read {}: {e}", local_path.display()))?;
+    ) -> crate::Result<()> {
+        let content = fs::read_to_string(local_path).await.map_err(|e| {
+            crate::Error::context(format!("Failed to read {}", local_path.display()), e)
+        })?;
         self.files
             .lock()
             .expect("files lock poisoned")
@@ -384,11 +391,11 @@ impl Sandbox for MutableMockSandbox {
         Ok(())
     }
 
-    async fn initialize(&self) -> Result<(), String> {
+    async fn initialize(&self) -> crate::Result<()> {
         Ok(())
     }
 
-    async fn cleanup(&self) -> Result<(), String> {
+    async fn cleanup(&self) -> crate::Result<()> {
         Ok(())
     }
 

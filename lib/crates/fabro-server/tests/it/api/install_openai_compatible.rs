@@ -7,7 +7,7 @@ use crate::helpers::response_json;
 
 #[tokio::test]
 async fn install_llm_endpoints_reject_openai_compatible_in_v1() {
-    let app = build_install_router(InstallAppState::for_test("test-install-token")).await;
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let test_response = app
         .clone()

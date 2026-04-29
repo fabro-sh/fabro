@@ -115,13 +115,6 @@ pub enum Speed {
     Fast,
 }
 
-impl Speed {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        self.into()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ModelRef {
     pub provider: Provider,

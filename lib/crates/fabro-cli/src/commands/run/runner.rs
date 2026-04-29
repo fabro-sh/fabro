@@ -501,7 +501,7 @@ fn maybe_build_github_credentials(
     let resolved_run = &settings.run;
     let resolved_server = ServerSettingsBuilder::load_default().ok();
     let required_github_credentials = (resolved_run.execution.mode != RunMode::DryRun
-        && resolved_run.sandbox.provider == "daytona")
+        && clone_sandbox_requires_github_credentials(&resolved_run.sandbox.provider))
         || resolved_server
             .as_ref()
             .is_some_and(|settings| !settings.server.integrations.github.permissions.is_empty());
@@ -515,18 +515,31 @@ fn maybe_build_github_credentials(
         .as_ref()
         .and_then(|settings| settings.server.integrations.github.app_id.as_ref())
         .map(InterpString::as_source);
+    let app_slug = resolved_server
+        .as_ref()
+        .and_then(|settings| settings.server.integrations.github.slug.as_ref())
+        .map(InterpString::as_source);
 
     if required_github_credentials {
-        return build_github_credentials(strategy, app_id.as_deref(), vault);
+        return build_github_credentials(strategy, app_id.as_deref(), app_slug.as_deref(), vault);
     }
 
     if pull_request_enabled {
-        return Ok(build_github_credentials(strategy, app_id.as_deref(), vault)
-            .ok()
-            .flatten());
+        return Ok(build_github_credentials(
+            strategy,
+            app_id.as_deref(),
+            app_slug.as_deref(),
+            vault,
+        )
+        .ok()
+        .flatten());
     }
 
     Ok(None)
+}
+
+fn clone_sandbox_requires_github_credentials(provider: &str) -> bool {
+    matches!(provider, "docker" | "daytona")
 }
 
 fn install_signal_handlers(
@@ -598,6 +611,13 @@ mod tests {
         worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
+
+    #[test]
+    fn clone_sandbox_credentials_are_required_for_clone_based_providers() {
+        assert!(super::clone_sandbox_requires_github_credentials("docker"));
+        assert!(super::clone_sandbox_requires_github_credentials("daytona"));
+        assert!(!super::clone_sandbox_requires_github_credentials("local"));
+    }
 
     fn running_event(actor: Option<ActorRef>) -> fabro_types::RunEvent {
         fabro_types::RunEvent {
@@ -690,6 +710,7 @@ mod tests {
         assert_eq!(
             worker_title_phase_for_event(&EventBody::RunFailed(RunFailedProps {
                 error:          "cancelled".to_string(),
+                causes:         Vec::new(),
                 duration_ms:    10,
                 reason:         FailureReason::Cancelled,
                 git_commit_sha: None,
@@ -700,6 +721,7 @@ mod tests {
         assert_eq!(
             worker_title_phase_for_event(&EventBody::RunFailed(RunFailedProps {
                 error:          "boom".to_string(),
+                causes:         Vec::new(),
                 duration_ms:    10,
                 reason:         FailureReason::Terminated,
                 git_commit_sha: None,

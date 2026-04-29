@@ -1,5 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 
+use crate::support::LightweightCli;
+
 fn fixture(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(format!("../../../test/{name}"))
@@ -25,7 +27,6 @@ fn help() {
 
     Options:
           --json              Output as JSON [env: FABRO_JSON=]
-          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet             Suppress non-essential output [env: FABRO_QUIET=]
@@ -49,6 +50,23 @@ fn simple() {
     Graph: [FIXTURES]/simple.fabro
     Validation: OK
     ");
+}
+
+#[test]
+fn simple_does_not_connect_to_configured_server() {
+    let cli = LightweightCli::new();
+    let mut cmd = cli.command();
+    cmd.env("FABRO_SERVER", "http://127.0.0.1:9")
+        .arg("validate")
+        .arg(fixture("simple.fabro"));
+
+    let output = cmd.output().expect("validate should execute");
+    assert!(
+        output.status.success(),
+        "validate should run locally without connecting to FABRO_SERVER\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
 }
 
 #[test]
