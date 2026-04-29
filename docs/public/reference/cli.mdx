@@ -301,6 +301,7 @@ fabro create [OPTIONS] <WORKFLOW>
 | `--dry-run` | Execute with simulated LLM backend |
 | `--goal <goal>` | Override the workflow goal (available as {{ goal }} in prompts) |
 | `--goal-file <goal_file>` | Read the workflow goal from a file |
+| `--in-place` | Run directly in the source checkout without git checkpoints |
 | `--label <key=value>` | Attach a label to this run (repeatable, format: KEY=VALUE) |
 | `--model <model>` | Override default LLM model |
 | `--no-retro` | Skip retro generation after the run |
@@ -815,6 +816,7 @@ fabro run [OPTIONS] <WORKFLOW>
 | `--dry-run` | Execute with simulated LLM backend |
 | `--goal <goal>` | Override the workflow goal (available as {{ goal }} in prompts) |
 | `--goal-file <goal_file>` | Read the workflow goal from a file |
+| `--in-place` | Run directly in the source checkout without git checkpoints |
 | `--label <key=value>` | Attach a label to this run (repeatable, format: KEY=VALUE) |
 | `--model <model>` | Override default LLM model |
 | `--no-retro` | Skip retro generation after the run |
@@ -1253,12 +1255,6 @@ fabro validate [OPTIONS] <WORKFLOW>
 | Name | Description |
 | --- | --- |
 | `WORKFLOW` | Path to the .fabro workflow file |
-
-#### Options
-
-| Option | Description |
-| --- | --- |
-| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 
 ### `fabro version`
 

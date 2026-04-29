@@ -10,7 +10,7 @@ use crate::commands::run::output::api_diagnostics_to_local;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest};
 use crate::shared::{print_diagnostics, print_json_pretty, relative_path};
 
-pub(crate) async fn run(
+pub(crate) fn run(
     args: &ValidateArgs,
     styles: &Styles,
     base_ctx: &CommandContext,

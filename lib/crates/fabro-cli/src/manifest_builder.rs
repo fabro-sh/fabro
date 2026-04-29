@@ -1060,7 +1060,7 @@ exit 1
             temp_env::with_var("FABRO_PROMPT_ENV_LOG", Some(helper_log.as_os_str()), || {
                 let built = build_run_manifest(ManifestBuildInput {
                     workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
-                    cwd:                workspace.to_path_buf(),
+                    cwd:                workspace.clone(),
                     run_overrides:      None,
                     cli_overrides:      None,
                     args:               None,

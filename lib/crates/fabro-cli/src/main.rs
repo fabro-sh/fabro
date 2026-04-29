@@ -253,7 +253,7 @@ async fn main_inner(worker_token: Option<String>) -> (String, Result<()>) {
             }
             Commands::Validate(args) => {
                 let styles = Styles::detect_stderr();
-                commands::validate::run(&args, &styles, &base_ctx).await?;
+                commands::validate::run(&args, &styles, &base_ctx)?;
             }
             Commands::Graph(args) => {
                 let styles = Styles::detect_stderr();
