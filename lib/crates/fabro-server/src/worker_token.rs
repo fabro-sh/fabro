@@ -7,7 +7,7 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use fabro_types::{RunBlobId, RunId, StageId};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
-use tracing::{info, warn};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::ApiError;
@@ -122,7 +122,7 @@ pub(crate) fn authorize_worker_token(
         return Err(ApiError::forbidden());
     }
 
-    info!(
+    debug!(
         target: "worker_auth",
         run_id = %run_id,
         jti = %claims.jti,
