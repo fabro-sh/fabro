@@ -188,3 +188,9 @@ If you need a capability which is not in-scope for Fabro, you always have the op
 ## License
 
 Fabro is licensed under the [MIT License](LICENSE.md).
+
+---
+
+*Agents in a graph —*
+*each stage a deliberate step.*
+*Code ships while you sleep.*
