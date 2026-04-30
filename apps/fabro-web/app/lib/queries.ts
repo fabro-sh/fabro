@@ -11,6 +11,7 @@ import type {
   ServerSettings,
   RunSummary,
   SystemInfoResponse,
+  WorkflowSettings,
 } from "@qltysh/fabro-api-client";
 
 import type { PaginatedWorkflowListResponse, WorkflowDetailResponse } from "./workflow-api";
@@ -115,7 +116,7 @@ export function useRunLogs(id: string | undefined, refreshInterval?: number) {
   );
 }
 
-export function useRunSettings<T = Record<string, unknown>>(id: string | undefined) {
+export function useRunSettings<T = WorkflowSettings>(id: string | undefined) {
   return useSWR<T>(
     id ? queryKeys.runs.settings(id) : null,
     apiFetcher,

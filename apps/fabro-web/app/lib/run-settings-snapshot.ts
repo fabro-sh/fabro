@@ -1,6 +1,9 @@
-export type Snapshot = Record<string, unknown>;
+import type { WorkflowSettings } from "@qltysh/fabro-api-client";
 
-function isRecord(v: unknown): v is Snapshot {
+export type Snapshot = WorkflowSettings;
+export type SnapshotObject = Record<string, unknown>;
+
+function isRecord(v: unknown): v is SnapshotObject {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
@@ -24,7 +27,7 @@ export function getBool(o: unknown, key: string): boolean | undefined {
   return typeof v === "boolean" ? v : undefined;
 }
 
-export function getObject(o: unknown, key: string): Snapshot | undefined {
+export function getObject(o: unknown, key: string): SnapshotObject | undefined {
   const v = read(o, key);
   return isRecord(v) ? v : undefined;
 }

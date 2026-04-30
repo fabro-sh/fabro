@@ -15,33 +15,107 @@ export interface WorkflowEntry {
   graph: string;
 }
 
+function sampleSettings({
+  name,
+  description,
+  goal,
+  inputs,
+  labels,
+  snapshot,
+  autoStopInterval,
+  cpu,
+  memoryGb,
+  diskGb,
+  prepareCommands = [],
+}: {
+  name: string;
+  description: string;
+  goal: string;
+  inputs: Record<string, unknown>;
+  labels: Record<string, string>;
+  snapshot: string;
+  autoStopInterval: number;
+  cpu: number;
+  memoryGb: number;
+  diskGb: number;
+  prepareCommands?: string[];
+}): WorkflowSettingsSnapshot {
+  return {
+    project: {
+      name: null,
+      description: null,
+      directory: ".",
+      metadata: {},
+    },
+    workflow: {
+      name,
+      description,
+      graph: "",
+      metadata: {},
+    },
+    run: {
+      goal: { type: "inline", value: goal },
+      working_dir: null,
+      metadata: {},
+      inputs,
+      model: { provider: null, name: "claude-sonnet", fallbacks: [] },
+      git: { author: null },
+      prepare: { commands: prepareCommands, timeout_ms: 120_000 },
+      execution: { mode: "normal", approval: "prompt", retros: true },
+      checkpoint: { exclude_globs: [] },
+      sandbox: {
+        provider: "daytona",
+        preserve: false,
+        devcontainer: true,
+        env: {},
+        local: { worktree_mode: "dirty" },
+        docker: null,
+        daytona: {
+          auto_stop_interval: autoStopInterval,
+          labels,
+          snapshot: {
+            name: snapshot,
+            cpu,
+            memory_gb: memoryGb,
+            disk_gb: diskGb,
+            dockerfile: null,
+          },
+          network: null,
+          skip_clone: false,
+        },
+      },
+      notifications: {},
+      interviews: { provider: null, slack: null, discord: null, teams: null },
+      agent: { permissions: null, mcps: {} },
+      hooks: [],
+      scm: { provider: null, owner: null, repository: null, github: null },
+      pull_request: null,
+      artifacts: { include: [] },
+    },
+  };
+}
+
 // Static sample data used by the `workflow-definition` index route for the
 // hardcoded showcase workflows. Shape mirrors the persisted
 // `WorkflowSettings` snapshot returned by `/api/v1/runs/:id/settings`.
-// Fields stay opaque to the `WorkflowSettingsSnapshot` TypeScript alias,
-// which is a bare `Record<string, unknown>`.
 export const workflowData: Record<string, WorkflowEntry> = {
   fix_build: {
     name: "Fix Build",
     slug: "fix_build",
     filename: "fix_build.fabro",
     description: "Automatically diagnoses and fixes CI build failures by analyzing error logs, identifying root causes, and applying targeted code changes.",
-    settings: {
-      _version: 1,
-      run: {
-        goal: "Diagnose and fix CI build failures",
-        inputs: { repo_url: "https://github.com/org/service", branch: "main" },
-        model: { name: "claude-sonnet" },
-        sandbox: {
-          provider: "daytona",
-          daytona: {
-            auto_stop_interval: 60,
-            labels: { project: "fix-build" },
-            snapshot: { name: "fix-build-dev", cpu: 4, memory: "8GB", disk: "10GB" },
-          },
-        },
-      },
-    },
+    settings: sampleSettings({
+      name: "Fix Build",
+      description: "Automatically diagnoses and fixes CI build failures by analyzing error logs, identifying root causes, and applying targeted code changes.",
+      goal: "Diagnose and fix CI build failures",
+      inputs: { repo_url: "https://github.com/org/service", branch: "main" },
+      labels: { project: "fix-build" },
+      snapshot: "fix-build-dev",
+      autoStopInterval: 60,
+      cpu: 4,
+      memoryGb: 8,
+      diskGb: 10,
+    }),
     graph: `digraph fix_build {
     graph [
         goal="Diagnose and fix CI build failures",
@@ -68,29 +142,19 @@ export const workflowData: Record<string, WorkflowEntry> = {
     slug: "implement",
     filename: "implement.fabro",
     description: "Generates production-ready code from a technical blueprint, including tests, documentation, and a pull request ready for review.",
-    settings: {
-      _version: 1,
-      run: {
-        goal: "Implement feature from technical blueprint",
-        inputs: { spec_path: "specs/feature.md", test_framework: "vitest" },
-        model: { name: "claude-sonnet" },
-        prepare: {
-          steps: [
-            { command: ["bun", "install"] },
-            { command: ["bun", "run", "typecheck"] },
-          ],
-          timeout: "120s",
-        },
-        sandbox: {
-          provider: "daytona",
-          daytona: {
-            auto_stop_interval: 120,
-            labels: { project: "implement", team: "engineering" },
-            snapshot: { name: "implement-dev", cpu: 4, memory: "8GB", disk: "20GB" },
-          },
-        },
-      },
-    },
+    settings: sampleSettings({
+      name: "Implement Feature",
+      description: "Generates production-ready code from a technical blueprint, including tests, documentation, and a pull request ready for review.",
+      goal: "Implement feature from technical blueprint",
+      inputs: { spec_path: "specs/feature.md", test_framework: "vitest" },
+      labels: { project: "implement", team: "engineering" },
+      snapshot: "implement-dev",
+      autoStopInterval: 120,
+      cpu: 4,
+      memoryGb: 8,
+      diskGb: 20,
+      prepareCommands: ["bun install", "bun run typecheck"],
+    }),
     graph: `digraph implement {
     graph [
         goal="",
@@ -131,22 +195,18 @@ export const workflowData: Record<string, WorkflowEntry> = {
     slug: "sync_drift",
     filename: "sync_drift.fabro",
     description: "Detects configuration and code drift between environments, then generates reconciliation patches to bring everything back in sync.",
-    settings: {
-      _version: 1,
-      run: {
-        goal: "Detect and reconcile configuration drift across environments",
-        inputs: { source_env: "production", target_env: "staging", drift_threshold: "warn" },
-        model: { name: "claude-sonnet" },
-        sandbox: {
-          provider: "daytona",
-          daytona: {
-            auto_stop_interval: 120,
-            labels: { project: "sync-drift", team: "platform" },
-            snapshot: { name: "sync-drift-dev", cpu: 2, memory: "4GB", disk: "10GB" },
-          },
-        },
-      },
-    },
+    settings: sampleSettings({
+      name: "Sync Drift",
+      description: "Detects configuration and code drift between environments, then generates reconciliation patches to bring everything back in sync.",
+      goal: "Detect and reconcile configuration drift across environments",
+      inputs: { source_env: "production", target_env: "staging", drift_threshold: "warn" },
+      labels: { project: "sync-drift", team: "platform" },
+      snapshot: "sync-drift-dev",
+      autoStopInterval: 120,
+      cpu: 2,
+      memoryGb: 4,
+      diskGb: 10,
+    }),
     graph: `digraph sync {
     graph [
         goal="Detect and resolve drift between product docs, architecture docs, and code",
@@ -177,22 +237,18 @@ export const workflowData: Record<string, WorkflowEntry> = {
     slug: "expand",
     filename: "expand.fabro",
     description: "Evolves the product by analyzing usage patterns and specifications to propose and implement incremental improvements.",
-    settings: {
-      _version: 1,
-      run: {
-        goal: "Propose and implement incremental product improvements",
-        inputs: { analytics_window: "30d", min_confidence: "0.8" },
-        model: { name: "claude-sonnet" },
-        sandbox: {
-          provider: "daytona",
-          daytona: {
-            auto_stop_interval: 180,
-            labels: { project: "expand", team: "product" },
-            snapshot: { name: "expand-dev", cpu: 2, memory: "4GB", disk: "10GB" },
-          },
-        },
-      },
-    },
+    settings: sampleSettings({
+      name: "Expand Product",
+      description: "Evolves the product by analyzing usage patterns and specifications to propose and implement incremental improvements.",
+      goal: "Propose and implement incremental product improvements",
+      inputs: { analytics_window: "30d", min_confidence: "0.8" },
+      labels: { project: "expand", team: "product" },
+      snapshot: "expand-dev",
+      autoStopInterval: 180,
+      cpu: 2,
+      memoryGb: 4,
+      diskGb: 10,
+    }),
     graph: `digraph expand {
     graph [
         goal="",
@@ -240,7 +296,18 @@ function resolveWorkflow(name: string | undefined, apiWorkflow: ApiWorkflowDetai
         slug: workflowName,
         description: "",
         filename: `${workflowName}.fabro`,
-        settings: {},
+        settings: sampleSettings({
+          name: workflowName,
+          description: "",
+          goal: "",
+          inputs: {},
+          labels: {},
+          snapshot: "default",
+          autoStopInterval: 120,
+          cpu: 2,
+          memoryGb: 4,
+          diskGb: 10,
+        }),
         graph: "",
       };
 }

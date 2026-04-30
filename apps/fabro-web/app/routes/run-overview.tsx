@@ -52,13 +52,13 @@ export default function RunOverview() {
 
     const gt = graphTheme;
     const runningDotIds = new Set<string>(
-      stages.filter((s: Stage) => s.status === "running").map((s: Stage) => s.dotId ?? s.id),
+      stages.filter((s: Stage) => s.status === "running" || s.status === "retrying").map((s: Stage) => s.dotId ?? s.id),
     );
     const failedDotIds = new Set<string>(
       stages.filter((s: Stage) => s.status === "failed").map((s: Stage) => s.dotId ?? s.id),
     );
     const completedDotIds = new Set<string>(
-      stages.filter((s: Stage) => s.status === "completed").map((s: Stage) => s.dotId ?? s.id),
+      stages.filter((s: Stage) => s.status === "succeeded" || s.status === "partially_succeeded").map((s: Stage) => s.dotId ?? s.id),
     );
     const dotIdToStageId = new Map<string, string>(
       stages.map((s: Stage) => [s.dotId ?? s.id, s.id]),

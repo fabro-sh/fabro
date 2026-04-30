@@ -7,7 +7,7 @@ function formatTokens(n: number) {
   return `${(n / 1000).toFixed(1)}k`;
 }
 
-function formatUsdMicros(usdMicros?: number) {
+function formatUsdMicros(usdMicros?: number | null) {
   return usdMicros == null ? "-" : `$${(usdMicros / 1_000_000).toFixed(2)}`;
 }
 
@@ -27,20 +27,20 @@ function mapBilling(billing: RunBilling | undefined) {
     stage: stage.stage.name,
     model: stage.model.id,
     inputTokens: stage.billing.input_tokens,
-    outputTokens: stage.billing.output_tokens + (stage.billing.reasoning_tokens ?? 0),
+    outputTokens: stage.billing.output_tokens + stage.billing.reasoning_tokens,
     runtime: formatDurationSecs(stage.runtime_secs),
     totalUsdMicros: stage.billing.total_usd_micros,
   }));
   const totalRuntime = formatDurationSecs(billing.totals.runtime_secs);
   const totalInput = billing.totals.input_tokens;
-  const totalOutput = billing.totals.output_tokens + (billing.totals.reasoning_tokens ?? 0);
+  const totalOutput = billing.totals.output_tokens + billing.totals.reasoning_tokens;
   const totalUsdMicros = billing.totals.total_usd_micros;
   const modelBreakdown = billing.by_model
     .map((entry) => ({
       model: entry.model.id,
       stages: entry.stages,
       inputTokens: entry.billing.input_tokens,
-      outputTokens: entry.billing.output_tokens + (entry.billing.reasoning_tokens ?? 0),
+      outputTokens: entry.billing.output_tokens + entry.billing.reasoning_tokens,
       totalUsdMicros: entry.billing.total_usd_micros,
     }))
     .sort((a, b) => (b.totalUsdMicros ?? -1) - (a.totalUsdMicros ?? -1));

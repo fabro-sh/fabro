@@ -13,7 +13,7 @@ export function mapRunStagesToSidebarStages(
       id: stage.id,
       name: stage.name,
       dotId: stage.dot_id ?? stage.id,
-      status: stage.status as Stage["status"],
+      status: stage.status,
       duration: stage.duration_secs != null
         ? formatDurationSecs(stage.duration_secs)
         : "--",
