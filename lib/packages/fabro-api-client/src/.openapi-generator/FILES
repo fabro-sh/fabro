@@ -43,6 +43,8 @@ models/check-run-status.ts
 models/check-run.ts
 models/close-run-pull-request-response.ts
 models/code-location.ts
+models/command-log-response.ts
+models/command-output-stream.ts
 models/completion-content-part.ts
 models/completion-message.ts
 models/completion-response.ts

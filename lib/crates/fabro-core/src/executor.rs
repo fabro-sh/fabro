@@ -390,7 +390,11 @@ impl<G: Graph + 'static> Executor<G> {
         }
 
         // Normal edge selection
-        if let Some(selection) = graph.select_edge(node, outcome, &state.context) {
+        let routing_context = self
+            .handler
+            .context_for_edge_selection(&state.context, graph)
+            .await?;
+        if let Some(selection) = graph.select_edge(node, outcome, &routing_context) {
             let target = selection.edge.target().to_string();
             let is_restart = selection.edge.is_loop_restart();
 

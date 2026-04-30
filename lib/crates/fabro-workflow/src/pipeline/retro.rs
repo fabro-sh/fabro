@@ -4,7 +4,7 @@ use fabro_agent::SessionEvent;
 use fabro_llm::client::Client;
 use fabro_retro::retro::{Retro, derive_retro};
 use fabro_retro::retro_agent::{
-    RETRO_DATA_DIR, build_retro_prompt, dry_run_narrative, run_retro_agent,
+    RETRO_DATA_DIR, RetroBlobReader, build_retro_prompt, dry_run_narrative, run_retro_agent,
 };
 
 use super::types::{Executed, RetroOptions, Retroed};
@@ -81,11 +81,22 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                             });
                         }
                     });
+                let run_store = services.run_store.clone();
+                let blob_reader: RetroBlobReader = Arc::new(move |blob_id| {
+                    let run_store = run_store.clone();
+                    Box::pin(async move {
+                        Ok(run_store
+                            .read_blob(&blob_id)
+                            .await?
+                            .map(|bytes| bytes.to_vec()))
+                    })
+                });
                 run_retro_agent(
                     &services.sandbox,
                     &state,
                     &events,
                     &options.run_dir,
+                    Some(blob_reader),
                     &client,
                     services.provider,
                     &options.model,

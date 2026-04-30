@@ -96,6 +96,10 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         parallel_results:  Some(json!([{ "stage": "fanout@1" }])),
         stdout:            Some("stdout".to_string()),
         stderr:            Some("stderr".to_string()),
+        stdout_bytes:      None,
+        stderr_bytes:      None,
+        streams_separated: None,
+        live_streaming:    None,
     });
 
     let serialized = serde_json::to_value(SerializableProjection(&projection))

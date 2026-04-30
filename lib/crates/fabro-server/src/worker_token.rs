@@ -5,7 +5,7 @@ use axum::extract::{FromRequestParts, Path};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
-use fabro_types::{RunBlobId, RunId, StageId};
+use fabro_types::{CommandOutputStream, RunBlobId, RunId, StageId};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -194,6 +194,34 @@ impl FromRequestParts<Arc<AppState>> for AuthorizeStageArtifact {
         authorize_run_scoped(parts, state.as_ref(), &run_id)
             .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id, stage_id))
+    }
+}
+
+pub(crate) struct AuthorizeCommandLog(
+    pub(crate) RunId,
+    pub(crate) StageId,
+    pub(crate) CommandOutputStream,
+);
+
+impl FromRequestParts<Arc<AppState>> for AuthorizeCommandLog {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let Path((id, stage_id, stream)): Path<(String, String, String)> =
+            Path::from_request_parts(parts, state)
+                .await
+                .map_err(IntoResponse::into_response)?;
+        let run_id = parse_run_id_path(&id)?;
+        let stage_id = parse_stage_id_path(&stage_id)?;
+        let stream = stream
+            .parse::<CommandOutputStream>()
+            .map_err(|_| ApiError::bad_request("Invalid command log stream.").into_response())?;
+        authorize_run_scoped(parts, state.as_ref(), &run_id)
+            .map_err(IntoResponse::into_response)?;
+        Ok(Self(run_id, stage_id, stream))
     }
 }
 

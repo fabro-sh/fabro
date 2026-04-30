@@ -15,6 +15,10 @@ pub trait NodeHandler<G: Graph>: Send + Sync {
         graph: &G,
     ) -> Result<Outcome<G::Meta>>;
 
+    async fn context_for_edge_selection(&self, context: &Context, _graph: &G) -> Result<Context> {
+        Ok(context.clone())
+    }
+
     fn retry_policy(&self, _node: &G::Node, _graph: &G) -> RetryPolicy {
         RetryPolicy::none()
     }

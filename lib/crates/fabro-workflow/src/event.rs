@@ -499,13 +499,17 @@ pub enum Event {
         timeout_ms: Option<u64>,
     },
     CommandCompleted {
-        node_id:     String,
-        stdout:      String,
-        stderr:      String,
+        node_id:           String,
+        stdout:            String,
+        stderr:            String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        exit_code:   Option<i32>,
-        duration_ms: u64,
-        timed_out:   bool,
+        exit_code:         Option<i32>,
+        duration_ms:       u64,
+        timed_out:         bool,
+        stdout_bytes:      u64,
+        stderr_bytes:      u64,
+        streams_separated: bool,
+        live_streaming:    bool,
     },
     AgentCliStarted {
         node_id:  String,
@@ -1111,11 +1115,18 @@ impl Event {
                 exit_code,
                 duration_ms,
                 timed_out,
+                stdout_bytes,
+                stderr_bytes,
                 ..
             } => {
                 debug!(
                     node_id,
-                    exit_code, duration_ms, timed_out, "Command completed"
+                    exit_code,
+                    duration_ms,
+                    timed_out,
+                    stdout_bytes,
+                    stderr_bytes,
+                    "Command completed"
                 );
             }
             Self::AgentCliStarted {
@@ -2487,13 +2498,21 @@ fn event_body_from_event(event: &Event) -> EventBody {
             exit_code,
             duration_ms,
             timed_out,
+            stdout_bytes,
+            stderr_bytes,
+            streams_separated,
+            live_streaming,
             ..
         } => EventBody::CommandCompleted(fabro_types::CommandCompletedProps {
-            stdout:      stdout.clone(),
-            stderr:      stderr.clone(),
-            exit_code:   *exit_code,
-            duration_ms: *duration_ms,
-            timed_out:   *timed_out,
+            stdout:            stdout.clone(),
+            stderr:            stderr.clone(),
+            exit_code:         *exit_code,
+            duration_ms:       *duration_ms,
+            timed_out:         *timed_out,
+            stdout_bytes:      *stdout_bytes,
+            stderr_bytes:      *stderr_bytes,
+            streams_separated: *streams_separated,
+            live_streaming:    *live_streaming,
         }),
         Event::AgentCliStarted {
             visit,
@@ -2696,6 +2715,11 @@ impl StageScope {
             parallel_group_id:  Some(parallel_group_id),
             parallel_branch_id: Some(parallel_branch_id),
         }
+    }
+
+    #[must_use]
+    pub fn stage_id(&self) -> StageId {
+        StageId::new(self.node_id.clone(), self.visit)
     }
 }
 

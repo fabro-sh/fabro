@@ -3,15 +3,16 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_static::EnvVars;
-use tokio::io::AsyncReadExt;
+use fabro_types::CommandOutputStream;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
 use tokio::task::spawn_blocking;
 use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
-    format_lines_numbered,
+    CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
+    SandboxEvent, SandboxEventCallback, format_lines_numbered,
 };
 
 pub struct LocalSandbox {
@@ -323,6 +324,100 @@ impl Sandbox for LocalSandbox {
         })
     }
 
+    async fn exec_command_streaming(
+        &self,
+        command: &str,
+        timeout_ms: u64,
+        working_dir: Option<&str>,
+        env_vars: Option<&std::collections::HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
+        output_callback: CommandOutputCallback,
+    ) -> crate::Result<ExecStreamingResult> {
+        let start = Instant::now();
+
+        let mut filtered_env: Vec<(String, String)> = process_env_vars()
+            .into_iter()
+            .filter(|(key, _)| !Self::should_filter_env_var(key))
+            .collect();
+
+        if let Some(extra) = env_vars {
+            for (k, v) in extra {
+                if !Self::should_filter_env_var(k) {
+                    filtered_env.push((k.clone(), v.clone()));
+                }
+            }
+        }
+
+        let effective_dir =
+            working_dir.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
+
+        let mut cmd = Command::new("/bin/bash");
+        cmd.arg("-c")
+            .arg(command)
+            .current_dir(&effective_dir)
+            .env_clear()
+            .envs(filtered_env)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        #[cfg(unix)]
+        fabro_proc::pre_exec_setpgid(cmd.as_std_mut());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| crate::Error::context("Failed to spawn command", e))?;
+
+        let timeout_duration = std::time::Duration::from_millis(timeout_ms);
+        let token = cancel_token.unwrap_or_default();
+
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+        let stdout_callback = output_callback.clone();
+        let stderr_callback = output_callback;
+        let stdout_task = tokio::spawn(async move {
+            drain_command_pipe(stdout_pipe, CommandOutputStream::Stdout, stdout_callback).await
+        });
+        let stderr_task = tokio::spawn(async move {
+            drain_command_pipe(stderr_pipe, CommandOutputStream::Stderr, stderr_callback).await
+        });
+
+        let (timed_out, exit_code) = tokio::select! {
+            status_result = child.wait() => {
+                let status = status_result
+                    .map_err(|e| crate::Error::context("Failed to wait for process", e))?;
+                (false, status.code().unwrap_or(-1))
+            }
+            () = time::sleep(timeout_duration) => {
+                sigterm_then_kill(&mut child).await;
+                (true, -1)
+            }
+            () = token.cancelled() => {
+                sigterm_then_kill(&mut child).await;
+                (true, -1)
+            }
+        };
+
+        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let stdout_bytes = stdout_task
+            .await
+            .map_err(|e| crate::Error::context("stdout stream task failed", e))??;
+        let stderr_bytes = stderr_task
+            .await
+            .map_err(|e| crate::Error::context("stderr stream task failed", e))??;
+
+        Ok(ExecStreamingResult {
+            result:            ExecResult {
+                stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
+                stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
+                exit_code,
+                timed_out,
+                duration_ms,
+            },
+            streams_separated: true,
+            live_streaming:    true,
+        })
+    }
+
     async fn grep(
         &self,
         pattern: &str,
@@ -580,6 +675,34 @@ async fn sigterm_then_kill(child: &mut Child) {
     {
         let _ = child.kill().await;
         let _ = child.wait().await;
+    }
+}
+
+async fn drain_command_pipe<R>(
+    mut reader: Option<R>,
+    stream: CommandOutputStream,
+    output_callback: CommandOutputCallback,
+) -> crate::Result<Vec<u8>>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut output = Vec::new();
+    let Some(reader) = reader.as_mut() else {
+        return Ok(output);
+    };
+
+    let mut buf = [0_u8; 8192];
+    loop {
+        let read = reader
+            .read(&mut buf)
+            .await
+            .map_err(|e| crate::Error::context("Failed to read command output", e))?;
+        if read == 0 {
+            return Ok(output);
+        }
+        let chunk = buf[..read].to_vec();
+        output_callback(stream, chunk.clone()).await?;
+        output.extend_from_slice(&chunk);
     }
 }
 

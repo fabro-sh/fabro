@@ -132,18 +132,18 @@ For the **CLI backend**, Fabro takes a different approach: it runs `git diff --n
 
 ## Artifact offloading
 
-When a stage produces a large context value -- an LLM response, command output, or any context update -- Fabro automatically offloads it into a global content-addressed blob store instead of leaving the full value inline in durable context.
+When a stage produces a large context value -- an LLM response or any context update -- Fabro automatically offloads it into a global content-addressed blob store instead of leaving the full value inline in durable context. Command stdout and stderr are streamed to stage log files while the command runs, then finalized into durable blob refs after completion.
 
 ### How offloading works
 
-After each node completes, Fabro checks every context update. If the serialized JSON of a value exceeds **100KB**, it is stored once by SHA-256 hash and replaced with a durable blob ref:
+After each node completes, Fabro checks every context update. If the serialized JSON of a value exceeds **100KB**, it is stored once by SHA-256 hash and replaced with a durable blob ref. Command stdout and stderr are always stored this way after completion, even when they are small or empty:
 
 ```
 response.plan  -->  blob://sha256/2cf24dba5fb0...
 command.output -->  blob://sha256/a4f3c1d9c2e1...
 ```
 
-Values under 100KB remain inline.
+Non-command values under 100KB remain inline.
 
 Checkpoints, checkpoint-completed events, forks, and resumes persist these `blob://` refs, not host-specific file paths.
 

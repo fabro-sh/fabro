@@ -216,6 +216,15 @@ fn encode_path_segment(segment: &str) -> String {
     utf8_percent_encode(segment, ARTIFACT_SEGMENT_ENCODE_SET).to_string()
 }
 
+#[must_use]
+pub fn stage_storage_segment(node: &StageId) -> String {
+    format!(
+        "{}@{:04}",
+        encode_path_segment(node.node_id()),
+        node.visit()
+    )
+}
+
 fn decode_path_segment(kind: &str, value: &str) -> Result<String> {
     percent_decode_str(value)
         .decode_utf8()

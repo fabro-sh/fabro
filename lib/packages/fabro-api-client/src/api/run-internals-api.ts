@@ -26,6 +26,10 @@ import type { AppendEventResponse } from '../models';
 // @ts-ignore
 import type { ArtifactListResponse } from '../models';
 // @ts-ignore
+import type { CommandLogResponse } from '../models';
+// @ts-ignore
+import type { CommandOutputStream } from '../models';
+// @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { PaginatedEventList } from '../models';
@@ -172,6 +176,64 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
             localVarHeaderParameter['Accept'] = 'text/plain; charset=utf-8,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns a byte-offset slice of a command stage stdout or stderr log. Bytes are base64-encoded and are not snapped to UTF-8 boundaries.
+         * @summary Tail Command Log
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {CommandOutputStream} stream Command output stream to read.
+         * @param {number} [offset] Byte offset to start reading from. Defaults to &#x60;0&#x60;.
+         * @param {number} [limit] Maximum bytes to return. Defaults to 65536 and is capped at 1048576.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunStageCommandLog: async (id: string, stageId: string, stream: CommandOutputStream, offset?: number, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('getRunStageCommandLog', 'id', id)
+            // verify required parameter 'stageId' is not null or undefined
+            assertParamExists('getRunStageCommandLog', 'stageId', stageId)
+            // verify required parameter 'stream' is not null or undefined
+            assertParamExists('getRunStageCommandLog', 'stream', stream)
+            const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/logs/{stream}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"stageId"}}`, encodeURIComponent(String(stageId)))
+                .replace(`{${"stream"}}`, encodeURIComponent(String(stream)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (offset !== undefined) {
+                localVarQueryParameter['offset'] = offset;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -785,6 +847,23 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Returns a byte-offset slice of a command stage stdout or stderr log. Bytes are base64-encoded and are not snapped to UTF-8 boundaries.
+         * @summary Tail Command Log
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {CommandOutputStream} stream Command output stream to read.
+         * @param {number} [offset] Byte offset to start reading from. Defaults to &#x60;0&#x60;.
+         * @param {number} [limit] Maximum bytes to return. Defaults to 65536 and is capped at 1048576.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getRunStageCommandLog(id: string, stageId: string, stream: CommandOutputStream, offset?: number, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CommandLogResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getRunStageCommandLog(id, stageId, stream, offset, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.getRunStageCommandLog']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns the internal event-sourced run projection. This is not a stable public contract.
          * @summary Get Run State
          * @param {string} id Unique run identifier (ULID).
@@ -997,6 +1076,20 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.getRunLogs(id, options).then((request) => request(axios, basePath));
         },
         /**
+         * Returns a byte-offset slice of a command stage stdout or stderr log. Bytes are base64-encoded and are not snapped to UTF-8 boundaries.
+         * @summary Tail Command Log
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {CommandOutputStream} stream Command output stream to read.
+         * @param {number} [offset] Byte offset to start reading from. Defaults to &#x60;0&#x60;.
+         * @param {number} [limit] Maximum bytes to return. Defaults to 65536 and is capped at 1048576.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunStageCommandLog(id: string, stageId: string, stream: CommandOutputStream, offset?: number, limit?: number, options?: RawAxiosRequestConfig): AxiosPromise<CommandLogResponse> {
+            return localVarFp.getRunStageCommandLog(id, stageId, stream, offset, limit, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns the internal event-sourced run projection. This is not a stable public contract.
          * @summary Get Run State
          * @param {string} id Unique run identifier (ULID).
@@ -1171,6 +1264,21 @@ export class RunInternalsApi extends BaseAPI {
      */
     public getRunLogs(id: string, options?: RawAxiosRequestConfig) {
         return RunInternalsApiFp(this.configuration).getRunLogs(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns a byte-offset slice of a command stage stdout or stderr log. Bytes are base64-encoded and are not snapped to UTF-8 boundaries.
+     * @summary Tail Command Log
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+     * @param {CommandOutputStream} stream Command output stream to read.
+     * @param {number} [offset] Byte offset to start reading from. Defaults to &#x60;0&#x60;.
+     * @param {number} [limit] Maximum bytes to return. Defaults to 65536 and is capped at 1048576.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getRunStageCommandLog(id: string, stageId: string, stream: CommandOutputStream, offset?: number, limit?: number, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).getRunStageCommandLog(id, stageId, stream, offset, limit, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

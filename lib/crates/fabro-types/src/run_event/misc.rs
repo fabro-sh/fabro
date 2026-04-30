@@ -201,12 +201,20 @@ pub struct CommandStartedProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CommandCompletedProps {
-    pub stdout:      String,
-    pub stderr:      String,
+    pub stdout:            String,
+    pub stderr:            String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exit_code:   Option<i32>,
-    pub duration_ms: u64,
-    pub timed_out:   bool,
+    pub exit_code:         Option<i32>,
+    pub duration_ms:       u64,
+    pub timed_out:         bool,
+    #[serde(default)]
+    pub stdout_bytes:      u64,
+    #[serde(default)]
+    pub stderr_bytes:      u64,
+    #[serde(default)]
+    pub streams_separated: bool,
+    #[serde(default)]
+    pub live_streaming:    bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

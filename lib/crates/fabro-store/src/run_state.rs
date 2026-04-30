@@ -342,6 +342,10 @@ impl RunProjectionReducer for RunProjection {
                 let node = self.node_mut(node_id, visit);
                 node.stdout = Some(props.stdout.clone());
                 node.stderr = Some(props.stderr.clone());
+                node.stdout_bytes = Some(props.stdout_bytes);
+                node.stderr_bytes = Some(props.stderr_bytes);
+                node.streams_separated = Some(props.streams_separated);
+                node.live_streaming = Some(props.live_streaming);
                 node.script_timing = Some(serde_json::to_value(props).map_err(|err| {
                     Error::InvalidEvent(format!("invalid command.completed payload: {err}"))
                 })?);

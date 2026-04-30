@@ -179,21 +179,35 @@ impl RunDump {
     {
         let mut cache = HashMap::new();
         for entry in &mut self.entries {
-            if let RunDumpContents::Json(value) = &mut entry.contents {
-                let mut blob_ids = Vec::new();
-                collect_blob_refs_in_value(value, &mut blob_ids);
-                for blob_id in blob_ids {
-                    if cache.contains_key(&blob_id) {
-                        continue;
+            match &mut entry.contents {
+                RunDumpContents::Json(value) => {
+                    let mut blob_ids = Vec::new();
+                    collect_blob_refs_in_value(value, &mut blob_ids);
+                    for blob_id in blob_ids {
+                        if cache.contains_key(&blob_id) {
+                            continue;
+                        }
+                        let blob = read_blob(blob_id).await?.with_context(|| {
+                            format!("blob {blob_id:?} is missing from the store")
+                        })?;
+                        let hydrated: serde_json::Value = serde_json::from_slice(&blob)
+                            .with_context(|| format!("blob {blob_id:?} is not valid JSON"))?;
+                        cache.insert(blob_id, hydrated);
                     }
+                    replace_blob_refs_in_value(value, &cache)?;
+                }
+                RunDumpContents::Text(text) => {
+                    let Some(blob_id) = parse_blob_ref(text) else {
+                        continue;
+                    };
                     let blob = read_blob(blob_id)
                         .await?
                         .with_context(|| format!("blob {blob_id:?} is missing from the store"))?;
-                    let hydrated: serde_json::Value = serde_json::from_slice(&blob)
-                        .with_context(|| format!("blob {blob_id:?} is not valid JSON"))?;
-                    cache.insert(blob_id, hydrated);
+                    *text = serde_json::from_slice::<String>(&blob).with_context(|| {
+                        format!("blob {blob_id:?} is not a JSON string text log")
+                    })?;
                 }
-                replace_blob_refs_in_value(value, &cache)?;
+                RunDumpContents::Bytes(_) => {}
             }
         }
         Ok(())
@@ -524,6 +538,10 @@ mod tests {
             parallel_results:  Some(serde_json::json!([{ "stage": "fanout@1" }])),
             stdout:            Some("stdout".to_string()),
             stderr:            Some("stderr".to_string()),
+            stdout_bytes:      None,
+            stderr_bytes:      None,
+            streams_separated: None,
+            live_streaming:    None,
         });
 
         let dump = RunDump::from_projection(&projection);

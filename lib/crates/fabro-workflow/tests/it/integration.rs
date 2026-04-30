@@ -19,7 +19,7 @@
 use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,7 +32,7 @@ use fabro_interview::{
 };
 use fabro_llm::provider::Provider;
 use fabro_store::{ArtifactStore, Database};
-use fabro_types::{RunEvent, RunId, StageId, WorkflowSettings};
+use fabro_types::{RunEvent, RunId, StageId, WorkflowSettings, parse_blob_ref};
 use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflow::context::Context;
 use fabro_workflow::error::{Error, FailureSignatureExt};
@@ -173,6 +173,79 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
     state
         .checkpoint
         .ok_or_else(|| "checkpoint should exist in run store".into())
+}
+
+fn run_store_dir_and_mode(run_dir: &Path) -> Result<(PathBuf, bool), Box<dyn std::error::Error>> {
+    let uses_shared_store = run_dir
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == "scratch");
+    let store_dir = if uses_shared_store {
+        let runs_dir = run_dir.parent().ok_or("run dir should have parent")?;
+        let storage_dir = runs_dir.parent().ok_or("runs dir should have parent")?;
+        storage_dir.join("store")
+    } else {
+        test_store_dir(run_dir)
+    };
+    Ok((store_dir, uses_shared_store))
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "This helper spins up a dedicated current-thread runtime when called from inside an existing Tokio runtime."
+)]
+fn resolve_checkpoint_text(
+    run_dir: &Path,
+    value: &serde_json::Value,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let Some(current) = value.as_str() else {
+        return Ok(value.to_string());
+    };
+    let Some(blob_id) = parse_blob_ref(current) else {
+        return Ok(current.to_string());
+    };
+
+    let run_dir = run_dir.to_path_buf();
+    let (store_dir, uses_shared_store) = run_store_dir_and_mode(&run_dir)?;
+    std::thread::spawn(
+        move || -> Result<_, Box<dyn std::error::Error + Send + Sync>> {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            let object_store = Arc::new(LocalFileSystem::new_with_prefix(store_dir)?);
+            let store = Arc::new(Database::new(
+                object_store,
+                "",
+                Duration::from_millis(1),
+                None,
+            ));
+            let run_id = if uses_shared_store {
+                run_dir
+                    .file_name()
+                    .ok_or("run dir should have file name")?
+                    .to_string_lossy()
+                    .rsplit('-')
+                    .next()
+                    .ok_or("run dir should contain run id suffix")?
+                    .parse()?
+            } else {
+                runtime
+                    .block_on(store.list_runs(&fabro_store::ListRunsQuery::default()))?
+                    .into_iter()
+                    .next()
+                    .ok_or("test store should contain one run")?
+                    .run_id
+            };
+            let run = runtime.block_on(store.open_run_reader(&run_id))?;
+            let bytes = runtime
+                .block_on(run.read_blob(&blob_id))?
+                .ok_or("checkpoint blob should exist")?;
+            Ok(serde_json::from_slice::<String>(&bytes)?)
+        },
+    )
+    .join()
+    .map_err(|_| "checkpoint text resolver thread panicked")?
+    .map_err(|err| err.to_string().into())
 }
 
 fn save_checkpoint(path: &Path, checkpoint: &Checkpoint) {
@@ -2330,12 +2403,8 @@ async fn tool_handler_e2e() {
         .context_values
         .get("command.output")
         .expect("command.output should exist");
-    assert!(
-        command_output
-            .as_str()
-            .unwrap()
-            .contains("hello-from-script")
-    );
+    let command_output = resolve_checkpoint_text(dir.path(), command_output).unwrap();
+    assert!(command_output.contains("hello-from-script"));
 }
 
 #[tokio::test]
@@ -2701,7 +2770,8 @@ async fn scenario_ship_a_feature() {
         .context_values
         .get("command.output")
         .expect("command.output");
-    assert!(command_output.as_str().unwrap().contains("PASS"));
+    let command_output = resolve_checkpoint_text(dir.path(), command_output).unwrap();
+    assert!(command_output.contains("PASS"));
     assert!(cp.completed_nodes.contains(&"plan".to_string()));
     assert!(cp.completed_nodes.contains(&"implement".to_string()));
     assert!(cp.completed_nodes.contains(&"test".to_string()));

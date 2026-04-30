@@ -315,6 +315,11 @@ fn main() {
         ("NodeStatusRecord", "fabro_types::NodeStatusRecord", &[]),
         ("StageOutcome", "fabro_types::StageOutcome", &[]),
         ("StageState", "fabro_types::StageState", &[]),
+        (
+            "CommandOutputStream",
+            "fabro_types::CommandOutputStream",
+            &[],
+        ),
         ("NodeState", "fabro_types::NodeState", &[]),
         ("SecretMetadata", "fabro_types::SecretMetadata", &[]),
         ("InterviewOption", "fabro_types::InterviewOption", &[]),

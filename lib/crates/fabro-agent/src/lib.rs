@@ -40,8 +40,9 @@ pub use memory::discover_memory;
 pub use profiles::{AnthropicProfile, EnvContext, GeminiProfile, OpenAiProfile};
 pub use read_before_write_sandbox::ReadBeforeWriteSandbox;
 pub use sandbox::{
-    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, WorktreeEvent,
-    WorktreeEventCallback, WorktreeOptions, WorktreeSandbox, format_lines_numbered, shell_quote,
+    CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
+    SandboxEvent, SandboxEventCallback, WorktreeEvent, WorktreeEventCallback, WorktreeOptions,
+    WorktreeSandbox, format_lines_numbered, shell_quote,
 };
 pub use session::Session;
 pub use skills::Skill;

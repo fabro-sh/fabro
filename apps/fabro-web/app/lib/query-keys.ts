@@ -46,6 +46,17 @@ export const queryKeys = {
       withQuery(`/api/v1/runs/${pathSegment(id)}/events`, { limit }),
     stageTurns: (id: string, stageId: string) =>
       `/api/v1/runs/${pathSegment(id)}/stages/${pathSegment(stageId)}/turns`,
+    stageLog: (
+      id: string,
+      stageId: string,
+      stream: "stdout" | "stderr",
+      offset = 0,
+      limit = 65_536,
+    ) =>
+      withQuery(
+        `/api/v1/runs/${pathSegment(id)}/stages/${pathSegment(stageId)}/logs/${stream}`,
+        { offset, limit },
+      ),
     preview: (id: string) => `/api/v1/runs/${pathSegment(id)}/preview`,
     cancel: (id: string) => `/api/v1/runs/${pathSegment(id)}/cancel`,
     archive: (id: string) => `/api/v1/runs/${pathSegment(id)}/archive`,

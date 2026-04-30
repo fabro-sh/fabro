@@ -44,8 +44,8 @@ Agents can also emit arbitrary context updates by including a JSON object with a
 
 | Key | Value |
 |---|---|
-| `command.output` | The command's stdout |
-| `command.stderr` | The command's stderr |
+| `command.output` | The command's stdout. Durable context stores this as a `blob://sha256/...` ref after the command completes; downstream prompts resolve it back to text. |
+| `command.stderr` | The command's stderr. Durable context stores this as a `blob://sha256/...` ref after the command completes; downstream prompts resolve it back to text. |
 
 ### Human gates
 
@@ -196,10 +196,11 @@ Internal keys (prefixed with `internal.`, `current`, `graph.`, `thread.`, `respo
 
 ## Artifact offloading
 
-When a stage produces a large output (over 100KB of serialized JSON), Fabro stores the serialized bytes in a global content-addressed blob store and replaces the context value with a durable blob ref:
+When a stage produces a large output (over 100KB of serialized JSON), Fabro stores the serialized bytes in a global content-addressed blob store and replaces the context value with a durable blob ref. Command stdout and stderr are always finalized into blob refs after command completion, even when they are small or empty:
 
 ```
 response.plan → blob://sha256/2cf24dba5fb0...
+command.output → blob://sha256/a4f3c1d9c2e1...
 ```
 
 Checkpoints and checkpoint-completed events persist these `blob://` refs, not host-specific file paths.

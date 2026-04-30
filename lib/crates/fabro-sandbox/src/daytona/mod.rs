@@ -6,7 +6,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use daytona_sdk::api_types::SignedPortPreviewUrl;
 use fabro_github::GitHubCredentials;
-use fabro_types::RunId;
+use fabro_types::{CommandOutputStream, RunId};
 use rand::Rng;
 use tokio::sync::OnceCell;
 use tokio::{fs, time};
@@ -16,8 +16,8 @@ use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
 use crate::redact::redact_auth_url;
 use crate::sandbox::resolve_path;
 use crate::{
-    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
-    format_lines_numbered, shell_quote,
+    CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
+    SandboxEvent, SandboxEventCallback, format_lines_numbered, shell_quote,
 };
 
 const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
@@ -1146,6 +1146,39 @@ impl Sandbox for DaytonaSandbox {
             exit_code: result.exit_code,
             timed_out: false,
             duration_ms,
+        })
+    }
+
+    async fn exec_command_streaming(
+        &self,
+        command: &str,
+        timeout_ms: u64,
+        working_dir: Option<&str>,
+        env_vars: Option<&HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
+        output_callback: CommandOutputCallback,
+    ) -> crate::Result<ExecStreamingResult> {
+        let result = self
+            .exec_command(command, timeout_ms, working_dir, env_vars, cancel_token)
+            .await?;
+        if !result.stdout.is_empty() {
+            output_callback(
+                CommandOutputStream::Stdout,
+                result.stdout.as_bytes().to_vec(),
+            )
+            .await?;
+        }
+        if !result.stderr.is_empty() {
+            output_callback(
+                CommandOutputStream::Stderr,
+                result.stderr.as_bytes().to_vec(),
+            )
+            .await?;
+        }
+        Ok(ExecStreamingResult {
+            result,
+            streams_separated: false,
+            live_streaming: false,
         })
     }
 

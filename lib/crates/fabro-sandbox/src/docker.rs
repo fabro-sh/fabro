@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Cursor;
-use std::time::Instant;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bollard::Docker;
@@ -15,7 +16,7 @@ use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
 use bollard::models::HostConfig;
 use fabro_github::GitHubCredentials;
-use fabro_types::RunId;
+use fabro_types::{CommandOutputStream, RunId};
 use futures::StreamExt;
 use tokio::sync::OnceCell;
 use tokio::{fs, time};
@@ -25,8 +26,8 @@ use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
 use crate::redact::redact_auth_url;
 use crate::sandbox::resolve_path;
 use crate::{
-    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
-    format_lines_numbered, shell_quote,
+    CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
+    SandboxEvent, SandboxEventCallback, format_lines_numbered, shell_quote,
 };
 
 const WORKING_DIRECTORY: &str = "/workspace";
@@ -34,6 +35,7 @@ const GIT_CLONE_DEPTH: usize = 10;
 
 const MANAGED_LABEL: &str = "sh.fabro.managed";
 const RUN_ID_LABEL: &str = "sh.fabro.run_id";
+static EXEC_CONTROL_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DockerSandboxOptions {
@@ -226,6 +228,69 @@ impl DockerSandbox {
         Ok((stdout, stderr, exit_code))
     }
 
+    async fn docker_exec_streaming(
+        docker: Docker,
+        container_id: String,
+        cmd: Vec<String>,
+        working_dir: Option<String>,
+        env: Option<Vec<String>>,
+        output_callback: CommandOutputCallback,
+    ) -> crate::Result<(Vec<u8>, Vec<u8>, i32)> {
+        let exec_opts = CreateExecOptions {
+            cmd: Some(cmd),
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
+            working_dir,
+            env: env.map(|e| e.into_iter().collect()),
+            ..Default::default()
+        };
+
+        let exec_instance = docker
+            .create_exec(&container_id, exec_opts)
+            .await
+            .map_err(|e| crate::Error::context("Failed to create exec", e))?;
+
+        let start_result = docker
+            .start_exec(&exec_instance.id, None)
+            .await
+            .map_err(|e| crate::Error::context("Failed to start exec", e))?;
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        if let StartExecResults::Attached { mut output, .. } = start_result {
+            while let Some(chunk) = output.next().await {
+                match chunk {
+                    Ok(LogOutput::StdOut { message }) => {
+                        let bytes = message.to_vec();
+                        output_callback(CommandOutputStream::Stdout, bytes.clone()).await?;
+                        stdout.extend_from_slice(&bytes);
+                    }
+                    Ok(LogOutput::StdErr { message }) => {
+                        let bytes = message.to_vec();
+                        output_callback(CommandOutputStream::Stderr, bytes.clone()).await?;
+                        stderr.extend_from_slice(&bytes);
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        return Err(crate::Error::context("Error reading exec output", e));
+                    }
+                }
+            }
+        }
+
+        let inspect = docker
+            .inspect_exec(&exec_instance.id)
+            .await
+            .map_err(|e| crate::Error::context("Failed to inspect exec", e))?;
+
+        let exit_code = inspect
+            .exit_code
+            .and_then(|code| i32::try_from(code).ok())
+            .unwrap_or(-1);
+        Ok((stdout, stderr, exit_code))
+    }
+
     async fn docker_exec_shell(
         &self,
         command: &str,
@@ -280,6 +345,94 @@ impl DockerSandbox {
                 })
             }
         }
+    }
+
+    async fn docker_exec_shell_streaming(
+        &self,
+        command: &str,
+        timeout_ms: u64,
+        working_dir: Option<&str>,
+        env_vars: Option<&HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
+        output_callback: CommandOutputCallback,
+    ) -> crate::Result<ExecStreamingResult> {
+        let start = Instant::now();
+        let effective_dir = working_dir.unwrap_or(WORKING_DIRECTORY).to_string();
+        let env: Option<Vec<String>> =
+            env_vars.map(|vars| vars.iter().map(|(k, v)| format!("{k}={v}")).collect());
+        let (stop_file, pid_file) = docker_exec_control_paths();
+        let controlled_command = docker_controlled_shell_command(command, &stop_file, &pid_file);
+        let cmd = vec![
+            "/bin/bash".to_string(),
+            "-lc".to_string(),
+            controlled_command,
+        ];
+
+        let timeout_duration = Duration::from_millis(timeout_ms);
+        let token = cancel_token.unwrap_or_default();
+
+        let container_id = self.container_id()?.to_string();
+        let mut output_task = tokio::spawn(Self::docker_exec_streaming(
+            self.docker.clone(),
+            container_id,
+            cmd,
+            Some(effective_dir.clone()),
+            env,
+            output_callback,
+        ));
+
+        let mut interrupted = false;
+        let output = tokio::select! {
+            joined = &mut output_task => {
+                joined
+                    .map_err(|e| crate::Error::context("Docker exec stream task failed", e))??
+            }
+            () = time::sleep(timeout_duration) => {
+                interrupted = true;
+                self.request_docker_exec_stop(&stop_file).await?;
+                output_task
+                    .await
+                    .map_err(|e| crate::Error::context("Docker exec stream task failed", e))??
+            }
+            () = token.cancelled() => {
+                interrupted = true;
+                self.request_docker_exec_stop(&stop_file).await?;
+                output_task
+                    .await
+                    .map_err(|e| crate::Error::context("Docker exec stream task failed", e))??
+            }
+        };
+
+        let (stdout, stderr, exit_code) = output;
+        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        Ok(ExecStreamingResult {
+            result:            ExecResult {
+                stdout: String::from_utf8_lossy(&stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&stderr).into_owned(),
+                exit_code: if interrupted { -1 } else { exit_code },
+                timed_out: interrupted,
+                duration_ms,
+            },
+            streams_separated: true,
+            live_streaming:    true,
+        })
+    }
+
+    async fn request_docker_exec_stop(&self, stop_file: &str) -> crate::Result<()> {
+        let command = format!("touch {}", shell_quote(stop_file));
+        let (stdout, stderr, exit_code) = self
+            .docker_exec(
+                vec!["/bin/bash".to_string(), "-lc".to_string(), command.clone()],
+                Some("/"),
+                None,
+            )
+            .await?;
+        if exit_code != 0 {
+            return Err(crate::Error::message(format!(
+                "Failed to request Docker exec stop (exit {exit_code}): {stderr}{stdout}"
+            )));
+        }
+        Ok(())
     }
 
     async fn ensure_image(&self) -> crate::Result<()> {
@@ -544,6 +697,48 @@ impl DockerSandbox {
 
 fn container_name(run_id: &RunId) -> String {
     format!("fabro-run-{run_id}")
+}
+
+fn docker_exec_control_paths() -> (String, String) {
+    let sequence = EXEC_CONTROL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let prefix = format!("/tmp/fabro-exec-{}-{sequence}", std::process::id());
+    (format!("{prefix}.stop"), format!("{prefix}.pid"))
+}
+
+fn docker_controlled_shell_command(command: &str, stop_file: &str, pid_file: &str) -> String {
+    format!(
+        "\
+stop_file={stop_file}; \
+pid_file={pid_file}; \
+user_command={command}; \
+rm -f \"$stop_file\" \"$pid_file\"; \
+( \
+  while [ ! -e \"$stop_file\" ]; do sleep 0.1; done; \
+  if [ -s \"$pid_file\" ]; then \
+    child=$(cat \"$pid_file\"); \
+    kill -TERM \"-$child\" 2>/dev/null || kill -TERM \"$child\" 2>/dev/null || true; \
+    sleep 0.2; \
+    kill -KILL \"-$child\" 2>/dev/null || kill -KILL \"$child\" 2>/dev/null || true; \
+  fi \
+) & watcher=$!; \
+if command -v setsid >/dev/null 2>&1; then \
+  setsid /bin/bash -lc \"$user_command\" & \
+else \
+  /bin/bash -lc \"$user_command\" & \
+fi; \
+child=$!; \
+echo \"$child\" > \"$pid_file\"; \
+wait \"$child\"; \
+status=$?; \
+kill \"$watcher\" 2>/dev/null || true; \
+wait \"$watcher\" 2>/dev/null || true; \
+rm -f \"$stop_file\" \"$pid_file\"; \
+exit \"$status\"\
+",
+        stop_file = shell_quote(stop_file),
+        pid_file = shell_quote(pid_file),
+        command = shell_quote(command),
+    )
 }
 
 fn git_clone_command(clone_url: &str, branch: Option<&str>) -> String {
@@ -961,6 +1156,27 @@ impl Sandbox for DockerSandbox {
             .await
     }
 
+    async fn exec_command_streaming(
+        &self,
+        command: &str,
+        timeout_ms: u64,
+        working_dir: Option<&str>,
+        env_vars: Option<&HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
+        output_callback: CommandOutputCallback,
+    ) -> crate::Result<ExecStreamingResult> {
+        let dir = working_dir.map(Self::resolve_container_path);
+        self.docker_exec_shell_streaming(
+            command,
+            timeout_ms,
+            dir.as_deref(),
+            env_vars,
+            cancel_token,
+            output_callback,
+        )
+        .await
+    }
+
     async fn read_file(
         &self,
         path: &str,
@@ -1288,6 +1504,7 @@ mod tests {
         reason = "unit test reads an in-memory tar entry synchronously"
     )]
     use std::io::Read as _;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
@@ -1344,6 +1561,87 @@ mod tests {
         assert_eq!(
             labels.get(RUN_ID_LABEL).map(String::as_str),
             Some("01HY0000000000000000000000")
+        );
+    }
+
+    #[tokio::test]
+    async fn streaming_timeout_terminates_docker_exec_before_returning() {
+        let image = "buildpack-deps:noble";
+        let Ok(docker) = Docker::connect_with_local_defaults() else {
+            return;
+        };
+        if docker.inspect_image(image).await.is_err() {
+            return;
+        }
+
+        let sandbox = DockerSandbox::new(
+            DockerSandboxOptions {
+                image: image.to_string(),
+                auto_pull: false,
+                skip_clone: true,
+                ..DockerSandboxOptions::default()
+            },
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("docker sandbox should construct");
+        sandbox
+            .initialize()
+            .await
+            .expect("docker sandbox should initialize");
+
+        let chunks = Arc::new(Mutex::new(Vec::new()));
+        let callback_chunks = Arc::clone(&chunks);
+        let callback: CommandOutputCallback = Arc::new(move |_stream, bytes| {
+            let callback_chunks = Arc::clone(&callback_chunks);
+            Box::pin(async move {
+                callback_chunks.lock().unwrap().extend(bytes);
+                Ok(())
+            })
+        });
+
+        let marker = "fabro_streaming_timeout_sentinel";
+        let result = sandbox
+            .exec_command_streaming(
+                &format!("trap '' HUP TERM; echo start; sleep 5 # {marker}"),
+                200,
+                None,
+                None,
+                None,
+                callback,
+            )
+            .await
+            .expect("streaming command should return a timeout result");
+
+        assert!(result.result.timed_out);
+        assert!(
+            String::from_utf8_lossy(&chunks.lock().unwrap()).contains("start"),
+            "stream should include output emitted before timeout"
+        );
+
+        let probe = sandbox
+            .exec_command(
+                "marker='fabro_streaming_timeout_''sentinel'; \
+                 ps -eo pid,args | awk -v marker=\"$marker\" \
+                 'index($0, marker) && $0 !~ /awk/ && $0 !~ /ps -eo/ { print }'",
+                1_000,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("process probe should run");
+        sandbox
+            .cleanup()
+            .await
+            .expect("docker cleanup should succeed");
+
+        assert!(
+            !probe.stdout.contains(marker),
+            "timed-out docker exec should be terminated before returning, found: {}",
+            probe.stdout
         );
     }
 

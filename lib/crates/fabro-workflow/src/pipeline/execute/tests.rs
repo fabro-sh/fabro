@@ -17,7 +17,7 @@ use fabro_hooks::HookSettings;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
 use fabro_store::Database;
-use fabro_types::{RunId, WorkflowSettings, fixtures};
+use fabro_types::{RunId, WorkflowSettings, fixtures, format_blob_ref};
 use object_store::memory::InMemory;
 
 use super::*;
@@ -420,6 +420,29 @@ impl HandlerTrait for PanickingHandler {
     }
 }
 
+struct BlobCommandOutputHandler;
+
+#[async_trait]
+impl HandlerTrait for BlobCommandOutputHandler {
+    async fn execute(
+        &self,
+        _node: &Node,
+        _context: &Context,
+        _graph: &Graph,
+        _run_dir: &Path,
+        services: &crate::handler::EngineServices,
+    ) -> std::result::Result<Outcome, Error> {
+        let blob = serde_json::to_vec("routed-ok").unwrap();
+        let blob_id = services.run.run_store.write_blob(&blob).await.unwrap();
+        let mut outcome = Outcome::success();
+        outcome.context_updates.insert(
+            context::keys::COMMAND_OUTPUT.to_string(),
+            serde_json::json!(format_blob_ref(&blob_id)),
+        );
+        Ok(outcome)
+    }
+}
+
 struct FailOnceThenSucceedHandler {
     call_count: AtomicU32,
 }
@@ -653,6 +676,78 @@ async fn execute_conditional_routing_uses_unconditional_success_path() {
         .unwrap();
     assert!(cp.completed_nodes.contains(&"path_b".to_string()));
     assert!(!cp.completed_nodes.contains(&"path_a".to_string()));
+}
+
+#[tokio::test]
+async fn execute_conditional_routing_resolves_command_output_blob_refs() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = Graph::new("command_output_route");
+
+    let mut start = Node::new("start");
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
+    g.nodes.insert("start".to_string(), start);
+
+    let mut commandish = Node::new("commandish");
+    commandish.attrs.insert(
+        "type".to_string(),
+        AttrValue::String("blob_command_output".to_string()),
+    );
+    commandish
+        .attrs
+        .insert("max_retries".to_string(), AttrValue::Integer(0));
+    g.nodes.insert("commandish".to_string(), commandish);
+
+    g.nodes.insert("matched".to_string(), Node::new("matched"));
+    g.nodes
+        .insert("fallback".to_string(), Node::new("fallback"));
+
+    let mut exit = Node::new("exit");
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
+    g.nodes.insert("exit".to_string(), exit);
+
+    g.edges.push(Edge::new("start", "commandish"));
+    let mut matched = Edge::new("commandish", "matched");
+    matched.attrs.insert(
+        "condition".to_string(),
+        AttrValue::String("command.output contains routed-ok".to_string()),
+    );
+    g.edges.push(matched);
+    g.edges.push(Edge::new("commandish", "fallback"));
+    g.edges.push(Edge::new("matched", "exit"));
+    g.edges.push(Edge::new("fallback", "exit"));
+
+    let mut registry = make_registry();
+    registry.register("blob_command_output", Box::new(BlobCommandOutputHandler));
+    let executed = execute_test_run_with_options(
+        test_run_options(dir.path(), "test-run"),
+        g,
+        Some(Arc::new(registry)),
+    )
+    .await;
+
+    let cp = executed
+        .engine
+        .run
+        .run_store
+        .state()
+        .await
+        .unwrap()
+        .checkpoint
+        .unwrap();
+    assert!(cp.completed_nodes.contains(&"matched".to_string()));
+    assert!(!cp.completed_nodes.contains(&"fallback".to_string()));
+    assert!(
+        cp.context_values[context::keys::COMMAND_OUTPUT]
+            .as_str()
+            .is_some_and(|value| value.starts_with("blob://sha256/")),
+        "durable checkpoint context should keep the command output blob ref"
+    );
 }
 
 #[tokio::test]

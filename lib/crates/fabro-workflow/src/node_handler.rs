@@ -123,6 +123,23 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         }
     }
 
+    async fn context_for_edge_selection(
+        &self,
+        context: &Context,
+        _graph: &WorkflowGraph,
+    ) -> CoreResult<Context> {
+        artifact::resolve_context_for_edge_selection(context, &self.services.run.run_store)
+            .await
+            .map_err(|err| {
+                CoreError::handler(HandlerErrorDetail {
+                    message:   err.to_string(),
+                    retryable: true,
+                    category:  Some(FailureCategory::TransientInfra),
+                    signature: None,
+                })
+            })
+    }
+
     fn retry_policy(&self, node: &WorkflowNode, _graph: &WorkflowGraph) -> CoreRetryPolicy {
         let gv_node = node.inner();
         build_retry_policy(gv_node, &self.graph)

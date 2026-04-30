@@ -6,6 +6,8 @@ import type {
   PaginatedRunList,
   PaginatedRunStageList,
   PaginatedStageTurnList,
+  CommandLogResponse,
+  CommandOutputStream,
   RunBilling,
   RunProjection,
   ServerSettings,
@@ -153,6 +155,18 @@ export function useRunEventsList(id: string | undefined, enabled = true) {
   return useSWR<PaginatedEventList | null>(
     id && enabled ? queryKeys.runs.events(id, 1000) : null,
     apiNullableFetcher,
+  );
+}
+
+export function fetchRunCommandLog(
+  id: string,
+  stageId: string,
+  stream: CommandOutputStream,
+  offset: number,
+  limit?: number,
+) {
+  return apiFetcher<CommandLogResponse>(
+    queryKeys.runs.stageLog(id, stageId, stream, offset, limit),
   );
 }
 

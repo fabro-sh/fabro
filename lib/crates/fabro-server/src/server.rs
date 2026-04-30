@@ -73,14 +73,15 @@ use fabro_types::settings::server::{
 };
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
-    ActorRef, EventBody, InterviewQuestionRecord, PullRequestRecord, QuestionType, RunBlobId,
-    RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance,
-    RunSubjectProvenance, ServerSettings,
+    ActorRef, CommandOutputStream, EventBody, InterviewQuestionRecord, PullRequestRecord,
+    QuestionType, RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
+    RunServerProvenance, RunSubjectProvenance, ServerSettings, parse_blob_ref,
 };
 use fabro_util::error::{collect_causes, render_with_causes};
 use fabro_util::version::FABRO_VERSION;
 use fabro_vault::{Error as VaultError, SecretType, Vault};
 use fabro_workflow::artifact_upload::ArtifactSink;
+use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
 use fabro_workflow::event::{self as workflow_event, Emitter};
 use fabro_workflow::handler::HandlerRegistry;
 use fabro_workflow::pipeline::Persisted;
@@ -123,8 +124,8 @@ use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
 use crate::server_secrets::{LlmClientResult, ServerSecrets};
 use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
 use crate::worker_token::{
-    AuthorizeRunBlob, AuthorizeRunScoped, AuthorizeStageArtifact, WorkerTokenKeys,
-    issue_worker_token,
+    AuthorizeCommandLog, AuthorizeRunBlob, AuthorizeRunScoped, AuthorizeStageArtifact,
+    WorkerTokenKeys, issue_worker_token,
 };
 use crate::{
     canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
@@ -1111,6 +1112,10 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/attach", get(demo::run_events_stub))
         .route("/runs/{id}/blobs", post(not_implemented))
         .route("/runs/{id}/blobs/{blobId}", get(not_implemented))
+        .route(
+            "/runs/{id}/stages/{stageId}/logs/{stream}",
+            get(not_implemented),
+        )
         .route("/runs/{id}/checkpoint", get(demo::checkpoint_stub))
         .route("/runs/{id}/cancel", post(demo::cancel_stub))
         .route("/runs/{id}/start", post(demo::start_run_stub))
@@ -1208,6 +1213,10 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/attach", get(attach_run_events))
         .route("/runs/{id}/blobs", post(write_run_blob))
         .route("/runs/{id}/blobs/{blobId}", get(read_run_blob))
+        .route(
+            "/runs/{id}/stages/{stageId}/logs/{stream}",
+            get(get_run_stage_command_log),
+        )
         .route("/runs/{id}/checkpoint", get(get_checkpoint))
         .route("/runs/{id}/cancel", post(cancel_run))
         .route("/runs/{id}/start", post(start_run))
@@ -3032,6 +3041,30 @@ struct ResolveRunQuery {
 struct DeleteRunQuery {
     #[serde(default)]
     force: bool,
+}
+
+fn default_command_log_limit() -> u64 {
+    65_536
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CommandLogQuery {
+    #[serde(default)]
+    offset: u64,
+    #[serde(default = "default_command_log_limit")]
+    limit:  u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct CommandLogResponseBody {
+    stream:         &'static str,
+    offset:         u64,
+    next_offset:    u64,
+    total_bytes:    u64,
+    bytes_base64:   String,
+    eof:            bool,
+    cas_ref:        Option<String>,
+    live_streaming: bool,
 }
 
 async fn resolve_run(
@@ -5299,6 +5332,144 @@ async fn get_run_logs(
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
     }
+}
+
+async fn get_run_stage_command_log(
+    AuthorizeCommandLog(id, stage_id, stream): AuthorizeCommandLog,
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<CommandLogQuery>,
+) -> Response {
+    const MAX_COMMAND_LOG_LIMIT: u64 = 1_048_576;
+
+    if query.limit == 0 {
+        return ApiError::bad_request("limit must be greater than 0").into_response();
+    }
+    let limit = query.limit.min(MAX_COMMAND_LOG_LIMIT);
+    let Ok(run_store) = state.store.open_run_reader(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+    let run_state = match run_store.state().await {
+        Ok(run_state) => run_state,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    let Some(node) = run_state.node(&stage_id) else {
+        return ApiError::not_found("Stage not found.").into_response();
+    };
+
+    let stream_value = match stream {
+        CommandOutputStream::Stdout => node.stdout.as_deref(),
+        CommandOutputStream::Stderr => node.stderr.as_deref(),
+    };
+    let cas_ref = stream_value
+        .filter(|value| parse_blob_ref(value).is_some())
+        .map(str::to_string);
+    let live_streaming = node
+        .live_streaming
+        .unwrap_or_else(|| cas_ref.is_none() && node.status.is_none());
+    let run_dir = Storage::new(state.server_storage_dir())
+        .run_scratch(&id)
+        .root()
+        .to_path_buf();
+    let scratch_path = command_log_path(&run_dir, &stage_id, stream);
+
+    match read_log_slice(&scratch_path, query.offset, limit).await {
+        Ok((bytes, total_bytes)) => {
+            let offset = query.offset.min(total_bytes);
+            return Json(CommandLogResponseBody {
+                stream: stream.as_str(),
+                offset,
+                next_offset: offset + u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+                total_bytes,
+                bytes_base64: BASE64_STANDARD.encode(bytes),
+                eof: cas_ref.is_some(),
+                cas_ref,
+                live_streaming,
+            })
+            .into_response();
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    }
+
+    if let Some(cas_ref) = cas_ref {
+        let text = match read_json_string_blob(&run_store.clone().into(), &cas_ref).await {
+            Ok(Some(text)) => text,
+            Ok(None) => String::new(),
+            Err(err) => {
+                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                    .into_response();
+            }
+        };
+        return command_log_text_response(
+            stream,
+            query.offset,
+            limit,
+            text.as_bytes(),
+            true,
+            Some(cas_ref),
+            live_streaming,
+        );
+    }
+
+    if let Some(inline_text) = stream_value {
+        return command_log_text_response(
+            stream,
+            query.offset,
+            limit,
+            inline_text.as_bytes(),
+            true,
+            None,
+            live_streaming,
+        );
+    }
+
+    let eof = node.status.is_some();
+    Json(CommandLogResponseBody {
+        stream: stream.as_str(),
+        offset: 0,
+        next_offset: 0,
+        total_bytes: 0,
+        bytes_base64: String::new(),
+        eof,
+        cas_ref: None,
+        live_streaming,
+    })
+    .into_response()
+}
+
+fn command_log_text_response(
+    stream: CommandOutputStream,
+    requested_offset: u64,
+    limit: u64,
+    bytes: &[u8],
+    eof: bool,
+    cas_ref: Option<String>,
+    live_streaming: bool,
+) -> Response {
+    let total_bytes = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    let offset = requested_offset.min(total_bytes);
+    let start = usize::try_from(offset).unwrap_or(bytes.len());
+    let end = start
+        .saturating_add(usize::try_from(limit).unwrap_or(usize::MAX))
+        .min(bytes.len());
+    let body = &bytes[start..end];
+    Json(CommandLogResponseBody {
+        stream: stream.as_str(),
+        offset,
+        next_offset: offset + u64::try_from(body.len()).unwrap_or(u64::MAX),
+        total_bytes,
+        bytes_base64: BASE64_STANDARD.encode(body),
+        eof,
+        cas_ref,
+        live_streaming,
+    })
+    .into_response()
 }
 
 #[expect(
@@ -10775,6 +10946,157 @@ slug = "fabro"
     }
 
     #[tokio::test]
+    async fn get_run_stage_command_log_returns_scratch_slice() {
+        let state = create_app_state_with_isolated_storage();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = RunId::new();
+        let stage_id = StageId::new("script_node", 1);
+        create_durable_run_with_events(&state, run_id, &[
+            workflow_event::Event::RunSubmitted {
+                definition_blob: None,
+            },
+            workflow_event::Event::StageStarted {
+                node_id:      "script_node".to_string(),
+                name:         "Script".to_string(),
+                index:        1,
+                handler_type: "command".to_string(),
+                attempt:      1,
+                max_attempts: 1,
+            },
+            workflow_event::Event::CommandStarted {
+                node_id:    "script_node".to_string(),
+                script:     "echo hello world".to_string(),
+                command:    "echo hello world".to_string(),
+                language:   "shell".to_string(),
+                timeout_ms: None,
+            },
+        ])
+        .await;
+        let run_dir = Storage::new(state.server_storage_dir())
+            .run_scratch(&run_id)
+            .root()
+            .to_path_buf();
+        let log_path = command_log_path(&run_dir, &stage_id, CommandOutputStream::Stdout);
+        tokio::fs::create_dir_all(log_path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&log_path, b"hello world").await.unwrap();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/{stage_id}/logs/stdout?offset=6&limit=5"
+            )))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        let body = response_json!(response, StatusCode::OK).await;
+        let bytes = BASE64_STANDARD
+            .decode(body["bytes_base64"].as_str().unwrap())
+            .unwrap();
+
+        assert_eq!(body["stream"], "stdout");
+        assert_eq!(body["offset"], 6);
+        assert_eq!(body["next_offset"], 11);
+        assert_eq!(body["total_bytes"], 11);
+        assert_eq!(bytes, b"world");
+        assert_eq!(body["eof"], false);
+        assert_eq!(body["cas_ref"], serde_json::Value::Null);
+        assert_eq!(body["live_streaming"], true);
+    }
+
+    #[tokio::test]
+    async fn get_run_stage_command_log_returns_cas_slice() {
+        let state = create_app_state_with_isolated_storage();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = RunId::new();
+        let run_store = state.store.create_run(&run_id).await.unwrap();
+        let stdout_blob = run_store
+            .write_blob(&serde_json::to_vec("hello world").unwrap())
+            .await
+            .unwrap();
+        let stderr_blob = run_store
+            .write_blob(&serde_json::to_vec("").unwrap())
+            .await
+            .unwrap();
+        let stdout_ref = format!("blob://sha256/{stdout_blob}");
+        let stderr_ref = format!("blob://sha256/{stderr_blob}");
+        for event in [
+            workflow_event::Event::RunSubmitted {
+                definition_blob: None,
+            },
+            workflow_event::Event::StageStarted {
+                node_id:      "script_node".to_string(),
+                name:         "Script".to_string(),
+                index:        1,
+                handler_type: "command".to_string(),
+                attempt:      1,
+                max_attempts: 1,
+            },
+            workflow_event::Event::CommandCompleted {
+                node_id:           "script_node".to_string(),
+                stdout:            stdout_ref.clone(),
+                stderr:            stderr_ref,
+                exit_code:         Some(0),
+                duration_ms:       5,
+                timed_out:         false,
+                stdout_bytes:      11,
+                stderr_bytes:      0,
+                streams_separated: true,
+                live_streaming:    false,
+            },
+        ] {
+            workflow_event::append_event(&run_store, &run_id, &event)
+                .await
+                .unwrap();
+        }
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/script_node@1/logs/stdout?offset=6&limit=5"
+            )))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        let body = response_json!(response, StatusCode::OK).await;
+        let bytes = BASE64_STANDARD
+            .decode(body["bytes_base64"].as_str().unwrap())
+            .unwrap();
+
+        assert_eq!(body["stream"], "stdout");
+        assert_eq!(body["offset"], 6);
+        assert_eq!(body["next_offset"], 11);
+        assert_eq!(body["total_bytes"], 11);
+        assert_eq!(bytes, b"world");
+        assert_eq!(body["eof"], true);
+        assert_eq!(body["cas_ref"], stdout_ref);
+        assert_eq!(body["live_streaming"], false);
+    }
+
+    #[tokio::test]
+    async fn get_run_stage_command_log_returns_not_found_for_missing_stage() {
+        let state = create_app_state_with_isolated_storage();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = RunId::new();
+        create_durable_run_with_events(&state, run_id, &[workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        }])
+        .await;
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/stages/missing@1/logs/stdout")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_status!(response, StatusCode::NOT_FOUND).await;
+    }
+
+    #[tokio::test]
     async fn get_run_pull_request_returns_live_detail_from_github() {
         let github = MockServer::start();
         let github_mock = github.mock(|when, then| {
@@ -12125,6 +12447,78 @@ slug = "fabro"
                     )))
                     .header(header::CONTENT_TYPE, "application/octet-stream")
                     .body(Body::from("artifact"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::UNAUTHORIZED).await;
+    }
+
+    #[tokio::test]
+    async fn worker_token_controls_command_log_route() {
+        let (state, app) = jwt_auth_app();
+        let user_jwt = issue_test_user_jwt();
+        let run_id = create_run_with_bearer(&app, &user_jwt).await;
+        let worker_token = issue_test_worker_token(&run_id);
+        let other_run_id = create_run_with_bearer(&app, &user_jwt).await;
+        let mismatched_worker_token = issue_test_worker_token(&other_run_id);
+        let run_store = state.store.open_run(&run_id).await.unwrap();
+        workflow_event::append_event(
+            &run_store,
+            &run_id,
+            &workflow_event::Event::CommandStarted {
+                node_id:    "code".to_string(),
+                script:     "echo hello".to_string(),
+                command:    "echo hello".to_string(),
+                language:   "shell".to_string(),
+                timeout_ms: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                Method::GET,
+                &format!("/runs/{run_id}/stages/code@1/logs/stdout"),
+                &worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                Method::GET,
+                &format!("/runs/{run_id}/stages/code@1/logs/stdout"),
+                &user_jwt,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                Method::GET,
+                &format!("/runs/{run_id}/stages/code@1/logs/stdout"),
+                &mismatched_worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::FORBIDDEN).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(api(&format!("/runs/{run_id}/stages/code@1/logs/stdout")))
+                    .body(Body::empty())
                     .unwrap(),
             )
             .await

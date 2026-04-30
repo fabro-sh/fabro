@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { Marked } from "marked";
 
@@ -40,7 +40,7 @@ import type { Stage } from "../components/stage-sidebar";
 import { EmptyState } from "../components/state";
 import { CopyButton } from "../components/ui";
 import { formatDurationSecs } from "../lib/format";
-import { useRunEventsList, useRunStageTurns, useRunStages } from "../lib/queries";
+import { fetchRunCommandLog, useRunEventsList, useRunStageTurns, useRunStages } from "../lib/queries";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import type { StageTurn as ApiStageTurn, PaginatedStageTurnList, PaginatedEventList } from "@qltysh/fabro-api-client";
 
@@ -50,10 +50,11 @@ type TurnType =
   | { kind: "system"; content: string }
   | { kind: "assistant"; content: string }
   | { kind: "tool"; tools: ToolUse[] }
-  | { kind: "command"; script: string; language: string; stdout?: string; stderr?: string; exitCode?: number | null; durationMs?: number; timedOut?: boolean; running: boolean };
+  | { kind: "command"; stageId: string; script: string; language: string; stdout?: string; stderr?: string; exitCode?: number | null; durationMs?: number; timedOut?: boolean; running: boolean };
 
 interface RawEvent {
   node_id?: string;
+  stage_id?: string;
   event: string;
   properties?: Record<string, unknown>;
   text?: string;
@@ -70,7 +71,7 @@ function turnsFromEvents(events: RawEvent[], stageId: string): TurnType[] {
   // Collect tool pairs: started → completed
   const pendingTools = new Map<string, { toolName: string; input: string }>();
   // Track pending command for pairing started → completed
-  let pendingCommand: { script: string; language: string } | undefined;
+  let pendingCommand: { stageId: string; script: string; language: string } | undefined;
 
   for (const e of stageEvents) {
     const props = e.properties ?? {};
@@ -111,6 +112,7 @@ function turnsFromEvents(events: RawEvent[], stageId: string): TurnType[] {
       }
       case "command.started": {
         pendingCommand = {
+          stageId: e.stage_id ?? `${stageId}@1`,
           script: props.script as string ?? "",
           language: props.language as string ?? "shell",
         };
@@ -119,6 +121,7 @@ function turnsFromEvents(events: RawEvent[], stageId: string): TurnType[] {
       case "command.completed": {
         turns.push({
           kind: "command",
+          stageId: pendingCommand?.stageId ?? e.stage_id ?? `${stageId}@1`,
           script: pendingCommand?.script ?? "",
           language: pendingCommand?.language ?? "shell",
           stdout: props.stdout as string ?? "",
@@ -138,6 +141,7 @@ function turnsFromEvents(events: RawEvent[], stageId: string): TurnType[] {
   if (pendingCommand) {
     turns.push({
       kind: "command",
+      stageId: pendingCommand.stageId,
       script: pendingCommand.script,
       language: pendingCommand.language,
       running: true,
@@ -238,6 +242,9 @@ function StatusPill({
 }
 
 const COLLAPSE_AFTER_LINES = 20;
+const LOG_POLL_INTERVAL_MS = 1000;
+const LOG_FETCH_LIMIT_BYTES = 65_536;
+const LOG_MEMORY_CAP_BYTES = 5 * 1024 * 1024;
 
 function StreamLabel({ label }: { label: string }) {
   return (
@@ -247,18 +254,144 @@ function StreamLabel({ label }: { label: string }) {
   );
 }
 
+interface CommandLogState {
+  text: string;
+  eof: boolean;
+  loading: boolean;
+  error: boolean;
+  truncated: boolean;
+  casRef: string | null;
+  liveStreaming: boolean;
+  totalBytes: number;
+}
+
+function decodeBase64Bytes(value: string): Uint8Array {
+  if (!value) return new Uint8Array();
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function trimTextToBytes(text: string, maxBytes: number) {
+  const encoded = new TextEncoder().encode(text);
+  if (encoded.byteLength <= maxBytes) {
+    return { text, truncated: false };
+  }
+  const start = encoded.byteLength - maxBytes;
+  const trimmed = new TextDecoder().decode(encoded.slice(start));
+  return { text: trimmed.replace(/^\uFFFD/, ""), truncated: true };
+}
+
+function useCommandLog(
+  runId: string | undefined,
+  stageId: string | undefined,
+  stream: "stdout" | "stderr",
+  running: boolean,
+): CommandLogState {
+  const [state, setState] = useState<CommandLogState>({
+    text: "",
+    eof: false,
+    loading: true,
+    error: false,
+    truncated: false,
+    casRef: null,
+    liveStreaming: false,
+    totalBytes: 0,
+  });
+  const offsetRef = useRef(0);
+  const finalPollDoneRef = useRef(false);
+  const decoderRef = useRef(new TextDecoder());
+
+  useEffect(() => {
+    offsetRef.current = 0;
+    finalPollDoneRef.current = false;
+    decoderRef.current = new TextDecoder();
+    setState({
+      text: "",
+      eof: false,
+      loading: true,
+      error: false,
+      truncated: false,
+      casRef: null,
+      liveStreaming: false,
+      totalBytes: 0,
+    });
+  }, [runId, stageId, stream]);
+
+  useEffect(() => {
+    if (!runId || !stageId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function poll() {
+      try {
+        const chunk = await fetchRunCommandLog(
+          runId,
+          stageId,
+          stream,
+          offsetRef.current,
+          LOG_FETCH_LIMIT_BYTES,
+        );
+        if (cancelled) return;
+
+        offsetRef.current = chunk.next_offset;
+        const bytes = decodeBase64Bytes(chunk.bytes_base64);
+        const decoded = decoderRef.current.decode(bytes, { stream: !chunk.eof });
+        finalPollDoneRef.current = chunk.eof;
+        setState((current) => {
+          const next = trimTextToBytes(current.text + decoded, LOG_MEMORY_CAP_BYTES);
+          return {
+            text: next.text,
+            eof: chunk.eof,
+            loading: false,
+            error: false,
+            truncated: current.truncated || next.truncated,
+            casRef: chunk.cas_ref,
+            liveStreaming: chunk.live_streaming,
+            totalBytes: chunk.total_bytes,
+          };
+        });
+      } catch {
+        if (!cancelled) {
+          setState((current) => ({ ...current, loading: false, error: true }));
+        }
+      }
+
+      if (!cancelled && (running || !finalPollDoneRef.current)) {
+        timer = setTimeout(poll, LOG_POLL_INTERVAL_MS);
+      }
+    }
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [runId, running, stageId, stream]);
+
+  return state;
+}
+
 function OutputStream({
   label,
-  content,
+  state,
   tone = "normal",
+  forceExpanded = false,
 }: {
   label: string;
-  content: string;
+  state: CommandLogState;
   tone?: "normal" | "error";
+  forceExpanded?: boolean;
 }) {
+  const content = state.text;
   const lines = content.split("\n");
   const isLong = lines.length > COLLAPSE_AFTER_LINES;
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(forceExpanded);
+  const scrollRef = useRef<HTMLPreElement>(null);
+  const followTailRef = useRef(true);
   const visible = isLong && !expanded
     ? lines.slice(-COLLAPSE_AFTER_LINES).join("\n")
     : content;
@@ -267,13 +400,44 @@ function OutputStream({
     tone === "error"
       ? "whitespace-pre-wrap font-mono text-sm leading-relaxed text-coral sm:text-xs"
       : "whitespace-pre-wrap font-mono text-sm leading-relaxed text-fg-3 sm:text-xs";
+  const status = state.error
+    ? "Failed to load"
+    : state.loading
+      ? "Waiting"
+      : content.length > 0
+        ? state.eof
+          ? state.casRef
+            ? "Stored"
+            : "Complete"
+          : state.liveStreaming
+            ? "Streaming"
+            : "Running"
+        : state.eof
+          ? "No output"
+          : "Waiting";
+
+  useEffect(() => {
+    if (!forceExpanded) return;
+    setExpanded(true);
+  }, [forceExpanded]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && followTailRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [visible]);
 
   return (
     <div>
       <div className="mb-1 flex items-center gap-2">
         <StreamLabel label={label} />
+        <span className="text-[11px] text-fg-muted">{status}</span>
+        {state.truncated ? (
+          <span className="text-[11px] text-amber">Last 5 MiB</span>
+        ) : null}
         <CopyButton
-          value={content}
+          value={visible}
           label={`Copy ${label}`}
           className="-my-1"
         />
@@ -287,13 +451,36 @@ function OutputStream({
           Show {hiddenLines} earlier lines
         </button>
       ) : null}
-      <pre className={preClass}>{visible}</pre>
+      {content.length === 0 ? (
+        <div className="font-mono text-sm text-fg-muted sm:text-xs">
+          {state.error ? "Unable to fetch this stream." : "No bytes received yet."}
+        </div>
+      ) : (
+        <pre
+          ref={scrollRef}
+          onScroll={(event) => {
+            const el = event.currentTarget;
+            followTailRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+          }}
+          className={`${preClass} max-h-96 overflow-auto`}
+        >
+          {visible}
+        </pre>
+      )}
     </div>
   );
 }
 
-function CommandBlock({ turn }: { turn: Extract<TurnType, { kind: "command" }> }) {
+function CommandBlock({
+  runId,
+  turn,
+}: {
+  runId: string | undefined;
+  turn: Extract<TurnType, { kind: "command" }>;
+}) {
   const failed = !turn.running && turn.exitCode !== 0;
+  const stdout = useCommandLog(runId, turn.stageId, "stdout", turn.running);
+  const stderr = useCommandLog(runId, turn.stageId, "stderr", turn.running);
   const borderColor = turn.running ? "border-teal-500/20" : failed ? "border-coral/15" : "border-mint/15";
   const bgColor = turn.running ? "bg-teal-500/5" : failed ? "bg-coral/5" : "bg-mint/5";
 
@@ -339,19 +526,19 @@ function CommandBlock({ turn }: { turn: Extract<TurnType, { kind: "command" }> }
         </div>
       )}
 
-      {/* stdout */}
-      {turn.stdout && (
-        <div className="border-t border-line px-3 py-2.5">
-          <OutputStream label="stdout" content={turn.stdout} />
+      <div className="grid border-t border-line md:grid-cols-2">
+        <div className="border-line px-3 py-2.5 md:border-r">
+          <OutputStream label="stdout" state={stdout} />
         </div>
-      )}
-
-      {/* stderr */}
-      {turn.stderr && (
-        <div className="border-t border-line px-3 py-2.5">
-          <OutputStream label="stderr" content={turn.stderr} tone="error" />
+        <div className="border-t border-line px-3 py-2.5 md:border-t-0">
+          <OutputStream
+            label="stderr"
+            state={stderr}
+            tone="error"
+            forceExpanded={failed || stderr.text.length > 0}
+          />
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -446,7 +633,7 @@ export default function RunStages() {
             case "tool":
               return <ToolBlock key={`turn-${i}`} tools={turn.tools} />;
             case "command":
-              return <CommandBlock key={`turn-${i}`} turn={turn} />;
+              return <CommandBlock key={`turn-${i}`} runId={id} turn={turn} />;
           }
         })}
       </div>

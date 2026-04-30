@@ -1,4 +1,6 @@
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -11,6 +13,7 @@ use fabro_llm::client::Client;
 use fabro_llm::provider::Provider;
 use fabro_llm::types::ToolDefinition;
 use fabro_store::{EventEnvelope, RunProjection, SerializableProjection};
+use fabro_types::{RunBlobId, parse_blob_ref};
 use tokio::task::JoinHandle;
 
 use crate::retro::{RetroNarrative, SmoothnessRating};
@@ -120,6 +123,12 @@ pub struct RetroAgentResult {
     pub response:  String,
 }
 
+pub type RetroBlobReader = Arc<
+    dyn Fn(RunBlobId) -> Pin<Box<dyn Future<Output = anyhow::Result<Option<Vec<u8>>>> + Send>>
+        + Send
+        + Sync,
+>;
+
 #[must_use]
 pub fn build_retro_prompt(retro_data_dir: &str) -> String {
     format!(
@@ -140,6 +149,7 @@ pub async fn run_retro_agent(
     state: &RunProjection,
     events: &[EventEnvelope],
     run_dir: &Path,
+    blob_reader: Option<RetroBlobReader>,
     llm_client: &Client,
     provider: Provider,
     model: &str,
@@ -147,7 +157,15 @@ pub async fn run_retro_agent(
 ) -> anyhow::Result<RetroAgentResult> {
     // Upload data files into sandbox (needed for Daytona; no-op effect for local
     // since the agent can also read from the original paths via tools).
-    upload_data_files(sandbox, state, events, run_dir, RETRO_DATA_DIR).await?;
+    upload_data_files(
+        sandbox,
+        state,
+        events,
+        run_dir,
+        RETRO_DATA_DIR,
+        blob_reader.as_ref(),
+    )
+    .await?;
 
     // Build provider profile with the submit_retro tool
     let captured: Arc<Mutex<Option<RetroNarrative>>> = Arc::new(Mutex::new(None));
@@ -300,6 +318,7 @@ async fn upload_data_files(
     events: &[EventEnvelope],
     _run_dir: &Path,
     target_dir: &str,
+    blob_reader: Option<&RetroBlobReader>,
 ) -> anyhow::Result<()> {
     let progress_content = (!events.is_empty()).then(|| {
         let mut buf = String::new();
@@ -406,19 +425,41 @@ async fn upload_data_files(
             sandbox,
             target_dir,
             &base.join("stdout.log"),
-            node.stdout.clone(),
+            resolve_text_file_content(node.stdout.clone(), blob_reader).await?,
         )
         .await?;
         upload_file(
             sandbox,
             target_dir,
             &base.join("stderr.log"),
-            node.stderr.clone(),
+            resolve_text_file_content(node.stderr.clone(), blob_reader).await?,
         )
         .await?;
     }
 
     Ok(())
+}
+
+async fn resolve_text_file_content(
+    content: Option<String>,
+    blob_reader: Option<&RetroBlobReader>,
+) -> anyhow::Result<Option<String>> {
+    let Some(content) = content else {
+        return Ok(None);
+    };
+    let Some(blob_id) = parse_blob_ref(&content) else {
+        return Ok(Some(content));
+    };
+    let Some(blob_reader) = blob_reader else {
+        return Ok(Some(content));
+    };
+
+    let bytes = blob_reader(blob_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("text blob missing: {blob_id}"))?;
+    let text = serde_json::from_slice::<String>(&bytes)
+        .map_err(|err| anyhow::anyhow!("text blob was not a JSON string: {err}"))?;
+    Ok(Some(text))
 }
 
 async fn upload_file(
@@ -573,11 +614,22 @@ mod tests {
             parallel_results:  Some(serde_json::json!([{ "stage": "fanout@1" }])),
             stdout:            Some("stdout".to_string()),
             stderr:            Some("stderr".to_string()),
+            stdout_bytes:      None,
+            stderr_bytes:      None,
+            streams_separated: None,
+            live_streaming:    None,
         });
 
-        upload_data_files(&sandbox, &state, &[], output_dir.path(), &target_dir_str)
-            .await
-            .expect("retro files should upload");
+        upload_data_files(
+            &sandbox,
+            &state,
+            &[],
+            output_dir.path(),
+            &target_dir_str,
+            None,
+        )
+        .await
+        .expect("retro files should upload");
 
         let run_json: serde_json::Value = serde_json::from_str(
             &fs::read_to_string(target_dir.join("run.json"))
@@ -620,6 +672,67 @@ mod tests {
         assert!(
             !target_dir.join("progress.jsonl").exists(),
             "progress file should be omitted when there are no events"
+        );
+    }
+
+    #[tokio::test]
+    async fn upload_data_files_resolves_command_stdout_stderr_blob_refs() {
+        let sandbox_root = tempfile::tempdir().expect("sandbox tempdir should exist");
+        let sandbox: Arc<dyn Sandbox> =
+            Arc::new(LocalSandbox::new(sandbox_root.path().to_path_buf()));
+        let output_dir = tempfile::tempdir().expect("retro tempdir should exist");
+        let target_dir = output_dir.path().join("retro");
+        let target_dir_str = target_dir.to_string_lossy().to_string();
+
+        let stdout_blob = serde_json::to_vec("resolved stdout").unwrap();
+        let stderr_blob = serde_json::to_vec("resolved stderr").unwrap();
+        let stdout_id = fabro_types::RunBlobId::new(&stdout_blob);
+        let stderr_id = fabro_types::RunBlobId::new(&stderr_blob);
+
+        let stage_id = StageId::new("build", 1);
+        let mut state = RunProjection::default();
+        state.set_node(stage_id, NodeState {
+            stdout: Some(fabro_types::format_blob_ref(&stdout_id)),
+            stderr: Some(fabro_types::format_blob_ref(&stderr_id)),
+            ..NodeState::default()
+        });
+
+        let reader: RetroBlobReader = Arc::new(move |blob_id| {
+            let stdout_blob = stdout_blob.clone();
+            let stderr_blob = stderr_blob.clone();
+            Box::pin(async move {
+                if blob_id == stdout_id {
+                    Ok(Some(stdout_blob))
+                } else if blob_id == stderr_id {
+                    Ok(Some(stderr_blob))
+                } else {
+                    Ok(None)
+                }
+            })
+        });
+
+        upload_data_files(
+            &sandbox,
+            &state,
+            &[],
+            output_dir.path(),
+            &target_dir_str,
+            Some(&reader),
+        )
+        .await
+        .expect("retro files should upload");
+
+        assert_eq!(
+            fs::read_to_string(target_dir.join("stages/build@1/stdout.log"))
+                .await
+                .expect("stdout file should exist"),
+            "resolved stdout"
+        );
+        assert_eq!(
+            fs::read_to_string(target_dir.join("stages/build@1/stderr.log"))
+                .await
+                .expect("stderr file should exist"),
+            "resolved stderr"
         );
     }
 }

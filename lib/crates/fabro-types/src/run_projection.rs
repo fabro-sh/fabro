@@ -49,6 +49,14 @@ pub struct NodeState {
     pub parallel_results:  Option<serde_json::Value>,
     pub stdout:            Option<String>,
     pub stderr:            Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout_bytes:      Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr_bytes:      Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub streams_separated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_streaming:    Option<bool>,
 }
 
 impl RunProjection {

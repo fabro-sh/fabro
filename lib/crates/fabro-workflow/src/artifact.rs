@@ -120,6 +120,19 @@ pub async fn resolve_context_for_execution(
     Ok(resolved)
 }
 
+pub async fn resolve_context_for_edge_selection(
+    context: &Context,
+    run_store: &RunStoreHandle,
+) -> Result<Context> {
+    let mut values = context.snapshot();
+    for key in [context::keys::COMMAND_OUTPUT, context::keys::COMMAND_STDERR] {
+        if let Some(Value::String(current)) = values.get_mut(key) {
+            *current = resolve_text_or_blob_ref_str(current, run_store).await?;
+        }
+    }
+    Ok(Context::from_values(values))
+}
+
 pub async fn resolve_outcomes_for_execution(
     node_outcomes: &HashMap<String, Outcome>,
     run_store: &RunStoreHandle,
@@ -142,6 +155,29 @@ pub async fn resolved_context_snapshot(
     let mut values = context.snapshot();
     resolve_execution_values(&mut values, run_store, env, run_dir).await?;
     Ok(values)
+}
+
+pub async fn resolve_text_or_blob_ref(value: &Value, run_store: &RunStoreHandle) -> Result<String> {
+    match value.as_str() {
+        Some(current) => resolve_text_or_blob_ref_str(current, run_store).await,
+        None => Ok(value.to_string()),
+    }
+}
+
+pub async fn resolve_text_or_blob_ref_str(
+    current: &str,
+    run_store: &RunStoreHandle,
+) -> Result<String> {
+    let Some(blob_id) = parse_blob_ref(current) else {
+        return Ok(current.to_string());
+    };
+    let bytes = run_store
+        .read_blob(&blob_id)
+        .await
+        .map_err(|e| Error::engine(format!("text blob read failed: {e}")))?
+        .ok_or_else(|| Error::engine(format!("text blob missing: {blob_id}")))?;
+    serde_json::from_slice::<String>(&bytes)
+        .map_err(|e| Error::engine(format!("text blob was not a JSON string: {e}")))
 }
 
 /// Sync artifact files to a remote sandbox.
@@ -225,14 +261,15 @@ fn resolve_execution_values<'a>(
     run_dir: &'a Path,
 ) -> BoxFuture<'a, Result<()>> {
     Box::pin(async move {
-        for value in values.values_mut() {
-            resolve_execution_value(value, run_store, env, run_dir).await?;
+        for (key, value) in values.iter_mut() {
+            resolve_execution_value(Some(key.as_str()), value, run_store, env, run_dir).await?;
         }
         Ok(())
     })
 }
 
 fn resolve_execution_value<'a>(
+    key: Option<&'a str>,
     value: &'a mut Value,
     run_store: &'a RunStoreHandle,
     env: &'a dyn Sandbox,
@@ -241,7 +278,12 @@ fn resolve_execution_value<'a>(
     Box::pin(async move {
         match value {
             Value::String(current) => {
-                if let Some(blob_id) =
+                if matches!(
+                    key,
+                    Some(context::keys::COMMAND_OUTPUT | context::keys::COMMAND_STDERR)
+                ) {
+                    *current = resolve_text_or_blob_ref_str(current, run_store).await?;
+                } else if let Some(blob_id) =
                     parse_blob_ref(current).or_else(|| parse_legacy_blob_file_ref(current))
                 {
                     *current = materialize_blob_ref(&blob_id, run_store, env, run_dir).await?;
@@ -253,12 +295,12 @@ fn resolve_execution_value<'a>(
             }
             Value::Array(items) => {
                 for item in items {
-                    resolve_execution_value(item, run_store, env, run_dir).await?;
+                    resolve_execution_value(None, item, run_store, env, run_dir).await?;
                 }
             }
             Value::Object(map) => {
                 for item in map.values_mut() {
-                    resolve_execution_value(item, run_store, env, run_dir).await?;
+                    resolve_execution_value(None, item, run_store, env, run_dir).await?;
                 }
             }
             Value::Null | Value::Bool(_) | Value::Number(_) => {}

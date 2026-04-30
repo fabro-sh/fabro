@@ -1768,6 +1768,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/stages/{stageId}/logs/{stream}:
+    get:
+      operationId: getRunStageCommandLog
+      tags: [Run Internals]
+      summary: Tail Command Log
+      description: Returns a byte-offset slice of a command stage stdout or stderr log. Bytes are base64-encoded and are not snapped to UTF-8 boundaries.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/StageId"
+        - $ref: "#/components/parameters/CommandLogStream"
+        - $ref: "#/components/parameters/CommandLogOffset"
+        - $ref: "#/components/parameters/CommandLogLimit"
+      responses:
+        "200":
+          description: Command log bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandLogResponse"
+        "400":
+          description: Invalid stage, stream, offset, or limit.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run or stage not found.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/questions:
     get:
       operationId: listRunQuestions
@@ -2890,6 +2928,38 @@ components:
       schema:
         type: string
       example: code@2
+
+    CommandLogStream:
+      name: stream
+      in: path
+      required: true
+      description: Command output stream to read.
+      schema:
+        $ref: "#/components/schemas/CommandOutputStream"
+      example: stdout
+
+    CommandLogOffset:
+      name: offset
+      in: query
+      required: false
+      description: Byte offset to start reading from. Defaults to `0`.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      example: 65536
+
+    CommandLogLimit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum bytes to return. Defaults to 65536 and is capped at 1048576.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1048576
+        default: 65536
+      example: 65536
 
     BlobId:
       name: blobId
@@ -4814,6 +4884,62 @@ components:
           description: Blob identifier.
           example: 550e8400-e29b-41d4-a716-446655440000
 
+    CommandOutputStream:
+      description: Command output stream name.
+      type: string
+      enum:
+        - stdout
+        - stderr
+
+    CommandLogResponse:
+      description: Byte-offset command log slice.
+      type: object
+      required:
+        - stream
+        - offset
+        - next_offset
+        - total_bytes
+        - bytes_base64
+        - eof
+        - cas_ref
+        - live_streaming
+      properties:
+        stream:
+          $ref: "#/components/schemas/CommandOutputStream"
+        offset:
+          type: integer
+          minimum: 0
+          description: Actual byte offset used for this slice.
+          example: 0
+        next_offset:
+          type: integer
+          minimum: 0
+          description: Byte offset for the next tail request.
+          example: 4096
+        total_bytes:
+          type: integer
+          minimum: 0
+          description: Total bytes currently available for the stream.
+          example: 8192
+        bytes_base64:
+          type: string
+          description: Base64-encoded raw log bytes.
+          example: aGVsbG8K
+        eof:
+          type: boolean
+          description: Whether the stream is finalized.
+          example: false
+        cas_ref:
+          oneOf:
+            - type: string
+              pattern: '^blob://sha256/[0-9a-f]{64}$'
+            - type: "null"
+          description: Final CAS reference once the command has completed.
+        live_streaming:
+          type: boolean
+          description: Whether the sandbox provided live output while the command was running.
+          example: true
+
     ArtifactEntry:
       description: A single artifact filename.
       type: object
@@ -4979,6 +5105,16 @@ components:
           type: ["string", "null"]
         stderr:
           type: ["string", "null"]
+        stdout_bytes:
+          type: ["integer", "null"]
+          minimum: 0
+        stderr_bytes:
+          type: ["integer", "null"]
+          minimum: 0
+        streams_separated:
+          type: ["boolean", "null"]
+        live_streaming:
+          type: ["boolean", "null"]
 
     InterviewOption:
       description: Option stored with an interview question in the event log.

@@ -1,9 +1,11 @@
 use std::path::Path;
 
 use async_trait::async_trait;
+use fabro_agent::CommandOutputCallback;
 use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};
+use crate::command_log::CommandLogRecorder;
 use crate::context::{Context, keys};
 use crate::error::Error;
 use crate::event::{Event, StageScope};
@@ -57,7 +59,7 @@ impl Handler for CommandHandler {
         node: &Node,
         context: &Context,
         _graph: &Graph,
-        _run_dir: &Path,
+        run_dir: &Path,
         services: &EngineServices,
     ) -> Result<Outcome, Error> {
         let script = node
@@ -107,25 +109,53 @@ impl Handler for CommandHandler {
             Some(&services.env)
         };
         let cancel_token = services.run.sandbox_cancel_token();
+        let stage_id = stage_scope.stage_id();
+        let recorder = CommandLogRecorder::create(run_dir, &stage_id).await?;
+        let output_callback: CommandOutputCallback = {
+            let recorder = recorder.clone();
+            std::sync::Arc::new(move |stream, bytes| {
+                let recorder = recorder.clone();
+                Box::pin(async move {
+                    recorder
+                        .append(stream, &bytes)
+                        .await
+                        .map_err(|err| fabro_sandbox::Error::message(err.to_string()))
+                })
+            })
+        };
 
         let result = services
             .run
             .sandbox
-            .exec_command(&command, timeout_ms, None, env_vars, cancel_token.clone())
+            .exec_command_streaming(
+                &command,
+                timeout_ms,
+                None,
+                env_vars,
+                cancel_token.clone(),
+                output_callback,
+            )
             .await;
         if let Some(token) = cancel_token {
             token.cancel();
         }
-        let result = result.map_err(|e| Error::handler(format!("Failed to spawn script: {e}")))?;
+        let streaming =
+            result.map_err(|e| Error::handler(format!("Failed to spawn script: {e}")))?;
+        let result = streaming.result;
+        let finalized = recorder.finalize(&services.run.run_store).await?;
 
         services.run.emitter.emit_scoped(
             &Event::CommandCompleted {
-                node_id:     node.id.clone(),
-                stdout:      result.stdout.clone(),
-                stderr:      result.stderr.clone(),
-                exit_code:   (!result.timed_out).then_some(result.exit_code),
-                duration_ms: result.duration_ms,
-                timed_out:   result.timed_out,
+                node_id:           node.id.clone(),
+                stdout:            finalized.stdout_ref.clone(),
+                stderr:            finalized.stderr_ref.clone(),
+                exit_code:         (!result.timed_out).then_some(result.exit_code),
+                duration_ms:       result.duration_ms,
+                timed_out:         result.timed_out,
+                stdout_bytes:      finalized.stdout_bytes,
+                stderr_bytes:      finalized.stderr_bytes,
+                streams_separated: streaming.streams_separated,
+                live_streaming:    streaming.live_streaming,
             },
             &stage_scope,
         );
@@ -140,36 +170,49 @@ impl Handler for CommandHandler {
             let mut outcome = Outcome::success();
             outcome.context_updates.insert(
                 keys::COMMAND_OUTPUT.to_string(),
-                serde_json::json!(result.stdout),
+                serde_json::json!(finalized.stdout_ref),
             );
             outcome.context_updates.insert(
                 keys::COMMAND_STDERR.to_string(),
-                serde_json::json!(result.stderr),
+                serde_json::json!(finalized.stderr_ref),
             );
             outcome.notes = Some(format!("Script completed: {script}"));
             Ok(outcome)
         } else {
             let mut reason = format!("Script failed with exit code: {}", result.exit_code);
-            if !result.stdout.trim().is_empty() {
+            let stdout_tail = tail_bytes(&finalized.stdout_text, 4096);
+            let stderr_tail = tail_bytes(&finalized.stderr_text, 4096);
+            if !stdout_tail.trim().is_empty() {
                 reason.push_str("\n\n## stdout\n");
-                reason.push_str(&result.stdout);
+                reason.push_str(&stdout_tail);
             }
-            if !result.stderr.trim().is_empty() {
+            if !stderr_tail.trim().is_empty() {
                 reason.push_str("\n\n## stderr\n");
-                reason.push_str(&result.stderr);
+                reason.push_str(&stderr_tail);
             }
             let mut outcome = Outcome::fail_classify(reason);
             outcome.context_updates.insert(
                 keys::COMMAND_OUTPUT.to_string(),
-                serde_json::json!(result.stdout),
+                serde_json::json!(finalized.stdout_ref),
             );
             outcome.context_updates.insert(
                 keys::COMMAND_STDERR.to_string(),
-                serde_json::json!(result.stderr),
+                serde_json::json!(finalized.stderr_ref),
             );
             Ok(outcome)
         }
     }
+}
+
+fn tail_bytes(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+    let mut start = text.len() - max_bytes;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    text[start..].to_string()
 }
 
 #[cfg(test)]
@@ -178,16 +221,69 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
+    use bytes::Bytes;
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::{Database, RunDatabase, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
+    use tokio::sync::Mutex;
 
     use super::*;
     use crate::outcome::StageOutcome;
+    use crate::runtime_store::{RunStoreBackend, RunStoreHandle};
+
+    #[derive(Default)]
+    struct MemoryRunStoreBackend {
+        blobs: Mutex<std::collections::HashMap<fabro_types::RunBlobId, Bytes>>,
+    }
+
+    #[async_trait::async_trait]
+    impl RunStoreBackend for MemoryRunStoreBackend {
+        async fn load_state(&self) -> anyhow::Result<fabro_store::RunProjection> {
+            Ok(fabro_store::RunProjection::default())
+        }
+
+        async fn list_events(&self) -> anyhow::Result<Vec<fabro_store::EventEnvelope>> {
+            Ok(Vec::new())
+        }
+
+        async fn append_run_event(&self, _event: &fabro_types::RunEvent) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn write_blob(&self, data: &[u8]) -> anyhow::Result<fabro_types::RunBlobId> {
+            let blob_id = fabro_types::RunBlobId::new(data);
+            self.blobs
+                .lock()
+                .await
+                .insert(blob_id, Bytes::copy_from_slice(data));
+            Ok(blob_id)
+        }
+
+        async fn read_blob(&self, id: &fabro_types::RunBlobId) -> anyhow::Result<Option<Bytes>> {
+            Ok(self.blobs.lock().await.get(id).cloned())
+        }
+    }
 
     fn make_services() -> EngineServices {
-        EngineServices::test_default()
+        let mut services = EngineServices::test_default();
+        services.run = services.run.with_run_store(RunStoreHandle::new(Arc::new(
+            MemoryRunStoreBackend::default(),
+        )));
+        services
+    }
+
+    async fn command_text(services: &EngineServices, value: &serde_json::Value) -> String {
+        crate::artifact::resolve_text_or_blob_ref(value, &services.run.run_store)
+            .await
+            .unwrap()
+    }
+
+    async fn command_log_text(services: &EngineServices, value: &str) -> String {
+        crate::command_log::read_json_string_blob(&services.run.run_store, value)
+            .await
+            .unwrap()
+            .unwrap_or_else(|| value.to_string())
     }
 
     fn test_store() -> Arc<Database> {
@@ -224,8 +320,9 @@ mod tests {
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
 
+        let services = make_services();
         let outcome = handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageOutcome::Failed {
@@ -304,16 +401,21 @@ mod tests {
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
 
+        let services = make_services();
         let outcome = handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert!(outcome.notes.as_deref().unwrap().contains("echo hello"));
         let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
-        assert!(command_output.as_str().unwrap().contains("hello"));
+        assert!(
+            command_text(&services, command_output)
+                .await
+                .contains("hello")
+        );
         let command_stderr = outcome.context_updates.get(keys::COMMAND_STDERR).unwrap();
-        assert_eq!(command_stderr.as_str().unwrap(), "");
+        assert_eq!(command_text(&services, command_stderr).await, "");
     }
 
     #[tokio::test]
@@ -326,8 +428,9 @@ mod tests {
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
 
+        let services = make_services();
         let outcome = handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageOutcome::Failed {
@@ -442,9 +545,13 @@ mod tests {
         let snapshot = run_store.state().await.unwrap();
         let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
         let stdout = node_state.stdout.as_deref().unwrap();
-        assert_eq!(stdout.trim(), "hello");
+        assert_eq!(command_log_text(&services, stdout).await.trim(), "hello");
         let stderr = node_state.stderr.as_deref().unwrap();
-        assert_eq!(stderr, "");
+        assert_eq!(command_log_text(&services, stderr).await, "");
+        assert_eq!(node_state.stdout_bytes, Some(6));
+        assert_eq!(node_state.stderr_bytes, Some(0));
+        assert_eq!(node_state.streams_separated, Some(true));
+        assert_eq!(node_state.live_streaming, Some(true));
     }
 
     #[tokio::test]
@@ -469,7 +576,7 @@ mod tests {
         let snapshot = run_store.state().await.unwrap();
         let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
         let stderr = node_state.stderr.as_deref().unwrap();
-        assert_eq!(stderr.trim(), "oops");
+        assert_eq!(command_log_text(&services, stderr).await.trim(), "oops");
     }
 
     #[tokio::test]
@@ -599,16 +706,16 @@ mod tests {
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
 
+        let services = make_services();
         let outcome = handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageOutcome::Succeeded);
         let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
         assert!(
-            command_output
-                .as_str()
-                .unwrap()
+            command_text(&services, command_output)
+                .await
                 .contains("hello from python")
         );
     }
@@ -681,13 +788,18 @@ mod tests {
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
 
+        let services = make_services();
         let outcome = handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageOutcome::Succeeded);
         let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
-        assert!(command_output.as_str().unwrap().contains("legacy"));
+        assert!(
+            command_text(&services, command_output)
+                .await
+                .contains("legacy")
+        );
     }
 
     #[tokio::test]
@@ -702,14 +814,17 @@ mod tests {
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
 
+        let services = make_services();
         let outcome = handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageOutcome::Succeeded);
         let command_stderr = outcome.context_updates.get(keys::COMMAND_STDERR).unwrap();
         assert!(
-            command_stderr.as_str().unwrap().contains("err"),
+            command_text(&services, command_stderr)
+                .await
+                .contains("err"),
             "command.stderr should contain 'err', got: {:?}",
             command_stderr
         );
@@ -822,7 +937,7 @@ mod tests {
     }
 
     fn make_spy_services(sandbox: std::sync::Arc<SpySandbox>) -> EngineServices {
-        let mut services = EngineServices::test_default();
+        let mut services = make_services();
         services.run = services.run.with_sandbox(sandbox);
         services
     }
@@ -847,21 +962,16 @@ mod tests {
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
 
+        let services = make_spy_services(spy.clone());
         let outcome = handler
-            .execute(
-                &node,
-                &context,
-                &graph,
-                run_dir.path(),
-                &make_spy_services(spy.clone()),
-            )
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
 
         assert_eq!(outcome.status, StageOutcome::Succeeded);
         let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
         assert_eq!(
-            command_output.as_str().unwrap(),
+            command_text(&services, command_output).await,
             "SANDBOX_MARKER\n",
             "CommandHandler must delegate to the sandbox, not spawn a host process"
         );
@@ -1017,8 +1127,9 @@ mod tests {
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
 
+        let services = make_services();
         let outcome = handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageOutcome::Failed {
@@ -1065,9 +1176,10 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let services = make_services();
 
         let outcome = handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageOutcome::Failed {
@@ -1078,7 +1190,9 @@ mod tests {
             .get(keys::COMMAND_OUTPUT)
             .expect("command.output should be set on failure");
         assert!(
-            command_output.as_str().unwrap().contains("build output"),
+            command_text(&services, command_output)
+                .await
+                .contains("build output"),
             "command.output should contain stdout, got: {command_output:?}"
         );
     }

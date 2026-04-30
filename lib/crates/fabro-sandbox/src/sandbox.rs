@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use fabro_types::CommandOutputStream;
 use serde::{Deserialize, Serialize};
 use tokio::time;
 use tokio_util::sync::CancellationToken;
@@ -82,6 +85,27 @@ macro_rules! delegate_sandbox {
             ) -> $crate::Result<$crate::ExecResult> {
                 self.$field
                     .exec_command(command, timeout_ms, working_dir, env_vars, cancel_token)
+                    .await
+            }
+
+            async fn exec_command_streaming(
+                &self,
+                command: &str,
+                timeout_ms: u64,
+                working_dir: Option<&str>,
+                env_vars: Option<&std::collections::HashMap<String, String>>,
+                cancel_token: Option<tokio_util::sync::CancellationToken>,
+                output_callback: $crate::CommandOutputCallback,
+            ) -> $crate::Result<$crate::ExecStreamingResult> {
+                self.$field
+                    .exec_command_streaming(
+                        command,
+                        timeout_ms,
+                        working_dir,
+                        env_vars,
+                        cancel_token,
+                        output_callback,
+                    )
                     .await
             }
 
@@ -423,6 +447,19 @@ impl ExecResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct ExecStreamingResult {
+    pub result:            ExecResult,
+    pub streams_separated: bool,
+    pub live_streaming:    bool,
+}
+
+pub type CommandOutputCallback = Arc<
+    dyn Fn(CommandOutputStream, Vec<u8>) -> Pin<Box<dyn Future<Output = crate::Result<()>> + Send>>
+        + Send
+        + Sync,
+>;
+
+#[derive(Debug, Clone)]
 pub struct DirEntry {
     pub name:   String,
     pub is_dir: bool,
@@ -460,6 +497,38 @@ pub trait Sandbox: Send + Sync {
         env_vars: Option<&std::collections::HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
     ) -> crate::Result<ExecResult>;
+    async fn exec_command_streaming(
+        &self,
+        command: &str,
+        timeout_ms: u64,
+        working_dir: Option<&str>,
+        env_vars: Option<&std::collections::HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
+        output_callback: CommandOutputCallback,
+    ) -> crate::Result<ExecStreamingResult> {
+        let result = self
+            .exec_command(command, timeout_ms, working_dir, env_vars, cancel_token)
+            .await?;
+        if !result.stdout.is_empty() {
+            output_callback(
+                CommandOutputStream::Stdout,
+                result.stdout.as_bytes().to_vec(),
+            )
+            .await?;
+        }
+        if !result.stderr.is_empty() {
+            output_callback(
+                CommandOutputStream::Stderr,
+                result.stderr.as_bytes().to_vec(),
+            )
+            .await?;
+        }
+        Ok(ExecStreamingResult {
+            result,
+            streams_separated: true,
+            live_streaming: false,
+        })
+    }
     async fn grep(
         &self,
         pattern: &str,
