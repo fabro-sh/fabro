@@ -2,31 +2,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fabro_model::Model;
-use strum::{EnumString, IntoStaticStr};
+pub use fabro_model::ModelTestMode;
+use strum::IntoStaticStr;
 use tokio::time;
 
 use crate::client::Client;
 use crate::generate::{self, GenerateParams};
 use crate::tools::Tool;
 use crate::types::{GenerateResult, ReasoningEffort};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumString, IntoStaticStr)]
-#[strum(serialize_all = "lowercase")]
-pub enum ModelTestMode {
-    #[default]
-    Basic,
-    Deep,
-}
-
-impl ModelTestMode {
-    #[must_use]
-    pub const fn timeout_secs(self) -> u64 {
-        match self {
-            Self::Basic => 30,
-            Self::Deep => 90,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]

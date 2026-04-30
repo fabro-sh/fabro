@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use fabro_workflow::outcome::{StageStatus, format_cost};
+use fabro_workflow::outcome::{StageOutcome, format_cost};
 use indicatif::ProgressBar;
 
 use super::event::ProgressUsage;
@@ -135,9 +135,14 @@ impl StageDisplay {
         status: &str,
         usage: Option<&ProgressUsage>,
     ) {
-        let succeeded = status.parse::<StageStatus>().map_or_else(
-            |_| matches!(status, "success" | "partial_success"),
-            |status| matches!(status, StageStatus::Success | StageStatus::PartialSuccess),
+        let succeeded = status.parse::<StageOutcome>().map_or_else(
+            |_| matches!(status, "succeeded" | "partially_succeeded"),
+            |status| {
+                matches!(
+                    status,
+                    StageOutcome::Succeeded | StageOutcome::PartiallySucceeded
+                )
+            },
         );
         let cost_str = usage
             .and_then(ProgressUsage::display_cost)

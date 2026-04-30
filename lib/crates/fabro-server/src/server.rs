@@ -24,19 +24,19 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
 pub use fabro_api::types::{
     AggregateBilling, AggregateBillingTotals, ApiQuestion, ApiQuestionOption, AppendEventResponse,
-    ArtifactEntry, ArtifactListResponse, BilledTokenCounts as ApiBilledTokenCounts, BillingByModel,
-    BillingStageRef, CloseRunPullRequestResponse, CompletionContentPart, CompletionMessage,
-    CompletionMessageRole, CompletionResponse, CompletionToolChoiceMode, CompletionUsage,
-    CreateCompletionRequest, CreateRunPullRequestRequest, CreateSecretRequest, DeleteSecretRequest,
-    DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, ForkRequest, ForkResponse,
-    MergeRunPullRequestRequest, MergeRunPullRequestResponse, ModelReference, PaginatedEventList,
-    PaginatedRunList, PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse,
-    PruneRunEntry, PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection,
-    RenderWorkflowGraphRequest, RewindRequest, RewindResponse, RunArtifactEntry,
-    RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals, RunError, RunManifest,
-    RunStage, RunStatusResponse, SandboxFileEntry, SandboxFileListResponse, SshAccessRequest,
-    SshAccessResponse, StageStatus as ApiStageStatus, StartRunRequest, SubmitAnswerRequest,
-    SystemFeatures, SystemInfoResponse, SystemRunCounts, TimelineEntryResponse, WriteBlobResponse,
+    ArtifactEntry, ArtifactListResponse, BillingByModel, BillingStageRef,
+    CloseRunPullRequestResponse, CompletionContentPart, CompletionMessage, CompletionMessageRole,
+    CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
+    CreateRunPullRequestRequest, CreateSecretRequest, DeleteSecretRequest, DiskUsageResponse,
+    DiskUsageRunRow, DiskUsageSummaryRow, ForkRequest, ForkResponse, MergeRunPullRequestRequest,
+    MergeRunPullRequestResponse, ModelReference, PaginatedEventList, PaginatedRunList,
+    PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse, PruneRunEntry,
+    PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest,
+    RewindRequest, RewindResponse, RunArtifactEntry, RunArtifactListResponse, RunBilling,
+    RunBillingStage, RunBillingTotals, RunError, RunManifest, RunStage, RunStatusResponse,
+    SandboxFileEntry, SandboxFileListResponse, SshAccessRequest, SshAccessResponse,
+    StageStatus as ApiStageStatus, StartRunRequest, SubmitAnswerRequest, SystemFeatures,
+    SystemInfoResponse, SystemRunCounts, TimelineEntryResponse, WriteBlobResponse,
 };
 use fabro_auth::{
     CredentialSource, VaultCredentialSource, auth_issue_message, parse_credential_secret,
@@ -46,12 +46,12 @@ use fabro_config::{RunLayer, RunSettingsBuilder, ServerSettingsBuilder, Storage,
 use fabro_interview::{Answer, ControlInterviewer, Interviewer, Question, WorkerControlEnvelope};
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
-use fabro_llm::model_test::{ModelTestMode, run_model_test};
+use fabro_llm::model_test::run_model_test;
 use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest, Role, ToolChoice,
     ToolDefinition,
 };
-use fabro_model::{BilledModelUsage, BilledTokenCounts, Catalog};
+use fabro_model::{BilledModelUsage, BilledTokenCounts, Catalog, ModelTestMode, Provider};
 use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::daytona::DaytonaSandbox;
 use fabro_sandbox::reconnect::reconnect;
@@ -635,35 +635,6 @@ pub(crate) struct ResolvedAppStateSettings {
     pub(crate) server_settings:       ServerSettings,
     pub(crate) manifest_run_defaults: RunLayer,
     pub(crate) manifest_run_settings: std::result::Result<RunNamespace, String>,
-}
-
-fn nonzero_i64(value: i64) -> Option<i64> {
-    (value != 0).then_some(value)
-}
-
-fn api_billed_token_counts_from_domain(billing: &BilledTokenCounts) -> ApiBilledTokenCounts {
-    ApiBilledTokenCounts {
-        cache_read_tokens:  nonzero_i64(billing.cache_read_tokens),
-        cache_write_tokens: nonzero_i64(billing.cache_write_tokens),
-        input_tokens:       billing.input_tokens,
-        output_tokens:      billing.output_tokens,
-        reasoning_tokens:   nonzero_i64(billing.reasoning_tokens),
-        total_tokens:       billing.total_tokens,
-        total_usd_micros:   billing.total_usd_micros,
-    }
-}
-
-fn api_billed_token_counts_from_usage(usage: &BilledModelUsage) -> ApiBilledTokenCounts {
-    let tokens = usage.tokens();
-    ApiBilledTokenCounts {
-        cache_read_tokens:  nonzero_i64(tokens.cache_read_tokens),
-        cache_write_tokens: nonzero_i64(tokens.cache_write_tokens),
-        input_tokens:       tokens.input_tokens,
-        output_tokens:      tokens.output_tokens,
-        reasoning_tokens:   nonzero_i64(tokens.reasoning_tokens),
-        total_tokens:       tokens.total_tokens(),
-        total_usd_micros:   usage.total_usd_micros,
-    }
 }
 
 fn accumulate_model_billing(entry: &mut ModelBillingTotals, usage: &BilledModelUsage) {
@@ -2190,32 +2161,34 @@ async fn get_aggregate_billing(
         .by_model
         .iter()
         .map(|(model, totals)| BillingByModel {
-            billing: api_billed_token_counts_from_domain(&totals.billing),
+            billing: totals.billing.clone(),
             model:   ModelReference { id: model.clone() },
             stages:  totals.stages,
         })
         .collect();
-    let total_billing = by_model
-        .iter()
-        .fold(BilledTokenCounts::default(), |mut acc, model| {
-            acc.input_tokens += model.billing.input_tokens;
-            acc.output_tokens += model.billing.output_tokens;
-            acc.reasoning_tokens += model.billing.reasoning_tokens.unwrap_or(0);
-            acc.cache_read_tokens += model.billing.cache_read_tokens.unwrap_or(0);
-            acc.cache_write_tokens += model.billing.cache_write_tokens.unwrap_or(0);
-            acc.total_tokens += model.billing.total_tokens;
-            if let Some(value) = model.billing.total_usd_micros {
-                *acc.total_usd_micros.get_or_insert(0) += value;
-            }
-            acc
-        });
+    let total_billing =
+        agg.by_model
+            .values()
+            .fold(BilledTokenCounts::default(), |mut acc, totals| {
+                let billing = &totals.billing;
+                acc.input_tokens += billing.input_tokens;
+                acc.output_tokens += billing.output_tokens;
+                acc.reasoning_tokens += billing.reasoning_tokens;
+                acc.cache_read_tokens += billing.cache_read_tokens;
+                acc.cache_write_tokens += billing.cache_write_tokens;
+                acc.total_tokens += billing.total_tokens;
+                if let Some(value) = billing.total_usd_micros {
+                    *acc.total_usd_micros.get_or_insert(0) += value;
+                }
+                acc
+            });
     let response = AggregateBilling {
         totals: AggregateBillingTotals {
-            cache_read_tokens:  nonzero_i64(total_billing.cache_read_tokens),
-            cache_write_tokens: nonzero_i64(total_billing.cache_write_tokens),
+            cache_read_tokens:  total_billing.cache_read_tokens,
+            cache_write_tokens: total_billing.cache_write_tokens,
             input_tokens:       total_billing.input_tokens,
             output_tokens:      total_billing.output_tokens,
-            reasoning_tokens:   nonzero_i64(total_billing.reasoning_tokens),
+            reasoning_tokens:   total_billing.reasoning_tokens,
             runs:               agg.total_runs,
             runtime_secs:       agg.total_runtime_secs,
             total_tokens:       total_billing.total_tokens,
@@ -2352,11 +2325,11 @@ async fn get_run_billing(
             by_model: Vec::new(),
             stages:   Vec::new(),
             totals:   RunBillingTotals {
-                cache_read_tokens:  None,
-                cache_write_tokens: None,
+                cache_read_tokens:  0,
+                cache_write_tokens: 0,
                 input_tokens:       0,
                 output_tokens:      0,
-                reasoning_tokens:   None,
+                reasoning_tokens:   0,
                 runtime_secs:       0.0,
                 total_tokens:       0,
                 total_usd_micros:   None,
@@ -2391,7 +2364,16 @@ async fn get_run_billing(
         };
 
         billed_usages.push(usage.clone());
-        let billing = api_billed_token_counts_from_usage(usage);
+        let tokens = usage.tokens();
+        let billing = BilledTokenCounts {
+            cache_read_tokens:  tokens.cache_read_tokens,
+            cache_write_tokens: tokens.cache_write_tokens,
+            input_tokens:       tokens.input_tokens,
+            output_tokens:      tokens.output_tokens,
+            reasoning_tokens:   tokens.reasoning_tokens,
+            total_tokens:       tokens.total_tokens(),
+            total_usd_micros:   usage.total_usd_micros,
+        };
         let model_id = usage.model_id().to_string();
         accumulate_model_billing(by_model_totals.entry(model_id.clone()).or_default(), usage);
         stages.push(RunBillingStage {
@@ -2409,7 +2391,7 @@ async fn get_run_billing(
     let by_model = by_model_totals
         .into_iter()
         .map(|(model, totals)| BillingByModel {
-            billing: api_billed_token_counts_from_domain(&totals.billing),
+            billing: totals.billing,
             model:   ModelReference { id: model },
             stages:  totals.stages,
         })
@@ -2419,11 +2401,11 @@ async fn get_run_billing(
         by_model,
         stages,
         totals: RunBillingTotals {
-            cache_read_tokens: nonzero_i64(totals.cache_read_tokens),
-            cache_write_tokens: nonzero_i64(totals.cache_write_tokens),
+            cache_read_tokens: totals.cache_read_tokens,
+            cache_write_tokens: totals.cache_write_tokens,
             input_tokens: totals.input_tokens,
             output_tokens: totals.output_tokens,
-            reasoning_tokens: nonzero_i64(totals.reasoning_tokens),
+            reasoning_tokens: totals.reasoning_tokens,
             runtime_secs,
             total_tokens: totals.total_tokens,
             total_usd_micros: totals.total_usd_micros,
@@ -7439,7 +7421,7 @@ async fn list_models(
     Query(params): Query<ModelListParams>,
 ) -> Response {
     let provider = match params.provider.as_deref() {
-        Some(value) => match fabro_model::Provider::from_str(value) {
+        Some(value) => match Provider::from_str(value) {
             Ok(provider) => Some(provider),
             Err(_) => {
                 return ApiError::new(

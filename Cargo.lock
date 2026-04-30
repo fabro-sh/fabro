@@ -1578,6 +1578,7 @@ version = "0.219.0-nightly.0"
 dependencies = [
  "chrono",
  "fabro-config",
+ "fabro-model",
  "fabro-types",
  "openapiv3",
  "prettyplease",

@@ -12,7 +12,7 @@ use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSecti
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
-use fabro_workflow::outcome::StageStatus;
+use fabro_workflow::outcome::StageOutcome;
 use fabro_workflow::records::Conclusion;
 use indicatif::HumanDuration;
 
@@ -178,7 +178,7 @@ pub(crate) fn print_run_conclusion(
 
     let status_str = conclusion.status.to_string().to_uppercase();
     let status_color = match conclusion.status {
-        StageStatus::Success | StageStatus::PartialSuccess => &styles.bold_green,
+        StageOutcome::Succeeded | StageOutcome::PartiallySucceeded => &styles.bold_green,
         _ => &styles.bold_red,
     };
     fabro_util::printerr!(printer, "Status:    {}", status_color.apply_to(&status_str));

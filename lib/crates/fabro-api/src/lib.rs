@@ -14,6 +14,7 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/codegen.rs"));
 }
 pub mod types {
+    pub use fabro_model::{Model, ModelCosts, ModelFeatures, ModelLimits, ModelTestMode, Provider};
     pub use fabro_types::settings::server::{
         DiscordIntegrationSettings, GithubIntegrationSettings, GithubIntegrationStrategy,
         IntegrationWebhooksSettings, IpAllowEntry, LogDestination, ObjectStoreSettings,
@@ -28,11 +29,11 @@ pub mod types {
         BlockedReason, FailureReason, RunControlAction, RunStatus, SuccessReason, TerminalStatus,
     };
     pub use fabro_types::{
-        ActorKind, ActorRef, DiffStats, DirtyStatus, EventEnvelope, GitContext, InterviewOption,
-        InterviewQuestionRecord, NodeState, NodeStatusRecord, PendingInterviewRecord,
-        PreRunPushOutcome, QuestionType, RepositoryReference, RunEvent, RunProjection, RunSummary,
-        SecretMetadata, SecretType, ServerSettings, StageStatus as InternalStageStatus,
-        WorkflowSettings,
+        ActorKind, ActorRef, BilledTokenCounts, DiffStats, DirtyStatus, EventEnvelope, GitContext,
+        InterviewOption, InterviewQuestionRecord, NodeState, NodeStatusRecord,
+        PendingInterviewRecord, PreRunPushOutcome, QuestionType, RepositoryReference, RunEvent,
+        RunProjection, RunSummary, SecretMetadata, SecretType, ServerSettings,
+        StageStatus as InternalStageStatus, WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

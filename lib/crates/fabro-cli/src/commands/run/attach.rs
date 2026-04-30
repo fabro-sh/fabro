@@ -24,7 +24,7 @@ use fabro_types::{EventBody, InterviewOption, RunId};
 use fabro_util::json::normalize_json_value;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
-use fabro_workflow::outcome::StageStatus;
+use fabro_workflow::outcome::StageOutcome;
 use fabro_workflow::run_status::RunStatus;
 use tokio::signal::ctrl_c;
 use tokio::time::sleep;
@@ -436,7 +436,7 @@ fn state_exit_code(state: &server_client::RunProjection) -> Option<ExitCode> {
     if let Some(conclusion) = &state.conclusion {
         let success = matches!(
             conclusion.status,
-            StageStatus::Success | StageStatus::PartialSuccess
+            StageOutcome::Succeeded | StageOutcome::PartiallySucceeded
         );
         return Some(if success {
             ExitCode::from(0)

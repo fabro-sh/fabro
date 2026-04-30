@@ -16,6 +16,7 @@ wildcard_imports = "warn"
 [dependencies]
 chrono = { workspace = true, features = ["serde"] }
 fabro-config = { path = "../fabro-config" }
+fabro-model = { path = "../fabro-model" }
 fabro-types = { path = "../fabro-types" }
 progenitor-client = "0.13"
 regress = "0.10"

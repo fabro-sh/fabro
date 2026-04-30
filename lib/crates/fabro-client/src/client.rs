@@ -9,7 +9,7 @@ use bytes::Bytes;
 use fabro_api::types;
 use fabro_http::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
 use fabro_http::multipart::{Form, Part};
-use fabro_model::Model;
+use fabro_model::{Model, ModelTestMode, Provider};
 use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
     ArtifactUpload, EventEnvelope, RunBlobId, RunEvent, RunId, RunProjection, RunSummary, StageId,
@@ -569,6 +569,13 @@ impl Client {
         provider: Option<&str>,
         query: Option<&str>,
     ) -> Result<Vec<Model>> {
+        let provider = provider
+            .map(|provider| {
+                provider
+                    .parse::<Provider>()
+                    .map_err(|_| anyhow!("unknown provider: {provider}"))
+            })
+            .transpose()?;
         let mut offset = 0u64;
         let mut models = Vec::new();
 
@@ -577,7 +584,7 @@ impl Client {
                 .send_api(|client| async move {
                     let mut request = client.list_models().page_limit(100u64).page_offset(offset);
                     if let Some(provider) = provider {
-                        request = request.provider(provider.to_string());
+                        request = request.provider(provider);
                     }
                     if let Some(query) = query {
                         request = request.query(query.to_string());
@@ -600,7 +607,7 @@ impl Client {
     pub async fn test_model(
         &self,
         id: &str,
-        mode: Option<types::ModelTestMode>,
+        mode: Option<ModelTestMode>,
     ) -> Result<types::ModelTestResult> {
         let response = self
             .send_api(|client| async move {

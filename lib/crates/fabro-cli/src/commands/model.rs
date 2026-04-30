@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_api::types as api_types;
-use fabro_model::{Catalog, Model, Provider};
+use fabro_model::{Catalog, Model, ModelTestMode, Provider};
 use fabro_util::terminal::Styles;
 use serde::Serialize;
 
@@ -200,7 +200,7 @@ async fn test_models_via_server(
     styles: &Styles,
     json_output: bool,
 ) -> Result<()> {
-    let request_mode = deep.then_some(api_types::ModelTestMode::Deep);
+    let request_mode = deep.then_some(ModelTestMode::Deep);
 
     let use_color = styles.use_color;
     let mut title = models_title(use_color);
@@ -559,7 +559,7 @@ mod tests {
 
         let client = test_client(&server.url(""));
         let response = client
-            .test_model("test-model", Some(api_types::ModelTestMode::Deep))
+            .test_model("test-model", Some(ModelTestMode::Deep))
             .await
             .unwrap();
 

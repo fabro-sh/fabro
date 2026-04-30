@@ -3009,7 +3009,7 @@ components:
       required: false
       description: Filter models by provider name. Invalid values return `400`.
       schema:
-        type: string
+        $ref: "#/components/schemas/Provider"
       example: anthropic
 
     ModelQueryFilter:
@@ -3431,11 +3431,25 @@ components:
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
+    Provider:
+      description: LLM provider identifier.
+      type: string
+      enum:
+        - anthropic
+        - openai
+        - gemini
+        - kimi
+        - zai
+        - minimax
+        - inception
+        - openai_compatible
+
     ModelLimits:
       description: Token limits for a model.
       type: object
       required:
         - context_window
+        - max_output
       properties:
         context_window:
           type: integer
@@ -3455,6 +3469,7 @@ components:
         - tools
         - vision
         - reasoning
+        - effort
       properties:
         tools:
           type: boolean
@@ -3465,10 +3480,17 @@ components:
         reasoning:
           type: boolean
           description: Whether the model supports extended reasoning.
+        effort:
+          type: boolean
+          description: Whether the model supports direct reasoning effort controls.
 
     ModelCosts:
       description: Pricing per million tokens in USD.
       type: object
+      required:
+        - input_cost_per_mtok
+        - output_cost_per_mtok
+        - cache_input_cost_per_mtok
       properties:
         input_cost_per_mtok:
           type: ["number", "null"]
@@ -3495,8 +3517,11 @@ components:
         - family
         - display_name
         - limits
+        - training
+        - knowledge_cutoff
         - features
         - costs
+        - estimated_output_tps
         - aliases
         - default
       properties:
@@ -3505,9 +3530,7 @@ components:
           description: Unique model identifier.
           example: "claude-opus-4-6"
         provider:
-          type: string
-          description: Provider that serves this model.
-          example: "anthropic"
+          $ref: "#/components/schemas/Provider"
         family:
           type: string
           description: Model family grouping.
@@ -3522,6 +3545,10 @@ components:
           type: ["string", "null"]
           description: Training data cutoff date (YYYY-MM-DD).
           example: "2025-08-01"
+        knowledge_cutoff:
+          type: ["string", "null"]
+          description: Public knowledge cutoff label, if known.
+          example: "May 2025"
         features:
           $ref: "#/components/schemas/ModelFeatures"
         costs:
@@ -5375,29 +5402,38 @@ components:
         - input_tokens
         - output_tokens
         - total_tokens
+        - reasoning_tokens
+        - cache_read_tokens
+        - cache_write_tokens
       properties:
         input_tokens:
           type: integer
+          format: int64
           description: Number of input tokens consumed.
           example: 28640
         output_tokens:
           type: integer
+          format: int64
           description: Number of output tokens generated.
           example: 8750
         total_tokens:
           type: integer
+          format: int64
           description: Total billable tokens aggregated across categories.
           example: 37390
         reasoning_tokens:
           type: integer
+          format: int64
           description: Number of reasoning tokens.
           example: 1200
         cache_read_tokens:
           type: integer
+          format: int64
           description: Number of cache read tokens.
           example: 4800
         cache_write_tokens:
           type: integer
+          format: int64
           description: Number of cache write tokens.
           example: 1500
         total_usd_micros:
@@ -5722,6 +5758,9 @@ components:
         - input_tokens
         - output_tokens
         - total_tokens
+        - reasoning_tokens
+        - cache_read_tokens
+        - cache_write_tokens
         - runtime_secs
       properties:
         runs:
@@ -6235,6 +6274,9 @@ components:
         - input_tokens
         - output_tokens
         - total_tokens
+        - reasoning_tokens
+        - cache_read_tokens
+        - cache_write_tokens
       properties:
         runtime_secs:
           type: number

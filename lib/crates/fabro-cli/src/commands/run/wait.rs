@@ -135,8 +135,7 @@ fn print_human_output(
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::{BilledTokenCounts, RunStatus, SuccessReason, fixtures};
-    use fabro_workflow::outcome::StageStatus;
+    use fabro_types::{BilledTokenCounts, RunStatus, StageOutcome, SuccessReason, fixtures};
     use fabro_workflow::records::Conclusion;
 
     use super::*;
@@ -150,7 +149,7 @@ mod tests {
         let run_id = fixtures::RUN_1;
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
-            status:               StageStatus::Success,
+            status:               StageOutcome::Succeeded,
             duration_ms:          12345,
             failure_reason:       None,
             final_git_commit_sha: None,
@@ -206,7 +205,9 @@ mod tests {
         let run_id = fixtures::RUN_4;
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
-            status:               StageStatus::Fail,
+            status:               StageOutcome::Failed {
+                retry_requested: false,
+            },
             duration_ms:          500,
             failure_reason:       Some("error".into()),
             final_git_commit_sha: None,
@@ -231,7 +232,7 @@ mod tests {
         let run_id = fixtures::RUN_5;
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
-            status:               StageStatus::Success,
+            status:               StageOutcome::Succeeded,
             duration_ms:          8000,
             failure_reason:       None,
             final_git_commit_sha: None,
