@@ -11,6 +11,10 @@ AI coding agents are powerful but unpredictable. You either babysit every step o
 [![docs](https://img.shields.io/badge/docs-fabro.sh-357F9E)](https://docs.fabro.sh)
 ![Discord](https://img.shields.io/discord/1256822430505373696)
 
+> *Graphs guide the agents*
+> *Each node a steady footstep*
+> *You rest; code flows on*
+
 ```bash
 # With Claude Code
 curl -fsSL https://fabro.sh/install.md | claude
