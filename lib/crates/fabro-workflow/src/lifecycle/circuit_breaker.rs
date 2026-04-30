@@ -9,7 +9,7 @@ use fabro_core::state::ExecutionState;
 
 use crate::error::{FailureCategory, FailureSignature, FailureSignatureExt};
 use crate::graph::{WorkflowGraph, WorkflowNode};
-use crate::outcome::{BilledModelUsage, OutcomeExt, StageStatus};
+use crate::outcome::{BilledModelUsage, OutcomeExt};
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -65,7 +65,7 @@ impl RunLifecycle<WorkflowGraph> for CircuitBreakerLifecycle {
         let gv = node.inner();
         let outcome = &result.outcome;
 
-        let outcome_failure_category = if outcome.status == StageStatus::Fail {
+        let outcome_failure_category = if outcome.status.is_failure() {
             outcome.classified_failure_category()
         } else {
             None

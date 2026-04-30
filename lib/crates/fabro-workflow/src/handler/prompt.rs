@@ -230,7 +230,7 @@ mod tests {
             .simulate(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
         assert_eq!(outcome.notes.as_deref(), Some("[Simulated] classify"));
         assert_eq!(
             outcome
@@ -303,7 +303,7 @@ mod tests {
             .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
 
         assert_eq!(
             outcome

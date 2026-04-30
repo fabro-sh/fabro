@@ -35,10 +35,10 @@ That means an unanswered gate will only continue if you model that path explicit
 approve [shape=hexagon, label="Approve release?"]
 
 approve -> ship          [label="[A] Approve"]
-approve -> manual_review [condition="outcome=fail"]
+approve -> manual_review [condition="outcome=failed"]
 ```
 
-If no `outcome=fail` edge or `retry_target` exists, the run stops rather than advancing past the approval gate.
+If no `outcome=failed` edge or `retry_target` exists, the run stops rather than advancing past the approval gate.
 
 ## Retry layers
 
@@ -285,7 +285,7 @@ A node failure does **not** automatically terminate the run. Fabro follows this 
 2. **Turn-level retries** — dropped streams retry the same agent turn (up to 3 retries), preserving conversation history
 3. **Provider failover** — if configured, switch to a fallback provider
 4. **Node retries** — re-execute the entire handler (per the retry policy)
-4. **Edge routing** — if the node ultimately fails, look for an outgoing edge that matches (e.g., `condition="outcome=fail"`)
+4. **Edge routing** — if the node ultimately fails, look for an outgoing edge that matches (e.g., `condition="outcome=failed"`)
 5. **Retry target** — if no matching edge exists, check `retry_target` / `fallback_retry_target` on the node and graph
 6. **Run failure** — if none of the above produces a path forward, the run terminates
 

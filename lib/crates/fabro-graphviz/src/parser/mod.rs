@@ -89,8 +89,8 @@ mod tests {
             gate      [shape=diamond, label="Tests passing?"]
 
             start -> plan -> implement -> validate -> gate
-            gate -> exit      [label="Yes", condition="outcome=success"]
-            gate -> implement [label="No", condition="outcome!=success"]
+            gate -> exit      [label="Yes", condition="outcome=succeeded"]
+            gate -> implement [label="No", condition="outcome!=succeeded"]
         }"#;
         let graph = parse(input).unwrap();
         assert_eq!(graph.name, "Branch");
@@ -104,7 +104,7 @@ mod tests {
             .iter()
             .find(|e| e.from == "gate" && e.to == "exit")
             .unwrap();
-        assert_eq!(gate_exit.condition(), Some("outcome=success"));
+        assert_eq!(gate_exit.condition(), Some("outcome=succeeded"));
     }
 
     #[test]

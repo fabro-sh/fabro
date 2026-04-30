@@ -149,9 +149,9 @@ pub(crate) fn evaluate_condition(expr: &str, outcome: &Outcome, context: &Contex
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::outcome::StageStatus;
+    use crate::outcome::StageOutcome;
 
-    fn make_outcome(status: StageStatus) -> Outcome {
+    fn make_outcome(status: StageOutcome) -> Outcome {
         Outcome {
             status,
             ..Outcome::success()
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn empty_condition_is_true() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         assert!(evaluate_condition("", &outcome, &context));
         assert!(evaluate_condition("  ", &outcome, &context));
@@ -172,23 +172,27 @@ mod tests {
 
     #[test]
     fn outcome_equals_success() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
-        assert!(evaluate_condition("outcome=success", &outcome, &context));
-        assert!(!evaluate_condition("outcome=fail", &outcome, &context));
+        assert!(evaluate_condition("outcome=succeeded", &outcome, &context));
+        assert!(!evaluate_condition("outcome=failed", &outcome, &context));
     }
 
     #[test]
     fn outcome_not_equals() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
-        assert!(evaluate_condition("outcome!=fail", &outcome, &context));
-        assert!(!evaluate_condition("outcome!=success", &outcome, &context));
+        assert!(evaluate_condition("outcome!=failed", &outcome, &context));
+        assert!(!evaluate_condition(
+            "outcome!=succeeded",
+            &outcome,
+            &context
+        ));
     }
 
     #[test]
     fn preferred_label_match() {
-        let mut outcome = make_outcome(StageStatus::Success);
+        let mut outcome = make_outcome(StageOutcome::Succeeded);
         outcome.preferred_label = Some("Fix".to_string());
         let context = Context::new();
         assert!(evaluate_condition(
@@ -205,7 +209,7 @@ mod tests {
 
     #[test]
     fn context_key_with_prefix() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("tests_passed", serde_json::json!("true"));
         assert!(evaluate_condition(
@@ -217,7 +221,7 @@ mod tests {
 
     #[test]
     fn bare_key_context_lookup() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("custom_key", serde_json::json!("custom_value"));
         assert!(evaluate_condition(
@@ -229,7 +233,7 @@ mod tests {
 
     #[test]
     fn missing_key_compares_as_empty() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         assert!(!evaluate_condition(
             "missing_key=something",
@@ -241,16 +245,16 @@ mod tests {
 
     #[test]
     fn multiple_clauses_and() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("tests_passed", serde_json::json!("true"));
         assert!(evaluate_condition(
-            "outcome=success && context.tests_passed=true",
+            "outcome=succeeded && context.tests_passed=true",
             &outcome,
             &context
         ));
         assert!(!evaluate_condition(
-            "outcome=fail && context.tests_passed=true",
+            "outcome=failed && context.tests_passed=true",
             &outcome,
             &context
         ));
@@ -258,7 +262,7 @@ mod tests {
 
     #[test]
     fn context_dotted_fallback() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("loop_state", serde_json::json!("exhausted"));
         assert!(evaluate_condition(
@@ -270,7 +274,7 @@ mod tests {
 
     #[test]
     fn bare_key_truthy_when_non_empty() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("my_flag", serde_json::json!("yes"));
         assert!(evaluate_condition("my_flag", &outcome, &context));
@@ -278,14 +282,14 @@ mod tests {
 
     #[test]
     fn bare_key_falsy_when_empty() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         assert!(!evaluate_condition("missing_key", &outcome, &context));
     }
 
     #[test]
     fn bare_key_falsy_when_false_string() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("my_flag", serde_json::json!("false"));
         assert!(!evaluate_condition("my_flag", &outcome, &context));
@@ -293,7 +297,7 @@ mod tests {
 
     #[test]
     fn bare_key_falsy_when_zero_string() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("my_flag", serde_json::json!("0"));
         assert!(!evaluate_condition("my_flag", &outcome, &context));
@@ -301,11 +305,11 @@ mod tests {
 
     #[test]
     fn bare_key_with_and_clause() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("flag", serde_json::json!("yes"));
         assert!(evaluate_condition(
-            "outcome=success && flag",
+            "outcome=succeeded && flag",
             &outcome,
             &context
         ));
@@ -313,7 +317,9 @@ mod tests {
 
     #[test]
     fn context_failure_class_matches_when_set() {
-        let outcome = make_outcome(StageStatus::Fail);
+        let outcome = make_outcome(StageOutcome::Failed {
+            retry_requested: false,
+        });
         let context = Context::new();
         context.set(keys::FAILURE_CLASS, serde_json::json!("budget_exhausted"));
         assert!(evaluate_condition(
@@ -325,7 +331,7 @@ mod tests {
 
     #[test]
     fn context_failure_class_not_equals_on_success() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set(keys::FAILURE_CLASS, serde_json::json!(""));
         assert!(evaluate_condition(
@@ -337,16 +343,18 @@ mod tests {
 
     #[test]
     fn context_failure_class_combined_with_outcome() {
-        let outcome = make_outcome(StageStatus::Fail);
+        let outcome = make_outcome(StageOutcome::Failed {
+            retry_requested: false,
+        });
         let context = Context::new();
         context.set(keys::FAILURE_CLASS, serde_json::json!("transient_infra"));
         assert!(evaluate_condition(
-            "outcome=fail && context.failure_class=transient_infra",
+            "outcome=failed && context.failure_class=transient_infra",
             &outcome,
             &context
         ));
         assert!(!evaluate_condition(
-            "outcome=fail && context.failure_class=deterministic",
+            "outcome=failed && context.failure_class=deterministic",
             &outcome,
             &context
         ));
@@ -358,7 +366,7 @@ mod tests {
 
     #[test]
     fn numeric_gt() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("score", serde_json::json!(90));
         assert!(evaluate_condition("context.score > 80", &outcome, &context));
@@ -372,7 +380,7 @@ mod tests {
 
     #[test]
     fn numeric_gte() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("score", serde_json::json!(80));
         assert!(evaluate_condition(
@@ -384,7 +392,7 @@ mod tests {
 
     #[test]
     fn numeric_lte() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("score", serde_json::json!(80));
         assert!(evaluate_condition(
@@ -396,7 +404,7 @@ mod tests {
 
     #[test]
     fn numeric_lt() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("count", serde_json::json!(3));
         assert!(evaluate_condition("context.count < 5", &outcome, &context));
@@ -404,7 +412,7 @@ mod tests {
 
     #[test]
     fn numeric_float() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("ratio", serde_json::json!(0.75));
         assert!(evaluate_condition(
@@ -416,7 +424,7 @@ mod tests {
 
     #[test]
     fn numeric_non_numeric_returns_false() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("score", serde_json::json!("not_a_number"));
         assert!(!evaluate_condition(
@@ -432,7 +440,7 @@ mod tests {
 
     #[test]
     fn contains_substring() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("message", serde_json::json!("an error occurred"));
         assert!(evaluate_condition(
@@ -450,7 +458,7 @@ mod tests {
 
     #[test]
     fn contains_case_sensitive() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("message", serde_json::json!("an error occurred"));
         assert!(!evaluate_condition(
@@ -462,7 +470,7 @@ mod tests {
 
     #[test]
     fn contains_json_array() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("tags", serde_json::json!(["urgent", "low"]));
         assert!(evaluate_condition(
@@ -483,7 +491,7 @@ mod tests {
 
     #[test]
     fn matches_regex() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("version", serde_json::json!("v2.0"));
         assert!(evaluate_condition(
@@ -505,16 +513,18 @@ mod tests {
 
     #[test]
     fn or_disjunction() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         assert!(evaluate_condition(
-            "outcome=success || outcome=partial_success",
+            "outcome=succeeded || outcome=partially_succeeded",
             &outcome,
             &context
         ));
-        let outcome = make_outcome(StageStatus::Fail);
+        let outcome = make_outcome(StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert!(!evaluate_condition(
-            "outcome=success || outcome=partial_success",
+            "outcome=succeeded || outcome=partially_succeeded",
             &outcome,
             &context
         ));
@@ -523,7 +533,7 @@ mod tests {
     #[test]
     fn or_precedence_and_binds_tighter() {
         // a=1 && b=2 || c=3  is  (a=1 AND b=2) OR c=3
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("a", serde_json::json!("0"));
         context.set("b", serde_json::json!("2"));
@@ -535,7 +545,7 @@ mod tests {
     #[test]
     fn or_precedence_right_and() {
         // a=1 || b=2 && c=3  is  a=1 OR (b=2 AND c=3)
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("a", serde_json::json!("0"));
         context.set("b", serde_json::json!("2"));
@@ -550,26 +560,30 @@ mod tests {
 
     #[test]
     fn not_negation() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
-        assert!(evaluate_condition("!outcome=fail", &outcome, &context));
-        assert!(!evaluate_condition("!outcome=success", &outcome, &context));
+        assert!(evaluate_condition("!outcome=failed", &outcome, &context));
+        assert!(!evaluate_condition(
+            "!outcome=succeeded",
+            &outcome,
+            &context
+        ));
     }
 
     #[test]
     fn not_missing_key_is_true() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         assert!(evaluate_condition("!missing_key", &outcome, &context));
     }
 
     #[test]
     fn not_with_and() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("ready", serde_json::json!("true"));
         assert!(evaluate_condition(
-            "!outcome=fail && context.ready=true",
+            "!outcome=failed && context.ready=true",
             &outcome,
             &context
         ));
@@ -581,23 +595,31 @@ mod tests {
 
     #[test]
     fn quoted_value_matches_bare_value() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         assert!(evaluate_condition(
-            r#"outcome="success""#,
+            r#"outcome="succeeded""#,
             &outcome,
             &context
         ));
-        assert!(!evaluate_condition(r#"outcome="fail""#, &outcome, &context));
+        assert!(!evaluate_condition(
+            r#"outcome="failed""#,
+            &outcome,
+            &context
+        ));
     }
 
     #[test]
     fn quoted_not_eq_matches() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
-        assert!(evaluate_condition(r#"outcome!="fail""#, &outcome, &context));
+        assert!(evaluate_condition(
+            r#"outcome!="failed""#,
+            &outcome,
+            &context
+        ));
         assert!(!evaluate_condition(
-            r#"outcome!="success""#,
+            r#"outcome!="succeeded""#,
             &outcome,
             &context
         ));
@@ -605,7 +627,7 @@ mod tests {
 
     #[test]
     fn quoted_context_value() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("env", serde_json::json!("production"));
         assert!(evaluate_condition(
@@ -617,12 +639,12 @@ mod tests {
 
     #[test]
     fn quoted_and_bare_equivalent_in_compound() {
-        let outcome = make_outcome(StageStatus::Success);
+        let outcome = make_outcome(StageOutcome::Succeeded);
         let context = Context::new();
         context.set("ready", serde_json::json!("true"));
         // Mix bare and quoted in a compound expression
         assert!(evaluate_condition(
-            r#"outcome=success && context.ready="true""#,
+            r#"outcome=succeeded && context.ready="true""#,
             &outcome,
             &context
         ));

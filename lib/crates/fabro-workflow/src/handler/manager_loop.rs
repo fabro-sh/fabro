@@ -18,7 +18,7 @@ use crate::condition::evaluate_condition;
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
 use crate::operations::{ValidateInput, WorkflowInput, validate};
-use crate::outcome::{Outcome, OutcomeExt, StageStatus};
+use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 use crate::pipeline::types::Initialized;
 use crate::run_dir::visit_from_context;
 use crate::run_options::RunOptions;
@@ -308,7 +308,7 @@ impl Handler for SubWorkflowHandler {
                         ..Outcome::success()
                     };
 
-                    if child_outcome.status == StageStatus::Fail {
+                    if child_outcome.status.is_failure() {
                         outcome.failure.clone_from(&child_outcome.failure);
                     }
 
@@ -326,7 +326,7 @@ impl Handler for SubWorkflowHandler {
                                 &mut child_handle,
                             ).await;
                             return Ok(Outcome {
-                                status: StageStatus::Success,
+                                status: StageOutcome::Succeeded,
                                 notes: Some(format!("Stop condition satisfied at cycle {cycle}")),
                                 ..Outcome::success()
                             });
@@ -400,7 +400,7 @@ mod tests {
             .execute(&node, &context, &graph, dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert!(
             outcome
                 .notes
@@ -433,7 +433,9 @@ mod tests {
             .execute(&node, &context, &graph, dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert!(
             outcome
                 .failure_reason()
@@ -465,7 +467,9 @@ mod tests {
             .execute(&node, &context, &graph, dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert!(
             outcome
                 .failure_reason()
@@ -535,7 +539,7 @@ mod tests {
             .execute(&node, &context, &graph, dir.path(), &services)
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert_eq!(
             outcome.context_updates.get("review.result"),
             Some(&serde_json::json!("approved"))
@@ -572,7 +576,7 @@ mod tests {
             .execute(&node, &context, &graph, dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -610,7 +614,7 @@ mod tests {
             .execute(&node, &context, &graph, dir.path(), &services)
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -643,7 +647,9 @@ mod tests {
             .execute(&node, &context, &graph, dir.path(), &services)
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert!(
             outcome
                 .failure_reason()
@@ -710,7 +716,9 @@ mod tests {
             .execute(&node, &context, &graph, dir.path(), &services)
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert!(outcome.failure_reason().unwrap().contains("Max cycles"));
     }
 
@@ -770,7 +778,7 @@ mod tests {
             .execute(&node, &context, &graph, dir.path(), &services)
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert!(
             outcome
                 .notes
@@ -927,7 +935,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         // User-defined keys propagate
         assert_eq!(
             outcome.context_updates.get("review.result"),
@@ -1011,7 +1019,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         let echoed = outcome
             .context_updates
             .get("echo.parent_preamble")

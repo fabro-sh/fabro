@@ -16,7 +16,7 @@ use crate::context::Context;
 use crate::error::Error;
 use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::handler::{EngineServices, dispatch_handler, format_panic_message};
-use crate::outcome::{Outcome, StageStatus};
+use crate::outcome::{Outcome, StageOutcome};
 use crate::retry::build_retry_policy;
 
 /// Production node handler that bridges fabro-core's NodeHandler to the
@@ -132,12 +132,14 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         let gv_node = node.inner();
         if gv_node.allow_partial() {
             Outcome {
-                status: StageStatus::PartialSuccess,
+                status: StageOutcome::PartiallySucceeded,
                 ..last_outcome
             }
         } else {
             Outcome {
-                status: StageStatus::Fail,
+                status: StageOutcome::Failed {
+                    retry_requested: false,
+                },
                 ..last_outcome
             }
         }
@@ -150,7 +152,7 @@ mod tests {
 
     use fabro_core::executor::ExecutorBuilder;
     use fabro_core::lifecycle::NoopLifecycle;
-    use fabro_core::outcome::StageStatus;
+    use fabro_core::outcome::StageOutcome;
     use fabro_core::state::ExecutionState;
     use fabro_graphviz::graph::AttrValue;
     use fabro_graphviz::graph::types::{Edge, Graph, Node};
@@ -203,6 +205,6 @@ mod tests {
             .lifecycle(Box::new(NoopLifecycle))
             .build();
         let (result, _) = executor.run(&wf_graph, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
     }
 }

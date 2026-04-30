@@ -11,7 +11,7 @@ digraph ConditionalBranching {
     failed [label="Failed", shape=parallelogram, script="echo branch-failed"]
 
     start -> cmd -> gate
-    gate -> passed [label="Pass", condition="outcome=success"]
+    gate -> passed [label="Pass", condition="outcome=succeeded"]
     gate -> failed [label="Fail"]
     passed -> exit
     failed -> exit

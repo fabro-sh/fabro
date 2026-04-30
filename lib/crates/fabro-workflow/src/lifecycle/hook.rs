@@ -14,7 +14,7 @@ use fabro_types::RunId;
 
 use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::hook_context::set_hook_node;
-use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt, StageStatus};
+use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt, StageOutcome};
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -93,10 +93,10 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
     ) -> CoreResult<()> {
         let outcome = &result.outcome;
         // Skipped nodes had no StageStarted, so skip hooks (engine.rs:2080)
-        if outcome.status == StageStatus::Skipped {
+        if outcome.status == StageOutcome::Skipped {
             return Ok(());
         }
-        let hook_event = if outcome.status == StageStatus::Fail {
+        let hook_event = if outcome.status.is_failure() {
             HookEvent::StageFailed
         } else {
             HookEvent::StageComplete
@@ -157,7 +157,9 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
         if state.cancelled {
             return;
         }
-        if outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess {
+        if outcome.status == StageOutcome::Succeeded
+            || outcome.status == StageOutcome::PartiallySucceeded
+        {
             let hook_ctx =
                 HookContext::new(HookEvent::RunComplete, self.run_id, self.graph_name.clone());
             let _ = self.run_hook(&hook_ctx).await;

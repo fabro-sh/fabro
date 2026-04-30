@@ -46,15 +46,15 @@ digraph ImplementAndSimplify {
     fmt               [label="Format", shape=parallelogram, script="cargo fmt --all 2>&1", goal_gate=true, max_retries=0]
 
     start -> toolchain
-    toolchain -> preflight_compile [condition="outcome=success"]
+    toolchain -> preflight_compile [condition="outcome=succeeded"]
     toolchain -> exit
-    preflight_compile -> preflight_lint [condition="outcome=success"]
+    preflight_compile -> preflight_lint [condition="outcome=succeeded"]
     preflight_compile -> exit
-    preflight_lint -> implement [condition="outcome=success"]
+    preflight_lint -> implement [condition="outcome=succeeded"]
     preflight_lint -> fix_lints
     fix_lints -> preflight_lint
     implement -> simplify_opus -> simplify_gemini -> simplify_gpt -> verify
-    verify -> fmt   [condition="outcome=success"]
+    verify -> fmt   [condition="outcome=succeeded"]
     verify -> fixup
     fixup -> verify
     fmt -> exit

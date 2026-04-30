@@ -26,7 +26,7 @@ use crate::error::Error;
 use crate::event::{Emitter, StoreProgressLogger};
 use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
-use crate::outcome::{Outcome, OutcomeExt, StageStatus};
+use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 use crate::pipeline::initialize;
 use crate::pipeline::types::{InitOptions, LlmSpec, Persisted, SandboxEnvSpec};
 use crate::records::RunSpec;
@@ -304,7 +304,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
 
     assert_eq!(
         executed.outcome.as_ref().unwrap().status,
-        crate::outcome::StageStatus::Success
+        crate::outcome::StageOutcome::Succeeded
     );
     assert_eq!(
         executed
@@ -509,13 +509,13 @@ fn looping_fail_graph() -> Graph {
     let mut fail_edge = Edge::new("work", "work");
     fail_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=fail".to_string()),
+        AttrValue::String("outcome=failed".to_string()),
     );
     g.edges.push(fail_edge);
     let mut ok_edge = Edge::new("work", "exit");
     ok_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     g.edges.push(ok_edge);
     g
@@ -533,7 +533,7 @@ async fn execute_runs_simple_workflow() {
     )
     .await
     .unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 #[tokio::test]
@@ -634,7 +634,7 @@ async fn execute_conditional_routing_uses_unconditional_success_path() {
     let mut e1 = Edge::new("start", "path_a");
     e1.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=fail".to_string()),
+        AttrValue::String("outcome=failed".to_string()),
     );
     g.edges.push(e1);
     g.edges.push(Edge::new("start", "path_b"));
@@ -676,7 +676,10 @@ async fn execute_persists_start_record_and_node_status() {
     assert_eq!(start.base_sha.as_deref(), Some("abc123"));
 
     let node = state.node(&fabro_store::StageId::new("start", 1)).unwrap();
-    assert_eq!(node.status.as_ref().unwrap().status, StageStatus::Success);
+    assert_eq!(
+        node.status.as_ref().unwrap().status,
+        StageOutcome::Succeeded
+    );
 }
 
 #[tokio::test]
@@ -713,7 +716,7 @@ async fn timeout_causes_fail_status_record() {
     let mut fail_edge = Edge::new("work", "exit");
     fail_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=fail".to_string()),
+        AttrValue::String("outcome=failed".to_string()),
     );
     g.edges.push(fail_edge);
 
@@ -732,7 +735,9 @@ async fn timeout_causes_fail_status_record() {
         .status
         .as_ref()
         .unwrap();
-    assert_eq!(status.status, StageStatus::Fail);
+    assert_eq!(status.status, StageOutcome::Failed {
+        retry_requested: false,
+    });
 }
 
 #[tokio::test]
@@ -855,7 +860,9 @@ async fn panic_handler_returns_panic_message() {
     .await;
 
     let outcome = result.expect("runner should convert panic into a failed outcome");
-    assert_eq!(outcome.status, StageStatus::Fail);
+    assert_eq!(outcome.status, StageOutcome::Failed {
+        retry_requested: false,
+    });
 }
 
 #[tokio::test]
@@ -986,7 +993,7 @@ async fn retry_emits_stage_started_per_attempt() {
     )
     .await
     .unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let collected = events.lock().unwrap();
     let work_started: Vec<_> = collected
@@ -1027,7 +1034,7 @@ async fn run_with_lifecycle_emits_initialize_and_setup_events() {
     )
     .await
     .unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let names = events.lock().unwrap();
     let sandbox_idx = names

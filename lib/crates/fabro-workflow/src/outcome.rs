@@ -1,5 +1,5 @@
 pub use fabro_core::outcome::{
-    FailureCategory, FailureDetail, OutcomeMeta, StageOutcome, StageState, StageStatus,
+    FailureCategory, FailureDetail, OutcomeMeta, StageOutcome, StageState,
 };
 use fabro_llm::types::TokenCounts as LlmTokenCounts;
 use fabro_model::{

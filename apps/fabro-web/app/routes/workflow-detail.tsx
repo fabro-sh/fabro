@@ -58,8 +58,8 @@ export const workflowData: Record<string, WorkflowEntry> = {
     gate     [shape=diamond,            label="Build passing?"]
 
     start -> diagnose -> fix -> validate -> gate
-    gate -> exit     [label="Yes", condition="outcome=success"]
-    gate -> diagnose [label="No",  condition="outcome!=success", max_visits=3]
+    gate -> exit     [label="Yes", condition="outcome=succeeded"]
+    gate -> diagnose [label="No",  condition="outcome!=succeeded", max_visits=3]
 }
 `,
   },
@@ -120,8 +120,8 @@ export const workflowData: Record<string, WorkflowEntry> = {
     strategy -> plan [label="[P] Embarrassingly parallel"]
     strategy -> plan [label="[S] Sequential / linear"]
     plan -> implement -> review -> validate
-    validate -> exit [condition="outcome=success"]
-    validate -> fix  [condition="outcome!=success", label="Fix"]
+    validate -> exit [condition="outcome=succeeded"]
+    validate -> fix  [condition="outcome!=succeeded", label="Fix"]
     fix -> validate
 }
 `,

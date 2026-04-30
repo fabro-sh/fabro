@@ -150,38 +150,38 @@ digraph BuildSolitaire {
     // Wiring: linear phases with verify-gate loops
     start -> expand_spec -> impl_setup -> verify_setup -> check_setup
 
-    check_setup -> impl_data  [condition="outcome=success"]
-    check_setup -> impl_setup [condition="outcome=fail", label="Retry"]
+    check_setup -> impl_data  [condition="outcome=succeeded"]
+    check_setup -> impl_setup [condition="outcome=failed", label="Retry"]
     check_setup -> impl_setup
 
     impl_data -> verify_data -> check_data
 
-    check_data -> impl_logic [condition="outcome=success"]
-    check_data -> impl_data  [condition="outcome=fail", label="Retry"]
+    check_data -> impl_logic [condition="outcome=succeeded"]
+    check_data -> impl_data  [condition="outcome=failed", label="Retry"]
     check_data -> impl_data
 
     impl_logic -> verify_logic -> check_logic
 
-    check_logic -> impl_ui    [condition="outcome=success"]
-    check_logic -> impl_logic [condition="outcome=fail", label="Retry"]
+    check_logic -> impl_ui    [condition="outcome=succeeded"]
+    check_logic -> impl_logic [condition="outcome=failed", label="Retry"]
     check_logic -> impl_logic
 
     impl_ui -> verify_ui -> check_ui
 
-    check_ui -> impl_integration [condition="outcome=success"]
-    check_ui -> impl_ui          [condition="outcome=fail", label="Retry"]
+    check_ui -> impl_integration [condition="outcome=succeeded"]
+    check_ui -> impl_ui          [condition="outcome=failed", label="Retry"]
     check_ui -> impl_ui
 
     impl_integration -> verify_integration -> check_integration
 
-    check_integration -> review           [condition="outcome=success"]
-    check_integration -> impl_integration [condition="outcome=fail", label="Retry"]
+    check_integration -> review           [condition="outcome=succeeded"]
+    check_integration -> impl_integration [condition="outcome=failed", label="Retry"]
     check_integration -> impl_integration
 
     review -> check_review
 
-    check_review -> exit    [condition="outcome=success"]
-    check_review -> impl_ui [condition="outcome=fail", label="Fix"]
+    check_review -> exit    [condition="outcome=succeeded"]
+    check_review -> impl_ui [condition="outcome=failed", label="Fix"]
     check_review -> impl_ui
 }
 ```

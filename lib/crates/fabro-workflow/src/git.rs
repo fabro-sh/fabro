@@ -480,7 +480,7 @@ mod tests {
             name: "Work".into(),
             index: 2,
             duration_ms: 100,
-            status: "success".into(),
+            status: "succeeded".into(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
             billing: None,
@@ -530,7 +530,7 @@ mod tests {
         .unwrap();
         append_event(&run, &fixtures::RUN_1, &Event::CheckpointCompleted {
             node_id: "work".into(),
-            status: "success".into(),
+            status: "succeeded".into(),
             current_node: "work".into(),
             completed_nodes: Vec::new(),
             node_retries: std::collections::BTreeMap::new(),

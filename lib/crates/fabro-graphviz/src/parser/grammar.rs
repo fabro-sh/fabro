@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn parse_edge_stmt_with_attrs() {
         let (_, stmt) =
-            node_or_edge_stmt("gate -> exit [label=\"Yes\", condition=\"outcome=success\"]")
+            node_or_edge_stmt("gate -> exit [label=\"Yes\", condition=\"outcome=succeeded\"]")
                 .unwrap();
         match stmt {
             Statement::Edge(e) => {
@@ -352,8 +352,8 @@ mod tests {
             gate      [shape=diamond, label="Tests passing?"]
 
             start -> plan -> implement -> validate -> gate
-            gate -> exit      [label="Yes", condition="outcome=success"]
-            gate -> implement [label="No", condition="outcome!=success"]
+            gate -> exit      [label="Yes", condition="outcome=succeeded"]
+            gate -> implement [label="No", condition="outcome!=succeeded"]
         }"#;
         let (_, graph) = parse_dot_graph(input).unwrap();
         assert_eq!(graph.name, "Branch");

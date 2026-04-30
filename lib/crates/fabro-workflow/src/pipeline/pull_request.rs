@@ -14,7 +14,7 @@ use tracing::{debug, info};
 
 use super::types::{Concluded, Finalized, PullRequestOptions};
 use crate::event::{Event, RunNoticeLevel};
-use crate::outcome::{StageStatus, format_cost as outcome_format_cost};
+use crate::outcome::{StageOutcome, format_cost as outcome_format_cost};
 use crate::records::{Conclusion, RunSpec};
 use crate::runtime_store::RunStoreHandle;
 
@@ -550,7 +550,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
         } else if let Ok(ref result) = outcome {
             if matches!(
                 result.status,
-                StageStatus::Success | StageStatus::PartialSuccess
+                StageOutcome::Succeeded | StageOutcome::PartiallySucceeded
             ) {
                 let diff = load_pull_request_diff(&services.run_store).await;
                 if let (Some(base_branch), Some(run_branch), Some(creds), Some(origin)) = (
@@ -782,7 +782,7 @@ mod tests {
     fn make_test_conclusion() -> Conclusion {
         Conclusion {
             timestamp:            Utc::now(),
-            status:               crate::outcome::StageStatus::Success,
+            status:               crate::outcome::StageOutcome::Succeeded,
             duration_ms:          150_000,
             failure_reason:       None,
             final_git_commit_sha: None,
@@ -828,7 +828,7 @@ mod tests {
                 StageRetro {
                     stage_id:           "plan".to_string(),
                     stage_label:        "plan".to_string(),
-                    status:             "success".to_string(),
+                    status:             "succeeded".to_string(),
                     duration_ms:        45_000,
                     retries:            0,
                     billing_usd_micros: Some(120_000),
@@ -839,7 +839,7 @@ mod tests {
                 StageRetro {
                     stage_id:           "implement".to_string(),
                     stage_label:        "implement".to_string(),
-                    status:             "success".to_string(),
+                    status:             "succeeded".to_string(),
                     duration_ms:        90_000,
                     retries:            0,
                     billing_usd_micros: Some(250_000),
@@ -850,7 +850,7 @@ mod tests {
                 StageRetro {
                     stage_id:           "simplify".to_string(),
                     stage_label:        "simplify".to_string(),
-                    status:             "success".to_string(),
+                    status:             "succeeded".to_string(),
                     duration_ms:        15_000,
                     retries:            0,
                     billing_usd_micros: Some(50_000),
@@ -1279,7 +1279,7 @@ mod tests {
             name: "plan".to_string(),
             index: 0,
             duration_ms: 1,
-            status: "success".to_string(),
+            status: "succeeded".to_string(),
             preferred_label: None,
             suggested_next_ids: vec![],
             billing: None,
@@ -1574,7 +1574,7 @@ mod tests {
         append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
             duration_ms:          1,
             artifact_count:       0,
-            status:               "success".to_string(),
+            status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
             total_usd_micros:     None,
             final_git_commit_sha: None,

@@ -732,14 +732,17 @@ mod tests {
             "should list completed stage 'plan' in bold"
         );
         assert!(
-            preamble.contains("success"),
+            preamble.contains("succeeded"),
             "should show plan's success status"
         );
         assert!(
             preamble.contains("**code**"),
             "should list completed stage 'code' in bold"
         );
-        assert!(preamble.contains("fail"), "should show code's fail status");
+        assert!(
+            preamble.contains("failed"),
+            "should show code's fail status"
+        );
     }
 
     #[test]
@@ -868,7 +871,7 @@ mod tests {
             preamble.contains("**work**"),
             "should include node ID in bold"
         );
-        assert!(preamble.contains("success"), "should show success status");
+        assert!(preamble.contains("succeeded"), "should show success status");
     }
 
     // --- compact handler-specific details ---

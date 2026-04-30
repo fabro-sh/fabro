@@ -1141,7 +1141,7 @@ mod tests {
                 start [shape=Mdiamond]
                 middle [import="./noop.fabro"]
                 exit [shape=Msquare]
-                start -> middle [condition="outcome=success"]
+                start -> middle [condition="outcome=succeeded"]
                 middle -> exit
             }"#,
             dir.path(),
@@ -1161,7 +1161,7 @@ mod tests {
                 start [shape=Mdiamond]
                 validate [import="./validate.fabro"]
                 exit [shape=Msquare]
-                start -> validate [label="go", condition="outcome=success"]
+                start -> validate [label="go", condition="outcome=succeeded"]
                 validate -> exit [thread_id="session1"]
             }"#,
             dir.path(),
@@ -1174,7 +1174,7 @@ mod tests {
             .find(|edge| edge.from == "start" && edge.to == "validate.lint")
             .unwrap();
         assert_eq!(start_edge.label(), Some("go"));
-        assert_eq!(start_edge.condition(), Some("outcome=success"));
+        assert_eq!(start_edge.condition(), Some("outcome=succeeded"));
 
         let exit_edge = graph
             .edges
@@ -1242,7 +1242,7 @@ mod tests {
                 start [shape=Mdiamond]
                 lint [prompt="Run clippy"]
                 exit [shape=Msquare]
-                start -> lint [condition="outcome=success"]
+                start -> lint [condition="outcome=succeeded"]
                 lint -> exit
             }"#,
         );

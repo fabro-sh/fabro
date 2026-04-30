@@ -30,7 +30,7 @@ digraph ImplementAndTest {
     gate      [shape=diamond, label="Tests passing?"]
 
     start -> implement -> validate -> gate
-    gate -> exit      [label="Pass", condition="outcome=success"]
+    gate -> exit      [label="Pass", condition="outcome=succeeded"]
     gate -> implement [label="Fix", max_visits=5]
 }
 ```

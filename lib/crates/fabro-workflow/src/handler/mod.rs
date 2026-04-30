@@ -332,7 +332,7 @@ mod tests {
         let outcome = dispatch_handler(&handler, &node, &context, &graph, run_dir, &services)
             .await
             .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
         assert_eq!(outcome.notes.as_deref(), Some("[Simulated] my_node"));
     }
 
@@ -351,7 +351,7 @@ mod tests {
         let outcome = dispatch_handler(&handler, &node, &context, &graph, run_dir, &services)
             .await
             .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
         // execute() returns success with no notes
         assert!(outcome.notes.is_none());
     }

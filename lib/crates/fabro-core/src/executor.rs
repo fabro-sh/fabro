@@ -714,8 +714,8 @@ mod tests {
                 TestNode::terminal("bad"),
             ],
             vec![
-                TestEdge::new("start", "ok").with_label("success"),
-                TestEdge::new("start", "bad").with_label("fail"),
+                TestEdge::new("start", "ok").with_label("succeeded"),
+                TestEdge::new("start", "bad").with_label("failed"),
             ],
             "start",
         );
@@ -738,8 +738,8 @@ mod tests {
                 TestNode::terminal("bad"),
             ],
             vec![
-                TestEdge::new("start", "ok").with_label("success"),
-                TestEdge::new("start", "bad").with_label("fail"),
+                TestEdge::new("start", "ok").with_label("succeeded"),
+                TestEdge::new("start", "bad").with_label("failed"),
             ],
             "start",
         );
@@ -872,7 +872,7 @@ mod tests {
         // Node fails with no "fail" edge → run ends with that outcome
         let g = TestGraph::new(
             vec![TestNode::new("start"), TestNode::terminal("end")],
-            vec![TestEdge::new("start", "end").with_label("success")],
+            vec![TestEdge::new("start", "end").with_label("succeeded")],
             "start",
         );
         let state = ExecutionState::new(&g).unwrap();
@@ -1956,7 +1956,7 @@ mod tests {
             ],
             vec![
                 // "work" has only a "success" edge — fail won't match
-                TestEdge::new("work", "end").with_label("success"),
+                TestEdge::new("work", "end").with_label("succeeded"),
                 TestEdge::new("recovery", "end"),
             ],
             "work",

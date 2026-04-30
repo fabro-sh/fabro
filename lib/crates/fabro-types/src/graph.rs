@@ -639,7 +639,7 @@ mod tests {
             .insert("label".to_string(), AttrValue::String("next".to_string()));
         edge.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=success".to_string()),
+            AttrValue::String("outcome=succeeded".to_string()),
         );
         edge.attrs
             .insert("weight".to_string(), AttrValue::Integer(5));
@@ -649,7 +649,7 @@ mod tests {
             .insert("freeform".to_string(), AttrValue::Boolean(true));
 
         assert_eq!(edge.label(), Some("next"));
-        assert_eq!(edge.condition(), Some("outcome=success"));
+        assert_eq!(edge.condition(), Some("outcome=succeeded"));
         assert_eq!(edge.weight(), 5);
         assert!(edge.loop_restart());
         assert!(edge.freeform());

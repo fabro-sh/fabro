@@ -36,7 +36,7 @@ use fabro_workflow::event::Emitter;
 use fabro_workflow::handler::exit::ExitHandler;
 use fabro_workflow::handler::start::StartHandler;
 use fabro_workflow::handler::{Handler, HandlerRegistry};
-use fabro_workflow::outcome::{Outcome, OutcomeExt, StageStatus};
+use fabro_workflow::outcome::{Outcome, OutcomeExt, StageOutcome};
 use fabro_workflow::records::Checkpoint;
 use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflow::test_support::{WorkflowRunner, test_store_dir};
@@ -529,7 +529,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Checkpoint should persist a durable blob ref.
     let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
@@ -713,7 +713,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Assert CheckpointCompleted events with git SHAs were emitted
     {
@@ -887,7 +887,7 @@ async fn daytona_parallel_git_branching_e2e() {
         .expect("daytona parallel pipeline should succeed");
     assert_eq!(
         outcome.status,
-        StageStatus::Success,
+        StageOutcome::Succeeded,
         "pipeline failed: {:?}",
         outcome.failure_reason()
     );
@@ -1215,7 +1215,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Assert shadow branch in the sandbox has checkpoint data
     let run_json = env
@@ -1368,7 +1368,7 @@ async fn daytona_asset_collection() {
         .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let content = String::from_utf8(
         test_artifact_store(dir.path())
@@ -1630,7 +1630,7 @@ async fn daytona_git_push_run_branch_to_origin() {
         .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Verify the run branch was pushed to origin
     let ls_remote_cmd = format!("git ls-remote --heads origin {branch_name}");

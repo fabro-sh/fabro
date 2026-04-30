@@ -17,7 +17,7 @@ use super::git::GitCheckpointResult;
 use crate::context::WorkflowContext;
 use crate::event::{Emitter, Event, StageScope};
 use crate::graph::{WorkflowGraph, WorkflowNode};
-use crate::outcome::{BilledModelUsage, FailureCategory, FailureDetail, Outcome, StageStatus};
+use crate::outcome::{BilledModelUsage, FailureCategory, FailureDetail, Outcome, StageOutcome};
 use crate::{artifact, context};
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
@@ -149,7 +149,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 name: gv.label().to_string(),
                 index: stage_index,
                 duration_ms: 0,
-                status: StageStatus::Success.to_string(),
+                status: StageOutcome::Succeeded.to_string(),
                 preferred_label: None,
                 suggested_next_ids: Vec::new(),
                 billing: None,
@@ -243,7 +243,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
     ) -> CoreResult<()> {
         let outcome = &result.outcome;
         // Skipped nodes had no StageStarted, so skip completion events (engine.rs:2080)
-        if outcome.status == StageStatus::Skipped {
+        if outcome.status == StageOutcome::Skipped {
             return Ok(());
         }
         let gv = node.inner();
@@ -253,7 +253,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let (loop_failure_signatures, restart_failure_signatures) =
             snapshot_failure_signatures(&self.circuit_breaker);
 
-        if outcome.status == StageStatus::Fail {
+        if outcome.status.is_failure() {
             self.emitter.emit_scoped(
                 &Event::StageFailed {
                     node_id: gv.id.clone(),

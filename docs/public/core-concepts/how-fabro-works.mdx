@@ -53,7 +53,7 @@ This loop repeats until execution reaches the exit node or an unrecoverable erro
 
 ## Retries and error handling
 
-When a node fails, Fabro consults its [retry policy](/workflows/stages-and-nodes#common-node-attributes). If retries remain, the node re-executes with exponential backoff. If all retries are exhausted, the failure propagates to edge selection — a `condition="outcome=fail"` edge can route to a fix node, creating a recovery loop.
+When a node fails, Fabro consults its [retry policy](/workflows/stages-and-nodes#common-node-attributes). If retries remain, the node re-executes with exponential backoff. If all retries are exhausted, the failure propagates to edge selection — a `condition="outcome=failed"` edge can route to a fix node, creating a recovery loop.
 
 For workflows with loops, Fabro tracks failure signatures to detect infinite retry cycles. If the same failure repeats beyond the configured limit, the workflow aborts rather than looping forever.
 

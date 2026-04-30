@@ -817,7 +817,7 @@ Emitted when the engine selects the next edge to traverse.
     "from_node": "code",
     "to_node": "review",
     "label": "tests_pass",
-    "condition": "outcome=success",
+    "condition": "outcome=succeeded",
     "reason": "condition",
     "preferred_label": "tests_pass",
     "suggested_next_ids": ["review"],

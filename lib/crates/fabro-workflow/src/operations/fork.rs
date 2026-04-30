@@ -352,7 +352,7 @@ mod tests {
             name: "Work".to_string(),
             index: 1,
             duration_ms: 10,
-            status: "success".to_string(),
+            status: "succeeded".to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
             billing: None,
@@ -374,7 +374,7 @@ mod tests {
 
         event::append_event(&source, &source_run_id, &Event::CheckpointCompleted {
             node_id: "work".to_string(),
-            status: "success".to_string(),
+            status: "succeeded".to_string(),
             current_node: "work".to_string(),
             completed_nodes: vec!["work".to_string()],
             node_retries: BTreeMap::new(),

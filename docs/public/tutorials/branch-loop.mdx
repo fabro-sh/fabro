@@ -25,7 +25,7 @@ digraph BranchLoop {
     gate      [shape=diamond, label="Tests passing?"]
 
     start -> plan -> implement -> validate -> gate
-    gate -> exit      [label="Pass", condition="outcome=success"]
+    gate -> exit      [label="Pass", condition="outcome=succeeded"]
     gate -> implement [label="Fix"]
 }
 ```
@@ -51,14 +51,14 @@ The `gate` node has `shape=diamond`, making it a **conditional node**. It evalua
 ```dot
 gate [shape=diamond, label="Tests passing?"]
 
-gate -> exit      [label="Pass", condition="outcome=success"]
+gate -> exit      [label="Pass", condition="outcome=succeeded"]
 gate -> implement [label="Fix"]
 ```
 
 - If the previous stage (`validate`) succeeded → take the "Pass" edge to `exit`
 - Otherwise → take the unconditional "Fix" edge back to `implement`
 
-The `condition="outcome=success"` checks the status of the most recently completed stage. An edge without a `condition` acts as the default fallback.
+The `condition="outcome=succeeded"` checks the status of the most recently completed stage. An edge without a `condition` acts as the default fallback.
 
 ### Condition expressions
 
@@ -72,10 +72,10 @@ gate -> fast [condition="context.score > 80"]
 gate -> alert [condition="context.log contains error"]
 
 // Boolean logic
-gate -> deploy [condition="outcome=success && context.tests_passed=true"]
+gate -> deploy [condition="outcome=succeeded && context.tests_passed=true"]
 
 // Negation
-gate -> retry [condition="!outcome=success"]
+gate -> retry [condition="!outcome=succeeded"]
 ```
 
 See [Transitions](/workflows/transitions) for the full condition grammar.

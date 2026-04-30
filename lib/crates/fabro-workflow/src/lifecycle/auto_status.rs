@@ -5,7 +5,7 @@ use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 
 use crate::graph::{WorkflowGraph, WorkflowNode};
-use crate::outcome::{BilledModelUsage, StageStatus};
+use crate::outcome::{BilledModelUsage, StageOutcome};
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -25,10 +25,10 @@ impl RunLifecycle<WorkflowGraph> for AutoStatusLifecycle {
         let gv = node.inner();
         let outcome = &mut result.outcome;
         if gv.auto_status()
-            && outcome.status != StageStatus::Success
-            && outcome.status != StageStatus::Skipped
+            && outcome.status != StageOutcome::Succeeded
+            && outcome.status != StageOutcome::Skipped
         {
-            outcome.status = StageStatus::Success;
+            outcome.status = StageOutcome::Succeeded;
             outcome.notes =
                 Some("auto-status: handler completed without writing status".to_string());
         }

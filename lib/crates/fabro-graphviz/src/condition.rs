@@ -387,8 +387,8 @@ mod tests {
 
     #[test]
     fn parse_condition_validates() {
-        assert!(parse_condition("outcome=success").is_ok());
-        assert!(parse_condition("outcome=success && context.x=y").is_ok());
+        assert!(parse_condition("outcome=succeeded").is_ok());
+        assert!(parse_condition("outcome=succeeded && context.x=y").is_ok());
         assert!(parse_condition("").is_ok());
     }
 
@@ -399,13 +399,13 @@ mod tests {
 
     #[test]
     fn parse_eq_into_clause() {
-        let expr = parse_expression("outcome=success").unwrap();
+        let expr = parse_expression("outcome=succeeded").unwrap();
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
                 key:   "outcome".to_string(),
                 op:    Op::Eq,
-                value: "success".to_string(),
+                value: "succeeded".to_string(),
             })
         );
     }
@@ -445,13 +445,13 @@ mod tests {
 
     #[test]
     fn parse_not_eq_into_clause() {
-        let expr = parse_expression("outcome!=fail").unwrap();
+        let expr = parse_expression("outcome!=failed").unwrap();
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
                 key:   "outcome".to_string(),
                 op:    Op::NotEq,
-                value: "fail".to_string(),
+                value: "failed".to_string(),
             })
         );
     }
@@ -525,33 +525,33 @@ mod tests {
 
     #[test]
     fn quoted_value_stripped_in_clause() {
-        let expr = parse_expression(r#"outcome="success""#).unwrap();
+        let expr = parse_expression(r#"outcome="succeeded""#).unwrap();
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
                 key:   "outcome".to_string(),
                 op:    Op::Eq,
-                value: "success".to_string(),
+                value: "succeeded".to_string(),
             })
         );
     }
 
     #[test]
     fn bare_and_quoted_values_produce_same_clause() {
-        let bare = parse_expression("outcome=success").unwrap();
-        let quoted = parse_expression(r#"outcome="success""#).unwrap();
+        let bare = parse_expression("outcome=succeeded").unwrap();
+        let quoted = parse_expression(r#"outcome="succeeded""#).unwrap();
         assert_eq!(bare, quoted);
     }
 
     #[test]
     fn quoted_value_with_not_eq() {
-        let expr = parse_expression(r#"outcome!="fail""#).unwrap();
+        let expr = parse_expression(r#"outcome!="failed""#).unwrap();
         assert_eq!(
             expr,
             ConditionExpr::Clause(Clause {
                 key:   "outcome".to_string(),
                 op:    Op::NotEq,
-                value: "fail".to_string(),
+                value: "failed".to_string(),
             })
         );
     }

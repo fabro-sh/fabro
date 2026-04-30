@@ -43,6 +43,6 @@ mod tests {
             .execute(&node, &context, &graph, run_dir, &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
     }
 }

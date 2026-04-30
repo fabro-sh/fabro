@@ -544,9 +544,9 @@ Respond with exactly one of:\n\
 
     // Bootstrap
     start -> check_toolchain
-    check_toolchain -> expand_spec [condition="outcome=success"]
-    check_toolchain -> check_toolchain [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
-    check_toolchain -> postmortem [condition="outcome=fail && context.failure_class!=transient_infra"]
+    check_toolchain -> expand_spec [condition="outcome=succeeded"]
+    check_toolchain -> check_toolchain [condition="outcome=failed && context.failure_class=transient_infra", loop_restart=true]
+    check_toolchain -> postmortem [condition="outcome=failed && context.failure_class!=transient_infra"]
     check_toolchain -> postmortem
 
     expand_spec -> plan_fanout
@@ -564,23 +564,23 @@ Respond with exactly one of:\n\
     // Verify chain — failures go directly back to implement (errors logged to .workflow/verify_errors.log)
     fix_fmt -> verify_fmt
     verify_fmt -> gate_fmt
-    gate_fmt -> verify_build [condition="outcome=success"]
+    gate_fmt -> verify_build [condition="outcome=succeeded"]
     gate_fmt -> implement
 
     verify_build -> gate_build
-    gate_build -> verify_test [condition="outcome=success"]
+    gate_build -> verify_test [condition="outcome=succeeded"]
     gate_build -> implement
 
     verify_test -> gate_test
-    gate_test -> verify_browser [condition="outcome=success"]
+    gate_test -> verify_browser [condition="outcome=succeeded"]
     gate_test -> implement
 
     verify_browser -> gate_browser
-    gate_browser -> verify_artifacts [condition="outcome=success"]
+    gate_browser -> verify_artifacts [condition="outcome=succeeded"]
     gate_browser -> implement
 
     verify_artifacts -> gate_artifacts
-    gate_artifacts -> verify_fidelity [condition="outcome=success"]
+    gate_artifacts -> verify_fidelity [condition="outcome=succeeded"]
     gate_artifacts -> implement
 
     verify_fidelity -> gate_fidelity
@@ -683,9 +683,9 @@ postmortem -> plan_fanout     [label="Replan"]
 The `check_toolchain` node has a self-heal edge for transient infrastructure failures. If Node.js or npm fail to respond due to a temporary issue, the workflow retries via a `loop_restart` edge. Deterministic failures (toolchain not installed) route to the postmortem for diagnosis:
 
 ```dot
-check_toolchain -> expand_spec      [condition="outcome=success"]
-check_toolchain -> check_toolchain  [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
-check_toolchain -> postmortem       [condition="outcome=fail && context.failure_class!=transient_infra"]
+check_toolchain -> expand_spec      [condition="outcome=succeeded"]
+check_toolchain -> check_toolchain  [condition="outcome=failed && context.failure_class=transient_infra", loop_restart=true]
+check_toolchain -> postmortem       [condition="outcome=failed && context.failure_class!=transient_infra"]
 ```
 
 ### Model routing strategy

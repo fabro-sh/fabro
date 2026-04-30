@@ -9,7 +9,7 @@ use fabro_util::time::elapsed_ms;
 use super::types::{Concluded, FinalizeOptions, Retroed};
 use crate::error::Error;
 use crate::event::{Event, RunNoticeLevel};
-use crate::outcome::{Outcome, OutcomeExt, StageStatus};
+use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
 use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
@@ -21,33 +21,37 @@ use crate::services::RunServices;
 
 pub fn classify_engine_result(
     engine_result: &Result<Outcome, Error>,
-) -> (StageStatus, Option<String>, RunStatus) {
+) -> (StageOutcome, Option<String>, RunStatus) {
     match engine_result {
         Ok(outcome) => {
             let status = outcome.status.clone();
             let failure_reason = outcome.failure_reason().map(String::from);
             let run_status = match status {
-                StageStatus::Success | StageStatus::Skipped => RunStatus::Succeeded {
+                StageOutcome::Succeeded | StageOutcome::Skipped => RunStatus::Succeeded {
                     reason: SuccessReason::Completed,
                 },
-                StageStatus::PartialSuccess => RunStatus::Succeeded {
+                StageOutcome::PartiallySucceeded => RunStatus::Succeeded {
                     reason: SuccessReason::PartialSuccess,
                 },
-                StageStatus::Fail | StageStatus::Retry => RunStatus::Failed {
+                StageOutcome::Failed { .. } => RunStatus::Failed {
                     reason: FailureReason::WorkflowError,
                 },
             };
             (status, failure_reason, run_status)
         }
         Err(Error::Cancelled) => (
-            StageStatus::Fail,
+            StageOutcome::Failed {
+                retry_requested: false,
+            },
             Some("Cancelled".to_string()),
             RunStatus::Failed {
                 reason: FailureReason::Cancelled,
             },
         ),
         Err(err) => (
-            StageStatus::Fail,
+            StageOutcome::Failed {
+                retry_requested: false,
+            },
             Some(err.display_with_causes()),
             RunStatus::Failed {
                 reason: FailureReason::WorkflowError,
@@ -58,7 +62,7 @@ pub fn classify_engine_result(
 
 pub(crate) async fn build_conclusion_from_store(
     run_store: &RunStoreHandle,
-    status: StageStatus,
+    status: StageOutcome,
     failure_reason: Option<String>,
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
@@ -87,7 +91,7 @@ pub(crate) async fn build_conclusion_from_store(
 fn build_conclusion_from_parts(
     checkpoint: Option<&Checkpoint>,
     stage_durations: &std::collections::HashMap<String, u64>,
-    status: StageStatus,
+    status: StageOutcome,
     failure_reason: Option<String>,
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
@@ -301,11 +305,11 @@ fn emit_metadata_warning(services: &RunServices, code: &str, message: String) {
 async fn compute_final_patch(
     run_options: &RunOptions,
     services: &RunServices,
-    status: StageStatus,
+    status: StageOutcome,
 ) -> Option<String> {
     let base_sha = run_options.git.as_ref().and_then(|g| g.base_sha.clone())?;
     let timeout_ms = match status {
-        StageStatus::Success | StageStatus::PartialSuccess => 30_000,
+        StageOutcome::Succeeded | StageOutcome::PartiallySucceeded => 30_000,
         _ => 10_000,
     };
     match git_diff_with_timeout(&*services.sandbox, &base_sha, timeout_ms).await {
@@ -351,18 +355,23 @@ pub(crate) fn build_terminal_event(
         };
     }
 
-    let outcome_status = outcome
-        .as_ref()
-        .map_or(StageStatus::Fail, |o| o.status.clone());
+    let outcome_status = outcome.as_ref().map_or(
+        StageOutcome::Failed {
+            retry_requested: false,
+        },
+        |o| o.status.clone(),
+    );
 
-    if outcome_status == StageStatus::Success || outcome_status == StageStatus::PartialSuccess {
+    if outcome_status == StageOutcome::Succeeded
+        || outcome_status == StageOutcome::PartiallySucceeded
+    {
         let total_usd_micros = billing.as_ref().and_then(|b| b.total_usd_micros);
         return Event::WorkflowRunCompleted {
             duration_ms,
             artifact_count,
             status: outcome_status.to_string(),
             reason: match outcome_status {
-                StageStatus::PartialSuccess => SuccessReason::PartialSuccess,
+                StageOutcome::PartiallySucceeded => SuccessReason::PartialSuccess,
                 _ => SuccessReason::Completed,
             },
             total_usd_micros,
@@ -695,7 +704,7 @@ mod tests {
         .unwrap();
         store_logger.flush().await;
 
-        assert_eq!(concluded.conclusion.status, StageStatus::Success);
+        assert_eq!(concluded.conclusion.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -707,7 +716,7 @@ mod tests {
         let handle = RunStoreHandle::local(run_store.clone());
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
-            status:               StageStatus::Success,
+            status:               StageOutcome::Succeeded,
             duration_ms:          10,
             failure_reason:       None,
             final_git_commit_sha: None,
@@ -761,7 +770,7 @@ mod tests {
         let run_options = test_git_run_options(repo_dir.path(), "fabro/metadata/run");
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
-            status:               StageStatus::Success,
+            status:               StageOutcome::Succeeded,
             duration_ms:          10,
             failure_reason:       None,
             final_git_commit_sha: None,
@@ -808,7 +817,7 @@ mod tests {
         let run_options = test_git_run_options(repo_dir.path(), "fabro/metadata/run");
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
-            status:               StageStatus::Success,
+            status:               StageOutcome::Succeeded,
             duration_ms:          10,
             failure_reason:       None,
             final_git_commit_sha: None,

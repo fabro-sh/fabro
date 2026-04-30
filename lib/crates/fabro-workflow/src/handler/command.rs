@@ -184,7 +184,7 @@ mod tests {
     use object_store::memory::InMemory;
 
     use super::*;
-    use crate::outcome::StageStatus;
+    use crate::outcome::StageOutcome;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -228,7 +228,9 @@ mod tests {
             .execute(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert_eq!(outcome.failure_reason(), Some("No script specified"));
     }
 
@@ -248,7 +250,7 @@ mod tests {
             .simulate(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
         assert!(outcome.notes.as_deref().unwrap().contains("echo hello"));
         assert_eq!(
@@ -286,7 +288,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
     }
 
@@ -306,7 +308,7 @@ mod tests {
             .execute(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert!(outcome.notes.as_deref().unwrap().contains("echo hello"));
         let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
         assert!(command_output.as_str().unwrap().contains("hello"));
@@ -328,7 +330,9 @@ mod tests {
             .execute(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
     }
 
     #[tokio::test]
@@ -599,7 +603,7 @@ mod tests {
             .execute(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
         assert!(
             command_output
@@ -629,7 +633,9 @@ mod tests {
             .execute(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
     }
 
     #[tokio::test]
@@ -652,7 +658,9 @@ mod tests {
             .execute(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert!(
             outcome
                 .failure_reason()
@@ -677,7 +685,7 @@ mod tests {
             .execute(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
         assert!(command_output.as_str().unwrap().contains("legacy"));
     }
@@ -698,7 +706,7 @@ mod tests {
             .execute(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         let command_stderr = outcome.context_updates.get(keys::COMMAND_STDERR).unwrap();
         assert!(
             command_stderr.as_str().unwrap().contains("err"),
@@ -850,7 +858,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
         assert_eq!(
             command_output.as_str().unwrap(),
@@ -899,7 +907,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         let captured = spy.captured_command().unwrap();
         assert!(
             captured.starts_with("python3 -c ") && captured.contains("print"),
@@ -989,7 +997,7 @@ mod tests {
             .execute(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert!(outcome.context_updates.contains_key(keys::COMMAND_OUTPUT));
         assert!(
             !outcome.context_updates.contains_key("tool.output"),
@@ -1013,7 +1021,9 @@ mod tests {
             .execute(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         let reason = outcome.failure_reason().unwrap();
         assert!(
             reason.contains("build output"),
@@ -1060,7 +1070,9 @@ mod tests {
             .execute(&node, &context, &graph, run_dir.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         let command_output = outcome
             .context_updates
             .get(keys::COMMAND_OUTPUT)

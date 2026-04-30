@@ -854,7 +854,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
             "internal.retry_count.start": 0,
             "internal.run_id": "[ULID]",
             "internal.thread_id": null,
-            "outcome": "success"
+            "outcome": "succeeded"
           },
           "current_node": "start",
           "next_node_id": "approve",

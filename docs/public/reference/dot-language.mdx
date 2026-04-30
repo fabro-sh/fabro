@@ -128,7 +128,7 @@ Chained edges like `A -> B -> C` expand to individual edges `A -> B` and `B -> C
 Edges can have attributes:
 
 ```dot
-gate -> exit      [label="Pass", condition="outcome=success"]
+gate -> exit      [label="Pass", condition="outcome=succeeded"]
 gate -> implement [label="Fix"]
 ```
 
@@ -280,8 +280,8 @@ Op         ::= '=' | '!=' | '>' | '<' | '>=' | '<='
 
 | Operator | Example | Description |
 |---|---|---|
-| `=` | `outcome=success` | Equality |
-| `!=` | `outcome!=fail` | Inequality |
+| `=` | `outcome=succeeded` | Equality |
+| `!=` | `outcome!=failed` | Inequality |
 | `>` | `context.score > 80` | Greater than (numeric) |
 | `<` | `context.count < 5` | Less than (numeric) |
 | `>=` | `context.score >= 80` | Greater than or equal |
@@ -290,7 +290,7 @@ Op         ::= '=' | '!=' | '>' | '<' | '>=' | '<='
 | `matches` | `context.version matches ^v\d+` | Regular expression match |
 | `&&` | `a=1 && b=2` | Logical AND (binds tighter than `\|\|`) |
 | `\|\|` | `a=1 \|\| b=2` | Logical OR |
-| `!` | `!outcome=fail` | Logical NOT |
+| `!` | `!outcome=failed` | Logical NOT |
 
 A bare key with no operator is a **truthiness check** — it passes if the value is non-empty, not `"false"`, and not `"0"`.
 
@@ -298,16 +298,16 @@ A bare key with no operator is a **truthiness check** — it passes if the value
 
 ```dot
 // Simple outcome check
-gate -> exit [condition="outcome=success"]
+gate -> exit [condition="outcome=succeeded"]
 
 // Compound condition
-gate -> deploy [condition="outcome=success && context.tests_passed=true"]
+gate -> deploy [condition="outcome=succeeded && context.tests_passed=true"]
 
 // Either outcome
-gate -> proceed [condition="outcome=success || outcome=partial_success"]
+gate -> proceed [condition="outcome=succeeded || outcome=partially_succeeded"]
 
 // Negation
-gate -> retry [condition="!outcome=success"]
+gate -> retry [condition="!outcome=succeeded"]
 
 // Numeric comparison
 gate -> fast_path [condition="context.score > 80"]
@@ -405,7 +405,7 @@ digraph ImplementFeature {
 
     implement -> test -> validate -> gate
 
-    gate -> review    [label="Pass", condition="outcome=success"]
+    gate -> review    [label="Pass", condition="outcome=succeeded"]
     gate -> implement [label="Fix"]
 
     review -> exit

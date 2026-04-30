@@ -13,7 +13,7 @@ use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::{
-    BilledModelUsage, FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus,
+    BilledModelUsage, FailureCategory, FailureDetail, Outcome, OutcomeExt, StageOutcome,
 };
 
 /// Result from a `CodergenBackend` invocation.
@@ -169,9 +169,9 @@ pub(crate) fn extract_status_fields(text: &str, outcome: &mut Outcome) -> bool {
     }
 
     if let Some(status_str) = obj.get("outcome").and_then(|v| v.as_str()) {
-        if let Ok(status) = status_str.parse::<StageStatus>() {
+        if let Ok(status) = status_str.parse::<StageOutcome>() {
             outcome.status = status;
-            if outcome.status == StageStatus::Fail {
+            if outcome.status.is_failure() {
                 if let Some(reason) = obj.get("failure_reason").and_then(|v| v.as_str()) {
                     outcome.failure =
                         Some(FailureDetail::new(reason, FailureCategory::Deterministic));
@@ -468,7 +468,7 @@ mod tests {
             .simulate(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
         assert_eq!(outcome.notes.as_deref(), Some("[Simulated] plan"));
         assert_eq!(
             outcome.context_updates.get(keys::LAST_STAGE),
@@ -567,7 +567,7 @@ mod tests {
         let sandbox_dir = TempDir::new().unwrap();
         std::fs::write(
             sandbox_dir.path().join("status.json"),
-            r#"{"outcome": "fail", "failure_reason": "tests failed"}"#,
+            r#"{"outcome": "failed", "failure_reason": "tests failed"}"#,
         )
         .unwrap();
 
@@ -590,7 +590,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert_eq!(outcome.failure_reason(), Some("tests failed"));
     }
 
@@ -616,7 +618,7 @@ mod tests {
             ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
                     text:
-                        r#"Done. {"outcome": "success", "preferred_next_label": "approve"}"#
+                        r#"Done. {"outcome": "succeeded", "preferred_next_label": "approve"}"#
                             .to_string(),
                     usage:             None,
                     files_touched:     Vec::new(),
@@ -628,7 +630,7 @@ mod tests {
         let sandbox_dir = TempDir::new().unwrap();
         std::fs::write(
             sandbox_dir.path().join("status.json"),
-            r#"{"outcome": "fail", "failure_reason": "should be ignored"}"#,
+            r#"{"outcome": "failed", "failure_reason": "should be ignored"}"#,
         )
         .unwrap();
 
@@ -651,7 +653,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
         assert_eq!(outcome.preferred_label.as_deref(), Some("approve"));
         assert!(outcome.failure.is_none());
     }
@@ -712,7 +714,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
         assert_eq!(
             outcome.context_updates.get("verified"),
             Some(&serde_json::json!("true")),
@@ -968,7 +970,7 @@ mod tests {
         let text = r#"Here is my analysis of the code.
 
 ```json
-{"preferred_next_label": "fix", "outcome": "success"}
+{"preferred_next_label": "fix", "outcome": "succeeded"}
 ```
 
 That's it."#;
@@ -1037,28 +1039,32 @@ That's it."#;
 
     #[test]
     fn extract_status_fields_outcome_fail_with_reason() {
-        let text = r#"{"outcome": "fail", "failure_reason": "tests failed"}"#;
+        let text = r#"{"outcome": "failed", "failure_reason": "tests failed"}"#;
         let mut outcome = Outcome::success();
         extract_status_fields(text, &mut outcome);
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert_eq!(outcome.failure_reason(), Some("tests failed"));
     }
 
     #[test]
     fn extract_status_fields_outcome_success() {
-        let text = r#"{"outcome": "success"}"#;
+        let text = r#"{"outcome": "succeeded"}"#;
         let mut outcome = Outcome::success();
         extract_status_fields(text, &mut outcome);
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
         assert!(outcome.failure.is_none());
     }
 
     #[test]
     fn extract_status_fields_outcome_fail_without_reason() {
-        let text = r#"{"outcome": "fail"}"#;
+        let text = r#"{"outcome": "failed"}"#;
         let mut outcome = Outcome::success();
         extract_status_fields(text, &mut outcome);
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert!(outcome.failure.is_none());
     }
 
@@ -1102,7 +1108,9 @@ Some text in between.
             .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert!(outcome.failure_reason().unwrap().contains("bad config"));
     }
 

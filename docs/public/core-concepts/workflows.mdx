@@ -68,7 +68,7 @@ Edges can have **conditions** that route execution based on outcomes:
 ```dot
 gate [shape=diamond, label="Tests passing?"]
 
-gate -> exit      [label="Pass", condition="outcome=success"]
+gate -> exit      [label="Pass", condition="outcome=succeeded"]
 gate -> implement [label="Fix"]
 ```
 

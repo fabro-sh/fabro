@@ -478,7 +478,7 @@ mod tests {
 
     use super::*;
     use crate::event::append_event;
-    use crate::outcome::{Outcome, StageStatus};
+    use crate::outcome::{Outcome, StageOutcome};
     use crate::pipeline::write_finalize_commit;
     use crate::records::Conclusion;
     use crate::run_options::GitCheckpointOptions;
@@ -915,7 +915,7 @@ mod tests {
         );
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
-            status:               StageStatus::Success,
+            status:               StageOutcome::Succeeded,
             duration_ms:          10,
             failure_reason:       None,
             final_git_commit_sha: None,

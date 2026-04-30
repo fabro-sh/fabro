@@ -5,7 +5,7 @@ use rand::Rng;
 
 use crate::condition::evaluate_condition;
 use crate::context::Context;
-use crate::outcome::{Outcome, StageStatus};
+use crate::outcome::{Outcome, StageOutcome};
 
 /// Result of edge selection: the chosen edge and the reason it was selected.
 pub(crate) struct SelectedGraphEdge<'a> {
@@ -102,8 +102,8 @@ pub(crate) fn check_goal_gates(
     for (node_id, outcome) in node_outcomes {
         if let Some(node) = graph.nodes.get(node_id) {
             if node.goal_gate()
-                && outcome.status != StageStatus::Success
-                && outcome.status != StageStatus::PartialSuccess
+                && outcome.status != StageOutcome::Succeeded
+                && outcome.status != StageOutcome::PartiallySucceeded
             {
                 return Err(node_id.clone());
             }
@@ -218,7 +218,7 @@ fn pick_edge<'a>(edges: &[&'a GvEdge], selection: &str) -> Option<&'a GvEdge> {
 
 fn blocks_unconditional_failure_fallthrough(node: &GvNode, outcome: &Outcome) -> bool {
     node.handler_type() == Some("human")
-        && outcome.status == StageStatus::Fail
+        && outcome.status.is_failure()
         && outcome.preferred_label.is_none()
         && outcome.suggested_next_ids.is_empty()
 }
@@ -231,7 +231,7 @@ mod tests {
 
     use super::*;
     use crate::context::Context;
-    use crate::outcome::{Outcome, OutcomeExt, StageStatus};
+    use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 
     fn make_graph_with_edges(edges: Vec<Edge>) -> Graph {
         let mut g = Graph::new("test");
@@ -378,12 +378,12 @@ mod tests {
         let mut e1 = Edge::new("a", "fail_path");
         e1.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=fail".to_string()),
+            AttrValue::String("outcome=failed".to_string()),
         );
         let mut e2 = Edge::new("a", "success_path");
         e2.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=success".to_string()),
+            AttrValue::String("outcome=succeeded".to_string()),
         );
         let g = make_graph_with_edges(vec![e1, e2]);
         let node = g.nodes.get("a").unwrap();
@@ -464,7 +464,7 @@ mod tests {
         let mut e_cond = Edge::new("a", "cond_path");
         e_cond.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=success".to_string()),
+            AttrValue::String("outcome=succeeded".to_string()),
         );
         let e_uncond = Edge::new("a", "uncond_path");
         let g = make_graph_with_edges(vec![e_cond, e_uncond]);
@@ -531,7 +531,7 @@ mod tests {
         let mut fail = Edge::new("gate", "retry");
         fail.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=fail".to_string()),
+            AttrValue::String("outcome=failed".to_string()),
         );
         let approve = Edge::new("gate", "approve");
         let g = make_graph_with_edges(vec![fail, approve]);
@@ -555,7 +555,7 @@ mod tests {
         let mut e1 = Edge::new("a", "path1");
         e1.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=fail".to_string()),
+            AttrValue::String("outcome=failed".to_string()),
         );
         let mut e2 = Edge::new("a", "path2");
         e2.attrs.insert(
@@ -574,7 +574,7 @@ mod tests {
         let mut e1 = Edge::new("a", "path1");
         e1.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=fail".to_string()),
+            AttrValue::String("outcome=failed".to_string()),
         );
         let mut e2 = Edge::new("a", "path2");
         e2.attrs.insert(
@@ -612,7 +612,7 @@ mod tests {
 
         let mut outcomes = HashMap::new();
         let mut o = Outcome::success();
-        o.status = StageStatus::PartialSuccess;
+        o.status = StageOutcome::PartiallySucceeded;
         outcomes.insert("work".to_string(), o);
 
         assert!(check_goal_gates(&g, &outcomes).is_ok());

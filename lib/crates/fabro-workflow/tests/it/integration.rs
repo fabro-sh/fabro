@@ -47,7 +47,7 @@ use fabro_workflow::handler::manager_loop::SubWorkflowHandler;
 use fabro_workflow::handler::start::StartHandler;
 use fabro_workflow::handler::wait::WaitHandler;
 use fabro_workflow::handler::{Handler, HandlerRegistry};
-use fabro_workflow::outcome::{Outcome, OutcomeExt, StageStatus};
+use fabro_workflow::outcome::{Outcome, OutcomeExt, StageOutcome};
 use fabro_workflow::records::{Checkpoint, CheckpointExt};
 use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflow::test_support::{WorkflowRunner, run_graph_with_hooks, test_store_dir};
@@ -239,7 +239,7 @@ fn parse_and_validate_branching_with_conditions() {
         gate      [shape=diamond, label="Tests passing?"]
 
         start -> plan -> implement -> validate -> gate
-        gate -> exit      [label="Yes", condition="outcome=success"]
+        gate -> exit      [label="Yes", condition="outcome=succeeded"]
         gate -> implement [label="No"]
     }"#;
 
@@ -253,7 +253,7 @@ fn parse_and_validate_branching_with_conditions() {
         .iter()
         .find(|e| e.from == "gate" && e.to == "exit")
         .expect("gate -> exit edge should exist");
-    assert_eq!(gate_exit.condition(), Some("outcome=success"));
+    assert_eq!(gate_exit.condition(), Some("outcome=succeeded"));
 
     let gate_impl = graph
         .edges
@@ -358,7 +358,7 @@ async fn end_to_end_linear_pipeline() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
     assert!(checkpoint.completed_nodes.contains(&"start".to_string()));
@@ -391,8 +391,8 @@ async fn end_to_end_linear_pipeline() {
 async fn end_to_end_branching_pipeline() {
     // Build a graph:
     //   start -> work -> gate (diamond)
-    //   gate -> success_path [condition="outcome=success"]
-    //   gate -> fail_path    [condition="outcome=fail"]
+    //   gate -> success_path [condition="outcome=succeeded"]
+    //   gate -> fail_path    [condition="outcome=failed"]
     //   success_path -> exit
     //   fail_path -> exit
     //
@@ -448,14 +448,14 @@ async fn end_to_end_branching_pipeline() {
     let mut gate_success = Edge::new("gate", "success_path");
     gate_success.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     graph.edges.push(gate_success);
 
     let mut gate_fail = Edge::new("gate", "fail_path");
     gate_fail.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=fail".to_string()),
+        AttrValue::String("outcome=failed".to_string()),
     );
     graph.edges.push(gate_fail);
 
@@ -488,7 +488,7 @@ async fn end_to_end_branching_pipeline() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
     assert!(
@@ -608,7 +608,7 @@ async fn end_to_end_human_gate_pipeline() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
     assert!(
@@ -706,7 +706,9 @@ async fn human_gate_interrupted_input_fails_closed_without_fail_route() {
         .expect("engine should return Ok with fail outcome");
     assert_eq!(
         outcome.status,
-        StageStatus::Fail,
+        StageOutcome::Failed {
+            retry_requested: false,
+        },
         "interrupted human gate should fail closed"
     );
     assert!(
@@ -781,7 +783,7 @@ async fn human_gate_interrupted_input_routes_via_outcome_fail_condition() {
     let mut fail_edge = Edge::new("gate", "manual_review");
     fail_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=fail".to_string()),
+        AttrValue::String("outcome=failed".to_string()),
     );
     graph.edges.push(fail_edge);
 
@@ -815,7 +817,7 @@ async fn human_gate_interrupted_input_routes_via_outcome_fail_condition() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("interrupted human gate should follow explicit fail route");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
     assert!(
@@ -933,7 +935,9 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
     let outcome = result.unwrap();
     assert_eq!(
         outcome.status,
-        StageStatus::Fail,
+        StageOutcome::Failed {
+            retry_requested: false,
+        },
         "pipeline outcome should be 'fail' when goal gate unsatisfied"
     );
     let failure_reason = outcome.failure_reason().unwrap_or_default();
@@ -1050,7 +1054,7 @@ async fn goal_gate_routes_to_retry_target_when_present() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run should eventually succeed after retry");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
     // gated_work should appear in completed nodes (at least twice -- first fail,
@@ -1365,7 +1369,7 @@ async fn retry_on_failure_then_succeed() {
         .run(&graph, &run_options)
         .await
         .expect("should succeed after retry");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 // ---------------------------------------------------------------------------
@@ -1440,7 +1444,7 @@ async fn pipeline_with_many_nodes() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("large pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
     // All 10 step nodes should be in completed_nodes
@@ -1673,8 +1677,8 @@ fn make_graph_with_start_exit(name: &str) -> Graph {
 async fn smoke_test_with_mock_codergen_backend() {
     // Pipeline:
     //   start -> plan -> gate (diamond)
-    //   gate -> implement [condition="outcome=success"]
-    //   gate -> fix       [condition="outcome!=success"]
+    //   gate -> implement [condition="outcome=succeeded"]
+    //   gate -> fix       [condition="outcome!=succeeded"]
     //   implement -> exit
     //   fix -> exit
     //
@@ -1743,14 +1747,14 @@ async fn smoke_test_with_mock_codergen_backend() {
     let mut gate_impl = Edge::new("gate", "implement");
     gate_impl.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     graph.edges.push(gate_impl);
 
     let mut gate_fix = Edge::new("gate", "fix");
     gate_fix.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome!=success".to_string()),
+        AttrValue::String("outcome!=succeeded".to_string()),
     );
     graph.edges.push(gate_fix);
 
@@ -1787,7 +1791,7 @@ async fn smoke_test_with_mock_codergen_backend() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("smoke test should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = load_run_checkpoint(dir.path()).unwrap();
     assert!(
@@ -1889,7 +1893,7 @@ async fn end_to_end_parallel_fan_out_fan_in() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("parallel pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
 
@@ -2002,7 +2006,7 @@ async fn resume_from_checkpoint_completes_pipeline() {
         .run_from_checkpoint_with_state(&graph, &run_options, &checkpoint)
         .await
         .expect("resume should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Verify checkpoint written after resume contains step_b
     let final_cp = state.checkpoint.expect("checkpoint should be captured");
@@ -2103,7 +2107,7 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
         .run_from_checkpoint(&graph, &run_options, &checkpoint)
         .await
         .expect("resume with goal gate should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 // ===========================================================================
@@ -2319,7 +2323,7 @@ async fn tool_handler_e2e() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let cp = load_run_checkpoint(dir.path()).unwrap();
     let command_output = cp
@@ -2394,7 +2398,7 @@ async fn auto_approve_interviewer_e2e() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let cp = load_run_checkpoint(dir.path()).unwrap();
     assert!(cp.completed_nodes.contains(&"approve".to_string()));
@@ -2499,13 +2503,13 @@ async fn branching_loop_back_on_failure() {
     let mut e_success = Edge::new("validate", "exit");
     e_success.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     graph.edges.push(e_success);
     let mut e_fail = Edge::new("validate", "implement");
     e_fail.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=fail".to_string()),
+        AttrValue::String("outcome=failed".to_string()),
     );
     graph.edges.push(e_fail);
 
@@ -2539,7 +2543,7 @@ async fn branching_loop_back_on_failure() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let cp = load_run_checkpoint(dir.path()).unwrap();
     let implement_count = cp
@@ -2625,7 +2629,7 @@ async fn human_gate_loops_back() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let cp = load_run_checkpoint(dir.path()).unwrap();
     let gate_count = cp.completed_nodes.iter().filter(|n| *n == "gate").count();
@@ -2690,7 +2694,7 @@ async fn scenario_ship_a_feature() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let cp = load_run_checkpoint(dir.path()).unwrap();
     let command_output = cp
@@ -2775,7 +2779,7 @@ async fn scenario_parallel_expert_review() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let cp = state.checkpoint.expect("checkpoint should exist");
     let results = cp
@@ -2862,7 +2866,7 @@ async fn scenario_node_retries_on_retry_status() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let cp = state.checkpoint.expect("checkpoint should exist");
     let retry_count = cp
@@ -2884,13 +2888,13 @@ async fn scenario_loop_restart_resets_context() {
     let mut success_edge = Edge::new("work", "exit");
     success_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     graph.edges.push(success_edge);
     let mut fail_edge = Edge::new("work", "start");
     fail_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=fail".to_string()),
+        AttrValue::String("outcome=failed".to_string()),
     );
     fail_edge
         .attrs
@@ -2924,7 +2928,7 @@ async fn scenario_loop_restart_resets_context() {
         git:              None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
     assert!(call_count.load(std::sync::atomic::Ordering::SeqCst) >= 2);
 }
 
@@ -2951,7 +2955,7 @@ async fn scenario_bug_triage_router() {
     let mut e_critical = Edge::new("triage", "critical");
     e_critical.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     e_critical
         .attrs
@@ -2960,7 +2964,7 @@ async fn scenario_bug_triage_router() {
     let mut e_normal = Edge::new("triage", "normal");
     e_normal.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     e_normal
         .attrs
@@ -2995,7 +2999,7 @@ async fn scenario_bug_triage_router() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let cp = state.checkpoint.expect("checkpoint should exist");
     assert!(
@@ -3057,7 +3061,7 @@ async fn scenario_crash_recovery() {
         .run_from_checkpoint_with_state(&graph, &run_options, &checkpoint)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let cp = state.checkpoint.expect("checkpoint should be captured");
     assert!(cp.completed_nodes.contains(&"b".to_string()));
@@ -3170,7 +3174,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
 
     let cp = state.checkpoint.expect("checkpoint should be captured");
     let manager_outcome = cp.node_outcomes.get("manager").expect("manager outcome");
-    assert_eq!(manager_outcome.status, StageStatus::Success);
+    assert_eq!(manager_outcome.status, StageOutcome::Succeeded);
     assert!(
         manager_outcome
             .notes
@@ -3179,7 +3183,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
             .contains("Stop condition satisfied")
     );
     // Overall pipeline succeeds because manager succeeded
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 #[tokio::test]
@@ -3252,7 +3256,9 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
 
     let cp = state.checkpoint.expect("checkpoint should be captured");
     let manager_outcome = cp.node_outcomes.get("manager").expect("manager outcome");
-    assert_eq!(manager_outcome.status, StageStatus::Fail);
+    assert_eq!(manager_outcome.status, StageOutcome::Failed {
+        retry_requested: false,
+    });
     assert!(
         manager_outcome
             .failure_reason()
@@ -3260,7 +3266,7 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
             .contains("Max cycles")
     );
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 // ===========================================================================
@@ -3354,13 +3360,13 @@ async fn conditional_branching_success_fail_paths() {
     let mut e_success = Edge::new("work", "success_path");
     e_success.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     graph.edges.push(e_success);
     let mut e_fail = Edge::new("work", "fail_path");
     e_fail.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=fail".to_string()),
+        AttrValue::String("outcome=failed".to_string()),
     );
     graph.edges.push(e_fail);
     graph.edges.push(Edge::new("success_path", "exit"));
@@ -3390,7 +3396,7 @@ async fn conditional_branching_success_fail_paths() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let cp = state.checkpoint.expect("checkpoint should exist");
     assert!(cp.completed_nodes.contains(&"fail_path".to_string()));
@@ -3412,7 +3418,7 @@ async fn edge_selection_condition_match_wins_over_weight() {
     let mut e_cond = Edge::new("a", "cond_target");
     e_cond.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     graph.edges.push(e_cond);
     let mut e_weight = Edge::new("a", "weighted_target");
@@ -3643,7 +3649,7 @@ async fn stylesheet_applies_model_override() {
         git:              None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 #[tokio::test]
@@ -3780,7 +3786,7 @@ async fn integration_smoke_plan_implement_review_done() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let cp = load_run_checkpoint(dir.path()).unwrap();
     assert!(cp.completed_nodes.contains(&"plan".to_string()));
@@ -3872,7 +3878,7 @@ async fn manager_loop_runs_child_engine_e2e() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("manager loop E2E should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
     assert!(
@@ -4006,7 +4012,7 @@ async fn manager_loop_context_flows_e2e() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Check that child's context updates were propagated through the manager
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
@@ -4079,7 +4085,7 @@ async fn manager_loop_child_dotfile_e2e() {
         git:              None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 // ===========================================================================
@@ -4186,7 +4192,7 @@ async fn import_e2e_through_engine() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("import E2E should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
     assert!(
@@ -6230,7 +6236,7 @@ mod real_llm {
     use fabro_workflow::handler::exit::ExitHandler;
     use fabro_workflow::handler::human::HumanHandler;
     use fabro_workflow::handler::start::StartHandler;
-    use fabro_workflow::outcome::StageStatus;
+    use fabro_workflow::outcome::StageOutcome;
     use fabro_workflow::run_options::RunOptions;
     use fabro_workflow::test_support::WorkflowRunner;
 
@@ -6320,7 +6326,7 @@ mod real_llm {
         .expect("should not timeout")
         .expect("real LLM pipeline should succeed");
 
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
 
         let checkpoint = load_run_checkpoint(dir.path()).unwrap();
         assert!(checkpoint.completed_nodes.contains(&"plan".to_string()));
@@ -6429,7 +6435,7 @@ mod real_llm {
         .expect("should not timeout")
         .expect("real LLM two-stage pipeline should succeed");
 
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
 
         let checkpoint = load_run_checkpoint(dir.path()).unwrap();
         let last_stage = checkpoint
@@ -6562,7 +6568,7 @@ mod real_llm {
         .expect("should not timeout")
         .expect("real LLM gate pipeline should succeed");
 
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
 
         let checkpoint = load_run_checkpoint(dir.path()).unwrap();
         assert!(
@@ -6663,7 +6669,7 @@ mod real_llm {
         .expect("should not timeout")
         .expect("one_shot pipeline should succeed");
 
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
 
         let response = state
             .node(&fabro_types::StageId::new("classify", 1))
@@ -6797,7 +6803,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
         .run_with_state_and_llm_source(&graph, &run_options, Arc::clone(&llm_source))
         .await
         .expect("workflow run should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let store_dir = test_store_dir(&run_options.run_dir);
     let store = Arc::new(Database::new(
@@ -6817,7 +6823,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
         llm_source.as_ref(),
         Some(&Conclusion {
             timestamp:            Utc::now(),
-            status:               StageStatus::Success,
+            status:               StageOutcome::Succeeded,
             duration_ms:          1,
             failure_reason:       None,
             final_git_commit_sha: None,
@@ -6909,7 +6915,7 @@ async fn human_gate_freeform_only_routes_text() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
     assert!(
@@ -7040,7 +7046,7 @@ async fn human_gate_freeform_with_fixed_choice_match() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
     assert!(
@@ -7157,7 +7163,7 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("run should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
     assert!(
@@ -7285,7 +7291,7 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
         .run(&graph, &run_options)
         .await
         .expect("run should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let recordings = recorder.recordings();
     assert_eq!(
@@ -7394,7 +7400,7 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
         .run(&graph, &run_options)
         .await
         .expect("run should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let recordings = recorder.recordings();
     assert_eq!(
@@ -7759,7 +7765,7 @@ async fn hook_run_start_proceed_allows_run() {
     let (outcome, _state) = Box::pin(engine.run_with_state(&graph, &run_options))
         .await
         .unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 #[tokio::test]
@@ -7826,7 +7832,7 @@ async fn hook_stage_start_proceed_allows_execution() {
     let (outcome, state) = Box::pin(engine.run_with_state(&graph, &run_options))
         .await
         .unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     assert!(
         state
@@ -7853,7 +7859,7 @@ async fn hook_stage_start_skip_bypasses_node() {
         .await
         .unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     assert!(
         state
@@ -7917,7 +7923,7 @@ async fn hook_stage_start_matcher_filters_by_node_id() {
         .await
         .unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     assert!(
         state
@@ -7951,7 +7957,7 @@ async fn hook_stage_start_matcher_no_match_proceeds() {
     let (outcome, _state) = Box::pin(engine.run_with_state(&graph, &run_options))
         .await
         .unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 // --- StageComplete hook tests ---
@@ -7970,7 +7976,7 @@ async fn hook_stage_complete_fires_after_success() {
     let run_options = make_run_options(dir.path());
 
     let outcome = engine.run(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Marker file should exist and contain node IDs
     assert!(
@@ -8001,7 +8007,7 @@ async fn hook_stage_complete_failure_does_not_block_pipeline() {
     let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(
         outcome.status,
-        StageStatus::Success,
+        StageOutcome::Succeeded,
         "Non-blocking StageComplete hook failure should not block pipeline"
     );
 }
@@ -8022,7 +8028,7 @@ async fn hook_run_complete_fires_on_success() {
     let run_options = make_run_options(dir.path());
 
     let outcome = engine.run(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     assert!(
         marker.exists(),
@@ -8171,7 +8177,7 @@ async fn no_hooks_configured_runs_normally() {
     let run_options = make_run_options(dir.path());
 
     let outcome = engine.run(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 // --- EdgeSelected hook tests ---
@@ -8194,7 +8200,7 @@ async fn hook_edge_selected_override_redirects_routing() {
     let run_options = make_run_options(dir.path());
 
     let outcome = engine.run(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Verify pathB was executed (override worked)
     let captured = events.lock().unwrap();
@@ -8243,7 +8249,7 @@ async fn hook_checkpoint_saved_fires() {
     let run_options = make_run_options(dir.path());
 
     let outcome = engine.run(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Checkpoint is saved after each node
     assert!(marker.exists(), "CheckpointSaved hook should have fired");
@@ -8347,7 +8353,7 @@ async fn hook_config_merge_run_overrides_by_name() {
     let run_options = make_run_options(dir.path());
 
     let outcome = engine.run(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 // The legacy `Settings`-based TOML parsing tests were deleted in Stage
@@ -8376,7 +8382,7 @@ async fn hook_blocking_override_makes_non_blocking_event_blocking() {
     // behavior — the blocking flag only affects the runner's execution
     // strategy (sequential vs parallel), not the engine's decision handling.
     let outcome = engine.run(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 #[tokio::test]
@@ -8394,7 +8400,7 @@ async fn hook_non_blocking_override_on_blocking_event() {
     // With blocking=false, the RunStart hook failure should NOT block the run
     // because the runner treats it as non-blocking (doesn't merge decisions)
     let outcome = engine.run(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 // --- Regex matcher tests ---
@@ -8418,7 +8424,7 @@ async fn hook_matcher_regex_pattern() {
         .await
         .unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     assert!(
         state
@@ -8452,7 +8458,7 @@ async fn hook_json_proceed_explicit() {
     let (outcome, _state) = Box::pin(engine.run_with_state(&graph, &run_options))
         .await
         .unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 #[tokio::test]
@@ -8839,7 +8845,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // The checkpoint context should contain a durable blob ref, not the full value.
     let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
@@ -9044,7 +9050,7 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // The checkpoint context should contain a durable blob ref.
     let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
@@ -9132,7 +9138,7 @@ async fn downstream_local_execution_materializes_blob_refs_to_runtime_files() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let expected_blob_id = fabro_types::RunBlobId::new(
         &serde_json::to_vec(&serde_json::json!("x".repeat(150 * 1024)))
@@ -9220,7 +9226,7 @@ async fn downstream_remote_execution_materializes_blob_refs_to_sandbox_files() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let expected_blob_id = fabro_types::RunBlobId::new(
         &serde_json::to_vec(&serde_json::json!("x".repeat(150 * 1024)))
@@ -9351,7 +9357,7 @@ async fn node_dir_uses_visit_count_on_revisit() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let first = state
         .node(&fabro_types::StageId::new("gated_work", 1))
@@ -9361,12 +9367,14 @@ async fn node_dir_uses_visit_count_on_revisit() {
         .unwrap();
     assert_eq!(
         first.status.as_ref().unwrap().status,
-        StageStatus::Fail,
+        StageOutcome::Failed {
+            retry_requested: false,
+        },
         "first visit should fail"
     );
     assert_eq!(
         second.status.as_ref().unwrap().status,
-        StageStatus::Success,
+        StageOutcome::Succeeded,
         "second visit should succeed"
     );
 }
@@ -10242,7 +10250,7 @@ async fn full_pipeline_with_cli_backend_node() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let api_response = state
         .node(&fabro_types::StageId::new("api_work", 1))
@@ -10361,7 +10369,7 @@ async fn stylesheet_backend_property_routes_to_cli() {
         .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let response = state
         .node(&fabro_types::StageId::new("work", 1))
@@ -10563,7 +10571,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // 6. Assert CheckpointCompleted events with git SHAs were emitted
     let events = events.lock().unwrap();
@@ -10729,7 +10737,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // 6. Assert shadow branch has checkpoint data in run.json
     let run_json = std::process::Command::new("git")
@@ -10943,7 +10951,7 @@ async fn parallel_git_branching_host_e2e() {
         .expect("parallel pipeline should succeed");
     assert_eq!(
         outcome.status,
-        StageStatus::Success,
+        StageOutcome::Succeeded,
         "pipeline failed: {:?}",
         outcome.failure_reason()
     );
@@ -11190,7 +11198,7 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
         .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Cleanup
     let _ = std::process::Command::new("git")
@@ -11366,13 +11374,13 @@ fn circuit_breaker_self_loop_graph(signature_limit: Option<i64>) -> Graph {
     let mut fail_edge = Edge::new("work", "work");
     fail_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=fail".to_string()),
+        AttrValue::String("outcome=failed".to_string()),
     );
     graph.edges.push(fail_edge);
     let mut ok_edge = Edge::new("work", "exit");
     ok_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     graph.edges.push(ok_edge);
     graph
@@ -11408,7 +11416,7 @@ fn circuit_breaker_restart_graph(signature_limit: Option<i64>) -> Graph {
     let mut restart_edge = Edge::new("work", "start");
     restart_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=fail".to_string()),
+        AttrValue::String("outcome=failed".to_string()),
     );
     restart_edge
         .attrs
@@ -11417,7 +11425,7 @@ fn circuit_breaker_restart_graph(signature_limit: Option<i64>) -> Graph {
     let mut ok_edge = Edge::new("work", "exit");
     ok_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     graph.edges.push(ok_edge);
     graph
@@ -11793,7 +11801,7 @@ async fn e2e_failure_signature_persisted_in_context() {
     let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
     // Pipeline reaches exit (terminal) with goal gates satisfied.
     // Per spec, reaching exit with satisfied goal gates returns SUCCESS.
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Verify checkpoint has failure_signature in context
     let cp = state.checkpoint.expect("checkpoint should be captured");
@@ -11913,7 +11921,7 @@ async fn e2e_signature_maps_persist_in_checkpoint() {
         git:              None,
     };
     let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Verify signature maps persisted to the run state checkpoint.
     let cp = state.checkpoint.expect("checkpoint should be captured");
@@ -12110,7 +12118,7 @@ async fn e2e_circuit_breaker_does_not_fire_below_limit() {
     let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
     assert_eq!(
         outcome.status,
-        StageStatus::Success,
+        StageOutcome::Succeeded,
         "pipeline should succeed when failures stay below limit"
     );
 
@@ -12166,14 +12174,14 @@ async fn e2e_circuit_breaker_multi_stage_impl_verify_cycle() {
     let mut fail_edge = Edge::new("verify", "impl");
     fail_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=fail".to_string()),
+        AttrValue::String("outcome=failed".to_string()),
     );
     graph.edges.push(fail_edge);
     // verify success -> exit (never taken)
     let mut ok_edge = Edge::new("verify", "exit");
     ok_edge.attrs.insert(
         "condition".to_string(),
-        AttrValue::String("outcome=success".to_string()),
+        AttrValue::String("outcome=succeeded".to_string()),
     );
     graph.edges.push(ok_edge);
 
@@ -12667,7 +12675,7 @@ async fn e2e_stall_watchdog_kept_alive_by_handler_events() {
         .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 #[tokio::test]
@@ -12713,7 +12721,7 @@ async fn e2e_stall_watchdog_disabled_with_zero_timeout() {
         .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }
 
 /// Handler that sleeps for a configurable duration, then succeeds (for e2e
@@ -12921,7 +12929,7 @@ async fn asset_collection_local_sandbox_success() {
         .run(&graph, &run_options)
         .await
         .expect("run should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let artifact_store = test_artifact_store(run_dir.path());
     let artifacts = artifact_store
@@ -13057,7 +13065,7 @@ async fn asset_collection_local_sandbox_on_failure() {
     // The pipeline completes with goal gates satisfied — per spec, SUCCESS at exit
     // node. Assets should still be collected regardless of intermediate node
     // failures.
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let report_content = String::from_utf8(
         test_artifact_store(run_dir.path())
@@ -13161,7 +13169,7 @@ async fn asset_collection_docker_sandbox() {
         .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let content = String::from_utf8(
         test_artifact_store(run_dir.path())
@@ -13227,5 +13235,5 @@ async fn wait_timer_e2e() {
         git:              None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
-    assert_eq!(outcome.status, StageStatus::Success);
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
 }

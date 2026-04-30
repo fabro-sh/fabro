@@ -16,7 +16,7 @@ use crate::event::{Event, StageScope};
 use crate::git::sanitize_ref_component;
 use crate::hook_context::set_hook_node;
 use crate::millis_u64;
-use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus};
+use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeExt, StageOutcome};
 use crate::run_dir::visit_from_context;
 use crate::sandbox_git::{
     GIT_REMOTE, checked_git_checkpoint, git_merge_ff_only, git_remove_worktree,
@@ -345,7 +345,7 @@ impl Handler for ParallelHandler {
                             branch:             setup.target_id.clone(),
                             index:              setup.branch_index,
                             duration_ms:        millis_u64(branch_start.elapsed()),
-                            status:             "fail".to_string(),
+                            status:             "failed".to_string(),
                             head_sha:           None,
                         },
                         &branch_scope,
@@ -498,7 +498,7 @@ impl Handler for ParallelHandler {
             // winner.
             let mut successful: Vec<_> = results
                 .iter()
-                .filter(|r| r.outcome.status == StageStatus::Success && r.head_sha.is_some())
+                .filter(|r| r.outcome.status == StageOutcome::Succeeded && r.head_sha.is_some())
                 .collect();
             successful.sort_by(|a, b| a.id.cmp(&b.id));
             if let Some(winner) = successful.first() {
@@ -511,11 +511,11 @@ impl Handler for ParallelHandler {
         // Count successes and failures
         let success_count = results
             .iter()
-            .filter(|r| r.outcome.status == StageStatus::Success)
+            .filter(|r| r.outcome.status == StageOutcome::Succeeded)
             .count();
         let fail_count = results
             .iter()
-            .filter(|r| r.outcome.status == StageStatus::Fail)
+            .filter(|r| r.outcome.status.is_failure())
             .count();
         let total = results.len();
 
@@ -562,16 +562,18 @@ impl Handler for ParallelHandler {
         let status = match join_policy {
             JoinPolicy::WaitAll => {
                 if fail_count == 0 {
-                    StageStatus::Success
+                    StageOutcome::Succeeded
                 } else {
-                    StageStatus::PartialSuccess
+                    StageOutcome::PartiallySucceeded
                 }
             }
             JoinPolicy::FirstSuccess => {
                 if success_count > 0 {
-                    StageStatus::Success
+                    StageOutcome::Succeeded
                 } else {
-                    StageStatus::Fail
+                    StageOutcome::Failed {
+                        retry_requested: false,
+                    }
                 }
             }
         };
@@ -580,7 +582,7 @@ impl Handler for ParallelHandler {
         // and find the common downstream target (typically the fan-in node).
         let join_node = find_join_node(&results, graph);
 
-        let is_fail = status == StageStatus::Fail;
+        let is_fail = status.is_failure();
         let mut outcome = Outcome {
             status,
             notes: Some(format!(
@@ -683,7 +685,9 @@ mod tests {
             .execute(&node, &context, &graph, run_dir, &services)
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
     }
 
     #[tokio::test]
@@ -721,7 +725,7 @@ mod tests {
             .unwrap();
         logger.flush().await;
 
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert!(outcome.notes.as_deref().unwrap().contains("2 branches"));
 
         // Check context was set
@@ -802,7 +806,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
     }
 
     #[test]
@@ -857,7 +861,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
         assert!(outcome.notes.as_deref().unwrap().contains("2 branches"));
         assert_eq!(outcome.jump_to_node, Some("fan_in".to_string()));

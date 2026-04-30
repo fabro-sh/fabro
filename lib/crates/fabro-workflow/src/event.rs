@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use ::fabro_types::{
     ActorRef, BilledTokenCounts, BlockedReason, FailureReason, ForkSourceRef, GitContext,
     ParallelBranchId, PullRequestRecord, RunBlobId, RunControlAction, RunEvent, RunId,
-    RunProvenance, StageId, StageStatus, SuccessReason, run_event as fabro_types,
+    RunProvenance, StageId, StageOutcome, SuccessReason, run_event as fabro_types,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -1401,13 +1401,15 @@ fn billed_token_counts_from_llm(usage: &LlmTokenCounts) -> BilledTokenCounts {
     }
 }
 
-fn stage_status_from_string(status: &str) -> StageStatus {
+fn stage_status_from_string(status: &str) -> StageOutcome {
     status.parse().unwrap_or_else(|_| {
         tracing::warn!(
             status,
             "unknown stage status in StageCompleted event; using Fail"
         );
-        StageStatus::Fail
+        StageOutcome::Failed {
+            retry_requested: false,
+        }
     })
 }
 
@@ -3137,7 +3139,7 @@ mod tests {
                 name: "Plan".to_string(),
                 index: 0,
                 duration_ms: 5000,
-                status: "success".to_string(),
+                status: "succeeded".to_string(),
                 preferred_label: None,
                 suggested_next_ids: Vec::new(),
                 billing: None,
@@ -3170,7 +3172,7 @@ mod tests {
         assert_eq!(stored.stage_id, Some(StageId::new("plan", 1)));
         let properties = stored.properties().unwrap();
         assert_eq!(properties["duration_ms"], 5000);
-        assert_eq!(properties["status"], "success");
+        assert_eq!(properties["status"], "succeeded");
         assert!(stored.session_id.is_none());
     }
 
@@ -3181,7 +3183,7 @@ mod tests {
             name: "Plan".to_string(),
             index: 0,
             duration_ms: 5000,
-            status: "success".to_string(),
+            status: "succeeded".to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
             billing: None,

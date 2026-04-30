@@ -117,14 +117,14 @@ See [Goal gates](/execution/failures#goal-gates) for retry target resolution and
 The four externally-visible statuses can be used in edge `condition` expressions via the `outcome` key:
 
 ```dot
-gate -> deploy  [label="Pass",    condition="outcome=success"]
-gate -> fix     [label="Fix",     condition="outcome=fail"]
-gate -> review  [label="Partial", condition="outcome=partial_success"]
+gate -> deploy  [label="Pass",    condition="outcome=succeeded"]
+gate -> fix     [label="Fix",     condition="outcome=failed"]
+gate -> review  [label="Partial", condition="outcome=partially_succeeded"]
 gate -> skip    [label="Skipped", condition="outcome=skipped"]
 
 // Common pattern: treat partial as passing
-gate -> deploy  [condition="outcome=success || outcome=partial_success"]
-gate -> fix     [condition="outcome=fail"]
+gate -> deploy  [condition="outcome=succeeded || outcome=partially_succeeded"]
+gate -> fix     [condition="outcome=failed"]
 ```
 
 See [Transitions](/workflows/transitions) for the full edge selection logic and operator reference.

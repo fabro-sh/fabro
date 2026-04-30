@@ -1016,7 +1016,7 @@ mod tests {
     use crate::handler::manager_loop::SubWorkflowHandler;
     use crate::handler::start::StartHandler;
     use crate::operations::resume;
-    use crate::outcome::StageStatus;
+    use crate::outcome::StageOutcome;
     use crate::records::CheckpointExt;
     use crate::workflow_bundle::{BundledWorkflow, WorkflowBundle};
 
@@ -1142,7 +1142,7 @@ mod tests {
                     injected.store(true, Ordering::SeqCst);
                     emitter_for_injection.emit(&Event::CheckpointCompleted {
                         node_id: "start".to_string(),
-                        status: "success".to_string(),
+                        status: "succeeded".to_string(),
                         current_node: "start".to_string(),
                         completed_nodes: Vec::new(),
                         node_retries: HashMap::new().into_iter().collect(),
@@ -1171,7 +1171,7 @@ mod tests {
             started.finalized.conclusion.final_git_commit_sha.as_deref(),
             Some("sha-test")
         );
-        assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
+        assert_eq!(started.finalized.conclusion.status, StageOutcome::Succeeded);
         assert!(started.retro.is_none());
     }
 
@@ -1191,7 +1191,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
+        assert_eq!(started.finalized.conclusion.status, StageOutcome::Succeeded);
         let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
         assert!(run_store.state().await.unwrap().conclusion.is_some());
     }
@@ -1281,7 +1281,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
+        assert_eq!(started.finalized.conclusion.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -1306,7 +1306,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
+        assert_eq!(started.finalized.conclusion.status, StageOutcome::Succeeded);
         assert_eq!(*visited.lock().unwrap(), vec!["start".to_string()]);
     }
 
@@ -1424,7 +1424,7 @@ mod tests {
         );
         let conclusion = crate::records::Conclusion {
             timestamp:            Utc::now(),
-            status:               StageStatus::Success,
+            status:               StageOutcome::Succeeded,
             duration_ms:          1,
             failure_reason:       None,
             final_git_commit_sha: None,
@@ -1435,7 +1435,7 @@ mod tests {
         let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
         crate::event::append_event(&run_store, &fixtures::RUN_1, &Event::CheckpointCompleted {
             node_id: checkpoint.current_node.clone(),
-            status: "success".to_string(),
+            status: "succeeded".to_string(),
             current_node: checkpoint.current_node.clone(),
             completed_nodes: checkpoint.completed_nodes.clone(),
             node_retries: checkpoint.node_retries.clone().into_iter().collect(),
@@ -1467,7 +1467,7 @@ mod tests {
         crate::event::append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
             duration_ms:          conclusion.duration_ms,
             artifact_count:       0,
-            status:               "success".to_string(),
+            status:               "succeeded".to_string(),
             reason:               crate::run_status::SuccessReason::Completed,
             total_usd_micros:     None,
             final_git_commit_sha: None,

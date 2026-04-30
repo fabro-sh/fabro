@@ -11,6 +11,6 @@ digraph BranchLoop {
     gate      [shape=diamond, label="Tests passing?"]
 
     start -> plan -> implement -> validate -> gate
-    gate -> exit      [label="Pass", condition="outcome=success"]
+    gate -> exit      [label="Pass", condition="outcome=succeeded"]
     gate -> implement [label="Fix"]
 }

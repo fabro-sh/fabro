@@ -414,7 +414,7 @@ mod tests {
     use fabro_types::graph::Graph;
     use fabro_types::run::RunSpec;
     use fabro_types::{
-        Checkpoint, Conclusion, NodeStatusRecord, RunStatus, SandboxRecord, StageStatus,
+        Checkpoint, Conclusion, NodeStatusRecord, RunStatus, SandboxRecord, StageOutcome,
         StartRecord, SuccessReason, WorkflowSettings, fixtures,
     };
 
@@ -487,7 +487,7 @@ mod tests {
                 .with_ymd_and_hms(2026, 4, 20, 12, 5, 0)
                 .single()
                 .unwrap(),
-            status:               StageStatus::Success,
+            status:               StageOutcome::Succeeded,
             duration_ms:          5,
             failure_reason:       None,
             final_git_commit_sha: Some("abc123".to_string()),
@@ -509,7 +509,7 @@ mod tests {
             prompt:            Some("plan".to_string()),
             response:          Some("done".to_string()),
             status:            Some(NodeStatusRecord {
-                status:         StageStatus::Success,
+                status:         StageOutcome::Succeeded,
                 notes:          Some("ok".to_string()),
                 failure_reason: None,
                 timestamp:      Utc

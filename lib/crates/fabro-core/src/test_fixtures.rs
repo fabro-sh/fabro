@@ -496,8 +496,8 @@ mod tests {
                 TestNode::terminal("end"),
             ],
             vec![
-                TestEdge::new("start", "a").with_label("success"),
-                TestEdge::new("start", "b").with_label("fail"),
+                TestEdge::new("start", "a").with_label("succeeded"),
+                TestEdge::new("start", "b").with_label("failed"),
             ],
             "start",
         );

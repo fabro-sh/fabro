@@ -88,8 +88,8 @@ The engine sets several keys automatically. These are prefixed with `internal.` 
 Edge [conditions](/workflows/transitions#conditions) can read context values to route execution:
 
 ```dot
-gate -> deploy [condition="outcome=success && context.tests_passed=true"]
-gate -> fix    [condition="outcome=fail"]
+gate -> deploy [condition="outcome=succeeded && context.tests_passed=true"]
+gate -> fix    [condition="outcome=failed"]
 ```
 
 The `context.` prefix is optional — `tests_passed=true` and `context.tests_passed=true` are equivalent.

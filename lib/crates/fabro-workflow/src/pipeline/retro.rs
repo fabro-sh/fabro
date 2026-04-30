@@ -245,7 +245,7 @@ mod tests {
         .unwrap();
         append_event(&run_store, &test_run_id(), &Event::CheckpointCompleted {
             node_id: checkpoint.current_node.clone(),
-            status: "success".to_string(),
+            status: "succeeded".to_string(),
             current_node: checkpoint.current_node.clone(),
             completed_nodes: checkpoint.completed_nodes.clone(),
             node_retries: checkpoint.node_retries.clone().into_iter().collect(),

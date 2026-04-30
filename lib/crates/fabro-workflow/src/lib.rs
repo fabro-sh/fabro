@@ -71,7 +71,7 @@ pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec
         } else {
             stages.push(CompletedStage {
                 node_id:            "unknown".to_string(),
-                status:             "fail".to_string(),
+                status:             "failed".to_string(),
                 succeeded:          false,
                 failed:             true,
                 retries:            0,

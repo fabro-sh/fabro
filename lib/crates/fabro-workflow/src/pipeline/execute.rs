@@ -15,7 +15,7 @@ use crate::event::Event;
 use crate::graph::WorkflowGraph;
 use crate::lifecycle::WorkflowLifecycle;
 use crate::node_handler::WorkflowNodeHandler;
-use crate::outcome::{Outcome, StageStatus};
+use crate::outcome::Outcome;
 use crate::records::Checkpoint;
 use crate::sandbox_git::GitState;
 
@@ -261,7 +261,7 @@ pub async fn execute(init: Initialized) -> Executed {
     let (outcome, final_context) = match result {
         Ok((core_outcome, final_state)) => {
             let ctx = final_state.context.clone();
-            let result = if core_outcome.status == StageStatus::Fail {
+            let result = if core_outcome.status.is_failure() {
                 core_outcome
             } else {
                 let mut out = Outcome::success();

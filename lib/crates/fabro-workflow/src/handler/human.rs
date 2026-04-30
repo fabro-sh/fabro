@@ -559,7 +559,7 @@ mod tests {
             .execute(node, &context, &graph, run_dir, &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
         // Auto-approve picks first option key "A"
         assert_eq!(
             outcome.context_updates.get(keys::HUMAN_GATE_SELECTED),
@@ -583,7 +583,9 @@ mod tests {
             .execute(node, &context, &graph, run_dir, &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Failed {
+            retry_requested: false,
+        });
     }
 
     #[tokio::test]
@@ -600,7 +602,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert!(outcome.preferred_label.is_none());
         assert!(outcome.suggested_next_ids.is_empty());
         assert_eq!(
@@ -640,7 +644,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert!(outcome.preferred_label.is_none());
         assert!(outcome.suggested_next_ids.is_empty());
         assert_eq!(outcome.failure_reason(), Some("human skipped interaction"));
@@ -784,7 +790,7 @@ mod tests {
             .execute(node, &context, &graph, run_dir, &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
         assert_eq!(outcome.suggested_next_ids, vec!["freeform_target"]);
         assert_eq!(
             outcome.context_updates.get(keys::HUMAN_GATE_TEXT),
@@ -843,7 +849,7 @@ mod tests {
             .simulate(node, &context, &graph, run_dir, &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
         assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
         assert_eq!(
             outcome.context_updates.get(keys::HUMAN_GATE_SELECTED),

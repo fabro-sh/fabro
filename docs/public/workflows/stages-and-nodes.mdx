@@ -145,7 +145,7 @@ Routes execution to different edges based on conditions evaluated against the cu
 ```dot
 gate [shape=diamond, label="Tests passing?"]
 
-gate -> exit      [label="Pass", condition="outcome=success"]
+gate -> exit      [label="Pass", condition="outcome=succeeded"]
 gate -> implement [label="Fix"]
 ```
 

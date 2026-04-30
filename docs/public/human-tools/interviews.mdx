@@ -121,4 +121,4 @@ The human handler then checks the node's `human.default_choice` attribute. If se
 approve [shape=hexagon, label="Approve?", human.default_choice="deploy"]
 ```
 
-Outside of timeout defaults, human gates fail closed: `Interrupted` and `Skipped` answers do not fall through to ordinary approval edges. To model an explicit unanswered path, add an edge such as `condition="outcome=fail"` or configure a `retry_target`.
+Outside of timeout defaults, human gates fail closed: `Interrupted` and `Skipped` answers do not fall through to ordinary approval edges. To model an explicit unanswered path, add an edge such as `condition="outcome=failed"` or configure a `retry_target`.

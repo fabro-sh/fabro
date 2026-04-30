@@ -31,8 +31,8 @@ digraph MyPipeline {
     gate      [shape=diamond, label="Tests passing?"]
 
     start -> plan -> implement -> validate -> gate
-    gate -> exit      [label="Yes", condition="outcome=success"]
-    gate -> implement [label="No", condition="outcome!=success"]
+    gate -> exit      [label="Yes", condition="outcome=succeeded"]
+    gate -> implement [label="No", condition="outcome!=succeeded"]
 }
 ```
 
@@ -126,9 +126,9 @@ Selectors by specificity: `*` (universal, 0) < `shape` (1) < `.class` (2) < `#id
 Edge conditions use a simple expression syntax for routing:
 
 ```
-outcome=success
-outcome!=fail
-outcome=success && context.tests_passed=true
+outcome=succeeded
+outcome!=failed
+outcome=succeeded && context.tests_passed=true
 my_flag
 ```
 

@@ -29,8 +29,8 @@ If no edge matches at all, the workflow halts with an error.
 Edge conditions are boolean expressions evaluated against the stage outcome and run context. Conditions go in the `condition` attribute on an edge:
 
 ```dot
-gate -> exit      [label="Pass", condition="outcome=success"]
-gate -> implement [label="Fix", condition="outcome=fail"]
+gate -> exit      [label="Pass", condition="outcome=succeeded"]
+gate -> implement [label="Fix", condition="outcome=failed"]
 ```
 
 ### Available keys
@@ -46,8 +46,8 @@ gate -> implement [label="Fix", condition="outcome=fail"]
 
 | Operator | Example | Description |
 |---|---|---|
-| `=` | `outcome=success` | Equality |
-| `!=` | `outcome!=fail` | Inequality |
+| `=` | `outcome=succeeded` | Equality |
+| `!=` | `outcome!=failed` | Inequality |
 | `>` | `context.score > 80` | Greater than (numeric) |
 | `<` | `context.count < 5` | Less than (numeric) |
 | `>=` | `context.score >= 80` | Greater than or equal (numeric) |
@@ -67,16 +67,16 @@ Use `&&` (AND), `||` (OR), and `!` (NOT) to build compound expressions. `&&` bin
 
 ```dot
 // Both must be true
-gate -> deploy [condition="outcome=success && context.tests_passed=true"]
+gate -> deploy [condition="outcome=succeeded && context.tests_passed=true"]
 
 // Either can be true
-gate -> proceed [condition="outcome=success || outcome=partial_success"]
+gate -> proceed [condition="outcome=succeeded || outcome=partially_succeeded"]
 
 // Negation
-gate -> retry [condition="!outcome=success"]
+gate -> retry [condition="!outcome=succeeded"]
 
 // Mixed precedence: (a AND b) OR c
-gate -> next [condition="outcome=success && context.ready=true || context.override"]
+gate -> next [condition="outcome=succeeded && context.ready=true || context.override"]
 ```
 
 ## Agent transitions
@@ -141,7 +141,7 @@ start -> plan -> implement -> exit
 When mixing conditional and unconditional edges, conditional matches take priority. An unconditional edge acts as the default fallback:
 
 ```dot
-gate -> fast_path [condition="outcome=success"]
+gate -> fast_path [condition="outcome=succeeded"]
 gate -> slow_path
 ```
 

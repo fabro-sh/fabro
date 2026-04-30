@@ -65,7 +65,7 @@ Fabro does not treat missing input as approval. A human gate advances only when 
 - The gate times out and `human.default_choice` is set
 - The run uses `--auto-approve`
 
-If stdin is closed, a prompt is canceled, a web session disconnects, or no answer is otherwise captured, the gate is treated as unanswered. Fabro will not fall through to an unconditional approval edge. If you want to handle that case explicitly, add a failure route such as `condition="outcome=fail"` or a `retry_target`.
+If stdin is closed, a prompt is canceled, a web session disconnects, or no answer is otherwise captured, the gate is treated as unanswered. Fabro will not fall through to an unconditional approval edge. If you want to handle that case explicitly, add a failure route such as `condition="outcome=failed"` or a `retry_target`.
 
 ### Auto-approve
 

@@ -1641,7 +1641,9 @@ mod tests {
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         });
         let outcome = err.to_fail_outcome();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Failed {
+            retry_requested: false,
+        });
         let failure = outcome.failure.as_ref().unwrap();
         assert_eq!(failure.category, FailureCategory::Deterministic);
         assert_eq!(
@@ -1654,7 +1656,9 @@ mod tests {
     fn to_fail_outcome_handler_has_class_but_no_signature() {
         let err = Error::handler("connection refused");
         let outcome = err.to_fail_outcome();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Failed {
+            retry_requested: false,
+        });
         let failure = outcome.failure.as_ref().unwrap();
         assert_eq!(failure.category, FailureCategory::TransientInfra);
         assert!(failure.signature.is_none());

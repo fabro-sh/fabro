@@ -93,11 +93,11 @@ impl Handler for FanInHandler {
         };
 
         // Check if all candidates failed — if so, return fail
-        let all_failed = if best.status == "fail" {
+        let all_failed = if best.status == "failed" {
             let empty_vec = vec![];
             let arr = results.as_array().unwrap_or(&empty_vec);
             arr.iter()
-                .all(|v| v.get("status").and_then(|v| v.as_str()).unwrap_or("fail") == "fail")
+                .all(|v| v.get("status").and_then(|v| v.as_str()).unwrap_or("failed") == "failed")
         } else {
             false
         };
@@ -148,10 +148,9 @@ struct Candidate {
 
 fn status_rank(status: &str) -> u32 {
     match status {
-        "success" => 0,
-        "partial_success" => 1,
-        "retry" => 2,
-        "fail" => 3,
+        "succeeded" => 0,
+        "partially_succeeded" => 1,
+        "failed" => 2,
         _ => 4,
     }
 }
@@ -162,7 +161,7 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
     if arr.is_empty() {
         return Candidate {
             id:     "unknown".to_string(),
-            status: "fail".to_string(),
+            status: "failed".to_string(),
             score:  0.0,
         };
     }
@@ -178,7 +177,7 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
             status: v
                 .get("status")
                 .and_then(|v| v.as_str())
-                .unwrap_or("fail")
+                .unwrap_or("failed")
                 .to_string(),
             score:  v
                 .get("score")
@@ -205,7 +204,7 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
 
     candidates.into_iter().next().unwrap_or_else(|| Candidate {
         id:     "unknown".to_string(),
-        status: "fail".to_string(),
+        status: "failed".to_string(),
         score:  0.0,
     })
 }
@@ -314,7 +313,7 @@ async fn llm_evaluate(
                         let status = v
                             .get("status")
                             .and_then(|v| v.as_str())
-                            .unwrap_or("success")
+                            .unwrap_or("succeeded")
                             .to_string();
                         let score = v
                             .get("score")
@@ -342,7 +341,7 @@ async fn llm_evaluate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::outcome::StageStatus;
+    use crate::outcome::StageOutcome;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -360,7 +359,9 @@ mod tests {
             .execute(&node, &context, &graph, run_dir, &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
     }
 
     #[tokio::test]
@@ -371,8 +372,8 @@ mod tests {
         context.set(
             keys::PARALLEL_RESULTS,
             serde_json::json!([
-                {"id": "branch_a", "status": "fail"},
-                {"id": "branch_b", "status": "success"},
+                {"id": "branch_a", "status": "failed"},
+                {"id": "branch_b", "status": "succeeded"},
             ]),
         );
         let graph = Graph::new("test");
@@ -382,7 +383,7 @@ mod tests {
             .execute(&node, &context, &graph, run_dir, &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert_eq!(
             outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
             Some(&serde_json::json!("branch_b"))
@@ -397,9 +398,9 @@ mod tests {
         context.set(
             keys::PARALLEL_RESULTS,
             serde_json::json!([
-                {"id": "c", "status": "success"},
-                {"id": "a", "status": "success"},
-                {"id": "b", "status": "success"},
+                {"id": "c", "status": "succeeded"},
+                {"id": "a", "status": "succeeded"},
+                {"id": "b", "status": "succeeded"},
             ]),
         );
         let graph = Graph::new("test");
@@ -417,9 +418,9 @@ mod tests {
 
     #[test]
     fn status_rank_ordering() {
-        assert!(status_rank("success") < status_rank("partial_success"));
-        assert!(status_rank("partial_success") < status_rank("retry"));
-        assert!(status_rank("retry") < status_rank("fail"));
+        assert!(status_rank("succeeded") < status_rank("partially_succeeded"));
+        assert!(status_rank("partially_succeeded") < status_rank("failed"));
+        assert!(status_rank("failed") < status_rank("unknown"));
     }
 
     #[tokio::test]
@@ -435,8 +436,8 @@ mod tests {
         context.set(
             keys::PARALLEL_RESULTS,
             serde_json::json!([
-                {"id": "branch_a", "status": "success"},
-                {"id": "branch_b", "status": "fail"},
+                {"id": "branch_a", "status": "succeeded"},
+                {"id": "branch_b", "status": "failed"},
             ]),
         );
         let graph = Graph::new("test");
@@ -446,7 +447,7 @@ mod tests {
             .execute(&node, &context, &graph, run_dir, &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         // Should still pick branch_a via heuristic (success beats fail)
         assert_eq!(
             outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
@@ -494,8 +495,8 @@ mod tests {
         context.set(
             keys::PARALLEL_RESULTS,
             serde_json::json!([
-                {"id": "branch_a", "status": "success"},
-                {"id": "branch_b", "status": "success"},
+                {"id": "branch_a", "status": "succeeded"},
+                {"id": "branch_b", "status": "succeeded"},
             ]),
         );
         let graph = Graph::new("test");
@@ -505,7 +506,7 @@ mod tests {
             .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         // LLM chose branch_b
         assert_eq!(
             outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
@@ -521,9 +522,9 @@ mod tests {
         context.set(
             keys::PARALLEL_RESULTS,
             serde_json::json!([
-                {"id": "branch_a", "status": "fail"},
-                {"id": "branch_b", "status": "fail"},
-                {"id": "branch_c", "status": "fail"},
+                {"id": "branch_a", "status": "failed"},
+                {"id": "branch_b", "status": "failed"},
+                {"id": "branch_c", "status": "failed"},
             ]),
         );
         let graph = Graph::new("test");
@@ -533,7 +534,9 @@ mod tests {
             .execute(&node, &context, &graph, run_dir, &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert!(
             outcome
                 .failure_reason()
@@ -550,9 +553,9 @@ mod tests {
         context.set(
             keys::PARALLEL_RESULTS,
             serde_json::json!([
-                {"id": "branch_a", "status": "success", "score": 0.5},
-                {"id": "branch_b", "status": "success", "score": 0.9},
-                {"id": "branch_c", "status": "success", "score": 0.7},
+                {"id": "branch_a", "status": "succeeded", "score": 0.5},
+                {"id": "branch_b", "status": "succeeded", "score": 0.9},
+                {"id": "branch_c", "status": "succeeded", "score": 0.7},
             ]),
         );
         let graph = Graph::new("test");
@@ -562,7 +565,7 @@ mod tests {
             .execute(&node, &context, &graph, run_dir, &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         // branch_b has highest score
         assert_eq!(
             outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
@@ -578,8 +581,8 @@ mod tests {
         context.set(
             keys::PARALLEL_RESULTS,
             serde_json::json!([
-                {"id": "branch_a", "status": "fail"},
-                {"id": "branch_b", "status": "success"},
+                {"id": "branch_a", "status": "failed"},
+                {"id": "branch_b", "status": "succeeded"},
             ]),
         );
         let graph = Graph::new("test");
@@ -589,7 +592,7 @@ mod tests {
             .simulate(&node, &context, &graph, run_dir, &make_services())
             .await
             .unwrap();
-        assert_eq!(outcome.status, StageStatus::Success);
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
         assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
         assert_eq!(
             outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),

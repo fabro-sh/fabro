@@ -3,7 +3,7 @@ use std::path::Path;
 use super::start::{StartServices, Started, execute_persisted_run};
 use crate::error::Error;
 use crate::event::{Event, append_event_to_sink};
-use crate::outcome::StageStatus;
+use crate::outcome::StageOutcome;
 use crate::run_status::RunStatus;
 
 /// Resume a workflow run from its checkpoint. Errors if no checkpoint is found.
@@ -25,7 +25,7 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
     if let Some(conclusion) = state.conclusion {
         if matches!(
             conclusion.status,
-            StageStatus::Success | StageStatus::PartialSuccess | StageStatus::Skipped
+            StageOutcome::Succeeded | StageOutcome::PartiallySucceeded | StageOutcome::Skipped
         ) {
             return Err(Error::Precondition(
                 "run already finished successfully — nothing to resume".to_string(),

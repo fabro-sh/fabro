@@ -1666,7 +1666,7 @@ mod tests {
         let mut edge = Edge::new("start", "exit");
         edge.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=success".to_string()),
+            AttrValue::String("outcome=succeeded".to_string()),
         );
         g.edges = vec![edge];
         let rule = ConditionSyntaxRule;
@@ -1812,7 +1812,7 @@ mod tests {
         let mut edge = Edge::new("start", "exit");
         edge.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome!=failure".to_string()),
+            AttrValue::String("outcome!=failed".to_string()),
         );
         g.edges = vec![edge];
         let rule = ConditionSyntaxRule;
@@ -1838,7 +1838,7 @@ mod tests {
         let mut edge = Edge::new("start", "exit");
         edge.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=success && retries=0".to_string()),
+            AttrValue::String("outcome=succeeded && retries=0".to_string()),
         );
         g.edges = vec![edge];
         let rule = ConditionSyntaxRule;
@@ -2773,7 +2773,7 @@ mod tests {
             let mut e = Edge::new("work", "exit");
             e.attrs.insert(
                 "condition".to_string(),
-                AttrValue::String("outcome=success".to_string()),
+                AttrValue::String("outcome=succeeded".to_string()),
             );
             e
         });
@@ -2781,7 +2781,7 @@ mod tests {
             let mut e = Edge::new("work", "start");
             e.attrs.insert(
                 "condition".to_string(),
-                AttrValue::String("outcome=fail".to_string()),
+                AttrValue::String("outcome=failed".to_string()),
             );
             e
         });
@@ -2800,7 +2800,7 @@ mod tests {
             let mut e = Edge::new("work", "exit");
             e.attrs.insert(
                 "condition".to_string(),
-                AttrValue::String("outcome=success".to_string()),
+                AttrValue::String("outcome=succeeded".to_string()),
             );
             e
         });
@@ -2837,7 +2837,7 @@ mod tests {
             let mut e = Edge::new("work", "exit");
             e.attrs.insert(
                 "condition".to_string(),
-                AttrValue::String("outcome=success".to_string()),
+                AttrValue::String("outcome=succeeded".to_string()),
             );
             e
         });
@@ -2845,7 +2845,7 @@ mod tests {
             let mut e = Edge::new("work", "start");
             e.attrs.insert(
                 "condition".to_string(),
-                AttrValue::String("outcome=fail".to_string()),
+                AttrValue::String("outcome=failed".to_string()),
             );
             e
         });
@@ -2864,7 +2864,7 @@ mod tests {
             let mut e = Edge::new("work", "exit");
             e.attrs.insert(
                 "condition".to_string(),
-                AttrValue::String("outcome=success".to_string()),
+                AttrValue::String("outcome=succeeded".to_string()),
             );
             e
         });
@@ -2882,7 +2882,7 @@ mod tests {
             let mut e = Edge::new("work", "exit");
             e.attrs.insert(
                 "condition".to_string(),
-                AttrValue::String("outcome!=fail".to_string()),
+                AttrValue::String("outcome!=failed".to_string()),
             );
             e
         });
@@ -2925,7 +2925,7 @@ mod tests {
         let mut edge = Edge::new("start", "exit");
         edge.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=success".to_string()),
+            AttrValue::String("outcome=succeeded".to_string()),
         );
         g.edges = vec![edge];
         let rule = ConditionSyntaxRule;
@@ -2941,7 +2941,7 @@ mod tests {
         let mut edge = Edge::new("start", "exit");
         edge.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=success || outcome=fail".to_string()),
+            AttrValue::String("outcome=succeeded || outcome=failed".to_string()),
         );
         g.edges = vec![edge];
         let rule = ConditionSyntaxRule;
@@ -2955,7 +2955,7 @@ mod tests {
         let mut edge = Edge::new("start", "exit");
         edge.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("!outcome=fail".to_string()),
+            AttrValue::String("!outcome=failed".to_string()),
         );
         g.edges = vec![edge];
         let rule = ConditionSyntaxRule;
@@ -3537,7 +3537,7 @@ mod tests {
         let mut e = Edge::new("pick", "exit");
         e.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=success".to_string()),
+            AttrValue::String("outcome=succeeded".to_string()),
         );
         g.edges.push(e);
         g.edges.push(Edge::new("pick", "start"));
@@ -3560,7 +3560,7 @@ mod tests {
         let mut e = Edge::new("gate", "exit");
         e.attrs.insert(
             "condition".to_string(),
-            AttrValue::String("outcome=success".to_string()),
+            AttrValue::String("outcome=succeeded".to_string()),
         );
         g.edges.push(e);
         g.edges.push(Edge::new("gate", "start"));
