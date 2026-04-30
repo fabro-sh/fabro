@@ -1,0 +1,224 @@
+{
+  "spec": {
+    "run_id": "01KQF5SZV94BZQG1JGK0YZ18KX",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "directory": ".",
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "Say hello and demonstrate a basic Fabro workflow"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": []
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt",
+          "retros": true
+        },
+        "checkpoint": {
+          "exclude_globs": []
+        },
+        "sandbox": {
+          "provider": "docker",
+          "preserve": false,
+          "devcontainer": false,
+          "env": {},
+          "local": {
+            "worktree_mode": "always"
+          },
+          "docker": {
+            "image": "buildpack-deps:noble",
+            "network_mode": null,
+            "memory_limit": 4000000000,
+            "cpu_quota": 200000,
+            "env_vars": {},
+            "skip_clone": false
+          },
+          "daytona": {
+            "auto_stop_interval": 30,
+            "labels": {
+              "repo": "fabro-sh/fabro"
+            },
+            "snapshot": {
+              "name": "fabro-v7",
+              "cpu": 8,
+              "memory_gb": 16,
+              "disk_gb": 20,
+              "dockerfile": {
+                "type": "inline",
+                "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+              }
+            },
+            "network": null,
+            "skip_clone": false
+          }
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null,
+          "discord": null,
+          "teams": null
+        },
+        "agent": {
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        }
+      }
+    },
+    "graph": {
+      "name": "Hello",
+      "nodes": {
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "label": {
+              "String": "Exit"
+            },
+            "shape": {
+              "String": "Msquare"
+            }
+          }
+        },
+        "greet": {
+          "id": "greet",
+          "attrs": {
+            "prompt": {
+              "String": "Add a haiku to the README"
+            },
+            "label": {
+              "String": "Greet"
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "label": {
+              "String": "Start"
+            },
+            "shape": {
+              "String": "Mdiamond"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "greet",
+          "attrs": {}
+        },
+        {
+          "from": "greet",
+          "to": "exit",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "goal": {
+          "String": "Say hello and demonstrate a basic Fabro workflow"
+        },
+        "rankdir": {
+          "String": "LR"
+        }
+      }
+    },
+    "workflow_slug": "hello",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.219.0-nightly.0"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.219.0-nightly.0",
+        "name": "fabro-cli",
+        "version": "0.219.0-nightly.0"
+      },
+      "subject": {
+        "login": "brynary",
+        "auth_method": "github"
+      }
+    },
+    "manifest_blob": "760c8cbcf5f956ad7468931262586f39914f5b8d0ddead62e25704a7ae7c33e1",
+    "definition_blob": "17ac72de38b73efd9f53523bb97f5c33a1f3cc7be6e5547227833a0f871834b2",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "272d2aa549c3b3ea31de59b24020a45dd41519d7",
+      "dirty": "dirty",
+      "push_outcome": {
+        "type": "succeeded",
+        "remote": "origin",
+        "branch": "main"
+      }
+    },
+    "in_place": false
+  },
+  "graph_source": "digraph Hello {\n    graph [goal=\"Say hello and demonstrate a basic Fabro workflow\"]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    greet [label=\"Greet\", prompt=\"Add a haiku to the README\"]\n\n    start -> greet -> exit\n}\n",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-04-30T12:28:49.924890168Z",
+  "pending_control": null,
+  "checkpoint": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "retro": null,
+  "retro_prompt": null,
+  "retro_response": null,
+  "sandbox": {
+    "provider": "docker",
+    "working_directory": "/workspace",
+    "identifier": "8f4b50cabe3b6a6988aa389fc4fe9a640e8514adece447a944ac2dd25e022cb2",
+    "repo_cloned": true,
+    "clone_origin_url": "https://github.com/fabro-sh/fabro",
+    "clone_branch": "main"
+  },
+  "final_patch": null,
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "nodes": {}
+}
