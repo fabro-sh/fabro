@@ -5,7 +5,7 @@ digraph Simplify {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    simplify [label="Simplify", prompt="@files-internal/prompts/simplify.md"]
+    simplify [label="Simplify", prompt="@prompts/simplify.md"]
 
     start -> simplify -> exit
 }
