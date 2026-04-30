@@ -1158,7 +1158,15 @@ mod tests {
                 })
             }
             fn retry_policy(&self, _n: &TestNode, _g: &TestGraph) -> RetryPolicy {
-                RetryPolicy::with_max_attempts(2)
+                RetryPolicy {
+                    max_attempts: 2,
+                    backoff:      BackoffPolicy {
+                        initial_delay: Duration::from_millis(1),
+                        factor:        1.0,
+                        max_delay:     Duration::from_millis(1),
+                        jitter:        false,
+                    },
+                }
             }
         }
         let g = TestGraph::new(vec![TestNode::new("start")], vec![], "start");
