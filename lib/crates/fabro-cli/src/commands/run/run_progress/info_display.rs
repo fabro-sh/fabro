@@ -63,6 +63,38 @@ impl InfoDisplay {
         );
     }
 
+    pub(super) fn on_metadata_snapshot_completed(
+        renderer: &ProgressRenderer,
+        phase: &str,
+        duration_ms: u64,
+    ) {
+        Self::insert_info_line(
+            renderer,
+            &format!("Metadata {phase} {}", format_duration_ms(duration_ms)),
+        );
+    }
+
+    pub(super) fn on_metadata_snapshot_failed(
+        renderer: &ProgressRenderer,
+        phase: &str,
+        failure_kind: &str,
+        error: &str,
+    ) {
+        let styles = renderer.styles();
+        let kind_suffix = if failure_kind.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", styles.dim.apply_to(format!("[{failure_kind}]")))
+        };
+        Self::insert_info_line(
+            renderer,
+            &format!(
+                "{} Metadata {phase} failed: {error}{kind_suffix}",
+                styles.yellow.apply_to("Warning:")
+            ),
+        );
+    }
+
     pub(super) fn on_edge_selected(
         &self,
         renderer: &ProgressRenderer,

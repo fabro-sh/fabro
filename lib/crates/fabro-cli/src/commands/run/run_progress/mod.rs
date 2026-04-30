@@ -4,6 +4,7 @@
 )]
 
 use fabro_types::RunEvent;
+use fabro_types::run_event::is_metadata_snapshot_compat_notice_code;
 
 mod event;
 mod info_display;
@@ -20,9 +21,10 @@ use stage_display::StageDisplay;
 
 pub(crate) struct ProgressUI {
     renderer: ProgressRenderer,
-    stage:    StageDisplay,
-    setup:    SetupDisplay,
-    info:     InfoDisplay,
+    stage: StageDisplay,
+    setup: SetupDisplay,
+    info: InfoDisplay,
+    saw_metadata_snapshot_failure: bool,
 }
 
 impl ProgressUI {
@@ -44,6 +46,7 @@ impl ProgressUI {
             stage: StageDisplay::new(verbose),
             setup: SetupDisplay::new(verbose),
             info: InfoDisplay::new(verbose),
+            saw_metadata_snapshot_failure: false,
         }
     }
 
@@ -407,11 +410,27 @@ impl ProgressUI {
             ProgressEvent::RetroFailed { duration_ms } => {
                 self.stage.on_retro_failed(renderer, duration_ms);
             }
+            ProgressEvent::MetadataSnapshotCompleted { phase, duration_ms } => {
+                InfoDisplay::on_metadata_snapshot_completed(renderer, &phase, duration_ms);
+            }
+            ProgressEvent::MetadataSnapshotFailed {
+                phase,
+                failure_kind,
+                error,
+            } => {
+                self.saw_metadata_snapshot_failure = true;
+                InfoDisplay::on_metadata_snapshot_failed(renderer, &phase, &failure_kind, &error);
+            }
             ProgressEvent::RunNotice {
                 level,
                 code,
                 message,
             } => {
+                if self.saw_metadata_snapshot_failure
+                    && is_metadata_snapshot_compat_notice_code(&code)
+                {
+                    return;
+                }
                 InfoDisplay::on_run_notice(renderer, level, &code, &message);
             }
             ProgressEvent::PullRequestCreated { pr_url, draft } => {
@@ -443,7 +462,9 @@ mod tests {
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::TokenCounts;
     use fabro_model::Provider;
-    use fabro_types::{ParallelBranchId, StageId, fixtures};
+    use fabro_types::{
+        MetadataSnapshotFailureKind, MetadataSnapshotPhase, ParallelBranchId, StageId, fixtures,
+    };
     use fabro_workflow::event::{Event, RunNoticeLevel, to_run_event, to_run_event_at};
     use fabro_workflow::outcome::billed_model_usage_from_llm;
 
@@ -1008,6 +1029,68 @@ mod tests {
             Warning: sandbox cleanup failed [sandbox_cleanup_failed]
             Draft PR: https://github.com/fabro-sh/fabro/pull/42
             PR failed: auth token expired
+        ");
+    }
+
+    #[test]
+    fn plain_metadata_snapshot_snapshot() {
+        let (mut ui, buffer) = capture_ui(false);
+
+        emit(&mut ui, Event::MetadataSnapshotCompleted {
+            phase:       MetadataSnapshotPhase::Checkpoint,
+            branch:      "fabro/meta".into(),
+            duration_ms: 2000,
+            entry_count: 2,
+            bytes:       42,
+            commit_sha:  "abc123".into(),
+        });
+        emit(&mut ui, Event::MetadataSnapshotFailed {
+            phase:        MetadataSnapshotPhase::Finalize,
+            branch:       "fabro/meta".into(),
+            duration_ms:  900,
+            failure_kind: MetadataSnapshotFailureKind::Push,
+            error:        "push rejected".into(),
+            causes:       Vec::new(),
+            commit_sha:   Some("abc123".into()),
+            entry_count:  Some(2),
+            bytes:        Some(42),
+        });
+
+        insta::assert_snapshot!(rendered(&buffer), @r"
+            Metadata checkpoint 2s
+            Warning: Metadata finalize failed: push rejected [push]
+        ");
+    }
+
+    #[test]
+    fn metadata_snapshot_failure_suppresses_compat_notice_only() {
+        let (mut ui, buffer) = capture_ui(false);
+
+        emit(&mut ui, Event::MetadataSnapshotFailed {
+            phase:        MetadataSnapshotPhase::Checkpoint,
+            branch:       "fabro/meta".into(),
+            duration_ms:  900,
+            failure_kind: MetadataSnapshotFailureKind::Write,
+            error:        "write failed".into(),
+            causes:       Vec::new(),
+            commit_sha:   None,
+            entry_count:  None,
+            bytes:        None,
+        });
+        emit(&mut ui, Event::RunNotice {
+            level:   RunNoticeLevel::Warn,
+            code:    "checkpoint_metadata_write_failed".into(),
+            message: "legacy metadata warning".into(),
+        });
+        emit(&mut ui, Event::RunNotice {
+            level:   RunNoticeLevel::Warn,
+            code:    "checkpoint_metadata_degraded".into(),
+            message: "metadata snapshots are disabled for this run".into(),
+        });
+
+        insta::assert_snapshot!(rendered(&buffer), @r"
+            Warning: Metadata checkpoint failed: write failed [write]
+            Warning: metadata snapshots are disabled for this run [checkpoint_metadata_degraded]
         ");
     }
 

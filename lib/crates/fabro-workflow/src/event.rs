@@ -146,6 +146,33 @@ pub enum Event {
         code:    String,
         message: String,
     },
+    MetadataSnapshotStarted {
+        phase:  fabro_types::MetadataSnapshotPhase,
+        branch: String,
+    },
+    MetadataSnapshotCompleted {
+        phase:       fabro_types::MetadataSnapshotPhase,
+        branch:      String,
+        duration_ms: u64,
+        entry_count: usize,
+        bytes:       u64,
+        commit_sha:  String,
+    },
+    MetadataSnapshotFailed {
+        phase:        fabro_types::MetadataSnapshotPhase,
+        branch:       String,
+        duration_ms:  u64,
+        failure_kind: fabro_types::MetadataSnapshotFailureKind,
+        error:        String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        causes:       Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        commit_sha:   Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        entry_count:  Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bytes:        Option<u64>,
+    },
     StageStarted {
         node_id:      String,
         name:         String,
@@ -679,6 +706,34 @@ impl Event {
                     error!(code, message, "Run notice");
                 }
             },
+            Self::MetadataSnapshotStarted { phase, branch } => {
+                debug!(%phase, branch, "Metadata snapshot started");
+            }
+            Self::MetadataSnapshotCompleted {
+                phase,
+                branch,
+                duration_ms,
+                ..
+            } => {
+                debug!(%phase, branch, duration_ms, "Metadata snapshot completed");
+            }
+            Self::MetadataSnapshotFailed {
+                phase,
+                branch,
+                duration_ms,
+                failure_kind,
+                error,
+                ..
+            } => {
+                warn!(
+                    %phase,
+                    branch,
+                    duration_ms,
+                    %failure_kind,
+                    error,
+                    "Metadata snapshot failed"
+                );
+            }
             Self::StageStarted {
                 node_id,
                 name,
@@ -1197,6 +1252,9 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::WorkflowRunCompleted { .. } => "run.completed",
         Event::WorkflowRunFailed { .. } => "run.failed",
         Event::RunNotice { .. } => "run.notice",
+        Event::MetadataSnapshotStarted { .. } => "metadata.snapshot.started",
+        Event::MetadataSnapshotCompleted { .. } => "metadata.snapshot.completed",
+        Event::MetadataSnapshotFailed { .. } => "metadata.snapshot.failed",
         Event::StageStarted { .. } => "stage.started",
         Event::StageCompleted { .. } => "stage.completed",
         Event::StageFailed { .. } => "stage.failed",
@@ -1659,6 +1717,48 @@ fn event_body_from_event(event: &Event) -> EventBody {
             level:   *level,
             code:    code.clone(),
             message: message.clone(),
+        }),
+        Event::MetadataSnapshotStarted { phase, branch } => {
+            EventBody::MetadataSnapshotStarted(fabro_types::MetadataSnapshotStartedProps {
+                phase:  *phase,
+                branch: branch.clone(),
+            })
+        }
+        Event::MetadataSnapshotCompleted {
+            phase,
+            branch,
+            duration_ms,
+            entry_count,
+            bytes,
+            commit_sha,
+        } => EventBody::MetadataSnapshotCompleted(fabro_types::MetadataSnapshotCompletedProps {
+            phase:       *phase,
+            branch:      branch.clone(),
+            duration_ms: *duration_ms,
+            entry_count: *entry_count,
+            bytes:       *bytes,
+            commit_sha:  commit_sha.clone(),
+        }),
+        Event::MetadataSnapshotFailed {
+            phase,
+            branch,
+            duration_ms,
+            failure_kind,
+            error,
+            causes,
+            commit_sha,
+            entry_count,
+            bytes,
+        } => EventBody::MetadataSnapshotFailed(fabro_types::MetadataSnapshotFailedProps {
+            phase:        *phase,
+            branch:       branch.clone(),
+            duration_ms:  *duration_ms,
+            failure_kind: *failure_kind,
+            error:        error.clone(),
+            causes:       causes.clone(),
+            commit_sha:   commit_sha.clone(),
+            entry_count:  *entry_count,
+            bytes:        *bytes,
         }),
         Event::StageStarted {
             index,
@@ -3625,6 +3725,97 @@ mod tests {
             }
             other => panic!("expected RunUnarchived body, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn metadata_snapshot_events_map_to_typed_bodies() {
+        let started = to_run_event(&fixtures::RUN_1, &Event::MetadataSnapshotStarted {
+            phase:  fabro_types::MetadataSnapshotPhase::Init,
+            branch: "fabro/metadata/run".to_string(),
+        });
+
+        assert_eq!(started.event_name(), "metadata.snapshot.started");
+        assert!(started.node_id.is_none());
+        assert!(started.stage_id.is_none());
+        match started.body {
+            EventBody::MetadataSnapshotStarted(props) => {
+                assert_eq!(props.phase, fabro_types::MetadataSnapshotPhase::Init);
+                assert_eq!(props.branch, "fabro/metadata/run");
+            }
+            other => panic!("expected MetadataSnapshotStarted body, got {other:?}"),
+        }
+
+        let completed = to_run_event(&fixtures::RUN_1, &Event::MetadataSnapshotCompleted {
+            phase:       fabro_types::MetadataSnapshotPhase::Finalize,
+            branch:      "fabro/metadata/run".to_string(),
+            duration_ms: 2400,
+            entry_count: 4,
+            bytes:       512,
+            commit_sha:  "abc123".to_string(),
+        });
+
+        assert_eq!(completed.event_name(), "metadata.snapshot.completed");
+        match completed.body {
+            EventBody::MetadataSnapshotCompleted(props) => {
+                assert_eq!(props.phase, fabro_types::MetadataSnapshotPhase::Finalize);
+                assert_eq!(props.duration_ms, 2400);
+                assert_eq!(props.entry_count, 4);
+                assert_eq!(props.bytes, 512);
+                assert_eq!(props.commit_sha, "abc123");
+            }
+            other => panic!("expected MetadataSnapshotCompleted body, got {other:?}"),
+        }
+
+        let failed = to_run_event(&fixtures::RUN_1, &Event::MetadataSnapshotFailed {
+            phase:        fabro_types::MetadataSnapshotPhase::Checkpoint,
+            branch:       "fabro/metadata/run".to_string(),
+            duration_ms:  120,
+            failure_kind: fabro_types::MetadataSnapshotFailureKind::Push,
+            error:        "push rejected".to_string(),
+            causes:       vec!["permission denied".to_string()],
+            commit_sha:   Some("def456".to_string()),
+            entry_count:  Some(4),
+            bytes:        Some(512),
+        });
+
+        assert_eq!(failed.event_name(), "metadata.snapshot.failed");
+        match failed.body {
+            EventBody::MetadataSnapshotFailed(props) => {
+                assert_eq!(
+                    props.failure_kind,
+                    fabro_types::MetadataSnapshotFailureKind::Push
+                );
+                assert_eq!(props.commit_sha.as_deref(), Some("def456"));
+                assert_eq!(props.entry_count, Some(4));
+                assert_eq!(props.bytes, Some(512));
+            }
+            other => panic!("expected MetadataSnapshotFailed body, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn checkpoint_metadata_snapshot_events_can_be_stage_scoped() {
+        let scope = StageScope {
+            node_id:            "build".to_string(),
+            visit:              2,
+            parallel_group_id:  Some(StageId::new("fanout", 1)),
+            parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 1), 0)),
+        };
+        let stored = to_run_event_at(
+            &fixtures::RUN_1,
+            &Event::MetadataSnapshotStarted {
+                phase:  fabro_types::MetadataSnapshotPhase::Checkpoint,
+                branch: "fabro/metadata/run".to_string(),
+            },
+            Utc::now(),
+            Some(&scope),
+        );
+
+        assert_eq!(stored.node_id.as_deref(), Some("build"));
+        assert_eq!(stored.node_label.as_deref(), Some("build"));
+        assert_eq!(stored.stage_id, Some(StageId::new("build", 2)));
+        assert_eq!(stored.parallel_group_id, scope.parallel_group_id);
+        assert_eq!(stored.parallel_branch_id, scope.parallel_branch_id);
     }
 
     #[test]

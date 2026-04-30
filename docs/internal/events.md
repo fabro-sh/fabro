@@ -200,6 +200,90 @@ Informational, warning, or error notice emitted during the run.
 | `code` | string | Machine-readable notice code |
 | `message` | string | Human-readable message |
 
+### `metadata.snapshot.started`
+
+Emitted when Fabro begins a durable metadata snapshot operation. These are product events for Fabro metadata snapshots, not tracing spans for the underlying git or filesystem work.
+
+Init and finalize metadata snapshots are unscoped. Checkpoint metadata snapshots use the checkpoint stage scope, so they include the checkpoint `node_id`, `node_label`, and `stage_id`.
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "metadata.snapshot.started",
+  "properties": {
+    "phase": "checkpoint",
+    "branch": "fabro/meta"
+  }
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `phase` | string | Logical metadata operation: `"init"`, `"checkpoint"`, or `"finalize"` |
+| `branch` | string | Metadata branch/ref being written |
+
+### `metadata.snapshot.completed`
+
+Emitted when Fabro commits and pushes a metadata snapshot successfully.
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "metadata.snapshot.completed",
+  "properties": {
+    "phase": "checkpoint",
+    "branch": "fabro/meta",
+    "duration_ms": 2800,
+    "entry_count": 12,
+    "bytes": 18432,
+    "commit_sha": "def456..."
+  }
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `phase` | string | Logical metadata operation: `"init"`, `"checkpoint"`, or `"finalize"` |
+| `branch` | string | Metadata branch/ref that was written |
+| `duration_ms` | number | End-to-end duration of the metadata snapshot operation |
+| `entry_count` | number | Number of metadata files written into the snapshot commit |
+| `bytes` | number | Sum of serialized metadata entry byte lengths |
+| `commit_sha` | string | Metadata snapshot commit SHA |
+
+### `metadata.snapshot.failed`
+
+Emitted when a real metadata snapshot attempt fails. It is emitted before the matching compatibility `run.notice`, allowing human-facing consumers to suppress duplicate warning text. Compatibility notices with codes `checkpoint_metadata_write_failed` and `checkpoint_metadata_push_failed` may still appear in raw event streams. The `checkpoint_metadata_degraded` notice is a separate summary signal and should not be treated as a duplicate of this event.
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "metadata.snapshot.failed",
+  "properties": {
+    "phase": "checkpoint",
+    "branch": "fabro/meta",
+    "duration_ms": 900,
+    "failure_kind": "push",
+    "error": "failed to push metadata snapshot",
+    "causes": ["remote rejected the push"],
+    "commit_sha": "def456...",
+    "entry_count": 12,
+    "bytes": 18432
+  }
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `phase` | string | Logical metadata operation: `"init"`, `"checkpoint"`, or `"finalize"` |
+| `branch` | string | Metadata branch/ref being written |
+| `duration_ms` | number | End-to-end duration before failure |
+| `failure_kind` | string | Failure phase: `"load_state"`, `"write"`, or `"push"` |
+| `error` | string | Primary error summary |
+| `causes` | string[] | Error cause chain; omitted when empty |
+| `commit_sha` | string? | Local metadata commit SHA for push failures; omitted for load-state and write failures |
+| `entry_count` | number? | Metadata entry count for push failures; omitted for load-state and write failures |
+| `bytes` | number? | Serialized metadata byte count for push failures; omitted for load-state and write failures |
+
 ---
 
 ## Stage events

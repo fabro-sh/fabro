@@ -64,7 +64,10 @@ pub use run::{
     RunProvenance, RunServerProvenance, RunSpec, RunSubjectProvenance,
 };
 pub use run_blob_id::RunBlobId;
-pub use run_event::{ActorKind, ActorRef, EventBody, InterviewOption, RunEvent, RunNoticeLevel};
+pub use run_event::{
+    ActorKind, ActorRef, EventBody, InterviewOption, MetadataSnapshotFailureKind,
+    MetadataSnapshotPhase, RunEvent, RunNoticeLevel,
+};
 pub use run_id::{RunId, fixtures};
 pub use run_projection::{NodeState, PendingInterviewRecord, RunProjection};
 pub use run_summary::RunSummary;

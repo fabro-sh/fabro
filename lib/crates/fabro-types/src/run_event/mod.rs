@@ -136,6 +136,12 @@ pub enum EventBody {
     RunFailed(RunFailedProps),
     #[serde(rename = "run.notice")]
     RunNotice(RunNoticeProps),
+    #[serde(rename = "metadata.snapshot.started")]
+    MetadataSnapshotStarted(MetadataSnapshotStartedProps),
+    #[serde(rename = "metadata.snapshot.completed")]
+    MetadataSnapshotCompleted(MetadataSnapshotCompletedProps),
+    #[serde(rename = "metadata.snapshot.failed")]
+    MetadataSnapshotFailed(MetadataSnapshotFailedProps),
     #[serde(rename = "stage.started")]
     StageStarted(StageStartedProps),
     #[serde(rename = "stage.completed")]
@@ -396,6 +402,9 @@ impl EventBody {
             Self::RunCompleted(_) => "run.completed",
             Self::RunFailed(_) => "run.failed",
             Self::RunNotice(_) => "run.notice",
+            Self::MetadataSnapshotStarted(_) => "metadata.snapshot.started",
+            Self::MetadataSnapshotCompleted(_) => "metadata.snapshot.completed",
+            Self::MetadataSnapshotFailed(_) => "metadata.snapshot.failed",
             Self::StageStarted(_) => "stage.started",
             Self::StageCompleted(_) => "stage.completed",
             Self::StageFailed(_) => "stage.failed",
@@ -527,6 +536,9 @@ fn is_known_event_name(event: &str) -> bool {
             | "run.completed"
             | "run.failed"
             | "run.notice"
+            | "metadata.snapshot.started"
+            | "metadata.snapshot.completed"
+            | "metadata.snapshot.failed"
             | "stage.started"
             | "stage.completed"
             | "stage.failed"
@@ -1215,5 +1227,82 @@ mod tests {
             );
             assert_eq!(parsed.to_value().unwrap()["event"], value["event"]);
         }
+    }
+
+    #[test]
+    fn metadata_snapshot_events_are_known_and_round_trip_json() {
+        let completed = RunEvent {
+            id:                 "evt_metadata_completed".to_string(),
+            ts:                 DateTime::parse_from_rfc3339("2026-04-29T12:00:00.000Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            run_id:             fixtures::RUN_1,
+            node_id:            None,
+            node_label:         None,
+            stage_id:           None,
+            parallel_group_id:  None,
+            parallel_branch_id: None,
+            session_id:         None,
+            parent_session_id:  None,
+            tool_call_id:       None,
+            actor:              None,
+            body:               EventBody::MetadataSnapshotCompleted(
+                MetadataSnapshotCompletedProps {
+                    phase:       MetadataSnapshotPhase::Checkpoint,
+                    branch:      "fabro/metadata/run".to_string(),
+                    duration_ms: 2800,
+                    entry_count: 3,
+                    bytes:       42,
+                    commit_sha:  "abc123".to_string(),
+                },
+            ),
+        };
+
+        let serialized = completed.to_value().unwrap();
+        assert_eq!(serialized["event"], "metadata.snapshot.completed");
+        assert_eq!(serialized["properties"]["phase"], "checkpoint");
+        assert_eq!(serialized["properties"]["branch"], "fabro/metadata/run");
+        assert_eq!(serialized["properties"]["duration_ms"], 2800);
+        assert_eq!(serialized["properties"]["entry_count"], 3);
+        assert_eq!(serialized["properties"]["bytes"], 42);
+        assert_eq!(serialized["properties"]["commit_sha"], "abc123");
+
+        let parsed = RunEvent::from_value(serialized).unwrap();
+        assert_eq!(parsed.event_name(), "metadata.snapshot.completed");
+        assert!(matches!(
+            parsed.body,
+            EventBody::MetadataSnapshotCompleted(MetadataSnapshotCompletedProps {
+                phase: MetadataSnapshotPhase::Checkpoint,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn metadata_snapshot_failed_omits_empty_optional_fields() {
+        let body = EventBody::MetadataSnapshotFailed(MetadataSnapshotFailedProps {
+            phase:        MetadataSnapshotPhase::Init,
+            branch:       "fabro/metadata/run".to_string(),
+            duration_ms:  15,
+            failure_kind: MetadataSnapshotFailureKind::LoadState,
+            error:        "state unavailable".to_string(),
+            causes:       Vec::new(),
+            commit_sha:   None,
+            entry_count:  None,
+            bytes:        None,
+        });
+
+        let value = serde_json::to_value(&body).unwrap();
+        assert_eq!(value["event"], "metadata.snapshot.failed");
+        assert_eq!(
+            value["properties"],
+            json!({
+                "phase": "init",
+                "branch": "fabro/metadata/run",
+                "duration_ms": 15,
+                "failure_kind": "load_state",
+                "error": "state unavailable"
+            })
+        );
     }
 }

@@ -1,5 +1,10 @@
+use std::time::Instant;
+
 use fabro_hooks::{HookContext, HookEvent};
+use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
 use fabro_types::{BilledTokenCounts, EventBody};
+use fabro_util::error::collect_causes;
+use fabro_util::time::elapsed_ms;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
 use crate::error::Error;
@@ -11,7 +16,7 @@ use crate::run_options::RunOptions;
 use crate::run_status::{FailureReason, RunStatus, SuccessReason};
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::git_diff_with_timeout;
-use crate::sandbox_metadata::SandboxMetadataWriter;
+use crate::sandbox_metadata::{MetadataSnapshot, SandboxMetadataWriter};
 use crate::services::RunServices;
 
 pub fn classify_engine_result(
@@ -153,45 +158,136 @@ pub async fn write_finalize_commit(
         return;
     };
 
+    let phase = MetadataSnapshotPhase::Finalize;
+    let started = Instant::now();
+    emit_metadata_snapshot_started(services, phase, meta_branch);
+
     let mut projection = match services.run_store.state().await {
         Ok(state) => state,
         Err(err) => {
-            emit_metadata_warning(
+            let message = format!("failed to load run state for final metadata snapshot: {err}");
+            emit_metadata_snapshot_failed(
                 services,
-                "checkpoint_metadata_write_failed",
-                format!("failed to load run state for final metadata snapshot: {err}"),
+                phase,
+                meta_branch,
+                started,
+                MetadataSnapshotFailureKind::LoadState,
+                message.clone(),
+                collect_causes(err.as_ref()),
+                None,
+                None,
+                None,
             );
+            emit_metadata_warning(services, "checkpoint_metadata_write_failed", message);
             return;
         }
     };
     projection.conclusion = Some(conclusion.clone());
     let dump = RunDump::from_projection(&projection);
-    let Some(spec_run_id) = projection.spec.as_ref().map(|spec| spec.run_id.to_string()) else {
-        return;
-    };
+    let run_id = run_options.run_id.to_string();
     let writer = SandboxMetadataWriter::new(
         &*services.sandbox,
         &services.metadata_runtime,
-        &spec_run_id,
+        &run_id,
         meta_branch,
         run_options.git_author(),
     );
     match writer.write_snapshot(&dump, "finalize run").await {
         Ok(snapshot) => {
             if let Some(detail) = snapshot.push_error.as_deref() {
-                emit_metadata_warning(
+                let message =
+                    format!("failed to push metadata ref refs/heads/{meta_branch}: {detail}");
+                emit_metadata_snapshot_failed(
                     services,
-                    "checkpoint_metadata_push_failed",
-                    format!("failed to push metadata ref refs/heads/{meta_branch}: {detail}"),
+                    phase,
+                    meta_branch,
+                    started,
+                    MetadataSnapshotFailureKind::Push,
+                    message.clone(),
+                    Vec::new(),
+                    Some(snapshot.commit_sha.clone()),
+                    Some(snapshot.entry_count),
+                    Some(snapshot.bytes),
                 );
+                emit_metadata_warning(services, "checkpoint_metadata_push_failed", message);
+            } else {
+                emit_metadata_snapshot_completed(services, phase, meta_branch, started, &snapshot);
             }
         }
-        Err(err) => emit_metadata_warning(
-            services,
-            "checkpoint_metadata_write_failed",
-            format!("failed to write final checkpoint metadata: {err}"),
-        ),
+        Err(err) => {
+            let message = format!("failed to write final checkpoint metadata: {err}");
+            emit_metadata_snapshot_failed(
+                services,
+                phase,
+                meta_branch,
+                started,
+                MetadataSnapshotFailureKind::Write,
+                message.clone(),
+                collect_causes(&err),
+                None,
+                None,
+                None,
+            );
+            emit_metadata_warning(services, "checkpoint_metadata_write_failed", message);
+        }
     }
+}
+
+fn emit_metadata_snapshot_started(
+    services: &RunServices,
+    phase: MetadataSnapshotPhase,
+    branch: &str,
+) {
+    services.emitter.emit(&Event::MetadataSnapshotStarted {
+        phase,
+        branch: branch.to_string(),
+    });
+}
+
+fn emit_metadata_snapshot_completed(
+    services: &RunServices,
+    phase: MetadataSnapshotPhase,
+    branch: &str,
+    started: Instant,
+    snapshot: &MetadataSnapshot,
+) {
+    services.emitter.emit(&Event::MetadataSnapshotCompleted {
+        phase,
+        branch: branch.to_string(),
+        duration_ms: elapsed_ms(started),
+        entry_count: snapshot.entry_count,
+        bytes: snapshot.bytes,
+        commit_sha: snapshot.commit_sha.clone(),
+    });
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Metadata failure event carries the full event contract explicitly."
+)]
+fn emit_metadata_snapshot_failed(
+    services: &RunServices,
+    phase: MetadataSnapshotPhase,
+    branch: &str,
+    started: Instant,
+    failure_kind: MetadataSnapshotFailureKind,
+    error: String,
+    causes: Vec<String>,
+    commit_sha: Option<String>,
+    entry_count: Option<usize>,
+    bytes: Option<u64>,
+) {
+    services.emitter.emit(&Event::MetadataSnapshotFailed {
+        phase,
+        branch: branch.to_string(),
+        duration_ms: elapsed_ms(started),
+        failure_kind,
+        error,
+        causes,
+        commit_sha,
+        entry_count,
+        bytes,
+    });
 }
 
 fn emit_metadata_warning(services: &RunServices, code: &str, message: String) {
@@ -419,18 +515,25 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::Path;
     use std::sync::Arc;
     use std::time::Duration;
 
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use bytes::Bytes;
     use fabro_graphviz::graph::Graph;
-    use fabro_store::Database;
-    use fabro_types::{RunId, WorkflowSettings, fixtures};
+    use fabro_store::{Database, EventEnvelope, RunDatabase, RunProjection};
+    use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
+    use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, WorkflowSettings, fixtures};
     use object_store::memory::InMemory;
 
     use super::*;
-    use crate::event::{Emitter, StoreProgressLogger};
+    use crate::event::{Emitter, StoreProgressLogger, append_event};
     use crate::pipeline::types::Retroed;
-    use crate::run_options::RunOptions;
+    use crate::run_options::{GitCheckpointOptions, RunOptions};
+    use crate::runtime_store::{RunStoreBackend, RunStoreHandle};
+    use crate::sandbox_metadata::SandboxGitRuntime;
 
     fn test_run_id() -> RunId {
         fixtures::RUN_1
@@ -453,6 +556,16 @@ mod tests {
         }
     }
 
+    fn test_git_run_options(run_dir: &std::path::Path, meta_branch: &str) -> RunOptions {
+        let mut options = test_run_options(run_dir);
+        options.git = Some(GitCheckpointOptions {
+            base_sha:    None,
+            run_branch:  None,
+            meta_branch: Some(meta_branch.to_string()),
+        });
+        options
+    }
+
     fn test_store() -> Arc<Database> {
         Arc::new(Database::new(
             Arc::new(InMemory::new()),
@@ -460,6 +573,84 @@ mod tests {
             Duration::from_millis(1),
             None,
         ))
+    }
+
+    async fn seeded_run_store() -> RunDatabase {
+        let run_store = test_store().create_run(&test_run_id()).await.unwrap();
+        append_event(&run_store, &test_run_id(), &Event::RunCreated {
+            run_id:           test_run_id(),
+            settings:         serde_json::to_value(WorkflowSettings::default()).unwrap(),
+            graph:            serde_json::to_value(fabro_types::Graph::new("metadata")).unwrap(),
+            workflow_source:  None,
+            workflow_config:  None,
+            labels:           std::collections::BTreeMap::new(),
+            run_dir:          "/tmp/run".to_string(),
+            source_directory: Some("/tmp/project".to_string()),
+            workflow_slug:    Some("metadata".to_string()),
+            db_prefix:        None,
+            provenance:       None,
+            manifest_blob:    None,
+            git:              None,
+            fork_source_ref:  None,
+            in_place:         false,
+        })
+        .await
+        .unwrap();
+        run_store
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "metadata event tests use synchronous git commands to set up temporary repositories"
+    )]
+    fn init_git_repo(repo: &Path) {
+        let init = std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+        for (key, value) in [("user.name", "Test"), ("user.email", "test@test.com")] {
+            let config = std::process::Command::new("git")
+                .args(["config", key, value])
+                .current_dir(repo)
+                .output()
+                .unwrap();
+            assert!(config.status.success());
+        }
+        let commit = std::process::Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "initial"])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(commit.status.success());
+    }
+
+    fn record_events(emitter: &Arc<Emitter>) -> Arc<std::sync::Mutex<Vec<RunEvent>>> {
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        emitter.on_event(move |event| {
+            captured.lock().unwrap().push(event.clone());
+        });
+        events
+    }
+
+    fn test_services(
+        run_store: RunStoreHandle,
+        emitter: Arc<Emitter>,
+        sandbox: Arc<dyn fabro_agent::Sandbox>,
+        metadata_runtime: Arc<SandboxGitRuntime>,
+    ) -> Arc<RunServices> {
+        RunServices::new(
+            run_store,
+            emitter,
+            sandbox,
+            None,
+            None,
+            fabro_model::Provider::Anthropic,
+            Arc::new(fabro_auth::EnvCredentialSource::new()),
+            metadata_runtime,
+        )
     }
 
     #[tokio::test]
@@ -505,5 +696,201 @@ mod tests {
         store_logger.flush().await;
 
         assert_eq!(concluded.conclusion.status, StageStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn finalize_metadata_snapshot_success_emits_started_completed_unscoped() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        init_git_repo(repo_dir.path());
+        let branch = "fabro/metadata/run";
+        let run_store = seeded_run_store().await;
+        let handle = RunStoreHandle::local(run_store.clone());
+        let conclusion = Conclusion {
+            timestamp:            chrono::Utc::now(),
+            status:               StageStatus::Success,
+            duration_ms:          10,
+            failure_reason:       None,
+            final_git_commit_sha: None,
+            stages:               Vec::new(),
+            billing:              None,
+            total_retries:        0,
+        };
+        let emitter = Arc::new(Emitter::new(test_run_id()));
+        let events = record_events(&emitter);
+        let services = test_services(
+            handle,
+            emitter,
+            Arc::new(fabro_agent::LocalSandbox::new(
+                repo_dir.path().to_path_buf(),
+            )),
+            Arc::new(SandboxGitRuntime::new()),
+        );
+        let run_options = test_git_run_options(repo_dir.path(), branch);
+
+        write_finalize_commit(&run_options, &services, &conclusion).await;
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event_name(), "metadata.snapshot.started");
+        assert_eq!(events[1].event_name(), "metadata.snapshot.completed");
+        assert!(events[0].node_id.is_none());
+        match &events[1].body {
+            EventBody::MetadataSnapshotCompleted(props) => {
+                assert_eq!(props.phase, MetadataSnapshotPhase::Finalize);
+                assert_eq!(props.branch, branch);
+                assert!(!props.commit_sha.is_empty());
+            }
+            other => panic!("expected metadata completed event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_metadata_load_state_failure_emits_failed_before_notice() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        init_git_repo(repo_dir.path());
+        let emitter = Arc::new(Emitter::new(test_run_id()));
+        let events = record_events(&emitter);
+        let services = test_services(
+            RunStoreHandle::new(Arc::new(FailingStateStore)),
+            emitter,
+            Arc::new(fabro_agent::LocalSandbox::new(
+                repo_dir.path().to_path_buf(),
+            )),
+            Arc::new(SandboxGitRuntime::new()),
+        );
+        let run_options = test_git_run_options(repo_dir.path(), "fabro/metadata/run");
+        let conclusion = Conclusion {
+            timestamp:            chrono::Utc::now(),
+            status:               StageStatus::Success,
+            duration_ms:          10,
+            failure_reason:       None,
+            final_git_commit_sha: None,
+            stages:               Vec::new(),
+            billing:              None,
+            total_retries:        0,
+        };
+
+        write_finalize_commit(&run_options, &services, &conclusion).await;
+
+        let events = events.lock().unwrap();
+        let names = events.iter().map(RunEvent::event_name).collect::<Vec<_>>();
+        assert_eq!(names, vec![
+            "metadata.snapshot.started",
+            "metadata.snapshot.failed",
+            "run.notice",
+        ]);
+        match &events[1].body {
+            EventBody::MetadataSnapshotFailed(props) => {
+                assert_eq!(props.phase, MetadataSnapshotPhase::Finalize);
+                assert_eq!(props.failure_kind, MetadataSnapshotFailureKind::LoadState);
+            }
+            other => panic!("expected metadata failed event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn degraded_metadata_runtime_skips_finalize_metadata_events() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        init_git_repo(repo_dir.path());
+        let run_store = seeded_run_store().await;
+        let emitter = Arc::new(Emitter::new(test_run_id()));
+        let events = record_events(&emitter);
+        let runtime = Arc::new(SandboxGitRuntime::new());
+        runtime.mark_metadata_degraded();
+        let services = test_services(
+            RunStoreHandle::local(run_store),
+            emitter,
+            Arc::new(fabro_agent::LocalSandbox::new(
+                repo_dir.path().to_path_buf(),
+            )),
+            runtime,
+        );
+        let run_options = test_git_run_options(repo_dir.path(), "fabro/metadata/run");
+        let conclusion = Conclusion {
+            timestamp:            chrono::Utc::now(),
+            status:               StageStatus::Success,
+            duration_ms:          10,
+            failure_reason:       None,
+            final_git_commit_sha: None,
+            stages:               Vec::new(),
+            billing:              None,
+            total_retries:        0,
+        };
+
+        write_finalize_commit(&run_options, &services, &conclusion).await;
+
+        assert!(events.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn finalize_emits_metadata_snapshot_before_run_completed() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        init_git_repo(repo_dir.path());
+        let run_store = seeded_run_store().await;
+        let emitter = Arc::new(Emitter::new(test_run_id()));
+        let events = record_events(&emitter);
+        let services = test_services(
+            RunStoreHandle::local(run_store),
+            Arc::clone(&emitter),
+            Arc::new(fabro_agent::LocalSandbox::new(
+                repo_dir.path().to_path_buf(),
+            )),
+            Arc::new(SandboxGitRuntime::new()),
+        );
+        let retroed = Retroed {
+            graph: Graph::new("test"),
+            outcome: Ok(Outcome::success()),
+            run_options: test_git_run_options(repo_dir.path(), "fabro/metadata/run"),
+            duration_ms: 5,
+            services,
+            retro: None,
+        };
+
+        finalize(retroed, &FinalizeOptions {
+            run_dir:          repo_dir.path().to_path_buf(),
+            run_id:           test_run_id(),
+            workflow_name:    "test".to_string(),
+            preserve_sandbox: false,
+            last_git_sha:     None,
+        })
+        .await
+        .unwrap();
+
+        let names = events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| event.event_name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec![
+            "metadata.snapshot.started",
+            "metadata.snapshot.completed",
+            "run.completed",
+        ]);
+    }
+
+    struct FailingStateStore;
+
+    #[async_trait]
+    impl RunStoreBackend for FailingStateStore {
+        async fn load_state(&self) -> Result<RunProjection> {
+            Err(anyhow::anyhow!("state unavailable"))
+        }
+
+        async fn list_events(&self) -> Result<Vec<EventEnvelope>> {
+            Ok(Vec::new())
+        }
+
+        async fn append_run_event(&self, _event: &RunEvent) -> Result<()> {
+            Ok(())
+        }
+
+        async fn write_blob(&self, data: &[u8]) -> Result<RunBlobId> {
+            Ok(RunBlobId::new(data))
+        }
+
+        async fn read_blob(&self, _id: &RunBlobId) -> Result<Option<Bytes>> {
+            Ok(None)
+        }
     }
 }

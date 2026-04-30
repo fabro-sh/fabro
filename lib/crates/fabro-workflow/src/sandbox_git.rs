@@ -1350,8 +1350,16 @@ mod tests {
             crate::git::GitAuthor::default(),
         );
 
+        let expected_entries = dump.git_entries().unwrap();
+        let expected_entry_count = expected_entries.len();
+        let expected_bytes = expected_entries
+            .iter()
+            .map(|(_, bytes)| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+            .sum::<u64>();
         let snapshot = writer.write_snapshot(&dump, "checkpoint").await.unwrap();
         assert_eq!(snapshot.push_error, None);
+        assert_eq!(snapshot.entry_count, expected_entry_count);
+        assert_eq!(snapshot.bytes, expected_bytes);
         let commit_sha = snapshot.commit_sha;
 
         let current = std::process::Command::new("git")
@@ -1399,7 +1407,15 @@ mod tests {
         assert!(String::from_utf8(status.stdout).unwrap().trim().is_empty());
 
         dump.add_file_bytes("second.txt", b"second\n".to_vec());
+        let second_expected_entries = dump.git_entries().unwrap();
+        let second_expected_entry_count = second_expected_entries.len();
+        let second_expected_bytes = second_expected_entries
+            .iter()
+            .map(|(_, bytes)| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+            .sum::<u64>();
         let second_snapshot = writer.write_snapshot(&dump, "checkpoint 2").await.unwrap();
+        assert_eq!(second_snapshot.entry_count, second_expected_entry_count);
+        assert_eq!(second_snapshot.bytes, second_expected_bytes);
         let second_commit_sha = second_snapshot.commit_sha;
         let second_parent = std::process::Command::new("git")
             .args(["rev-list", "--parents", "-n", "1", &second_commit_sha])
@@ -1482,6 +1498,12 @@ mod tests {
             in_place:         false,
         });
         let dump = crate::run_dump::RunDump::from_projection(&projection);
+        let expected_entries = dump.git_entries().unwrap();
+        let expected_entry_count = expected_entries.len();
+        let expected_bytes = expected_entries
+            .iter()
+            .map(|(_, bytes)| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+            .sum::<u64>();
         let runtime = crate::sandbox_metadata::SandboxGitRuntime::new();
         let writer = crate::sandbox_metadata::SandboxMetadataWriter::new(
             &sandbox,
@@ -1492,6 +1514,8 @@ mod tests {
         );
 
         let snapshot = writer.write_snapshot(&dump, "checkpoint").await.unwrap();
+        assert_eq!(snapshot.entry_count, expected_entry_count);
+        assert_eq!(snapshot.bytes, expected_bytes);
 
         let push_error = snapshot.push_error.unwrap();
         assert!(push_error.contains("git push origin"));

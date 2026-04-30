@@ -76,8 +76,10 @@ pub(crate) struct SandboxMetadataWriter<'a> {
 }
 
 pub(crate) struct MetadataSnapshot {
-    pub commit_sha: String,
-    pub push_error: Option<String>,
+    pub commit_sha:  String,
+    pub push_error:  Option<String>,
+    pub entry_count: usize,
+    pub bytes:       u64,
 }
 
 impl<'a> SandboxMetadataWriter<'a> {
@@ -108,6 +110,8 @@ impl<'a> SandboxMetadataWriter<'a> {
             .map_err(SandboxMetadataError::GitUnavailable)?;
 
         let entries = dump.git_entries()?;
+        let entry_count = entries.len();
+        let bytes = metadata_entries_bytes(&entries);
         let temp = sandbox_temp_dir(self.sandbox, self.run_id, "metadata");
         exec_ok(
             self.sandbox,
@@ -119,7 +123,9 @@ impl<'a> SandboxMetadataWriter<'a> {
         )
         .await?;
 
-        let result = self.write_snapshot_in_temp(&entries, message, &temp).await;
+        let result = self
+            .write_snapshot_in_temp(&entries, message, &temp, entry_count, bytes)
+            .await;
         let _ = exec_ok(
             self.sandbox,
             &format!("rm -rf {}", shell_quote(&temp)),
@@ -134,6 +140,8 @@ impl<'a> SandboxMetadataWriter<'a> {
         entries: &[(String, Vec<u8>)],
         message: &str,
         temp: &str,
+        entry_count: usize,
+        bytes: u64,
     ) -> Result<MetadataSnapshot, SandboxMetadataError> {
         let full_ref = format!("refs/heads/{}", self.branch);
         let old_commit = exec_stdout(
@@ -187,8 +195,16 @@ impl<'a> SandboxMetadataWriter<'a> {
         Ok(MetadataSnapshot {
             commit_sha: commit,
             push_error,
+            entry_count,
+            bytes,
         })
     }
+}
+
+fn metadata_entries_bytes(entries: &[(String, Vec<u8>)]) -> u64 {
+    entries.iter().fold(0, |total, (_, bytes)| {
+        total.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+    })
 }
 
 fn fast_import_stream(
