@@ -1,0 +1,15 @@
+diff --git a/README.md b/README.md
+index d2d663b..5ab59e0 100644
+--- a/README.md
++++ b/README.md
+@@ -188,3 +188,9 @@ If you need a capability which is not in-scope for Fabro, you always have the op
+ ## License
+ 
+ Fabro is licensed under the [MIT License](LICENSE.md).
++
++---
++
++*Agents in a graph —*
++*each stage a deliberate step.*
++*Code ships while you sleep.*
+\ No newline at end of file

@@ -206,7 +206,7 @@
   "status_updated_at": "2026-04-30T12:12:58.089599748Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-04-30T12:13:10.124448962Z",
+    "timestamp": "2026-04-30T12:13:14.110728967Z",
     "current_node": "greet",
     "completed_nodes": [
       "start",
@@ -214,29 +214,25 @@
     ],
     "node_retries": {},
     "context_values": {
-      "failure_signature": "",
-      "graph.rankdir": "LR",
-      "last_stage": "greet",
-      "internal.run_id": "01KQF4WN966XC57QWCEC1QYDEV",
-      "response.greet": "Added a haiku to the bottom of the README:\n\n```\nAgents in a graph —\neach stage a deliberate step.\nCode ships while you sleep.\n```\n\nIt nods to Fabro's core ideas — workflow graphs, deliberate staged execution, and the promise of autonomous overnight runs.",
-      "internal.work_dir": "/workspace",
       "internal.fidelity": "compact",
-      "current_node": "greet",
-      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
-      "internal.retry_count.start": 0,
-      "internal.thread_id": "start",
-      "thread.start.current_node": "greet",
       "internal.retry_count.greet": 0,
-      "outcome": "succeeded",
-      "last_response": "Added a haiku to the bottom of the README:\n\n```\nAgents in a graph —\neach stage a deliberate step.\nCode ships while you sleep.\n```\n\nIt nods to Fabro's core ideas — workflow graphs, deliberate stage",
+      "failure_signature": "",
+      "internal.retry_count.start": 0,
+      "internal.run_id": "01KQF4WN966XC57QWCEC1QYDEV",
+      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
       "failure_class": "",
-      "internal.node_visit_count": 1
+      "outcome": "succeeded",
+      "internal.work_dir": "/workspace",
+      "thread.start.current_node": "greet",
+      "current_node": "greet",
+      "graph.rankdir": "LR",
+      "response.greet": "Added a haiku to the bottom of the README:\n\n```\nAgents in a graph —\neach stage a deliberate step.\nCode ships while you sleep.\n```\n\nIt nods to Fabro's core ideas — workflow graphs, deliberate staged execution, and the promise of autonomous overnight runs.",
+      "internal.thread_id": "start",
+      "last_response": "Added a haiku to the bottom of the README:\n\n```\nAgents in a graph —\neach stage a deliberate step.\nCode ships while you sleep.\n```\n\nIt nods to Fabro's core ideas — workflow graphs, deliberate stage",
+      "internal.node_visit_count": 1,
+      "last_stage": "greet"
     },
     "node_outcomes": {
-      "start": {
-        "status": "succeeded",
-        "usage": null
-      },
       "greet": {
         "status": "succeeded",
         "context_updates": {
@@ -271,12 +267,17 @@
         "files_touched": [
           "/workspace/README.md"
         ]
+      },
+      "start": {
+        "status": "succeeded",
+        "usage": null
       }
     },
     "next_node_id": "exit",
+    "git_commit_sha": "46f7673767c28abf7deeea0470a907ca79fd993f",
     "node_visits": {
-      "greet": 1,
-      "start": 1
+      "start": 1,
+      "greet": 1
     }
   },
   "checkpoints": [
@@ -314,9 +315,117 @@
           "start": 1
         }
       }
+    ],
+    [
+      40,
+      {
+        "timestamp": "2026-04-30T12:13:14.110728967Z",
+        "current_node": "greet",
+        "completed_nodes": [
+          "start",
+          "greet"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.fidelity": "compact",
+          "internal.retry_count.greet": 0,
+          "failure_signature": "",
+          "internal.retry_count.start": 0,
+          "internal.run_id": "01KQF4WN966XC57QWCEC1QYDEV",
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "failure_class": "",
+          "outcome": "succeeded",
+          "internal.work_dir": "/workspace",
+          "thread.start.current_node": "greet",
+          "current_node": "greet",
+          "graph.rankdir": "LR",
+          "response.greet": "Added a haiku to the bottom of the README:\n\n```\nAgents in a graph —\neach stage a deliberate step.\nCode ships while you sleep.\n```\n\nIt nods to Fabro's core ideas — workflow graphs, deliberate staged execution, and the promise of autonomous overnight runs.",
+          "internal.thread_id": "start",
+          "last_response": "Added a haiku to the bottom of the README:\n\n```\nAgents in a graph —\neach stage a deliberate step.\nCode ships while you sleep.\n```\n\nIt nods to Fabro's core ideas — workflow graphs, deliberate stage",
+          "internal.node_visit_count": 1,
+          "last_stage": "greet"
+        },
+        "node_outcomes": {
+          "greet": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "greet",
+              "last_response": "Added a haiku to the bottom of the README:\n\n```\nAgents in a graph —\neach stage a deliberate step.\nCode ships while you sleep.\n```\n\nIt nods to Fabro's core ideas — workflow graphs, deliberate stage",
+              "response.greet": "Added a haiku to the bottom of the README:\n\n```\nAgents in a graph —\neach stage a deliberate step.\nCode ships while you sleep.\n```\n\nIt nods to Fabro's core ideas — workflow graphs, deliberate staged execution, and the promise of autonomous overnight runs."
+            },
+            "notes": "Stage completed: greet",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 4703,
+                    "output_tokens": 346,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 15523,
+                    "cache_write_tokens": 19730
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 19730,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 97942
+            },
+            "files_touched": [
+              "/workspace/README.md"
+            ]
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "exit",
+        "git_commit_sha": "46f7673767c28abf7deeea0470a907ca79fd993f",
+        "node_visits": {
+          "start": 1,
+          "greet": 1
+        }
+      }
     ]
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-04-30T12:13:14.126419725Z",
+    "status": "succeeded",
+    "duration_ms": 16021,
+    "final_git_commit_sha": "46f7673767c28abf7deeea0470a907ca79fd993f",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "greet",
+        "stage_label": "greet",
+        "duration_ms": 9857,
+        "billing_usd_micros": 97942,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 4703,
+      "output_tokens": 346,
+      "total_tokens": 40302,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 15523,
+      "cache_write_tokens": 19730,
+      "total_usd_micros": 97942
+    },
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -336,12 +445,34 @@
     "greet@1": {
       "prompt": null,
       "response": null,
-      "status": null,
+      "status": {
+        "status": "succeeded",
+        "notes": "Stage completed: greet",
+        "failure_reason": null,
+        "timestamp": "2026-04-30T12:13:10.124289962Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "anthropic",
         "model": "claude-sonnet-4-6"
       },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
+    "exit@1": {
+      "prompt": null,
+      "response": null,
+      "status": {
+        "status": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-04-30T12:13:14.110904676Z"
+      },
+      "provider_used": null,
       "diff": null,
       "script_invocation": null,
       "script_timing": null,
