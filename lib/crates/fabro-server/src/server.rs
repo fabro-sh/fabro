@@ -11077,6 +11077,87 @@ slug = "fabro"
     }
 
     #[tokio::test]
+    async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
+        let state = create_app_state_with_isolated_storage();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = RunId::new();
+        let stage_id = StageId::new("script_node", 1);
+        let run_store = state.store.create_run(&run_id).await.unwrap();
+        let stdout_blob = run_store
+            .write_blob(&serde_json::to_vec("cas log").unwrap())
+            .await
+            .unwrap();
+        let stderr_blob = run_store
+            .write_blob(&serde_json::to_vec("").unwrap())
+            .await
+            .unwrap();
+        let stdout_ref = format!("blob://sha256/{stdout_blob}");
+        let stderr_ref = format!("blob://sha256/{stderr_blob}");
+        for event in [
+            workflow_event::Event::RunSubmitted {
+                definition_blob: None,
+            },
+            workflow_event::Event::StageStarted {
+                node_id:      "script_node".to_string(),
+                name:         "Script".to_string(),
+                index:        1,
+                handler_type: "command".to_string(),
+                attempt:      1,
+                max_attempts: 1,
+            },
+            workflow_event::Event::CommandCompleted {
+                node_id:           "script_node".to_string(),
+                stdout:            stdout_ref.clone(),
+                stderr:            stderr_ref,
+                exit_code:         Some(0),
+                duration_ms:       5,
+                timed_out:         false,
+                stdout_bytes:      7,
+                stderr_bytes:      0,
+                streams_separated: true,
+                live_streaming:    false,
+            },
+        ] {
+            workflow_event::append_event(&run_store, &run_id, &event)
+                .await
+                .unwrap();
+        }
+
+        let run_dir = Storage::new(state.server_storage_dir())
+            .run_scratch(&run_id)
+            .root()
+            .to_path_buf();
+        let log_path = command_log_path(&run_dir, &stage_id, CommandOutputStream::Stdout);
+        tokio::fs::create_dir_all(log_path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&log_path, b"scratch log").await.unwrap();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/{stage_id}/logs/stdout?offset=0&limit=64"
+            )))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        let body = response_json!(response, StatusCode::OK).await;
+        let bytes = BASE64_STANDARD
+            .decode(body["bytes_base64"].as_str().unwrap())
+            .unwrap();
+
+        assert_eq!(body["stream"], "stdout");
+        assert_eq!(body["offset"], 0);
+        assert_eq!(body["next_offset"], 11);
+        assert_eq!(body["total_bytes"], 11);
+        assert_eq!(bytes, b"scratch log");
+        assert_eq!(body["eof"], true);
+        assert_eq!(body["cas_ref"], stdout_ref);
+        assert_eq!(body["live_streaming"], false);
+    }
+
+    #[tokio::test]
     async fn get_run_stage_command_log_returns_not_found_for_missing_stage() {
         let state = create_app_state_with_isolated_storage();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
