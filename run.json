@@ -208,7 +208,7 @@
   "status_updated_at": "2026-04-30T12:28:59.711556187Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-04-30T12:29:12.437340171Z",
+    "timestamp": "2026-04-30T12:29:16.627496327Z",
     "current_node": "greet",
     "completed_nodes": [
       "start",
@@ -216,23 +216,23 @@
     ],
     "node_retries": {},
     "context_values": {
-      "current_node": "greet",
+      "failure_class": "",
+      "last_stage": "greet",
+      "internal.fidelity": "compact",
+      "internal.node_visit_count": 1,
       "thread.start.current_node": "greet",
+      "response.greet": "Done! I added a haiku just below the tagline:\n\n```\nAgents write the code\nGraphs keep them on the right path\nYou review, then ship\n```\n\nIt captures the core Fabro philosophy in 5-7-5: AI agents do the work, workflow graphs provide the structure, and humans stay in control at the verification step.",
+      "current_node": "greet",
+      "outcome": "succeeded",
       "internal.work_dir": "/workspace",
-      "internal.run_id": "01KQF5SZV94BZQG1JGK0YZ18KX",
+      "internal.thread_id": "start",
       "failure_signature": "",
       "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
-      "internal.fidelity": "compact",
-      "internal.retry_count.start": 0,
-      "response.greet": "Done! I added a haiku just below the tagline:\n\n```\nAgents write the code\nGraphs keep them on the right path\nYou review, then ship\n```\n\nIt captures the core Fabro philosophy in 5-7-5: AI agents do the work, workflow graphs provide the structure, and humans stay in control at the verification step.",
-      "last_stage": "greet",
-      "internal.node_visit_count": 1,
-      "failure_class": "",
-      "internal.retry_count.greet": 0,
-      "graph.rankdir": "LR",
-      "outcome": "succeeded",
       "last_response": "Done! I added a haiku just below the tagline:\n\n```\nAgents write the code\nGraphs keep them on the right path\nYou review, then ship\n```\n\nIt captures the core Fabro philosophy in 5-7-5: AI agents do the ",
-      "internal.thread_id": "start"
+      "internal.run_id": "01KQF5SZV94BZQG1JGK0YZ18KX",
+      "internal.retry_count.greet": 0,
+      "internal.retry_count.start": 0,
+      "graph.rankdir": "LR"
     },
     "node_outcomes": {
       "greet": {
@@ -276,6 +276,7 @@
       }
     },
     "next_node_id": "exit",
+    "git_commit_sha": "5e7bddfcbaf310a90dc55acdfb632959ef3feda3",
     "node_visits": {
       "start": 1,
       "greet": 1
@@ -316,9 +317,117 @@
           "start": 1
         }
       }
+    ],
+    [
+      40,
+      {
+        "timestamp": "2026-04-30T12:29:16.627496327Z",
+        "current_node": "greet",
+        "completed_nodes": [
+          "start",
+          "greet"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_class": "",
+          "last_stage": "greet",
+          "internal.fidelity": "compact",
+          "internal.node_visit_count": 1,
+          "thread.start.current_node": "greet",
+          "response.greet": "Done! I added a haiku just below the tagline:\n\n```\nAgents write the code\nGraphs keep them on the right path\nYou review, then ship\n```\n\nIt captures the core Fabro philosophy in 5-7-5: AI agents do the work, workflow graphs provide the structure, and humans stay in control at the verification step.",
+          "current_node": "greet",
+          "outcome": "succeeded",
+          "internal.work_dir": "/workspace",
+          "internal.thread_id": "start",
+          "failure_signature": "",
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "last_response": "Done! I added a haiku just below the tagline:\n\n```\nAgents write the code\nGraphs keep them on the right path\nYou review, then ship\n```\n\nIt captures the core Fabro philosophy in 5-7-5: AI agents do the ",
+          "internal.run_id": "01KQF5SZV94BZQG1JGK0YZ18KX",
+          "internal.retry_count.greet": 0,
+          "internal.retry_count.start": 0,
+          "graph.rankdir": "LR"
+        },
+        "node_outcomes": {
+          "greet": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_response": "Done! I added a haiku just below the tagline:\n\n```\nAgents write the code\nGraphs keep them on the right path\nYou review, then ship\n```\n\nIt captures the core Fabro philosophy in 5-7-5: AI agents do the ",
+              "response.greet": "Done! I added a haiku just below the tagline:\n\n```\nAgents write the code\nGraphs keep them on the right path\nYou review, then ship\n```\n\nIt captures the core Fabro philosophy in 5-7-5: AI agents do the work, workflow graphs provide the structure, and humans stay in control at the verification step.",
+              "last_stage": "greet"
+            },
+            "notes": "Stage completed: greet",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 4753,
+                    "output_tokens": 408,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 23307,
+                    "cache_write_tokens": 11962
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 11962,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 72228
+            },
+            "files_touched": [
+              "/workspace/README.md"
+            ]
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "exit",
+        "git_commit_sha": "5e7bddfcbaf310a90dc55acdfb632959ef3feda3",
+        "node_visits": {
+          "start": 1,
+          "greet": 1
+        }
+      }
     ]
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-04-30T12:29:16.643123977Z",
+    "status": "succeeded",
+    "duration_ms": 16916,
+    "final_git_commit_sha": "5e7bddfcbaf310a90dc55acdfb632959ef3feda3",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "greet",
+        "stage_label": "greet",
+        "duration_ms": 10454,
+        "billing_usd_micros": 72228,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 4753,
+      "output_tokens": 408,
+      "total_tokens": 40430,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 23307,
+      "cache_write_tokens": 11962,
+      "total_usd_micros": 72228
+    },
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -335,6 +444,44 @@
   "superseded_by": null,
   "pending_interviews": {},
   "nodes": {
+    "greet@1": {
+      "prompt": null,
+      "response": null,
+      "status": {
+        "status": "succeeded",
+        "notes": "Stage completed: greet",
+        "failure_reason": null,
+        "timestamp": "2026-04-30T12:29:12.437286713Z"
+      },
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
+    "exit@1": {
+      "prompt": null,
+      "response": null,
+      "status": {
+        "status": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-04-30T12:29:16.627545869Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
     "start@1": {
       "prompt": null,
       "response": null,
@@ -345,22 +492,6 @@
         "timestamp": "2026-04-30T12:29:01.982511174Z"
       },
       "provider_used": null,
-      "diff": null,
-      "script_invocation": null,
-      "script_timing": null,
-      "parallel_results": null,
-      "stdout": null,
-      "stderr": null
-    },
-    "greet@1": {
-      "prompt": null,
-      "response": null,
-      "status": null,
-      "provider_used": {
-        "mode": "agent",
-        "provider": "anthropic",
-        "model": "claude-sonnet-4-6"
-      },
       "diff": null,
       "script_invocation": null,
       "script_timing": null,
