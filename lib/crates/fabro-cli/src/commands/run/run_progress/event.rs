@@ -203,10 +203,6 @@ pub(super) enum ProgressEvent {
     RetroFailed {
         duration_ms: u64,
     },
-    MetadataSnapshotCompleted {
-        phase:       String,
-        duration_ms: u64,
-    },
     MetadataSnapshotFailed {
         phase:        String,
         failure_kind: String,
@@ -431,12 +427,6 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
         EventBody::RetroFailed(props) => Some(ProgressEvent::RetroFailed {
             duration_ms: props.duration_ms,
         }),
-        EventBody::MetadataSnapshotCompleted(props) => {
-            Some(ProgressEvent::MetadataSnapshotCompleted {
-                phase:       props.phase.to_string(),
-                duration_ms: props.duration_ms,
-            })
-        }
         EventBody::MetadataSnapshotFailed(props) => Some(ProgressEvent::MetadataSnapshotFailed {
             phase:        props.phase.to_string(),
             failure_kind: props.failure_kind.to_string(),
@@ -719,26 +709,6 @@ mod tests {
                 code,
                 message,
             } if code == "sandbox_cleanup_failed" && message == "sandbox cleanup failed"
-        ));
-    }
-
-    #[test]
-    fn round_trip_metadata_snapshot_completed() {
-        let event = Event::MetadataSnapshotCompleted {
-            phase:       MetadataSnapshotPhase::Checkpoint,
-            branch:      "fabro/meta".into(),
-            duration_ms: 2800,
-            entry_count: 2,
-            bytes:       42,
-            commit_sha:  "abc123".into(),
-        };
-
-        let stored = to_run_event(&fixtures::RUN_1, &event);
-        let parsed = from_run_event(&stored).unwrap();
-        assert!(matches!(
-            parsed,
-            ProgressEvent::MetadataSnapshotCompleted { phase, duration_ms }
-                if phase == "checkpoint" && duration_ms == 2800
         ));
     }
 

@@ -63,17 +63,6 @@ impl InfoDisplay {
         );
     }
 
-    pub(super) fn on_metadata_snapshot_completed(
-        renderer: &ProgressRenderer,
-        phase: &str,
-        duration_ms: u64,
-    ) {
-        Self::insert_info_line(
-            renderer,
-            &format!("Metadata {phase} {}", format_duration_ms(duration_ms)),
-        );
-    }
-
     pub(super) fn on_metadata_snapshot_failed(
         renderer: &ProgressRenderer,
         phase: &str,

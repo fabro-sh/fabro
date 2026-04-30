@@ -410,9 +410,6 @@ impl ProgressUI {
             ProgressEvent::RetroFailed { duration_ms } => {
                 self.stage.on_retro_failed(renderer, duration_ms);
             }
-            ProgressEvent::MetadataSnapshotCompleted { phase, duration_ms } => {
-                InfoDisplay::on_metadata_snapshot_completed(renderer, &phase, duration_ms);
-            }
             ProgressEvent::MetadataSnapshotFailed {
                 phase,
                 failure_kind,
@@ -1056,10 +1053,7 @@ mod tests {
             bytes:        Some(42),
         });
 
-        insta::assert_snapshot!(rendered(&buffer), @r"
-            Metadata checkpoint 2s
-            Warning: Metadata finalize failed: push rejected [push]
-        ");
+        insta::assert_snapshot!(rendered(&buffer), @"Warning: Metadata finalize failed: push rejected [push]");
     }
 
     #[test]
