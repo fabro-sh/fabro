@@ -4,6 +4,10 @@
 
 ## The open source dark software factory for expert engineers
 
+> *Agents write the code*
+> *Graphs keep them on the right path*
+> *You review, then ship*
+
 AI coding agents are powerful but unpredictable. You either babysit every step or review a 50-file diff you don't trust. Fabro gives you a middle path: define the process as a graph, let agents execute it, and intervene only where it matters. [Why Fabro?](https://docs.fabro.sh/getting-started/why-fabro)
 
 [![Rust](https://github.com/fabro-sh/fabro/actions/workflows/rust.yml/badge.svg)](https://github.com/fabro-sh/fabro/actions/workflows/rust.yml)
