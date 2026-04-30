@@ -302,13 +302,7 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
             .header("Content-Type", "text/event-stream")
             .body(run_sse_body(success_run_id.as_str()));
     });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            success_server.base_url()
-        ),
-    );
+    context.set_http_target(&success_server.base_url());
 
     let success_output = context
         .command()
@@ -406,13 +400,7 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
             .header("Content-Type", "text/event-stream")
             .body("");
     });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            eof_server.base_url()
-        ),
-    );
+    context.set_http_target(&eof_server.base_url());
 
     let eof_output = context
         .command()

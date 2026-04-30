@@ -227,13 +227,7 @@ fn detach_uses_configured_server_target_without_server_flag() {
             .header("Content-Type", "application/json")
             .body(run_status_response(run_id.as_str(), "queued").to_string());
     });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            server.base_url()
-        ),
-    );
+    context.set_http_target(&server.base_url());
 
     let workflow = context.install_fixture("simple.fabro");
     let output = context
@@ -411,13 +405,7 @@ fn detach_cli_server_target_overrides_configured_server_target() {
             .header("Content-Type", "application/json")
             .body(run_status_response(run_id.as_str(), "queued").to_string());
     });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            config_server.base_url()
-        ),
-    );
+    context.set_http_target(&config_server.base_url());
 
     let workflow = context.install_fixture("simple.fabro");
     let output = context

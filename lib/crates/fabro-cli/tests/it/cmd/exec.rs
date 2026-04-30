@@ -163,13 +163,7 @@ fn exec_configured_server_target_alone_does_not_reroute_exec() {
         when.method("POST").path("/api/v1/completions");
         then.status(500).body("config-should-not-be-used");
     });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            server.base_url()
-        ),
-    );
+    context.set_http_target(&server.base_url());
 
     let mut cmd = context.exec_cmd();
     cmd.env_clear();
@@ -212,13 +206,7 @@ fn exec_cli_server_target_overrides_configured_server_target() {
         // without paying the retry backoff cost of a 5xx response.
         then.status(400).body("cli-override-marker");
     });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            config_server.base_url()
-        ),
-    );
+    context.set_http_target(&config_server.base_url());
 
     let mut cmd = context.exec_cmd();
     cmd.env_clear();

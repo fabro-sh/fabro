@@ -227,13 +227,7 @@ fn list_uses_configured_server_target_without_server_flag() {
                 .to_string(),
             );
     });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            server.base_url()
-        ),
-    );
+    context.set_http_target(&server.base_url());
 
     let mut cmd = context.model();
     cmd.args(["list", "--json"]);

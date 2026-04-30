@@ -187,13 +187,7 @@ fn rm_force_removes_active_run() {
             .query_param("force", "true");
         then.status(204);
     });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            server.base_url()
-        ),
-    );
+    context.set_http_target(&server.base_url());
 
     let mut filters = context.filters();
     filters.push((
@@ -265,13 +259,7 @@ fn rm_without_force_uses_resolve_then_surfaces_server_conflict() {
                 .to_string(),
             );
     });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            server.base_url()
-        ),
-    );
+    context.set_http_target(&server.base_url());
 
     let mut filters = context.filters();
     filters.push((
@@ -384,13 +372,7 @@ fn rm_uses_configured_server_target_without_local_run_dir() {
         when.method("DELETE").path(format!("/api/v1/runs/{run_id}"));
         then.status(204);
     });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            server.base_url()
-        ),
-    );
+    context.set_http_target(&server.base_url());
 
     let output = context
         .command()

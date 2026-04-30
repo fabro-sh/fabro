@@ -260,13 +260,7 @@ fn archive_resolves_selector_via_server_endpoint() {
                 .to_string(),
             );
     });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            server.base_url()
-        ),
-    );
+    context.set_http_target(&server.base_url());
 
     let mut filters = context.filters();
     filters.push(ulid_filter());

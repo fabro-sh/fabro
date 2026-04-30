@@ -1,5 +1,5 @@
 use assert_cmd::Command;
-use fabro_test::{TestContext, fabro_snapshot, test_context};
+use fabro_test::{fabro_snapshot, test_context};
 use httpmock::MockServer;
 
 fn remove_provider_env(cmd: &mut Command) -> &mut Command {
@@ -11,16 +11,6 @@ fn remove_provider_env(cmd: &mut Command) -> &mut Command {
         .env_remove("ZAI_API_KEY")
         .env_remove("MINIMAX_API_KEY")
         .env_remove("INCEPTION_API_KEY")
-}
-
-fn configure_server_target(context: &TestContext, server: &MockServer) {
-    context.write_home(
-        ".fabro/settings.toml",
-        format!(
-            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
-            server.base_url()
-        ),
-    );
 }
 
 fn model_json(id: &str, provider: &str, configured: bool) -> serde_json::Value {
@@ -184,7 +174,7 @@ fn json_output_includes_skipped_models() {
 fn model_test_does_not_announce_unconfigured() {
     let context = test_context!();
     let server = MockServer::start();
-    configure_server_target(&context, &server);
+    context.set_http_target(&server.base_url());
     let list = mock_model_list(&server, [
         model_json("claude-opus-4-7", "anthropic", true),
         model_json("gpt-5.2", "openai", false),
@@ -233,7 +223,7 @@ fn model_test_does_not_announce_unconfigured() {
 fn model_test_skipped_footer_sources_from_listing() {
     let context = test_context!();
     let server = MockServer::start();
-    configure_server_target(&context, &server);
+    context.set_http_target(&server.base_url());
     mock_model_list(&server, [
         model_json("claude-opus-4-7", "anthropic", true),
         model_json("gpt-5.2", "openai", false),
@@ -267,7 +257,7 @@ fn model_test_skipped_footer_sources_from_listing() {
 fn model_test_post_list_race_is_a_failure() {
     let context = test_context!();
     let server = MockServer::start();
-    configure_server_target(&context, &server);
+    context.set_http_target(&server.base_url());
     mock_model_list(&server, [model_json("claude-opus-4-7", "anthropic", true)]);
     server.mock(|when, then| {
         when.method("POST")
@@ -301,7 +291,7 @@ fn model_test_post_list_race_is_a_failure() {
 fn model_test_json_partitions_skip_and_fail() {
     let context = test_context!();
     let server = MockServer::start();
-    configure_server_target(&context, &server);
+    context.set_http_target(&server.base_url());
     mock_model_list(&server, [
         model_json("gpt-5.2", "openai", false),
         model_json("claude-opus-4-7", "anthropic", true),

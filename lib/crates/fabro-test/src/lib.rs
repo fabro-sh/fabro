@@ -1581,6 +1581,13 @@ impl TestContext {
         self
     }
 
+    pub fn set_http_target(&self, base_url: &str) -> &Self {
+        self.write_home(
+            ".fabro/settings.toml",
+            format!("_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{base_url}/api/v1\"\n"),
+        )
+    }
+
     pub fn ensure_home_server_auth_methods(&self) -> &Self {
         let settings_path = home_settings_path(&self.home_dir);
         ensure_home_server_auth_methods(
