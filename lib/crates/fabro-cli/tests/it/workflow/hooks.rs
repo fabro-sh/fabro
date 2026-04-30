@@ -124,7 +124,7 @@ model = "{model}"
         run_success_output(cmd).await;
     }
 
-    assert_eq!(conclusion_status(&context), "success");
+    assert_eq!(conclusion_status(&context), "succeeded");
 }
 
 #[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
@@ -230,7 +230,7 @@ max_tool_rounds = 1
         run_success_output(cmd).await;
     }
 
-    assert_eq!(conclusion_status(&context), "success");
+    assert_eq!(conclusion_status(&context), "succeeded");
 }
 
 #[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
@@ -287,7 +287,7 @@ max_tool_rounds = 5
         run_success_output(cmd).await;
     }
 
-    assert_eq!(conclusion_status(&context), "success");
+    assert_eq!(conclusion_status(&context), "succeeded");
 }
 
 #[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
@@ -346,5 +346,5 @@ async fn arc_e2e_with_real_llm() {
         "Hello from LLM",
         "workflow should create the expected file"
     );
-    assert_eq!(conclusion_status(&context), "success");
+    assert_eq!(conclusion_status(&context), "succeeded");
 }

@@ -191,7 +191,7 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
           "has_start_time": true
         },
         "conclusion": {
-          "status": "success",
+          "status": "succeeded",
           "duration_ms": "[DURATION_MS]",
           "stage_count": null
         },
@@ -263,7 +263,7 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
           "has_start_time": true
         },
         "conclusion": {
-          "status": "success",
+          "status": "succeeded",
           "duration_ms": "[DURATION_MS]",
           "stage_count": null
         },
@@ -322,7 +322,7 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
           "base_sha": "[SHA]"
         },
         "conclusion": {
-          "status": "success",
+          "status": "succeeded",
           "duration_ms": "[DURATION_MS]",
           "final_git_commit_sha": "[SHA]",
           "stage_count": null

@@ -41,7 +41,7 @@ digraph ImplementFeature {
 
     implement -> test -> validate -> gate
 
-    gate -> review    [label="Pass", condition="outcome=success"]
+    gate -> review    [label="Pass", condition="outcome=succeeded"]
     gate -> implement [label="Fix"]
 
     review -> exit

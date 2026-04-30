@@ -212,7 +212,7 @@ Otherwise set preferred_next_label to \"more_work_needed\"."
     fix_batch -> build_check
 
     /* Build check outcomes */
-    build_check -> final_audit     [label="Build OK", condition="outcome=success"]
+    build_check -> final_audit     [label="Build OK", condition="outcome=succeeded"]
     build_check -> build_fix       [label="Build failed"]
 
     /* Build fix loops back to build check */

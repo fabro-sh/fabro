@@ -30,7 +30,7 @@ Expand into a detailed spec covering:
 
 Write the spec to .ai/spec.md.
 
-Write status.json: outcome=success"
+Write status.json: outcome=succeeded"
     ]
 
     // Project setup
@@ -50,7 +50,7 @@ Run the appropriate build command:
 - Go: go build ./...
 - Rust: cargo build
 
-Write status.json: outcome=success if project structure is created and builds, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if project structure is created and builds, outcome=failed with failure_reason otherwise."
     ]
 
     verify_setup [
@@ -68,7 +68,7 @@ Run:
 4. Verify no syntax errors
 
 Write results to .ai/verify_setup.md.
-Write status.json: outcome=success if ALL checks pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if ALL checks pass, outcome=failed with failure_reason otherwise."
     ]
 
     check_setup [shape=diamond, label="Setup OK?"]
@@ -93,7 +93,7 @@ Run appropriate test command:
 - Go: go test ./...
 - Rust: cargo test
 
-Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all tests pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_data_structures [
@@ -114,7 +114,7 @@ Run:
 4. Verify basic operations work (create deck, shuffle, deal)
 
 Write results to .ai/verify_data_structures.md.
-Write status.json: outcome=success if all pass, outcome=fail with failure_reason."
+Write status.json: outcome=succeeded if all pass, outcome=failed with failure_reason."
     ]
 
     check_data_structures [shape=diamond, label="Data structures OK?"]
@@ -146,7 +146,7 @@ Run tests for the chosen language ONLY (do not run other language commands):
 - Go: go test ./... -v
 - Rust: cargo test -- --nocapture
 
-Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all tests pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_game_logic [
@@ -168,7 +168,7 @@ Run:
 5. Test undo functionality
 
 Write results to .ai/verify_game_logic.md.
-Write status.json: outcome=success if all pass, outcome=fail with failure_reason."
+Write status.json: outcome=succeeded if all pass, outcome=failed with failure_reason."
     ]
 
     check_game_logic [shape=diamond, label="Game logic OK?"]
@@ -203,7 +203,7 @@ Run for the chosen language ONLY (do not run other language commands):
 - Go: go build ./... && go test ./...
 - Rust: cargo build && cargo test
 
-Write status.json: outcome=success if builds and tests pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if builds and tests pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_terminal_ui [
@@ -225,7 +225,7 @@ Run:
 5. Test that rendering doesn't crash with empty game state
 
 Write results to .ai/verify_terminal_ui.md.
-Write status.json: outcome=success if all pass, outcome=fail with failure_reason."
+Write status.json: outcome=succeeded if all pass, outcome=failed with failure_reason."
     ]
 
     check_terminal_ui [shape=diamond, label="Terminal UI OK?"]
@@ -256,7 +256,7 @@ IMPORTANT: Run for the chosen language ONLY (do not run other language commands)
 - Go: go build ./cmd/solitaire && go test ./...
 - Rust: cargo build --release && cargo test
 
-Write status.json: outcome=success if game runs and all tests pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if game runs and all tests pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_integration [
@@ -278,7 +278,7 @@ Run:
 5. Test that game starts without errors
 
 Write results to .ai/verify_integration.md.
-Write status.json: outcome=success if all pass, outcome=fail with failure_reason."
+Write status.json: outcome=succeeded if all pass, outcome=failed with failure_reason."
     ]
 
     check_integration [shape=diamond, label="Integration OK?"]
@@ -314,33 +314,33 @@ Write detailed review to .ai/final_review.md including:
 - Any issues found
 - Compliance with spec
 
-Write status.json: outcome=success if the game is complete and playable per spec, outcome=fail with what's missing or broken."
+Write status.json: outcome=succeeded if the game is complete and playable per spec, outcome=failed with what's missing or broken."
     ]
 
     check_review [shape=diamond, label="Review OK?"]
 
     // Flow
     start -> expand_spec -> impl_setup -> verify_setup -> check_setup
-    check_setup -> impl_data_structures [condition="outcome=success"]
-    check_setup -> impl_setup           [condition="outcome=fail", label="retry"]
+    check_setup -> impl_data_structures [condition="outcome=succeeded"]
+    check_setup -> impl_setup           [condition="outcome=failed", label="retry"]
 
     impl_data_structures -> verify_data_structures -> check_data_structures
-    check_data_structures -> impl_game_logic     [condition="outcome=success"]
-    check_data_structures -> impl_data_structures [condition="outcome=fail", label="retry"]
+    check_data_structures -> impl_game_logic     [condition="outcome=succeeded"]
+    check_data_structures -> impl_data_structures [condition="outcome=failed", label="retry"]
 
     impl_game_logic -> verify_game_logic -> check_game_logic
-    check_game_logic -> impl_terminal_ui    [condition="outcome=success"]
-    check_game_logic -> impl_game_logic     [condition="outcome=fail", label="retry"]
+    check_game_logic -> impl_terminal_ui    [condition="outcome=succeeded"]
+    check_game_logic -> impl_game_logic     [condition="outcome=failed", label="retry"]
 
     impl_terminal_ui -> verify_terminal_ui -> check_terminal_ui
-    check_terminal_ui -> impl_integration   [condition="outcome=success"]
-    check_terminal_ui -> impl_terminal_ui   [condition="outcome=fail", label="retry"]
+    check_terminal_ui -> impl_integration   [condition="outcome=succeeded"]
+    check_terminal_ui -> impl_terminal_ui   [condition="outcome=failed", label="retry"]
 
     impl_integration -> verify_integration -> check_integration
-    check_integration -> review             [condition="outcome=success"]
-    check_integration -> impl_integration   [condition="outcome=fail", label="retry"]
+    check_integration -> review             [condition="outcome=succeeded"]
+    check_integration -> impl_integration   [condition="outcome=failed", label="retry"]
 
     review -> check_review
-    check_review -> exit            [condition="outcome=success"]
-    check_review -> impl_terminal_ui [condition="outcome=fail", label="fix"]
+    check_review -> exit            [condition="outcome=succeeded"]
+    check_review -> impl_terminal_ui [condition="outcome=failed", label="fix"]
 }

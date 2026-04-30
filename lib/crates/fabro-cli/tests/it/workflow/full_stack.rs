@@ -34,7 +34,7 @@ fn scenario_full_stack(sandbox: &str) {
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(
         conclusion["status"].as_str(),
-        Some("success"),
+        Some("succeeded"),
         "conclusion: {conclusion}"
     );
     assert!(

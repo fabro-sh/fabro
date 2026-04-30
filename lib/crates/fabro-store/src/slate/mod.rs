@@ -421,7 +421,7 @@ mod tests {
             &serde_json::json!({
                 "duration_ms": 3210,
                 "artifact_count": 1,
-                "status": "success",
+                "status": "succeeded",
                 "reason": "completed",
                 "total_cost": 1.25,
             }),
@@ -625,7 +625,7 @@ mod tests {
             &serde_json::json!({
                 "duration_ms": 3210,
                 "artifact_count": 1,
-                "status": "success",
+                "status": "succeeded",
                 "reason": "completed",
                 "total_cost": 1.25,
             }),

@@ -5635,7 +5635,7 @@ components:
       properties:
         force:
           type: boolean
-          description: Create the pull request even if the run did not finish with success or partial_success.
+          description: Create the pull request even if the run did not finish with succeeded or partially_succeeded.
           example: false
         model:
           type: ["string", "null"]

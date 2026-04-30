@@ -51,7 +51,7 @@ export function emptyStateCopy(kind: EmptyKind): string {
 /// The full RunStatus enum (per fabro-types/src/status.rs) is:
 ///   submitted, queued, starting, running, blocked, paused, removing,
 ///   succeeded, failed, dead, archived
-/// partial_success is a stage status, not a run status.
+/// partially_succeeded is a stage outcome, not a run status.
 export function deriveEmptyKind(args: {
   runStatus: string | undefined;
   totalChanged: number;

@@ -1,40 +1,39 @@
 ---
 title: "Node Outcomes"
-description: "The five stage statuses and the attributes that control them"
+description: "The four stage outcomes and the attributes that control them"
 ---
 
-Every node execution produces an **outcome** containing a status that drives edge routing, retry logic, and goal gate checks. This page defines the five statuses and the attributes that influence them.
+Every node execution produces an **outcome** that drives edge routing, retry logic, and goal gate checks. This page defines the four externally visible outcomes and the attributes that influence them.
 
-## The five statuses
+## The four outcomes
 
-| Status | Meaning |
+| Outcome | Meaning |
 |---|---|
-| `success` | The handler completed normally |
-| `fail` | The handler encountered an unrecoverable error |
-| `partial_success` | The handler did not fully succeed but produced usable results — typically from retries exhausted with `allow_partial=true` |
-| `retry` | The handler wants to re-execute — consumed by the [retry loop](#retry-loop) and never appears in edge conditions |
+| `succeeded` | The handler completed normally |
+| `failed` | The handler encountered an unrecoverable error |
+| `partially_succeeded` | The handler did not fully succeed but produced usable results — typically from retries exhausted with `allow_partial=true` |
 | `skipped` | The node was not executed (e.g. a branch not taken in a parallel fan-out) |
 
 <Note>
-`retry` is internal to the engine. It triggers re-execution inside the retry loop and is never visible in edge `condition` expressions. The four externally-visible statuses are `success`, `fail`, `partial_success`, and `skipped`.
+Retry intent is internal to the engine. It triggers re-execution inside the retry loop and is never visible in edge `condition` expressions. Retryable failures emit `stage.retrying` events while the node is still active, then finish as one of the four outcomes above.
 </Note>
 
-## How handlers produce statuses
+## How handlers produce outcomes
 
-Each node type has its own rules for which statuses it can return:
+Each node type has its own rules for which outcomes it can return:
 
 | Handler | Produces | Conditions |
 |---|---|---|
-| **Command** | `success`, `fail` | `success` when exit code is 0; `fail` otherwise |
-| **Agent / Prompt** | `success`, `fail`, `partial_success`, `retry`, `skipped` | Defaults to `success`. The LLM can set any status via a [routing directive](/agents/outputs#routing-directives) JSON object in its response. Backend errors produce `retry` (if retryable) or `fail`. |
-| **Parallel** | `success`, `partial_success`, `fail` | Depends on the `join_policy`. `wait_all`: `success` if no failures, `partial_success` if some branches failed. `first_success`: `success` if threshold met, else `fail`. |
-| **Human** | `success` | Always succeeds — the user's selection becomes a routing signal via `preferred_label` |
-| **Conditional** | `success` | Always succeeds — routing is handled by the engine's edge selection |
-| **Start / Exit / Wait** | `success` | Always succeed |
+| **Command** | `succeeded`, `failed` | `succeeded` when exit code is 0; `failed` otherwise |
+| **Agent / Prompt** | `succeeded`, `failed`, `partially_succeeded`, `skipped` | Defaults to `succeeded`. The LLM can set any outcome via a [routing directive](/agents/outputs#routing-directives) JSON object in its response. Backend errors request retry when retryable or finish as `failed`. |
+| **Parallel** | `succeeded`, `partially_succeeded`, `failed` | Depends on the `join_policy`. `wait_all`: `succeeded` if no failures, `partially_succeeded` if some branches failed. `first_success`: `succeeded` if threshold met, else `failed`. |
+| **Human** | `succeeded` | Always succeeds — the user's selection becomes a routing signal via `preferred_label` |
+| **Conditional** | `succeeded` | Always succeeds — routing is handled by the engine's edge selection |
+| **Start / Exit / Wait** | `succeeded` | Always succeed |
 
 ## Retry loop
 
-When a handler returns `retry` status, the engine enters the retry loop. If retry attempts remain (per the node's [retry policy](/execution/failures#retry-policies)), the handler re-executes after a backoff delay. If attempts are exhausted, the final status depends on `allow_partial`:
+When a handler returns a retryable failure, the engine enters the retry loop. If retry attempts remain (per the node's [retry policy](/execution/failures#retry-policies)), the handler re-executes after a backoff delay. If attempts are exhausted, the final outcome depends on `allow_partial`:
 
 ```
 ┌─────────────┐
@@ -42,10 +41,10 @@ When a handler returns `retry` status, the engine enters the retry loop. If retr
 └──────┬──────┘
        │
        ▼
-  ┌──────────┐    success/fail/
-  │ Status?  │───partial_success/───▶ Done (use as-is)
-  └────┬─────┘    skipped
-       │ retry
+  ┌──────────┐    succeeded / failed /
+  │Outcome?  │─── partially_succeeded / skipped ──▶ Done (use as-is)
+  └────┬─────┘
+       │ retryable failure
        ▼
   ┌──────────────┐   yes    ┌──────────────┐
   │ Attempts     │─────────▶│ Backoff +    │──┐
@@ -58,15 +57,14 @@ When a handler returns `retry` status, the engine enters the retry loop. If retr
   └──────┬───┬───┘                 │  "Run handler")
     yes  │   │ no                  │
          ▼   ▼
-  partial_   fail
-  success
+  partially_succeeded  failed
 ```
 
 Handler errors follow the same loop: retryable errors (transient infrastructure) re-execute if attempts remain; non-retryable errors (authentication, bad config) fail immediately without consuming retry attempts.
 
 ## `allow_partial`
 
-When `allow_partial=true` and the retry loop exhausts all attempts on a `retry` status, the outcome is promoted to `partial_success` instead of `fail`. This lets the workflow continue past nodes that could not fully succeed.
+When `allow_partial=true` and the retry loop exhausts all attempts on a retryable failure, the outcome is promoted to `partially_succeeded` instead of `failed`. This lets the workflow continue past nodes that could not fully succeed.
 
 | Attribute | Type | Default |
 |---|---|---|
@@ -81,13 +79,13 @@ implement [
 ]
 ```
 
-In this example, if the agent returns `retry` and all 5 standard-policy attempts are used, the node finishes with `partial_success` rather than failing the run.
+In this example, if the agent returns a retryable failure and all 5 standard-policy attempts are used, the node finishes with `partially_succeeded` rather than failing the run.
 
 See [Retry policies](/execution/failures#retry-policies) for the available presets and backoff settings.
 
 ## `auto_status`
 
-When `auto_status=true`, any non-`success` and non-`skipped` status is silently overridden to `success` after the handler completes. This is applied after the retry loop, so retries still happen normally — only the final outcome is overridden.
+When `auto_status=true`, any non-`succeeded` and non-`skipped` outcome is silently overridden to `succeeded` after the handler completes. This is applied after the retry loop, so retries still happen normally — only the final outcome is overridden.
 
 | Attribute | Type | Default |
 |---|---|---|
@@ -106,9 +104,9 @@ Use `auto_status` for nodes whose failure should never block the workflow — op
 
 ## Goal gate interaction
 
-Nodes marked with `goal_gate=true` are checked when the workflow reaches the exit node. A goal gate is satisfied if its last outcome was `success` **or** `partial_success`. Any other status (`fail`, `skipped`) causes the workflow to fail, even though execution reached the exit.
+Nodes marked with `goal_gate=true` are checked when the workflow reaches the exit node. A goal gate is satisfied if its last outcome was `succeeded` **or** `partially_succeeded`. Any other outcome (`failed`, `skipped`) causes the workflow to fail, even though execution reached the exit.
 
-This means `allow_partial=true` on a goal gate node lets the gate pass even if the node exhausted its retries — the promoted `partial_success` counts as passing.
+This means `allow_partial=true` on a goal gate node lets the gate pass even if the node exhausted its retries — the promoted `partially_succeeded` outcome counts as passing.
 
 See [Goal gates](/execution/failures#goal-gates) for retry target resolution and failure behavior.
 

@@ -443,7 +443,7 @@ mod tests {
     use crate::context::Context;
     use crate::error::HandlerErrorDetail;
     use crate::lifecycle::RunLifecycle;
-    use crate::outcome::{StageOutcome, StageStatus};
+    use crate::outcome::StageOutcome;
     use crate::retry::{BackoffPolicy, RetryPolicy};
     use crate::test_fixtures::*;
 
@@ -470,7 +470,7 @@ mod tests {
         let result = run_linear(&["start", "work", "end"], Arc::new(AlwaysSucceedHandler))
             .await
             .unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -514,7 +514,7 @@ mod tests {
         let g = TestGraph::new(
             vec![
                 TestNode::new("work"),
-                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+                TestNode::terminal("end").with_goal_gate("work", StageOutcome::Succeeded),
             ],
             vec![TestEdge::new("work", "end")],
             "work",
@@ -524,7 +524,7 @@ mod tests {
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -535,7 +535,7 @@ mod tests {
         let g = TestGraph::new(
             vec![
                 TestNode::new("work"),
-                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+                TestNode::terminal("end").with_goal_gate("work", StageOutcome::Succeeded),
             ],
             vec![TestEdge::new("work", "end")],
             "work",
@@ -550,7 +550,7 @@ mod tests {
         let executor =
             ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>).build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
         assert_eq!(handler.calls(), 2);
     }
 
@@ -559,7 +559,7 @@ mod tests {
         let g = TestGraph::new(
             vec![
                 TestNode::new("work"),
-                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+                TestNode::terminal("end").with_goal_gate("work", StageOutcome::Succeeded),
             ],
             vec![TestEdge::new("work", "end")],
             "work",
@@ -571,7 +571,9 @@ mod tests {
         )
         .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Fail);
+        assert_eq!(result.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
     }
 
     #[tokio::test]
@@ -726,7 +728,7 @@ mod tests {
         .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
         // Ends at "bad" terminal with success (goal gates pass since no gates defined)
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -748,7 +750,7 @@ mod tests {
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -781,7 +783,7 @@ mod tests {
         let executor =
             ExecutorBuilder::new(Arc::new(JumpHandler) as Arc<dyn NodeHandler<TestGraph>>).build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -817,7 +819,7 @@ mod tests {
             .max_node_visits(5)
             .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
         assert_eq!(handler.calls(), 4);
     }
 
@@ -881,7 +883,9 @@ mod tests {
         )
         .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Fail);
+        assert_eq!(result.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
     }
 
     #[tokio::test]
@@ -893,7 +897,7 @@ mod tests {
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
     }
 
     // ---- Step 11: Cancellation ----
@@ -1003,7 +1007,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
         assert_eq!(handler.calls(), 3);
     }
 
@@ -1041,7 +1045,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
         assert_eq!(handler.calls(), 3);
     }
 
@@ -1119,20 +1123,20 @@ mod tests {
             }
             fn on_retries_exhausted(&self, _n: &TestNode, _last: Outcome) -> Outcome {
                 Outcome {
-                    status: StageStatus::PartialSuccess,
+                    status: StageOutcome::PartiallySucceeded,
                     notes: Some("exhausted".into()),
                     ..Outcome::default()
                 }
             }
         }
-        // No outgoing edges from "start" so PartialSuccess becomes the run result
+        // No outgoing edges from "start" so PartiallySucceeded becomes the run result.
         let g = TestGraph::new(vec![TestNode::new("start")], vec![], "start");
         let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(ExhaustedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::PartialSuccess);
+        assert_eq!(result.status, StageOutcome::PartiallySucceeded);
     }
 
     #[tokio::test]
@@ -1303,7 +1307,7 @@ mod tests {
             .lifecycle(Box::new(SkipOnSecondAttempt(call_count_clone)))
             .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success); // overall run succeeds via terminal
+        assert_eq!(result.status, StageOutcome::Succeeded); // overall run succeeds via terminal
         assert_eq!(handler.calls(), 1); // handler only called once
         assert_eq!(call_count.load(Ordering::Relaxed), 2); // before_attempt called twice
     }
@@ -1338,7 +1342,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
         // Should have slept ~5s for the retry backoff
         assert!(start.elapsed() >= Duration::from_secs(4));
     }
@@ -1372,7 +1376,7 @@ mod tests {
                 .lifecycle(Box::new(SkipFirst(Mutex::new(false))))
                 .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -1451,7 +1455,7 @@ mod tests {
                 .lifecycle(Box::new(Redirector))
                 .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -1777,7 +1781,7 @@ mod tests {
         let g2 = TestGraph::new(
             vec![
                 TestNode::new("work"),
-                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+                TestNode::terminal("end").with_goal_gate("work", StageOutcome::Succeeded),
             ],
             vec![TestEdge::new("work", "end")],
             "work",
@@ -1926,7 +1930,7 @@ mod tests {
         let g = TestGraph::new(
             vec![
                 TestNode::new("work"),
-                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+                TestNode::terminal("end").with_goal_gate("work", StageOutcome::Succeeded),
             ],
             vec![TestEdge::new("work", "end")],
             "work",
@@ -1937,7 +1941,7 @@ mod tests {
         let executor =
             ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>).build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
         assert_eq!(handler.calls(), 2);
     }
 
@@ -1968,7 +1972,7 @@ mod tests {
             .max_node_visits(5)
             .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
         assert_eq!(handler.calls(), 2);
     }
 
@@ -1993,7 +1997,7 @@ mod tests {
         let g = TestGraph::new(
             vec![
                 TestNode::new("work"),
-                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+                TestNode::terminal("end").with_goal_gate("work", StageOutcome::Succeeded),
             ],
             vec![TestEdge::new("work", "end")],
             "work",
@@ -2008,7 +2012,9 @@ mod tests {
         .build();
 
         let (result, _) = executor.run(&g, state).await.unwrap();
-        assert_eq!(result.status, StageStatus::Fail);
+        assert_eq!(result.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert_eq!(
             result
                 .failure

@@ -21,7 +21,7 @@ digraph TransitionPatterns {
     review -> implement [label="Fix"]
     review -> gate      [label="Approve"]
     review -> gate      [weight=-1]
-    gate -> fast_path [condition="outcome=success"]
+    gate -> fast_path [condition="outcome=succeeded"]
     gate -> slow_path
     fast_path -> preferred [weight=10]
     fast_path -> exit      [weight=1]

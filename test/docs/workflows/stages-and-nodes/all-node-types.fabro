@@ -18,7 +18,7 @@ digraph AllNodeTypes {
     approve -> spec [label="[A] Approve"]
     approve -> plan [label="[R] Revise"]
     spec -> implement -> test -> gate
-    gate -> fork      [label="Pass", condition="outcome=success"]
+    gate -> fork      [label="Pass", condition="outcome=succeeded"]
     gate -> cooldown  [label="Fix"]
     cooldown -> implement
     fork -> security

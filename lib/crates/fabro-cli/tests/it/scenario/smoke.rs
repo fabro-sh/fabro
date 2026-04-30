@@ -35,7 +35,7 @@ fn run_sse_body(run_id: &str) -> String {
         "properties": {
             "duration_ms": 12,
             "artifact_count": 0,
-            "status": "success",
+            "status": "succeeded",
             "reason": "completed"
         }
     });

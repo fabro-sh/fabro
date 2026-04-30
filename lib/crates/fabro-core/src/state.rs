@@ -93,7 +93,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::outcome::{Outcome, StageStatus};
+    use crate::outcome::{Outcome, StageOutcome};
     use crate::test_fixtures::linear_graph;
 
     #[test]
@@ -115,7 +115,7 @@ mod tests {
         state.record("start", &result);
 
         assert_eq!(state.completed_nodes, vec!["start"]);
-        assert_eq!(state.node_outcomes["start"].status, StageStatus::Success);
+        assert_eq!(state.node_outcomes["start"].status, StageOutcome::Succeeded);
         assert_eq!(state.node_retries["start"], 1); // 2 attempts - 1
         assert_eq!(state.stage_index, 1);
     }

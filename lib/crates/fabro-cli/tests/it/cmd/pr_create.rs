@@ -30,7 +30,7 @@ fn help() {
           --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --model <MODEL>     LLM model for generating PR description
-      -f, --force             Create PR even if the run status is not success/partial_success
+      -f, --force             Create PR even if the run status is not succeeded/partially_succeeded
           --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet             Suppress non-essential output [env: FABRO_QUIET=]
           --verbose           Enable verbose output [env: FABRO_VERBOSE=]

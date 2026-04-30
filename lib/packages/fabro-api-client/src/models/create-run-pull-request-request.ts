@@ -19,7 +19,7 @@
  */
 export interface CreateRunPullRequestRequest {
     /**
-     * Create the pull request even if the run did not finish with success or partial_success.
+     * Create the pull request even if the run did not finish with succeeded or partially_succeeded.
      */
     'force': boolean;
     /**
@@ -27,4 +27,3 @@ export interface CreateRunPullRequestRequest {
      */
     'model'?: string | null;
 }
-

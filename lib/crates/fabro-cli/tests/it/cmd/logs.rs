@@ -203,7 +203,7 @@ fn logs_pretty_formats_small_run() {
     [CLOCK]    → exit unconditional
     [CLOCK] ▶ Exit
     [CLOCK] ✓ Exit    [DURATION]
-    [CLOCK] ✓ SUCCESS [DURATION]  
+    [CLOCK] ✓ SUCCEEDED [DURATION]
     ----- stderr -----
     ");
 }

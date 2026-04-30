@@ -17,7 +17,7 @@ fn scenario_conditional_branching(sandbox: &str) {
 
     let run_dir = find_run_dir(&context);
     let conclusion = read_conclusion(&run_dir);
-    assert_eq!(conclusion["status"].as_str(), Some("success"));
+    assert_eq!(conclusion["status"].as_str(), Some("succeeded"));
 
     let nodes = completed_nodes(&run_dir);
     assert!(

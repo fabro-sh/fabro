@@ -113,7 +113,7 @@ digraph SemanticPort {
 
     plan -> implement -> validate -> gate
 
-    gate -> finalize [label="Pass", condition="outcome=success"]
+    gate -> finalize [label="Pass", condition="outcome=succeeded"]
     gate -> fix      [label="Fail"]
 
     fix -> validate

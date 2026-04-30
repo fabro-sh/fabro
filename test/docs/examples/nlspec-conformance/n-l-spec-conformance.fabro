@@ -34,13 +34,13 @@ digraph NLSpecConformance {
     // Wiring
     start -> plan -> implement -> test_quick -> gate_quick
 
-    gate_quick -> test_full  [label="Pass", condition="outcome=success"]
+    gate_quick -> test_full  [label="Pass", condition="outcome=succeeded"]
     gate_quick -> fix        [label="Fix"]
 
     fix -> test_quick
 
     test_full -> gate_full
 
-    gate_full -> exit [label="Pass", condition="outcome=success"]
+    gate_full -> exit [label="Pass", condition="outcome=succeeded"]
     gate_full -> fix  [label="Fix"]
 }

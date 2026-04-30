@@ -5,7 +5,7 @@ use fabro_store::{NodeState, RunProjection, SerializableProjection, StageId};
 use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
 use fabro_types::{
-    Checkpoint, NodeStatusRecord, RunStatus, SandboxRecord, StageStatus, StartRecord,
+    Checkpoint, NodeStatusRecord, RunStatus, SandboxRecord, StageOutcome, StartRecord,
     TerminalStatus, WorkflowSettings, fixtures,
 };
 use serde_json::json;
@@ -81,7 +81,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         prompt:            Some("plan the work".to_string()),
         response:          Some("done".to_string()),
         status:            Some(NodeStatusRecord {
-            status:         StageStatus::Success,
+            status:         StageOutcome::Succeeded,
             notes:          Some("ok".to_string()),
             failure_reason: None,
             timestamp:      Utc

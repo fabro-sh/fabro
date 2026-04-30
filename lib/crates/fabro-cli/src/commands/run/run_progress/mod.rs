@@ -552,7 +552,7 @@ mod tests {
             name: name.into(),
             index: 0,
             duration_ms: 5000,
-            status: "success".into(),
+            status: "succeeded".into(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
             billing: Some(billed_model_usage_from_llm(
@@ -616,7 +616,7 @@ mod tests {
             branch:             "security".into(),
             index:              0,
             duration_ms:        2000,
-            status:             "success".into(),
+            status:             "succeeded".into(),
             head_sha:           None,
         });
         let stage = &ui.stage.active_stages["fork1"];
@@ -717,7 +717,7 @@ mod tests {
                 reason:             "condition".into(),
                 preferred_label:    None,
                 suggested_next_ids: Vec::new(),
-                stage_status:       "success".into(),
+                stage_status:       "succeeded".into(),
                 is_jump:            false,
             },
             Event::StageRetrying {
@@ -912,7 +912,7 @@ mod tests {
             reason:             "condition".into(),
             preferred_label:    None,
             suggested_next_ids: Vec::new(),
-            stage_status:       "success".into(),
+            stage_status:       "succeeded".into(),
             is_jump:            false,
         });
         emit(&mut ui, Event::StageRetrying {
@@ -1117,7 +1117,7 @@ mod tests {
             branch:             "security".into(),
             index:              0,
             duration_ms:        500,
-            status:             "success".into(),
+            status:             "succeeded".into(),
             head_sha:           None,
         });
 

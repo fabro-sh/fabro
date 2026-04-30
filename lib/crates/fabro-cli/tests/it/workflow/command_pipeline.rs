@@ -33,8 +33,8 @@ fn scenario_command_pipeline(sandbox: &str) {
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(
         conclusion["status"].as_str(),
-        Some("success"),
-        "conclusion status should be success"
+        Some("succeeded"),
+        "conclusion status should be succeeded"
     );
 
     let nodes = completed_nodes(&run_dir);

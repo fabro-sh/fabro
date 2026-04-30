@@ -509,7 +509,7 @@ mod tests {
             reason:             "condition".into(),
             preferred_label:    None,
             suggested_next_ids: Vec::new(),
-            stage_status:       "success".into(),
+            stage_status:       "succeeded".into(),
             is_jump:            false,
         });
 
@@ -532,7 +532,7 @@ mod tests {
             name: "Plan".into(),
             index: 0,
             duration_ms: 5000,
-            status: "success".into(),
+            status: "succeeded".into(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
             billing: None,

@@ -30,7 +30,7 @@ fn dry_run_branching() {
 
     === Run Result ===
     Run:       [ULID]
-    Status:    SUCCESS
+    Status:    SUCCEEDED
     Duration:  [DURATION]
 
     === Output ===
@@ -63,7 +63,7 @@ fn dry_run_conditions() {
 
     === Run Result ===
     Run:       [ULID]
-    Status:    SUCCESS
+    Status:    SUCCEEDED
     Duration:  [DURATION]
 
     === Output ===
@@ -97,7 +97,7 @@ fn dry_run_parallel() {
 
     === Run Result ===
     Run:       [ULID]
-    Status:    SUCCESS
+    Status:    SUCCEEDED
     Duration:  [DURATION]
 
     === Output ===
@@ -131,7 +131,7 @@ fn dry_run_styled() {
 
     === Run Result ===
     Run:       [ULID]
-    Status:    SUCCESS
+    Status:    SUCCEEDED
     Duration:  [DURATION]
 
     === Output ===
@@ -163,7 +163,7 @@ fn dry_run_legacy_tool() {
 
     === Run Result ===
     Run:       [ULID]
-    Status:    SUCCESS
+    Status:    SUCCEEDED
     Duration:  [DURATION]
     ");
 }

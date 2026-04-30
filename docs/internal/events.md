@@ -123,7 +123,7 @@ Emitted when the workflow run finishes successfully (or with partial success).
   "properties": {
     "duration_ms": 45000,
     "artifact_count": 3,
-    "status": "success",
+    "status": "succeeded",
     "total_cost": 0.15,
     "final_git_commit_sha": "def456...",
     "usage": {
@@ -143,7 +143,7 @@ Emitted when the workflow run finishes successfully (or with partial success).
 |----------|------|-------------|
 | `duration_ms` | number | Total run duration in milliseconds |
 | `artifact_count` | number | Number of artifacts produced |
-| `status` | string | Final status (`"success"`, `"fail"`, `"partial_success"`) |
+| `status` | string | Final stage outcome (`"succeeded"`, `"failed"`, `"partially_succeeded"`, `"skipped"`) |
 | `total_cost` | number? | Aggregate cost in USD |
 | `final_git_commit_sha` | string? | Final HEAD SHA |
 | `usage` | object? | Aggregate token usage |
@@ -327,7 +327,7 @@ Emitted when a workflow node finishes execution.
   "properties": {
     "index": 1,
     "duration_ms": 8000,
-    "status": "success",
+    "status": "succeeded",
     "preferred_label": "tests_pass",
     "suggested_next_ids": ["review"],
     "usage": {
@@ -362,7 +362,7 @@ Emitted when a workflow node finishes execution.
 |----------|------|-------------|
 | `index` | number | Stage execution order index |
 | `duration_ms` | number | Stage duration in milliseconds |
-| `status` | string | `"success"`, `"fail"`, `"skipped"`, `"partial_success"`, `"retry"` |
+| `status` | string | `"succeeded"`, `"failed"`, `"skipped"`, `"partially_succeeded"` |
 | `preferred_label` | string? | Edge label hint for routing |
 | `suggested_next_ids` | string[] | Suggested successor node ids |
 | `usage` | object? | Token usage for this stage |
@@ -522,7 +522,7 @@ Emitted when a parallel branch finishes.
   "properties": {
     "index": 0,
     "duration_ms": 5000,
-    "status": "success"
+    "status": "succeeded"
   }
 }
 ```
@@ -640,7 +640,7 @@ Emitted after a checkpoint is saved.
   "node_id": "code",
   "node_label": "code",
   "properties": {
-    "status": "success",
+    "status": "succeeded",
     "git_commit_sha": "abc123...",
     "diff": "diff --git a/src/lib.rs b/src/lib.rs\n..."
   }
@@ -821,7 +821,7 @@ Emitted when the engine selects the next edge to traverse.
     "reason": "condition",
     "preferred_label": "tests_pass",
     "suggested_next_ids": ["review"],
-    "stage_status": "success",
+    "stage_status": "succeeded",
     "is_jump": false
   }
 }
@@ -1490,7 +1490,7 @@ Emitted when the agent fails over to a different LLM provider/model.
   "node_label": "pipeline",
   "properties": {
     "steps_executed": 4,
-    "status": "success",
+    "status": "succeeded",
     "duration_ms": 25000
   }
 }

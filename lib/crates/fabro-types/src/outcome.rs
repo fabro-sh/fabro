@@ -3,7 +3,7 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
 
-use serde::de::DeserializeOwned;
+use serde::de::{DeserializeOwned, Error as DeError};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use strum::{Display, EnumString, IntoStaticStr};
@@ -87,7 +87,7 @@ impl<'de> Deserialize<'de> for StageOutcome {
         D: Deserializer<'de>,
     {
         let value = String::deserialize(deserializer)?;
-        value.parse().map_err(serde::de::Error::custom)
+        value.parse().map_err(DeError::custom)
     }
 }
 
@@ -141,23 +141,6 @@ impl From<StageOutcome> for StageState {
         }
     }
 }
-
-#[allow(
-    non_upper_case_globals,
-    reason = "Temporary compatibility constants allow the staged refactor to compile between phase commits."
-)]
-impl StageOutcome {
-    pub const Success: Self = Self::Succeeded;
-    pub const Fail: Self = Self::Failed {
-        retry_requested: false,
-    };
-    pub const PartialSuccess: Self = Self::PartiallySucceeded;
-    pub const Retry: Self = Self::Failed {
-        retry_requested: true,
-    };
-}
-
-pub type StageStatus = StageOutcome;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

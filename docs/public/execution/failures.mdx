@@ -108,7 +108,7 @@ The engine resolves retry configuration in this order:
 
 Not all errors trigger a node retry. The handler's `should_retry` check must return true — generally, only errors classified as transient are retried. Deterministic errors (auth failures, bad config) fail immediately without consuming retry attempts.
 
-When a handler returns a `Retry` status instead of `Fail`, retries always proceed (if attempts remain). If retries are exhausted and the node has `allow_partial=true`, the outcome is promoted to `PartialSuccess` instead of failing. See [Node Outcomes — Retry loop](/execution/outcomes#retry-loop) for a detailed flow diagram.
+When a handler reports a retryable failure, retries always proceed if attempts remain. If retries are exhausted and the node has `allow_partial=true`, the outcome is promoted to `partially_succeeded` instead of `failed`. See [Node Outcomes — Retry loop](/execution/outcomes#retry-loop) for a detailed flow diagram.
 
 ## Model fallbacks
 
@@ -234,7 +234,7 @@ Loop restart edges also have their own separate circuit breaker (`restart_failur
 
 ## Goal gates
 
-Goal gates are quality checkpoints that are enforced when the workflow reaches an exit node. A node marked with `goal_gate=true` must have completed with `success` or `partial_success` — otherwise the run cannot finish. See [Node Outcomes — Goal gate interaction](/execution/outcomes#goal-gate-interaction) for how `partial_success` and `allow_partial` interact with goal gates.
+Goal gates are quality checkpoints that are enforced when the workflow reaches an exit node. A node marked with `goal_gate=true` must have completed with `succeeded` or `partially_succeeded` — otherwise the run cannot finish. See [Node Outcomes — Goal gate interaction](/execution/outcomes#goal-gate-interaction) for how `partially_succeeded` and `allow_partial` interact with goal gates.
 
 ```dot
 verify [shape=box, goal_gate="true"]

@@ -479,7 +479,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use fabro_agent::LocalSandbox;
     use fabro_store::{NodeState, StageId};
-    use fabro_types::{NodeStatusRecord, StageStatus};
+    use fabro_types::{NodeStatusRecord, StageOutcome};
     use tokio::fs;
 
     use super::*;
@@ -558,7 +558,7 @@ mod tests {
             prompt:            Some("plan".to_string()),
             response:          Some("done".to_string()),
             status:            Some(NodeStatusRecord {
-                status:         StageStatus::Success,
+                status:         StageOutcome::Succeeded,
                 notes:          Some("ok".to_string()),
                 failure_reason: None,
                 timestamp:      Utc

@@ -36,7 +36,7 @@ Expand this into a detailed spec covering:
 
 Write the expanded spec to .ai/spec.md.
 
-Write status.json: outcome=success"
+Write status.json: outcome=succeeded"
     ]
 
     // Phase 2: Project setup
@@ -56,7 +56,7 @@ Create the Go project structure:
 
 Run: go build ./...
 
-Write status.json: outcome=success if the project builds, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if the project builds, outcome=failed with failure_reason otherwise."
     ]
 
     verify_setup [
@@ -75,7 +75,7 @@ Check that:
 - pkg/ directories are created
 
 Write results to .ai/verify_setup.md.
-Write status.json: outcome=success if all checks pass, outcome=fail with details otherwise."
+Write status.json: outcome=succeeded if all checks pass, outcome=failed with details otherwise."
     ]
 
     check_setup [shape=diamond, label="Setup OK?"]
@@ -104,7 +104,7 @@ Include comprehensive documentation for all exported types.
 
 Run: go build ./...
 
-Write status.json: outcome=success if builds, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if builds, outcome=failed with failure_reason otherwise."
     ]
 
     verify_types [
@@ -124,7 +124,7 @@ Check that:
 - No compilation errors
 
 Write results to .ai/verify_types.md.
-Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details otherwise."
     ]
 
     check_types [shape=diamond, label="Types OK?"]
@@ -158,7 +158,7 @@ Read: pkg/crawler/types.go for interfaces.
 
 Run: go test ./pkg/robotstxt/...
 
-Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all tests pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_robotstxt [
@@ -176,7 +176,7 @@ Check test coverage:
 4. go test ./pkg/robotstxt/... -cover
 
 Write results to .ai/verify_robotstxt.md.
-Write status.json: outcome=success if all pass and coverage > 70%, outcome=fail with details otherwise."
+Write status.json: outcome=succeeded if all pass and coverage > 70%, outcome=failed with details otherwise."
     ]
 
     check_robotstxt [shape=diamond, label="Robots.txt OK?"]
@@ -206,7 +206,7 @@ Read: pkg/crawler/types.go for types.
 
 Run: go test ./pkg/checker/...
 
-Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all tests pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_checker [
@@ -225,7 +225,7 @@ Check:
 - No race conditions: go test ./pkg/checker/... -race
 
 Write results to .ai/verify_checker.md.
-Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details otherwise."
     ]
 
     check_checker [shape=diamond, label="Checker OK?"]
@@ -255,7 +255,7 @@ Read: pkg/crawler/types.go for types.
 
 Run: go test ./pkg/crawler/...
 
-Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all tests pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_extractor [
@@ -275,7 +275,7 @@ Check:
 - Non-http schemes are filtered
 
 Write results to .ai/verify_extractor.md.
-Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details otherwise."
     ]
 
     check_extractor [shape=diamond, label="Extractor OK?"]
@@ -319,7 +319,7 @@ Read: pkg/crawler/types.go, pkg/crawler/extractor.go, pkg/robotstxt/, pkg/checke
 
 Run: go test ./pkg/crawler/...
 
-Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all tests pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_crawler [
@@ -341,7 +341,7 @@ Check:
 - No race conditions
 
 Write results to .ai/verify_crawler.md.
-Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details otherwise."
     ]
 
     check_crawler [shape=diamond, label="Crawler OK?"]
@@ -377,7 +377,7 @@ Read: pkg/report/types.go for types.
 
 Run: go test ./pkg/report/...
 
-Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all tests pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_report [
@@ -397,7 +397,7 @@ Check:
 - All test cases pass
 
 Write results to .ai/verify_report.md.
-Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details otherwise."
     ]
 
     check_report [shape=diamond, label="Report OK?"]
@@ -430,7 +430,7 @@ Read: all pkg/ directories for integration.
 
 Run: go build ./cmd/linkcheck
 
-Write status.json: outcome=success if builds, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if builds, outcome=failed with failure_reason otherwise."
     ]
 
     verify_cli [
@@ -454,7 +454,7 @@ Check:
 - Exit codes are correct
 
 Write results to .ai/verify_cli.md.
-Write status.json: outcome=success if all manual tests pass, outcome=fail with details otherwise."
+Write status.json: outcome=succeeded if all manual tests pass, outcome=failed with details otherwise."
     ]
 
     check_cli [shape=diamond, label="CLI OK?"]
@@ -479,7 +479,7 @@ Create integration tests in test/:
 
 Run: go test ./test/...
 
-Write status.json: outcome=success if integration tests pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if integration tests pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_integration [
@@ -500,7 +500,7 @@ Check:
 - Project builds cleanly
 
 Write results to .ai/verify_integration.md.
-Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details otherwise."
     ]
 
     check_integration [shape=diamond, label="Integration OK?"]
@@ -543,7 +543,7 @@ Perform final review of the complete linkcheck implementation:
    - go build ./...
 
 Write detailed review to .ai/final_review.md.
-Write status.json: outcome=success if complete and working, outcome=fail with specific issues that need fixing."
+Write status.json: outcome=succeeded if complete and working, outcome=failed with specific issues that need fixing."
     ]
 
     check_review [shape=diamond, label="Review OK?"]
@@ -551,42 +551,42 @@ Write status.json: outcome=success if complete and working, outcome=fail with sp
     // Graph flow
     start -> expand_spec -> impl_setup -> verify_setup -> check_setup
 
-    check_setup -> impl_types           [condition="outcome=success"]
-    check_setup -> impl_setup           [condition="outcome=fail", label="retry"]
+    check_setup -> impl_types           [condition="outcome=succeeded"]
+    check_setup -> impl_setup           [condition="outcome=failed", label="retry"]
 
     impl_types -> verify_types -> check_types
-    check_types -> impl_robotstxt       [condition="outcome=success"]
-    check_types -> impl_types           [condition="outcome=fail", label="retry"]
+    check_types -> impl_robotstxt       [condition="outcome=succeeded"]
+    check_types -> impl_types           [condition="outcome=failed", label="retry"]
 
     impl_robotstxt -> verify_robotstxt -> check_robotstxt
-    check_robotstxt -> impl_checker     [condition="outcome=success"]
-    check_robotstxt -> impl_robotstxt   [condition="outcome=fail", label="retry"]
+    check_robotstxt -> impl_checker     [condition="outcome=succeeded"]
+    check_robotstxt -> impl_robotstxt   [condition="outcome=failed", label="retry"]
 
     impl_checker -> verify_checker -> check_checker
-    check_checker -> impl_extractor     [condition="outcome=success"]
-    check_checker -> impl_checker       [condition="outcome=fail", label="retry"]
+    check_checker -> impl_extractor     [condition="outcome=succeeded"]
+    check_checker -> impl_checker       [condition="outcome=failed", label="retry"]
 
     impl_extractor -> verify_extractor -> check_extractor
-    check_extractor -> impl_crawler     [condition="outcome=success"]
-    check_extractor -> impl_extractor   [condition="outcome=fail", label="retry"]
+    check_extractor -> impl_crawler     [condition="outcome=succeeded"]
+    check_extractor -> impl_extractor   [condition="outcome=failed", label="retry"]
 
     impl_crawler -> verify_crawler -> check_crawler
-    check_crawler -> impl_report        [condition="outcome=success"]
-    check_crawler -> impl_crawler       [condition="outcome=fail", label="retry"]
+    check_crawler -> impl_report        [condition="outcome=succeeded"]
+    check_crawler -> impl_crawler       [condition="outcome=failed", label="retry"]
 
     impl_report -> verify_report -> check_report
-    check_report -> impl_cli            [condition="outcome=success"]
-    check_report -> impl_report         [condition="outcome=fail", label="retry"]
+    check_report -> impl_cli            [condition="outcome=succeeded"]
+    check_report -> impl_report         [condition="outcome=failed", label="retry"]
 
     impl_cli -> verify_cli -> check_cli
-    check_cli -> impl_integration       [condition="outcome=success"]
-    check_cli -> impl_cli               [condition="outcome=fail", label="retry"]
+    check_cli -> impl_integration       [condition="outcome=succeeded"]
+    check_cli -> impl_cli               [condition="outcome=failed", label="retry"]
 
     impl_integration -> verify_integration -> check_integration
-    check_integration -> review         [condition="outcome=success"]
-    check_integration -> impl_integration [condition="outcome=fail", label="retry"]
+    check_integration -> review         [condition="outcome=succeeded"]
+    check_integration -> impl_integration [condition="outcome=failed", label="retry"]
 
     review -> check_review
-    check_review -> exit                [condition="outcome=success"]
-    check_review -> impl_cli            [condition="outcome=fail", label="fix"]
+    check_review -> exit                [condition="outcome=succeeded"]
+    check_review -> impl_cli            [condition="outcome=failed", label="fix"]
 }

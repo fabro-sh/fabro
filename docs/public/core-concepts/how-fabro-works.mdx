@@ -41,7 +41,7 @@ The engine walks the graph starting from the start node. For each node it:
 
 1. **Resolves context** — Assembles the node's input from prior stage outputs, run context, and the workflow goal. The [fidelity](/workflows/stages-and-nodes#agent) setting controls how much prior context is included.
 2. **Dispatches to a handler** — Each [node type](/workflows/stages-and-nodes) has a handler: the agent handler runs an LLM tool loop, the command handler runs a shell script, the human handler waits for input, and so on.
-3. **Collects the outcome** — The handler returns a [status](/execution/outcomes) (`success`, `fail`, `partial_success`, `retry`, or `skipped`), optional routing directives, and any context updates.
+3. **Collects the outcome** — The handler returns a [stage outcome](/execution/outcomes) (`succeeded`, `failed`, `partially_succeeded`, or `skipped`), optional routing directives, and any context updates.
 4. **Selects the next edge** — Fabro evaluates outgoing edges using conditions, labels, and weights to pick the next node. See [Transitions](/workflows/transitions).
 5. **Checkpoints** — After each stage, Fabro writes a checkpoint so the run can be resumed if interrupted.
 

@@ -58,7 +58,7 @@ fn assert_worker_succeeded(run_dir: &std::path::Path, stdout: &[u8]) {
     let events = stored_worker_events(run_dir);
     assert!(events.iter().any(|event| matches!(
         &event.body,
-        EventBody::RunCompleted(props) if props.status == "success"
+        EventBody::RunCompleted(props) if props.status == "succeeded"
     )));
 }
 
@@ -656,7 +656,7 @@ digraph Test {
       "run_dir": null,
       "start_time": "[TIMESTAMP]",
       "conclusion_timestamp": "[TIMESTAMP]",
-      "conclusion_status": "success"
+      "conclusion_status": "succeeded"
     }
     "#);
 

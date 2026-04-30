@@ -8,7 +8,7 @@ use crate::context::Context;
 use crate::error::{Error, HandlerErrorDetail, Result};
 use crate::graph::{EdgeSelection, EdgeSpec, Graph, NodeSpec};
 use crate::handler::NodeHandler;
-use crate::outcome::{Outcome, StageStatus};
+use crate::outcome::{Outcome, StageOutcome};
 use crate::retry::RetryPolicy;
 
 // ---- Test node ----
@@ -18,7 +18,7 @@ pub struct TestNode {
     pub id:         String,
     pub terminal:   bool,
     pub max_visits: Option<usize>,
-    pub goal_gate:  Option<(String, StageStatus)>,
+    pub goal_gate:  Option<(String, StageOutcome)>,
 }
 
 impl TestNode {
@@ -47,7 +47,7 @@ impl TestNode {
     }
 
     #[must_use]
-    pub fn with_goal_gate(mut self, node_id: &str, required_status: StageStatus) -> Self {
+    pub fn with_goal_gate(mut self, node_id: &str, required_status: StageOutcome) -> Self {
         self.goal_gate = Some((node_id.to_string(), required_status));
         self
     }
@@ -525,7 +525,7 @@ mod tests {
         let g = TestGraph::new(
             vec![
                 TestNode::new("work"),
-                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+                TestNode::terminal("end").with_goal_gate("work", StageOutcome::Succeeded),
             ],
             vec![TestEdge::new("work", "end")],
             "work",
@@ -540,7 +540,7 @@ mod tests {
         let g = TestGraph::new(
             vec![
                 TestNode::new("work"),
-                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+                TestNode::terminal("end").with_goal_gate("work", StageOutcome::Succeeded),
             ],
             vec![TestEdge::new("work", "end")],
             "work",
@@ -564,7 +564,7 @@ mod tests {
         let node = g.get_node("start").unwrap();
         let ctx = Context::new();
         let result = h.execute(&node, &ctx, &g).await.unwrap();
-        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(result.status, StageOutcome::Succeeded);
     }
 
     #[tokio::test]
@@ -574,7 +574,9 @@ mod tests {
         let node = g.get_node("start").unwrap();
         let ctx = Context::new();
         let result = h.execute(&node, &ctx, &g).await.unwrap();
-        assert_eq!(result.status, StageStatus::Fail);
+        assert_eq!(result.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert_eq!(result.failure.unwrap().message, "boom");
     }
 
@@ -586,16 +588,18 @@ mod tests {
         let ctx = Context::new();
 
         let r1 = h.execute(&node, &ctx, &g).await.unwrap();
-        assert_eq!(r1.status, StageStatus::Fail);
+        assert_eq!(r1.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         assert_eq!(h.calls(), 1);
 
         let r2 = h.execute(&node, &ctx, &g).await.unwrap();
-        assert_eq!(r2.status, StageStatus::Success);
+        assert_eq!(r2.status, StageOutcome::Succeeded);
         assert_eq!(h.calls(), 2);
 
         // Past end of outcomes list → default success
         let r3 = h.execute(&node, &ctx, &g).await.unwrap();
-        assert_eq!(r3.status, StageStatus::Success);
+        assert_eq!(r3.status, StageOutcome::Succeeded);
         assert_eq!(h.calls(), 3);
     }
 }

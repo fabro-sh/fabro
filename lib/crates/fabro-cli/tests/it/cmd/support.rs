@@ -1042,7 +1042,7 @@ async fn append_seeded_simple_completion_events(
         serde_json::json!({
             "duration_ms": 123,
             "artifact_count": 0,
-            "status": "success",
+            "status": "succeeded",
             "reason": "completed",
             "total_usd_micros": null,
             "final_git_commit_sha": null,
@@ -1157,7 +1157,14 @@ async fn append_seeded_git_completion_events(
         &run.run_id,
         Some("start"),
         "checkpoint.completed",
-        checkpoint_properties("success", "start", &["start"], Some("step_one"), None, None),
+        checkpoint_properties(
+            "succeeded",
+            "start",
+            &["start"],
+            Some("step_one"),
+            None,
+            None,
+        ),
     )
     .await;
     append_run_event(
@@ -1201,7 +1208,7 @@ async fn append_seeded_git_completion_events(
         serde_json::json!({
             "duration_ms": 456,
             "artifact_count": 0,
-            "status": "success",
+            "status": "succeeded",
             "reason": "completed",
             "total_usd_micros": null,
             "final_git_commit_sha": step_two_sha,
@@ -1262,7 +1269,7 @@ async fn append_seeded_git_noop_events(
         serde_json::json!({
             "duration_ms": 123,
             "artifact_count": 0,
-            "status": "success",
+            "status": "succeeded",
             "reason": "completed",
             "total_usd_micros": null,
             "final_git_commit_sha": base_sha,
@@ -1322,7 +1329,7 @@ async fn append_seeded_artifact_run_events(
         serde_json::json!({
             "duration_ms": 123,
             "artifact_count": 6,
-            "status": "success",
+            "status": "succeeded",
             "reason": "completed",
             "total_usd_micros": null,
             "final_git_commit_sha": null,
@@ -1415,7 +1422,7 @@ async fn append_seeded_edge(
             "reason": "unconditional",
             "preferred_label": null,
             "suggested_next_ids": [],
-            "stage_status": "success",
+            "stage_status": "succeeded",
             "is_jump": false,
         }),
     )
@@ -1470,7 +1477,7 @@ fn stage_completed_properties(index: usize, response: Option<&str>) -> serde_jso
     serde_json::json!({
         "index": index,
         "duration_ms": 1,
-        "status": "success",
+        "status": "succeeded",
         "preferred_label": null,
         "suggested_next_ids": [],
         "billing": null,

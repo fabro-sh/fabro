@@ -9,7 +9,7 @@ use fabro_types::run_event::{
 use fabro_types::{
     BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
     NodeStatusRecord, Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunId,
-    RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageStatus, StartRecord,
+    RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageOutcome, StartRecord,
     TerminalStatus,
 };
 use fabro_util::error::render_with_causes;
@@ -302,7 +302,9 @@ impl RunProjectionReducer for RunProjection {
                 let failure_reason = props.failure.as_ref().map(|detail| detail.message.clone());
                 let node = self.node_mut(node_id, visit);
                 node.status = Some(NodeStatusRecord {
-                    status: StageStatus::Fail,
+                    status: StageOutcome::Failed {
+                        retry_requested: false,
+                    },
                     notes: None,
                     failure_reason,
                     timestamp: ts,
@@ -448,7 +450,7 @@ fn conclusion_from_completed(
 ) -> Result<Conclusion> {
     Ok(Conclusion {
         timestamp,
-        status: StageStatus::from_str(&props.status)
+        status: StageOutcome::from_str(&props.status)
             .map_err(|err| Error::InvalidEvent(format!("invalid completed stage status: {err}")))?,
         duration_ms: props.duration_ms,
         failure_reason: None,
@@ -462,7 +464,9 @@ fn conclusion_from_completed(
 fn conclusion_from_failed(props: &RunFailedProps, timestamp: DateTime<Utc>) -> Conclusion {
     Conclusion {
         timestamp,
-        status: StageStatus::Fail,
+        status: StageOutcome::Failed {
+            retry_requested: false,
+        },
         duration_ms: props.duration_ms,
         failure_reason: Some(render_with_causes(&props.error, &props.causes)),
         final_git_commit_sha: props.git_commit_sha.clone(),
@@ -485,7 +489,7 @@ fn stage_visit(
 
 fn stage_outcome_from_props(props: &StageCompletedProps) -> Outcome<Option<BilledModelUsage>> {
     Outcome {
-        status:             props.status.clone(),
+        status:             props.status,
         preferred_label:    props.preferred_label.clone(),
         suggested_next_ids: props.suggested_next_ids.clone(),
         context_updates:    props
@@ -508,7 +512,7 @@ fn node_status_from_outcome(
     timestamp: DateTime<Utc>,
 ) -> NodeStatusRecord {
     NodeStatusRecord {
-        status: outcome.status.clone(),
+        status: outcome.status,
         notes: outcome.notes.clone(),
         failure_reason: outcome
             .failure
@@ -1118,7 +1122,7 @@ mod tests {
                 EventBody::RunCompleted(RunCompletedProps {
                     duration_ms:          10,
                     artifact_count:       0,
-                    status:               "success".to_string(),
+                    status:               "succeeded".to_string(),
                     reason:               SuccessReason::Completed,
                     total_usd_micros:     None,
                     final_git_commit_sha: None,
@@ -1181,7 +1185,7 @@ mod tests {
                 EventBody::RunCompleted(RunCompletedProps {
                     duration_ms:          10,
                     artifact_count:       0,
-                    status:               "success".to_string(),
+                    status:               "succeeded".to_string(),
                     reason:               SuccessReason::PartialSuccess,
                     total_usd_micros:     None,
                     final_git_commit_sha: None,
@@ -1311,7 +1315,7 @@ mod tests {
                 EventBody::RunCompleted(RunCompletedProps {
                     duration_ms:          10,
                     artifact_count:       0,
-                    status:               "success".to_string(),
+                    status:               "succeeded".to_string(),
                     reason:               SuccessReason::Completed,
                     total_usd_micros:     None,
                     final_git_commit_sha: None,

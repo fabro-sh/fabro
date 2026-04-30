@@ -189,9 +189,9 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 | `retry_policy` | String | Named preset: `none`, `standard`, `aggressive`, `linear`, `patient` |
 | `retry_target` | String | Node ID to jump to on retry |
 | `fallback_retry_target` | String | Fallback node ID if primary `retry_target` is unreachable |
-| `goal_gate` | Boolean | When `true`, workflow fails if this node didn't finish with `success` or `partial_success`. See [Node Outcomes](/execution/outcomes#goal-gate-interaction). |
-| `auto_status` | Boolean | When `true`, overrides any non-`success`/non-`skipped` status to `success` after the handler completes. See [Node Outcomes](/execution/outcomes#auto_status). |
-| `allow_partial` | Boolean | When `true` and retries are exhausted on a `retry` status, promotes the outcome to `partial_success` instead of `fail`. Default `false`. See [Node Outcomes](/execution/outcomes#allow_partial). |
+| `goal_gate` | Boolean | When `true`, workflow fails if this node didn't finish with `succeeded` or `partially_succeeded`. See [Node Outcomes](/execution/outcomes#goal-gate-interaction). |
+| `auto_status` | Boolean | When `true`, overrides any non-`succeeded`/non-`skipped` outcome to `succeeded` after the handler completes. See [Node Outcomes](/execution/outcomes#auto_status). |
+| `allow_partial` | Boolean | When `true` and retries are exhausted on a retry-requesting failure, promotes the outcome to `partially_succeeded` instead of `failed`. Default `false`. See [Node Outcomes](/execution/outcomes#allow_partial). |
 | `selection` | String | Edge tiebreaking strategy: `deterministic` (default) or `random` (weighted-random). Cannot be combined with conditional edges. |
 
 ### Agent and prompt nodes
@@ -271,7 +271,7 @@ Op         ::= '=' | '!=' | '>' | '<' | '>=' | '<='
 
 | Key | Resolves to |
 |---|---|
-| `outcome` | Stage status: `success`, `fail`, `partial_success`, or `skipped`. See [Node Outcomes](/execution/outcomes#outcome-in-edge-conditions). |
+| `outcome` | Stage outcome: `succeeded`, `failed`, `partially_succeeded`, or `skipped`. See [Node Outcomes](/execution/outcomes#outcome-in-edge-conditions). |
 | `preferred_label` | Label selected by a human gate or LLM routing directive |
 | `context.KEY` | Value from the run context |
 | `KEY` | Shorthand for context lookup (without the `context.` prefix) |

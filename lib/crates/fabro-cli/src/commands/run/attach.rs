@@ -39,7 +39,7 @@ const ATTACH_PREMATURE_EOF_MESSAGE: &str = "Attach stream ended before terminal 
 
 /// Attach to a running (or finished) workflow run, rendering progress live.
 ///
-/// Returns exit code 0 for success/partial_success, 1 otherwise.
+/// Returns exit code 0 for succeeded/partially_succeeded, 1 otherwise.
 #[cfg(test)]
 pub(crate) async fn attach_run(
     run_dir: &Path,
@@ -455,7 +455,7 @@ fn state_exit_code(state: &server_client::RunProjection) -> Option<ExitCode> {
 fn event_exit_code(event: &EventEnvelope) -> Option<ExitCode> {
     match &event.event.body {
         EventBody::RunCompleted(props) => Some(
-            if props.status == "success" || props.status == "partial_success" {
+            if props.status == "succeeded" || props.status == "partially_succeeded" {
                 ExitCode::from(0)
             } else {
                 ExitCode::from(1)

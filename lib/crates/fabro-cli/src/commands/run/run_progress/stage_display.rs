@@ -261,7 +261,7 @@ impl StageDisplay {
             return;
         };
 
-        let succeeded = matches!(status, "success" | "partial_success");
+        let succeeded = matches!(status, "succeeded" | "partially_succeeded");
         entry.status = if succeeded {
             ToolCallStatus::Succeeded
         } else {

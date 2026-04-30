@@ -51,7 +51,7 @@ fn remote_run_state_response() -> serde_json::Value {
         "checkpoints": [],
         "conclusion": {
             "timestamp": "2026-04-05T12:00:01Z",
-            "status": "success",
+            "status": "succeeded",
             "duration_ms": 12,
             "stages": [],
             "billing": null,
@@ -77,7 +77,7 @@ fn run_completed_event(run_id: &str) -> serde_json::Value {
         "properties": {
             "duration_ms": 12,
             "artifact_count": 0,
-            "status": "success",
+            "status": "succeeded",
             "reason": "completed"
         }
     })
@@ -703,7 +703,7 @@ fn dry_run_simple() {
 
     === Run Result ===
     Run:       [ULID]
-    Status:    SUCCESS
+    Status:    SUCCEEDED
     Duration:  [DURATION]
 
     === Output ===

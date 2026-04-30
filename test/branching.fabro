@@ -11,6 +11,6 @@ digraph Branch {
     gate      [shape=diamond, label="Tests passing?"]
 
     start -> plan -> implement -> validate -> gate
-    gate -> exit      [label="Yes", condition="outcome=success"]
+    gate -> exit      [label="Yes", condition="outcome=succeeded"]
     gate -> implement [label="No"]
 }

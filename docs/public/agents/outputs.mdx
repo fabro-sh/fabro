@@ -45,8 +45,8 @@ Agent and prompt nodes can influence which edge is taken after they complete by 
 
 | Field | Effect |
 |---|---|
-| `outcome` | Sets the node status: `success`, `fail`, `partial_success`, `retry`, or `skipped` |
-| `failure_reason` | When `outcome` is `fail`, provides a structured failure message |
+| `outcome` | Sets the node outcome: `succeeded`, `failed`, `partially_succeeded`, or `skipped` |
+| `failure_reason` | When `outcome` is `failed`, provides a structured failure message |
 | `preferred_next_label` | Matched against edge labels to select the next node |
 | `suggested_next_ids` | Ordered list of preferred target node IDs |
 | `context_updates` | Key-value pairs merged into the run context |
@@ -110,7 +110,7 @@ The tracked paths are stored as `files_touched` on the stage outcome:
 
 ```json
 {
-  "status": "success",
+  "status": "succeeded",
   "files_touched": ["src/main.rs", "tests/api_test.rs", "README.md"]
 }
 ```

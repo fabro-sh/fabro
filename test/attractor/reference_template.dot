@@ -309,9 +309,9 @@ digraph reference_template {
 
     // Linear start: toolchain gate -> spec -> DoD check
     start -> check_toolchain
-    check_toolchain -> expand_spec [condition="outcome=success"]
-    check_toolchain -> check_toolchain [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
-    check_toolchain -> postmortem [condition="outcome=fail && context.failure_class!=transient_infra"]
+    check_toolchain -> expand_spec [condition="outcome=succeeded"]
+    check_toolchain -> check_toolchain [condition="outcome=failed && context.failure_class=transient_infra", loop_restart=true]
+    check_toolchain -> postmortem [condition="outcome=failed && context.failure_class!=transient_infra"]
     check_toolchain -> postmortem
     expand_spec -> check_dod
 
@@ -340,42 +340,42 @@ digraph reference_template {
 
     // Verify/check inner loop (tool gates first, semantic review last)
     implement -> check_implement
-    check_implement -> fix_fmt [condition="outcome=success"]
+    check_implement -> fix_fmt [condition="outcome=succeeded"]
     fix_fmt -> verify_fmt
-    check_implement -> implement  [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
-    check_implement -> postmortem [condition="outcome=fail && context.failure_class!=transient_infra"]
+    check_implement -> implement  [condition="outcome=failed && context.failure_class=transient_infra", loop_restart=true]
+    check_implement -> postmortem [condition="outcome=failed && context.failure_class!=transient_infra"]
     check_implement -> postmortem
     verify_fmt -> check_fmt
-    check_fmt -> verify_build [condition="outcome=success"]
-    check_fmt -> implement    [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
-    check_fmt -> postmortem   [condition="outcome=fail && context.failure_class!=transient_infra"]
+    check_fmt -> verify_build [condition="outcome=succeeded"]
+    check_fmt -> implement    [condition="outcome=failed && context.failure_class=transient_infra", loop_restart=true]
+    check_fmt -> postmortem   [condition="outcome=failed && context.failure_class!=transient_infra"]
     check_fmt -> postmortem
 
     verify_build -> check_build
-    check_build -> verify_test  [condition="outcome=success"]
-    check_build -> implement    [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
-    check_build -> postmortem   [condition="outcome=fail && context.failure_class!=transient_infra"]
+    check_build -> verify_test  [condition="outcome=succeeded"]
+    check_build -> implement    [condition="outcome=failed && context.failure_class=transient_infra", loop_restart=true]
+    check_build -> postmortem   [condition="outcome=failed && context.failure_class!=transient_infra"]
     check_build -> postmortem
 
     verify_test -> check_test
-    check_test -> verify_artifacts [condition="outcome=success"]
-    check_test -> implement        [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
-    check_test -> postmortem       [condition="outcome=fail && context.failure_class!=transient_infra"]
+    check_test -> verify_artifacts [condition="outcome=succeeded"]
+    check_test -> implement        [condition="outcome=failed && context.failure_class=transient_infra", loop_restart=true]
+    check_test -> postmortem       [condition="outcome=failed && context.failure_class!=transient_infra"]
     check_test -> postmortem
 
     verify_artifacts -> check_artifacts
-    check_artifacts -> verify_fidelity [condition="outcome=success"]
-    check_artifacts -> implement       [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
-    check_artifacts -> postmortem      [condition="outcome=fail && context.failure_class!=transient_infra"]
+    check_artifacts -> verify_fidelity [condition="outcome=succeeded"]
+    check_artifacts -> implement       [condition="outcome=failed && context.failure_class=transient_infra", loop_restart=true]
+    check_artifacts -> postmortem      [condition="outcome=failed && context.failure_class!=transient_infra"]
     check_artifacts -> postmortem
 
     verify_fidelity -> check_impl
-    check_impl -> review_fanout [condition="outcome=success"]
+    check_impl -> review_fanout [condition="outcome=succeeded"]
     review_fanout -> review_a
     review_fanout -> review_b
     review_fanout -> review_c
-    check_impl -> implement  [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
-    check_impl -> postmortem [condition="outcome=fail && context.failure_class!=transient_infra"]
+    check_impl -> implement  [condition="outcome=failed && context.failure_class=transient_infra", loop_restart=true]
+    check_impl -> postmortem [condition="outcome=failed && context.failure_class!=transient_infra"]
     check_impl -> postmortem
 
     // Review fan-in -> consensus
@@ -384,11 +384,11 @@ digraph reference_template {
     review_c -> review_consensus
 
     // Consensus routing: success -> exit, anything else -> postmortem
-    review_consensus -> exit [condition="outcome=success"]
+    review_consensus -> exit [condition="outcome=succeeded"]
     review_consensus -> postmortem
 
     // Domain-routed recovery: classify failure and choose the right re-entry
-    postmortem -> check_toolchain [condition="outcome=fail && context.failure_class=transient_infra"]
+    postmortem -> check_toolchain [condition="outcome=failed && context.failure_class=transient_infra"]
     postmortem -> implement [condition="outcome=impl_repair"]
     postmortem -> plan_fanout [condition="outcome=needs_replan"]
     postmortem -> check_toolchain [condition="outcome=needs_toolchain"]

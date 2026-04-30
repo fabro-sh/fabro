@@ -24,7 +24,7 @@ pub fn classify_engine_result(
 ) -> (StageOutcome, Option<String>, RunStatus) {
     match engine_result {
         Ok(outcome) => {
-            let status = outcome.status.clone();
+            let status = outcome.status;
             let failure_reason = outcome.failure_reason().map(String::from);
             let run_status = match status {
                 StageOutcome::Succeeded | StageOutcome::Skipped => RunStatus::Succeeded {
@@ -359,7 +359,7 @@ pub(crate) fn build_terminal_event(
         StageOutcome::Failed {
             retry_requested: false,
         },
-        |o| o.status.clone(),
+        |o| o.status,
     );
 
     if outcome_status == StageOutcome::Succeeded
@@ -456,7 +456,7 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
     let conclusion = build_conclusion_from_parts(
         checkpoint.as_ref(),
         &stage_durations,
-        final_status.clone(),
+        final_status,
         failure_reason,
         duration_ms,
         options.last_git_sha.clone(),

@@ -31,7 +31,7 @@ Create:
 
 Run: go build ./...
 
-Write status.json: outcome=success if project builds, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if project builds, outcome=failed with failure_reason otherwise."
     ]
 
     verify_setup [
@@ -46,7 +46,7 @@ Run:
 3. Check that all required directories exist
 
 Write results to .ai/verify_setup.md.
-Write status.json: outcome=success if ALL pass, outcome=fail with details."
+Write status.json: outcome=succeeded if ALL pass, outcome=failed with details."
     ]
 
     check_setup [shape=diamond, label="Setup OK?"]
@@ -77,7 +77,7 @@ Acceptance:
 - go build ./...
 - go test ./pkg/game/
 
-Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all criteria pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_core_types [
@@ -93,7 +93,7 @@ Run:
 4. Check test coverage: go test -cover ./pkg/game/
 
 Write results to .ai/verify_core_types.md.
-Write status.json: outcome=success if ALL pass and coverage >70%, outcome=fail with details."
+Write status.json: outcome=succeeded if ALL pass and coverage >70%, outcome=failed with details."
     ]
 
     check_core_types [shape=diamond, label="Types OK?"]
@@ -140,7 +140,7 @@ Acceptance:
 - go build ./...
 - go test ./pkg/game/ -v (all tests pass)
 
-Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all criteria pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_game_logic [
@@ -156,7 +156,7 @@ Run:
 4. go test -cover ./pkg/game/ (check for >80% coverage)
 
 Write results to .ai/verify_game_logic.md.
-Write status.json: outcome=success if ALL pass with good coverage, outcome=fail with details."
+Write status.json: outcome=succeeded if ALL pass with good coverage, outcome=failed with details."
     ]
 
     check_game_logic [shape=diamond, label="Logic OK?"]
@@ -194,7 +194,7 @@ Acceptance:
 - go build ./...
 - go test ./pkg/ui/
 
-Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all criteria pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_ui_render [
@@ -210,7 +210,7 @@ Run:
 4. Check that bubbletea dependency is properly added to go.mod
 
 Write results to .ai/verify_ui_render.md.
-Write status.json: outcome=success if ALL pass, outcome=fail with details."
+Write status.json: outcome=succeeded if ALL pass, outcome=failed with details."
     ]
 
     check_ui_render [shape=diamond, label="Render OK?"]
@@ -255,7 +255,7 @@ Acceptance:
 - Binary runs and displays game (manual check)
 - All keyboard controls work (manual check)
 
-Write status.json: outcome=success if builds and runs, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if builds and runs, outcome=failed with failure_reason otherwise."
     ]
 
     verify_ui_input [
@@ -272,7 +272,7 @@ Run:
 5. Check that binary exists at ./cmd/solitaire/solitaire
 
 Write results to .ai/verify_ui_input.md.
-Write status.json: outcome=success if ALL pass and binary exists, outcome=fail with details."
+Write status.json: outcome=succeeded if ALL pass and binary exists, outcome=failed with details."
     ]
 
     check_ui_input [shape=diamond, label="Input OK?"]
@@ -312,7 +312,7 @@ Acceptance:
 - go test ./pkg/storage/
 - Manual test: save game, quit, restart with --load
 
-Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all criteria pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_persistence [
@@ -328,7 +328,7 @@ Run:
 4. go test ./... (all tests)
 
 Write results to .ai/verify_persistence.md.
-Write status.json: outcome=success if ALL pass, outcome=fail with details."
+Write status.json: outcome=succeeded if ALL pass, outcome=failed with details."
     ]
 
     check_persistence [shape=diamond, label="Persist OK?"]
@@ -368,7 +368,7 @@ Acceptance:
 - All keyboard commands work
 - Game is winnable
 
-Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+Write status.json: outcome=succeeded if all criteria pass, outcome=failed with failure_reason otherwise."
     ]
 
     verify_integration [
@@ -387,7 +387,7 @@ Run:
 7. Verify README exists and has instructions
 
 Write results to .ai/verify_integration.md.
-Write status.json: outcome=success if ALL pass, outcome=fail with details."
+Write status.json: outcome=succeeded if ALL pass, outcome=failed with details."
     ]
 
     check_integration [shape=diamond, label="Integration OK?"]
@@ -425,7 +425,7 @@ Verify:
 Run full test suite and manual gameplay check.
 
 Write comprehensive review to .ai/final_review.md.
-Write status.json: outcome=success if COMPLETE per spec, outcome=fail with specific missing items."
+Write status.json: outcome=succeeded if COMPLETE per spec, outcome=failed with specific missing items."
     ]
 
     check_review [shape=diamond, label="Review OK?"]
@@ -434,40 +434,40 @@ Write status.json: outcome=success if COMPLETE per spec, outcome=fail with speci
     start -> impl_setup
     impl_setup -> verify_setup
     verify_setup -> check_setup
-    check_setup -> impl_core_types      [condition="outcome=success"]
-    check_setup -> impl_setup           [condition="outcome=fail", label="retry"]
+    check_setup -> impl_core_types      [condition="outcome=succeeded"]
+    check_setup -> impl_setup           [condition="outcome=failed", label="retry"]
 
     impl_core_types -> verify_core_types
     verify_core_types -> check_core_types
-    check_core_types -> impl_game_logic [condition="outcome=success"]
-    check_core_types -> impl_core_types [condition="outcome=fail", label="retry"]
+    check_core_types -> impl_game_logic [condition="outcome=succeeded"]
+    check_core_types -> impl_core_types [condition="outcome=failed", label="retry"]
 
     impl_game_logic -> verify_game_logic
     verify_game_logic -> check_game_logic
-    check_game_logic -> impl_ui_render [condition="outcome=success"]
-    check_game_logic -> impl_game_logic [condition="outcome=fail", label="retry"]
+    check_game_logic -> impl_ui_render [condition="outcome=succeeded"]
+    check_game_logic -> impl_game_logic [condition="outcome=failed", label="retry"]
 
     impl_ui_render -> verify_ui_render
     verify_ui_render -> check_ui_render
-    check_ui_render -> impl_ui_input   [condition="outcome=success"]
-    check_ui_render -> impl_ui_render  [condition="outcome=fail", label="retry"]
+    check_ui_render -> impl_ui_input   [condition="outcome=succeeded"]
+    check_ui_render -> impl_ui_render  [condition="outcome=failed", label="retry"]
 
     impl_ui_input -> verify_ui_input
     verify_ui_input -> check_ui_input
-    check_ui_input -> impl_persistence [condition="outcome=success"]
-    check_ui_input -> impl_ui_input    [condition="outcome=fail", label="retry"]
+    check_ui_input -> impl_persistence [condition="outcome=succeeded"]
+    check_ui_input -> impl_ui_input    [condition="outcome=failed", label="retry"]
 
     impl_persistence -> verify_persistence
     verify_persistence -> check_persistence
-    check_persistence -> impl_integration [condition="outcome=success"]
-    check_persistence -> impl_persistence [condition="outcome=fail", label="retry"]
+    check_persistence -> impl_integration [condition="outcome=succeeded"]
+    check_persistence -> impl_persistence [condition="outcome=failed", label="retry"]
 
     impl_integration -> verify_integration
     verify_integration -> check_integration
-    check_integration -> review         [condition="outcome=success"]
-    check_integration -> impl_integration [condition="outcome=fail", label="retry"]
+    check_integration -> review         [condition="outcome=succeeded"]
+    check_integration -> impl_integration [condition="outcome=failed", label="retry"]
 
     review -> check_review
-    check_review -> exit                [condition="outcome=success"]
-    check_review -> impl_integration    [condition="outcome=fail", label="fix"]
+    check_review -> exit                [condition="outcome=succeeded"]
+    check_review -> impl_integration    [condition="outcome=failed", label="fix"]
 }

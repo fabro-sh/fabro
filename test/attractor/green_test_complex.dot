@@ -30,7 +30,7 @@ Create:
 
 Run: go build ./...
 
-Write status.json: outcome=success if project builds, outcome=fail with error otherwise."
+Write status.json: outcome=succeeded if project builds, outcome=failed with error otherwise."
     ]
 
     verify_setup [
@@ -45,7 +45,7 @@ Run:
 3. Check that go.mod exists with correct module path
 
 Write results to .ai/verify_setup.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_setup [shape=diamond, label="Setup OK?"]
@@ -69,7 +69,7 @@ Add comprehensive godoc comments. Include validation methods where appropriate.
 
 Run: go build ./... && go test ./pkg/dttf/...
 
-Write status.json: outcome=success if builds and tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if builds and tests pass, outcome=failed otherwise."
     ]
 
     verify_types [
@@ -85,7 +85,7 @@ Run:
 4. Check that all types from section 7 are present
 
 Write results to .ai/verify_types.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_types [shape=diamond, label="Types OK?"]
@@ -112,7 +112,7 @@ Create tests in pkg/dttf/loader_test.go with sample PNGs.
 
 Run: go test ./pkg/dttf/... -run TestLoad
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_loader [
@@ -128,7 +128,7 @@ Run:
 4. Verify font.json defaults are applied
 
 Write results to .ai/verify_loader.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_loader [shape=diamond, label="Loader OK?"]
@@ -151,7 +151,7 @@ Create tests with synthetic images and known thresholds.
 
 Run: go test ./pkg/dttf/... -run TestImage
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_imageproc [
@@ -166,7 +166,7 @@ Run:
 3. Check threshold produces binary output
 
 Write results to .ai/verify_imageproc.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_imageproc [shape=diamond, label="ImageProc OK?"]
@@ -191,7 +191,7 @@ Create tests with simple shapes (square, circle, letter O with counter).
 
 Run: go test ./pkg/dttf/tracer/... -run TestDecompose
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_tracer_phase1 [
@@ -206,7 +206,7 @@ Run:
 3. Verify closed paths return to origin
 
 Write results to .ai/verify_tracer_phase1.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_tracer_phase1 [shape=diamond, label="Phase1 OK?"]
@@ -230,7 +230,7 @@ Create tests comparing input/output vertex counts.
 
 Run: go test ./pkg/dttf/tracer/... -run TestPolygon
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_tracer_phase2 [
@@ -245,7 +245,7 @@ Run:
 3. Verify shape is preserved
 
 Write results to .ai/verify_tracer_phase2.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_tracer_phase2 [shape=diamond, label="Phase2 OK?"]
@@ -270,7 +270,7 @@ Create tests with known curves.
 
 Run: go test ./pkg/dttf/tracer/... -run TestBezier
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_tracer_phase3 [
@@ -285,7 +285,7 @@ Run:
 3. Verify curves are quadratic (TrueType format)
 
 Write results to .ai/verify_tracer_phase3.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_tracer_phase3 [shape=diamond, label="Phase3 OK?"]
@@ -310,7 +310,7 @@ Create tests validating each constraint.
 
 Run: go test ./pkg/dttf/tracer/... -run TestOptimize
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_tracer_phase4 [
@@ -326,7 +326,7 @@ Run:
 4. Check point count cap
 
 Write results to .ai/verify_tracer_phase4.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_tracer_phase4 [shape=diamond, label="Phase4 OK?"]
@@ -348,7 +348,7 @@ Create tests with known transformations.
 
 Run: go test ./pkg/dttf/tracer/... -run TestCoordinates
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_coordinates [
@@ -363,7 +363,7 @@ Run:
 3. Verify integer output
 
 Write results to .ai/verify_coordinates.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_coordinates [shape=diamond, label="Coords OK?"]
@@ -387,7 +387,7 @@ Create integration tests.
 
 Run: go test ./pkg/dttf/... -run TestTrace
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_tracer_main [
@@ -402,7 +402,7 @@ Run:
 3. Verify all phases are called
 
 Write results to .ai/verify_tracer_main.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_tracer_main [shape=diamond, label="Tracer OK?"]
@@ -424,7 +424,7 @@ Create tests with known glyph shapes.
 
 Run: go test ./pkg/dttf/... -run TestMetrics
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_metrics [
@@ -439,7 +439,7 @@ Run:
 3. Verify sidebearing calculations
 
 Write results to .ai/verify_metrics.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_metrics [shape=diamond, label="Metrics OK?"]
@@ -471,7 +471,7 @@ Create tests validating table structure.
 
 Run: go test ./pkg/dttf/ttf/... -v
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_tables [
@@ -486,7 +486,7 @@ Run:
 3. Verify checksums are computed correctly
 
 Write results to .ai/verify_tables.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_tables [shape=diamond, label="Tables OK?"]
@@ -509,7 +509,7 @@ Implement in pkg/dttf/assembler.go:
 
 Run: go test ./pkg/dttf/... -run TestAssemble
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_assembler [
@@ -524,7 +524,7 @@ Run:
 3. Verify offset calculations
 
 Write results to .ai/verify_assembler.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_assembler [shape=diamond, label="Assembler OK?"]
@@ -546,7 +546,7 @@ Create tests writing to temp files.
 
 Run: go test ./pkg/dttf/... -run TestWrite
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_writer [
@@ -561,7 +561,7 @@ Run:
 3. Verify checksum calculation
 
 Write results to .ai/verify_writer.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_writer [shape=diamond, label="Writer OK?"]
@@ -582,7 +582,7 @@ Create end-to-end test with sample input directory.
 
 Run: go test ./pkg/dttf/... -run TestBuild
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_pipeline [
@@ -597,7 +597,7 @@ Run:
 3. Verify parallelization works
 
 Write results to .ai/verify_pipeline.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_pipeline [shape=diamond, label="Pipeline OK?"]
@@ -622,7 +622,7 @@ Create tests with valid and invalid fonts.
 
 Run: go test ./pkg/dttf/... -run TestValidate
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_validator [
@@ -637,7 +637,7 @@ Run:
 3. Check that invalid fonts fail appropriately
 
 Write results to .ai/verify_validator.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_validator [shape=diamond, label="Validator OK?"]
@@ -662,7 +662,7 @@ Create tests with a simple font.
 
 Run: go test ./pkg/dttf/... -run TestRasterize
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_rasterizer [
@@ -677,7 +677,7 @@ Run:
 3. Verify font.json is written
 
 Write results to .ai/verify_rasterizer.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_rasterizer [shape=diamond, label="Rasterizer OK?"]
@@ -699,7 +699,7 @@ Create tests with identical/different images.
 
 Run: go test ./pkg/dttf/quality/... -run TestSSIM
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_ssim [
@@ -714,7 +714,7 @@ Run:
 3. Check different images return < 1.0
 
 Write results to .ai/verify_ssim.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_ssim [shape=diamond, label="SSIM OK?"]
@@ -738,7 +738,7 @@ Create tests with a known font.
 
 Run: go test ./pkg/dttf/test/... -run TestHarness
 
-Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+Write status.json: outcome=succeeded if tests pass, outcome=failed otherwise."
     ]
 
     verify_test_harness [
@@ -753,7 +753,7 @@ Run:
 3. Verify SSIM scores are computed
 
 Write results to .ai/verify_test_harness.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_test_harness [shape=diamond, label="Harness OK?"]
@@ -774,7 +774,7 @@ Update cmd/dttf/main.go to register command.
 
 Run: go build ./cmd/dttf && ./cmd/dttf build --help
 
-Write status.json: outcome=success if help displays, outcome=fail otherwise."
+Write status.json: outcome=succeeded if help displays, outcome=failed otherwise."
     ]
 
     verify_cli_build [
@@ -789,7 +789,7 @@ Run:
 3. Check all flags are present
 
 Write results to .ai/verify_cli_build.md.
-Write status.json: outcome=success if help works, outcome=fail with details."
+Write status.json: outcome=succeeded if help works, outcome=failed with details."
     ]
 
     check_cli_build [shape=diamond, label="CLI Build OK?"]
@@ -810,7 +810,7 @@ Update cmd/dttf/main.go to register command.
 
 Run: go build ./cmd/dttf && ./cmd/dttf rasterize --help
 
-Write status.json: outcome=success if help displays, outcome=fail otherwise."
+Write status.json: outcome=succeeded if help displays, outcome=failed otherwise."
     ]
 
     verify_cli_rasterize [
@@ -825,7 +825,7 @@ Run:
 3. Check all flags are present
 
 Write results to .ai/verify_cli_rasterize.md.
-Write status.json: outcome=success if help works, outcome=fail with details."
+Write status.json: outcome=succeeded if help works, outcome=failed with details."
     ]
 
     check_cli_rasterize [shape=diamond, label="CLI Rasterize OK?"]
@@ -846,7 +846,7 @@ Update cmd/dttf/main.go to register command.
 
 Run: go build ./cmd/dttf && ./cmd/dttf validate --help
 
-Write status.json: outcome=success if help displays, outcome=fail otherwise."
+Write status.json: outcome=succeeded if help displays, outcome=failed otherwise."
     ]
 
     verify_cli_validate [
@@ -860,7 +860,7 @@ Run:
 2. ./cmd/dttf validate --help
 
 Write results to .ai/verify_cli_validate.md.
-Write status.json: outcome=success if help works, outcome=fail with details."
+Write status.json: outcome=succeeded if help works, outcome=failed with details."
     ]
 
     check_cli_validate [shape=diamond, label="CLI Validate OK?"]
@@ -882,7 +882,7 @@ Update cmd/dttf/main.go to register command.
 
 Run: go build ./cmd/dttf && ./cmd/dttf test --help
 
-Write status.json: outcome=success if help displays, outcome=fail otherwise."
+Write status.json: outcome=succeeded if help displays, outcome=failed otherwise."
     ]
 
     verify_cli_test [
@@ -897,7 +897,7 @@ Run:
 3. Check all flags are present
 
 Write results to .ai/verify_cli_test.md.
-Write status.json: outcome=success if help works, outcome=fail with details."
+Write status.json: outcome=succeeded if help works, outcome=failed with details."
     ]
 
     check_cli_test [shape=diamond, label="CLI Test OK?"]
@@ -923,7 +923,7 @@ This is an end-to-end test of the full pipeline.
 
 Run: go test ./test/... -v -timeout 5m
 
-Write status.json: outcome=success if all steps pass and SSIM > 0.90, outcome=fail with details."
+Write status.json: outcome=succeeded if all steps pass and SSIM > 0.90, outcome=failed with details."
     ]
 
     verify_integration [
@@ -939,7 +939,7 @@ Run:
 4. Check SSIM threshold met
 
 Write results to .ai/verify_integration.md.
-Write status.json: outcome=success if all pass, outcome=fail with details."
+Write status.json: outcome=succeeded if all pass, outcome=failed with details."
     ]
 
     check_integration [shape=diamond, label="Integration OK?"]
@@ -967,109 +967,109 @@ Run:
 3. go vet ./...
 
 Write a review report to .ai/review.md.
-Write status.json: outcome=success if complete and correct, outcome=fail with missing/broken items."
+Write status.json: outcome=succeeded if complete and correct, outcome=failed with missing/broken items."
     ]
 
     check_review [shape=diamond, label="Review OK?"]
 
     // Flow
     start -> impl_setup -> verify_setup -> check_setup
-    check_setup -> impl_types         [condition="outcome=success"]
-    check_setup -> impl_setup          [condition="outcome=fail", label="retry"]
+    check_setup -> impl_types         [condition="outcome=succeeded"]
+    check_setup -> impl_setup          [condition="outcome=failed", label="retry"]
 
     impl_types -> verify_types -> check_types
-    check_types -> impl_loader         [condition="outcome=success"]
-    check_types -> impl_types          [condition="outcome=fail", label="retry"]
+    check_types -> impl_loader         [condition="outcome=succeeded"]
+    check_types -> impl_types          [condition="outcome=failed", label="retry"]
 
     impl_loader -> verify_loader -> check_loader
-    check_loader -> impl_imageproc     [condition="outcome=success"]
-    check_loader -> impl_loader        [condition="outcome=fail", label="retry"]
+    check_loader -> impl_imageproc     [condition="outcome=succeeded"]
+    check_loader -> impl_loader        [condition="outcome=failed", label="retry"]
 
     impl_imageproc -> verify_imageproc -> check_imageproc
-    check_imageproc -> impl_tracer_phase1    [condition="outcome=success"]
-    check_imageproc -> impl_imageproc        [condition="outcome=fail", label="retry"]
+    check_imageproc -> impl_tracer_phase1    [condition="outcome=succeeded"]
+    check_imageproc -> impl_imageproc        [condition="outcome=failed", label="retry"]
 
     impl_tracer_phase1 -> verify_tracer_phase1 -> check_tracer_phase1
-    check_tracer_phase1 -> impl_tracer_phase2      [condition="outcome=success"]
-    check_tracer_phase1 -> impl_tracer_phase1      [condition="outcome=fail", label="retry"]
+    check_tracer_phase1 -> impl_tracer_phase2      [condition="outcome=succeeded"]
+    check_tracer_phase1 -> impl_tracer_phase1      [condition="outcome=failed", label="retry"]
 
     impl_tracer_phase2 -> verify_tracer_phase2 -> check_tracer_phase2
-    check_tracer_phase2 -> impl_tracer_phase3      [condition="outcome=success"]
-    check_tracer_phase2 -> impl_tracer_phase2      [condition="outcome=fail", label="retry"]
+    check_tracer_phase2 -> impl_tracer_phase3      [condition="outcome=succeeded"]
+    check_tracer_phase2 -> impl_tracer_phase2      [condition="outcome=failed", label="retry"]
 
     impl_tracer_phase3 -> verify_tracer_phase3 -> check_tracer_phase3
-    check_tracer_phase3 -> impl_tracer_phase4      [condition="outcome=success"]
-    check_tracer_phase3 -> impl_tracer_phase3      [condition="outcome=fail", label="retry"]
+    check_tracer_phase3 -> impl_tracer_phase4      [condition="outcome=succeeded"]
+    check_tracer_phase3 -> impl_tracer_phase3      [condition="outcome=failed", label="retry"]
 
     impl_tracer_phase4 -> verify_tracer_phase4 -> check_tracer_phase4
-    check_tracer_phase4 -> impl_coordinates        [condition="outcome=success"]
-    check_tracer_phase4 -> impl_tracer_phase4      [condition="outcome=fail", label="retry"]
+    check_tracer_phase4 -> impl_coordinates        [condition="outcome=succeeded"]
+    check_tracer_phase4 -> impl_tracer_phase4      [condition="outcome=failed", label="retry"]
 
     impl_coordinates -> verify_coordinates -> check_coordinates
-    check_coordinates -> impl_tracer_main          [condition="outcome=success"]
-    check_coordinates -> impl_coordinates          [condition="outcome=fail", label="retry"]
+    check_coordinates -> impl_tracer_main          [condition="outcome=succeeded"]
+    check_coordinates -> impl_coordinates          [condition="outcome=failed", label="retry"]
 
     impl_tracer_main -> verify_tracer_main -> check_tracer_main
-    check_tracer_main -> impl_metrics              [condition="outcome=success"]
-    check_tracer_main -> impl_tracer_main          [condition="outcome=fail", label="retry"]
+    check_tracer_main -> impl_metrics              [condition="outcome=succeeded"]
+    check_tracer_main -> impl_tracer_main          [condition="outcome=failed", label="retry"]
 
     impl_metrics -> verify_metrics -> check_metrics
-    check_metrics -> impl_tables                   [condition="outcome=success"]
-    check_metrics -> impl_metrics                  [condition="outcome=fail", label="retry"]
+    check_metrics -> impl_tables                   [condition="outcome=succeeded"]
+    check_metrics -> impl_metrics                  [condition="outcome=failed", label="retry"]
 
     impl_tables -> verify_tables -> check_tables
-    check_tables -> impl_assembler                 [condition="outcome=success"]
-    check_tables -> impl_tables                    [condition="outcome=fail", label="retry"]
+    check_tables -> impl_assembler                 [condition="outcome=succeeded"]
+    check_tables -> impl_tables                    [condition="outcome=failed", label="retry"]
 
     impl_assembler -> verify_assembler -> check_assembler
-    check_assembler -> impl_writer                 [condition="outcome=success"]
-    check_assembler -> impl_assembler              [condition="outcome=fail", label="retry"]
+    check_assembler -> impl_writer                 [condition="outcome=succeeded"]
+    check_assembler -> impl_assembler              [condition="outcome=failed", label="retry"]
 
     impl_writer -> verify_writer -> check_writer
-    check_writer -> impl_pipeline                  [condition="outcome=success"]
-    check_writer -> impl_writer                    [condition="outcome=fail", label="retry"]
+    check_writer -> impl_pipeline                  [condition="outcome=succeeded"]
+    check_writer -> impl_writer                    [condition="outcome=failed", label="retry"]
 
     impl_pipeline -> verify_pipeline -> check_pipeline
-    check_pipeline -> impl_validator               [condition="outcome=success"]
-    check_pipeline -> impl_pipeline                [condition="outcome=fail", label="retry"]
+    check_pipeline -> impl_validator               [condition="outcome=succeeded"]
+    check_pipeline -> impl_pipeline                [condition="outcome=failed", label="retry"]
 
     impl_validator -> verify_validator -> check_validator
-    check_validator -> impl_rasterizer             [condition="outcome=success"]
-    check_validator -> impl_validator              [condition="outcome=fail", label="retry"]
+    check_validator -> impl_rasterizer             [condition="outcome=succeeded"]
+    check_validator -> impl_validator              [condition="outcome=failed", label="retry"]
 
     impl_rasterizer -> verify_rasterizer -> check_rasterizer
-    check_rasterizer -> impl_ssim                  [condition="outcome=success"]
-    check_rasterizer -> impl_rasterizer            [condition="outcome=fail", label="retry"]
+    check_rasterizer -> impl_ssim                  [condition="outcome=succeeded"]
+    check_rasterizer -> impl_rasterizer            [condition="outcome=failed", label="retry"]
 
     impl_ssim -> verify_ssim -> check_ssim
-    check_ssim -> impl_test_harness                [condition="outcome=success"]
-    check_ssim -> impl_ssim                        [condition="outcome=fail", label="retry"]
+    check_ssim -> impl_test_harness                [condition="outcome=succeeded"]
+    check_ssim -> impl_ssim                        [condition="outcome=failed", label="retry"]
 
     impl_test_harness -> verify_test_harness -> check_test_harness
-    check_test_harness -> impl_cli_build           [condition="outcome=success"]
-    check_test_harness -> impl_test_harness        [condition="outcome=fail", label="retry"]
+    check_test_harness -> impl_cli_build           [condition="outcome=succeeded"]
+    check_test_harness -> impl_test_harness        [condition="outcome=failed", label="retry"]
 
     impl_cli_build -> verify_cli_build -> check_cli_build
-    check_cli_build -> impl_cli_rasterize          [condition="outcome=success"]
-    check_cli_build -> impl_cli_build              [condition="outcome=fail", label="retry"]
+    check_cli_build -> impl_cli_rasterize          [condition="outcome=succeeded"]
+    check_cli_build -> impl_cli_build              [condition="outcome=failed", label="retry"]
 
     impl_cli_rasterize -> verify_cli_rasterize -> check_cli_rasterize
-    check_cli_rasterize -> impl_cli_validate       [condition="outcome=success"]
-    check_cli_rasterize -> impl_cli_rasterize      [condition="outcome=fail", label="retry"]
+    check_cli_rasterize -> impl_cli_validate       [condition="outcome=succeeded"]
+    check_cli_rasterize -> impl_cli_rasterize      [condition="outcome=failed", label="retry"]
 
     impl_cli_validate -> verify_cli_validate -> check_cli_validate
-    check_cli_validate -> impl_cli_test            [condition="outcome=success"]
-    check_cli_validate -> impl_cli_validate        [condition="outcome=fail", label="retry"]
+    check_cli_validate -> impl_cli_test            [condition="outcome=succeeded"]
+    check_cli_validate -> impl_cli_validate        [condition="outcome=failed", label="retry"]
 
     impl_cli_test -> verify_cli_test -> check_cli_test
-    check_cli_test -> impl_integration             [condition="outcome=success"]
-    check_cli_test -> impl_cli_test                [condition="outcome=fail", label="retry"]
+    check_cli_test -> impl_integration             [condition="outcome=succeeded"]
+    check_cli_test -> impl_cli_test                [condition="outcome=failed", label="retry"]
 
     impl_integration -> verify_integration -> check_integration
-    check_integration -> review                    [condition="outcome=success"]
-    check_integration -> impl_integration          [condition="outcome=fail", label="retry"]
+    check_integration -> review                    [condition="outcome=succeeded"]
+    check_integration -> impl_integration          [condition="outcome=failed", label="retry"]
 
     review -> check_review
-    check_review -> exit                           [condition="outcome=success"]
-    check_review -> impl_setup                     [condition="outcome=fail", label="fix from start"]
+    check_review -> exit                           [condition="outcome=succeeded"]
+    check_review -> impl_setup                     [condition="outcome=failed", label="fix from start"]
 }

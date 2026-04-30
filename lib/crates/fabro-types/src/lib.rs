@@ -52,7 +52,6 @@ pub use interview::{InterviewQuestionRecord, QuestionType};
 pub use node_status::NodeStatusRecord;
 pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,
-    StageStatus,
 };
 pub use pull_request::{
     PullRequestDetail, PullRequestGithubDetail, PullRequestRecord, PullRequestRef, PullRequestUser,

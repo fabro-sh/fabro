@@ -806,7 +806,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
           "node_visits": {
             "start": 1
           },
-          "status": "success"
+          "status": "succeeded"
         },
         "run_id": "[ULID]",
         "stage_id": "start@1",
@@ -824,7 +824,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
           "from_node": "start",
           "is_jump": false,
           "reason": "unconditional",
-          "stage_status": "success",
+          "stage_status": "succeeded",
           "to_node": "approve"
         },
         "run_id": "[ULID]",
@@ -860,14 +860,14 @@ fn attach_json_errors_without_prompting_for_human_input() {
           "next_node_id": "approve",
           "node_outcomes": {
             "start": {
-              "status": "success",
+              "status": "succeeded",
               "usage": null
             }
           },
           "node_visits": {
             "start": 1
           },
-          "status": "success"
+          "status": "succeeded"
         },
         "run_id": "[ULID]",
         "stage_id": "start@1",

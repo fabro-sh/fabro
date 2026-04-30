@@ -111,7 +111,7 @@ digraph Workflow {
     node_type="stack.steer", label="Review Consensus", shape="box", style="rounded,filled",
     is_codergen="true", model="gpt-5.2-codex",
     max_agent_turns="6", timeout="300",
-    llm_prompt="Reach consensus.\n\nRead .ai/review_*.md\nWrite to .ai/review_consensus.md\n\noutcome=yes if PASS, outcome=retry if FAIL. Set preferred_next_label to \"\" (empty) or to \"yes\"/\"retry\"; do not use \"No\"."
+    llm_prompt="Reach consensus.\n\nRead .ai/review_*.md\nWrite to .ai/review_consensus.md\n\noutcome=succeeded if PASS, outcome=failed if FAIL. Set preferred_next_label to \"\" (empty) or to \"yes\"/\"retry\"; do not use \"No\"."
   ];
 
   Postmortem [
@@ -150,7 +150,7 @@ digraph Workflow {
   ReviewGemini -> ReviewConsensus;
   ReviewGPT -> ReviewConsensus;
   ReviewOpus -> ReviewConsensus;
-  ReviewConsensus -> Exit [condition="outcome=yes"];
+  ReviewConsensus -> Exit [condition="outcome=succeeded"];
   ReviewConsensus -> Postmortem;
   Postmortem -> PlanGemini [loop_restart="true"];
   Postmortem -> PlanGPT [loop_restart="true"];

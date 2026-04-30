@@ -302,7 +302,7 @@ impl Handler for SubWorkflowHandler {
                     );
 
                     let mut outcome = Outcome {
-                        status: child_outcome.status.clone(),
+                        status: child_outcome.status,
                         notes: Some(format!("Child completed at cycle {cycle}")),
                         context_updates: diff,
                         ..Outcome::success()
