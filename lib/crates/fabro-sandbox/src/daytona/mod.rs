@@ -12,6 +12,7 @@ use fabro_github::GitHubCredentials;
 use fabro_types::{CommandOutputStream, CommandTermination, RunId};
 use rand::Rng;
 use tokio::sync::{Mutex, OnceCell};
+use tokio::task::JoinHandle;
 use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
@@ -1240,7 +1241,7 @@ impl Sandbox for DaytonaSandbox {
                                 stdout_seen.lock().await.extend_from_slice(&bytes);
                                 callback(CommandOutputStream::Stdout, bytes)
                                     .await
-                                    .map_err(daytona_callback_error)?;
+                                    .map_err(|err| daytona_callback_error(&err))?;
                             }
                             Ok(())
                         }
@@ -1256,7 +1257,7 @@ impl Sandbox for DaytonaSandbox {
                                 stderr_seen.lock().await.extend_from_slice(&bytes);
                                 callback(CommandOutputStream::Stderr, bytes)
                                     .await
-                                    .map_err(daytona_callback_error)?;
+                                    .map_err(|err| daytona_callback_error(&err))?;
                             }
                             Ok(())
                         }
@@ -1492,14 +1493,14 @@ impl Sandbox for DaytonaSandbox {
     }
 }
 
-fn daytona_callback_error(err: crate::Error) -> DaytonaError {
+fn daytona_callback_error(err: &crate::Error) -> DaytonaError {
     DaytonaError::general(format!("output callback failed: {err}"))
 }
 
 async fn finish_daytona_log_stream(
-    stream_task: &mut tokio::task::JoinHandle<Result<(), DaytonaError>>,
+    stream_task: &mut JoinHandle<Result<(), DaytonaError>>,
 ) -> crate::Result<bool> {
-    match time::timeout(Duration::from_secs(2), stream_task).await {
+    match time::timeout(Duration::from_secs(2), &mut *stream_task).await {
         Ok(Ok(Ok(()))) => Ok(true),
         Ok(Ok(Err(err))) => {
             let message = err.to_string();
@@ -1594,7 +1595,7 @@ fn build_session_command(
 
     if let Some(vars) = env_vars {
         let mut entries: Vec<_> = vars.iter().collect();
-        entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+        entries.sort_by_key(|(key, _)| *key);
         for (key, value) in entries {
             lines.push(format!(
                 "export {}={}",
@@ -1604,7 +1605,9 @@ fn build_session_command(
         }
     }
 
+    lines.push("(".to_string());
     lines.push(command.to_string());
+    lines.push(")".to_string());
     lines.join("\n")
 }
 
@@ -1713,7 +1716,9 @@ mod tests {
             "cd '/tmp/with space' || exit $?\n\
              export ALPHA=one\n\
              export BETA='two words'\n\
-             echo $ALPHA $BETA"
+             (\n\
+             echo $ALPHA $BETA\n\
+             )"
         );
     }
 
