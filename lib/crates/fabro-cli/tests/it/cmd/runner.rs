@@ -17,15 +17,15 @@ use fabro_store::EventEnvelope;
 use fabro_test::{
     assert_reqwest_status, expect_reqwest_json, fabro_json_snapshot, fabro_snapshot, test_context,
 };
-use fabro_types::{EventBody, FailureReason, RunEvent, StageId};
+use fabro_types::{CommandOutputStream, EventBody, FailureReason, RunEvent, StageId};
 use hkdf::Hkdf;
 use httpmock::MockServer;
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use sha2::Sha256;
 
 use super::support::{
-    find_run_dir, local_dev_token, output_stderr, run_events, run_state, server_endpoint,
-    server_target, wait_for_event_names, wait_for_status, write_gated_workflow,
+    command_log_text, find_run_dir, local_dev_token, output_stderr, run_events, run_state,
+    server_endpoint, server_target, wait_for_event_names, wait_for_status, write_gated_workflow,
 };
 use crate::support::unique_run_id;
 
@@ -549,20 +549,16 @@ methods = ["dev-token"]
     wait_for_status(&run_dir, &["succeeded"]);
 
     let state = run_state(&run_dir);
+    let probe_stage_id = StageId::new("probe", 1);
     let _probe = state
-        .node(&StageId::new("probe", 1))
+        .node(&probe_stage_id)
         .expect("probe node state should exist");
-    let stdout = state
-        .checkpoint
-        .as_ref()
-        .and_then(|checkpoint| checkpoint.context_values.get("command.output"))
-        .and_then(serde_json::Value::as_str)
-        .expect("probe command output should exist");
+    let stdout = command_log_text(&run_dir, &probe_stage_id, CommandOutputStream::Stdout);
     assert!(
         stdout.contains("probe-ran"),
         "probe stage should have executed, got stdout:\n{stdout}"
     );
-    assert_no_worker_env_leak("probe stdout", stdout);
+    assert_no_worker_env_leak("probe stdout", &stdout);
     assert_no_worker_env_leak(
         "run state",
         &serde_json::to_string(&state).expect("run state should serialize"),

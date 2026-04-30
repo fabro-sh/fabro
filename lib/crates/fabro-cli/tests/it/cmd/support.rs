@@ -14,12 +14,14 @@ use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_config::bind::Bind;
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{Storage, envfile};
 use fabro_store::EventEnvelope;
 use fabro_test::{TestContext, expect_reqwest_status};
-use fabro_types::RunId;
+use fabro_types::{CommandOutputStream, RunId, StageId};
 use httpmock::{Mock, MockServer};
 use serde_json::Value;
 use shlex::try_quote;
@@ -37,6 +39,11 @@ struct RunSummaryRecord {
     run_id: String,
     #[serde(default)]
     labels: std::collections::HashMap<String, String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CommandLogResponseRecord {
+    bytes_base64: String,
 }
 
 pub(crate) struct RunSetup {
@@ -695,6 +702,22 @@ pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
         &format!("/api/v1/runs/{run_id}/events"),
     ));
     crate::support::parse_event_envelopes(&response)
+}
+
+pub(crate) fn command_log_text(
+    run_dir: &Path,
+    stage_id: &StageId,
+    stream: CommandOutputStream,
+) -> String {
+    let run_id = infer_run_id(run_dir);
+    let response: CommandLogResponseRecord = block_on(get_server_json(
+        run_dir,
+        &format!("/api/v1/runs/{run_id}/stages/{stage_id}/logs/{stream}?offset=0&limit=1048576"),
+    ));
+    let bytes = BASE64_STANDARD
+        .decode(&response.bytes_base64)
+        .expect("command log bytes should decode");
+    String::from_utf8(bytes).expect("command log should be UTF-8")
 }
 
 #[expect(
