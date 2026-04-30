@@ -84,7 +84,7 @@ export default function Start() {
       <div className="flex-1 flex flex-col items-center pt-[12vh] px-4">
         <div className="w-full max-w-2xl">
           <h1 className="flex items-center justify-center gap-3 text-[2rem] font-medium tracking-tight text-fg-2 text-center mb-8">
-            <img src="/logo.svg" alt="" className="size-9" />
+            <img src="/images/logo.svg" alt="" className="size-9" />
             What do you want to build?
           </h1>
 

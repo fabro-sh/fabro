@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 function FabroLogo({ className }: { className?: string }) {
   return (
     <img
-      src="/logo.svg"
+      src="/images/logo.svg"
       alt="Fabro"
       className={className}
       draggable={false}

@@ -32,7 +32,7 @@ With the SPA baked into the binary, there's no in-container edit path. Commit th
 
 ## Updating logos
 
-Logos live at `apps/fabro-web/public/logotype.svg` (dark) and `apps/fabro-web/public/logotype-light.svg` (light). These are bundled into the SPA at build time — rebuilding the image picks up the changes. The source-of-truth logos are in `docs/public/logo/dark.svg` and `docs/public/logo/light.svg`.
+Logos live at `apps/fabro-web/public/images/logotype.svg` (dark) and `apps/fabro-web/public/images/logotype-light.svg` (light). These are bundled into the SPA at build time — rebuilding the image picks up the changes. The source-of-truth logos are in `docs/public/logo/dark.svg` and `docs/public/logo/light.svg`.
 
 ## Browser setup
 

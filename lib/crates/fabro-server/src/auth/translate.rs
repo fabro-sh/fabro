@@ -279,7 +279,7 @@ methods = ["dev-token"]
             identity,
             name: "Development User".to_string(),
             email: "dev@localhost".to_string(),
-            avatar_url: "/logo.svg".to_string(),
+            avatar_url: "/images/logo.svg".to_string(),
             user_url: String::new(),
             iat: chrono::Utc::now().timestamp(),
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp(),

@@ -1056,7 +1056,8 @@ pub fn build_router_with_options(
 }
 
 async fn http_log_middleware(req: axum_extract::Request, next: Next) -> Response {
-    if req.uri().path().starts_with("/assets/") {
+    let path = req.uri().path();
+    if path.starts_with("/assets/") || path.starts_with("/images/") {
         return next.run(req).await;
     }
     let method = req.method().clone();
@@ -10265,7 +10266,7 @@ slug = "fabro"
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/favicon.svg")
+                    .uri("/images/favicon.svg")
                     .body(Body::empty())
                     .unwrap(),
             )

@@ -17,7 +17,7 @@ pub(crate) fn browser_shell(status: StatusCode, title: &str, body: &str) -> Resp
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{title} · Fabro</title>
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/images/favicon.svg" type="image/svg+xml">
     <style>
       :root {{
         color-scheme: dark;
@@ -169,7 +169,7 @@ pub(crate) fn browser_shell(status: StatusCode, title: &str, body: &str) -> Resp
   <body>
     <main>
       <div class="brand">
-        <img src="/logo.svg" alt="Fabro" width="48" height="48">
+        <img src="/images/logo.svg" alt="Fabro" width="48" height="48">
       </div>
       <div class="panel">
         <div class="stack">

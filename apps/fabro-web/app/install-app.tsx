@@ -917,7 +917,7 @@ function TokenEntryScreen({
     <main className="min-h-dvh bg-atmosphere px-4 py-16 text-fg-2 antialiased sm:py-20">
       <div className="relative mx-auto max-w-md">
         <div className="flex items-center gap-3">
-          <img src="/logo.svg" alt="Fabro" className="size-8" draggable={false} />
+          <img src="/images/logo.svg" alt="Fabro" className="size-8" draggable={false} />
           <span className="text-sm font-medium text-fg-3">Install</span>
         </div>
         <div className="mt-10">
@@ -1006,7 +1006,7 @@ function InstallLayout({
     <main className="min-h-dvh bg-atmosphere px-4 py-12 text-fg-2 antialiased sm:py-16">
       <div className="relative mx-auto max-w-xl">
         <div className="flex items-center gap-3">
-          <img src="/logo.svg" alt="Fabro" className="size-8" draggable={false} />
+          <img src="/images/logo.svg" alt="Fabro" className="size-8" draggable={false} />
           <span className="text-sm font-medium text-fg-3">Install</span>
         </div>
         {showStepper ? (

@@ -84,7 +84,7 @@ export default function AppShell() {
             <div className="flex items-center">
               <div className="shrink-0">
                 <Link to={demoMode ? "/start" : "/runs"}>
-                  <img alt="Fabro" src="/logotype.svg" className="h-8 w-auto" />
+                  <img alt="Fabro" src="/images/logotype.svg" className="h-8 w-auto" />
                 </Link>
               </div>
               <div className="hidden md:block">
