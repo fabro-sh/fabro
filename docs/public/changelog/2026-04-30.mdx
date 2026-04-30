@@ -1,0 +1,45 @@
+---
+title: "Precise stage outcomes"
+date: "2026-04-30"
+---
+
+<Warning>
+**Workflow condition outcomes use new names.** Conditions and routing directives now use `succeeded`, `failed`, `partially_succeeded`, and `skipped`. Retry intent is internal and no longer appears as an edge-routable outcome.
+
+To migrate:
+1. Replace `outcome=success` with `outcome=succeeded`.
+2. Replace `outcome=fail` with `outcome=failed`.
+3. Replace `outcome=partial_success` with `outcome=partially_succeeded`.
+4. Remove `outcome=retry` branches and use retry policies plus `stage.retrying` events for retry observability.
+</Warning>
+
+## Precise stage outcomes
+
+Fabro now separates a stage's terminal outcome from its live execution state. Workflow routing sees four stable outcomes - `succeeded`, `failed`, `partially_succeeded`, and `skipped` - while retrying remains an internal execution state surfaced through events.
+
+This makes edge conditions, agent routing directives, status files, and API responses line up around one vocabulary:
+
+```dot
+gate -> deploy [condition="outcome=succeeded || outcome=partially_succeeded"]
+gate -> fix    [condition="outcome=failed"]
+gate -> skip   [condition="outcome=skipped"]
+```
+
+## Clearer run state in the API and web app
+
+The server now projects precise stage states to API clients, and the generated TypeScript client exposes those shapes directly. The web app uses the same model across run overview, stage sidebar, run files, settings, billing, and workflow detail views, so running, retrying, succeeded, failed, partially succeeded, and skipped stages render consistently.
+
+The OpenAPI schema also reuses canonical billing, model, provider, settings, and stage outcome types instead of parallel generated copies. Client code sees fewer accidental shape differences between API responses that represent the same product concepts.
+
+## More
+
+<Accordion title="API">
+- Replaced the generated `StageStatus` model with `StageState` and `StageOutcome` shapes
+- Tightened shared model, billing, provider, and settings schemas in the OpenAPI contract
+- Regenerated the TypeScript API client with precise run, workflow, sandbox, hook, MCP, and settings models
+</Accordion>
+
+<Accordion title="Workflows">
+- `allow_partial=true` now promotes exhausted retryable failures to `partially_succeeded`
+- Retryable failures emit retrying events while the node remains active instead of exposing `retry` as a final outcome
+</Accordion>

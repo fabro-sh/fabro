@@ -1,5 +1,5 @@
 ---
-title: "Files Changed sidebar and settings panels"
+title: "Files Changed sidebar, settings panels, and install validation"
 date: "2026-04-25"
 ---
 
@@ -13,7 +13,16 @@ Clicking a file in the tree scrolls and focuses the matching diff, while mobile 
 
 The Settings page now presents server configuration as curated panels instead of a raw JSON dump. Server, access, integration, and artifact values are rendered with typed controls and readable summaries, so operators can scan what matters without parsing the full settings payload.
 
+## Safer install URLs
+
+Install and server startup now reject wildcard public URLs before they can be saved or used for callbacks. This catches misconfigured deployment origins at setup time instead of letting GitHub OAuth or browser redirects fail later with harder-to-debug errors.
+
 ## More
+
+<Accordion title="CLI">
+- Added grouped `cargo dev spa` and `cargo dev docs` commands for asset and documentation maintenance
+- Updated `cargo dev docker-build` to default image tags to `fabro-sh/fabro`
+</Accordion>
 
 <Accordion title="Improvements">
 - Added the captured commit short SHA to the Files Changed freshness label
@@ -25,4 +34,5 @@ The Settings page now presents server configuration as curated panels instead of
 - Fixed aggregate diff stats counting sensitive, binary, symlink, and submodule entries that are not visible in the diff
 - Fixed Files Changed tree selection so it only targets valid file paths after filtering or reloads
 - Fixed sidebar loading and filtering behavior to keep the desktop layout stable
+- Fixed install and doctor validation accepting wildcard public URLs
 </Accordion>

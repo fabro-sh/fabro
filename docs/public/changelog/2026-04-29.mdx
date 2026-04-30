@@ -1,0 +1,41 @@
+---
+title: "Faster preflight checks and clearer setup errors"
+date: "2026-04-29"
+---
+
+## Faster preflight checks
+
+Preflight checks no longer need to clone repositories just to validate a run manifest. Fabro now bundles and validates the workflow inputs directly, which makes `fabro preflight` and server-side run creation much faster for remote repositories and private GitHub origins.
+
+The CLI also shows a spinner while the server runs checks, so long validations no longer look stuck. Run creation skips redundant implicit preflight work when validation has already been handled.
+
+## Setup and auth recovery
+
+Setup failures now point at the configured GitHub App and tell operators when Docker-based runs need GitHub credentials for private clones. The web setup page also shows GitHub App install return state, and the auth quick start includes the server URL so users copy a complete login command.
+
+CLI login now persists the selected auth target, and dev-token recovery messages explain how to get back to a working local session. These changes make setup problems more diagnosable without reading server logs first.
+
+## More
+
+<Accordion title="API">
+- Error responses now include request IDs so API failures can be correlated with server logs
+- Run projection types reuse canonical event, interview, secret, billing, and model shapes across the Rust and TypeScript clients
+</Accordion>
+
+<Accordion title="Workflows">
+- Metadata snapshot events now emit into the run event stream during workflow execution
+</Accordion>
+
+<Accordion title="Improvements">
+- Added a Settings/JSON toggle on the settings page
+- Regrouped settings into Server, Data, Security, and Integrations sections
+- Added syntax highlighting to the run graph source view
+- Sped up Docker repository clones during sandbox startup
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed degraded Run Files diffs so placeholder, truncation, and unavailable-content states render consistently
+- Fixed Graph/Source toggling unmounting the graph view unnecessarily
+- Fixed worker subprocesses missing `GITHUB_APP_PRIVATE_KEY` for GitHub App operations
+- Fixed git push and origin-credential failures leaking unsafe stderr into logs
+</Accordion>

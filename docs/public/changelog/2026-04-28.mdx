@@ -1,0 +1,33 @@
+---
+title: "Workflow-relative prompt files and sandbox metadata fixes"
+date: "2026-04-28"
+---
+
+## Workflow-relative prompt files
+
+Prompt file references now resolve relative to the workflow file instead of the shell's current working directory. A workflow can live with its prompt files in a subdirectory and behave the same whether it is run from that directory, from the repo root, or through a run config.
+
+```dot
+review [prompt="@prompts/review.md"]
+```
+
+This makes checked-in workflow folders more portable and removes a class of failures where `@path` references only worked from one launch location.
+
+## Sandbox metadata recovery
+
+Sandbox-native metadata handling now covers more run shapes, including non-git local runs and clone-based sandboxes with pre-run git state. Runs that do not start from a normal host git checkout can still initialize, record useful metadata, and keep fork or rewind operations aligned with the sandbox workspace.
+
+Metadata snapshots are also batched with `git fast-import`, which reduces checkpoint overhead on workflows that write many stage snapshots.
+
+## More
+
+<Accordion title="CLI">
+- Added `cargo dev bench-tests` for capturing per-test timing CSVs
+- Kept `fabro validate` focused on workflow validation instead of running runtime preflight checks
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed manifest creation paths that could prompt for git credentials while preparing a run
+- Fixed non-git local sandbox runs failing during initialization
+- Fixed sandbox-native git metadata gaps affecting fork, rewind, and run projections
+</Accordion>

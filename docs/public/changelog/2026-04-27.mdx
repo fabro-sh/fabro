@@ -1,0 +1,34 @@
+---
+title: "Install wizard sandbox selection and sandbox-native git metadata"
+date: "2026-04-27"
+---
+
+## Install wizard sandbox selection
+
+The web install flow now includes a sandbox provider step, so operators choose and validate their execution environment during setup instead of discovering missing Docker or Daytona configuration on the first run. The setup screen also preserves the GitHub App return state, which makes install failures easier to resume after bouncing through GitHub.
+
+This gives new deployments a clearer path from "server is running" to "runs can actually execute". The wizard validates the selected provider through the server install API and shows the result in the same setup flow.
+
+## Sandbox-native git metadata
+
+Run metadata now follows the sandbox instead of assuming the server's current working directory is the source of truth. Clone-based providers can record origin, branch, dirty state, checkpoint branches, and pre-run push outcomes from the workspace where execution actually happens.
+
+This matters for Docker and Daytona runs because the working tree lives inside the sandbox. Fork, rewind, resume, PR creation, and run detail pages now have a more accurate view of the sandbox repository state.
+
+## More
+
+<Accordion title="API">
+- New run graph source response returns the raw workflow DOT source for graph viewers and external tools
+</Accordion>
+
+<Accordion title="Improvements">
+- Added level and target coloring to the web run logs view
+- Polished the runs board and install navigation layout
+- Removed the redundant Unarchive action from the archive toast
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed packaged Docker deployments missing access to the mounted Docker socket
+- Fixed sandbox error chains losing useful context before reaching users
+- Fixed server routing middleware behavior around nested route handling
+</Accordion>

@@ -1,10 +1,15 @@
 ---
-title: "Per-run logs and clone-based Docker sandboxes"
+title: "Clone-based Docker sandboxes and per-run logs"
 date: "2026-04-26"
 ---
 
 <Warning>
 **Docker is now the default runtime sandbox provider.** Docker sandboxes no longer bind-mount the caller's working directory. They create a container workspace and clone the run manifest's GitHub origin into `/workspace`.
+
+To migrate:
+1. Use `--sandbox local` or `[run.sandbox] provider = "local"` when a run must operate directly on the host working tree.
+2. For Docker or Daytona runs without a GitHub origin, set `skip_clone = true` under the provider-specific sandbox section.
+3. Make sure private GitHub repositories have GitHub App credentials configured before running clone-based sandboxes.
 </Warning>
 
 ## Clone-based Docker sandboxes
@@ -29,3 +34,25 @@ Each server-dispatched run now gets its own worker tracing log at `runtime/serve
 ## Operators
 
 Worker subprocesses continue writing to the main `<storage>/logs/server.log`, and also mirror worker tracing into the per-run file. `FABRO_LOG` still controls log verbosity; if a server config sets `[server.logging] level`, that level is now propagated to workers unless the parent process already set `FABRO_LOG`.
+
+Server logs can also go to stdout, which is useful for containers and process supervisors:
+
+```toml
+[server.logging]
+destination = "stdout"
+```
+
+## More
+
+<Accordion title="API">
+- New `GET /api/v1/runs/{id}/logs` endpoint returns the per-run worker log
+- Server settings now include `server.logging.destination` with `file` and `stdout` values
+</Accordion>
+
+<Accordion title="CLI">
+- `fabro dump` now includes per-run worker logs as `run.log` when they are available
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed web requests being served from non-canonical hosts instead of redirecting to the configured canonical host
+</Accordion>
