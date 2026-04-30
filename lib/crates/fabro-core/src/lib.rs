@@ -22,7 +22,8 @@ pub use lifecycle::{
     NodeDecision, NoopLifecycle, RunLifecycle,
 };
 pub use outcome::{
-    FailureCategory, FailureDetail, NodeResult, NodeResultExt, Outcome, OutcomeMeta, StageStatus,
+    FailureCategory, FailureDetail, NodeResult, NodeResultExt, Outcome, OutcomeMeta, StageOutcome,
+    StageState, StageStatus,
 };
 pub use retry::{BackoffPolicy, RetryPolicy};
 pub use stall::{ActivityMonitor, StallGuard, StallWatchdog};

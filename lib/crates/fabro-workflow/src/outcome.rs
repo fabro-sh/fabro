@@ -1,4 +1,6 @@
-pub use fabro_core::outcome::{FailureCategory, FailureDetail, OutcomeMeta, StageStatus};
+pub use fabro_core::outcome::{
+    FailureCategory, FailureDetail, OutcomeMeta, StageOutcome, StageState, StageStatus,
+};
 use fabro_llm::types::TokenCounts as LlmTokenCounts;
 use fabro_model::{
     AnthropicBillingFacts, Catalog, ModelBillingFacts, ModelBillingInput, ModelRef, ModelUsage,
@@ -61,7 +63,9 @@ pub trait OutcomeExt: Sized {
 impl OutcomeExt for Outcome {
     fn fail_deterministic(reason: impl Into<String>) -> Self {
         Self {
-            status: StageStatus::Fail,
+            status: StageOutcome::Failed {
+                retry_requested: false,
+            },
             failure: Some(FailureDetail::new(reason, FailureCategory::Deterministic)),
             ..Self::default()
         }
@@ -71,7 +75,9 @@ impl OutcomeExt for Outcome {
         let reason = reason.into();
         let category = classify_failure_reason(&reason);
         Self {
-            status: StageStatus::Fail,
+            status: StageOutcome::Failed {
+                retry_requested: false,
+            },
             failure: Some(FailureDetail::new(reason, category)),
             ..Self::default()
         }
@@ -81,7 +87,9 @@ impl OutcomeExt for Outcome {
         let reason = reason.into();
         let category = classify_failure_reason(&reason);
         Self {
-            status: StageStatus::Retry,
+            status: StageOutcome::Failed {
+                retry_requested: true,
+            },
             failure: Some(FailureDetail::new(reason, category)),
             ..Self::default()
         }
@@ -113,8 +121,10 @@ impl OutcomeExt for Outcome {
 
     fn classified_failure_category(&self) -> Option<FailureCategory> {
         match self.status {
-            StageStatus::Success | StageStatus::PartialSuccess | StageStatus::Skipped => None,
-            StageStatus::Fail | StageStatus::Retry => self
+            StageOutcome::Succeeded | StageOutcome::PartiallySucceeded | StageOutcome::Skipped => {
+                None
+            }
+            StageOutcome::Failed { .. } => self
                 .failure_category()
                 .or(Some(FailureCategory::Deterministic)),
         }
@@ -149,7 +159,7 @@ mod tests {
     use fabro_llm::types::TokenCounts;
     use fabro_model::Provider;
 
-    use super::billed_model_usage_from_llm;
+    use super::{OutcomeExt, billed_model_usage_from_llm};
 
     #[test]
     fn billed_model_usage_from_llm_bills_openai_cached_input_and_reasoning_output() {
@@ -165,6 +175,16 @@ mod tests {
         assert_eq!(billed.total_usd_micros, Some(3_562_500));
         assert_eq!(billed.tokens().output_tokens, 125_000);
         assert_eq!(billed.tokens().reasoning_tokens, 25_000);
+    }
+
+    #[test]
+    fn retry_classify_marks_failed_outcome_with_retry_request() {
+        let outcome = crate::outcome::Outcome::retry_classify("timeout");
+
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Failed {
+            retry_requested: true,
+        });
+        assert!(outcome.status.retry_requested());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeMeta, StageStatus};
+use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeMeta, StageOutcome};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VisitLimitSource {
@@ -79,7 +79,9 @@ impl Error {
     pub fn to_fail_outcome<M: OutcomeMeta>(&self) -> Outcome<M> {
         match self {
             Self::Handler { detail } => Outcome {
-                status: StageStatus::Fail,
+                status: StageOutcome::Failed {
+                    retry_requested: false,
+                },
                 failure: Some(FailureDetail {
                     message:   detail.message.clone(),
                     category:  detail.category.unwrap_or(FailureCategory::Deterministic),
@@ -168,7 +170,9 @@ mod tests {
             signature: Some("sig123".into()),
         });
         let outcome: Outcome = err.to_fail_outcome();
-        assert_eq!(outcome.status, StageStatus::Fail);
+        assert_eq!(outcome.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
         let failure = outcome.failure.unwrap();
         assert_eq!(failure.message, "api down");
         assert_eq!(failure.category, FailureCategory::TransientInfra);

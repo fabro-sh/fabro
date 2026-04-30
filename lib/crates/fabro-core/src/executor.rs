@@ -13,7 +13,7 @@ use crate::lifecycle::{
     AttemptContext, AttemptResultContext, EdgeContext, EdgeDecision, NodeDecision, NoopLifecycle,
     RunLifecycle,
 };
-use crate::outcome::{NodeResult, NodeResultExt, Outcome, StageStatus};
+use crate::outcome::{NodeResult, NodeResultExt, Outcome};
 use crate::state::ExecutionState;
 
 #[derive(Default)]
@@ -248,7 +248,7 @@ impl<G: Graph + 'static> Executor<G> {
                 }
                 NextStep::End => {
                     let mut outcome = last_outcome.clone();
-                    if outcome.status == StageStatus::Fail {
+                    if outcome.status.is_failure() {
                         outcome = Outcome::fail(&format!(
                             "stage {} failed with no outgoing fail edge",
                             node.id()
@@ -285,7 +285,7 @@ impl<G: Graph + 'static> Executor<G> {
             let can_retry = attempt < policy.max_attempts;
 
             match self.handler.execute(node, &state.context, graph).await {
-                Ok(outcome) if outcome.status == StageStatus::Retry && can_retry => {
+                Ok(outcome) if outcome.status.retry_requested() && can_retry => {
                     let delay = policy.backoff.delay_for_attempt(attempt);
                     let result =
                         NodeResult::new(outcome, start.elapsed(), attempt, policy.max_attempts);
@@ -299,7 +299,7 @@ impl<G: Graph + 'static> Executor<G> {
                     self.lifecycle.after_attempt(&ctx, state).await?;
                     sleep(delay).await;
                 }
-                Ok(outcome) if outcome.status == StageStatus::Retry => {
+                Ok(outcome) if outcome.status.retry_requested() => {
                     let final_outcome = self.handler.on_retries_exhausted(node, outcome);
                     let result = NodeResult::new(
                         final_outcome,
@@ -415,7 +415,7 @@ impl<G: Graph + 'static> Executor<G> {
             }
         } else {
             // No edge found
-            if outcome.status == StageStatus::Fail {
+            if outcome.status.is_failure() {
                 if let Some(retry_target) = graph.get_retry_target(node.id()) {
                     return Ok(NextStep::Edge(retry_target));
                 }
@@ -443,6 +443,7 @@ mod tests {
     use crate::context::Context;
     use crate::error::HandlerErrorDetail;
     use crate::lifecycle::RunLifecycle;
+    use crate::outcome::{StageOutcome, StageStatus};
     use crate::retry::{BackoffPolicy, RetryPolicy};
     use crate::test_fixtures::*;
 
@@ -1007,15 +1008,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn executor_retry_on_retry_status() {
+    async fn executor_retry_on_retry_requested_failure() {
         let handler = Arc::new(
             CountingHandler::new(vec![
                 Ok(Outcome {
-                    status: StageStatus::Retry,
+                    status: StageOutcome::Failed {
+                        retry_requested: true,
+                    },
                     ..Outcome::default()
                 }),
                 Ok(Outcome {
-                    status: StageStatus::Retry,
+                    status: StageOutcome::Failed {
+                        retry_requested: true,
+                    },
                     ..Outcome::default()
                 }),
                 Ok(Outcome::success()),
@@ -1095,7 +1100,9 @@ mod tests {
                 _g: &TestGraph,
             ) -> Result<Outcome> {
                 Ok(Outcome {
-                    status: StageStatus::Retry,
+                    status: StageOutcome::Failed {
+                        retry_requested: true,
+                    },
                     ..Outcome::default()
                 })
             }
@@ -1126,6 +1133,39 @@ mod tests {
                 .build();
         let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::PartialSuccess);
+    }
+
+    #[tokio::test]
+    async fn executor_retry_exhausted_default_outcome_clears_retry_request() {
+        struct ExhaustedHandler;
+        #[async_trait]
+        impl NodeHandler<TestGraph> for ExhaustedHandler {
+            async fn execute(
+                &self,
+                _n: &TestNode,
+                _c: &Context,
+                _g: &TestGraph,
+            ) -> Result<Outcome> {
+                Ok(Outcome {
+                    status: StageOutcome::Failed {
+                        retry_requested: true,
+                    },
+                    ..Outcome::default()
+                })
+            }
+            fn retry_policy(&self, _n: &TestNode, _g: &TestGraph) -> RetryPolicy {
+                RetryPolicy::with_max_attempts(2)
+            }
+        }
+        let g = TestGraph::new(vec![TestNode::new("start")], vec![], "start");
+        let state = ExecutionState::new(&g).unwrap();
+        let executor =
+            ExecutorBuilder::new(Arc::new(ExhaustedHandler) as Arc<dyn NodeHandler<TestGraph>>)
+                .build();
+        let (result, _) = executor.run(&g, state).await.unwrap();
+        assert_eq!(result.status, StageOutcome::Failed {
+            retry_requested: false,
+        });
     }
 
     #[tokio::test]
@@ -1274,7 +1314,9 @@ mod tests {
         let handler = Arc::new(
             CountingHandler::new(vec![
                 Ok(Outcome {
-                    status: StageStatus::Retry,
+                    status: StageOutcome::Failed {
+                        retry_requested: true,
+                    },
                     ..Outcome::default()
                 }),
                 Ok(Outcome::success()),

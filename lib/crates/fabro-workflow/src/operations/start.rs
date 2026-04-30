@@ -39,7 +39,7 @@ use crate::event::{
     Emitter, Event, EventBody, RunEventLogger, RunEventSink, RunNoticeLevel, append_event_to_sink,
 };
 use crate::handler::HandlerRegistry;
-use crate::outcome::{Outcome, StageStatus};
+use crate::outcome::Outcome;
 use crate::pipeline::{
     self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
     PullRequestOptions, RetroOptions, SandboxEnvSpec, build_conclusion_from_store,
@@ -778,10 +778,10 @@ impl RunSession {
         let executed = pipeline::execute(initialized).await;
         store_progress_logger.flush().await;
         let final_context = Some(executed.final_context.clone());
-        let failed = !matches!(
-            executed.outcome.as_ref().map(|outcome| &outcome.status),
-            Ok(StageStatus::Success | StageStatus::PartialSuccess)
-        );
+        let failed = !executed
+            .outcome
+            .as_ref()
+            .is_ok_and(|outcome| outcome.status.is_successful());
 
         let retro_opts = RetroOptions {
             run_id: executed.run_options.run_id,
@@ -1016,6 +1016,7 @@ mod tests {
     use crate::handler::manager_loop::SubWorkflowHandler;
     use crate::handler::start::StartHandler;
     use crate::operations::resume;
+    use crate::outcome::StageStatus;
     use crate::records::CheckpointExt;
     use crate::workflow_bundle::{BundledWorkflow, WorkflowBundle};
 

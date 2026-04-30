@@ -7,7 +7,7 @@ use fabro_validate::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
 
-use crate::outcome::{FailureDetail, Outcome, StageStatus};
+use crate::outcome::{FailureDetail, Outcome, StageOutcome};
 
 /// Classify an LLM error into a `FailureCategory` based on its structure.
 #[must_use]
@@ -378,7 +378,9 @@ impl Error {
             signature: self.failure_signature_hint(),
         };
         Outcome {
-            status: StageStatus::Fail,
+            status: StageOutcome::Failed {
+                retry_requested: false,
+            },
             failure: Some(failure),
             ..Outcome::success()
         }

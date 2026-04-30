@@ -32,7 +32,7 @@ pub(crate) fn millis_u64(d: std::time::Duration) -> u64 {
 /// Build `Vec<CompletedStage>` from a `Checkpoint`, mapping workflow-engine
 /// types into the flat struct expected by `fabro_retro::retro::derive_retro`.
 pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec<CompletedStage> {
-    use outcome::{OutcomeExt, StageStatus};
+    use outcome::OutcomeExt;
 
     let mut stages = Vec::new();
     let mut any_stage_failed = false;
@@ -43,11 +43,8 @@ pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec
 
         let status = outcome.map_or_else(|| "unknown".to_string(), |o| o.status.to_string());
 
-        let succeeded = matches!(
-            outcome.map(|o| &o.status),
-            Some(StageStatus::Success | StageStatus::PartialSuccess)
-        );
-        let failed = matches!(outcome.map(|o| &o.status), Some(StageStatus::Fail));
+        let succeeded = outcome.is_some_and(|o| o.status.is_successful());
+        let failed = outcome.is_some_and(|o| o.status.is_failure());
         if failed {
             any_stage_failed = true;
         }
