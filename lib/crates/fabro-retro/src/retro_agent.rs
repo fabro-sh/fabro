@@ -1,11 +1,10 @@
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use fabro_agent::tool_registry::RegisteredTool;
 use fabro_agent::{
     AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session, SessionEvent,
-    SessionOptions, Turn, shell_quote,
+    SessionOptions, Turn,
 };
 use fabro_dump::{BlobReader, RunDump};
 use fabro_llm::client::Client;
@@ -144,7 +143,6 @@ pub async fn run_retro_agent(
     sandbox: &Arc<dyn Sandbox>,
     state: &RunProjection,
     events: &[EventEnvelope],
-    _run_dir: &Path,
     run_log: Option<Vec<u8>>,
     blob_reader: Option<BlobReader>,
     llm_client: &Client,
@@ -318,7 +316,6 @@ async fn upload_data_files(
     }
     for entry in dump.entries() {
         let remote_path = format!("{target_dir}/{}", entry.path());
-        ensure_remote_dir(sandbox, Path::new(&remote_path)).await?;
         let bytes = entry.to_bytes()?;
         let text = String::from_utf8(bytes)
             .map_err(|err| anyhow::anyhow!("non-UTF8 retro entry {}: {err}", entry.path()))?;
@@ -326,25 +323,6 @@ async fn upload_data_files(
             .write_file(&remote_path, &text)
             .await
             .map_err(|err| anyhow::anyhow!("Failed to upload {}: {err}", entry.path()))?;
-    }
-    Ok(())
-}
-
-async fn ensure_remote_dir(sandbox: &Arc<dyn Sandbox>, path: &Path) -> anyhow::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("Retro upload path has no parent: {}", path.display()))?;
-    let command = format!("mkdir -p {}", shell_quote(&parent.to_string_lossy()));
-    let result = sandbox
-        .exec_command(&command, 10_000, None, None, None)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create retro upload dir: {e}"))?;
-    if !result.is_success() {
-        return Err(anyhow::anyhow!(
-            "Failed to create retro upload dir {}: {}",
-            parent.display(),
-            result.stderr
-        ));
     }
     Ok(())
 }

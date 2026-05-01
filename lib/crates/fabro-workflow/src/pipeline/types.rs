@@ -329,7 +329,6 @@ pub struct RetroOptions {
     pub services:        Arc<RunServices>,
     pub workflow_name:   String,
     pub goal:            String,
-    pub run_dir:         PathBuf,
     pub failed:          bool,
     pub run_duration_ms: u64,
     pub enabled:         bool,
