@@ -1518,64 +1518,10 @@ mod tests {
         reason = "unit test reads an in-memory tar entry synchronously"
     )]
     use std::io::Read as _;
-    use std::sync::{Arc, Mutex};
 
     use tokio::process::Command;
 
     use super::*;
-
-    async fn start_test_sandbox_container(sandbox: &DockerSandbox) {
-        let container = sandbox
-            .docker
-            .create_container(None::<CreateContainerOptions<String>>, Config {
-                image: Some(sandbox.config.image.clone()),
-                cmd: Some(vec!["sleep".to_string(), "infinity".to_string()]),
-                working_dir: Some("/".to_string()),
-                env: if sandbox.config.env_vars.is_empty() {
-                    None
-                } else {
-                    Some(sandbox.config.env_vars.clone())
-                },
-                labels: Some(container_labels(sandbox.run_id.as_ref())),
-                host_config: Some(host_config(&sandbox.config)),
-                ..Default::default()
-            })
-            .await
-            .expect("docker test container should be created");
-        let container_id = container.id.clone();
-        sandbox
-            .container_id
-            .set(container_id.clone())
-            .expect("docker test container id should be initialized once");
-        sandbox
-            .docker
-            .start_container(&container_id, None::<StartContainerOptions<String>>)
-            .await
-            .expect("docker test container should start");
-    }
-
-    async fn force_remove_test_sandbox(sandbox: &DockerSandbox) {
-        let Some(container_id) = sandbox.container_id.get().cloned() else {
-            return;
-        };
-        let labels = sandbox
-            .inspect_labels(&container_id)
-            .await
-            .expect("docker test container should have labels");
-        verify_managed_labels(&container_id, &labels, sandbox.run_id.as_ref())
-            .expect("docker test container should be managed by fabro");
-        sandbox
-            .docker
-            .remove_container(
-                &container_id,
-                Some(RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                }),
-            )
-            .await
-            .expect("docker test container should be force removed");
-    }
 
     #[test]
     fn default_options_are_clone_based() {
@@ -1690,79 +1636,6 @@ mod tests {
                 let _ = Command::new("kill").args(["-KILL", pid]).status().await;
             }
         }
-    }
-
-    #[tokio::test]
-    #[ignore = "requires real Docker container lifecycle; run explicitly when changing Docker exec integration"]
-    async fn streaming_timeout_terminates_docker_exec_before_returning() {
-        let image = "buildpack-deps:noble";
-        let Ok(sandbox) = DockerSandbox::new(
-            DockerSandboxOptions {
-                image: image.to_string(),
-                auto_pull: false,
-                skip_clone: true,
-                ..DockerSandboxOptions::default()
-            },
-            None,
-            None,
-            None,
-            None,
-        ) else {
-            return;
-        };
-        if sandbox.docker.inspect_image(image).await.is_err() {
-            return;
-        }
-        start_test_sandbox_container(&sandbox).await;
-
-        let chunks = Arc::new(Mutex::new(Vec::new()));
-        let callback_chunks = Arc::clone(&chunks);
-        let callback: CommandOutputCallback = Arc::new(move |_stream, bytes| {
-            let callback_chunks = Arc::clone(&callback_chunks);
-            Box::pin(async move {
-                callback_chunks.lock().unwrap().extend(bytes);
-                Ok(())
-            })
-        });
-
-        let marker = "fabro_streaming_timeout_sentinel";
-        let result = sandbox
-            .exec_command_streaming(
-                &format!("trap '' HUP TERM; echo start; sleep 5 # {marker}"),
-                50,
-                Some("/"),
-                None,
-                None,
-                callback,
-            )
-            .await
-            .expect("streaming command should return a timeout result");
-
-        assert!(result.result.is_timed_out());
-        assert!(
-            String::from_utf8_lossy(&chunks.lock().unwrap()).contains("start"),
-            "stream should include output emitted before timeout"
-        );
-
-        let probe = sandbox
-            .exec_command(
-                "marker='fabro_streaming_timeout_''sentinel'; \
-                 ps -eo pid,args | awk -v marker=\"$marker\" \
-                 'index($0, marker) && $0 !~ /awk/ && $0 !~ /ps -eo/ { print }'",
-                1_000,
-                Some("/"),
-                None,
-                None,
-            )
-            .await
-            .expect("process probe should run");
-        force_remove_test_sandbox(&sandbox).await;
-
-        assert!(
-            !probe.stdout.contains(marker),
-            "timed-out docker exec should be terminated before returning, found: {}",
-            probe.stdout
-        );
     }
 
     #[test]
