@@ -39,9 +39,10 @@ use crate::event::Emitter;
 use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt};
 use crate::run_control::RunControlState;
+use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
 use crate::run_options::RunOptions;
 use crate::runtime_store::RunStoreHandle;
-use crate::sandbox_metadata::SandboxGitRuntime;
+use crate::sandbox_git_runtime::SandboxGitRuntime;
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -88,7 +89,9 @@ impl WorkflowLifecycle {
         run_store: &RunStoreHandle,
         artifact_sink: Option<ArtifactSink>,
         run_options: &Arc<RunOptions>,
-        metadata_runtime: Arc<SandboxGitRuntime>,
+        sandbox_git: Arc<SandboxGitRuntime>,
+        metadata_runtime: Arc<RunMetadataRuntime>,
+        metadata_writer: Option<RunMetadataWriterHandle>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,
         run_control: Option<Arc<RunControlState>>,
@@ -150,7 +153,9 @@ impl WorkflowLifecycle {
             run_id: run_options.run_id,
             run_store: run_store.clone(),
             run_options: Arc::clone(run_options),
+            sandbox_git,
             metadata_runtime,
+            metadata_writer,
             start_node_id,
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             last_git_sha,

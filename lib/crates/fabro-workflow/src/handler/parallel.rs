@@ -186,7 +186,7 @@ impl Handler for ParallelHandler {
         // --- Git isolation: checkpoint "parallel base" before fan-out ---
         let base_sha: Option<String> = if let Some(ref gs) = git_state {
             let result = checked_git_checkpoint(
-                &services.run.metadata_runtime,
+                &services.run.sandbox_git,
                 &*services.run.sandbox,
                 &gs.run_id.to_string(),
                 &node.id,

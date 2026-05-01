@@ -19,8 +19,9 @@ use crate::pipeline;
 use crate::pipeline::types::{Executed, Initialized};
 use crate::pipeline::{billing_from_checkpoint, build_terminal_event};
 use crate::records::Checkpoint;
+use crate::run_metadata::RunMetadataRuntime;
 use crate::run_options::RunOptions;
-use crate::sandbox_metadata::SandboxGitRuntime;
+use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::services::{EngineServices, RunServices};
 
 /// These helpers stop at EXECUTE, so they emit the terminal event here to
@@ -162,6 +163,8 @@ async fn initialized(
                         .llm_source
                         .unwrap_or_else(|| Arc::new(EnvCredentialSource::new())),
                     Arc::new(SandboxGitRuntime::new()),
+                    Arc::new(RunMetadataRuntime::new()),
+                    None,
                 ),
                 registry:        Arc::new(registry),
                 git_state:       std::sync::RwLock::new(None),

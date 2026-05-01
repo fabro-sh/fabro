@@ -17,9 +17,10 @@ use tokio_util::sync::CancellationToken;
 use crate::ManifestPath;
 use crate::event::Emitter;
 use crate::handler::HandlerRegistry;
+use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::GitState;
-use crate::sandbox_metadata::SandboxGitRuntime;
+use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::workflow_bundle::WorkflowBundle;
 
 /// Services shared across workflow phases.
@@ -32,7 +33,9 @@ pub struct RunServices {
     pub cancel_requested:        Option<Arc<AtomicBool>>,
     pub provider:                Provider,
     pub llm_source:              Arc<dyn CredentialSource>,
-    pub(crate) metadata_runtime: Arc<SandboxGitRuntime>,
+    pub(crate) sandbox_git:      Arc<SandboxGitRuntime>,
+    pub(crate) metadata_runtime: Arc<RunMetadataRuntime>,
+    pub(crate) metadata_writer:  Option<RunMetadataWriterHandle>,
 }
 
 impl RunServices {
@@ -45,7 +48,9 @@ impl RunServices {
         cancel_requested: Option<Arc<AtomicBool>>,
         provider: Provider,
         llm_source: Arc<dyn CredentialSource>,
-        metadata_runtime: Arc<SandboxGitRuntime>,
+        sandbox_git: Arc<SandboxGitRuntime>,
+        metadata_runtime: Arc<RunMetadataRuntime>,
+        metadata_writer: Option<RunMetadataWriterHandle>,
     ) -> Arc<Self> {
         Arc::new(Self {
             run_store,
@@ -55,7 +60,9 @@ impl RunServices {
             cancel_requested,
             provider,
             llm_source,
+            sandbox_git,
             metadata_runtime,
+            metadata_writer,
         })
     }
 
@@ -206,6 +213,8 @@ impl EngineServices {
                 Provider::Anthropic,
                 Arc::new(StubCredentialSource),
                 Arc::new(SandboxGitRuntime::new()),
+                Arc::new(RunMetadataRuntime::new()),
+                None,
             ),
             registry:        Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
             git_state:       std::sync::RwLock::new(None),

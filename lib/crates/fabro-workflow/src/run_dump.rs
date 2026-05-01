@@ -170,6 +170,16 @@ impl RunDump {
         self.entries.push(RunDumpEntry::bytes(path, contents));
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_raw_entries(entries: Vec<(String, Vec<u8>)>) -> Self {
+        Self {
+            entries: entries
+                .into_iter()
+                .map(|(path, contents)| RunDumpEntry::bytes(path, contents))
+                .collect(),
+        }
+    }
+
     pub async fn hydrate_referenced_blobs_with_reader<'a, F>(
         &mut self,
         mut read_blob: F,

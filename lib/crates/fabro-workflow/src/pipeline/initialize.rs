@@ -31,9 +31,12 @@ use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::RUN_BRANCH_PREFIX;
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use crate::handler::{HandlerRegistry, default_registry, sandbox_cancel_token};
+use crate::run_metadata::{
+    RunMetadataRuntime, build_metadata_writer, metadata_branch_name, mint_token,
+};
 use crate::run_options::{GitCheckpointOptions, RunOptions};
 use crate::sandbox_git::GIT_REMOTE;
-use crate::sandbox_metadata::{SandboxGitRuntime, metadata_branch_name};
+use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::services::{EngineServices, RunServices};
 
 struct WorktreePlan {
@@ -216,32 +219,9 @@ async fn mint_github_token(
     origin_url: &str,
     permissions: &HashMap<String, String>,
 ) -> Result<String, Error> {
-    if let fabro_github::GitHubCredentials::Token(token) = creds {
-        return Ok(token.clone());
-    }
-
-    let https_url = fabro_github::ssh_url_to_https(origin_url);
-    let (owner, repo) =
-        fabro_github::parse_github_owner_repo(&https_url).map_err(|e| Error::engine(e.clone()))?;
-    let fabro_github::GitHubCredentials::App(creds) = creds else {
-        unreachable!("token credentials return early");
-    };
-    let jwt = fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem)
-        .map_err(|e| Error::engine(e.clone()))?;
-    let client = fabro_http::http_client().map_err(|e| Error::engine(e.to_string()))?;
-    let perms_json = serde_json::to_value(permissions).map_err(|e| Error::engine(e.to_string()))?;
-    let install_url = creds.installation_url(&owner);
-    fabro_github::create_installation_access_token_with_permissions_and_install_url(
-        &client,
-        &jwt,
-        &owner,
-        &repo,
-        &fabro_github::github_api_base_url(),
-        perms_json,
-        install_url.as_deref(),
-    )
-    .await
-    .map_err(|e| Error::engine(e.clone()))
+    mint_token(creds, origin_url, permissions)
+        .await
+        .map_err(Error::engine)
 }
 
 async fn build_sandbox_env(
@@ -465,7 +445,8 @@ pub async fn initialize(
 
     let llm_source = build_llm_source(options.vault.clone());
     let cli_resolver = options.vault.clone().map(CredentialResolver::new);
-    let metadata_runtime = Arc::new(SandboxGitRuntime::new());
+    let sandbox_git = Arc::new(SandboxGitRuntime::new());
+    let metadata_runtime = Arc::new(RunMetadataRuntime::new());
 
     let hook_runner = if options.hooks.hooks.is_empty() {
         None
@@ -494,7 +475,7 @@ pub async fn initialize(
             .await
             .map_err(|e| Error::engine(e.to_string()))?;
         if let Some(base_sha) = resolve_worktree_base_sha(&*inner, plan).await? {
-            metadata_runtime
+            sandbox_git
                 .ensure_git_available(&*inner)
                 .await
                 .map_err(|err| Error::engine(format!("sandbox git unavailable: {err}")))?;
@@ -612,7 +593,7 @@ pub async fn initialize(
     if !has_run_branch {
         let intent = git_setup_intent(&options.run_options);
         if sandbox.origin_url().is_some() {
-            metadata_runtime
+            sandbox_git
                 .ensure_git_available(&*sandbox)
                 .await
                 .map_err(|err| Error::engine(format!("sandbox git unavailable: {err}")))?;
@@ -711,6 +692,21 @@ pub async fn initialize(
         .await?;
     }
 
+    let metadata_writer = match build_metadata_writer(&options.run_options) {
+        Ok(writer) => writer,
+        Err(err) => {
+            let message = format!("failed to initialize checkpoint metadata writer: {err}");
+            if metadata_runtime.mark_metadata_degraded() {
+                options.emitter.notice(
+                    RunNoticeLevel::Warn,
+                    "checkpoint_metadata_write_failed",
+                    message,
+                );
+            }
+            None
+        }
+    };
+
     let run_services = RunServices::new(
         options.run_store.clone(),
         Arc::clone(&options.emitter),
@@ -719,7 +715,9 @@ pub async fn initialize(
         options.run_options.cancel_token.clone(),
         options.llm.provider,
         Arc::clone(&llm_source),
+        sandbox_git,
         metadata_runtime,
+        metadata_writer,
     );
     let engine = Arc::new(EngineServices {
         run: Arc::clone(&run_services),

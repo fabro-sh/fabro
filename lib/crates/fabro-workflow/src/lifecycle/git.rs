@@ -18,10 +18,11 @@ use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::lifecycle::event::stage_scope_for;
 use crate::outcome::BilledModelUsage;
 use crate::run_dump::RunDump;
+use crate::run_metadata::{MetadataSnapshot, RunMetadataRuntime, RunMetadataWriterHandle};
 use crate::run_options::RunOptions;
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::{checked_git_checkpoint, git_diff};
-use crate::sandbox_metadata::{MetadataSnapshot, SandboxGitRuntime, SandboxMetadataWriter};
+use crate::sandbox_git_runtime::SandboxGitRuntime;
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -70,7 +71,9 @@ pub(crate) struct GitLifecycle {
     pub run_id:                RunId,
     pub run_store:             RunStoreHandle,
     pub run_options:           Arc<RunOptions>,
-    pub metadata_runtime:      Arc<SandboxGitRuntime>,
+    pub sandbox_git:           Arc<SandboxGitRuntime>,
+    pub metadata_runtime:      Arc<RunMetadataRuntime>,
+    pub metadata_writer:       Option<RunMetadataWriterHandle>,
     pub start_node_id:         Option<String>,
     // Cross-lifecycle data (shared with EventLifecycle)
     pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
@@ -84,7 +87,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         *self.last_git_sha.lock().unwrap() = None;
         *self.checkpoint_git_result.lock().unwrap() = None;
         if let Some(meta_branch) = self.metadata_branch().map(str::to_string) {
-            if self.metadata_runtime.metadata_degraded() {
+            if self.metadata_writer.is_none() || self.metadata_runtime.metadata_degraded() {
                 return Ok(());
             }
             let phase = MetadataSnapshotPhase::Init;
@@ -151,7 +154,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             None,
         );
         let shadow_sha = if let Some(meta_branch) = self.metadata_branch().map(str::to_string) {
-            if self.metadata_runtime.metadata_degraded() {
+            if self.metadata_writer.is_none() || self.metadata_runtime.metadata_degraded() {
                 None
             } else {
                 let phase = MetadataSnapshotPhase::Checkpoint;
@@ -200,7 +203,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         let completed_count = state.completed_nodes.len();
         let git_author = self.run_options.git_author();
         let commit_result = checked_git_checkpoint(
-            &self.metadata_runtime,
+            &self.sandbox_git,
             &*self.sandbox,
             &self.run_id.to_string(),
             node_id,
@@ -311,15 +314,8 @@ impl GitLifecycle {
         if self.metadata_runtime.metadata_degraded() {
             return None;
         }
+        let writer = self.metadata_writer.as_ref()?;
 
-        let run_id = self.run_id.to_string();
-        let writer = SandboxMetadataWriter::new(
-            &*self.sandbox,
-            &self.metadata_runtime,
-            &run_id,
-            meta_branch,
-            self.run_options.git_author(),
-        );
         match writer.write_snapshot(dump, message).await {
             Ok(snapshot) => {
                 if let Some(detail) = snapshot.push_error.as_deref() {
@@ -596,12 +592,61 @@ mod tests {
         events
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "metadata event tests use synchronous git commands to set up temporary bare remotes"
+    )]
+    fn metadata_writer_for_repo(repo: &Path, branch: &str) -> RunMetadataWriterHandle {
+        let remote = repo.with_extension("metadata-remote.git");
+        let init = std::process::Command::new("git")
+            .args(["init", "--bare"])
+            .current_dir(repo)
+            .arg(&remote)
+            .output()
+            .unwrap();
+        assert!(
+            init.status.success(),
+            "git init --bare failed: {}",
+            String::from_utf8_lossy(&init.stderr)
+        );
+        RunMetadataWriterHandle::new_for_test(
+            format!("file://{}", remote.display()),
+            branch.to_string(),
+            crate::git::GitAuthor::default(),
+            None,
+        )
+        .unwrap()
+    }
+
     fn git_lifecycle(
         repo: &Path,
         emitter: Arc<Emitter>,
         run_store: RunStoreHandle,
         run_options: Arc<RunOptions>,
-        metadata_runtime: Arc<SandboxGitRuntime>,
+        metadata_runtime: Arc<RunMetadataRuntime>,
+    ) -> GitLifecycle {
+        let metadata_writer = run_options
+            .git
+            .as_ref()
+            .and_then(|git| git.meta_branch.as_deref())
+            .map(|branch| metadata_writer_for_repo(repo, branch));
+        git_lifecycle_with_writer(
+            repo,
+            emitter,
+            run_store,
+            run_options,
+            metadata_runtime,
+            metadata_writer,
+        )
+    }
+
+    fn git_lifecycle_with_writer(
+        repo: &Path,
+        emitter: Arc<Emitter>,
+        run_store: RunStoreHandle,
+        run_options: Arc<RunOptions>,
+        metadata_runtime: Arc<RunMetadataRuntime>,
+        metadata_writer: Option<RunMetadataWriterHandle>,
     ) -> GitLifecycle {
         GitLifecycle {
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(repo.to_path_buf())),
@@ -609,7 +654,9 @@ mod tests {
             run_id: fixtures::RUN_1,
             run_store,
             run_options,
+            sandbox_git: Arc::new(SandboxGitRuntime::new()),
             metadata_runtime,
+            metadata_writer,
             start_node_id: Some("start".to_string()),
             checkpoint_git_result: Arc::new(Mutex::new(None)),
             last_git_sha: Arc::new(Mutex::new(None)),
@@ -637,7 +684,7 @@ mod tests {
             emitter,
             handle,
             run_options(repo_dir.path(), branch),
-            Arc::new(SandboxGitRuntime::new()),
+            Arc::new(RunMetadataRuntime::new()),
         );
         let graph = workflow_graph();
         let state = ExecutionState::new(&graph).unwrap();
@@ -674,7 +721,7 @@ mod tests {
             emitter,
             RunStoreHandle::new(Arc::new(FailingStateStore)),
             run_options(repo_dir.path(), branch),
-            Arc::new(SandboxGitRuntime::new()),
+            Arc::new(RunMetadataRuntime::new()),
         );
         let graph = workflow_graph();
         let state = ExecutionState::new(&graph).unwrap();
@@ -701,20 +748,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "metadata push-failure test uses a synchronous git command to configure a temporary remote"
-    )]
     async fn init_metadata_push_failure_emits_failed_with_snapshot_accounting() {
         let repo_dir = tempfile::tempdir().unwrap();
         init_git_repo(repo_dir.path());
-        let missing_origin = repo_dir.path().join("missing-origin.git");
-        let remote = std::process::Command::new("git")
-            .args(["remote", "add", "origin", missing_origin.to_str().unwrap()])
-            .current_dir(repo_dir.path())
-            .output()
-            .unwrap();
-        assert!(remote.status.success());
         let branch = "fabro/metadata/run";
         let run_store = run_store(fixtures::RUN_1).await;
         let handle = RunStoreHandle::local(run_store.clone());
@@ -727,13 +763,21 @@ mod tests {
             .sum::<u64>();
         let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let events = record_events(&emitter);
-        let runtime = Arc::new(SandboxGitRuntime::new());
-        let lifecycle = git_lifecycle(
+        let runtime = Arc::new(RunMetadataRuntime::new());
+        let metadata_writer = RunMetadataWriterHandle::new_for_test(
+            format!("file://{}", repo_dir.path().display()),
+            branch.to_string(),
+            crate::git::GitAuthor::default(),
+            None,
+        )
+        .unwrap();
+        let lifecycle = git_lifecycle_with_writer(
             repo_dir.path(),
             emitter,
             handle,
             run_options(repo_dir.path(), branch),
             Arc::clone(&runtime),
+            Some(metadata_writer),
         );
         let graph = workflow_graph();
         let state = ExecutionState::new(&graph).unwrap();
@@ -772,7 +816,7 @@ mod tests {
             emitter,
             RunStoreHandle::new(Arc::new(FailingStateStore)),
             run_options(repo_dir.path(), branch),
-            Arc::new(SandboxGitRuntime::new()),
+            Arc::new(RunMetadataRuntime::new()),
         );
         let graph = workflow_graph();
         let node = graph.get_node("build").unwrap();
@@ -815,7 +859,7 @@ mod tests {
             emitter,
             RunStoreHandle::local(run_store),
             run_options(repo_dir.path(), branch),
-            Arc::new(SandboxGitRuntime::new()),
+            Arc::new(RunMetadataRuntime::new()),
         );
         let graph = workflow_graph();
         let node = graph.get_node("build").unwrap();
@@ -855,7 +899,7 @@ mod tests {
     async fn degraded_metadata_runtime_skips_snapshot_events() {
         let repo_dir = tempfile::tempdir().unwrap();
         init_git_repo(repo_dir.path());
-        let runtime = Arc::new(SandboxGitRuntime::new());
+        let runtime = Arc::new(RunMetadataRuntime::new());
         runtime.mark_metadata_degraded();
         let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let events = record_events(&emitter);
@@ -880,7 +924,7 @@ mod tests {
         init_git_repo(repo_dir.path());
         let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let events = record_events(&emitter);
-        let runtime = Arc::new(SandboxGitRuntime::new());
+        let runtime = Arc::new(RunMetadataRuntime::new());
         let lifecycle = git_lifecycle(
             repo_dir.path(),
             emitter,
@@ -911,7 +955,9 @@ mod tests {
             None,
             fabro_model::Provider::Anthropic,
             Arc::new(fabro_auth::EnvCredentialSource::new()),
+            Arc::new(SandboxGitRuntime::new()),
             Arc::clone(&lifecycle.metadata_runtime),
+            lifecycle.metadata_writer.clone(),
         );
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),

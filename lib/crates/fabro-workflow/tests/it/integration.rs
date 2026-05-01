@@ -10704,10 +10704,10 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
 }
 
 /// End-to-end test: pipeline with git checkpointing enabled + `meta_branch`
-/// writes shadow branch with checkpoint data and includes `Fabro-Checkpoint`
-/// trailer in run-branch commits.
+/// but no worker-side GitHub credentials still writes run-branch checkpoint
+/// commits and skips metadata-branch snapshots.
 #[tokio::test]
-async fn git_checkpoint_host_writes_shadow_branch() {
+async fn git_checkpoint_host_skips_metadata_branch_without_writer_prereqs() {
     // 1. Create a temporary git repo with an initial commit
     let repo = tempfile::tempdir().unwrap();
     std::process::Command::new("git")
@@ -10821,43 +10821,24 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    // 6. Assert shadow branch has checkpoint data in run.json
+    // 6. Without pre-run GitHub credentials, metadata snapshots are disabled.
     let run_json = std::process::Command::new("git")
         .args(["show", &format!("refs/heads/{meta_branch}:run.json")])
         .current_dir(repo.path())
         .output()
         .expect("git show should run");
     assert!(
-        run_json.status.success(),
-        "metadata run.json should exist: {}",
-        String::from_utf8_lossy(&run_json.stderr)
-    );
-    let projection: fabro_store::RunProjection =
-        serde_json::from_slice(&run_json.stdout).expect("run.json should parse");
-    let checkpoint = projection
-        .checkpoint
-        .expect("shadow branch should contain checkpoint data");
-    assert!(
-        !checkpoint.completed_nodes.is_empty(),
-        "checkpoint should have completed nodes"
-    );
-    assert!(
-        checkpoint.completed_nodes.contains(&"work".to_string()),
-        "checkpoint should contain the 'work' node"
+        !run_json.status.success(),
+        "metadata run.json should not exist without writer prerequisites"
     );
 
-    // 7. Assert run-branch commit has Fabro-Checkpoint trailer pointing to shadow
-    //    SHA
+    // 7. Assert run-branch commit still has the run checkpoint trailers.
     let output = std::process::Command::new("git")
         .args(["log", "--format=%B", "-1"])
         .current_dir(&worktree_path)
         .output()
         .unwrap();
     let commit_msg = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    assert!(
-        commit_msg.contains("Fabro-Checkpoint:"),
-        "run-branch commit should have Fabro-Checkpoint trailer, got:\n{commit_msg}"
-    );
     assert!(
         commit_msg.contains("Fabro-Run:"),
         "run-branch commit should have Fabro-Run trailer, got:\n{commit_msg}"
@@ -10866,12 +10847,10 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         commit_msg.contains("Fabro-Completed:"),
         "run-branch commit should have Fabro-Completed trailer, got:\n{commit_msg}"
     );
-
-    // 8. Verify round-trip: shadow run.json contains the run spec
-    let run_spec = projection
-        .spec
-        .expect("shadow branch should contain run spec");
-    assert_eq!(run_spec.run_id, run_id);
+    assert!(
+        !commit_msg.contains("Fabro-Checkpoint:"),
+        "run-branch commit should not have Fabro-Checkpoint trailer without metadata snapshot, got:\n{commit_msg}"
+    );
 
     // Cleanup worktree
     let _ = std::process::Command::new("git")

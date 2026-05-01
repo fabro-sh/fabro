@@ -47,10 +47,10 @@ use crate::pipeline::{
 };
 use crate::records::Checkpoint;
 use crate::run_control::RunControlState;
+use crate::run_metadata::metadata_branch_name;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{FailureReason, RunStatus};
 use crate::runtime_store::RunStoreHandle;
-use crate::sandbox_metadata::metadata_branch_name;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 
 struct RunSession {

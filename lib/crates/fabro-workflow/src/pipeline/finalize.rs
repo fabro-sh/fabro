@@ -12,11 +12,11 @@ use crate::event::{Event, RunNoticeLevel};
 use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
 use crate::run_dump::RunDump;
+use crate::run_metadata::MetadataSnapshot;
 use crate::run_options::RunOptions;
 use crate::run_status::{FailureReason, RunStatus, SuccessReason};
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::git_diff_with_timeout;
-use crate::sandbox_metadata::{MetadataSnapshot, SandboxMetadataWriter};
 use crate::services::RunServices;
 
 pub fn classify_engine_result(
@@ -154,6 +154,9 @@ pub async fn write_finalize_commit(
     if services.metadata_runtime.metadata_degraded() {
         return;
     }
+    let Some(writer) = services.metadata_writer.as_ref() else {
+        return;
+    };
     let Some(meta_branch) = run_options
         .git
         .as_ref()
@@ -188,14 +191,6 @@ pub async fn write_finalize_commit(
     };
     projection.conclusion = Some(conclusion.clone());
     let dump = RunDump::from_projection(&projection);
-    let run_id = run_options.run_id.to_string();
-    let writer = SandboxMetadataWriter::new(
-        &*services.sandbox,
-        &services.metadata_runtime,
-        &run_id,
-        meta_branch,
-        run_options.git_author(),
-    );
     match writer.write_snapshot(&dump, "finalize run").await {
         Ok(snapshot) => {
             if let Some(detail) = snapshot.push_error.as_deref() {
@@ -540,9 +535,10 @@ mod tests {
     use super::*;
     use crate::event::{Emitter, StoreProgressLogger, append_event};
     use crate::pipeline::types::Retroed;
+    use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
     use crate::run_options::{GitCheckpointOptions, RunOptions};
     use crate::runtime_store::{RunStoreBackend, RunStoreHandle};
-    use crate::sandbox_metadata::SandboxGitRuntime;
+    use crate::sandbox_git_runtime::SandboxGitRuntime;
 
     fn test_run_id() -> RunId {
         fixtures::RUN_1
@@ -644,11 +640,38 @@ mod tests {
         events
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "metadata event tests use synchronous git commands to set up temporary bare remotes"
+    )]
+    fn metadata_writer_for_repo(repo: &Path, branch: &str) -> RunMetadataWriterHandle {
+        let remote = repo.with_extension("metadata-remote.git");
+        let init = std::process::Command::new("git")
+            .args(["init", "--bare"])
+            .current_dir(repo)
+            .arg(&remote)
+            .output()
+            .unwrap();
+        assert!(
+            init.status.success(),
+            "git init --bare failed: {}",
+            String::from_utf8_lossy(&init.stderr)
+        );
+        RunMetadataWriterHandle::new_for_test(
+            format!("file://{}", remote.display()),
+            branch.to_string(),
+            crate::git::GitAuthor::default(),
+            None,
+        )
+        .unwrap()
+    }
+
     fn test_services(
         run_store: RunStoreHandle,
         emitter: Arc<Emitter>,
         sandbox: Arc<dyn fabro_agent::Sandbox>,
-        metadata_runtime: Arc<SandboxGitRuntime>,
+        metadata_runtime: Arc<RunMetadataRuntime>,
+        metadata_writer: Option<RunMetadataWriterHandle>,
     ) -> Arc<RunServices> {
         RunServices::new(
             run_store,
@@ -658,7 +681,9 @@ mod tests {
             None,
             fabro_model::Provider::Anthropic,
             Arc::new(fabro_auth::EnvCredentialSource::new()),
+            Arc::new(SandboxGitRuntime::new()),
             metadata_runtime,
+            metadata_writer,
         )
     }
 
@@ -682,7 +707,9 @@ mod tests {
             None,
             fabro_model::Provider::Anthropic,
             Arc::new(fabro_auth::EnvCredentialSource::new()),
-            Arc::new(crate::sandbox_metadata::SandboxGitRuntime::new()),
+            Arc::new(SandboxGitRuntime::new()),
+            Arc::new(RunMetadataRuntime::new()),
+            None,
         );
         let retroed = Retroed {
             graph: Graph::new("test"),
@@ -732,7 +759,8 @@ mod tests {
             Arc::new(fabro_agent::LocalSandbox::new(
                 repo_dir.path().to_path_buf(),
             )),
-            Arc::new(SandboxGitRuntime::new()),
+            Arc::new(RunMetadataRuntime::new()),
+            Some(metadata_writer_for_repo(repo_dir.path(), branch)),
         );
         let run_options = test_git_run_options(repo_dir.path(), branch);
 
@@ -765,7 +793,11 @@ mod tests {
             Arc::new(fabro_agent::LocalSandbox::new(
                 repo_dir.path().to_path_buf(),
             )),
-            Arc::new(SandboxGitRuntime::new()),
+            Arc::new(RunMetadataRuntime::new()),
+            Some(metadata_writer_for_repo(
+                repo_dir.path(),
+                "fabro/metadata/run",
+            )),
         );
         let run_options = test_git_run_options(repo_dir.path(), "fabro/metadata/run");
         let conclusion = Conclusion {
@@ -804,7 +836,7 @@ mod tests {
         let run_store = seeded_run_store().await;
         let emitter = Arc::new(Emitter::new(test_run_id()));
         let events = record_events(&emitter);
-        let runtime = Arc::new(SandboxGitRuntime::new());
+        let runtime = Arc::new(RunMetadataRuntime::new());
         runtime.mark_metadata_degraded();
         let services = test_services(
             RunStoreHandle::local(run_store),
@@ -813,6 +845,10 @@ mod tests {
                 repo_dir.path().to_path_buf(),
             )),
             runtime,
+            Some(metadata_writer_for_repo(
+                repo_dir.path(),
+                "fabro/metadata/run",
+            )),
         );
         let run_options = test_git_run_options(repo_dir.path(), "fabro/metadata/run");
         let conclusion = Conclusion {
@@ -844,7 +880,11 @@ mod tests {
             Arc::new(fabro_agent::LocalSandbox::new(
                 repo_dir.path().to_path_buf(),
             )),
-            Arc::new(SandboxGitRuntime::new()),
+            Arc::new(RunMetadataRuntime::new()),
+            Some(metadata_writer_for_repo(
+                repo_dir.path(),
+                "fabro/metadata/run",
+            )),
         );
         let retroed = Retroed {
             graph: Graph::new("test"),
