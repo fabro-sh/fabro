@@ -70,12 +70,6 @@ pub enum PullRequestApiError {
     Other(#[from] anyhow::Error),
 }
 
-impl From<String> for PullRequestApiError {
-    fn from(value: String) -> Self {
-        Self::Other(anyhow!(value))
-    }
-}
-
 fn http_client() -> anyhow::Result<fabro_http::HttpClient> {
     fabro_http::http_client().map_err(Into::into)
 }
@@ -1066,14 +1060,14 @@ pub async fn get_pull_request_with_client(
             });
         }
         401 | 403 => {
-            return Err(format!(
+            return Err(anyhow!(
                 "Authentication failed fetching pull request ({})",
                 resp.status
             )
             .into());
         }
         status => {
-            return Err(format!(
+            return Err(anyhow!(
                 "Unexpected status {status} fetching pull request: {}",
                 resp.text()
             )
@@ -1081,9 +1075,9 @@ pub async fn get_pull_request_with_client(
         }
     }
 
-    resp.json::<PullRequestGithubDetail>()
-        .context("Failed to parse pull request response")
-        .map_err(Into::into)
+    Ok(resp
+        .json::<PullRequestGithubDetail>()
+        .context("Failed to parse pull request response")?)
 }
 
 /// Merge a pull request.
@@ -1131,20 +1125,20 @@ pub async fn merge_pull_request_with_client(
     match resp.status {
         200 => Ok(()),
         405 => Err(
-            format!("Pull request #{number} is not mergeable (method may not be allowed)").into(),
+            anyhow!("Pull request #{number} is not mergeable (method may not be allowed)").into(),
         ),
-        409 => Err(format!("Pull request #{number} has a merge conflict").into()),
+        409 => Err(anyhow!("Pull request #{number} has a merge conflict").into()),
         404 => Err(PullRequestApiError::NotFound {
             owner: owner.to_string(),
             repo: repo.to_string(),
             number,
         }),
-        401 | 403 => Err(format!(
+        401 | 403 => Err(anyhow!(
             "Authentication failed merging pull request ({})",
             resp.status
         )
         .into()),
-        status => Err(format!(
+        status => Err(anyhow!(
             "Unexpected status {status} merging pull request: {}",
             resp.text()
         )
@@ -1199,12 +1193,12 @@ pub async fn close_pull_request_with_client(
             repo: repo.to_string(),
             number,
         }),
-        401 | 403 => Err(format!(
+        401 | 403 => Err(anyhow!(
             "Authentication failed closing pull request ({})",
             resp.status
         )
         .into()),
-        status => Err(format!(
+        status => Err(anyhow!(
             "Unexpected status {status} closing pull request: {}",
             resp.text()
         )
@@ -1244,16 +1238,6 @@ mod tests {
     use tracing_subscriber::registry;
 
     use super::*;
-
-    trait DisplayContains {
-        fn contains(&self, needle: &str) -> bool;
-    }
-
-    impl<T: std::fmt::Display> DisplayContains for T {
-        fn contains(&self, needle: &str) -> bool {
-            self.to_string().as_str().contains(needle)
-        }
-    }
 
     #[test]
     fn decode_pem_env_accepts_raw_pem() {
@@ -1399,7 +1383,12 @@ mod tests {
     fn parse_credentials_non_github_still_errors() {
         let result = parse_github_owner_repo("https://user:pass@gitlab.com/owner/repo");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Not a GitHub HTTPS URL"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Not a GitHub HTTPS URL")
+        );
     }
 
     #[test]
@@ -1478,14 +1467,19 @@ mod tests {
     fn parse_non_github_url_errors() {
         let result = parse_github_owner_repo("https://gitlab.com/owner/repo");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Not a GitHub HTTPS URL"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Not a GitHub HTTPS URL")
+        );
     }
 
     #[test]
     fn parse_missing_repo_errors() {
         let result = parse_github_owner_repo("https://github.com/owner");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Missing repo"));
+        assert!(result.unwrap_err().to_string().contains("Missing repo"));
     }
 
     #[test]
@@ -1541,7 +1535,12 @@ mod tests {
     fn jwt_invalid_pem_errors() {
         let result = sign_app_jwt("12345", "not-a-pem");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Invalid RSA private key"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid RSA private key")
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1672,7 +1671,8 @@ mod tests {
 
         let err = create_installation_access_token(&mock, "jwt", "owner", "repo", "")
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("not installed"), "got: {err}");
         assert!(err.contains("owner"), "got: {err}");
     }
@@ -1694,7 +1694,8 @@ mod tests {
             Some(install_url),
         )
         .await
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
 
         assert!(err.contains("not installed"), "got: {err}");
         assert!(err.contains(install_url), "got: {err}");
@@ -1711,7 +1712,8 @@ mod tests {
 
         let err = create_installation_access_token(&mock, "jwt", "owner", "repo", "")
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("suspended"), "got: {err}");
     }
 
@@ -1733,7 +1735,8 @@ mod tests {
 
         let err = create_installation_access_token(&mock, "jwt", "owner", "repo", "")
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("does not have access"), "got: {err}");
         assert!(err.contains("repo"), "got: {err}");
     }
@@ -1745,7 +1748,8 @@ mod tests {
 
         let err = create_installation_access_token(&mock, "jwt", "owner", "repo", "")
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("authentication failed"), "got: {err}");
     }
 
@@ -1961,7 +1965,10 @@ mod tests {
         let result = check_app_installed(&mock, "test-jwt", "owner", "repo", "").await;
         assert!(result.is_err());
         assert!(
-            result.unwrap_err().contains("authentication failed"),
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("authentication failed"),
             "expected auth error"
         );
     }
@@ -1993,7 +2000,10 @@ mod tests {
         let result = get_authenticated_app(&mock, "bad-jwt", "").await;
         assert!(result.is_err());
         assert!(
-            result.unwrap_err().contains("authentication failed"),
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("authentication failed"),
             "expected auth error"
         );
     }

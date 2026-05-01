@@ -693,21 +693,6 @@ mod tests {
 
     use super::*;
 
-    trait DisplayStringExt {
-        fn contains(&self, needle: &str) -> bool;
-        fn is_empty(&self) -> bool;
-    }
-
-    impl<T: std::fmt::Display> DisplayStringExt for T {
-        fn contains(&self, needle: &str) -> bool {
-            self.to_string().as_str().contains(needle)
-        }
-
-        fn is_empty(&self) -> bool {
-            self.to_string().is_empty()
-        }
-    }
-
     fn test_http_client() -> fabro_http::HttpClient {
         fabro_http::test_http_client().unwrap()
     }
@@ -978,7 +963,8 @@ mod tests {
             Some("verifier"),
         )
         .await
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
 
         assert!(err.contains("400"), "error should contain status: {err}");
     }
@@ -1088,7 +1074,8 @@ mod tests {
             "expired-tok",
         )
         .await
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
 
         assert!(err.contains("401"), "error should contain status: {err}");
     }
@@ -1189,7 +1176,8 @@ mod tests {
         for path in ["", "no-leading-slash", "/:param", "/*wildcard"] {
             let err = start_callback_server(0, path, "test-state".to_string())
                 .await
-                .unwrap_err();
+                .unwrap_err()
+                .to_string();
             assert!(!err.is_empty(), "expected error for path {path}");
         }
     }

@@ -8,11 +8,6 @@ impl SharedError {
     pub fn new(err: anyhow::Error) -> Self {
         Self(Arc::new(err))
     }
-
-    #[must_use]
-    pub fn as_anyhow(&self) -> &anyhow::Error {
-        &self.0
-    }
 }
 
 impl std::fmt::Display for SharedError {
