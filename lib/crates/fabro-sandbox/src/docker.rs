@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bollard::Docker;
@@ -32,6 +32,14 @@ use crate::{
 
 const WORKING_DIRECTORY: &str = "/workspace";
 const GIT_CLONE_DEPTH: usize = 10;
+#[cfg(test)]
+const EXEC_STOP_POLL_SLEEP_SECONDS: &str = "0.005";
+#[cfg(not(test))]
+const EXEC_STOP_POLL_SLEEP_SECONDS: &str = "0.1";
+#[cfg(test)]
+const EXEC_TERM_GRACE_SECONDS: &str = "0.02";
+#[cfg(not(test))]
+const EXEC_TERM_GRACE_SECONDS: &str = "0.2";
 
 const MANAGED_LABEL: &str = "sh.fabro.managed";
 const RUN_ID_LABEL: &str = "sh.fabro.run_id";
@@ -700,7 +708,11 @@ fn container_name(run_id: &RunId) -> String {
 
 fn docker_exec_control_paths() -> (String, String) {
     let sequence = EXEC_CONTROL_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let prefix = format!("/tmp/fabro-exec-{}-{sequence}", std::process::id());
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let prefix = format!("/tmp/fabro-exec-{}-{nonce}-{sequence}", std::process::id());
     (format!("{prefix}.stop"), format!("{prefix}.pid"))
 }
 
@@ -710,15 +722,14 @@ fn docker_controlled_shell_command(command: &str, stop_file: &str, pid_file: &st
 stop_file={stop_file}; \
 pid_file={pid_file}; \
 user_command={command}; \
-rm -f \"$stop_file\" \"$pid_file\"; \
+rm -f \"$pid_file\"; \
 ( \
-  while [ ! -e \"$stop_file\" ]; do sleep 0.1; done; \
-  if [ -s \"$pid_file\" ]; then \
-    child=$(cat \"$pid_file\"); \
-    kill -TERM \"-$child\" 2>/dev/null || kill -TERM \"$child\" 2>/dev/null || true; \
-    sleep 0.2; \
-    kill -KILL \"-$child\" 2>/dev/null || kill -KILL \"$child\" 2>/dev/null || true; \
-  fi \
+  while [ ! -e \"$stop_file\" ]; do sleep {stop_poll_sleep}; done; \
+  while [ ! -s \"$pid_file\" ]; do sleep {stop_poll_sleep}; done; \
+  child=$(cat \"$pid_file\"); \
+  kill -TERM \"-$child\" 2>/dev/null || kill -TERM \"$child\" 2>/dev/null || true; \
+  sleep {term_grace}; \
+  kill -KILL \"-$child\" 2>/dev/null || kill -KILL \"$child\" 2>/dev/null || true; \
 ) & watcher=$!; \
 if command -v setsid >/dev/null 2>&1; then \
   setsid /bin/bash -lc \"$user_command\" & \
@@ -737,6 +748,8 @@ exit \"$status\"\
         stop_file = shell_quote(stop_file),
         pid_file = shell_quote(pid_file),
         command = shell_quote(command),
+        stop_poll_sleep = EXEC_STOP_POLL_SLEEP_SECONDS,
+        term_grace = EXEC_TERM_GRACE_SECONDS,
     )
 }
 
@@ -1507,7 +1520,62 @@ mod tests {
     use std::io::Read as _;
     use std::sync::{Arc, Mutex};
 
+    use tokio::process::Command;
+
     use super::*;
+
+    async fn start_test_sandbox_container(sandbox: &DockerSandbox) {
+        let container = sandbox
+            .docker
+            .create_container(None::<CreateContainerOptions<String>>, Config {
+                image: Some(sandbox.config.image.clone()),
+                cmd: Some(vec!["sleep".to_string(), "infinity".to_string()]),
+                working_dir: Some("/".to_string()),
+                env: if sandbox.config.env_vars.is_empty() {
+                    None
+                } else {
+                    Some(sandbox.config.env_vars.clone())
+                },
+                labels: Some(container_labels(sandbox.run_id.as_ref())),
+                host_config: Some(host_config(&sandbox.config)),
+                ..Default::default()
+            })
+            .await
+            .expect("docker test container should be created");
+        let container_id = container.id.clone();
+        sandbox
+            .container_id
+            .set(container_id.clone())
+            .expect("docker test container id should be initialized once");
+        sandbox
+            .docker
+            .start_container(&container_id, None::<StartContainerOptions<String>>)
+            .await
+            .expect("docker test container should start");
+    }
+
+    async fn force_remove_test_sandbox(sandbox: &DockerSandbox) {
+        let Some(container_id) = sandbox.container_id.get().cloned() else {
+            return;
+        };
+        let labels = sandbox
+            .inspect_labels(&container_id)
+            .await
+            .expect("docker test container should have labels");
+        verify_managed_labels(&container_id, &labels, sandbox.run_id.as_ref())
+            .expect("docker test container should be managed by fabro");
+        sandbox
+            .docker
+            .remove_container(
+                &container_id,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .expect("docker test container should be force removed");
+    }
 
     #[test]
     fn default_options_are_clone_based() {
@@ -1566,16 +1634,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn controlled_shell_command_honors_stop_requested_before_pid_file_exists() {
+        let tempdir = tempfile::tempdir().expect("tempdir should be created");
+        let stop_file = tempdir.path().join("stop");
+        let pid_file = tempdir.path().join("pid");
+        let stop_file = stop_file.to_string_lossy().into_owned();
+        let pid_file = pid_file.to_string_lossy().into_owned();
+        let marker = "fabro_controlled_shell_stop_sentinel";
+        let command = docker_controlled_shell_command(
+            &format!("trap '' HUP TERM; while :; do :; done # {marker}"),
+            &stop_file,
+            &pid_file,
+        );
+
+        fs::write(&stop_file, b"")
+            .await
+            .expect("early stop file should be written");
+        let mut child = Command::new("/bin/bash");
+        child.arg("-lc").arg(command).kill_on_drop(true);
+        let output = if let Ok(output) = time::timeout(Duration::from_secs(1), child.output()).await
+        {
+            output.expect("controlled shell command should run")
+        } else {
+            kill_processes_with_marker(marker).await;
+            panic!("controlled shell command should honor an early stop request");
+        };
+
+        assert!(
+            !output.status.success(),
+            "controlled shell command should be terminated by the stop request"
+        );
+        let matching_processes = processes_with_marker(marker).await;
+        assert!(
+            matching_processes.is_empty(),
+            "controlled shell command should not leave child processes: {matching_processes:?}"
+        );
+    }
+
+    async fn processes_with_marker(marker: &str) -> Vec<String> {
+        let output = Command::new("ps")
+            .args(["-eo", "pid=,args="])
+            .output()
+            .await
+            .expect("process probe should run");
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|line| line.contains(marker))
+            .map(str::to_string)
+            .collect()
+    }
+
+    async fn kill_processes_with_marker(marker: &str) {
+        for line in processes_with_marker(marker).await {
+            if let Some(pid) = line.split_whitespace().next() {
+                let _ = Command::new("kill").args(["-KILL", pid]).status().await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires real Docker container lifecycle; run explicitly when changing Docker exec integration"]
     async fn streaming_timeout_terminates_docker_exec_before_returning() {
         let image = "buildpack-deps:noble";
-        let Ok(docker) = Docker::connect_with_local_defaults() else {
-            return;
-        };
-        if docker.inspect_image(image).await.is_err() {
-            return;
-        }
-
-        let sandbox = DockerSandbox::new(
+        let Ok(sandbox) = DockerSandbox::new(
             DockerSandboxOptions {
                 image: image.to_string(),
                 auto_pull: false,
@@ -1586,12 +1707,13 @@ mod tests {
             None,
             None,
             None,
-        )
-        .expect("docker sandbox should construct");
-        sandbox
-            .initialize()
-            .await
-            .expect("docker sandbox should initialize");
+        ) else {
+            return;
+        };
+        if sandbox.docker.inspect_image(image).await.is_err() {
+            return;
+        }
+        start_test_sandbox_container(&sandbox).await;
 
         let chunks = Arc::new(Mutex::new(Vec::new()));
         let callback_chunks = Arc::clone(&chunks);
@@ -1607,8 +1729,8 @@ mod tests {
         let result = sandbox
             .exec_command_streaming(
                 &format!("trap '' HUP TERM; echo start; sleep 5 # {marker}"),
-                200,
-                None,
+                50,
+                Some("/"),
                 None,
                 None,
                 callback,
@@ -1628,16 +1750,13 @@ mod tests {
                  ps -eo pid,args | awk -v marker=\"$marker\" \
                  'index($0, marker) && $0 !~ /awk/ && $0 !~ /ps -eo/ { print }'",
                 1_000,
-                None,
+                Some("/"),
                 None,
                 None,
             )
             .await
             .expect("process probe should run");
-        sandbox
-            .cleanup()
-            .await
-            .expect("docker cleanup should succeed");
+        force_remove_test_sandbox(&sandbox).await;
 
         assert!(
             !probe.stdout.contains(marker),
