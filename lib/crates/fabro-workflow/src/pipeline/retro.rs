@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use fabro_agent::SessionEvent;
+use fabro_dump::BlobReader;
 use fabro_llm::client::Client;
 use fabro_retro::retro::{Retro, derive_retro};
 use fabro_retro::retro_agent::{
-    RETRO_DATA_DIR, RetroBlobReader, build_retro_prompt, dry_run_narrative, run_retro_agent,
+    RETRO_DATA_DIR, build_retro_prompt, dry_run_narrative, run_retro_agent,
 };
 
 use super::types::{Executed, RetroOptions, Retroed};
@@ -82,20 +83,25 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                         }
                     });
                 let run_store = services.run_store.clone();
-                let blob_reader: RetroBlobReader = Arc::new(move |blob_id| {
+                let run_log = match services.run_store.read_run_log().await {
+                    Ok(log) => log,
+                    Err(err) => {
+                        tracing::warn!(
+                            error = %err,
+                            "failed to fetch run.log for retro; continuing without it"
+                        );
+                        None
+                    }
+                };
+                let blob_reader: BlobReader = Box::new(move |blob_id| {
                     let run_store = run_store.clone();
-                    Box::pin(async move {
-                        Ok(run_store
-                            .read_blob(&blob_id)
-                            .await?
-                            .map(|bytes| bytes.to_vec()))
-                    })
+                    Box::pin(async move { run_store.read_blob(&blob_id).await })
                 });
                 run_retro_agent(
                     &services.sandbox,
                     &state,
                     &events,
-                    &options.run_dir,
+                    run_log,
                     Some(blob_reader),
                     &client,
                     services.provider,
@@ -348,7 +354,6 @@ mod tests {
             services,
             workflow_name: "test".to_string(),
             goal: "Ship it".to_string(),
-            run_dir: run_dir.clone(),
             failed: false,
             run_duration_ms: 1,
             enabled: true,
@@ -394,7 +399,6 @@ mod tests {
                 services,
                 workflow_name: "test".to_string(),
                 goal: "Ship it".to_string(),
-                run_dir: run_dir.clone(),
                 failed: false,
                 run_duration_ms: 1,
                 enabled: true,
@@ -416,7 +420,7 @@ mod tests {
         assert!(
             retro_started_properties["prompt"]
                 .as_str()
-                .is_some_and(|prompt| prompt.contains("/tmp/retro_data/progress.jsonl"))
+                .is_some_and(|prompt| prompt.contains("/tmp/retro_data/events.jsonl"))
         );
 
         let retro_completed = seen

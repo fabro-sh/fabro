@@ -34,7 +34,7 @@ These names are still real, but they are no longer live scratch files by default
 
 - Metadata branch files such as `run.json`, `start.json`, `checkpoint.json`, and `retro.json`
 - `fabro dump` exports such as `run.json`, `start.json`, `status.json`, `checkpoint.json`, `conclusion.json`, `retro.json`, `events.jsonl`, and per-node prompt/response/status/stdout/stderr files
-- Retro-agent temp uploads named `progress.jsonl`, `checkpoint.json`, `run.json`, and `start.json` inside the retro sandbox
+- Retro-agent temp uploads named `events.jsonl`, `run.json`, `graph.fabro`, `checkpoints/{seq:04}.json`, `run.log` when available, and per-stage files under `stages/{node_id}@{visit}/...` inside the retro sandbox
 
 ## Notes
 

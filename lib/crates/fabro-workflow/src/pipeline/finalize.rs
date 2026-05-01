@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use fabro_dump::RunDump;
 use fabro_hooks::{HookContext, HookEvent};
 use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
 use fabro_types::{BilledTokenCounts, EventBody};
@@ -11,7 +12,6 @@ use crate::error::Error;
 use crate::event::{Event, RunNoticeLevel};
 use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
-use crate::run_dump::RunDump;
 use crate::run_metadata::MetadataSnapshot;
 use crate::run_options::RunOptions;
 use crate::run_status::{FailureReason, RunStatus, SuccessReason};
@@ -190,7 +190,26 @@ pub async fn write_finalize_commit(
         }
     };
     projection.conclusion = Some(conclusion.clone());
-    let dump = RunDump::from_projection(&projection);
+    let dump = match RunDump::from_projection(&projection) {
+        Ok(dump) => dump,
+        Err(err) => {
+            let message = format!("failed to build run dump for final metadata snapshot: {err}");
+            emit_metadata_snapshot_failed(
+                services,
+                phase,
+                meta_branch,
+                started,
+                MetadataSnapshotFailureKind::Write,
+                message.clone(),
+                collect_causes(err.as_ref()),
+                None,
+                None,
+                None,
+            );
+            emit_metadata_warning(services, "checkpoint_metadata_write_failed", message);
+            return;
+        }
+    };
     match writer.write_snapshot(&dump, "finalize run").await {
         Ok(snapshot) => {
             if let Some(detail) = snapshot.push_error.as_deref() {
@@ -286,6 +305,7 @@ fn emit_metadata_snapshot_failed(
         commit_sha,
         entry_count,
         bytes,
+        exec_output_tail: None,
     });
 }
 
@@ -916,6 +936,10 @@ mod tests {
         }
 
         async fn read_blob(&self, _id: &RunBlobId) -> Result<Option<Bytes>> {
+            Ok(None)
+        }
+
+        async fn read_run_log(&self) -> Result<Option<Vec<u8>>> {
             Ok(None)
         }
     }

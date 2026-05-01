@@ -1,0 +1,143 @@
+---
+title: "Self-host with Docker"
+description: "Run the Fabro server as a Docker container with docker compose, ECS, or any cloud container service"
+---
+
+<Warning>
+  The server interface is in private early access. Contact [bryan@qlty.sh](mailto:bryan@qlty.sh) if you're interested in trying it.
+</Warning>
+
+The supported deployment artifact is the official Fabro image at `ghcr.io/fabro-sh/fabro`. Everything else — `docker compose`, ECS, Cloud Run, Kubernetes, Railway — is just running this image somewhere with the right requirements.
+
+## Requirements
+
+| Requirement | Value |
+|---|---|
+| **Image** | `ghcr.io/fabro-sh/fabro:nightly` (multi-arch; pin a version for production) |
+| **Persistent volume** | Mount at `/storage`. Stores run history, checkpoints, sessions, the dev token, and JWT keys. |
+| **Port** | The container binds to `$PORT` (default `32276`). Expose it. |
+| **LLM provider key** | At least one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, ... |
+| **Replicas** | One. The server expects exclusive ownership of `/storage`. |
+
+## Quickstart with docker compose
+
+The repo ships a `docker-compose.yaml` at the root. Clone the repo (or copy the file), create a `.env` with at least one provider key, and start it:
+
+```bash
+git clone https://github.com/fabro-sh/fabro.git
+cd fabro
+cp .env.example .env
+# edit .env and set at least ANTHROPIC_API_KEY (or another provider key)
+docker compose up -d
+```
+
+The compose file:
+
+- Pulls `ghcr.io/fabro-sh/fabro:nightly`
+- Creates a named volume `fabro-storage` mounted at `/storage`
+- Mounts `/var/run/docker.sock` so Fabro can spawn sandbox containers on the host daemon
+- Exposes port `32276`
+- Loads environment from `.env` if present
+
+<Warning>
+  Mounting `/var/run/docker.sock` gives the container host-root-equivalent access. Only use the bundled compose service in trusted, single-tenant deployments. See [Sandboxing](/administration/sandboxing) for the threat model.
+</Warning>
+
+After the container is healthy, finish setup in your browser following the [install wizard](/reference/server-operations#first-run-web-install-wizard).
+
+### Adding a reverse proxy with TLS
+
+For a production deployment exposed to the internet, layer the `docker-compose.prod.yaml` overlay on top. It adds a [Caddy](https://caddyserver.com) reverse proxy that terminates TLS (auto-provisioning a Let's Encrypt certificate) and forwards to Fabro:
+
+```bash
+# In .env
+FABRO_DOMAIN=fabro.example.com
+
+# Then bring the stack up
+docker compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d
+```
+
+Leave `FABRO_DOMAIN` unset to serve plain HTTP on `localhost`.
+
+## Required environment variables
+
+At minimum, set one LLM provider key in `.env`:
+
+```bash title=".env"
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+For the web UI you also need a session secret:
+
+```bash
+SESSION_SECRET=<64-character hex string>
+```
+
+Generate one with `openssl rand -hex 32`.
+
+Optional:
+
+| Variable | Purpose |
+|---|---|
+| `FABRO_DEV_TOKEN` | Pre-set the dev token instead of reading the one written to `/storage` on first boot |
+| `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | Only if you enable GitHub OAuth or the GitHub App integration |
+| `FABRO_DOMAIN` | Public hostname when using the Caddy reverse-proxy overlay |
+
+See [Server Configuration](/administration/server-configuration) for the full settings reference, and [`.env.example`](https://github.com/fabro-sh/fabro/blob/main/.env.example) for the complete list.
+
+## Cloud container services
+
+The same image works on any container orchestrator that supports the requirements above. Common patterns:
+
+- **AWS ECS / Fargate** — Task definition referencing `ghcr.io/fabro-sh/fabro:nightly`, EFS volume mounted at `/storage`, port `32276` published, environment variables for keys.
+- **Google Cloud Run** — Cloud Run with a backed volume mount at `/storage`. Pin minimum instances to 1; scale-to-zero interrupts running workflows.
+- **Kubernetes** — One-replica `StatefulSet` (not Deployment) with a `PersistentVolumeClaim` mounted at `/storage`. Expose via Service + Ingress.
+
+In all cases: single replica, persistent `/storage`, expose `$PORT`, set provider keys.
+
+## Pinning a version
+
+`docker-compose.yaml` uses `:nightly` by default, so `docker compose pull && docker compose up -d` picks up the latest nightly. To pin a specific version, change the `image:` line to `ghcr.io/fabro-sh/fabro:<version>`.
+
+Release artifacts ship with [SLSA Build Provenance](/reference/verifying-releases) attestations you can verify with `gh attestation verify`.
+
+## Pointing the CLI at your server
+
+Once the container is running, install the CLI on your local machine and point it at the server:
+
+```toml title="~/.fabro/settings.toml"
+[cli.target]
+type = "http"
+url = "https://fabro.example.com/api/v1"
+```
+
+For dev-token auth, save the token in the CLI auth store:
+
+```bash
+fabro auth login --server https://fabro.example.com/api/v1 --dev-token fabro_dev_...
+```
+
+See [Server Operations](/reference/server-operations#pointing-the-cli-at-a-server) for the full CLI-target options.
+
+## Caveats
+
+- **Volume is load-bearing.** Without a persistent volume at `/storage`, redeploys silently wipe all state — including the dev token and JWT signing keys.
+- **Single replica.** The server expects exclusive ownership of `/storage`. Don't scale to multiple replicas.
+- **Architecture.** The `:nightly` tag is multi-arch. The amd64 variant is the most heavily tested.
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Server Operations" icon="server" href="/reference/server-operations">
+    Install wizard, web UI, authentication, demo mode, and pointing the CLI at the server.
+  </Card>
+  <Card title="Server Configuration" icon="gear" href="/administration/server-configuration">
+    Full settings.toml reference — auth, reverse-proxy TLS, run defaults, and more.
+  </Card>
+  <Card title="Deploy to Railway" icon="train" href="/administration/deploy-railway">
+    One-click managed shortcut for the same Docker image.
+  </Card>
+  <Card title="Sandboxing" icon="shield" href="/administration/sandboxing">
+    The Docker sandbox provider's security model and trust assumptions.
+  </Card>
+</Columns>

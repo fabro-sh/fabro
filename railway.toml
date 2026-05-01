@@ -1,8 +1,0 @@
-[build]
-builder = "dockerfile"
-dockerfilePath = "Dockerfile.deploy"
-
-[deploy]
-healthcheckPath = "/health"
-restartPolicyType = "ALWAYS"
-restartPolicyMaxRetries = 5

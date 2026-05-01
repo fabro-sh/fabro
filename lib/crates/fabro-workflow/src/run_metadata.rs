@@ -5,6 +5,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use async_trait::async_trait;
 use fabro_checkpoint::git::{FileMode, Store, TreeEntries};
+use fabro_dump::RunDump;
 use git2::{
     Cred, Direction, ErrorClass, ErrorCode, FetchOptions, Oid, PushOptions, RemoteCallbacks,
     Repository, Signature,
@@ -12,7 +13,6 @@ use git2::{
 use tokio::task::{self, JoinError};
 
 use crate::git::{GitAuthor, META_BRANCH_PREFIX};
-use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 
 static METADATA_PERMISSIONS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
@@ -540,7 +540,6 @@ mod tests {
 
     use super::*;
     use crate::git::GitAuthor;
-    use crate::run_dump::RunDump;
     use crate::run_options::{GitCheckpointOptions, RunOptions};
 
     fn run_git(repo: &Path, args: &[&str]) -> String {
@@ -642,7 +641,7 @@ mod tests {
             in_place:         false,
         });
 
-        let mut dump = RunDump::from_projection(&projection);
+        let mut dump = RunDump::from_projection(&projection).unwrap();
         dump.add_file_bytes("binary/payload.bin", vec![0, 159, 146, 150]);
         dump.add_file_bytes("path with spaces.txt", b"quoted path\n".to_vec());
         dump
@@ -856,7 +855,8 @@ mod tests {
             None,
         )
         .unwrap();
-        let dump = RunDump::from_raw_entries(vec![("../escape.txt".to_string(), b"x".to_vec())]);
+        let mut dump = metadata_dump();
+        dump.add_file_bytes("../escape.txt", b"x".to_vec());
 
         let err = handle
             .write_snapshot(&dump, "checkpoint")

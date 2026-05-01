@@ -15,6 +15,8 @@ use tokio_util::sync::CancellationToken;
 /// Git command prefix that disables background maintenance.
 const GIT: &str = "git -c maintenance.auto=0 -c gc.auto=0";
 
+pub const DEFAULT_EXEC_OUTPUT_TAIL_BYTES: usize = 8 * 1024;
+
 /// Information returned when a sandbox sets up git for a workflow run.
 #[derive(Debug, Clone)]
 pub struct GitRunInfo {
@@ -422,14 +424,7 @@ impl ExecResult {
     }
 
     pub fn into_exec_error(self, label: impl Into<String>) -> crate::Error {
-        crate::Error::exec(
-            label,
-            self.exit_code,
-            self.termination,
-            self.duration_ms,
-            self.stderr,
-            self.stdout,
-        )
+        crate::Error::exec(label, self)
     }
 
     pub fn into_exec_error_with_redactor(
@@ -437,16 +432,11 @@ impl ExecResult {
         label: impl Into<String>,
         redactor: impl Fn(&str) -> String,
     ) -> crate::Error {
-        let stderr = redactor(&self.stderr);
-        let stdout = redactor(&self.stdout);
-        crate::Error::exec(
-            label,
-            self.exit_code,
-            self.termination,
-            self.duration_ms,
-            stderr,
-            stdout,
-        )
+        crate::Error::exec(label, Self {
+            stdout: redactor(&self.stdout),
+            stderr: redactor(&self.stderr),
+            ..self
+        })
     }
 
     pub fn into_result(self, label: impl Into<String>) -> crate::Result<Self> {
@@ -456,6 +446,117 @@ impl ExecResult {
             Err(self.into_exec_error(label))
         }
     }
+
+    pub fn redacted_output_tail(
+        &self,
+        max_bytes_per_stream: usize,
+    ) -> Option<fabro_types::ExecOutputTail> {
+        redacted_output_tail(&self.stdout, &self.stderr, max_bytes_per_stream)
+    }
+
+    pub fn default_redacted_output_tail(&self) -> Option<fabro_types::ExecOutputTail> {
+        self.redacted_output_tail(DEFAULT_EXEC_OUTPUT_TAIL_BYTES)
+    }
+
+    /// Converts host process output into the canonical full exec result.
+    ///
+    /// This stores raw stdout/stderr. Callers must not log these fields
+    /// directly; use `default_redacted_output_tail()` for events and
+    /// tracing metadata.
+    #[cfg(test)]
+    pub fn from_process_output(output: std::process::Output, duration_ms: u64) -> Self {
+        let std::process::Output {
+            status,
+            stdout,
+            stderr,
+        } = output;
+        Self {
+            stdout: String::from_utf8_lossy(&stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr).into_owned(),
+            exit_code: Some(status.code().unwrap_or(-1)),
+            termination: CommandTermination::Exited,
+            duration_ms,
+        }
+    }
+}
+
+/// Build a redacted `ExecOutputTail` from raw stdout/stderr without
+/// fabricating a synthetic `ExecResult`. Pass `""` for either stream that
+/// isn't relevant. Returns `None` when both streams are empty.
+#[must_use]
+pub fn redacted_output_tail(
+    stdout: &str,
+    stderr: &str,
+    max_bytes_per_stream: usize,
+) -> Option<fabro_types::ExecOutputTail> {
+    let (stdout, stdout_truncated) = redacted_tail(stdout, max_bytes_per_stream);
+    let (stderr, stderr_truncated) = redacted_tail(stderr, max_bytes_per_stream);
+    let tail = fabro_types::ExecOutputTail {
+        stdout,
+        stderr,
+        stdout_truncated,
+        stderr_truncated,
+    };
+    (!tail.is_empty()).then_some(tail)
+}
+
+fn redacted_tail(text: &str, max_bytes: usize) -> (Option<String>, bool) {
+    if text.is_empty() || max_bytes == 0 {
+        return (None, !text.is_empty());
+    }
+
+    let redacted = fabro_redact::redact_string(text);
+    let sanitized = sanitize_exec_output(&redacted);
+    let truncated = sanitized.len() > max_bytes;
+    let start = if truncated {
+        sanitized.floor_char_boundary(sanitized.len() - max_bytes)
+    } else {
+        0
+    };
+    let tail = sanitized[start..].to_string();
+    ((!tail.is_empty()).then_some(tail), truncated)
+}
+
+fn sanitize_exec_output(text: &str) -> String {
+    let mut sanitized = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            match chars.peek().copied() {
+                Some('[') => {
+                    chars.next();
+                    for next in chars.by_ref() {
+                        if ('@'..='~').contains(&next) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    chars.next();
+                    let mut saw_esc = false;
+                    for next in chars.by_ref() {
+                        if next == '\u{7}' || (saw_esc && next == '\\') {
+                            break;
+                        }
+                        saw_esc = next == '\u{1b}';
+                    }
+                }
+                Some('(' | ')' | '*' | '+' | '-' | '.' | '/') => {
+                    chars.next();
+                    chars.next();
+                }
+                Some('@'..='_') => {
+                    chars.next();
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if ch == '\n' || ch == '\r' || ch == '\t' || !ch.is_control() {
+            sanitized.push(ch);
+        }
+    }
+    sanitized
 }
 
 #[derive(Debug, Clone)]
@@ -841,14 +942,11 @@ mod tests {
             duration_ms: 42,
         };
         let error = result.into_result("git push").unwrap_err();
-        let crate::Error::Exec {
-            label, exit_code, ..
-        } = &error
-        else {
+        let crate::Error::Exec { label, result, .. } = &error else {
             panic!("expected Error::Exec, got {error:?}");
         };
         assert_eq!(label, "git push");
-        assert_eq!(*exit_code, Some(128));
+        assert_eq!(result.exit_code, Some(128));
         assert!(error.to_string().contains("no credentials in origin URL"));
     }
 
@@ -884,11 +982,123 @@ mod tests {
             s.replace("https://token@example.com", "https://****@example.com")
         });
 
-        let crate::Error::Exec { stderr, stdout, .. } = &error else {
+        let crate::Error::Exec { result, .. } = &error else {
             panic!("expected Error::Exec, got {error:?}");
         };
-        assert_eq!(stderr, "stderr https://****@example.com");
-        assert_eq!(stdout, "stdout https://****@example.com");
+        assert_eq!(result.stderr, "stderr https://****@example.com");
+        assert_eq!(result.stdout, "stdout https://****@example.com");
+    }
+
+    #[test]
+    fn exec_result_redacts_before_taking_tail() {
+        let secret = "sk-ant-api03-xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA";
+        let result = ExecResult {
+            stdout:      format!("{} {secret} done", "context ".repeat(20)),
+            stderr:      String::new(),
+            exit_code:   Some(1),
+            termination: CommandTermination::Exited,
+            duration_ms: 1,
+        };
+
+        let tail = result
+            .redacted_output_tail(32)
+            .expect("redacted output tail");
+        let stdout = tail.stdout.expect("stdout tail");
+        assert!(stdout.contains("REDACTED"), "{stdout}");
+        assert!(!stdout.contains("F0gH3jE6pA"), "{stdout}");
+        assert!(tail.stdout_truncated);
+    }
+
+    #[test]
+    fn exec_result_tail_sanitizes_terminal_control_sequences() {
+        let result = ExecResult {
+            stdout:      "\u{1b}[31mred\u{1b}[0m \u{1b}]0;window-title\u{7}shown \
+                          \u{1b}(Bset \u{1b}Mtwo-byte \u{8}backspace"
+                .to_string(),
+            stderr:      String::new(),
+            exit_code:   Some(1),
+            termination: CommandTermination::Exited,
+            duration_ms: 1,
+        };
+
+        let tail = result
+            .redacted_output_tail(1024)
+            .expect("redacted output tail");
+        let stdout = tail.stdout.expect("stdout tail");
+        assert_eq!(stdout, "red shown set two-byte backspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test intentionally creates host process output for conversion coverage"
+    )]
+    fn from_process_output_uses_minus_one_for_signal_exit_without_code() {
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("printf out; printf err >&2; kill -9 $$")
+            .output()
+            .expect("signal-killed process output");
+
+        let result = ExecResult::from_process_output(output, 12);
+
+        assert_eq!(result.stdout, "out");
+        assert_eq!(result.stderr, "err");
+        assert_eq!(result.exit_code, Some(-1));
+        assert_eq!(result.termination, CommandTermination::Exited);
+        assert_eq!(result.duration_ms, 12);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test intentionally creates host process output for conversion coverage"
+    )]
+    fn from_process_output_handles_lossy_non_utf8_output() {
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("printf '\\377'; printf '\\376' >&2")
+            .output()
+            .expect("non-utf8 process output");
+
+        let result = ExecResult::from_process_output(output, 3);
+        let tail = result
+            .redacted_output_tail(16)
+            .expect("redacted output tail");
+
+        assert!(tail.stdout.expect("stdout tail").len() <= 16);
+        assert!(tail.stderr.expect("stderr tail").len() <= 16);
+    }
+
+    #[test]
+    fn default_exec_output_tail_serialized_budget_stays_below_40_kib() {
+        let result = ExecResult {
+            stdout:      "o".repeat(DEFAULT_EXEC_OUTPUT_TAIL_BYTES + 128),
+            stderr:      "e".repeat(DEFAULT_EXEC_OUTPUT_TAIL_BYTES + 128),
+            exit_code:   Some(1),
+            termination: CommandTermination::Exited,
+            duration_ms: 1,
+        };
+
+        let tail = result.default_redacted_output_tail().expect("tail present");
+        assert_eq!(
+            tail.stdout.as_deref().map(str::len),
+            Some(DEFAULT_EXEC_OUTPUT_TAIL_BYTES)
+        );
+        assert_eq!(
+            tail.stderr.as_deref().map(str::len),
+            Some(DEFAULT_EXEC_OUTPUT_TAIL_BYTES)
+        );
+        assert!(tail.stdout_truncated);
+        assert!(tail.stderr_truncated);
+        let serialized = serde_json::to_vec(&tail).expect("serialize tail");
+        assert!(
+            serialized.len() < 40 * 1024,
+            "tail JSON was {} bytes",
+            serialized.len()
+        );
     }
 
     #[test]

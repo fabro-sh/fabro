@@ -1,6 +1,6 @@
 ---
 title: "Railway"
-description: "Deploy Fabro to Railway from the Dockerfile, with a persistent Volume for state"
+description: "Deploy Fabro to Railway from the prebuilt GHCR image, with a persistent Volume for state"
 ---
 
 <Warning>
@@ -11,9 +11,9 @@ description: "Deploy Fabro to Railway from the Dockerfile, with a persistent Vol
 
 ## One-click deploy
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https%3A%2F%2Fgithub.com%2Ffabro-sh%2Ffabro)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/UcEy5m?referralCode=E5TucU&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
-The button launches Railway's new-project flow pointed at this repo. `railway.toml` instructs Railway to build `Dockerfile.deploy`, which is a thin wrapper that pulls `ghcr.io/fabro-sh/fabro:nightly` — no Rust compilation on Railway's builder, so deploys complete in seconds.
+The button launches Railway's template flow, which deploys the pre-built `ghcr.io/fabro-sh/fabro:nightly` image directly from GHCR — no Rust compilation on Railway's builder, so deploys complete in seconds.
 
 ## First-deploy checklist
 
@@ -59,11 +59,11 @@ Once the deploy is healthy, Railway exposes a `*.up.railway.app` URL (or your cu
 
    Then commands like `fabro model list --server <url>` will hit your Railway instance.
 
-See [Running the Fabro Server](/administration/deploy-server) for the full auth and CLI-pointing story.
+See [Server Operations](/reference/server-operations) for the full auth and CLI-pointing story.
 
 ## Redeploys and updates
 
-Railway re-pulls the GHCR image on every deploy. `Dockerfile.deploy` references the `:nightly` tag by default, so redeploying picks up the latest nightly automatically. To pin a specific version, edit `Dockerfile.deploy` to reference `ghcr.io/fabro-sh/fabro:<version>` and redeploy. The `/storage` Volume survives redeploys, so runs and checkpoints persist.
+Railway re-pulls the GHCR image on every deploy. The template uses the `:nightly` tag by default, so redeploying picks up the latest nightly automatically. To pin a specific version, change the image in **Service → Settings → Source** to `ghcr.io/fabro-sh/fabro:<version>` and redeploy. The `/storage` Volume survives redeploys, so runs and checkpoints persist.
 
 ## Caveats
 
@@ -74,7 +74,7 @@ Railway re-pulls the GHCR image on every deploy. `Dockerfile.deploy` references 
 ## Next steps
 
 <Columns cols={2}>
-  <Card title="Running the Fabro Server" icon="server" href="/administration/deploy-server">
+  <Card title="Server Operations" icon="server" href="/reference/server-operations">
     Auth, dev tokens, submitting runs, and pointing the CLI at your deployment.
   </Card>
   <Card title="Server Configuration" icon="gear" href="/administration/server-configuration">

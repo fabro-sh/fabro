@@ -1,28 +1,13 @@
 ---
-title: "Running the Fabro Server"
-description: "Run Fabro as an API server with a web UI, concurrent runs, and team access"
+title: "Server Operations"
+description: "Operate the Fabro server: starting, install wizard, auth, web UI, and pointing the CLI at it"
 ---
 
 <Warning>
   The server interface is in private early access. Contact [bryan@qlty.sh](mailto:bryan@qlty.sh) if you're interested in trying it.
 </Warning>
 
-Fabro has two interfaces to the same workflow engine. You can run a workflow directly in the CLI with `fabro run`, or start the HTTP server with `fabro server start` to queue runs, stream events, and serve the web UI.
-
-Both interfaces use the same workflow engine, the same Graphviz files, and the same sandbox providers. The difference is how you interact with them.
-
-## Direct CLI Runs vs. Server Interface
-
-| | Direct CLI runs | Server interface |
-|---|---|---|
-| **Command** | `fabro run workflow.fabro` | `fabro server start` |
-| **Best for** | Local development, one-off runs, CI/CD | Production, team use, running at scale |
-| **Execution** | Synchronous, one run per process | Asynchronous, queued with configurable concurrency |
-| **Human-in-the-loop** | Terminal prompts | Web UI or HTTP endpoints |
-| **Events** | Printed to stderr | Streamed via SSE |
-| **Persistence** | Checkpoint files only | Persistent run store + checkpoint files |
-| **Web UI** | Not available | Full React interface |
-| **Authentication** | None | Dev token and/or GitHub OAuth |
+This page covers operating the Fabro server once it's running, whether locally on your laptop or self-hosted in a container. For where to run it, see [Deployment](/administration/deployment).
 
 ## Starting the server
 
@@ -68,7 +53,7 @@ See [Server Configuration](/administration/server-configuration) for the full `s
 
 ## Submitting runs
 
-In the server interface, workflows are submitted via the REST API and executed in the background. The exact request body is documented in the API reference:
+Workflows are submitted via the REST API and executed in the background. The exact request body is documented in the API reference:
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/runs
@@ -110,7 +95,7 @@ The API streams run events via [Server-Sent Events (SSE)](/api-reference/runs/st
 
 ## Human-in-the-loop
 
-In the server interface, human-in-the-loop questions are served over HTTP instead of terminal prompts. The engine blocks the current stage until an answer is submitted, then continues execution. See the [list questions](/api-reference/human-in-the-loop/list-run-questions) and [submit answer](/api-reference/human-in-the-loop/submit-run-answer) API reference pages.
+Human-in-the-loop questions are served over HTTP. The engine blocks the current stage until an answer is submitted, then continues execution. See the [list questions](/api-reference/human-in-the-loop/list-run-questions) and [submit answer](/api-reference/human-in-the-loop/submit-run-answer) API reference pages.
 
 ## Authentication
 
@@ -162,16 +147,16 @@ See [User Configuration](/reference/user-configuration#cli-target-section) for t
 ## Next steps
 
 <Columns cols={2}>
+  <Card title="Deployment" icon="server" href="/administration/deployment">
+    Choose where the server runs: laptop or self-hosted Docker container.
+  </Card>
   <Card title="Server Configuration" icon="gear" href="/administration/server-configuration">
     Full settings.toml reference — authentication, reverse-proxy TLS, run defaults, and more.
-  </Card>
-  <Card title="Deploy to Railway" icon="train" href="/administration/deploy-railway">
-    Step-by-step guide for deploying Fabro on Railway.
   </Card>
   <Card title="API Reference" icon="code" href="/api-reference/overview">
     REST API for submitting runs, streaming events, and managing resources.
   </Card>
   <Card title="How Fabro Works" icon="lightbulb" href="/core-concepts/how-fabro-works">
-    The workflow engine that powers both interfaces.
+    The workflow engine and architecture.
   </Card>
 </Columns>

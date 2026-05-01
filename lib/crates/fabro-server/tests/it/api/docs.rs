@@ -33,11 +33,11 @@ fn security_doc_does_not_require_jwt_keys_for_the_current_web_flow() {
 }
 
 #[test]
-fn deploy_server_doc_links_to_the_cli_target_section_slug() {
-    let deploy_server = read_doc("docs/public/administration/deploy-server.mdx");
+fn server_operations_doc_links_to_the_cli_target_section_slug() {
+    let server_operations = read_doc("docs/public/reference/server-operations.mdx");
     assert!(
-        deploy_server.contains("/reference/user-configuration#cli-target-section"),
-        "deploy-server doc should link to the Mintlify slug for the [cli.target] section"
+        server_operations.contains("/reference/user-configuration#cli-target-section"),
+        "server-operations doc should link to the Mintlify slug for the [cli.target] section"
     );
 }
 

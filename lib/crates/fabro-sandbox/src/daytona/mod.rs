@@ -662,11 +662,16 @@ impl Sandbox for DaytonaSandbox {
                                             Ok(r) if r.exit_code != 0 => {
                                                 let err = crate::Error::exec(
                                                     "git remote set-url origin (Daytona post-clone)",
-                                                    Some(r.exit_code),
-                                                    CommandTermination::Exited,
-                                                    0,
-                                                    redact_auth_url(&r.result, Some(&auth_url)),
-                                                    String::new(),
+                                                    ExecResult {
+                                                        stdout:      String::new(),
+                                                        stderr:      redact_auth_url(
+                                                            &r.result,
+                                                            Some(&auth_url),
+                                                        ),
+                                                        exit_code:   Some(r.exit_code),
+                                                        termination: CommandTermination::Exited,
+                                                        duration_ms: 0,
+                                                    },
                                                 );
                                                 tracing::warn!(
                                                     error = %err,

@@ -7,9 +7,9 @@ use std::io::ErrorKind;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use fabro_dump::RunDump;
 use fabro_store::{RunProjection, StageId};
 use fabro_types::RunId;
-use fabro_workflow::run_dump::RunDump;
 use tokio::task::spawn_blocking;
 
 use crate::args::DumpArgs;

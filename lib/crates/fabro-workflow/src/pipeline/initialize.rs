@@ -656,11 +656,13 @@ pub async fn initialize(
             let duration_ms = crate::millis_u64(cmd_start.elapsed());
             if !result.is_success() {
                 let exit_code = result.display_exit_code();
+                let exec_output_tail = result.default_redacted_output_tail();
                 options.emitter.emit(&Event::SetupFailed {
                     command: command.clone(),
                     index,
                     exit_code,
                     stderr: result.stderr.clone(),
+                    exec_output_tail,
                 });
                 return Err(Error::engine(format!(
                     "Setup command failed (exit code {}): {command}\n{}",
@@ -759,7 +761,7 @@ mod tests {
     use fabro_sandbox::SandboxSpec;
     use fabro_sandbox::config::WorktreeMode;
     use fabro_store::Database;
-    use fabro_types::{RunId, WorkflowSettings, fixtures};
+    use fabro_types::{EventBody, RunEvent, RunId, WorkflowSettings, fixtures};
     use fabro_vault::{SecretType, Vault};
     use object_store::memory::InMemory;
     use tokio::sync::RwLock as AsyncRwLock;
@@ -883,6 +885,71 @@ mod tests {
                 in_place: false,
             },
         )
+    }
+
+    async fn initialize_with_setup_command(
+        command: &str,
+    ) -> (crate::error::Result<Initialized>, Vec<RunEvent>) {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let (graph, source) = simple_graph();
+        let persisted = test_persisted(graph, source, &run_dir);
+        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        emitter.on_event({
+            let seen = Arc::clone(&seen);
+            move |event| seen.lock().unwrap().push(event.clone())
+        });
+
+        let result = initialize(persisted, InitOptions {
+            run_id: test_run_id(),
+            run_store: {
+                let store = memory_store();
+                let inner = store.create_run(&test_run_id()).await.unwrap();
+                inner.into()
+            },
+            dry_run: false,
+            emitter,
+            sandbox: SandboxSpec::Local {
+                working_directory: std::env::current_dir().unwrap(),
+            },
+            llm: LlmSpec {
+                model:          "test-model".to_string(),
+                provider:       fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers:    Vec::new(),
+                dry_run:        true,
+            },
+            interviewer: Arc::new(AutoApproveInterviewer),
+            lifecycle: crate::run_options::LifecycleOptions {
+                setup_commands:           vec![command.to_string()],
+                setup_command_timeout_ms: 1_000,
+                devcontainer_phases:      vec![],
+            },
+            run_options: test_settings(&run_dir),
+            workflow_path: None,
+            workflow_bundle: None,
+            hooks: fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env: SandboxEnvSpec {
+                devcontainer_env:   HashMap::new(),
+                toml_env:           HashMap::new(),
+                github_permissions: None,
+                origin_url:         None,
+            },
+            vault: None,
+            devcontainer: None,
+            git: None,
+            worktree_mode: None,
+            run_control: None,
+            registry_override: None,
+            artifact_sink: None,
+            checkpoint: None,
+            seed_context: None,
+        })
+        .await;
+        let events = seen.lock().unwrap().clone();
+        (result, events)
     }
 
     #[tokio::test]
@@ -1137,6 +1204,49 @@ mod tests {
                 .iter()
                 .any(|event| event == "sandbox.initialized")
         );
+    }
+
+    #[tokio::test]
+    async fn initialize_setup_failure_preserves_stderr_and_adds_exec_tail() {
+        let (result, events) =
+            initialize_with_setup_command("printf setup-out; printf setup-err >&2; exit 7").await;
+
+        assert!(result.is_err());
+        let failed = events
+            .iter()
+            .find(|event| event.event_name() == "setup.failed")
+            .expect("setup failed event");
+        match &failed.body {
+            EventBody::SetupFailed(props) => {
+                assert_eq!(props.exit_code, 7);
+                assert_eq!(props.stderr, "setup-err");
+                let tail = props.exec_output_tail.as_ref().expect("exec output tail");
+                assert_eq!(tail.stdout.as_deref(), Some("setup-out"));
+                assert_eq!(tail.stderr.as_deref(), Some("setup-err"));
+            }
+            other => panic!("expected setup failed body, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn initialize_setup_failure_with_stdout_only_adds_stdout_tail() {
+        let (result, events) = initialize_with_setup_command("printf setup-out; exit 5").await;
+
+        assert!(result.is_err());
+        let failed = events
+            .iter()
+            .find(|event| event.event_name() == "setup.failed")
+            .expect("setup failed event");
+        match &failed.body {
+            EventBody::SetupFailed(props) => {
+                assert_eq!(props.exit_code, 5);
+                assert!(props.stderr.is_empty());
+                let tail = props.exec_output_tail.as_ref().expect("exec output tail");
+                assert_eq!(tail.stdout.as_deref(), Some("setup-out"));
+                assert!(tail.stderr.is_none());
+            }
+            other => panic!("expected setup failed body, got {other:?}"),
+        }
     }
 
     #[tokio::test]

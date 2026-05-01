@@ -1042,15 +1042,16 @@ mod tests {
             commit_sha:  "abc123".into(),
         });
         emit(&mut ui, Event::MetadataSnapshotFailed {
-            phase:        MetadataSnapshotPhase::Finalize,
-            branch:       "fabro/meta".into(),
-            duration_ms:  900,
-            failure_kind: MetadataSnapshotFailureKind::Push,
-            error:        "push rejected".into(),
-            causes:       Vec::new(),
-            commit_sha:   Some("abc123".into()),
-            entry_count:  Some(2),
-            bytes:        Some(42),
+            phase:            MetadataSnapshotPhase::Finalize,
+            branch:           "fabro/meta".into(),
+            duration_ms:      900,
+            failure_kind:     MetadataSnapshotFailureKind::Push,
+            error:            "push rejected".into(),
+            causes:           Vec::new(),
+            commit_sha:       Some("abc123".into()),
+            entry_count:      Some(2),
+            bytes:            Some(42),
+            exec_output_tail: None,
         });
 
         insta::assert_snapshot!(rendered(&buffer), @"Warning: Metadata finalize failed: push rejected [push]");
@@ -1061,15 +1062,16 @@ mod tests {
         let (mut ui, buffer) = capture_ui(false);
 
         emit(&mut ui, Event::MetadataSnapshotFailed {
-            phase:        MetadataSnapshotPhase::Checkpoint,
-            branch:       "fabro/meta".into(),
-            duration_ms:  900,
-            failure_kind: MetadataSnapshotFailureKind::Write,
-            error:        "write failed".into(),
-            causes:       Vec::new(),
-            commit_sha:   None,
-            entry_count:  None,
-            bytes:        None,
+            phase:            MetadataSnapshotPhase::Checkpoint,
+            branch:           "fabro/meta".into(),
+            duration_ms:      900,
+            failure_kind:     MetadataSnapshotFailureKind::Write,
+            error:            "write failed".into(),
+            causes:           Vec::new(),
+            commit_sha:       None,
+            entry_count:      None,
+            bytes:            None,
+            exec_output_tail: None,
         });
         emit(&mut ui, Event::RunNotice {
             level:   RunNoticeLevel::Warn,

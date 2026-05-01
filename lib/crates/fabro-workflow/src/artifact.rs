@@ -3,10 +3,7 @@ use std::path::{Path, PathBuf};
 
 use fabro_agent::Sandbox;
 use fabro_config::RunScratch;
-use fabro_types::{
-    RunBlobId, format_blob_ref, parse_blob_ref, parse_legacy_blob_file_ref,
-    parse_managed_blob_file_ref,
-};
+use fabro_types::{RunBlobId, format_blob_ref, parse_blob_ref, parse_managed_blob_file_ref};
 use futures::future::BoxFuture;
 use serde_json::Value;
 use tokio::fs;
@@ -234,9 +231,7 @@ pub async fn sync_artifacts_to_env(
 fn normalize_durable_value(value: &mut Value) {
     match value {
         Value::String(current) => {
-            if let Some(blob_id) =
-                parse_legacy_blob_file_ref(current).or_else(|| parse_managed_blob_file_ref(current))
-            {
+            if let Some(blob_id) = parse_managed_blob_file_ref(current) {
                 *current = format_blob_ref(&blob_id);
             }
         }
@@ -283,9 +278,7 @@ fn resolve_execution_value<'a>(
                     Some(context::keys::COMMAND_OUTPUT | context::keys::COMMAND_STDERR)
                 ) {
                     *current = resolve_text_or_blob_ref_str(current, run_store).await?;
-                } else if let Some(blob_id) =
-                    parse_blob_ref(current).or_else(|| parse_legacy_blob_file_ref(current))
-                {
+                } else if let Some(blob_id) = parse_blob_ref(current) {
                     *current = materialize_blob_ref(&blob_id, run_store, env, run_dir).await?;
                 } else if current.starts_with(ARTIFACT_POINTER_PREFIX)
                     && parse_managed_blob_file_ref(current).is_none()
@@ -525,8 +518,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_checkpoint_for_resume_converts_legacy_blob_file_refs_and_drops_preamble() {
-        let blob_id = fabro_types::RunBlobId::new(b"legacy");
+    fn normalize_checkpoint_for_resume_converts_managed_blob_file_refs_and_drops_preamble() {
+        let blob_id = fabro_types::RunBlobId::new(b"managed");
         let mut checkpoint = crate::records::Checkpoint {
             timestamp:                  chrono::Utc::now(),
             current_node:               "work".to_string(),
@@ -539,7 +532,7 @@ mod tests {
                 ),
                 (
                     "response.work".to_string(),
-                    serde_json::json!(format!("file:///sandbox/.fabro/artifacts/{blob_id}.json")),
+                    serde_json::json!(format!("file:///sandbox/.fabro/blobs/{blob_id}.json")),
                 ),
             ]),
             node_outcomes:              HashMap::from([(
@@ -547,9 +540,7 @@ mod tests {
                 crate::outcome::Outcome {
                     context_updates: HashMap::from([(
                         "response.work".to_string(),
-                        serde_json::json!(format!(
-                            "file:///sandbox/.fabro/artifacts/{blob_id}.json"
-                        )),
+                        serde_json::json!(format!("file:///sandbox/.fabro/blobs/{blob_id}.json")),
                     )]),
                     ..crate::outcome::Outcome::success()
                 },

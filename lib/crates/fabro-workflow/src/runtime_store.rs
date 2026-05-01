@@ -15,6 +15,7 @@ pub trait RunStoreBackend: Send + Sync {
     async fn append_run_event(&self, event: &RunEvent) -> Result<()>;
     async fn write_blob(&self, data: &[u8]) -> Result<RunBlobId>;
     async fn read_blob(&self, id: &RunBlobId) -> Result<Option<Bytes>>;
+    async fn read_run_log(&self) -> Result<Option<Vec<u8>>>;
 }
 
 #[derive(Clone)]
@@ -51,6 +52,10 @@ impl RunStoreHandle {
 
     pub async fn read_blob(&self, id: &RunBlobId) -> Result<Option<Bytes>> {
         self.backend.read_blob(id).await
+    }
+
+    pub async fn read_run_log(&self) -> Result<Option<Vec<u8>>> {
+        self.backend.read_run_log().await
     }
 }
 
@@ -98,6 +103,10 @@ impl RunStoreBackend for LocalRunStoreBackend {
             .read_blob(id)
             .await
             .map_err(anyhow::Error::from)
+    }
+
+    async fn read_run_log(&self) -> Result<Option<Vec<u8>>> {
+        Ok(None)
     }
 }
 
@@ -207,5 +216,13 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(blob.as_ref(), br#"{"ok":true}"#);
+    }
+
+    #[tokio::test]
+    async fn local_handle_returns_no_run_log() {
+        let run_store = test_run_store().await;
+        let handle = RunStoreHandle::local(run_store);
+
+        assert_eq!(handle.read_run_log().await.unwrap(), None);
     }
 }

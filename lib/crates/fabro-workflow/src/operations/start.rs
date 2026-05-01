@@ -788,7 +788,6 @@ impl RunSession {
             services: Arc::clone(&executed.engine.run),
             workflow_name: executed.graph.name.clone(),
             goal: executed.graph.goal().to_string(),
-            run_dir: executed.run_options.run_dir.clone(),
             failed,
             run_duration_ms: executed.duration_ms,
             enabled: self.retro_enabled,

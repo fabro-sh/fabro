@@ -159,19 +159,21 @@ pub enum Event {
         commit_sha:  String,
     },
     MetadataSnapshotFailed {
-        phase:        fabro_types::MetadataSnapshotPhase,
-        branch:       String,
-        duration_ms:  u64,
-        failure_kind: fabro_types::MetadataSnapshotFailureKind,
-        error:        String,
+        phase:            fabro_types::MetadataSnapshotPhase,
+        branch:           String,
+        duration_ms:      u64,
+        failure_kind:     fabro_types::MetadataSnapshotFailureKind,
+        error:            String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        causes:       Vec<String>,
+        causes:           Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        commit_sha:   Option<String>,
+        commit_sha:       Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        entry_count:  Option<usize>,
+        entry_count:      Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        bytes:        Option<u64>,
+        bytes:            Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exec_output_tail: Option<fabro_types::ExecOutputTail>,
     },
     StageStarted {
         node_id:      String,
@@ -443,10 +445,12 @@ pub enum Event {
         duration_ms: u64,
     },
     SetupFailed {
-        command:   String,
-        index:     usize,
-        exit_code: i32,
-        stderr:    String,
+        command:          String,
+        index:            usize,
+        exit_code:        i32,
+        stderr:           String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exec_output_tail: Option<fabro_types::ExecOutputTail>,
     },
     StallWatchdogTimeout {
         node:         String,
@@ -485,10 +489,12 @@ pub enum Event {
         duration_ms:       u64,
     },
     CliEnsureFailed {
-        cli_name:    String,
-        provider:    String,
-        error:       String,
-        duration_ms: u64,
+        cli_name:         String,
+        provider:         String,
+        error:            String,
+        duration_ms:      u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exec_output_tail: Option<fabro_types::ExecOutputTail>,
     },
     CommandStarted {
         node_id:    String,
@@ -566,11 +572,13 @@ pub enum Event {
         duration_ms: u64,
     },
     DevcontainerLifecycleFailed {
-        phase:     String,
-        command:   String,
-        index:     usize,
-        exit_code: i32,
-        stderr:    String,
+        phase:            String,
+        command:          String,
+        index:            usize,
+        exit_code:        i32,
+        stderr:           String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exec_output_tail: Option<fabro_types::ExecOutputTail>,
     },
     RetroStarted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -727,14 +735,21 @@ impl Event {
                 duration_ms,
                 failure_kind,
                 error,
+                exec_output_tail,
                 ..
             } => {
+                let tail = fabro_types::ExecOutputTail::trace_summary(exec_output_tail.as_ref());
                 warn!(
                     %phase,
                     branch,
                     duration_ms,
                     %failure_kind,
                     error,
+                    exec_output_tail_present = tail.present,
+                    exec_stdout_tail_bytes = tail.stdout_bytes,
+                    exec_stderr_tail_bytes = tail.stderr_bytes,
+                    exec_stdout_truncated = tail.stdout_truncated,
+                    exec_stderr_truncated = tail.stderr_truncated,
                     "Metadata snapshot failed"
                 );
             }
@@ -1032,9 +1047,21 @@ impl Event {
                 command,
                 index,
                 exit_code,
+                exec_output_tail,
                 ..
             } => {
-                error!(command, index, exit_code, "Setup command failed");
+                let tail = fabro_types::ExecOutputTail::trace_summary(exec_output_tail.as_ref());
+                error!(
+                    command,
+                    index,
+                    exit_code,
+                    exec_output_tail_present = tail.present,
+                    exec_stdout_tail_bytes = tail.stdout_bytes,
+                    exec_stderr_tail_bytes = tail.stderr_bytes,
+                    exec_stdout_truncated = tail.stdout_truncated,
+                    exec_stderr_truncated = tail.stderr_truncated,
+                    "Setup command failed"
+                );
             }
             Self::StallWatchdogTimeout { node, idle_seconds } => {
                 warn!(node, idle_seconds, "Stall watchdog timeout");
@@ -1099,8 +1126,21 @@ impl Event {
                 provider,
                 error,
                 duration_ms,
+                exec_output_tail,
             } => {
-                error!(cli_name, provider, error, duration_ms, "CLI ensure failed");
+                let tail = fabro_types::ExecOutputTail::trace_summary(exec_output_tail.as_ref());
+                error!(
+                    cli_name,
+                    provider,
+                    error,
+                    duration_ms,
+                    exec_output_tail_present = tail.present,
+                    exec_stdout_tail_bytes = tail.stdout_bytes,
+                    exec_stderr_tail_bytes = tail.stderr_bytes,
+                    exec_stdout_truncated = tail.stdout_truncated,
+                    exec_stderr_truncated = tail.stderr_truncated,
+                    "CLI ensure failed"
+                );
             }
             Self::CommandStarted {
                 node_id,
@@ -1212,11 +1252,21 @@ impl Event {
                 command,
                 index,
                 exit_code,
+                exec_output_tail,
                 ..
             } => {
+                let tail = fabro_types::ExecOutputTail::trace_summary(exec_output_tail.as_ref());
                 error!(
                     phase,
-                    command, index, exit_code, "Devcontainer lifecycle command failed"
+                    command,
+                    index,
+                    exit_code,
+                    exec_output_tail_present = tail.present,
+                    exec_stdout_tail_bytes = tail.stdout_bytes,
+                    exec_stderr_tail_bytes = tail.stderr_bytes,
+                    exec_stdout_truncated = tail.stdout_truncated,
+                    exec_stderr_truncated = tail.stderr_truncated,
+                    "Devcontainer lifecycle command failed"
                 );
             }
             Self::RetroStarted {
@@ -1762,16 +1812,18 @@ fn event_body_from_event(event: &Event) -> EventBody {
             commit_sha,
             entry_count,
             bytes,
+            exec_output_tail,
         } => EventBody::MetadataSnapshotFailed(fabro_types::MetadataSnapshotFailedProps {
-            phase:        *phase,
-            branch:       branch.clone(),
-            duration_ms:  *duration_ms,
-            failure_kind: *failure_kind,
-            error:        error.clone(),
-            causes:       causes.clone(),
-            commit_sha:   commit_sha.clone(),
-            entry_count:  *entry_count,
-            bytes:        *bytes,
+            phase:            *phase,
+            branch:           branch.clone(),
+            duration_ms:      *duration_ms,
+            failure_kind:     *failure_kind,
+            error:            error.clone(),
+            causes:           causes.clone(),
+            commit_sha:       commit_sha.clone(),
+            entry_count:      *entry_count,
+            bytes:            *bytes,
+            exec_output_tail: exec_output_tail.clone(),
         }),
         Event::StageStarted {
             index,
@@ -2402,11 +2454,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
             index,
             exit_code,
             stderr,
+            exec_output_tail,
         } => EventBody::SetupFailed(fabro_types::SetupFailedProps {
-            command:   command.clone(),
-            index:     *index,
-            exit_code: *exit_code,
-            stderr:    stderr.clone(),
+            command:          command.clone(),
+            index:            *index,
+            exit_code:        *exit_code,
+            stderr:           stderr.clone(),
+            exec_output_tail: exec_output_tail.clone(),
         }),
         Event::StallWatchdogTimeout { idle_seconds, .. } => {
             EventBody::StallWatchdogTimeout(fabro_types::StallWatchdogTimeoutProps {
@@ -2474,11 +2528,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
             provider,
             error,
             duration_ms,
+            exec_output_tail,
         } => EventBody::CliEnsureFailed(fabro_types::CliEnsureFailedProps {
-            cli_name:    cli_name.clone(),
-            provider:    provider.clone(),
-            error:       error.clone(),
-            duration_ms: *duration_ms,
+            cli_name:         cli_name.clone(),
+            provider:         provider.clone(),
+            error:            error.clone(),
+            duration_ms:      *duration_ms,
+            exec_output_tail: exec_output_tail.clone(),
         }),
         Event::CommandStarted {
             script,
@@ -2624,13 +2680,15 @@ fn event_body_from_event(event: &Event) -> EventBody {
             index,
             exit_code,
             stderr,
+            exec_output_tail,
         } => {
             EventBody::DevcontainerLifecycleFailed(fabro_types::DevcontainerLifecycleFailedProps {
-                phase:     phase.clone(),
-                command:   command.clone(),
-                index:     *index,
-                exit_code: *exit_code,
-                stderr:    stderr.clone(),
+                phase:            phase.clone(),
+                command:          command.clone(),
+                index:            *index,
+                exit_code:        *exit_code,
+                stderr:           stderr.clone(),
+                exec_output_tail: exec_output_tail.clone(),
             })
         }
         Event::RetroStarted {
@@ -3495,6 +3553,34 @@ mod tests {
     }
 
     #[test]
+    fn build_redacted_event_payload_redacts_exec_output_tail_values() {
+        let secret = "sk-ant-api03-xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA";
+        let stored = to_run_event(&fixtures::RUN_8, &Event::SetupFailed {
+            command:          "setup".to_string(),
+            index:            0,
+            exit_code:        1,
+            stderr:           "compat stderr".to_string(),
+            exec_output_tail: Some(fabro_types::ExecOutputTail {
+                stdout:           Some(format!("stdout {secret}")),
+                stderr:           Some("plain stderr".to_string()),
+                stdout_truncated: false,
+                stderr_truncated: false,
+            }),
+        });
+
+        let payload = build_redacted_event_payload(&stored, &fixtures::RUN_8).unwrap();
+        let payload_text = serde_json::to_string(payload.as_value()).unwrap();
+
+        assert!(!payload_text.contains(secret));
+        assert!(payload_text.contains("REDACTED"));
+        assert_eq!(payload.as_value()["event"], "setup.failed");
+        assert_eq!(
+            payload.as_value()["properties"]["exec_output_tail"]["stderr"],
+            "plain stderr"
+        );
+    }
+
+    #[test]
     fn event_name_matches_new_dot_notation() {
         assert_eq!(
             event_name(&Event::RetroStarted {
@@ -3793,15 +3879,21 @@ mod tests {
         }
 
         let failed = to_run_event(&fixtures::RUN_1, &Event::MetadataSnapshotFailed {
-            phase:        fabro_types::MetadataSnapshotPhase::Checkpoint,
-            branch:       "fabro/metadata/run".to_string(),
-            duration_ms:  120,
-            failure_kind: fabro_types::MetadataSnapshotFailureKind::Push,
-            error:        "push rejected".to_string(),
-            causes:       vec!["permission denied".to_string()],
-            commit_sha:   Some("def456".to_string()),
-            entry_count:  Some(4),
-            bytes:        Some(512),
+            phase:            fabro_types::MetadataSnapshotPhase::Checkpoint,
+            branch:           "fabro/metadata/run".to_string(),
+            duration_ms:      120,
+            failure_kind:     fabro_types::MetadataSnapshotFailureKind::Push,
+            error:            "push rejected".to_string(),
+            causes:           vec!["permission denied".to_string()],
+            commit_sha:       Some("def456".to_string()),
+            entry_count:      Some(4),
+            bytes:            Some(512),
+            exec_output_tail: Some(fabro_types::ExecOutputTail {
+                stdout:           Some("last stdout line".to_string()),
+                stderr:           Some("last stderr line".to_string()),
+                stdout_truncated: false,
+                stderr_truncated: true,
+            }),
         });
 
         assert_eq!(failed.event_name(), "metadata.snapshot.failed");
@@ -3814,6 +3906,11 @@ mod tests {
                 assert_eq!(props.commit_sha.as_deref(), Some("def456"));
                 assert_eq!(props.entry_count, Some(4));
                 assert_eq!(props.bytes, Some(512));
+                let tail = props.exec_output_tail.expect("exec output tail");
+                assert_eq!(tail.stdout.as_deref(), Some("last stdout line"));
+                assert_eq!(tail.stderr.as_deref(), Some("last stderr line"));
+                assert!(tail.stderr_truncated);
+                assert!(!tail.stdout_truncated);
             }
             other => panic!("expected MetadataSnapshotFailed body, got {other:?}"),
         }

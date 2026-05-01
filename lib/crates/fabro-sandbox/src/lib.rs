@@ -36,9 +36,10 @@ pub use error::{Error, Result};
 pub use local::LocalSandbox;
 pub use read_guard::ReadBeforeWriteSandbox;
 pub use sandbox::{
-    CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GitRunInfo, GitSetupIntent,
-    GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, format_lines_numbered,
-    git_push_via_exec, setup_git_via_exec, shell_quote,
+    CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
+    ExecStreamingResult, GitRunInfo, GitSetupIntent, GrepOptions, Sandbox, SandboxEvent,
+    SandboxEventCallback, format_lines_numbered, git_push_via_exec, redacted_output_tail,
+    setup_git_via_exec, shell_quote,
 };
 pub use sandbox_provider::SandboxProvider;
 pub use sandbox_record::SandboxRecord;

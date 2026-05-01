@@ -39,9 +39,7 @@ pub use billing::{
     ModelBillingFacts, ModelBillingInput, ModelPricing, ModelPricingPolicy, ModelRef, ModelUsage,
     OpenAiBillingFacts, OpenAiModelPricing, PricePerMTok, Speed, TokenCounts, UsdMicros,
 };
-pub use blob_ref::{
-    format_blob_ref, parse_blob_ref, parse_legacy_blob_file_ref, parse_managed_blob_file_ref,
-};
+pub use blob_ref::{format_blob_ref, parse_blob_ref, parse_managed_blob_file_ref};
 pub use checkpoint::Checkpoint;
 pub use command_output::{CommandOutputStream, CommandTermination};
 pub use conclusion::{Conclusion, StageSummary};
@@ -69,7 +67,7 @@ pub use run::{
 };
 pub use run_blob_id::RunBlobId;
 pub use run_event::{
-    ActorKind, ActorRef, EventBody, InterviewOption, MetadataSnapshotFailureKind,
+    ActorKind, ActorRef, EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind,
     MetadataSnapshotPhase, RunEvent, RunNoticeLevel,
 };
 pub use run_id::{RunId, fixtures};

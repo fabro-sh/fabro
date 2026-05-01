@@ -1,6 +1,6 @@
 # Preserve Exec Failure Diagnostics Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Preserve bounded, redacted stdout/stderr tails for failed process executions in durable run events, while keeping server tracing log-safe and avoiding duplicate full process-output types.
 
@@ -40,7 +40,7 @@
 - Modify: `lib/crates/fabro-types/src/lib.rs`
 - Modify: `lib/crates/fabro-types/src/run_event/mod.rs`
 
-- [ ] **Step 1: Add `ExecOutputTail`**
+- [x] **Step 1: Add `ExecOutputTail`**
 
 Add this type near the infrastructure event props in `infra.rs`:
 
@@ -82,7 +82,7 @@ impl ExecOutputTail {
 
 Keep `is_false` private to the module. Do not add another full process result type.
 
-- [ ] **Step 2: Add `exec_output_tail` additively to failure props**
+- [x] **Step 2: Add `exec_output_tail` additively to failure props**
 
 Add this optional field to `MetadataSnapshotFailedProps`, `SetupFailedProps`, `CliEnsureFailedProps`, and `DevcontainerLifecycleFailedProps`:
 
@@ -93,11 +93,11 @@ pub exec_output_tail: Option<ExecOutputTail>,
 
 Do not remove existing fields, including `stderr` on setup/devcontainer failure props.
 
-- [ ] **Step 3: Re-export the projection**
+- [x] **Step 3: Re-export the projection**
 
 In `lib.rs`, include `ExecOutputTail` in the `pub use run_event::{ ... }` list if downstream crates need to reference it as `fabro_types::ExecOutputTail`.
 
-- [ ] **Step 4: Add serde tests**
+- [x] **Step 4: Add serde tests**
 
 Add a test in `run_event/mod.rs` that serializes a `MetadataSnapshotFailedProps` with:
 
@@ -114,7 +114,7 @@ Assert the JSON includes `exec_output_tail.stdout`, `exec_output_tail.stderr`, a
 
 Add a second assertion that `exec_output_tail: None` omits the field.
 
-- [ ] **Step 5: Run focused type tests**
+- [x] **Step 5: Run focused type tests**
 
 Run:
 
@@ -131,7 +131,7 @@ Expected: serde tests pass and existing event payloads remain backward compatibl
 - Modify: `lib/crates/fabro-sandbox/src/error.rs`
 - Modify: `lib/crates/fabro-sandbox/src/daytona/mod.rs`
 
-- [ ] **Step 1: Add projection helpers to `ExecResult`**
+- [x] **Step 1: Add projection helpers to `ExecResult`**
 
 In `sandbox.rs`, add:
 
@@ -178,7 +178,7 @@ pub fn from_process_output(output: std::process::Output, duration_ms: u64) -> Se
 
 The signal-killed fallback is `-1`, matching existing local/docker sandbox behavior. The 8 KiB limit is applied after redaction and sanitization, so it is an event-size budget, not a promise about how many original process-output bytes are represented. At the default, one failure event can add at most about 16 KiB of tail text plus JSON escaping overhead.
 
-- [ ] **Step 2: Redact before truncating**
+- [x] **Step 2: Redact before truncating**
 
 Implement the private helper so it redacts the full stream first, strips ANSI escape sequences and other terminal control characters in the retained diagnostic string, then takes the tail:
 
@@ -245,7 +245,7 @@ fn sanitize_exec_output(text: &str) -> String {
 
 If the repository MSRV does not support `str::floor_char_boundary`, use the existing pattern from `fabro-agent/src/truncation.rs` and note that in the implementation comment.
 
-- [ ] **Step 3: Refactor `Error::Exec` to store `ExecResult`**
+- [x] **Step 3: Refactor `Error::Exec` to store `ExecResult`**
 
 In `error.rs`, replace the existing six-field variant with:
 
@@ -292,7 +292,7 @@ pub fn default_redacted_output_tail(&self) -> Option<fabro_types::ExecOutputTail
 
 Keep the existing `display_with_causes()` method.
 
-- [ ] **Step 4: Update `ExecResult` error constructors**
+- [x] **Step 4: Update `ExecResult` error constructors**
 
 Change:
 
@@ -324,11 +324,11 @@ rg -n "into_exec_error_with_redactor" lib/crates/fabro-sandbox/src
 
 If that grep has no production callers after the refactor, delete `into_exec_error_with_redactor` and its dedicated tests instead of retaining speculative API surface.
 
-- [ ] **Step 5: Update direct constructor call sites**
+- [x] **Step 5: Update direct constructor call sites**
 
 Update the direct `Error::exec(...)` call in `daytona/mod.rs` to construct an `ExecResult` and pass it to the new constructor. Use `rg "Error::exec\\(" lib/crates/fabro-sandbox/src` to verify there are no old six-argument calls left.
 
-- [ ] **Step 6: Add sandbox tests**
+- [x] **Step 6: Add sandbox tests**
 
 Add or update tests for:
 
@@ -353,7 +353,7 @@ Expected: sandbox tests pass and no safe-display test leaks raw command output.
 **Files:**
 - Modify: `lib/crates/fabro-workflow/src/event.rs`
 
-- [ ] **Step 1: Add optional tails to internal event variants**
+- [x] **Step 1: Add optional tails to internal event variants**
 
 Add `exec_output_tail: Option<fabro_types::ExecOutputTail>` to:
 
@@ -364,11 +364,11 @@ Add `exec_output_tail: Option<fabro_types::ExecOutputTail>` to:
 
 Keep existing `stderr` fields on `SetupFailed` and `DevcontainerLifecycleFailed`.
 
-- [ ] **Step 2: Map tails into `EventBody`**
+- [x] **Step 2: Map tails into `EventBody`**
 
 In `event_body_from_event`, pass `exec_output_tail.clone()` into the corresponding props for all four variants.
 
-- [ ] **Step 3: Trace only safe tail metadata**
+- [x] **Step 3: Trace only safe tail metadata**
 
 Do not add `exec_stdout_tail` or `exec_stderr_tail` fields to tracing. In each failure trace arm, include only:
 
@@ -382,7 +382,7 @@ exec_stderr_truncated = exec_output_tail.as_ref().map(|tail| tail.stderr_truncat
 
 This preserves the server-log debugging breadcrumb without duplicating output content into `server.log`.
 
-- [ ] **Step 4: Update event tests**
+- [x] **Step 4: Update event tests**
 
 Update existing constructors in tests to include `exec_output_tail: None`.
 
@@ -390,7 +390,7 @@ Add a test that converts a `SetupFailed` or `MetadataSnapshotFailed` event with 
 
 Add a test around `build_redacted_event_payload` that uses a secret-looking value in `exec_output_tail` and asserts the persisted payload does not contain the raw token.
 
-- [ ] **Step 5: Run focused event tests**
+- [x] **Step 5: Run focused event tests**
 
 Run:
 
@@ -407,7 +407,7 @@ Expected: event conversion includes additive tails and tracing changes compile.
 - Modify: `lib/crates/fabro-workflow/src/lifecycle/git.rs`
 - Modify: `lib/crates/fabro-workflow/src/pipeline/finalize.rs`
 
-- [ ] **Step 1: Keep `MetadataSnapshot` serializable/simple**
+- [x] **Step 1: Keep `MetadataSnapshot` serializable/simple**
 
 Do not store `fabro_sandbox::Error` in `MetadataSnapshot`.
 
@@ -433,7 +433,7 @@ to:
 pub push_error: Option<MetadataPushError>,
 ```
 
-- [ ] **Step 2: Capture push tail before stringifying**
+- [x] **Step 2: Capture push tail before stringifying**
 
 Change the push handling to:
 
@@ -450,7 +450,7 @@ let push_error = match push_result {
 
 Return this field on `MetadataSnapshot`. The only valid states are `None` for no push failure, or `Some(MetadataPushError { message, exec_output_tail })` for a push failure. There are no parallel `Option` fields.
 
-- [ ] **Step 3: Carry write-failure tails by projection only**
+- [x] **Step 3: Carry write-failure tails by projection only**
 
 Change string-only command/sandbox failures in `SandboxMetadataError` to one diagnostic variant carrying the projection, not the full sandbox error:
 
@@ -484,7 +484,7 @@ Use `Operation` for both nonzero `ExecResult` returns and sandbox API errors suc
 
 `Dump(#[from] anyhow::Error)` intentionally has no `exec_output_tail`: run-dump serialization should not execute sandbox commands. If a future dump path performs sandbox exec, that code path must return `Operation` instead.
 
-- [ ] **Step 4: Update metadata command helpers**
+- [x] **Step 4: Update metadata command helpers**
 
 In `exec_stdout`, use:
 
@@ -510,7 +510,7 @@ if result.is_success() {
 
 Delete the local `exec_err` helper after callers no longer use it.
 
-- [ ] **Step 5: Emit metadata failed events with tails**
+- [x] **Step 5: Emit metadata failed events with tails**
 
 In both `lifecycle/git.rs` and `pipeline/finalize.rs`:
 
@@ -518,7 +518,7 @@ In both `lifecycle/git.rs` and `pipeline/finalize.rs`:
 - For write failures, pass `err.exec_output_tail()`.
 - Keep the warning message string concise and based on the existing safe error string.
 
-- [ ] **Step 6: Update metadata tests**
+- [x] **Step 6: Update metadata tests**
 
 Update tests that assert `MetadataSnapshotFailedProps` to include:
 
@@ -550,7 +550,7 @@ Expected: metadata push/write failure events contain `exec_output_tail` when com
 - Modify: `lib/crates/fabro-workflow/src/devcontainer_bridge.rs`
 - Modify: `lib/crates/fabro-workflow/src/handler/llm/cli.rs`
 
-- [ ] **Step 1: Add setup failure tails without removing `stderr`**
+- [x] **Step 1: Add setup failure tails without removing `stderr`**
 
 When a setup command returns a nonzero exit code, emit:
 
@@ -567,7 +567,7 @@ options.emitter.emit(&Event::SetupFailed {
 
 Keep the existing `stderr` value for compatibility in this change.
 
-- [ ] **Step 2: Add devcontainer failure tails without removing `stderr`**
+- [x] **Step 2: Add devcontainer failure tails without removing `stderr`**
 
 For both parallel and single-command lifecycle failures, emit:
 
@@ -585,7 +585,7 @@ emitter.emit(&Event::DevcontainerLifecycleFailed {
 
 Use `phase.to_string()` and `command.to_string()` in the single-command path, matching the current code.
 
-- [ ] **Step 3: Replace CLI install's embedded output detail**
+- [x] **Step 3: Replace CLI install's embedded output detail**
 
 In CLI ensure install failure handling, replace the 500-character manual tail embedded in `error_msg` with:
 
@@ -605,7 +605,7 @@ emitter.emit(&Event::CliEnsureFailed {
 return Err(Error::handler(error_msg));
 ```
 
-- [ ] **Step 4: Add focused tests**
+- [x] **Step 4: Add focused tests**
 
 Add or update tests so that:
 
@@ -629,7 +629,7 @@ Expected: failure events are additive and backward compatible.
 **Files:**
 - Modify only files that fail to compile from the `Error::exec` signature change.
 
-- [ ] **Step 1: Find old constructor call sites**
+- [x] **Step 1: Find old constructor call sites**
 
 Run:
 
@@ -639,17 +639,17 @@ rg -n "Error::exec\\(|\\.into_exec_error_with_redactor\\(" lib/crates/fabro-sand
 
 Expected: old direct `Error::exec(label, exit_code, timed_out, duration_ms, stderr, stdout)` calls are limited and mechanical.
 
-- [ ] **Step 2: Update direct `Error::exec` calls mechanically**
+- [x] **Step 2: Update direct `Error::exec` calls mechanically**
 
 For each old direct call, construct an `ExecResult` with the same existing values and pass it to `Error::exec(label, result)`.
 
 Do not refactor `sandbox_git.rs` return types unless a compile error forces it.
 
-- [ ] **Step 3: Keep hook behavior unchanged**
+- [x] **Step 3: Keep hook behavior unchanged**
 
 Do not add hook stdout/stderr tails to `HookDecision::Block.reason`. If compilation requires use of `ExecResult::from_process_output`, use it internally only and preserve the existing decision behavior.
 
-- [ ] **Step 4: Run compile-focused checks**
+- [x] **Step 4: Run compile-focused checks**
 
 Run:
 
@@ -666,7 +666,7 @@ Expected: constructor refactor compiles without broad unrelated changes.
 **Files:**
 - Modify: `docs/internal/logging-strategy.md`
 
-- [ ] **Step 1: Preserve the raw-output prohibition**
+- [x] **Step 1: Preserve the raw-output prohibition**
 
 Update the prohibited-fields guidance to say:
 
@@ -674,7 +674,7 @@ Update the prohibited-fields guidance to say:
 Raw command stdout/stderr, including raw `git_stderr`, must not be emitted to tracing logs. Durable run events may include `ExecOutputTail`, which is bounded and redacted before serialization. Tracing may include only tail metadata such as presence, byte count, and truncation booleans.
 ```
 
-- [ ] **Step 2: Add a safe tracing example**
+- [x] **Step 2: Add a safe tracing example**
 
 Add an example like:
 
@@ -693,7 +693,7 @@ error!(
 
 Do not show tail content fields in the tracing example.
 
-- [ ] **Step 3: Verify docs mention both sides of the policy**
+- [x] **Step 3: Verify docs mention both sides of the policy**
 
 Run:
 
@@ -708,7 +708,7 @@ Expected: docs allow bounded redacted tails in events and prohibit raw/tail cont
 **Files:**
 - Existing Rust test modules only.
 
-- [ ] **Step 1: Run focused crate tests**
+- [x] **Step 1: Run focused crate tests**
 
 Run:
 
@@ -720,7 +720,7 @@ cargo nextest run -p fabro-workflow
 
 Expected: all focused tests pass.
 
-- [ ] **Step 2: Run hook tests to prove behavior stayed stable**
+- [x] **Step 2: Run hook tests to prove behavior stayed stable**
 
 Run:
 
@@ -730,7 +730,7 @@ cargo nextest run -p fabro-hooks
 
 Expected: existing hook command behavior remains unchanged.
 
-- [ ] **Step 3: Run formatting**
+- [x] **Step 3: Run formatting**
 
 Run:
 
@@ -740,7 +740,7 @@ cargo +nightly-2026-04-14 fmt --check --all
 
 Expected: formatting passes.
 
-- [ ] **Step 4: Run clippy after tests pass**
+- [x] **Step 4: Run clippy after tests pass**
 
 Run:
 
@@ -750,7 +750,7 @@ cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings
 
 Expected: no new warnings.
 
-- [ ] **Step 5: Inspect one event payload**
+- [x] **Step 5: Inspect one event payload**
 
 Run or unit-test a setup failure and inspect the canonical event. The expected shape is additive:
 

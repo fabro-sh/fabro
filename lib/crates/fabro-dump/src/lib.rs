@@ -14,8 +14,10 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
 use fabro_store::{EventEnvelope, RunProjection, SerializableProjection, StageId};
-use fabro_types::{RunBlobId, parse_blob_ref, parse_legacy_blob_file_ref};
+use fabro_types::{RunBlobId, parse_blob_ref};
 use futures::future::BoxFuture;
+
+pub type BlobReader = Box<dyn FnMut(RunBlobId) -> BoxFuture<'static, Result<Option<Bytes>>> + Send>;
 
 #[derive(Debug, Clone)]
 pub struct RunDump {
@@ -29,18 +31,17 @@ pub struct RunDumpEntry {
 }
 
 #[derive(Debug, Clone)]
-pub enum RunDumpContents {
+pub(crate) enum RunDumpContents {
     Text(String),
     Json(serde_json::Value),
     Bytes(Vec<u8>),
 }
 
 impl RunDump {
-    #[must_use]
-    pub fn from_projection(state: &RunProjection) -> Self {
+    pub fn from_projection(state: &RunProjection) -> Result<Self> {
         let mut entries = Vec::new();
 
-        push_json_entry(&mut entries, "run.json", &SerializableProjection(state));
+        push_json_entry(&mut entries, "run.json", &SerializableProjection(state))?;
 
         if let Some(graph_source) = state.graph_source.as_ref() {
             entries.push(RunDumpEntry::text("graph.fabro", graph_source.clone()));
@@ -71,7 +72,7 @@ impl RunDump {
                 ));
             }
             if let Some(status) = node.status.as_ref() {
-                push_json_entry_path(&mut entries, &base.join("status.json"), status);
+                push_json_entry_path(&mut entries, &base.join("status.json"), status)?;
             }
             if let Some(provider_used) = node.provider_used.as_ref() {
                 entries.push(RunDumpEntry::json_path(
@@ -127,14 +128,14 @@ impl RunDump {
             ));
         }
 
-        Self { entries }
+        Ok(Self { entries })
     }
 
     pub fn from_store_state_and_events(
         state: &RunProjection,
         events: &[EventEnvelope],
     ) -> Result<Self> {
-        let mut dump = Self::from_projection(state);
+        let mut dump = Self::from_projection(state)?;
 
         let mut events_jsonl = Vec::new();
         for event in events {
@@ -149,7 +150,7 @@ impl RunDump {
                 &mut dump.entries,
                 &PathBuf::from("checkpoints").join(format!("{seq:04}.json")),
                 checkpoint,
-            );
+            )?;
         }
 
         Ok(dump)
@@ -168,16 +169,6 @@ impl RunDump {
 
     pub fn add_file_bytes(&mut self, path: impl Into<String>, contents: Vec<u8>) {
         self.entries.push(RunDumpEntry::bytes(path, contents));
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_raw_entries(entries: Vec<(String, Vec<u8>)>) -> Self {
-        Self {
-            entries: entries
-                .into_iter()
-                .map(|(path, contents)| RunDumpEntry::bytes(path, contents))
-                .collect(),
-        }
     }
 
     pub async fn hydrate_referenced_blobs_with_reader<'a, F>(
@@ -248,6 +239,14 @@ impl RunDump {
 }
 
 impl RunDumpEntry {
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        self.contents.to_bytes()
+    }
+
     fn text(path: impl Into<String>, contents: String) -> Self {
         Self {
             path:     path.into(),
@@ -301,7 +300,7 @@ impl RunDumpEntry {
 }
 
 impl RunDumpContents {
-    fn to_bytes(&self) -> Result<Vec<u8>> {
+    pub(crate) fn to_bytes(&self) -> Result<Vec<u8>> {
         match self {
             Self::Text(value) => Ok(value.as_bytes().to_vec()),
             Self::Json(value) => Ok(serde_json::to_vec_pretty(value)?),
@@ -310,22 +309,20 @@ impl RunDumpContents {
     }
 }
 
-fn push_json_entry<T>(entries: &mut Vec<RunDumpEntry>, path: &str, value: &T)
+fn push_json_entry<T>(entries: &mut Vec<RunDumpEntry>, path: &str, value: &T) -> Result<()>
 where
     T: serde::Serialize,
 {
-    if let Ok(value) = serde_json::to_value(value) {
-        entries.push(RunDumpEntry::json(path, value));
-    }
+    entries.push(RunDumpEntry::json(path, serde_json::to_value(value)?));
+    Ok(())
 }
 
-fn push_json_entry_path<T>(entries: &mut Vec<RunDumpEntry>, path: &Path, value: &T)
+fn push_json_entry_path<T>(entries: &mut Vec<RunDumpEntry>, path: &Path, value: &T) -> Result<()>
 where
     T: serde::Serialize,
 {
-    if let Ok(value) = serde_json::to_value(value) {
-        entries.push(RunDumpEntry::json_path(path, value));
-    }
+    entries.push(RunDumpEntry::json_path(path, serde_json::to_value(value)?));
+    Ok(())
 }
 
 fn path_to_string(path: &Path) -> String {
@@ -360,9 +357,7 @@ fn validate_relative_path(kind: &str, value: &str) -> Result<PathBuf> {
 fn collect_blob_refs_in_value(value: &serde_json::Value, blob_ids: &mut Vec<RunBlobId>) {
     match value {
         serde_json::Value::String(current) => {
-            if let Some(blob_id) =
-                parse_blob_ref(current).or_else(|| parse_legacy_blob_file_ref(current))
-            {
+            if let Some(blob_id) = parse_blob_ref(current) {
                 blob_ids.push(blob_id);
             }
         }
@@ -386,9 +381,7 @@ fn replace_blob_refs_in_value(
 ) -> Result<()> {
     match value {
         serde_json::Value::String(current) => {
-            let Some(blob_id) =
-                parse_blob_ref(current).or_else(|| parse_legacy_blob_file_ref(current))
-            else {
+            let Some(blob_id) = parse_blob_ref(current) else {
                 return Ok(());
             };
             let hydrated = cache
@@ -441,9 +434,9 @@ mod tests {
         Checkpoint, Conclusion, NodeStatusRecord, RunStatus, SandboxRecord, StageOutcome,
         StartRecord, SuccessReason, WorkflowSettings, fixtures,
     };
+    use futures::executor;
 
-    use super::RunDump;
-    use crate::run_dump::RunDumpContents;
+    use super::{RunDump, RunDumpContents, RunDumpEntry};
 
     fn sample_run_spec() -> RunSpec {
         RunSpec {
@@ -555,7 +548,7 @@ mod tests {
             termination:       None,
         });
 
-        let dump = RunDump::from_projection(&projection);
+        let dump = RunDump::from_projection(&projection).unwrap();
         let paths: Vec<&str> = dump
             .entries()
             .iter()
@@ -609,5 +602,35 @@ mod tests {
             node.provider_used,
             Some(serde_json::json!({ "provider": "openai" }))
         );
+    }
+
+    #[test]
+    fn hydrate_referenced_blobs_ignores_legacy_artifact_file_refs() {
+        let blob = serde_json::to_vec("hydrated legacy text").unwrap();
+        let blob_id = fabro_types::RunBlobId::new(&blob);
+        let legacy_ref = format!("file:///sandbox/.fabro/artifacts/{blob_id}.json");
+        let mut dump = RunDump {
+            entries: vec![RunDumpEntry::json(
+                "run.json",
+                serde_json::json!({ "stdout": legacy_ref }),
+            )],
+        };
+
+        executor::block_on(async {
+            dump.hydrate_referenced_blobs_with_reader(|read_blob_id| {
+                let blob = blob.clone();
+                Box::pin(async move {
+                    assert_eq!(read_blob_id, blob_id);
+                    Ok(Some(bytes::Bytes::from(blob)))
+                })
+            })
+            .await
+        })
+        .unwrap();
+
+        let RunDumpContents::Json(value) = &dump.entries[0].contents else {
+            panic!("entry should be JSON");
+        };
+        assert_eq!(value["stdout"], legacy_ref);
     }
 }

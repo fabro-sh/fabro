@@ -342,12 +342,12 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use fabro_dump::RunDump;
     use fabro_store::Database;
     use fabro_types::{CommandTermination, fixtures};
     use object_store::memory::InMemory;
 
     use super::*;
-    use crate::run_dump::RunDump;
 
     /// Create a temporary git repo with an initial commit.
     #[expect(
@@ -551,7 +551,10 @@ mod tests {
         .unwrap();
 
         let state = run.state().await.unwrap();
-        let files = RunDump::from_projection(&state).git_entries().unwrap();
+        let files = RunDump::from_projection(&state)
+            .unwrap()
+            .git_entries()
+            .unwrap();
         let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
         assert!(paths.contains(&"stages/work@2/prompt.md"));
         assert!(paths.contains(&"stages/work@2/response.md"));

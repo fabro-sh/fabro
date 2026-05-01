@@ -16,6 +16,7 @@ workspace = true
 anyhow = "1"
 chrono = { workspace = true, features = ["serde"] }
 fabro-agent = { path = "../fabro-agent" }
+fabro-dump = { path = "../fabro-dump" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../fabro-types" }

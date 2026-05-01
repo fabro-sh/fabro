@@ -1661,6 +1661,7 @@ dependencies = [
  "fabro-client",
  "fabro-config",
  "fabro-devcontainer",
+ "fabro-dump",
  "fabro-github",
  "fabro-graphviz",
  "fabro-hooks",
@@ -1835,6 +1836,20 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "fabro-dump"
+version = "0.220.0-nightly.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "fabro-store",
+ "fabro-types",
+ "futures",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2067,6 +2082,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "fabro-agent",
+ "fabro-dump",
  "fabro-llm",
  "fabro-store",
  "fabro-types",
@@ -2408,6 +2424,7 @@ dependencies = [
  "fabro-config",
  "fabro-core",
  "fabro-devcontainer",
+ "fabro-dump",
  "fabro-github",
  "fabro-graphviz",
  "fabro-hooks",

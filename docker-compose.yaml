@@ -7,6 +7,9 @@ services:
     volumes:
       - fabro-storage:/storage
       - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - path: .env
+        required: false
 
 volumes:
   fabro-storage:

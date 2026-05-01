@@ -140,7 +140,6 @@ pub mod records;
 mod retry;
 pub mod run_control;
 pub(crate) mod run_dir;
-pub mod run_dump;
 pub mod run_lookup;
 
 pub use error::{Error, FailureCategory, FailureSignature, FailureSignatureExt, Result};

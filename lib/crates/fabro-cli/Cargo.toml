@@ -26,6 +26,7 @@ fabro-oauth = { path = "../fabro-oauth" }
 fabro-github = { path = "../fabro-github" }
 fabro-agent = { path = "../fabro-agent" }
 fabro-devcontainer = { path = "../fabro-devcontainer" }
+fabro-dump = { path = "../fabro-dump" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-install = { path = "../fabro-install" }
 fabro-interview = { path = "../fabro-interview" }

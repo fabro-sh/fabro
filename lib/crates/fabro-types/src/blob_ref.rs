@@ -15,18 +15,6 @@ pub fn parse_blob_ref(value: &str) -> Option<RunBlobId> {
 }
 
 #[must_use]
-pub fn parse_legacy_blob_file_ref(value: &str) -> Option<RunBlobId> {
-    let path = value.strip_prefix("file://")?;
-    let blob_id = parse_blob_file_name(path)?;
-
-    if has_path_suffix(path, &[".fabro", "artifacts"]) {
-        Some(blob_id)
-    } else {
-        None
-    }
-}
-
-#[must_use]
 pub fn parse_managed_blob_file_ref(value: &str) -> Option<RunBlobId> {
     let path = value.strip_prefix("file://")?;
     let blob_id = parse_blob_file_name(path)?;
@@ -57,9 +45,7 @@ fn has_path_suffix(path: &str, suffix: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        format_blob_ref, parse_blob_ref, parse_legacy_blob_file_ref, parse_managed_blob_file_ref,
-    };
+    use super::{format_blob_ref, parse_blob_ref, parse_managed_blob_file_ref};
     use crate::RunBlobId;
 
     #[test]
@@ -68,14 +54,6 @@ mod tests {
         let formatted = format_blob_ref(&blob_id);
 
         assert_eq!(parse_blob_ref(&formatted), Some(blob_id));
-    }
-
-    #[test]
-    fn legacy_remote_blob_file_ref_is_recognized() {
-        let blob_id = RunBlobId::new(b"hello");
-        let value = format!("file:///sandbox/.fabro/artifacts/{blob_id}.json");
-
-        assert_eq!(parse_legacy_blob_file_ref(&value), Some(blob_id));
     }
 
     #[test]
@@ -96,7 +74,6 @@ mod tests {
 
     #[test]
     fn ordinary_file_refs_are_not_treated_as_blob_refs() {
-        assert_eq!(parse_legacy_blob_file_ref("file:///tmp/report.json"), None);
         assert_eq!(parse_managed_blob_file_ref("file:///tmp/report.json"), None);
     }
 }

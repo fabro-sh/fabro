@@ -1,0 +1,42 @@
+---
+title: "Deployment"
+description: "Choose where the Fabro server runs: on your laptop or self-hosted on a server"
+---
+
+<Warning>
+  The server interface is in private early access. Contact [bryan@qlty.sh](mailto:bryan@qlty.sh) if you're interested in trying it.
+</Warning>
+
+Fabro runs as a server. The CLI authenticates and communicates with that server, whether the server is running on your laptop or on a remote host. Choose where the server runs based on how you use Fabro.
+
+## Two deployment modes
+
+| | Local | Self-hosted |
+|---|---|---|
+| **Where the server runs** | Your laptop | A host you operate (Docker container) |
+| **How to start it** | `fabro server start` | `docker compose up -d` |
+| **Best for** | Solo use, getting started, learning | Teams, production, 24/7 workflows |
+| **Trade-off** | Workflows pause when your laptop sleeps or shuts off | You operate the host |
+
+Both modes use the same image, the same workflow engine, and the same CLI. The only difference is where the server process lives.
+
+## Local
+
+Run `fabro server start` on your machine. State persists under `~/.fabro/`. The CLI talks to it over a Unix socket by default. This is the right mode for solo use and getting started — no deployment required.
+
+When your laptop sleeps or shuts off, in-flight workflows pause until the laptop wakes again. For workflows that need to run 24/7 or for teams sharing a single instance, self-host.
+
+See [Server Operations](/reference/server-operations) for starting the server, the install wizard, authentication, and pointing the CLI at it.
+
+## Self-hosted
+
+For team use, production workflows, or running 24/7, self-host the server as a Docker container. The recommended approach is `docker compose` for a single host, or any cloud container service (ECS, Cloud Run, Kubernetes) using the same image with the same requirements.
+
+<Columns cols={2}>
+  <Card title="Self-host with Docker" icon="docker" href="/administration/self-host-docker">
+    Compose-first walkthrough. Same image works on ECS, Cloud Run, and Kubernetes.
+  </Card>
+  <Card title="Deploy to Railway" icon="train" href="/administration/deploy-railway">
+    One-click managed shortcut for the same Docker image.
+  </Card>
+</Columns>

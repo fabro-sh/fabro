@@ -144,15 +144,18 @@ For headless or scripted environments, `fabro install` runs the same setup as a 
 
 ---
 
-## Self-host the Fabro server
+## Running Fabro
 
-Running Fabro as an HTTP server with the web UI lets a team share one instance. The repository ships a `Dockerfile` that serves the API (with the embedded web UI) on `$PORT` (default `32276`) and persists state to `/storage`.
+Fabro runs as a server. You choose where it runs:
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https%3A%2F%2Fgithub.com%2Ffabro-sh%2Ffabro) [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/fabro-sh/fabro)
+- **On your laptop** — install the CLI (above) and run `fabro server start`. Workflows pause when your laptop sleeps.
+- **On a host (self-hosted)** — deploy the Docker image with `docker compose` or any cloud container service (ECS, Cloud Run, Kubernetes). See [Self-host with Docker](https://docs.fabro.sh/administration/self-host-docker).
 
-Click a button to provision a Fabro service from this repository. On Railway, attach a Volume at `/storage` so your runs and checkpoints survive redeploys; on Render, the `render.yaml` blueprint provisions a 1 GB disk at `/storage` automatically. The [Railway](https://docs.fabro.sh/administration/deploy-railway) and [Render](https://docs.fabro.sh/administration/deploy-render) deploy guides walk through env vars, accessing the dev token, and pointing the CLI at your deployment.
+One-click managed alternative for the same Docker image:
 
-Prefer to run Fabro elsewhere? See [Running the Fabro Server](https://docs.fabro.sh/administration/deploy-server) for generic Docker guidance and the companion guides for [Fly.io](https://docs.fabro.sh/administration/deploy-fly-io) and [DigitalOcean](https://docs.fabro.sh/administration/deploy-digital-ocean).
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/UcEy5m?referralCode=E5TucU&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
+See the [deployment overview](https://docs.fabro.sh/administration/deployment) for the full picture.
 
 ---
 

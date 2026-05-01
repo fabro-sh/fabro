@@ -108,6 +108,7 @@
               "reference/run-directory",
               "reference/sdk",
               "reference/architecture",
+              "reference/server-operations",
               "reference/verifying-releases",
               "administration/server-configuration",
               "administration/troubleshooting",
@@ -156,11 +157,9 @@
             "group": "Deployment",
             "icon": "server",
             "pages": [
-              "administration/deploy-server",
-              "administration/deploy-railway",
-              "administration/deploy-render",
-              "administration/deploy-fly-io",
-              "administration/deploy-digital-ocean"
+              "administration/deployment",
+              "administration/self-host-docker",
+              "administration/deploy-railway"
             ]
           }
         ]
