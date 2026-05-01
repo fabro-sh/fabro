@@ -192,14 +192,12 @@ impl RunMetadataWriterHandle {
         let entries = dump
             .git_entries()
             .map_err(RunMetadataError::DumpSerialize)?;
-        let entry_count = entries.len();
-        let bytes = metadata_entries_bytes(&entries);
         let message = message.to_string();
         let writer = Arc::clone(&self.writer);
 
         task::spawn_blocking(move || {
             let mut guard = writer.lock().expect("metadata writer mutex poisoned");
-            guard.write_snapshot_blocking(&entries, entry_count, bytes, &message, token.as_deref())
+            guard.write_snapshot_blocking(&entries, &message, token.as_deref())
         })
         .await
         .map_err(RunMetadataError::Join)?
@@ -305,12 +303,12 @@ impl RunMetadataWriter {
     fn write_snapshot_blocking(
         &mut self,
         entries: &[(String, Vec<u8>)],
-        entry_count: usize,
-        bytes: u64,
         message: &str,
         token: Option<&str>,
     ) -> Result<MetadataSnapshot, RunMetadataError> {
         self.discover_parent(token)?;
+        let entry_count = entries.len();
+        let bytes = metadata_entries_bytes(entries);
         for (path, _) in entries {
             validate_metadata_path(path)?;
         }
