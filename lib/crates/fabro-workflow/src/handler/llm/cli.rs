@@ -117,21 +117,9 @@ async fn ensure_cli(
     let node_installed = true;
     if !install_result.is_success() {
         let duration_ms = elapsed_ms(start);
-        let output = if install_result.stderr.is_empty() {
-            &install_result.stdout
-        } else {
-            &install_result.stderr
-        };
-        let detail: String = output
-            .chars()
-            .rev()
-            .take(500)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
+        let exec_output_tail = install_result.default_redacted_output_tail();
         let error_msg = format!(
-            "{cli_name} install exited with code {}: {detail}",
+            "{cli_name} install exited with code {}",
             install_result.display_exit_code()
         );
         emitter.emit(&Event::CliEnsureFailed {
@@ -139,6 +127,7 @@ async fn ensure_cli(
             provider: provider_str.to_string(),
             error: error_msg.clone(),
             duration_ms,
+            exec_output_tail,
         });
         return Err(Error::handler(error_msg));
     }
@@ -986,11 +975,15 @@ mod tests {
     }
 
     fn fail_result(code: i32) -> ExecResult {
+        fail_result_with_output(code, "", "error")
+    }
+
+    fn fail_result_with_output(code: i32, stdout: &str, stderr: &str) -> ExecResult {
         ExecResult {
             exit_code:   Some(code),
             termination: CommandTermination::Exited,
-            stdout:      String::new(),
-            stderr:      "error".to_string(),
+            stdout:      stdout.to_string(),
+            stderr:      stderr.to_string(),
             duration_ms: 10,
         }
     }
@@ -1039,20 +1032,49 @@ mod tests {
         let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(
             vec![
                 fail_result(127), // claude --version
-                fail_result(1),   // combined install fails
+                fail_result_with_output(1, "install stdout detail", "install stderr detail"),
             ],
             Arc::clone(&commands),
         ));
         let emitter = Arc::new(Emitter::default());
+        let events = Arc::new(Mutex::new(Vec::<fabro_types::RunEvent>::new()));
+        emitter.on_event({
+            let events = Arc::clone(&events);
+            move |event| events.lock().unwrap().push(event.clone())
+        });
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("install exited with code")
-        );
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("install exited with code 1"));
+        assert!(!error.contains("install stdout detail"));
+        assert!(!error.contains("install stderr detail"));
+
+        let events = events.lock().unwrap();
+        let failed = events
+            .iter()
+            .find(|event| event.event_name() == "cli.ensure.failed")
+            .expect("cli ensure failed event");
+        match &failed.body {
+            fabro_types::EventBody::CliEnsureFailed(props) => {
+                assert_eq!(props.error, "claude install exited with code 1");
+                assert_eq!(
+                    props
+                        .exec_output_tail
+                        .as_ref()
+                        .and_then(|tail| tail.stdout.as_deref()),
+                    Some("install stdout detail")
+                );
+                assert_eq!(
+                    props
+                        .exec_output_tail
+                        .as_ref()
+                        .and_then(|tail| tail.stderr.as_deref()),
+                    Some("install stderr detail")
+                );
+            }
+            other => panic!("expected cli ensure failed body, got {other:?}"),
+        }
     }
 
     // -- Cycle 1: cli_command_for_provider --

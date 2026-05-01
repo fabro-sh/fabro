@@ -1281,15 +1281,16 @@ mod tests {
     #[test]
     fn metadata_snapshot_failed_omits_empty_optional_fields() {
         let body = EventBody::MetadataSnapshotFailed(MetadataSnapshotFailedProps {
-            phase:        MetadataSnapshotPhase::Init,
-            branch:       "fabro/metadata/run".to_string(),
-            duration_ms:  15,
-            failure_kind: MetadataSnapshotFailureKind::LoadState,
-            error:        "state unavailable".to_string(),
-            causes:       Vec::new(),
-            commit_sha:   None,
-            entry_count:  None,
-            bytes:        None,
+            phase:            MetadataSnapshotPhase::Init,
+            branch:           "fabro/metadata/run".to_string(),
+            duration_ms:      15,
+            failure_kind:     MetadataSnapshotFailureKind::LoadState,
+            error:            "state unavailable".to_string(),
+            causes:           Vec::new(),
+            commit_sha:       None,
+            entry_count:      None,
+            bytes:            None,
+            exec_output_tail: None,
         });
 
         let value = serde_json::to_value(&body).unwrap();
@@ -1303,6 +1304,69 @@ mod tests {
                 "failure_kind": "load_state",
                 "error": "state unavailable"
             })
+        );
+    }
+
+    #[test]
+    fn metadata_snapshot_failed_serializes_exec_output_tail_additively() {
+        let body = EventBody::MetadataSnapshotFailed(MetadataSnapshotFailedProps {
+            phase:            MetadataSnapshotPhase::Checkpoint,
+            branch:           "fabro/metadata/run".to_string(),
+            duration_ms:      20,
+            failure_kind:     MetadataSnapshotFailureKind::Push,
+            error:            "push failed".to_string(),
+            causes:           Vec::new(),
+            commit_sha:       None,
+            entry_count:      None,
+            bytes:            None,
+            exec_output_tail: Some(ExecOutputTail {
+                stdout:           Some("last stdout line".to_string()),
+                stderr:           Some("last stderr line".to_string()),
+                stdout_truncated: false,
+                stderr_truncated: true,
+            }),
+        });
+
+        let value = serde_json::to_value(&body).unwrap();
+        assert_eq!(
+            value["properties"]["exec_output_tail"]["stdout"],
+            "last stdout line"
+        );
+        assert_eq!(
+            value["properties"]["exec_output_tail"]["stderr"],
+            "last stderr line"
+        );
+        assert_eq!(
+            value["properties"]["exec_output_tail"]["stderr_truncated"],
+            true
+        );
+        assert!(
+            value["properties"]["exec_output_tail"]
+                .as_object()
+                .expect("exec output tail object")
+                .get("stdout_truncated")
+                .is_none()
+        );
+
+        let body_without_tail = EventBody::MetadataSnapshotFailed(MetadataSnapshotFailedProps {
+            phase:            MetadataSnapshotPhase::Checkpoint,
+            branch:           "fabro/metadata/run".to_string(),
+            duration_ms:      20,
+            failure_kind:     MetadataSnapshotFailureKind::Push,
+            error:            "push failed".to_string(),
+            causes:           Vec::new(),
+            commit_sha:       None,
+            entry_count:      None,
+            bytes:            None,
+            exec_output_tail: None,
+        });
+        let value_without_tail = serde_json::to_value(&body_without_tail).unwrap();
+        assert!(
+            value_without_tail["properties"]
+                .as_object()
+                .expect("properties object")
+                .get("exec_output_tail")
+                .is_none()
         );
     }
 }

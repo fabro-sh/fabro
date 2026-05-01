@@ -16,7 +16,9 @@ use crate::run_options::RunOptions;
 use crate::run_status::{FailureReason, RunStatus, SuccessReason};
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::git_diff_with_timeout;
-use crate::sandbox_metadata::{MetadataSnapshot, SandboxMetadataWriter};
+use crate::sandbox_metadata::{
+    MetadataSnapshot, MetadataSnapshotFailure, SandboxMetadataWriter, emit_metadata_snapshot_failed,
+};
 use crate::services::RunServices;
 
 pub fn classify_engine_result(
@@ -171,15 +173,19 @@ pub async fn write_finalize_commit(
         Err(err) => {
             let message = format!("failed to load run state for final metadata snapshot: {err}");
             emit_metadata_snapshot_failed(
-                services,
+                &services.emitter,
                 phase,
                 meta_branch,
                 started,
-                MetadataSnapshotFailureKind::LoadState,
-                message.clone(),
-                collect_causes(err.as_ref()),
-                None,
-                None,
+                MetadataSnapshotFailure {
+                    kind:             MetadataSnapshotFailureKind::LoadState,
+                    error:            message.clone(),
+                    causes:           collect_causes(err.as_ref()),
+                    commit_sha:       None,
+                    entry_count:      None,
+                    bytes:            None,
+                    exec_output_tail: None,
+                },
                 None,
             );
             emit_metadata_warning(services, "checkpoint_metadata_write_failed", message);
@@ -217,20 +223,24 @@ pub async fn write_finalize_commit(
     );
     match writer.write_snapshot(&dump, "finalize run").await {
         Ok(snapshot) => {
-            if let Some(detail) = snapshot.push_error.as_deref() {
+            if let Some(push_error) = snapshot.push_error.as_ref() {
                 let message =
-                    format!("failed to push metadata ref refs/heads/{meta_branch}: {detail}");
+                    format!("failed to push metadata ref refs/heads/{meta_branch}: {push_error}");
                 emit_metadata_snapshot_failed(
-                    services,
+                    &services.emitter,
                     phase,
                     meta_branch,
                     started,
-                    MetadataSnapshotFailureKind::Push,
-                    message.clone(),
-                    Vec::new(),
-                    Some(snapshot.commit_sha.clone()),
-                    Some(snapshot.entry_count),
-                    Some(snapshot.bytes),
+                    MetadataSnapshotFailure {
+                        kind:             MetadataSnapshotFailureKind::Push,
+                        error:            message.clone(),
+                        causes:           Vec::new(),
+                        commit_sha:       Some(snapshot.commit_sha.clone()),
+                        entry_count:      Some(snapshot.entry_count),
+                        bytes:            Some(snapshot.bytes),
+                        exec_output_tail: push_error.exec_output_tail(),
+                    },
+                    None,
                 );
                 emit_metadata_warning(services, "checkpoint_metadata_push_failed", message);
             } else {
@@ -240,15 +250,19 @@ pub async fn write_finalize_commit(
         Err(err) => {
             let message = format!("failed to write final checkpoint metadata: {err}");
             emit_metadata_snapshot_failed(
-                services,
+                &services.emitter,
                 phase,
                 meta_branch,
                 started,
-                MetadataSnapshotFailureKind::Write,
-                message.clone(),
-                collect_causes(&err),
-                None,
-                None,
+                MetadataSnapshotFailure {
+                    kind:             MetadataSnapshotFailureKind::Write,
+                    error:            message.clone(),
+                    causes:           collect_causes(&err),
+                    commit_sha:       None,
+                    entry_count:      None,
+                    bytes:            None,
+                    exec_output_tail: err.exec_output_tail(),
+                },
                 None,
             );
             emit_metadata_warning(services, "checkpoint_metadata_write_failed", message);
@@ -281,35 +295,6 @@ fn emit_metadata_snapshot_completed(
         entry_count: snapshot.entry_count,
         bytes: snapshot.bytes,
         commit_sha: snapshot.commit_sha.clone(),
-    });
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Metadata failure event carries the full event contract explicitly."
-)]
-fn emit_metadata_snapshot_failed(
-    services: &RunServices,
-    phase: MetadataSnapshotPhase,
-    branch: &str,
-    started: Instant,
-    failure_kind: MetadataSnapshotFailureKind,
-    error: String,
-    causes: Vec<String>,
-    commit_sha: Option<String>,
-    entry_count: Option<usize>,
-    bytes: Option<u64>,
-) {
-    services.emitter.emit(&Event::MetadataSnapshotFailed {
-        phase,
-        branch: branch.to_string(),
-        duration_ms: elapsed_ms(started),
-        failure_kind,
-        error,
-        causes,
-        commit_sha,
-        entry_count,
-        bytes,
     });
 }
 

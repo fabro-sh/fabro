@@ -67,7 +67,7 @@ pub use run::{
 };
 pub use run_blob_id::RunBlobId;
 pub use run_event::{
-    ActorKind, ActorRef, EventBody, InterviewOption, MetadataSnapshotFailureKind,
+    ActorKind, ActorRef, EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind,
     MetadataSnapshotPhase, RunEvent, RunNoticeLevel,
 };
 pub use run_id::{RunId, fixtures};

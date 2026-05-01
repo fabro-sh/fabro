@@ -1,13 +1,17 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use fabro_agent::Sandbox;
 use fabro_dump::RunDump;
 use fabro_sandbox::shell_quote;
+use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
+use fabro_util::time::elapsed_ms;
 use tokio::fs;
 use tokio::sync::OnceCell;
 
+use crate::event::{Emitter, Event, StageScope};
 use crate::git::{GitAuthor, META_BRANCH_PREFIX};
 use crate::sandbox_git::GIT_REMOTE;
 
@@ -19,10 +23,22 @@ pub(crate) enum SandboxMetadataError {
     Dump(#[from] anyhow::Error),
     #[error("metadata temp file write failed: {0}")]
     LocalTemp(std::io::Error),
-    #[error("{0}")]
-    Git(String),
-    #[error("{0}")]
-    Sandbox(String),
+    #[error("{message}")]
+    Operation {
+        message:          String,
+        exec_output_tail: Option<fabro_types::ExecOutputTail>,
+    },
+}
+
+impl SandboxMetadataError {
+    pub(crate) fn exec_output_tail(&self) -> Option<fabro_types::ExecOutputTail> {
+        match self {
+            Self::Operation {
+                exec_output_tail, ..
+            } => exec_output_tail.clone(),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) struct SandboxGitRuntime {
@@ -77,9 +93,49 @@ pub(crate) struct SandboxMetadataWriter<'a> {
 
 pub(crate) struct MetadataSnapshot {
     pub commit_sha:  String,
-    pub push_error:  Option<String>,
+    pub push_error:  Option<SandboxMetadataError>,
     pub entry_count: usize,
     pub bytes:       u64,
+}
+
+/// Full payload for a `MetadataSnapshotFailed` event, grouped so the emit
+/// helper stays under clippy's argument threshold.
+#[derive(Debug)]
+pub(crate) struct MetadataSnapshotFailure {
+    pub kind:             MetadataSnapshotFailureKind,
+    pub error:            String,
+    pub causes:           Vec<String>,
+    pub commit_sha:       Option<String>,
+    pub entry_count:      Option<usize>,
+    pub bytes:            Option<u64>,
+    pub exec_output_tail: Option<fabro_types::ExecOutputTail>,
+}
+
+pub(crate) fn emit_metadata_snapshot_failed(
+    emitter: &Emitter,
+    phase: MetadataSnapshotPhase,
+    branch: &str,
+    started: Instant,
+    failure: MetadataSnapshotFailure,
+    scope: Option<&StageScope>,
+) {
+    let event = Event::MetadataSnapshotFailed {
+        phase,
+        branch: branch.to_string(),
+        duration_ms: elapsed_ms(started),
+        failure_kind: failure.kind,
+        error: failure.error,
+        causes: failure.causes,
+        commit_sha: failure.commit_sha,
+        entry_count: failure.entry_count,
+        bytes: failure.bytes,
+        exec_output_tail: failure.exec_output_tail,
+    };
+    if let Some(scope) = scope {
+        emitter.emit_scoped(&event, scope);
+    } else {
+        emitter.emit(&event);
+    }
 }
 
 impl<'a> SandboxMetadataWriter<'a> {
@@ -173,7 +229,10 @@ impl<'a> SandboxMetadataWriter<'a> {
         self.sandbox
             .upload_file_from_local(local.path(), &remote)
             .await
-            .map_err(|err| SandboxMetadataError::Sandbox(err.display_with_causes()))?;
+            .map_err(|err| SandboxMetadataError::Operation {
+                message:          err.display_with_causes(),
+                exec_output_tail: err.default_redacted_output_tail(),
+            })?;
 
         let stdout = exec_stdout(
             self.sandbox,
@@ -186,12 +245,12 @@ impl<'a> SandboxMetadataWriter<'a> {
         .await?;
         let commit = parse_fast_import_mark(&stdout)?;
         let refspec = format!("{full_ref}:{full_ref}");
-        let push_error = self
-            .sandbox
-            .git_push_ref(&refspec)
-            .await
-            .err()
-            .map(|err| err.to_string());
+        let push_error = self.sandbox.git_push_ref(&refspec).await.err().map(|err| {
+            SandboxMetadataError::Operation {
+                message:          err.display_with_causes(),
+                exec_output_tail: err.default_redacted_output_tail(),
+            }
+        });
         Ok(MetadataSnapshot {
             commit_sha: commit,
             push_error,
@@ -262,11 +321,24 @@ fn parse_fast_import_mark(stdout: &str) -> Result<String, SandboxMetadataError> 
         .map(str::trim)
         .find(|line| !line.is_empty() && line.bytes().all(|byte| byte.is_ascii_hexdigit()))
         .map(ToString::to_string)
-        .ok_or_else(|| {
-            SandboxMetadataError::Git(format!(
-                "git fast-import did not report imported commit mark: {stdout:?}"
-            ))
+        .ok_or_else(|| SandboxMetadataError::Operation {
+            message:          format!(
+                "git fast-import did not report imported commit mark (stdout_bytes={})",
+                stdout.len()
+            ),
+            exec_output_tail: stdout_output_tail(stdout),
         })
+}
+
+fn stdout_output_tail(stdout: &str) -> Option<fabro_types::ExecOutputTail> {
+    fabro_sandbox::ExecResult {
+        stdout:      stdout.to_string(),
+        stderr:      String::new(),
+        exit_code:   Some(0),
+        termination: fabro_types::CommandTermination::Exited,
+        duration_ms: 0,
+    }
+    .default_redacted_output_tail()
 }
 
 fn fast_import_ident(author: &GitAuthor) -> String {
@@ -357,11 +429,18 @@ async fn exec_stdout(
     let result = sandbox
         .exec_command(command, 30_000, None, env, None)
         .await
-        .map_err(|err| SandboxMetadataError::Sandbox(err.display_with_causes()))?;
+        .map_err(|err| SandboxMetadataError::Operation {
+            message:          err.display_with_causes(),
+            exec_output_tail: err.default_redacted_output_tail(),
+        })?;
     if result.is_success() {
         Ok(result.stdout.trim().to_string())
     } else {
-        Err(SandboxMetadataError::Git(exec_err(command, &result)))
+        let error = result.into_exec_error(command.to_string());
+        Err(SandboxMetadataError::Operation {
+            message:          error.display_with_causes(),
+            exec_output_tail: error.default_redacted_output_tail(),
+        })
     }
 }
 
@@ -373,25 +452,6 @@ async fn exec_ok(
     exec_stdout(sandbox, command, env).await.map(|_| ())
 }
 
-fn exec_err(label: &str, result: &fabro_sandbox::ExecResult) -> String {
-    if result.is_timed_out() {
-        return format!("{label} timed out after {}ms", result.duration_ms);
-    }
-    if result.is_cancelled() {
-        return format!("{label} cancelled after {}ms", result.duration_ms);
-    }
-    let detail = format!("{}{}", result.stdout, result.stderr);
-    let detail = detail.trim();
-    if detail.is_empty() {
-        format!("{label} failed with exit {}", result.display_exit_code())
-    } else {
-        format!(
-            "{label} failed with exit {}: {detail}",
-            result.display_exit_code()
-        )
-    }
-}
-
 fn validate_metadata_path(path: &str) -> Result<(), SandboxMetadataError> {
     let invalid = path.is_empty()
         || path.starts_with('/')
@@ -399,9 +459,167 @@ fn validate_metadata_path(path: &str) -> Result<(), SandboxMetadataError> {
             .split('/')
             .any(|segment| segment.is_empty() || segment == "." || segment == "..");
     if invalid {
-        return Err(SandboxMetadataError::Git(format!(
-            "invalid metadata path: {path}"
-        )));
+        return Err(SandboxMetadataError::Operation {
+            message:          format!("invalid metadata path: {path}"),
+            exec_output_tail: None,
+        });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use async_trait::async_trait;
+    use fabro_sandbox::{DirEntry, ExecResult, GrepOptions, Sandbox};
+    use fabro_types::CommandTermination;
+    use tokio_util::sync::CancellationToken;
+
+    use super::*;
+
+    struct ExecOnlySandbox {
+        result: ExecResult,
+    }
+
+    #[async_trait]
+    impl Sandbox for ExecOnlySandbox {
+        async fn read_file(
+            &self,
+            _path: &str,
+            _offset: Option<usize>,
+            _limit: Option<usize>,
+        ) -> fabro_sandbox::Result<String> {
+            unreachable!("read_file is not used by exec_stdout")
+        }
+
+        async fn write_file(&self, _path: &str, _content: &str) -> fabro_sandbox::Result<()> {
+            unreachable!("write_file is not used by exec_stdout")
+        }
+
+        async fn delete_file(&self, _path: &str) -> fabro_sandbox::Result<()> {
+            unreachable!("delete_file is not used by exec_stdout")
+        }
+
+        async fn file_exists(&self, _path: &str) -> fabro_sandbox::Result<bool> {
+            unreachable!("file_exists is not used by exec_stdout")
+        }
+
+        async fn list_directory(
+            &self,
+            _path: &str,
+            _depth: Option<usize>,
+        ) -> fabro_sandbox::Result<Vec<DirEntry>> {
+            unreachable!("list_directory is not used by exec_stdout")
+        }
+
+        async fn exec_command(
+            &self,
+            _command: &str,
+            _timeout_ms: u64,
+            _working_dir: Option<&str>,
+            _env_vars: Option<&HashMap<String, String>>,
+            _cancel_token: Option<CancellationToken>,
+        ) -> fabro_sandbox::Result<ExecResult> {
+            Ok(self.result.clone())
+        }
+
+        async fn grep(
+            &self,
+            _pattern: &str,
+            _path: &str,
+            _options: &GrepOptions,
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            unreachable!("grep is not used by exec_stdout")
+        }
+
+        async fn glob(
+            &self,
+            _pattern: &str,
+            _path: Option<&str>,
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            unreachable!("glob is not used by exec_stdout")
+        }
+
+        async fn download_file_to_local(
+            &self,
+            _remote_path: &str,
+            _local_path: &std::path::Path,
+        ) -> fabro_sandbox::Result<()> {
+            unreachable!("download_file_to_local is not used by exec_stdout")
+        }
+
+        async fn upload_file_from_local(
+            &self,
+            _local_path: &std::path::Path,
+            _remote_path: &str,
+        ) -> fabro_sandbox::Result<()> {
+            unreachable!("upload_file_from_local is not used by exec_stdout")
+        }
+
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+
+        fn working_directory(&self) -> &str {
+            "/work"
+        }
+
+        fn platform(&self) -> &str {
+            "linux"
+        }
+
+        fn os_version(&self) -> String {
+            "Linux".to_string()
+        }
+    }
+
+    #[tokio::test]
+    async fn metadata_snapshot_exec_stdout_error_carries_projected_tail() {
+        let sandbox = ExecOnlySandbox {
+            result: ExecResult {
+                stdout:      "push stdout".to_string(),
+                stderr:      "remote: Permission denied".to_string(),
+                exit_code:   Some(128),
+                termination: CommandTermination::Exited,
+                duration_ms: 7,
+            },
+        };
+
+        let err = exec_stdout(&sandbox, "git push origin refs/heads/run", None)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("git push origin"));
+        assert_eq!(
+            err.exec_output_tail()
+                .as_ref()
+                .and_then(|tail| tail.stderr.as_deref()),
+            Some("remote: Permission denied")
+        );
+    }
+
+    #[test]
+    fn parse_fast_import_mark_error_is_log_safe_and_carries_projected_tail() {
+        let secret = "sk-ant-api03-xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA";
+        let stdout = format!("unexpected output {secret}\n\u{1b}[31mcolored\u{1b}[0m");
+
+        let err = parse_fast_import_mark(&stdout).unwrap_err();
+        let message = err.to_string();
+
+        assert!(message.contains("stdout_bytes="));
+        assert!(!message.contains("unexpected output"));
+        assert!(!message.contains(secret));
+
+        let stdout_tail = err
+            .exec_output_tail()
+            .and_then(|tail| tail.stdout)
+            .expect("stdout tail");
+        assert!(stdout_tail.contains("REDACTED"), "{stdout_tail}");
+        assert!(stdout_tail.contains("colored"), "{stdout_tail}");
+        assert!(!stdout_tail.contains(secret), "{stdout_tail}");
+        assert!(!stdout_tail.contains('\u{1b}'), "{stdout_tail}");
+    }
 }

@@ -124,6 +124,7 @@ pub async fn run_devcontainer_lifecycle(
                             let cmd_duration = crate::millis_u64(cmd_start.elapsed());
                             if !result.is_success() {
                                 let exit_code = result.display_exit_code();
+                                let exec_output_tail = result.default_redacted_output_tail();
                                 emitter.emit(
                                     &Event::DevcontainerLifecycleFailed {
                                         phase: phase.clone(),
@@ -131,6 +132,7 @@ pub async fn run_devcontainer_lifecycle(
                                         index,
                                         exit_code,
                                         stderr: result.stderr.clone(),
+                                        exec_output_tail,
                                     },
                                 );
                                 return Err(Error::engine(format!(
@@ -195,12 +197,14 @@ async fn run_single_lifecycle_command(
     let cmd_duration = crate::millis_u64(cmd_start.elapsed());
     if !result.is_success() {
         let exit_code = result.display_exit_code();
+        let exec_output_tail = result.default_redacted_output_tail();
         emitter.emit(&Event::DevcontainerLifecycleFailed {
             phase: phase.to_string(),
             command: command.to_string(),
             index,
             exit_code,
             stderr: result.stderr.clone(),
+            exec_output_tail,
         });
         return Err(Error::engine(format!(
             "Devcontainer {phase} command failed (exit code {}): {command}\n{}",
@@ -226,7 +230,7 @@ mod tests {
 
     use async_trait::async_trait;
     use fabro_agent::sandbox::{ExecResult, GrepOptions, Sandbox};
-    use fabro_types::CommandTermination;
+    use fabro_types::{CommandTermination, EventBody};
     use tokio_util::sync::CancellationToken;
 
     use super::*;
@@ -514,12 +518,25 @@ mod tests {
                 .await;
         assert!(result.is_err());
         let events = events.lock().unwrap();
-        assert!(events.iter().any(|event| {
-            event.event_name() == "devcontainer.lifecycle.failed"
-                && event.properties().is_ok_and(|properties| {
-                    properties["phase"] == "on_create" && properties["exit_code"] == 1
-                })
-        }));
+        let failed = events
+            .iter()
+            .find(|event| event.event_name() == "devcontainer.lifecycle.failed")
+            .expect("devcontainer lifecycle failed event");
+        match &failed.body {
+            EventBody::DevcontainerLifecycleFailed(props) => {
+                assert_eq!(props.phase, "on_create");
+                assert_eq!(props.exit_code, 1);
+                assert_eq!(props.stderr, "command failed");
+                assert_eq!(
+                    props
+                        .exec_output_tail
+                        .as_ref()
+                        .and_then(|tail| tail.stderr.as_deref()),
+                    Some("command failed")
+                );
+            }
+            other => panic!("expected devcontainer lifecycle failed body, got {other:?}"),
+        }
     }
 
     #[tokio::test]

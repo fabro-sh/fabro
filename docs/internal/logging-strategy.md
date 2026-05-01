@@ -198,8 +198,24 @@ Some field values carry real or latent sensitivity and must not appear in `traci
 | `diff_contents` | File contents from a user workspace may include secrets, PII, or copyrighted code. | `bytes_total`, `file_count`, `truncated` counters |
 | `file_path` (for changed-file paths in the Run Files endpoint specifically) | Leaks workspace structure; combined with public run IDs can expose layout of private repos. | `file_count`, aggregate counts bucketed by `binary`, `sensitive`, `symlink`, `submodule` |
 | `git_stderr` | Raw git output for untrusted workspaces may include path-shaped secrets (e.g. `~/.ssh/id_rsa_work`) and terminal control sequences. | A short categorized reason (`"timeout"`, `"bad_revision"`, `"unknown_object"`) derived from stderr, never the stderr itself |
+| Raw command stdout/stderr, including raw `git_stderr` | Process output for untrusted workspaces may include secrets, PII, paths, or terminal control sequences. Durable run events may include `ExecOutputTail`, which is bounded and redacted before serialization. | In tracing, emit only tail metadata such as presence, byte count, and truncation booleans. |
 | Credential-ish strings (`api_key`, `bearer_token`, `cookie`, `session_id`, …) | Exfiltration risk. | Emit `has_credentials: true` or a fingerprint (`token_last4`) only when debugging is the only option |
 
 These prohibitions apply to every level (ERROR through TRACE). If an error path genuinely needs raw output for triage, route it through an authenticated support channel — not the default tracing subscriber.
+
+Safe tracing for process failures looks like:
+
+```rust
+error!(
+    command,
+    exit_code,
+    exec_output_tail_present,
+    exec_stdout_tail_bytes,
+    exec_stdout_truncated,
+    exec_stderr_tail_bytes,
+    exec_stderr_truncated,
+    "Setup command failed"
+);
+```
 
 For URLs that may carry credentials, log `fabro_redact::DisplaySafeUrl` or a string produced by `DisplaySafeUrl::redacted_string()`. Its `Display` and `Debug` forms redact userinfo plus these query keys case-insensitively: `token`, `install_token`, `access_token`, `refresh_token`, `api_key`, `apikey`, `code`, `state`, `password`, `secret`, and `key`. Raw URL strings stay reserved for wire transit, subprocess arguments, redirects, and persistence.

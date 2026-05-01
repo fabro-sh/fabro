@@ -194,7 +194,7 @@ pub(crate) fn truncate(s: &str, max_chars: usize) -> &str {
     if s.len() <= max_chars {
         s
     } else {
-        &s[..fabro_agent::floor_char_boundary(s, max_chars)]
+        &s[..s.floor_char_boundary(max_chars)]
     }
 }
 

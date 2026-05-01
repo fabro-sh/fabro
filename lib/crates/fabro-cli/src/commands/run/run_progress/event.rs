@@ -715,15 +715,16 @@ mod tests {
     #[test]
     fn round_trip_metadata_snapshot_failed() {
         let event = Event::MetadataSnapshotFailed {
-            phase:        MetadataSnapshotPhase::Finalize,
-            branch:       "fabro/meta".into(),
-            duration_ms:  900,
-            failure_kind: MetadataSnapshotFailureKind::Push,
-            error:        "push rejected".into(),
-            causes:       vec!["remote rejected".into()],
-            commit_sha:   Some("abc123".into()),
-            entry_count:  Some(2),
-            bytes:        Some(42),
+            phase:            MetadataSnapshotPhase::Finalize,
+            branch:           "fabro/meta".into(),
+            duration_ms:      900,
+            failure_kind:     MetadataSnapshotFailureKind::Push,
+            error:            "push rejected".into(),
+            causes:           vec!["remote rejected".into()],
+            commit_sha:       Some("abc123".into()),
+            entry_count:      Some(2),
+            bytes:            Some(42),
+            exec_output_tail: None,
         };
 
         let stored = to_run_event(&fixtures::RUN_1, &event);

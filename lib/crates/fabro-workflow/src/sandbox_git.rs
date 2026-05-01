@@ -1139,7 +1139,8 @@ mod tests {
         .unwrap_err();
 
         assert!(err.starts_with("sandbox git unavailable:"));
-        assert!(err.contains("git missing"));
+        assert!(err.contains("exit 127"));
+        assert!(!err.contains("git missing"));
     }
 
     #[tokio::test]
@@ -1361,7 +1362,7 @@ mod tests {
             .map(|(_, bytes)| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
             .sum::<u64>();
         let snapshot = writer.write_snapshot(&dump, "checkpoint").await.unwrap();
-        assert_eq!(snapshot.push_error, None);
+        assert!(snapshot.push_error.is_none());
         assert_eq!(snapshot.entry_count, expected_entry_count);
         assert_eq!(snapshot.bytes, expected_bytes);
         let commit_sha = snapshot.commit_sha;
@@ -1522,16 +1523,22 @@ mod tests {
         assert_eq!(snapshot.bytes, expected_bytes);
 
         let push_error = snapshot.push_error.unwrap();
-        assert!(push_error.contains("git push origin"));
-        assert!(push_error.contains("hint:"));
+        let message = push_error.to_string();
+        assert!(message.contains("git push origin"));
+        assert!(message.contains("hint:"));
         assert!(
-            !push_error.contains("fatal:"),
-            "push error should be log-safe: {push_error}"
+            !message.contains("fatal:"),
+            "push error should be log-safe: {message}"
         );
         assert!(
-            !push_error.contains(missing_origin.to_str().unwrap()),
-            "push error should not include raw git stderr paths: {push_error}"
+            !message.contains(missing_origin.to_str().unwrap()),
+            "push error should not include raw git stderr paths: {message}"
         );
+        let tail = push_error
+            .exec_output_tail()
+            .expect("push failure exec output tail");
+        let stderr_tail = tail.stderr.as_deref().expect("push failure stderr tail");
+        assert!(stderr_tail.contains("fatal:"), "{stderr_tail}");
     }
 
     #[tokio::test]

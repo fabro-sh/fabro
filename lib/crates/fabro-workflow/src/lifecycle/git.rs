@@ -21,7 +21,10 @@ use crate::outcome::BilledModelUsage;
 use crate::run_options::RunOptions;
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::{checked_git_checkpoint, git_diff};
-use crate::sandbox_metadata::{MetadataSnapshot, SandboxGitRuntime, SandboxMetadataWriter};
+use crate::sandbox_metadata::{
+    MetadataSnapshot, MetadataSnapshotFailure, SandboxGitRuntime, SandboxMetadataWriter,
+    emit_metadata_snapshot_failed,
+};
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -123,16 +126,20 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 },
                 Err(err) => {
                     let message = format!("failed to load run state for metadata init: {err}");
-                    self.emit_metadata_snapshot_failed(
+                    emit_metadata_snapshot_failed(
+                        &self.emitter,
                         phase,
                         &meta_branch,
                         started,
-                        MetadataSnapshotFailureKind::LoadState,
-                        message.clone(),
-                        collect_causes(err.as_ref()),
-                        None,
-                        None,
-                        None,
+                        MetadataSnapshotFailure {
+                            kind:             MetadataSnapshotFailureKind::LoadState,
+                            error:            message.clone(),
+                            causes:           collect_causes(err.as_ref()),
+                            commit_sha:       None,
+                            entry_count:      None,
+                            bytes:            None,
+                            exec_output_tail: None,
+                        },
                         None,
                     );
                     self.emit_metadata_warning("checkpoint_metadata_write_failed", message);
@@ -217,16 +224,20 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     Err(err) => {
                         let message =
                             format!("failed to load run state for metadata checkpoint: {err}");
-                        self.emit_metadata_snapshot_failed(
+                        emit_metadata_snapshot_failed(
+                            &self.emitter,
                             phase,
                             &meta_branch,
                             started,
-                            MetadataSnapshotFailureKind::LoadState,
-                            message.clone(),
-                            collect_causes(err.as_ref()),
-                            None,
-                            None,
-                            None,
+                            MetadataSnapshotFailure {
+                                kind:             MetadataSnapshotFailureKind::LoadState,
+                                error:            message.clone(),
+                                causes:           collect_causes(err.as_ref()),
+                                commit_sha:       None,
+                                entry_count:      None,
+                                bytes:            None,
+                                exec_output_tail: None,
+                            },
                             Some(&scope),
                         );
                         self.emit_metadata_warning("checkpoint_metadata_write_failed", message);
@@ -364,19 +375,24 @@ impl GitLifecycle {
         );
         match writer.write_snapshot(dump, message).await {
             Ok(snapshot) => {
-                if let Some(detail) = snapshot.push_error.as_deref() {
-                    let message =
-                        format!("failed to push metadata ref refs/heads/{meta_branch}: {detail}");
-                    self.emit_metadata_snapshot_failed(
+                if let Some(push_error) = snapshot.push_error.as_ref() {
+                    let message = format!(
+                        "failed to push metadata ref refs/heads/{meta_branch}: {push_error}"
+                    );
+                    emit_metadata_snapshot_failed(
+                        &self.emitter,
                         phase,
                         meta_branch,
                         started,
-                        MetadataSnapshotFailureKind::Push,
-                        message.clone(),
-                        Vec::new(),
-                        Some(snapshot.commit_sha.clone()),
-                        Some(snapshot.entry_count),
-                        Some(snapshot.bytes),
+                        MetadataSnapshotFailure {
+                            kind:             MetadataSnapshotFailureKind::Push,
+                            error:            message.clone(),
+                            causes:           Vec::new(),
+                            commit_sha:       Some(snapshot.commit_sha.clone()),
+                            entry_count:      Some(snapshot.entry_count),
+                            bytes:            Some(snapshot.bytes),
+                            exec_output_tail: push_error.exec_output_tail(),
+                        },
                         scope,
                     );
                     self.emit_metadata_warning("checkpoint_metadata_push_failed", message);
@@ -393,16 +409,20 @@ impl GitLifecycle {
             }
             Err(err) => {
                 let message = format!("failed to write checkpoint metadata: {err}");
-                self.emit_metadata_snapshot_failed(
+                emit_metadata_snapshot_failed(
+                    &self.emitter,
                     phase,
                     meta_branch,
                     started,
-                    MetadataSnapshotFailureKind::Write,
-                    message.clone(),
-                    collect_causes(&err),
-                    None,
-                    None,
-                    None,
+                    MetadataSnapshotFailure {
+                        kind:             MetadataSnapshotFailureKind::Write,
+                        error:            message.clone(),
+                        causes:           collect_causes(&err),
+                        commit_sha:       None,
+                        entry_count:      None,
+                        bytes:            None,
+                        exec_output_tail: err.exec_output_tail(),
+                    },
                     scope,
                 );
                 self.emit_metadata_warning("checkpoint_metadata_write_failed", message);
@@ -442,39 +462,6 @@ impl GitLifecycle {
                 entry_count: snapshot.entry_count,
                 bytes: snapshot.bytes,
                 commit_sha: snapshot.commit_sha.clone(),
-            },
-            scope,
-        );
-    }
-
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "Metadata failure event carries the full event contract explicitly."
-    )]
-    fn emit_metadata_snapshot_failed(
-        &self,
-        phase: MetadataSnapshotPhase,
-        branch: &str,
-        started: Instant,
-        failure_kind: MetadataSnapshotFailureKind,
-        error: String,
-        causes: Vec<String>,
-        commit_sha: Option<String>,
-        entry_count: Option<usize>,
-        bytes: Option<u64>,
-        scope: Option<&StageScope>,
-    ) {
-        self.emit_metadata_snapshot_event(
-            &Event::MetadataSnapshotFailed {
-                phase,
-                branch: branch.to_string(),
-                duration_ms: elapsed_ms(started),
-                failure_kind,
-                error,
-                causes,
-                commit_sha,
-                entry_count,
-                bytes,
             },
             scope,
         );
@@ -803,6 +790,14 @@ mod tests {
                 assert!(props.commit_sha.as_ref().is_some_and(|sha| !sha.is_empty()));
                 assert_eq!(props.entry_count, Some(expected_entry_count));
                 assert_eq!(props.bytes, Some(expected_bytes));
+                assert!(
+                    props
+                        .exec_output_tail
+                        .as_ref()
+                        .and_then(|tail| tail.stderr.as_deref())
+                        .is_some_and(|stderr| stderr.contains("fatal:")),
+                    "expected push stderr tail in metadata failure props: {props:?}"
+                );
             }
             other => panic!("expected metadata failed event, got {other:?}"),
         }

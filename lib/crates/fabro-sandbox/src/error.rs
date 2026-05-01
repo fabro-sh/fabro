@@ -1,6 +1,5 @@
 #[cfg(feature = "docker")]
 use bollard::errors::Error as BollardError;
-use fabro_types::CommandTermination;
 use fabro_util::error::{collect_causes, render_with_causes};
 
 #[derive(Debug, thiserror::Error)]
@@ -40,18 +39,16 @@ pub enum Error {
 
     #[error(
         "{label} failed (exit {exit}, termination={termination}, duration_ms={duration_ms}) - hint: {hint}",
-        exit = format_exit_code(*exit_code),
-        hint = classify_exec_failure(stderr)
-            .or_else(|| classify_exec_failure(stdout))
+        exit = format_exit_code(result.exit_code),
+        termination = result.termination,
+        duration_ms = result.duration_ms,
+        hint = classify_exec_failure(&result.stderr)
+            .or_else(|| classify_exec_failure(&result.stdout))
             .unwrap_or("unclassified")
     )]
     Exec {
-        label:       String,
-        exit_code:   Option<i32>,
-        termination: CommandTermination,
-        duration_ms: u64,
-        stderr:      String,
-        stdout:      String,
+        label:  String,
+        result: crate::ExecResult,
     },
 }
 
@@ -70,21 +67,17 @@ impl Error {
         }
     }
 
-    pub fn exec(
-        label: impl Into<String>,
-        exit_code: Option<i32>,
-        termination: CommandTermination,
-        duration_ms: u64,
-        stderr: impl Into<String>,
-        stdout: impl Into<String>,
-    ) -> Self {
+    pub fn exec(label: impl Into<String>, result: crate::ExecResult) -> Self {
         Self::Exec {
             label: label.into(),
-            exit_code,
-            termination,
-            duration_ms,
-            stderr: stderr.into(),
-            stdout: stdout.into(),
+            result,
+        }
+    }
+
+    pub fn default_redacted_output_tail(&self) -> Option<fabro_types::ExecOutputTail> {
+        match self {
+            Self::Exec { result, .. } => result.default_redacted_output_tail(),
+            _ => None,
         }
     }
 
@@ -172,6 +165,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 mod tests {
+    use fabro_types::CommandTermination;
+
     use super::*;
 
     #[test]
@@ -180,16 +175,46 @@ mod tests {
                       'https://x-access-token:ghs_xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA@github.com/owner/repo/':\n\
                       remote: Permission to owner/repo.git denied\n\
                       identity ~/.ssh/id_rsa_work";
-        let error = Error::exec(
-            "git push origin refs/heads/run",
-            Some(128),
-            CommandTermination::Exited,
-            210,
-            stderr,
-            "",
-        );
+        let error = Error::exec("git push origin refs/heads/run", crate::ExecResult {
+            stdout:      String::new(),
+            stderr:      stderr.to_string(),
+            exit_code:   Some(128),
+            termination: CommandTermination::Exited,
+            duration_ms: 210,
+        });
         let rendered = error.to_string();
 
+        assert_exec_rendering_is_safe(&rendered);
+        assert!(rendered.contains("git push origin refs/heads/run"));
+        assert!(rendered.contains("exit 128"));
+        assert!(rendered.contains("termination=exited"));
+        assert!(rendered.contains("duration_ms=210"));
+        assert!(rendered.contains("hint:"));
+    }
+
+    #[test]
+    fn display_with_causes_does_not_reintroduce_raw_exec_output() {
+        let stderr = "fatal: unable to access \
+                      'https://x-access-token:ghs_xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA@github.com/owner/repo/':\n\
+                      remote: Permission to owner/repo.git denied\n\
+                      identity ~/.ssh/id_rsa_work";
+        let exec_error = Error::exec("git push origin refs/heads/run", crate::ExecResult {
+            stdout:      "stdout secret ghs_xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA".to_string(),
+            stderr:      stderr.to_string(),
+            exit_code:   Some(128),
+            termination: CommandTermination::Exited,
+            duration_ms: 210,
+        });
+        let error = Error::context("metadata push failed", exec_error);
+        let rendered = error.display_with_causes();
+
+        assert_exec_rendering_is_safe(&rendered);
+        assert!(rendered.contains("metadata push failed"));
+        assert!(rendered.contains("git push origin refs/heads/run"));
+        assert!(rendered.contains("hint:"));
+    }
+
+    fn assert_exec_rendering_is_safe(rendered: &str) {
         for forbidden in [
             "fatal:",
             "remote:",
@@ -203,11 +228,27 @@ mod tests {
                 "Display leaked {forbidden:?}: {rendered}"
             );
         }
-        assert!(rendered.contains("git push origin refs/heads/run"));
-        assert!(rendered.contains("exit 128"));
-        assert!(rendered.contains("termination=exited"));
-        assert!(rendered.contains("duration_ms=210"));
-        assert!(rendered.contains("hint:"));
+    }
+
+    #[test]
+    fn exec_error_exposes_default_redacted_output_tail() {
+        let stderr = "stderr secret ghs_xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA";
+        let error = Error::exec("git push origin refs/heads/run", crate::ExecResult {
+            stdout:      "last stdout line".to_string(),
+            stderr:      stderr.to_string(),
+            exit_code:   Some(128),
+            termination: CommandTermination::Exited,
+            duration_ms: 210,
+        });
+
+        let tail = error.default_redacted_output_tail().expect("tail present");
+        assert_eq!(tail.stdout.as_deref(), Some("last stdout line"));
+        assert!(
+            tail.stderr
+                .as_deref()
+                .expect("stderr tail")
+                .contains("REDACTED")
+        );
     }
 
     #[test]

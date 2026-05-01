@@ -54,6 +54,65 @@ pub enum MetadataSnapshotFailureKind {
     Push,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecOutputTail {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout:           Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr:           Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stdout_truncated: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stderr_truncated: bool,
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if predicates receive fields by reference"
+)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+impl ExecOutputTail {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.stdout.as_deref().unwrap_or("").is_empty()
+            && self.stderr.as_deref().unwrap_or("").is_empty()
+    }
+
+    #[must_use]
+    pub fn stdout_len(&self) -> usize {
+        self.stdout.as_deref().map_or(0, str::len)
+    }
+
+    #[must_use]
+    pub fn stderr_len(&self) -> usize {
+        self.stderr.as_deref().map_or(0, str::len)
+    }
+
+    #[must_use]
+    pub fn trace_summary(tail: Option<&Self>) -> ExecOutputTailTrace {
+        ExecOutputTailTrace {
+            present:          tail.is_some(),
+            stdout_bytes:     tail.map_or(0, Self::stdout_len),
+            stderr_bytes:     tail.map_or(0, Self::stderr_len),
+            stdout_truncated: tail.is_some_and(|t| t.stdout_truncated),
+            stderr_truncated: tail.is_some_and(|t| t.stderr_truncated),
+        }
+    }
+}
+
+/// Flat view of an `ExecOutputTail` for tracing field expansion.
+#[derive(Debug, Clone, Copy)]
+pub struct ExecOutputTailTrace {
+    pub present:          bool,
+    pub stdout_bytes:     usize,
+    pub stderr_bytes:     usize,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetadataSnapshotStartedProps {
     pub phase:  MetadataSnapshotPhase,
@@ -72,19 +131,21 @@ pub struct MetadataSnapshotCompletedProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetadataSnapshotFailedProps {
-    pub phase:        MetadataSnapshotPhase,
-    pub branch:       String,
-    pub duration_ms:  u64,
-    pub failure_kind: MetadataSnapshotFailureKind,
-    pub error:        String,
+    pub phase:            MetadataSnapshotPhase,
+    pub branch:           String,
+    pub duration_ms:      u64,
+    pub failure_kind:     MetadataSnapshotFailureKind,
+    pub error:            String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub causes:       Vec<String>,
+    pub causes:           Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub commit_sha:   Option<String>,
+    pub commit_sha:       Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entry_count:  Option<usize>,
+    pub entry_count:      Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bytes:        Option<u64>,
+    pub bytes:            Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exec_output_tail: Option<ExecOutputTail>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -214,10 +275,12 @@ pub struct SetupCompletedProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetupFailedProps {
-    pub command:   String,
-    pub index:     usize,
-    pub exit_code: i32,
-    pub stderr:    String,
+    pub command:          String,
+    pub index:            usize,
+    pub exit_code:        i32,
+    pub stderr:           String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exec_output_tail: Option<ExecOutputTail>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -237,10 +300,12 @@ pub struct CliEnsureCompletedProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CliEnsureFailedProps {
-    pub cli_name:    String,
-    pub provider:    String,
-    pub error:       String,
-    pub duration_ms: u64,
+    pub cli_name:         String,
+    pub provider:         String,
+    pub error:            String,
+    pub duration_ms:      u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exec_output_tail: Option<ExecOutputTail>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -281,9 +346,11 @@ pub struct DevcontainerLifecycleCompletedProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DevcontainerLifecycleFailedProps {
-    pub phase:     String,
-    pub command:   String,
-    pub index:     usize,
-    pub exit_code: i32,
-    pub stderr:    String,
+    pub phase:            String,
+    pub command:          String,
+    pub index:            usize,
+    pub exit_code:        i32,
+    pub stderr:           String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exec_output_tail: Option<ExecOutputTail>,
 }
