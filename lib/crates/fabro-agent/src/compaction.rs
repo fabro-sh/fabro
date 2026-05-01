@@ -9,7 +9,6 @@ use crate::error::Error;
 use crate::event::Emitter;
 use crate::file_tracker::FileTracker;
 use crate::history::History;
-use crate::truncation;
 use crate::types::{AgentEvent, Turn};
 
 /// Check whether the context window usage exceeds the configured threshold.
@@ -210,10 +209,7 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
                 for tc in tool_calls {
                     let args_str = tc.arguments.to_string();
                     let truncated = if args_str.len() > 500 {
-                        format!(
-                            "{}...",
-                            &args_str[..truncation::floor_char_boundary(&args_str, 500)]
-                        )
+                        format!("{}...", &args_str[..args_str.floor_char_boundary(500)])
                     } else {
                         args_str
                     };
@@ -226,7 +222,7 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
                     let truncated = if content_str.len() > 500 {
                         format!(
                             "{}...",
-                            &content_str[..truncation::floor_char_boundary(&content_str, 500)]
+                            &content_str[..content_str.floor_char_boundary(500)]
                         )
                     } else {
                         content_str

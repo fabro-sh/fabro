@@ -30,7 +30,7 @@ use crate::subagent::{SessionFactory, SubAgentManager};
 use crate::tools::WebFetchSummarizer;
 use crate::{
     AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile,
-    Sandbox, Session, SessionOptions, Turn, truncation,
+    Sandbox, Session, SessionOptions, Turn,
 };
 
 /// Public arguments for the agent command, usable from an external CLI.
@@ -288,7 +288,7 @@ fn format_tool_args(args: &serde_json::Value, cwd: &str) -> String {
             serde_json::Value::String(s) => {
                 let s = s.strip_prefix(&cwd_prefix).unwrap_or(s);
                 let display = if s.len() > 80 {
-                    format!("{}...", &s[..truncation::floor_char_boundary(s, 77)])
+                    format!("{}...", &s[..s.floor_char_boundary(77)])
                 } else {
                     s.to_string()
                 };
@@ -671,7 +671,7 @@ pub async fn run_with_args_and_client(
                             ..
                         } => {
                             let task_preview = if task.len() > 60 {
-                                &task[..truncation::floor_char_boundary(task, 60)]
+                                &task[..task.floor_char_boundary(60)]
                             } else {
                                 task
                             };

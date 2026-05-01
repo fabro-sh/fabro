@@ -497,7 +497,7 @@ fn redacted_tail(text: &str, max_bytes: usize) -> (Option<String>, bool) {
     let sanitized = sanitize_exec_output(&redacted);
     let truncated = sanitized.len() > max_bytes;
     let start = if truncated {
-        floor_char_boundary(&sanitized, sanitized.len() - max_bytes)
+        sanitized.floor_char_boundary(sanitized.len() - max_bytes)
     } else {
         0
     };
@@ -545,17 +545,6 @@ fn sanitize_exec_output(text: &str) -> String {
         }
     }
     sanitized
-}
-
-fn floor_char_boundary(text: &str, index: usize) -> usize {
-    if index >= text.len() {
-        return text.len();
-    }
-    let mut boundary = index;
-    while boundary > 0 && !text.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    boundary
 }
 
 #[derive(Debug, Clone)]

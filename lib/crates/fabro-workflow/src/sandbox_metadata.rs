@@ -1,12 +1,16 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use fabro_agent::Sandbox;
 use fabro_sandbox::shell_quote;
+use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
+use fabro_util::time::elapsed_ms;
 use tokio::fs;
 use tokio::sync::OnceCell;
 
+use crate::event::{Emitter, Event, StageScope};
 use crate::git::{GitAuthor, META_BRANCH_PREFIX};
 use crate::run_dump::RunDump;
 use crate::sandbox_git::GIT_REMOTE;
@@ -92,6 +96,46 @@ pub(crate) struct MetadataSnapshot {
     pub push_error:  Option<SandboxMetadataError>,
     pub entry_count: usize,
     pub bytes:       u64,
+}
+
+/// Full payload for a `MetadataSnapshotFailed` event, grouped so the emit
+/// helper stays under clippy's argument threshold.
+#[derive(Debug)]
+pub(crate) struct MetadataSnapshotFailure {
+    pub kind:             MetadataSnapshotFailureKind,
+    pub error:            String,
+    pub causes:           Vec<String>,
+    pub commit_sha:       Option<String>,
+    pub entry_count:      Option<usize>,
+    pub bytes:            Option<u64>,
+    pub exec_output_tail: Option<fabro_types::ExecOutputTail>,
+}
+
+pub(crate) fn emit_metadata_snapshot_failed(
+    emitter: &Emitter,
+    phase: MetadataSnapshotPhase,
+    branch: &str,
+    started: Instant,
+    failure: MetadataSnapshotFailure,
+    scope: Option<&StageScope>,
+) {
+    let event = Event::MetadataSnapshotFailed {
+        phase,
+        branch: branch.to_string(),
+        duration_ms: elapsed_ms(started),
+        failure_kind: failure.kind,
+        error: failure.error,
+        causes: failure.causes,
+        commit_sha: failure.commit_sha,
+        entry_count: failure.entry_count,
+        bytes: failure.bytes,
+        exec_output_tail: failure.exec_output_tail,
+    };
+    if let Some(scope) = scope {
+        emitter.emit_scoped(&event, scope);
+    } else {
+        emitter.emit(&event);
+    }
 }
 
 impl<'a> SandboxMetadataWriter<'a> {
