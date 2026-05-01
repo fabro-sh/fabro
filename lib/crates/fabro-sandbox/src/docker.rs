@@ -1588,11 +1588,17 @@ mod tests {
         let tempdir = tempfile::tempdir().expect("tempdir should be created");
         let stop_file = tempdir.path().join("stop");
         let pid_file = tempdir.path().join("pid");
+        let block_fifo = tempdir.path().join("block");
         let stop_file = stop_file.to_string_lossy().into_owned();
         let pid_file = pid_file.to_string_lossy().into_owned();
+        let block_fifo = block_fifo.to_string_lossy().into_owned();
         let marker = "fabro_controlled_shell_stop_sentinel";
         let command = docker_controlled_shell_command(
-            &format!("trap '' HUP TERM; while :; do :; done # {marker}"),
+            &format!(
+                "mkfifo {}; trap '' HUP TERM; read _ < {} # {marker}",
+                shell_quote(&block_fifo),
+                shell_quote(&block_fifo)
+            ),
             &stop_file,
             &pid_file,
         );
@@ -1602,7 +1608,7 @@ mod tests {
             .expect("early stop file should be written");
         let mut child = Command::new("/bin/bash");
         child.arg("-lc").arg(command).kill_on_drop(true);
-        let output = if let Ok(output) = time::timeout(Duration::from_secs(1), child.output()).await
+        let output = if let Ok(output) = time::timeout(Duration::from_secs(5), child.output()).await
         {
             output.expect("controlled shell command should run")
         } else {
