@@ -1,14 +1,19 @@
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroU32;
 
 use chrono::{TimeZone, Utc};
-use fabro_store::{NodeState, RunProjection, SerializableProjection, StageId};
+use fabro_store::{RunProjection, SerializableProjection, StageId};
 use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
 use fabro_types::{
-    Checkpoint, NodeStatusRecord, RunStatus, SandboxRecord, StageOutcome, StartRecord,
+    Checkpoint, RunStatus, SandboxRecord, StageCompletion, StageOutcome, StartRecord,
     TerminalStatus, WorkflowSettings, fixtures,
 };
 use serde_json::json;
+
+fn nonzero(value: u32) -> NonZeroU32 {
+    NonZeroU32::new(value).expect("test sequence must be non-zero")
+}
 
 fn sample_run_spec() -> RunSpec {
     RunSpec {
@@ -77,37 +82,31 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         clone_branch:      None,
     });
     projection.pending_interviews = BTreeMap::new();
-    projection.set_node(stage_id.clone(), NodeState {
-        prompt:            Some("plan the work".to_string()),
-        response:          Some("done".to_string()),
-        status:            Some(NodeStatusRecord {
-            status:         StageOutcome::Succeeded,
-            notes:          Some("ok".to_string()),
-            failure_reason: None,
-            timestamp:      Utc
-                .with_ymd_and_hms(2026, 4, 20, 12, 1, 0)
-                .single()
-                .expect("timestamp should be representable"),
-        }),
-        provider_used:     Some(json!({ "provider": "openai", "model": "gpt-5.4" })),
-        diff:              Some("diff --git a/a b/a".to_string()),
-        script_invocation: Some(json!({ "command": "cargo test" })),
-        script_timing:     Some(json!({ "duration_ms": 10 })),
-        parallel_results:  Some(json!([{ "stage": "fanout@1" }])),
-        stdout:            Some("stdout".to_string()),
-        stderr:            Some("stderr".to_string()),
-        stdout_bytes:      None,
-        stderr_bytes:      None,
-        streams_separated: None,
-        live_streaming:    None,
-        termination:       None,
+    let stage = projection.stage_entry(stage_id.node_id(), stage_id.visit(), nonzero(2));
+    stage.prompt = Some("plan the work".to_string());
+    stage.response = Some("done".to_string());
+    stage.completion = Some(StageCompletion {
+        outcome:        StageOutcome::Succeeded,
+        notes:          Some("ok".to_string()),
+        failure_reason: None,
+        timestamp:      Utc
+            .with_ymd_and_hms(2026, 4, 20, 12, 1, 0)
+            .single()
+            .expect("timestamp should be representable"),
     });
+    stage.provider_used = Some(json!({ "provider": "openai", "model": "gpt-5.4" }));
+    stage.diff = Some("diff --git a/a b/a".to_string());
+    stage.script_invocation = Some(json!({ "command": "cargo test" }));
+    stage.script_timing = Some(json!({ "duration_ms": 10 }));
+    stage.parallel_results = Some(json!([{ "stage": "fanout@1" }]));
+    stage.stdout = Some("stdout".to_string());
+    stage.stderr = Some("stderr".to_string());
 
     let serialized = serde_json::to_value(SerializableProjection(&projection))
         .expect("projection should serialize");
     let round_tripped: RunProjection =
         serde_json::from_value(serialized).expect("serialized projection should deserialize");
-    let node = round_tripped.node(&stage_id).expect("node should remain");
+    let node = round_tripped.stage(&stage_id).expect("node should remain");
 
     assert_eq!(round_tripped.spec().map(RunSpec::id), Some(fixtures::RUN_1));
     assert_eq!(
@@ -124,6 +123,13 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
     assert_eq!(node.diff, None);
     assert_eq!(node.stdout, None);
     assert_eq!(node.stderr, None);
+    assert_eq!(node.first_event_seq, nonzero(2));
+    assert_eq!(
+        node.completion
+            .as_ref()
+            .map(|completion| completion.outcome),
+        Some(StageOutcome::Succeeded)
+    );
     assert_eq!(
         node.provider_used,
         Some(json!({ "provider": "openai", "model": "gpt-5.4" }))

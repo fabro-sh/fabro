@@ -154,8 +154,6 @@ models/model-reference.ts
 models/model-test-mode.ts
 models/model-test-result.ts
 models/model.ts
-models/node-state.ts
-models/node-status-record.ts
 models/notification-provider-settings.ts
 models/notification-route-settings.ts
 models/object-store-local-settings.ts
@@ -287,7 +285,9 @@ models/server-web-settings.ts
 models/slack-integration-settings.ts
 models/ssh-access-request.ts
 models/ssh-access-response.ts
+models/stage-completion.ts
 models/stage-outcome.ts
+models/stage-projection.ts
 models/stage-state.ts
 models/stage-turn.ts
 models/start-run-request.ts

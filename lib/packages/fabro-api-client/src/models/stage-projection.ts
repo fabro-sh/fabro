@@ -18,15 +18,16 @@
 import type { CommandTermination } from './command-termination';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { NodeStatusRecord } from './node-status-record';
+import type { StageCompletion } from './stage-completion';
 
 /**
- * Internal node projection state.
+ * Observable projection data for one workflow stage execution.
  */
-export interface NodeState {
+export interface StageProjection {
+    'first_event_seq': number;
     'prompt'?: string | null;
     'response'?: string | null;
-    'status'?: NodeStatusRecord | null;
+    'completion'?: StageCompletion | null;
     'provider_used'?: any;
     'diff'?: string | null;
     'script_invocation'?: any;

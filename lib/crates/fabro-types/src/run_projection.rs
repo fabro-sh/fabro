@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroU32;
 
 use chrono::{DateTime, Utc};
 
 use crate::{
-    Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition, NodeStatusRecord,
-    PullRequestRecord, Retro, RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord, StageId,
+    Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition, PullRequestRecord, Retro,
+    RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord, StageCompletion, StageId,
     StartRecord,
 };
 
@@ -28,7 +29,7 @@ pub struct RunProjection {
     pub pull_request:       Option<PullRequestRecord>,
     pub superseded_by:      Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
-    nodes:                  HashMap<StageId, NodeState>,
+    stages:                 HashMap<StageId, StageProjection>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -37,11 +38,12 @@ pub struct PendingInterviewRecord {
     pub started_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct NodeState {
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StageProjection {
+    pub first_event_seq:   NonZeroU32,
     pub prompt:            Option<String>,
     pub response:          Option<String>,
-    pub status:            Option<NodeStatusRecord>,
+    pub completion:        Option<StageCompletion>,
     pub provider_used:     Option<serde_json::Value>,
     pub diff:              Option<String>,
     pub script_invocation: Option<serde_json::Value>,
@@ -61,26 +63,50 @@ pub struct NodeState {
     pub termination:       Option<crate::CommandTermination>,
 }
 
+impl StageProjection {
+    #[must_use]
+    pub fn new(first_event_seq: NonZeroU32) -> Self {
+        Self {
+            first_event_seq,
+            prompt: None,
+            response: None,
+            completion: None,
+            provider_used: None,
+            diff: None,
+            script_invocation: None,
+            script_timing: None,
+            parallel_results: None,
+            stdout: None,
+            stderr: None,
+            stdout_bytes: None,
+            stderr_bytes: None,
+            streams_separated: None,
+            live_streaming: None,
+            termination: None,
+        }
+    }
+}
+
 impl RunProjection {
-    pub fn node(&self, node: &StageId) -> Option<&NodeState> {
-        self.nodes.get(node)
+    pub fn stage(&self, stage: &StageId) -> Option<&StageProjection> {
+        self.stages.get(stage)
     }
 
-    pub fn iter_nodes(&self) -> impl Iterator<Item = (&StageId, &NodeState)> {
-        self.nodes.iter()
+    pub fn iter_stages(&self) -> impl Iterator<Item = (&StageId, &StageProjection)> {
+        self.stages.iter()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
+        self.stages.is_empty()
     }
 
-    pub fn set_node(&mut self, node: StageId, state: NodeState) {
-        self.nodes.insert(node, state);
+    pub fn stage_mut(&mut self, stage: &StageId) -> Option<&mut StageProjection> {
+        self.stages.get_mut(stage)
     }
 
     pub fn list_node_visits(&self, node_id: &str) -> Vec<u32> {
         let mut visits = self
-            .nodes
+            .stages
             .keys()
             .filter(|node| node.node_id() == node_id)
             .map(StageId::visit)
@@ -110,12 +136,19 @@ impl RunProjection {
         &self.pending_interviews
     }
 
-    pub fn node_mut(&mut self, node_id: &str, visit: u32) -> &mut NodeState {
-        self.nodes.entry(StageId::new(node_id, visit)).or_default()
+    pub fn stage_entry(
+        &mut self,
+        node_id: &str,
+        visit: u32,
+        first_event_seq: NonZeroU32,
+    ) -> &mut StageProjection {
+        self.stages
+            .entry(StageId::new(node_id, visit))
+            .or_insert_with(|| StageProjection::new(first_event_seq))
     }
 
     pub fn current_visit_for(&self, node_id: &str) -> Option<u32> {
-        self.nodes
+        self.stages
             .keys()
             .filter(|node| node.node_id() == node_id)
             .map(StageId::visit)

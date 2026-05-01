@@ -11,22 +11,19 @@ impl Serialize for SerializableProjection<'_> {
     {
         let mut projection = self.0.clone();
         let stage_ids: Vec<_> = projection
-            .iter_nodes()
+            .iter_stages()
             .map(|(stage_id, _)| stage_id.clone())
             .collect();
 
         for stage_id in stage_ids {
-            let Some(node) = projection.node(&stage_id).cloned() else {
+            let Some(stage) = projection.stage_mut(&stage_id) else {
                 continue;
             };
-            projection.set_node(stage_id, crate::NodeState {
-                prompt: None,
-                response: None,
-                diff: None,
-                stdout: None,
-                stderr: None,
-                ..node
-            });
+            stage.prompt = None;
+            stage.response = None;
+            stage.diff = None;
+            stage.stdout = None;
+            stage.stderr = None;
         }
 
         projection.serialize(serializer)

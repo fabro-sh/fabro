@@ -5366,7 +5366,7 @@ async fn get_run_stage_command_log(
                 .into_response();
         }
     };
-    let Some(node) = run_state.node(&stage_id) else {
+    let Some(node) = run_state.stage(&stage_id) else {
         return ApiError::not_found("Stage not found.").into_response();
     };
 
@@ -5379,7 +5379,7 @@ async fn get_run_stage_command_log(
         .map(str::to_string);
     let live_streaming = node
         .live_streaming
-        .unwrap_or_else(|| cas_ref.is_none() && node.status.is_none());
+        .unwrap_or_else(|| cas_ref.is_none() && node.completion.is_none());
     let run_dir = Storage::new(state.server_storage_dir())
         .run_scratch(&id)
         .root()
@@ -5442,7 +5442,7 @@ async fn get_run_stage_command_log(
         query.offset,
         limit,
         LogSource::Full(&[]),
-        node.status.is_some(),
+        node.completion.is_some(),
         None,
         live_streaming,
     )
@@ -10890,7 +10890,7 @@ slug = "fabro"
 
         let response = app.oneshot(req).await.unwrap();
         let body = response_json!(response, StatusCode::OK).await;
-        assert!(body["nodes"].is_object());
+        assert!(body["stages"].is_object());
     }
 
     #[tokio::test]

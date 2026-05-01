@@ -770,9 +770,9 @@ async fn execute_persists_start_record_and_node_status() {
     );
     assert_eq!(start.base_sha.as_deref(), Some("abc123"));
 
-    let node = state.node(&fabro_store::StageId::new("start", 1)).unwrap();
+    let node = state.stage(&fabro_store::StageId::new("start", 1)).unwrap();
     assert_eq!(
-        node.status.as_ref().unwrap().status,
+        node.completion.as_ref().unwrap().outcome,
         StageOutcome::Succeeded
     );
 }
@@ -825,12 +825,12 @@ async fn timeout_causes_fail_status_record() {
     .await;
     let state = executed.engine.run.run_store.state().await.unwrap();
     let status = state
-        .node(&fabro_store::StageId::new("work", 1))
+        .stage(&fabro_store::StageId::new("work", 1))
         .unwrap()
-        .status
+        .completion
         .as_ref()
         .unwrap();
-    assert_eq!(status.status, StageOutcome::Failed {
+    assert_eq!(status.outcome, StageOutcome::Failed {
         retry_requested: false,
     });
 }

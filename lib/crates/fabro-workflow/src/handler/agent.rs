@@ -505,7 +505,7 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let node_state = state.node(&StageId::new("plan", 1)).unwrap();
+        let node_state = state.stage(&StageId::new("plan", 1)).unwrap();
         assert_eq!(
             node_state.prompt.as_deref(),
             Some("Achieve: Build a feature")
@@ -532,7 +532,7 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let node_state = state.node(&StageId::new("work", 1)).unwrap();
+        let node_state = state.stage(&StageId::new("work", 1)).unwrap();
         assert_eq!(node_state.prompt.as_deref(), Some("Do work"));
     }
 
@@ -774,7 +774,7 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let node_state = state.node(&StageId::new("step", 1)).unwrap();
+        let node_state = state.stage(&StageId::new("step", 1)).unwrap();
         assert_eq!(
             node_state.provider_used.as_ref().unwrap()["provider"],
             "openai"
@@ -1262,7 +1262,7 @@ Some text in between.
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let node_state = state.node(&StageId::new("report", 1)).unwrap();
+        let node_state = state.stage(&StageId::new("report", 1)).unwrap();
         let prompt_content = node_state.prompt.as_deref().unwrap();
         assert!(
             prompt_content.contains("## Script Output\nAll tests passed"),

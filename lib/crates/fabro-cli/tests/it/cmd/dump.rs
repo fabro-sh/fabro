@@ -282,12 +282,12 @@ fn dump_exports_completed_run_snapshot() {
     graph.fabro
     run.json
     run.log
-    stages/exit@1/status.json
-    stages/report@1/response.md
-    stages/report@1/status.json
-    stages/run_tests@1/response.md
-    stages/run_tests@1/status.json
-    stages/start@1/status.json
+    stages/001-start@1/status.json
+    stages/002-run_tests@1/response.md
+    stages/002-run_tests@1/status.json
+    stages/003-report@1/response.md
+    stages/003-report@1/status.json
+    stages/004-exit@1/status.json
     ");
 }
 

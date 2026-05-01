@@ -1,24 +1,24 @@
 use std::any::{TypeId, type_name};
 
-use fabro_api::types::NodeStatusRecord as ApiNodeStatusRecord;
-use fabro_types::NodeStatusRecord;
+use fabro_api::types::StageCompletion as ApiStageCompletion;
+use fabro_types::StageCompletion;
 use serde_json::json;
 
 #[test]
-fn node_status_record_reuses_canonical_type() {
-    assert_same_type::<ApiNodeStatusRecord, NodeStatusRecord>();
+fn stage_completion_reuses_canonical_type() {
+    assert_same_type::<ApiStageCompletion, StageCompletion>();
 }
 
 #[test]
-fn node_status_record_round_trips_representative_json() {
+fn stage_completion_round_trips_representative_json() {
     let value = json!({
-        "status": "partially_succeeded",
+        "outcome": "partially_succeeded",
         "notes": "continued with warnings",
         "failure_reason": null,
         "timestamp": "2026-04-29T12:34:56Z"
     });
 
-    let record: NodeStatusRecord = serde_json::from_value(value.clone()).unwrap();
+    let record: StageCompletion = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(record).unwrap(), value);
 }
 

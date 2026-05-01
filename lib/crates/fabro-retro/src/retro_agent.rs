@@ -24,7 +24,7 @@ You have access to the run's data files:
 - `graph.fabro` — the workflow source for the run
 - `checkpoints/{seq:04}.json` — zero-padded checkpoint snapshots captured during the run
 - `run.log` — server/worker log output for the run when available
-- `stages/{node_id}@{visit}/...` — per-stage prompt, response, status, diff, stdout/stderr, and tool metadata files
+- `stages/{rank:03}-{node_id}@{visit}/...` — execution-order-prefixed per-stage prompt, response, status, diff, stdout/stderr, and tool metadata files
 
 ## Your task
 
@@ -330,15 +330,20 @@ async fn upload_data_files(
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
     use std::sync::Arc;
 
     use chrono::{TimeZone, Utc};
     use fabro_agent::LocalSandbox;
-    use fabro_store::{NodeState, StageId};
-    use fabro_types::{NodeStatusRecord, StageOutcome};
+    use fabro_store::StageId;
+    use fabro_types::{StageCompletion, StageOutcome};
     use tokio::fs;
 
     use super::*;
+
+    fn nonzero(value: u32) -> NonZeroU32 {
+        NonZeroU32::new(value).expect("test sequence must be non-zero")
+    }
 
     #[test]
     fn submit_retro_schema_is_valid_json() {
@@ -410,31 +415,25 @@ mod tests {
         let stage_id = StageId::new("build", 2);
         let mut state = RunProjection::default();
         state.graph_source = Some("digraph Ship {}".to_string());
-        state.set_node(stage_id, NodeState {
-            prompt:            Some("plan".to_string()),
-            response:          Some("done".to_string()),
-            status:            Some(NodeStatusRecord {
-                status:         StageOutcome::Succeeded,
-                notes:          Some("ok".to_string()),
-                failure_reason: None,
-                timestamp:      Utc
-                    .with_ymd_and_hms(2026, 4, 20, 12, 1, 0)
-                    .single()
-                    .unwrap(),
-            }),
-            provider_used:     Some(serde_json::json!({ "provider": "openai" })),
-            diff:              Some("diff --git a/a b/a".to_string()),
-            script_invocation: Some(serde_json::json!({ "command": "cargo test" })),
-            script_timing:     Some(serde_json::json!({ "duration_ms": 10 })),
-            parallel_results:  Some(serde_json::json!([{ "stage": "fanout@1" }])),
-            stdout:            Some("stdout".to_string()),
-            stderr:            Some("stderr".to_string()),
-            stdout_bytes:      None,
-            stderr_bytes:      None,
-            streams_separated: None,
-            live_streaming:    None,
-            termination:       None,
+        let stage = state.stage_entry(stage_id.node_id(), stage_id.visit(), nonzero(2));
+        stage.prompt = Some("plan".to_string());
+        stage.response = Some("done".to_string());
+        stage.completion = Some(StageCompletion {
+            outcome:        StageOutcome::Succeeded,
+            notes:          Some("ok".to_string()),
+            failure_reason: None,
+            timestamp:      Utc
+                .with_ymd_and_hms(2026, 4, 20, 12, 1, 0)
+                .single()
+                .unwrap(),
         });
+        stage.provider_used = Some(serde_json::json!({ "provider": "openai" }));
+        stage.diff = Some("diff --git a/a b/a".to_string());
+        stage.script_invocation = Some(serde_json::json!({ "command": "cargo test" }));
+        stage.script_timing = Some(serde_json::json!({ "duration_ms": 10 }));
+        stage.parallel_results = Some(serde_json::json!([{ "stage": "fanout@1" }]));
+        stage.stdout = Some("stdout".to_string());
+        stage.stderr = Some("stderr".to_string());
 
         upload_data_files(
             &sandbox,
@@ -455,8 +454,8 @@ mod tests {
         .expect("run.json should parse");
         assert!(run_json.get("spec").is_some());
         assert!(run_json.get("run").is_none());
-        assert!(run_json["nodes"]["build@2"]["prompt"].is_null());
-        assert!(run_json["nodes"]["build@2"]["diff"].is_null());
+        assert!(run_json["stages"]["build@2"]["prompt"].is_null());
+        assert!(run_json["stages"]["build@2"]["diff"].is_null());
         assert_eq!(
             fs::read_to_string(target_dir.join("graph.fabro"))
                 .await
@@ -464,19 +463,19 @@ mod tests {
             "digraph Ship {}"
         );
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/build@2/prompt.md"))
+            fs::read_to_string(target_dir.join("stages/001-build@2/prompt.md"))
                 .await
                 .expect("prompt file should exist"),
             "plan"
         );
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/build@2/response.md"))
+            fs::read_to_string(target_dir.join("stages/001-build@2/response.md"))
                 .await
                 .expect("response file should exist"),
             "done"
         );
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/build@2/stdout.log"))
+            fs::read_to_string(target_dir.join("stages/001-build@2/stdout.log"))
                 .await
                 .expect("stdout file should exist"),
             "stdout"
@@ -494,7 +493,7 @@ mod tests {
             "server log\n"
         );
         assert!(
-            target_dir.join("stages/build@2/status.json").exists(),
+            target_dir.join("stages/001-build@2/status.json").exists(),
             "status file should exist"
         );
         assert!(
@@ -521,21 +520,19 @@ mod tests {
         let mut state = RunProjection::default();
         let stdout_ref = fabro_types::format_blob_ref(&stdout_id);
         let stderr_ref = fabro_types::format_blob_ref(&stderr_id);
-        state.set_node(stage_id, NodeState {
-            script_invocation: Some(serde_json::json!({
-                "command": "cargo test",
-                "stdout": stdout_ref,
-                "stderr": stderr_ref,
-            })),
-            script_timing: Some(serde_json::json!({
-                "exit_code": 0,
-                "stdout": stdout_ref,
-                "stderr": stderr_ref,
-            })),
-            stdout: Some(stdout_ref),
-            stderr: Some(stderr_ref),
-            ..NodeState::default()
-        });
+        let stage = state.stage_entry(stage_id.node_id(), stage_id.visit(), nonzero(1));
+        stage.script_invocation = Some(serde_json::json!({
+            "command": "cargo test",
+            "stdout": stdout_ref,
+            "stderr": stderr_ref,
+        }));
+        stage.script_timing = Some(serde_json::json!({
+            "exit_code": 0,
+            "stdout": stdout_ref,
+            "stderr": stderr_ref,
+        }));
+        stage.stdout = Some(stdout_ref);
+        stage.stderr = Some(stderr_ref);
 
         let reader: BlobReader = Box::new(move |blob_id| {
             let stdout_blob = stdout_blob.clone();
@@ -556,20 +553,20 @@ mod tests {
             .expect("retro files should upload");
 
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/build@1/stdout.log"))
+            fs::read_to_string(target_dir.join("stages/001-build@1/stdout.log"))
                 .await
                 .expect("stdout file should exist"),
             "resolved stdout"
         );
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/build@1/stderr.log"))
+            fs::read_to_string(target_dir.join("stages/001-build@1/stderr.log"))
                 .await
                 .expect("stderr file should exist"),
             "resolved stderr"
         );
 
         let script_timing: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(target_dir.join("stages/build@1/script_timing.json"))
+            &fs::read_to_string(target_dir.join("stages/001-build@1/script_timing.json"))
                 .await
                 .expect("script timing should exist"),
         )
@@ -578,7 +575,7 @@ mod tests {
         assert_eq!(script_timing["stderr"], "resolved stderr");
 
         let script_invocation: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(target_dir.join("stages/build@1/script_invocation.json"))
+            &fs::read_to_string(target_dir.join("stages/001-build@1/script_invocation.json"))
                 .await
                 .expect("script invocation should exist"),
         )
@@ -593,18 +590,18 @@ mod tests {
         )
         .expect("run.json should parse");
         assert_eq!(
-            run_json["nodes"]["build@1"]["script_timing"]["stdout"],
+            run_json["stages"]["build@1"]["script_timing"]["stdout"],
             "resolved stdout"
         );
         assert_eq!(
-            run_json["nodes"]["build@1"]["script_timing"]["stderr"],
+            run_json["stages"]["build@1"]["script_timing"]["stderr"],
             "resolved stderr"
         );
         assert_eq!(
-            run_json["nodes"]["build@1"]["script_invocation"]["stdout"],
+            run_json["stages"]["build@1"]["script_invocation"]["stdout"],
             "resolved stdout"
         );
-        assert!(run_json["nodes"]["build@1"]["stdout"].is_null());
-        assert!(run_json["nodes"]["build@1"]["stderr"].is_null());
+        assert!(run_json["stages"]["build@1"]["stdout"].is_null());
+        assert!(run_json["stages"]["build@1"]["stderr"].is_null());
     }
 }

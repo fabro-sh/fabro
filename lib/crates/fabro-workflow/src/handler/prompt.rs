@@ -367,7 +367,7 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let node_state = state.node(&StageId::new("classify", 1)).unwrap();
+        let node_state = state.stage(&StageId::new("classify", 1)).unwrap();
         assert_eq!(node_state.provider_used.as_ref().unwrap()["mode"], "prompt");
     }
 

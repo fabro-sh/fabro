@@ -401,7 +401,7 @@ mod tests {
         let forked_events = forked.list_events().await.unwrap();
         let forked_state = fabro_store::RunProjection::apply_events(&forked_events).unwrap();
         let node = forked_state
-            .node(&StageId::new("work", 1))
+            .stage(&StageId::new("work", 1))
             .expect("forked state should retain historical node projection");
 
         assert_eq!(node.response.as_deref(), Some("historical response"));

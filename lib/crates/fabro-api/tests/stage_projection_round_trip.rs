@@ -1,21 +1,22 @@
 use std::any::{TypeId, type_name};
 
-use fabro_api::types::NodeState as ApiNodeState;
-use fabro_types::NodeState;
+use fabro_api::types::StageProjection as ApiStageProjection;
+use fabro_types::StageProjection;
 use serde_json::json;
 
 #[test]
-fn node_state_reuses_canonical_type() {
-    assert_same_type::<ApiNodeState, NodeState>();
+fn stage_projection_reuses_canonical_type() {
+    assert_same_type::<ApiStageProjection, StageProjection>();
 }
 
 #[test]
-fn node_state_round_trips_representative_json() {
+fn stage_projection_round_trips_representative_json() {
     let value = json!({
+        "first_event_seq": 1,
         "prompt": "build it",
         "response": "done",
-        "status": {
-            "status": "succeeded",
+        "completion": {
+            "outcome": "succeeded",
             "notes": null,
             "failure_reason": null,
             "timestamp": "2026-04-29T12:34:56Z"
@@ -30,7 +31,7 @@ fn node_state_round_trips_representative_json() {
         "termination": "exited"
     });
 
-    let state: NodeState = serde_json::from_value(value.clone()).unwrap();
+    let state: StageProjection = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(state).unwrap(), value);
 }
 

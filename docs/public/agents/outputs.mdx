@@ -7,7 +7,7 @@ When an agent or prompt node finishes, Fabro captures its response text and prod
 
 ## Response capture
 
-After an agent or prompt node completes, Fabro captures the full response text and persists it to `stages/{node_id}@{visit}/response.md` in metadata snapshots and `fabro dump` output. It also writes the final outcome (status, context updates, routing directives) to `stages/{node_id}@{visit}/status.json`.
+After an agent or prompt node completes, Fabro captures the full response text and persists it to `stages/{rank:03}-{node_id}@{visit}/response.md` in metadata snapshots and `fabro dump` output. It also writes the final outcome (status, context updates, routing directives) to `stages/{rank:03}-{node_id}@{visit}/status.json`.
 
 ## Context updates
 
@@ -92,7 +92,7 @@ review -> approve [label="Approve"]
 
 ## Output logging
 
-Fabro writes several files per stage to `stages/{node_id}@{visit}/` in metadata snapshots and `fabro dump` output:
+Fabro writes several files per stage to `stages/{rank:03}-{node_id}@{visit}/` in metadata snapshots and `fabro dump` output:
 
 | File | Contents |
 |---|---|

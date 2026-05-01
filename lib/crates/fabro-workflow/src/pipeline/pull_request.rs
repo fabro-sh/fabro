@@ -213,7 +213,7 @@ fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
 /// directory scan behavior.
 fn read_plan_text(state: &RunProjection) -> Option<String> {
     let mut plan_nodes = state
-        .iter_nodes()
+        .iter_stages()
         .filter_map(|(stage_id, node)| {
             stage_id.node_id().starts_with("plan").then_some((
                 stage_id.node_id(),
@@ -625,6 +625,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::num::NonZeroU32;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -652,6 +653,10 @@ mod tests {
     use super::*;
     use crate::event::{Event, append_event};
     use crate::records::StageSummary;
+
+    fn nonzero(value: u32) -> NonZeroU32 {
+        NonZeroU32::new(value).expect("test sequence must be non-zero")
+    }
 
     struct MockProvider {
         name:          String,
@@ -997,13 +1002,7 @@ mod tests {
     #[test]
     fn read_plan_text_found() {
         let mut state = RunProjection::default();
-        state.set_node(
-            fabro_store::StageId::new("plan", 1),
-            fabro_store::NodeState {
-                response: Some("This is the plan".to_string()),
-                ..Default::default()
-            },
-        );
+        state.stage_entry("plan", 1, nonzero(1)).response = Some("This is the plan".to_string());
 
         let result = read_plan_text(&state);
         assert_eq!(result, Some("This is the plan".to_string()));
@@ -1012,13 +1011,8 @@ mod tests {
     #[test]
     fn read_plan_text_prefix_match() {
         let mut state = RunProjection::default();
-        state.set_node(
-            fabro_store::StageId::new("planning", 1),
-            fabro_store::NodeState {
-                response: Some("Planning content".to_string()),
-                ..Default::default()
-            },
-        );
+        state.stage_entry("planning", 1, nonzero(1)).response =
+            Some("Planning content".to_string());
 
         let result = read_plan_text(&state);
         assert_eq!(result, Some("Planning content".to_string()));
@@ -1027,20 +1021,9 @@ mod tests {
     #[test]
     fn read_plan_text_prefers_alphabetically_first_plan_node() {
         let mut state = RunProjection::default();
-        state.set_node(
-            fabro_store::StageId::new("planning", 1),
-            fabro_store::NodeState {
-                response: Some("Planning content".to_string()),
-                ..Default::default()
-            },
-        );
-        state.set_node(
-            fabro_store::StageId::new("plan", 1),
-            fabro_store::NodeState {
-                response: Some("Plan content".to_string()),
-                ..Default::default()
-            },
-        );
+        state.stage_entry("planning", 1, nonzero(1)).response =
+            Some("Planning content".to_string());
+        state.stage_entry("plan", 1, nonzero(2)).response = Some("Plan content".to_string());
 
         let result = read_plan_text(&state);
         assert_eq!(result, Some("Plan content".to_string()));
@@ -1049,10 +1032,7 @@ mod tests {
     #[test]
     fn read_plan_text_not_found() {
         let mut state = RunProjection::default();
-        state.set_node(
-            fabro_store::StageId::new("implement", 1),
-            fabro_store::NodeState::default(),
-        );
+        state.stage_entry("implement", 1, nonzero(1));
 
         let result = read_plan_text(&state);
         assert_eq!(result, None);

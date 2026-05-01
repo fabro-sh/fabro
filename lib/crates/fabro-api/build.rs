@@ -312,7 +312,7 @@ fn main() {
         ("ActorKind", "fabro_types::ActorKind", &[]),
         ("ActorRef", "fabro_types::ActorRef", &[]),
         ("QuestionType", "fabro_types::QuestionType", &[]),
-        ("NodeStatusRecord", "fabro_types::NodeStatusRecord", &[]),
+        ("StageCompletion", "fabro_types::StageCompletion", &[]),
         ("StageOutcome", "fabro_types::StageOutcome", &[]),
         ("StageState", "fabro_types::StageState", &[]),
         (
@@ -321,7 +321,7 @@ fn main() {
             &[],
         ),
         ("CommandTermination", "fabro_types::CommandTermination", &[]),
-        ("NodeState", "fabro_types::NodeState", &[]),
+        ("StageProjection", "fabro_types::StageProjection", &[]),
         ("SecretMetadata", "fabro_types::SecretMetadata", &[]),
         ("InterviewOption", "fabro_types::InterviewOption", &[]),
         (

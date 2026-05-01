@@ -48,69 +48,75 @@ impl RunDump {
         }
 
         let mut stage_ids: Vec<_> = state
-            .iter_nodes()
-            .map(|(stage_id, _)| stage_id.clone())
+            .iter_stages()
+            .map(|(stage_id, stage)| (stage_id.clone(), stage.first_event_seq))
             .collect();
-        stage_ids.sort();
+        stage_ids.sort_by(|(left_id, left_seq), (right_id, right_seq)| {
+            left_seq
+                .get()
+                .cmp(&right_seq.get())
+                .then_with(|| left_id.cmp(right_id))
+        });
 
-        for stage_id in stage_ids {
-            let Some(node) = state.node(&stage_id) else {
+        for (index, (stage_id, _)) in stage_ids.into_iter().enumerate() {
+            let Some(stage) = state.stage(&stage_id) else {
                 continue;
             };
-            let base = PathBuf::from("stages").join(stage_id.to_string());
+            let rank = index + 1;
+            let base = PathBuf::from("stages").join(format!("{rank:03}-{stage_id}"));
 
-            if let Some(prompt) = node.prompt.as_ref() {
+            if let Some(prompt) = stage.prompt.as_ref() {
                 entries.push(RunDumpEntry::text_path(
                     &base.join("prompt.md"),
                     prompt.clone(),
                 ));
             }
-            if let Some(response) = node.response.as_ref() {
+            if let Some(response) = stage.response.as_ref() {
                 entries.push(RunDumpEntry::text_path(
                     &base.join("response.md"),
                     response.clone(),
                 ));
             }
-            if let Some(status) = node.status.as_ref() {
-                push_json_entry_path(&mut entries, &base.join("status.json"), status)?;
+            if let Some(completion) = stage.completion.as_ref() {
+                push_json_entry_path(&mut entries, &base.join("status.json"), completion)?;
             }
-            if let Some(provider_used) = node.provider_used.as_ref() {
+            if let Some(provider_used) = stage.provider_used.as_ref() {
                 entries.push(RunDumpEntry::json_path(
                     &base.join("provider_used.json"),
                     provider_used.clone(),
                 ));
             }
-            if let Some(diff) = node.diff.as_ref() {
+            if let Some(diff) = stage.diff.as_ref() {
                 entries.push(RunDumpEntry::text_path(
                     &base.join("diff.patch"),
                     diff.clone(),
                 ));
             }
-            if let Some(script_invocation) = node.script_invocation.as_ref() {
+            if let Some(script_invocation) = stage.script_invocation.as_ref() {
                 entries.push(RunDumpEntry::json_path(
                     &base.join("script_invocation.json"),
                     script_invocation.clone(),
                 ));
             }
-            if let Some(script_timing) = node.script_timing.as_ref() {
+            if let Some(script_timing) = stage.script_timing.as_ref() {
                 entries.push(RunDumpEntry::json_path(
                     &base.join("script_timing.json"),
                     script_timing.clone(),
                 ));
             }
-            if let Some(parallel_results) = node.parallel_results.as_ref() {
+            if let Some(parallel_results) = stage.parallel_results.as_ref() {
                 entries.push(RunDumpEntry::json_path(
                     &base.join("parallel_results.json"),
                     parallel_results.clone(),
                 ));
             }
-            if let Some(stdout) = node.stdout.as_ref() {
+            if let Some(stdout) = stage.stdout.as_ref() {
                 entries.push(RunDumpEntry::text_path(
                     &base.join("stdout.log"),
                     stdout.clone(),
                 ));
             }
-            if let Some(stderr) = node.stderr.as_ref() {
+            if let Some(stderr) = stage.stderr.as_ref() {
                 entries.push(RunDumpEntry::text_path(
                     &base.join("stderr.log"),
                     stderr.clone(),
@@ -425,18 +431,23 @@ fn ensure_parent_dir(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::num::NonZeroU32;
 
     use chrono::{TimeZone, Utc};
-    use fabro_store::{NodeState, RunProjection, StageId};
+    use fabro_store::{RunProjection, StageId};
     use fabro_types::graph::Graph;
     use fabro_types::run::RunSpec;
     use fabro_types::{
-        Checkpoint, Conclusion, NodeStatusRecord, RunStatus, SandboxRecord, StageOutcome,
+        Checkpoint, Conclusion, RunStatus, SandboxRecord, StageCompletion, StageOutcome,
         StartRecord, SuccessReason, WorkflowSettings, fixtures,
     };
     use futures::executor;
 
     use super::{RunDump, RunDumpContents, RunDumpEntry};
+
+    fn nonzero(value: u32) -> NonZeroU32 {
+        NonZeroU32::new(value).expect("test sequence must be non-zero")
+    }
 
     fn sample_run_spec() -> RunSpec {
         RunSpec {
@@ -522,31 +533,25 @@ mod tests {
         });
         projection.retro_prompt = Some("retro prompt".to_string());
         projection.retro_response = Some("retro response".to_string());
-        projection.set_node(stage_id.clone(), NodeState {
-            prompt:            Some("plan".to_string()),
-            response:          Some("done".to_string()),
-            status:            Some(NodeStatusRecord {
-                status:         StageOutcome::Succeeded,
-                notes:          Some("ok".to_string()),
-                failure_reason: None,
-                timestamp:      Utc
-                    .with_ymd_and_hms(2026, 4, 20, 12, 1, 0)
-                    .single()
-                    .unwrap(),
-            }),
-            provider_used:     Some(serde_json::json!({ "provider": "openai" })),
-            diff:              Some("diff --git a/a b/a".to_string()),
-            script_invocation: Some(serde_json::json!({ "command": "cargo test" })),
-            script_timing:     Some(serde_json::json!({ "duration_ms": 10 })),
-            parallel_results:  Some(serde_json::json!([{ "stage": "fanout@1" }])),
-            stdout:            Some("stdout".to_string()),
-            stderr:            Some("stderr".to_string()),
-            stdout_bytes:      None,
-            stderr_bytes:      None,
-            streams_separated: None,
-            live_streaming:    None,
-            termination:       None,
+        let stage = projection.stage_entry(stage_id.node_id(), stage_id.visit(), nonzero(2));
+        stage.prompt = Some("plan".to_string());
+        stage.response = Some("done".to_string());
+        stage.completion = Some(StageCompletion {
+            outcome:        StageOutcome::Succeeded,
+            notes:          Some("ok".to_string()),
+            failure_reason: None,
+            timestamp:      Utc
+                .with_ymd_and_hms(2026, 4, 20, 12, 1, 0)
+                .single()
+                .unwrap(),
         });
+        stage.provider_used = Some(serde_json::json!({ "provider": "openai" }));
+        stage.diff = Some("diff --git a/a b/a".to_string());
+        stage.script_invocation = Some(serde_json::json!({ "command": "cargo test" }));
+        stage.script_timing = Some(serde_json::json!({ "duration_ms": 10 }));
+        stage.parallel_results = Some(serde_json::json!([{ "stage": "fanout@1" }]));
+        stage.stdout = Some("stdout".to_string());
+        stage.stderr = Some("stderr".to_string());
 
         let dump = RunDump::from_projection(&projection).unwrap();
         let paths: Vec<&str> = dump
@@ -559,16 +564,16 @@ mod tests {
         assert!(paths.contains(&"graph.fabro"));
         assert!(paths.contains(&"stages/retro/prompt.md"));
         assert!(paths.contains(&"stages/retro/response.md"));
-        assert!(paths.contains(&"stages/build@2/prompt.md"));
-        assert!(paths.contains(&"stages/build@2/response.md"));
-        assert!(paths.contains(&"stages/build@2/status.json"));
-        assert!(paths.contains(&"stages/build@2/provider_used.json"));
-        assert!(paths.contains(&"stages/build@2/diff.patch"));
-        assert!(paths.contains(&"stages/build@2/script_invocation.json"));
-        assert!(paths.contains(&"stages/build@2/script_timing.json"));
-        assert!(paths.contains(&"stages/build@2/parallel_results.json"));
-        assert!(paths.contains(&"stages/build@2/stdout.log"));
-        assert!(paths.contains(&"stages/build@2/stderr.log"));
+        assert!(paths.contains(&"stages/001-build@2/prompt.md"));
+        assert!(paths.contains(&"stages/001-build@2/response.md"));
+        assert!(paths.contains(&"stages/001-build@2/status.json"));
+        assert!(paths.contains(&"stages/001-build@2/provider_used.json"));
+        assert!(paths.contains(&"stages/001-build@2/diff.patch"));
+        assert!(paths.contains(&"stages/001-build@2/script_invocation.json"));
+        assert!(paths.contains(&"stages/001-build@2/script_timing.json"));
+        assert!(paths.contains(&"stages/001-build@2/parallel_results.json"));
+        assert!(paths.contains(&"stages/001-build@2/stdout.log"));
+        assert!(paths.contains(&"stages/001-build@2/stderr.log"));
         assert!(!paths.contains(&"start.json"));
         assert!(!paths.contains(&"status.json"));
         assert!(!paths.contains(&"checkpoint.json"));
@@ -585,7 +590,7 @@ mod tests {
             panic!("run.json should be json");
         };
         let round_tripped: RunProjection = serde_json::from_value(value.clone()).unwrap();
-        let node = round_tripped.node(&stage_id).expect("node should exist");
+        let node = round_tripped.stage(&stage_id).expect("node should exist");
 
         assert!(round_tripped.spec.is_some());
         assert!(round_tripped.start.is_some());
@@ -602,6 +607,30 @@ mod tests {
             node.provider_used,
             Some(serde_json::json!({ "provider": "openai" }))
         );
+    }
+
+    #[test]
+    fn from_projection_prefixes_stage_paths_but_not_artifact_paths() {
+        let mut projection = RunProjection::default();
+        projection.stage_entry("zebra", 1, nonzero(1)).prompt = Some("first".to_string());
+        projection.stage_entry("apple", 1, nonzero(2)).prompt = Some("second".to_string());
+
+        let mut dump = RunDump::from_projection(&projection).unwrap();
+        dump.add_artifact_bytes(&StageId::new("zebra", 1), "report.txt", b"z".to_vec())
+            .unwrap();
+        dump.add_artifact_bytes(&StageId::new("apple", 1), "report.txt", b"a".to_vec())
+            .unwrap();
+
+        let paths: Vec<&str> = dump
+            .entries()
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect();
+
+        assert!(paths.contains(&"stages/001-zebra@1/prompt.md"));
+        assert!(paths.contains(&"stages/002-apple@1/prompt.md"));
+        assert!(paths.contains(&"artifacts/zebra@1/report.txt"));
+        assert!(paths.contains(&"artifacts/apple@1/report.txt"));
     }
 
     #[test]

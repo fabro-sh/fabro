@@ -553,7 +553,7 @@ methods = ["dev-token"]
     let state = run_state(&run_dir);
     let probe_stage_id = StageId::new("probe", 1);
     let _probe = state
-        .node(&probe_stage_id)
+        .stage(&probe_stage_id)
         .expect("probe node state should exist");
     let stdout = command_log_text(&run_dir, &probe_stage_id, CommandOutputStream::Stdout);
     assert!(
@@ -723,7 +723,7 @@ fn runner_reports_missing_run_spec_without_prefetching_events() {
                     "sandbox": null,
                     "final_patch": null,
                     "pull_request": null,
-                    "nodes": {}
+                    "stages": {}
                 })
                 .to_string(),
             );

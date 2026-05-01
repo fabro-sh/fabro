@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::time::Instant;
 
 use fabro_dump::RunDump;
 use fabro_hooks::{HookContext, HookEvent};
 use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
-use fabro_types::{BilledTokenCounts, EventBody};
+use fabro_types::{BilledTokenCounts, EventBody, RunProjection};
 use fabro_util::error::collect_causes;
 use fabro_util::time::elapsed_ms;
 
@@ -67,11 +68,14 @@ pub(crate) async fn build_conclusion_from_store(
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
-    let checkpoint = run_store
-        .state()
-        .await
-        .ok()
-        .and_then(|state| state.checkpoint);
+    let projection = run_store.state().await.ok();
+    let projection_order = projection
+        .as_ref()
+        .map(stage_projection_order)
+        .unwrap_or_default();
+    let checkpoint = projection
+        .as_ref()
+        .and_then(|state| state.checkpoint.as_ref());
     let stage_durations = run_store
         .list_events()
         .await
@@ -79,8 +83,9 @@ pub(crate) async fn build_conclusion_from_store(
         .unwrap_or_default();
 
     build_conclusion_from_parts(
-        checkpoint.as_ref(),
+        checkpoint,
         &stage_durations,
+        &projection_order,
         status,
         failure_reason,
         run_duration_ms,
@@ -90,7 +95,8 @@ pub(crate) async fn build_conclusion_from_store(
 
 fn build_conclusion_from_parts(
     checkpoint: Option<&Checkpoint>,
-    stage_durations: &std::collections::HashMap<String, u64>,
+    stage_durations: &HashMap<String, u64>,
+    projection_order: &HashMap<String, u32>,
     status: StageOutcome,
     failure_reason: Option<String>,
     run_duration_ms: u64,
@@ -100,14 +106,31 @@ fn build_conclusion_from_parts(
     // while the other checkpoint maps are keyed by node_id. Dedupe to one row
     // per node so the stages table matches the deduped billing total.
     let (stages, total_retries) = if let Some(cp) = checkpoint {
-        let mut stages = Vec::new();
+        let mut stage_rows = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let mut retries_sum: u32 = 0;
+        let mut stage_order = Vec::new();
 
-        for node_id in &cp.completed_nodes {
+        for (original_checkpoint_order, node_id) in cp.completed_nodes.iter().enumerate() {
             if !seen.insert(node_id.as_str()) {
                 continue;
             }
+            stage_order.push((original_checkpoint_order, node_id.as_str()));
+        }
+        let mut extra_node_outcomes = cp
+            .node_outcomes
+            .keys()
+            .filter(|node_id| !seen.contains(node_id.as_str()))
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        extra_node_outcomes.sort_unstable();
+        let extra_offset = stage_order.len();
+        for (extra_index, node_id) in extra_node_outcomes.into_iter().enumerate() {
+            seen.insert(node_id);
+            stage_order.push((extra_offset + extra_index, node_id));
+        }
+
+        for (original_checkpoint_order, node_id) in stage_order {
             let outcome = cp.node_outcomes.get(node_id);
             let retries = cp
                 .node_retries
@@ -117,16 +140,31 @@ fn build_conclusion_from_parts(
                 .saturating_sub(1);
             retries_sum += retries;
 
-            stages.push(StageSummary {
-                stage_id: node_id.clone(),
-                stage_label: node_id.clone(),
+            let summary = StageSummary {
+                stage_id: node_id.to_string(),
+                stage_label: node_id.to_string(),
                 duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
                 billing_usd_micros: outcome
                     .and_then(|o| o.usage.as_ref())
                     .and_then(|usage| usage.total_usd_micros),
                 retries,
-            });
+            };
+            stage_rows.push((
+                projection_order.get(node_id).copied().unwrap_or(u32::MAX),
+                original_checkpoint_order,
+                summary,
+            ));
         }
+        stage_rows.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.cmp(&right.1))
+                .then_with(|| left.2.stage_id.cmp(&right.2.stage_id))
+        });
+        let stages = stage_rows
+            .into_iter()
+            .map(|(_, _, summary)| summary)
+            .collect();
         (stages, retries_sum)
     } else {
         (vec![], 0)
@@ -142,6 +180,19 @@ fn build_conclusion_from_parts(
         billing: checkpoint.and_then(billing_from_checkpoint),
         total_retries,
     }
+}
+
+fn stage_projection_order(state: &RunProjection) -> HashMap<String, u32> {
+    let mut order = HashMap::new();
+    for (stage_id, stage) in state.iter_stages() {
+        order
+            .entry(stage_id.node_id().to_string())
+            .and_modify(|first_seq: &mut u32| {
+                *first_seq = (*first_seq).min(stage.first_event_seq.get());
+            })
+            .or_insert_with(|| stage.first_event_seq.get());
+    }
+    order
 }
 
 /// `conclusion` is injected because the terminal event hasn't been emitted
@@ -462,15 +513,18 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
         .iter()
         .filter(|envelope| matches!(envelope.event.body, EventBody::ArtifactCaptured(_)))
         .count();
-    let checkpoint = services
-        .run_store
-        .state()
-        .await
-        .ok()
-        .and_then(|state| state.checkpoint);
+    let projection = services.run_store.state().await.ok();
+    let projection_order = projection
+        .as_ref()
+        .map(stage_projection_order)
+        .unwrap_or_default();
+    let checkpoint = projection
+        .as_ref()
+        .and_then(|state| state.checkpoint.as_ref());
     let conclusion = build_conclusion_from_parts(
-        checkpoint.as_ref(),
+        checkpoint,
         &stage_durations,
+        &projection_order,
         final_status,
         failure_reason,
         duration_ms,
@@ -539,6 +593,7 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::num::NonZeroU32;
     use std::path::Path;
     use std::sync::Arc;
     use std::time::Duration;
@@ -658,6 +713,100 @@ mod tests {
             captured.lock().unwrap().push(event.clone());
         });
         events
+    }
+
+    fn nonzero(value: u32) -> NonZeroU32 {
+        NonZeroU32::new(value).expect("test sequence must be non-zero")
+    }
+
+    fn checkpoint_with(
+        completed_nodes: Vec<&str>,
+        node_outcomes: HashMap<String, Outcome>,
+    ) -> Checkpoint {
+        Checkpoint {
+            timestamp: chrono::Utc::now(),
+            current_node: completed_nodes
+                .last()
+                .copied()
+                .unwrap_or("start")
+                .to_string(),
+            completed_nodes: completed_nodes.into_iter().map(str::to_string).collect(),
+            node_retries: HashMap::new(),
+            context_values: HashMap::new(),
+            node_outcomes,
+            next_node_id: None,
+            git_commit_sha: None,
+            loop_failure_signatures: HashMap::new(),
+            restart_failure_signatures: HashMap::new(),
+            node_visits: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn conclusion_stage_order_follows_projection_first_event_order() {
+        let mut projection = RunProjection::default();
+        projection.stage_entry("zebra", 1, nonzero(1));
+        projection.stage_entry("apple", 1, nonzero(2));
+        let projection_order = stage_projection_order(&projection);
+        let checkpoint = checkpoint_with(
+            vec!["apple", "zebra"],
+            HashMap::from([
+                ("apple".to_string(), Outcome::success()),
+                ("zebra".to_string(), Outcome::success()),
+            ]),
+        );
+
+        let conclusion = build_conclusion_from_parts(
+            Some(&checkpoint),
+            &HashMap::new(),
+            &projection_order,
+            StageOutcome::Succeeded,
+            None,
+            10,
+            None,
+        );
+
+        let stage_ids = conclusion
+            .stages
+            .iter()
+            .map(|stage| stage.stage_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(stage_ids, vec!["zebra", "apple"]);
+    }
+
+    #[test]
+    fn conclusion_includes_skipped_stage_from_projection_checkpoint_fallback() {
+        let mut projection = RunProjection::default();
+        projection.stage_entry("skipped", 1, nonzero(4));
+        projection.stage_entry("finished", 1, nonzero(5));
+        let projection_order = stage_projection_order(&projection);
+        let checkpoint = checkpoint_with(
+            vec!["finished"],
+            HashMap::from([
+                ("finished".to_string(), Outcome::success()),
+                (
+                    "skipped".to_string(),
+                    Outcome::skipped("condition was false"),
+                ),
+            ]),
+        );
+
+        let conclusion = build_conclusion_from_parts(
+            Some(&checkpoint),
+            &HashMap::new(),
+            &projection_order,
+            StageOutcome::Succeeded,
+            None,
+            10,
+            None,
+        );
+
+        let stage_ids = conclusion
+            .stages
+            .iter()
+            .map(|stage| stage.stage_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(stage_ids, vec!["skipped", "finished"]);
     }
 
     fn test_services(

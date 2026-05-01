@@ -13,7 +13,6 @@ pub mod event_envelope;
 pub mod failure_signature;
 pub mod graph;
 pub mod interview;
-pub mod node_status;
 pub mod outcome;
 pub mod pull_request;
 pub mod repository;
@@ -27,6 +26,7 @@ pub mod run_summary;
 pub mod sandbox_record;
 pub mod secret;
 pub mod settings;
+pub mod stage_completion;
 pub mod stage_id;
 pub mod start;
 pub mod status;
@@ -49,7 +49,6 @@ pub use event_envelope::EventEnvelope;
 pub use failure_signature::FailureSignature;
 pub use graph::{AttrValue, Edge, Graph, Node, is_llm_handler_type, shape_to_handler_type};
 pub use interview::{InterviewQuestionRecord, QuestionType};
-pub use node_status::NodeStatusRecord;
 pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,
 };
@@ -71,10 +70,11 @@ pub use run_event::{
     MetadataSnapshotPhase, RunEvent, RunNoticeLevel,
 };
 pub use run_id::{RunId, fixtures};
-pub use run_projection::{NodeState, PendingInterviewRecord, RunProjection};
+pub use run_projection::{PendingInterviewRecord, RunProjection, StageProjection};
 pub use run_summary::RunSummary;
 pub use sandbox_record::SandboxRecord;
 pub use secret::{SecretMetadata, SecretType};
+pub use stage_completion::StageCompletion;
 pub use stage_id::{ParallelBranchId, StageId};
 pub use start::StartRecord;
 pub use status::{

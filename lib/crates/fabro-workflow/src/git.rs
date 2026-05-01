@@ -556,13 +556,13 @@ mod tests {
             .git_entries()
             .unwrap();
         let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
-        assert!(paths.contains(&"stages/work@2/prompt.md"));
-        assert!(paths.contains(&"stages/work@2/response.md"));
-        assert!(paths.contains(&"stages/work@2/status.json"));
-        assert!(paths.contains(&"stages/work@2/provider_used.json"));
-        assert!(paths.contains(&"stages/work@2/script_invocation.json"));
-        assert!(paths.contains(&"stages/work@2/script_timing.json"));
-        assert!(paths.contains(&"stages/work@2/parallel_results.json"));
+        assert!(paths.contains(&"stages/001-work@2/prompt.md"));
+        assert!(paths.contains(&"stages/001-work@2/response.md"));
+        assert!(paths.contains(&"stages/001-work@2/status.json"));
+        assert!(paths.contains(&"stages/001-work@2/provider_used.json"));
+        assert!(paths.contains(&"stages/001-work@2/script_invocation.json"));
+        assert!(paths.contains(&"stages/001-work@2/script_timing.json"));
+        assert!(paths.contains(&"stages/001-work@2/parallel_results.json"));
     }
 
     #[test]

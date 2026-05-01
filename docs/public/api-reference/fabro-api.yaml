@@ -5074,14 +5074,14 @@ components:
         - failed
         - skipped
 
-    NodeStatusRecord:
-      description: Internal node status record.
+    StageCompletion:
+      description: Terminal completion metadata for a projected workflow stage.
       type: object
       required:
-        - status
+        - outcome
         - timestamp
       properties:
-        status:
+        outcome:
           $ref: "#/components/schemas/StageOutcome"
         notes:
           type: ["string", "null"]
@@ -5091,17 +5091,23 @@ components:
           type: string
           format: date-time
 
-    NodeState:
-      description: Internal node projection state.
+    StageProjection:
+      description: Observable projection data for one workflow stage execution.
       type: object
+      required:
+        - first_event_seq
       properties:
+        first_event_seq:
+          type: integer
+          format: uint32
+          minimum: 1
         prompt:
           type: ["string", "null"]
         response:
           type: ["string", "null"]
-        status:
+        completion:
           oneOf:
-            - $ref: "#/components/schemas/NodeStatusRecord"
+            - $ref: "#/components/schemas/StageCompletion"
             - type: "null"
         provider_used: {}
         diff:
@@ -5247,7 +5253,7 @@ components:
       description: Raw internal run projection derived from the event log.
       type: object
       required:
-        - nodes
+        - stages
       properties:
         spec:
           oneOf:
@@ -5310,11 +5316,11 @@ components:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/PendingInterviewRecord"
-        nodes:
+        stages:
           type: object
-          description: Map from StageId (`node_id@visit`) to NodeState.
+          description: Map from StageId (`node_id@visit`) to stage projection data.
           additionalProperties:
-            $ref: "#/components/schemas/NodeState"
+            $ref: "#/components/schemas/StageProjection"
 
     RunSummary:
       description: Durable run summary derived from the backing store.

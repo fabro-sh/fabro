@@ -509,7 +509,7 @@ mod tests {
         logger.flush().await;
 
         let snapshot = run_store.state().await.unwrap();
-        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let node_state = snapshot.stage(&StageId::new("script_node", 1)).unwrap();
         let json = node_state.script_invocation.as_ref().unwrap();
         assert_eq!(json["command"], "echo hello");
         assert_eq!(json["language"], "shell");
@@ -540,7 +540,7 @@ mod tests {
         logger.flush().await;
 
         let snapshot = run_store.state().await.unwrap();
-        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let node_state = snapshot.stage(&StageId::new("script_node", 1)).unwrap();
         let json = node_state.script_invocation.as_ref().unwrap();
         assert_eq!(json["command"], "echo hello");
         assert_eq!(json["language"], "shell");
@@ -567,7 +567,7 @@ mod tests {
         logger.flush().await;
 
         let snapshot = run_store.state().await.unwrap();
-        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let node_state = snapshot.stage(&StageId::new("script_node", 1)).unwrap();
         let stdout = node_state.stdout.as_deref().unwrap();
         assert_eq!(command_log_text(&services, stdout).await.trim(), "hello");
         let stderr = node_state.stderr.as_deref().unwrap();
@@ -598,7 +598,7 @@ mod tests {
         logger.flush().await;
 
         let snapshot = run_store.state().await.unwrap();
-        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let node_state = snapshot.stage(&StageId::new("script_node", 1)).unwrap();
         let stderr = node_state.stderr.as_deref().unwrap();
         assert_eq!(command_log_text(&services, stderr).await.trim(), "oops");
     }
@@ -623,7 +623,7 @@ mod tests {
         logger.flush().await;
 
         let snapshot = run_store.state().await.unwrap();
-        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let node_state = snapshot.stage(&StageId::new("script_node", 1)).unwrap();
         let json = node_state.script_timing.as_ref().unwrap();
         assert!(json["duration_ms"].is_u64());
         assert_eq!(json["exit_code"], 0);
@@ -648,7 +648,7 @@ mod tests {
         logger.flush().await;
 
         let snapshot = run_store.state().await.unwrap();
-        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let node_state = snapshot.stage(&StageId::new("script_node", 1)).unwrap();
         let json = node_state.script_timing.as_ref().unwrap();
         assert_eq!(json["exit_code"], 1);
         assert_eq!(json["termination"], "exited");
@@ -678,7 +678,7 @@ mod tests {
         logger.flush().await;
 
         let snapshot = run_store.state().await.unwrap();
-        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let node_state = snapshot.stage(&StageId::new("script_node", 1)).unwrap();
         let json = node_state.script_timing.as_ref().unwrap();
         assert!(json["duration_ms"].is_u64());
         assert_eq!(json["exit_code"], serde_json::Value::Null);
@@ -706,7 +706,7 @@ mod tests {
 
         let snapshot = run_store.state().await.unwrap();
         let node = snapshot
-            .node(&StageId::new("script_node", 1))
+            .stage(&StageId::new("script_node", 1))
             .cloned()
             .unwrap();
 
