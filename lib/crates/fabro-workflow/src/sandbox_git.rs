@@ -1339,7 +1339,7 @@ mod tests {
             fork_source_ref: None,
             in_place: false,
         });
-        let mut dump = crate::run_dump::RunDump::from_projection(&projection);
+        let mut dump = fabro_dump::RunDump::from_projection(&projection);
         dump.add_file_bytes("binary/payload.bin", vec![0, 159, 146, 150]);
         dump.add_file_bytes("path with spaces.txt", b"quoted path\n".to_vec());
 
@@ -1501,7 +1501,7 @@ mod tests {
             fork_source_ref:  None,
             in_place:         false,
         });
-        let dump = crate::run_dump::RunDump::from_projection(&projection);
+        let dump = fabro_dump::RunDump::from_projection(&projection);
         let expected_entries = dump.git_entries().unwrap();
         let expected_entry_count = expected_entries.len();
         let expected_bytes = expected_entries

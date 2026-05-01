@@ -283,6 +283,10 @@ mod tests {
         async fn read_blob(&self, id: &fabro_types::RunBlobId) -> anyhow::Result<Option<Bytes>> {
             Ok(self.blobs.lock().await.get(id).cloned())
         }
+
+        async fn read_run_log(&self) -> anyhow::Result<Option<Vec<u8>>> {
+            Ok(None)
+        }
     }
 
     fn make_services() -> EngineServices {

@@ -1,6 +1,4 @@
-use std::future::Future;
-use std::path::{Path, PathBuf};
-use std::pin::Pin;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -9,12 +7,11 @@ use fabro_agent::{
     AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session, SessionEvent,
     SessionOptions, Turn, shell_quote,
 };
+use fabro_dump::{BlobReader, RunDump};
 use fabro_llm::client::Client;
 use fabro_llm::provider::Provider;
 use fabro_llm::types::ToolDefinition;
-use fabro_store::{EventEnvelope, RunProjection, SerializableProjection};
-use fabro_types::{RunBlobId, parse_blob_ref};
-use serde_json::Value;
+use fabro_store::{EventEnvelope, RunProjection};
 use tokio::task::JoinHandle;
 
 use crate::retro::{RetroNarrative, SmoothnessRating};
@@ -22,9 +19,11 @@ use crate::retro::{RetroNarrative, SmoothnessRating};
 const RETRO_SYSTEM_PROMPT: &str = r"You are a workflow run retrospective analyst. Your job is to analyze a completed workflow run and generate a structured retrospective.
 
 You have access to the run's data files:
-- `progress.jsonl` — the full event stream (stage starts/completions, agent tool calls, errors, retries)
+- `events.jsonl` — the full event stream (stage starts/completions, agent tool calls, errors, retries)
 - `run.json` — serialized run projection with the run spec, checkpoint state, conclusion, retro data, and other metadata
 - `graph.fabro` — the workflow source for the run
+- `checkpoints/{seq:04}.json` — zero-padded checkpoint snapshots captured during the run
+- `run.log` — server/worker log output for the run when available
 - `stages/{node_id}@{visit}/...` — per-stage prompt, response, status, diff, stdout/stderr, and tool metadata files
 
 ## Your task
@@ -124,33 +123,30 @@ pub struct RetroAgentResult {
     pub response:  String,
 }
 
-pub type RetroBlobReader = Arc<
-    dyn Fn(RunBlobId) -> Pin<Box<dyn Future<Output = anyhow::Result<Option<Vec<u8>>>> + Send>>
-        + Send
-        + Sync,
->;
-
 #[must_use]
 pub fn build_retro_prompt(retro_data_dir: &str) -> String {
     format!(
         "Analyze the workflow run data at `{retro_data_dir}/` and generate a retrospective. \
-         The key file is `{retro_data_dir}/progress.jsonl` which contains the full event stream. \
+         The key file is `{retro_data_dir}/events.jsonl` which contains the full event stream. \
          Use `{retro_data_dir}/run.json` for the run-level snapshot, `{retro_data_dir}/graph.fabro` \
-         for the workflow source, and `{retro_data_dir}/stages/` for full per-stage payloads. \
+         for the workflow source, `{retro_data_dir}/checkpoints/` for checkpoint snapshots, \
+         `{retro_data_dir}/run.log` for server logs when present, and `{retro_data_dir}/stages/` \
+         for full per-stage payloads. \
          Use grep to search for interesting signals (failures, retries, errors, approach changes) \
          rather than reading the entire file. When done, call the `submit_retro` tool with your analysis."
     )
 }
 
 /// Run a retro agent session that analyzes workflow run data and produces
-/// a structured narrative. The agent explores `progress.jsonl` and other
+/// a structured narrative. The agent explores `events.jsonl` and other
 /// files via tool access, then calls `submit_retro` with its analysis.
 pub async fn run_retro_agent(
     sandbox: &Arc<dyn Sandbox>,
     state: &RunProjection,
     events: &[EventEnvelope],
-    run_dir: &Path,
-    blob_reader: Option<RetroBlobReader>,
+    _run_dir: &Path,
+    run_log: Option<Vec<u8>>,
+    blob_reader: Option<BlobReader>,
     llm_client: &Client,
     provider: Provider,
     model: &str,
@@ -158,15 +154,7 @@ pub async fn run_retro_agent(
 ) -> anyhow::Result<RetroAgentResult> {
     // Upload data files into sandbox (needed for Daytona; no-op effect for local
     // since the agent can also read from the original paths via tools).
-    upload_data_files(
-        sandbox,
-        state,
-        events,
-        run_dir,
-        RETRO_DATA_DIR,
-        blob_reader.as_ref(),
-    )
-    .await?;
+    upload_data_files(sandbox, state, events, RETRO_DATA_DIR, run_log, blob_reader).await?;
 
     // Build provider profile with the submit_retro tool
     let captured: Arc<Mutex<Option<RetroNarrative>>> = Arc::new(Mutex::new(None));
@@ -317,238 +305,29 @@ async fn upload_data_files(
     sandbox: &Arc<dyn Sandbox>,
     state: &RunProjection,
     events: &[EventEnvelope],
-    _run_dir: &Path,
     target_dir: &str,
-    blob_reader: Option<&RetroBlobReader>,
+    run_log: Option<Vec<u8>>,
+    blob_reader: Option<BlobReader>,
 ) -> anyhow::Result<()> {
-    let progress_content = (!events.is_empty()).then(|| {
-        let mut buf = String::new();
-        for env in events {
-            if let Ok(line) = serde_json::to_string(&env.event) {
-                buf.push_str(&line);
-                buf.push('\n');
-            }
-        }
-        buf
-    });
-    upload_file(
-        sandbox,
-        target_dir,
-        Path::new("progress.jsonl"),
-        progress_content,
-    )
-    .await?;
-
-    let retro_state = hydrate_retro_projection(state, blob_reader).await?;
-
-    let run_content = serde_json::to_string_pretty(&SerializableProjection(&retro_state))?;
-    upload_file(
-        sandbox,
-        target_dir,
-        Path::new("run.json"),
-        Some(run_content),
-    )
-    .await?;
-    upload_file(
-        sandbox,
-        target_dir,
-        Path::new("graph.fabro"),
-        state.graph_source.clone(),
-    )
-    .await?;
-
-    let mut stage_ids: Vec<_> = state
-        .iter_nodes()
-        .map(|(stage_id, _)| stage_id.clone())
-        .collect();
-    stage_ids.sort();
-
-    for stage_id in stage_ids {
-        let Some(node) = retro_state.node(&stage_id) else {
-            continue;
-        };
-        let base = PathBuf::from("stages").join(stage_id.to_string());
-        upload_file(
-            sandbox,
-            target_dir,
-            &base.join("prompt.md"),
-            node.prompt.clone(),
-        )
-        .await?;
-        upload_file(
-            sandbox,
-            target_dir,
-            &base.join("response.md"),
-            node.response.clone(),
-        )
-        .await?;
-        upload_json_file(
-            sandbox,
-            target_dir,
-            &base.join("status.json"),
-            node.status.as_ref(),
-        )
-        .await?;
-        upload_json_file(
-            sandbox,
-            target_dir,
-            &base.join("provider_used.json"),
-            node.provider_used.as_ref(),
-        )
-        .await?;
-        upload_file(
-            sandbox,
-            target_dir,
-            &base.join("diff.patch"),
-            node.diff.clone(),
-        )
-        .await?;
-        upload_json_file(
-            sandbox,
-            target_dir,
-            &base.join("script_invocation.json"),
-            node.script_invocation.as_ref(),
-        )
-        .await?;
-        upload_json_file(
-            sandbox,
-            target_dir,
-            &base.join("script_timing.json"),
-            node.script_timing.as_ref(),
-        )
-        .await?;
-        upload_json_file(
-            sandbox,
-            target_dir,
-            &base.join("parallel_results.json"),
-            node.parallel_results.as_ref(),
-        )
-        .await?;
-        upload_file(
-            sandbox,
-            target_dir,
-            &base.join("stdout.log"),
-            resolve_text_file_content(node.stdout.clone(), blob_reader).await?,
-        )
-        .await?;
-        upload_file(
-            sandbox,
-            target_dir,
-            &base.join("stderr.log"),
-            resolve_text_file_content(node.stderr.clone(), blob_reader).await?,
-        )
-        .await?;
+    let mut dump = RunDump::from_store_state_and_events(state, events)?;
+    if let Some(log) = run_log {
+        dump.add_file_bytes("run.log", log);
     }
-
+    if let Some(reader) = blob_reader {
+        dump.hydrate_referenced_blobs_with_reader(reader).await?;
+    }
+    for entry in dump.entries() {
+        let remote_path = format!("{target_dir}/{}", entry.path());
+        ensure_remote_dir(sandbox, Path::new(&remote_path)).await?;
+        let bytes = entry.to_bytes()?;
+        let text = String::from_utf8(bytes)
+            .map_err(|err| anyhow::anyhow!("non-UTF8 retro entry {}: {err}", entry.path()))?;
+        sandbox
+            .write_file(&remote_path, &text)
+            .await
+            .map_err(|err| anyhow::anyhow!("Failed to upload {}: {err}", entry.path()))?;
+    }
     Ok(())
-}
-
-async fn hydrate_retro_projection(
-    state: &RunProjection,
-    blob_reader: Option<&RetroBlobReader>,
-) -> anyhow::Result<RunProjection> {
-    let mut hydrated = state.clone();
-    let stage_ids: Vec<_> = hydrated
-        .iter_nodes()
-        .map(|(stage_id, _)| stage_id.clone())
-        .collect();
-
-    for stage_id in stage_ids {
-        let Some(mut node) = hydrated.node(&stage_id).cloned() else {
-            continue;
-        };
-        node.script_timing =
-            resolve_script_timing_value(node.script_timing.as_ref(), blob_reader).await?;
-        hydrated.set_node(stage_id, node);
-    }
-
-    Ok(hydrated)
-}
-
-async fn resolve_script_timing_value(
-    value: Option<&Value>,
-    blob_reader: Option<&RetroBlobReader>,
-) -> anyhow::Result<Option<Value>> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    let mut value = value.clone();
-    let Value::Object(fields) = &mut value else {
-        return Ok(Some(value));
-    };
-
-    for key in ["stdout", "stderr"] {
-        let current = fields
-            .get(key)
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned);
-        if let Some(current) = current {
-            fields.insert(
-                key.to_string(),
-                Value::String(
-                    resolve_text_file_content(Some(current), blob_reader)
-                        .await?
-                        .unwrap_or_default(),
-                ),
-            );
-        }
-    }
-
-    Ok(Some(value))
-}
-
-async fn resolve_text_file_content(
-    content: Option<String>,
-    blob_reader: Option<&RetroBlobReader>,
-) -> anyhow::Result<Option<String>> {
-    let Some(content) = content else {
-        return Ok(None);
-    };
-    let Some(blob_id) = parse_blob_ref(&content) else {
-        return Ok(Some(content));
-    };
-    let Some(blob_reader) = blob_reader else {
-        return Ok(Some(content));
-    };
-
-    let bytes = blob_reader(blob_id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("text blob missing: {blob_id}"))?;
-    let text = serde_json::from_slice::<String>(&bytes)
-        .map_err(|err| anyhow::anyhow!("text blob was not a JSON string: {err}"))?;
-    Ok(Some(text))
-}
-
-async fn upload_file(
-    sandbox: &Arc<dyn Sandbox>,
-    target_dir: &str,
-    relative: &Path,
-    content: Option<String>,
-) -> anyhow::Result<()> {
-    let Some(content) = content else {
-        return Ok(());
-    };
-    let path = Path::new(target_dir).join(relative);
-    let remote_path = path.to_string_lossy().into_owned();
-    ensure_remote_dir(sandbox, &path).await?;
-    sandbox
-        .write_file(&remote_path, &content)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to upload {}: {e}", relative.display()))?;
-    Ok(())
-}
-
-async fn upload_json_file<T>(
-    sandbox: &Arc<dyn Sandbox>,
-    target_dir: &str,
-    relative: &Path,
-    value: Option<&T>,
-) -> anyhow::Result<()>
-where
-    T: serde::Serialize,
-{
-    let content = value.map(serde_json::to_string_pretty).transpose()?;
-    upload_file(sandbox, target_dir, relative, content).await
 }
 
 async fn ensure_remote_dir(sandbox: &Arc<dyn Sandbox>, path: &Path) -> anyhow::Result<()> {
@@ -682,8 +461,8 @@ mod tests {
             &sandbox,
             &state,
             &[],
-            output_dir.path(),
             &target_dir_str,
+            Some(b"server log\n".to_vec()),
             None,
         )
         .await
@@ -723,13 +502,25 @@ mod tests {
                 .expect("stdout file should exist"),
             "stdout"
         );
+        assert_eq!(
+            fs::read_to_string(target_dir.join("events.jsonl"))
+                .await
+                .expect("events file should exist"),
+            ""
+        );
+        assert_eq!(
+            fs::read_to_string(target_dir.join("run.log"))
+                .await
+                .expect("run.log should exist"),
+            "server log\n"
+        );
         assert!(
             target_dir.join("stages/build@2/status.json").exists(),
             "status file should exist"
         );
         assert!(
             !target_dir.join("progress.jsonl").exists(),
-            "progress file should be omitted when there are no events"
+            "legacy progress file should not be emitted"
         );
     }
 
@@ -767,30 +558,23 @@ mod tests {
             ..NodeState::default()
         });
 
-        let reader: RetroBlobReader = Arc::new(move |blob_id| {
+        let reader: BlobReader = Box::new(move |blob_id| {
             let stdout_blob = stdout_blob.clone();
             let stderr_blob = stderr_blob.clone();
             Box::pin(async move {
                 if blob_id == stdout_id {
-                    Ok(Some(stdout_blob))
+                    Ok(Some(stdout_blob.into()))
                 } else if blob_id == stderr_id {
-                    Ok(Some(stderr_blob))
+                    Ok(Some(stderr_blob.into()))
                 } else {
                     Ok(None)
                 }
             })
         });
 
-        upload_data_files(
-            &sandbox,
-            &state,
-            &[],
-            output_dir.path(),
-            &target_dir_str,
-            Some(&reader),
-        )
-        .await
-        .expect("retro files should upload");
+        upload_data_files(&sandbox, &state, &[], &target_dir_str, None, Some(reader))
+            .await
+            .expect("retro files should upload");
 
         assert_eq!(
             fs::read_to_string(target_dir.join("stages/build@1/stdout.log"))
@@ -820,14 +604,8 @@ mod tests {
                 .expect("script invocation should exist"),
         )
         .expect("script invocation should parse");
-        assert_eq!(
-            script_invocation["stdout"],
-            fabro_types::format_blob_ref(&stdout_id)
-        );
-        assert_eq!(
-            script_invocation["stderr"],
-            fabro_types::format_blob_ref(&stderr_id)
-        );
+        assert_eq!(script_invocation["stdout"], "resolved stdout");
+        assert_eq!(script_invocation["stderr"], "resolved stderr");
 
         let run_json: serde_json::Value = serde_json::from_str(
             &fs::read_to_string(target_dir.join("run.json"))
@@ -845,7 +623,9 @@ mod tests {
         );
         assert_eq!(
             run_json["nodes"]["build@1"]["script_invocation"]["stdout"],
-            fabro_types::format_blob_ref(&stdout_id)
+            "resolved stdout"
         );
+        assert!(run_json["nodes"]["build@1"]["stdout"].is_null());
+        assert!(run_json["nodes"]["build@1"]["stderr"].is_null());
     }
 }

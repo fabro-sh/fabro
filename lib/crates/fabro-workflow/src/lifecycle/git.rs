@@ -7,6 +7,7 @@ use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
+use fabro_dump::RunDump;
 use fabro_types::RunId;
 use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
 use fabro_util::error::collect_causes;
@@ -17,7 +18,6 @@ use crate::event::{Emitter, Event, RunNoticeLevel, StageScope};
 use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::lifecycle::event::stage_scope_for;
 use crate::outcome::BilledModelUsage;
-use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::{checked_git_checkpoint, git_diff};
@@ -963,6 +963,10 @@ mod tests {
         }
 
         async fn read_blob(&self, _id: &RunBlobId) -> Result<Option<Bytes>> {
+            Ok(None)
+        }
+
+        async fn read_run_log(&self) -> Result<Option<Vec<u8>>> {
             Ok(None)
         }
     }

@@ -433,6 +433,15 @@ impl RunStoreBackend for HttpRunStore {
         })
         .await
     }
+
+    async fn read_run_log(&self) -> Result<Option<Vec<u8>>> {
+        self.with_retries("get run logs", || {
+            let client = self.client.clone_for_reuse();
+            let run_id = self.run_id;
+            async move { client.get_run_logs(&run_id).await }
+        })
+        .await
+    }
 }
 
 fn set_worker_title(run_id: &RunId, phase: WorkerTitlePhase) {

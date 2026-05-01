@@ -1,0 +1,25 @@
+[package]
+name = "fabro-dump"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+fabro-store = { path = "../fabro-store" }
+fabro-types = { path = "../fabro-types" }
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+chrono = { workspace = true, features = ["serde"] }
+fabro-types = { path = "../fabro-types", features = ["test-support"] }

@@ -5,9 +5,7 @@ use anyhow::{Context as _, Result};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_api::types;
-use fabro_types::{
-    PullRequestRecord, RunBlobId, RunId, parse_blob_ref, parse_legacy_blob_file_ref,
-};
+use fabro_types::{PullRequestRecord, RunBlobId, RunId, parse_blob_ref};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -321,7 +319,7 @@ async fn resolve_response_string(
 }
 
 fn blob_id_from_response(response: &str) -> Option<RunBlobId> {
-    parse_blob_ref(response).or_else(|| parse_legacy_blob_file_ref(response))
+    parse_blob_ref(response)
 }
 
 async fn list_artifact_display_entries_with_client(

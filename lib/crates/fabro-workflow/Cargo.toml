@@ -25,6 +25,7 @@ fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-devcontainer = { path = "../fabro-devcontainer" }
+fabro-dump = { path = "../fabro-dump" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-github = { path = "../fabro-github" }

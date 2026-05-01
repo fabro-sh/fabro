@@ -3,12 +3,12 @@ use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use fabro_agent::Sandbox;
+use fabro_dump::RunDump;
 use fabro_sandbox::shell_quote;
 use tokio::fs;
 use tokio::sync::OnceCell;
 
 use crate::git::{GitAuthor, META_BRANCH_PREFIX};
-use crate::run_dump::RunDump;
 use crate::sandbox_git::GIT_REMOTE;
 
 #[derive(Debug, thiserror::Error)]

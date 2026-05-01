@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use fabro_dump::RunDump;
 use fabro_hooks::{HookContext, HookEvent};
 use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
 use fabro_types::{BilledTokenCounts, EventBody};
@@ -11,7 +12,6 @@ use crate::error::Error;
 use crate::event::{Event, RunNoticeLevel};
 use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
-use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 use crate::run_status::{FailureReason, RunStatus, SuccessReason};
 use crate::runtime_store::RunStoreHandle;
@@ -899,6 +899,10 @@ mod tests {
         }
 
         async fn read_blob(&self, _id: &RunBlobId) -> Result<Option<Bytes>> {
+            Ok(None)
+        }
+
+        async fn read_run_log(&self) -> Result<Option<Vec<u8>>> {
             Ok(None)
         }
     }

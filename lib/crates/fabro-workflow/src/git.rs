@@ -342,12 +342,12 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use fabro_dump::RunDump;
     use fabro_store::Database;
     use fabro_types::{CommandTermination, fixtures};
     use object_store::memory::InMemory;
 
     use super::*;
-    use crate::run_dump::RunDump;
 
     /// Create a temporary git repo with an initial commit.
     #[expect(
