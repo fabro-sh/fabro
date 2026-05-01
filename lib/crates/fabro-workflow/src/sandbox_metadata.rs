@@ -326,19 +326,12 @@ fn parse_fast_import_mark(stdout: &str) -> Result<String, SandboxMetadataError> 
                 "git fast-import did not report imported commit mark (stdout_bytes={})",
                 stdout.len()
             ),
-            exec_output_tail: stdout_output_tail(stdout),
+            exec_output_tail: fabro_sandbox::redacted_output_tail(
+                stdout,
+                "",
+                fabro_sandbox::DEFAULT_EXEC_OUTPUT_TAIL_BYTES,
+            ),
         })
-}
-
-fn stdout_output_tail(stdout: &str) -> Option<fabro_types::ExecOutputTail> {
-    fabro_sandbox::ExecResult {
-        stdout:      stdout.to_string(),
-        stderr:      String::new(),
-        exit_code:   Some(0),
-        termination: fabro_types::CommandTermination::Exited,
-        duration_ms: 0,
-    }
-    .default_redacted_output_tail()
 }
 
 fn fast_import_ident(author: &GitAuthor) -> String {

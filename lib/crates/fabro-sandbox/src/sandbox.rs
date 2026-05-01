@@ -451,15 +451,7 @@ impl ExecResult {
         &self,
         max_bytes_per_stream: usize,
     ) -> Option<fabro_types::ExecOutputTail> {
-        let (stdout, stdout_truncated) = redacted_tail(&self.stdout, max_bytes_per_stream);
-        let (stderr, stderr_truncated) = redacted_tail(&self.stderr, max_bytes_per_stream);
-        let tail = fabro_types::ExecOutputTail {
-            stdout,
-            stderr,
-            stdout_truncated,
-            stderr_truncated,
-        };
-        (!tail.is_empty()).then_some(tail)
+        redacted_output_tail(&self.stdout, &self.stderr, max_bytes_per_stream)
     }
 
     pub fn default_redacted_output_tail(&self) -> Option<fabro_types::ExecOutputTail> {
@@ -486,6 +478,26 @@ impl ExecResult {
             duration_ms,
         }
     }
+}
+
+/// Build a redacted `ExecOutputTail` from raw stdout/stderr without
+/// fabricating a synthetic `ExecResult`. Pass `""` for either stream that
+/// isn't relevant. Returns `None` when both streams are empty.
+#[must_use]
+pub fn redacted_output_tail(
+    stdout: &str,
+    stderr: &str,
+    max_bytes_per_stream: usize,
+) -> Option<fabro_types::ExecOutputTail> {
+    let (stdout, stdout_truncated) = redacted_tail(stdout, max_bytes_per_stream);
+    let (stderr, stderr_truncated) = redacted_tail(stderr, max_bytes_per_stream);
+    let tail = fabro_types::ExecOutputTail {
+        stdout,
+        stderr,
+        stdout_truncated,
+        stderr_truncated,
+    };
+    (!tail.is_empty()).then_some(tail)
 }
 
 fn redacted_tail(text: &str, max_bytes: usize) -> (Option<String>, bool) {
