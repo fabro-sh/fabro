@@ -12,6 +12,7 @@ use std::path::Path;
 use std::process::{Child, ExitStatus, Output, Stdio};
 use std::time::{Duration, Instant};
 
+use fabro_client::ServerTarget;
 use fabro_config::{Storage, envfile};
 use fabro_store::EventEnvelope;
 use fabro_test::{
@@ -27,7 +28,7 @@ use super::support::{
     command_log_text, find_run_dir, local_dev_token, output_stderr, run_events, run_state,
     server_endpoint, server_target, wait_for_event_names, wait_for_status, write_gated_workflow,
 };
-use crate::support::unique_run_id;
+use crate::support::{seed_dev_token_auth, unique_run_id};
 
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const LEAKED_WORKER_PARENT_TOKEN: &str = "leak-worker-parent-token";
@@ -519,9 +520,10 @@ methods = ["dev-token"]
 
     let run_id = unique_run_id();
     let dev_token = local_dev_token(&storage_dir).expect("managed server should have a dev token");
+    let target = ServerTarget::unix_socket_path(&socket_path).expect("socket path should parse");
+    seed_dev_token_auth(&context.home_dir, &target, &dev_token);
     let run_output = context
         .run_cmd()
-        .env("FABRO_DEV_TOKEN", dev_token)
         .args([
             "--server",
             socket_path.to_str().expect("socket path should be UTF-8"),

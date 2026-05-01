@@ -6,6 +6,7 @@
 use std::fs;
 use std::time::Duration;
 
+use fabro_client::ServerTarget;
 use fabro_test::{fabro_snapshot, test_context};
 use insta::assert_snapshot;
 
@@ -13,7 +14,7 @@ use super::support::{
     local_dev_token, server_target, setup_completed_dry_run, setup_seeded_completed_dry_run,
     setup_seeded_created_dry_run,
 };
-use crate::support::{LightweightCli, unique_run_id};
+use crate::support::{LightweightCli, seed_dev_token_auth, unique_run_id};
 
 #[test]
 fn help() {
@@ -51,6 +52,12 @@ fn dump_accepts_server_target_from_separate_home() {
     let cli = LightweightCli::new();
     let output_dir = context.temp_dir.join("remote-export");
     let server = server_target(&context.storage_dir);
+    if let Some(dev_token) = local_dev_token(&context.storage_dir) {
+        let target = server
+            .parse::<ServerTarget>()
+            .expect("server target should parse");
+        seed_dev_token_auth(cli.home(), &target, &dev_token);
+    }
 
     let mut cmd = cli.command();
     cmd.args([
@@ -61,9 +68,6 @@ fn dump_accepts_server_target_from_separate_home() {
         output_dir.to_str().unwrap(),
         &run.run_id,
     ]);
-    if let Some(dev_token) = local_dev_token(&context.storage_dir) {
-        cmd.env("FABRO_DEV_TOKEN", dev_token);
-    }
 
     let output = cmd.output().expect("dump should execute");
     assert!(

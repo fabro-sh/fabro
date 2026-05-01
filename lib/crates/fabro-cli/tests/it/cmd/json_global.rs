@@ -69,7 +69,7 @@ fn auth_status_ignores_json_output_format_from_home_config() {
     );
     let stderr = output_stderr(&output);
     assert!(stderr.contains("Not logged in to any servers."));
-    assert!(stderr.contains("FABRO_DEV_TOKEN:"));
+    assert!(!stderr.contains("FABRO_DEV_TOKEN:"));
 }
 
 #[test]

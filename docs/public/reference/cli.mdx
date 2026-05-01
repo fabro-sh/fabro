@@ -48,7 +48,7 @@ url = "https://fabro.example.com/api/v1"
 
 `fabro model` uses `[cli.target]` by default when no explicit `--storage-dir` is passed. `fabro exec` remains a local session unless you pass `--server`, even if `[cli.target]` is configured.
 
-Explicit `http(s)://...` targets are always treated as remote servers. They do not inherit identity from a local daemon, a local storage dir, or `~/.fabro/dev-token`. For remote URLs, use `fabro auth login --server ...`, a stored CLI auth session, or an explicit `FABRO_DEV_TOKEN`.
+Explicit `http(s)://...` targets are always treated as remote servers. They do not inherit identity from a local daemon, a local storage dir, or `~/.fabro/dev-token`. For remote URLs, use `fabro auth login --server ...` or a stored CLI auth session.
 
 CLI flags always override `settings.toml` values, which override hardcoded defaults.
 

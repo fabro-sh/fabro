@@ -1,3 +1,4 @@
+use fabro_client::ServerTarget;
 use fabro_config::{Storage, envfile};
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_util::dev_token;
@@ -7,7 +8,7 @@ use serde_json::Value;
 use super::support::{
     local_dev_token, setup_seeded_completed_dry_run, setup_seeded_created_dry_run,
 };
-use crate::support::{fatal_error_line, unique_run_id};
+use crate::support::{fatal_error_line, seed_dev_token_auth, unique_run_id};
 
 const TEST_DEV_TOKEN: &str =
     "fabro_dev_abababababababababababababababababababababababababababababababab";
@@ -89,6 +90,7 @@ fn ps_explicit_local_tcp_server_target_requires_explicit_auth() {
     let output = context
         .command()
         .env("FABRO_STORAGE_DIR", &storage_dir)
+        .env("FABRO_DEV_TOKEN", TEST_DEV_TOKEN)
         .args(["ps", "-a", "--json", "--server", &format!("http://{bind}")])
         .output()
         .expect("ps should run");
@@ -102,7 +104,7 @@ fn ps_explicit_local_tcp_server_target_requires_explicit_auth() {
 
     assert!(
         !output.status.success(),
-        "ps against an explicit local TCP target should require explicit auth:\nstdout:\n{}\nstderr:\n{}",
+        "ps against an explicit local TCP target should ignore FABRO_DEV_TOKEN and require persisted auth:\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -139,10 +141,11 @@ fn ps_explicit_local_tcp_server_target_accepts_explicit_dev_token() {
         .as_str()
         .expect("bind should be present");
     let token = local_dev_token(&storage_dir).expect("local dev token should exist");
+    let target = ServerTarget::http_url(format!("http://{bind}")).expect("bind should parse");
+    seed_dev_token_auth(&context.home_dir, &target, &token);
 
     let output = context
         .command()
-        .env("FABRO_DEV_TOKEN", &token)
         .args(["ps", "-a", "--json", "--server", &format!("http://{bind}")])
         .output()
         .expect("ps should run");

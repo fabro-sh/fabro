@@ -1,9 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use fabro_client::{AuthEntry, AuthStore, OAuthEntry};
-use fabro_static::EnvVars;
-use fabro_util::dev_token::validate_dev_token_format;
-use fabro_util::printer::Printer;
 use serde::Serialize;
 
 use crate::args::AuthStatusArgs;
@@ -45,8 +42,7 @@ enum StatusRow {
 
 #[derive(Serialize)]
 struct StatusOutput {
-    servers:       Vec<StatusRow>,
-    env_dev_token: &'static str,
+    servers: Vec<StatusRow>,
 }
 
 pub(super) fn status_command(args: &AuthStatusArgs, ctx: &CommandContext) -> Result<()> {
@@ -59,23 +55,13 @@ pub(super) fn status_command(args: &AuthStatusArgs, ctx: &CommandContext) -> Res
     } else {
         all_rows(&store, now)?
     };
-    let env_dev_token = if load_env_dev_token_if_available() {
-        "active"
-    } else {
-        "not_set"
-    };
-
     if ctx.explicit_json_requested() {
-        print_json_pretty(&StatusOutput {
-            servers: rows,
-            env_dev_token,
-        })?;
+        print_json_pretty(&StatusOutput { servers: rows })?;
         return Ok(());
     }
 
     if rows.is_empty() {
         fabro_util::printerr!(printer, "Not logged in to any servers.");
-        print_env_dev_token_status(env_dev_token, printer);
         return Ok(());
     }
 
@@ -141,7 +127,6 @@ pub(super) fn status_command(args: &AuthStatusArgs, ctx: &CommandContext) -> Res
         }
     }
     fabro_util::printerr!(printer, "");
-    print_env_dev_token_status(env_dev_token, printer);
     Ok(())
 }
 
@@ -196,34 +181,12 @@ fn oauth_state(entry: &OAuthEntry, now: DateTime<Utc>) -> OAuthState {
     }
 }
 
-fn print_env_dev_token_status(env_dev_token: &str, printer: Printer) {
-    if env_dev_token == "active" {
-        fabro_util::printerr!(
-            printer,
-            "FABRO_DEV_TOKEN: active (overrides persisted credentials)"
-        );
-    } else {
-        fabro_util::printerr!(printer, "FABRO_DEV_TOKEN: not_set");
-    }
-}
-
 fn human_state(state: OAuthState) -> &'static str {
     match state {
         OAuthState::Active => "active",
         OAuthState::ExpiredRefreshable => "expired (refreshable)",
         OAuthState::Expired => "expired",
     }
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Auth status reports whether the documented dev-token env source is configured."
-)]
-fn load_env_dev_token_if_available() -> bool {
-    let env_token = std::env::var(EnvVars::FABRO_DEV_TOKEN)
-        .ok()
-        .filter(|token| validate_dev_token_format(token));
-    env_token.is_some()
 }
 
 #[cfg(test)]

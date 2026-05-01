@@ -10,11 +10,9 @@ use fabro_client::{
 pub(crate) use fabro_client::{Client, RunEventStream};
 use fabro_config::Storage;
 use fabro_config::bind::Bind;
-use fabro_static::EnvVars;
 pub(crate) use fabro_types::RunProjection;
 use fabro_types::UserSettings;
 use fabro_util::dev_token;
-use fabro_util::dev_token::validate_dev_token_format;
 use tokio::time::sleep;
 
 use crate::args::ServerTargetArgs;
@@ -207,14 +205,6 @@ fn connect_cli_target_transport(
     Ok((http_client, "http://fabro".to_string()))
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Server client authentication supports the documented local dev-token env source."
-)]
-fn process_env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok()
-}
-
 async fn wait_for_runtime_dev_token(path: &Path) -> Result<String> {
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
 
@@ -273,14 +263,9 @@ async fn connect_unix_socket_http_client(
 
 fn resolve_target_credential_with_store(
     target: &ServerTarget,
-    env_token: Option<&str>,
     store: &AuthStore,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<Option<Credential>> {
-    if let Some(token) = env_token.filter(|token| validate_dev_token_format(token)) {
-        return Ok(Some(Credential::DevToken(token.to_owned())));
-    }
-
     let Some(entry) = store.get(target)? else {
         return Ok(None);
     };
@@ -296,9 +281,8 @@ fn resolve_target_credential_with_store(
 }
 
 fn resolve_target_credential(target: &ServerTarget) -> Result<Option<Credential>> {
-    let env_token = process_env_var(EnvVars::FABRO_DEV_TOKEN);
     let store = AuthStore::default();
-    resolve_target_credential_with_store(target, env_token.as_deref(), &store, chrono::Utc::now())
+    resolve_target_credential_with_store(target, &store, chrono::Utc::now())
 }
 
 #[expect(
@@ -353,22 +337,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_local_tcp_credential_prefers_valid_env_token() {
-        let target = ServerTarget::http_url("http://127.0.0.1:32276").unwrap();
-        let store = AuthStore::new(tempfile::tempdir().unwrap().path().join("auth.json"));
-
-        let credential = resolve_target_credential_with_store(
-            &target,
-            Some("fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"),
-            &store,
-            Utc::now(),
-        )
-        .unwrap();
-
-        assert!(matches!(credential, Some(Credential::DevToken(_))));
-    }
-
-    #[test]
     fn resolve_target_credential_uses_persisted_dev_token_entry() {
         let dir = tempfile::tempdir().unwrap();
         let target = ServerTarget::http_url("http://127.0.0.1:32276").unwrap();
@@ -384,8 +352,7 @@ mod tests {
             )
             .unwrap();
 
-        let credential =
-            resolve_target_credential_with_store(&target, None, &store, Utc::now()).unwrap();
+        let credential = resolve_target_credential_with_store(&target, &store, Utc::now()).unwrap();
 
         assert!(matches!(credential, Some(Credential::DevToken(found)) if found == token));
     }
@@ -406,7 +373,7 @@ mod tests {
             )
             .unwrap();
 
-        let credential = resolve_target_credential_with_store(&target, None, &store, now).unwrap();
+        let credential = resolve_target_credential_with_store(&target, &store, now).unwrap();
 
         assert!(matches!(credential, Some(Credential::OAuth(_))));
     }
@@ -427,7 +394,7 @@ mod tests {
             )
             .unwrap();
 
-        let credential = resolve_target_credential_with_store(&target, None, &store, now).unwrap();
+        let credential = resolve_target_credential_with_store(&target, &store, now).unwrap();
 
         assert!(matches!(credential, Some(Credential::OAuth(_))));
     }
@@ -448,7 +415,7 @@ mod tests {
             )
             .unwrap();
 
-        let credential = resolve_target_credential_with_store(&target, None, &store, now).unwrap();
+        let credential = resolve_target_credential_with_store(&target, &store, now).unwrap();
 
         assert!(credential.is_none());
     }

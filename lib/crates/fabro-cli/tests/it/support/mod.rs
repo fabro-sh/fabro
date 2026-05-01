@@ -4,7 +4,7 @@ mod auth_tokens;
 use assert_cmd::Command;
 pub(crate) use auth_harness::{
     RealAuthHarness, TEST_DEV_TOKEN, complete_login_via_browser, expire_saved_access_token,
-    no_redirect_browser_client, run_detached, saved_auth_entry,
+    no_redirect_browser_client, run_detached, saved_auth_entry, seed_dev_token_auth,
 };
 pub(crate) use auth_tokens::{TEST_SESSION_SECRET, issue_test_github_jwt};
 use fabro_store::EventEnvelope;
@@ -58,6 +58,10 @@ impl LightweightCli {
         Self {
             home_dir: tempfile::tempdir().expect("temp home dir should exist"),
         }
+    }
+
+    pub(crate) fn home(&self) -> &std::path::Path {
+        self.home_dir.path()
     }
 
     #[expect(

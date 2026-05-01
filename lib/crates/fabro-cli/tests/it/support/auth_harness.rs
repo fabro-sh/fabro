@@ -8,6 +8,7 @@
 )]
 
 use std::io::Read;
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -17,6 +18,7 @@ use axum::extract::{Request, State as AxumState};
 use axum::middleware::{self, Next};
 use axum::response::Response as AxumResponse;
 use chrono::{Duration as ChronoDuration, Utc};
+use fabro_client::{AuthEntry, AuthStore, DevTokenEntry, ServerTarget};
 use fabro_config::{RunLayer, ServerSettingsBuilder};
 use fabro_server::auth::GithubEndpoints;
 use fabro_server::ip_allowlist::IpAllowlistConfig;
@@ -246,6 +248,18 @@ pub(crate) fn expire_saved_access_token(context: &TestContext, issuer: &str) {
         ),
     )
     .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
+}
+
+pub(crate) fn seed_dev_token_auth(home_dir: &Path, target: &ServerTarget, token: &str) {
+    AuthStore::new(home_dir.join(".fabro/auth.json"))
+        .put(
+            target,
+            AuthEntry::DevToken(DevTokenEntry {
+                token:        token.to_owned(),
+                logged_in_at: Utc::now(),
+            }),
+        )
+        .unwrap_or_else(|err| panic!("failed to seed dev-token auth: {err}"));
 }
 
 pub(crate) fn no_redirect_browser_client() -> fabro_http::HttpClient {
