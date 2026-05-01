@@ -9,6 +9,7 @@ use fabro_graphviz::graph::Node;
 use fabro_llm::types::TokenCounts;
 use fabro_model::Provider;
 use fabro_types::CommandTermination;
+use fabro_util::time::elapsed_ms;
 use tokio::time::sleep;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
@@ -89,7 +90,7 @@ async fn ensure_cli(
         .map_err(|e| Error::handler(format!("Failed to check {cli_name} version: {e}")))?;
 
     if version_check.is_success() {
-        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let duration_ms = elapsed_ms(start);
         emitter.emit(&Event::CliEnsureCompleted {
             cli_name: cli_name.to_string(),
             provider: provider_str.to_string(),
@@ -115,7 +116,7 @@ async fn ensure_cli(
 
     let node_installed = true;
     if !install_result.is_success() {
-        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let duration_ms = elapsed_ms(start);
         let output = if install_result.stderr.is_empty() {
             &install_result.stdout
         } else {
@@ -142,7 +143,7 @@ async fn ensure_cli(
         return Err(Error::handler(error_msg));
     }
 
-    let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let duration_ms = elapsed_ms(start);
     emitter.emit(&Event::CliEnsureCompleted {
         cli_name: cli_name.to_string(),
         provider: provider_str.to_string(),

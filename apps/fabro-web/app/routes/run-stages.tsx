@@ -43,7 +43,14 @@ import { formatDurationSecs } from "../lib/format";
 import { fetchRunCommandLog, useRunEventsList, useRunStageTurns, useRunStages } from "../lib/queries";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
-import type { StageTurn as ApiStageTurn, PaginatedStageTurnList, PaginatedEventList } from "@qltysh/fabro-api-client";
+import {
+  CommandOutputStream,
+  CommandTermination,
+  type EventEnvelope,
+  type StageTurn as ApiStageTurn,
+  type PaginatedStageTurnList,
+  type PaginatedEventList,
+} from "@qltysh/fabro-api-client";
 
 export const handle = { wide: true };
 
@@ -53,27 +60,15 @@ type TurnType =
   | { kind: "tool"; tools: ToolUse[] }
   | { kind: "command"; stageId: string; script: string; language: string; stdout?: string; stderr?: string; exitCode?: number | null; durationMs?: number; termination?: CommandTermination; running: boolean };
 
-type CommandTermination = "exited" | "timed_out" | "cancelled";
-
-interface RawEvent {
-  node_id?: string;
-  stage_id?: string;
-  event: string;
-  properties?: Record<string, unknown>;
-  text?: string;
-  tool_name?: string;
-  tool_call_id?: string;
-  arguments?: unknown;
-  output?: unknown;
-  is_error?: boolean;
-}
-
 function readTermination(props: UnknownRecord): CommandTermination {
   const v = props.termination;
-  return v === "exited" || v === "timed_out" || v === "cancelled" ? v : "exited";
+  if (v === CommandTermination.EXITED || v === CommandTermination.TIMED_OUT || v === CommandTermination.CANCELLED) {
+    return v;
+  }
+  return CommandTermination.EXITED;
 }
 
-function turnsFromEvents(events: RawEvent[], stageId: string): TurnType[] {
+function turnsFromEvents(events: EventEnvelope[], stageId: string): TurnType[] {
   const stageEvents = events.filter((e) => e.node_id === stageId);
   const turns: TurnType[] = [];
   // Collect tool pairs: started → completed
@@ -158,6 +153,26 @@ function turnsFromEvents(events: RawEvent[], stageId: string): TurnType[] {
   return turns;
 }
 
+function mapApiStageTurn(t: ApiStageTurn): TurnType {
+  switch (t.kind) {
+    case "tool":
+      return {
+        kind: "tool",
+        tools: (t.tools ?? []).map((tu) => ({
+          id: tu.id,
+          toolName: tu.tool_name,
+          input: tu.input,
+          result: tu.result,
+          isError: tu.is_error,
+          durationMs: tu.duration_ms,
+        })),
+      };
+    case "system":
+    case "assistant":
+      return { kind: t.kind, content: t.content ?? "" };
+  }
+}
+
 function mapTurns(
   turnsResult: PaginatedStageTurnList | null | undefined,
   eventsResult: PaginatedEventList | null | undefined,
@@ -165,25 +180,10 @@ function mapTurns(
 ): TurnType[] {
   if (!selectedStageId) return [];
   if (turnsResult?.data?.length) {
-    return turnsResult.data.map((t: ApiStageTurn): TurnType => {
-        if (t.kind === "tool" && t.tools) {
-          return {
-            kind: "tool",
-            tools: t.tools.map((tu) => ({
-              id: tu.id,
-              toolName: tu.tool_name,
-              input: tu.input,
-              result: tu.result,
-              isError: tu.is_error,
-              durationMs: tu.duration_ms,
-            })),
-          };
-        }
-        return { kind: t.kind as "system" | "assistant", content: t.content ?? "" };
-      });
+    return turnsResult.data.map(mapApiStageTurn);
   }
   if (eventsResult?.data) {
-    return turnsFromEvents(eventsResult.data as unknown as RawEvent[], selectedStageId);
+    return turnsFromEvents(eventsResult.data, selectedStageId);
   }
   return [];
 }
@@ -301,7 +301,7 @@ function trimTextToBytes(text: string, maxBytes: number) {
 function useCommandLog(
   runId: string | undefined,
   stageId: string | undefined,
-  stream: "stdout" | "stderr",
+  stream: CommandOutputStream,
   running: boolean,
 ): CommandLogState {
   const [state, setState] = useState<CommandLogState>({
@@ -399,6 +399,16 @@ function useCommandLog(
   return state;
 }
 
+function streamStatus(state: CommandLogState, hasContent: boolean): string {
+  if (state.error) return "Failed to load";
+  if (state.loading) return "Waiting";
+  if (hasContent) {
+    if (state.eof) return state.casRef ? "Stored" : "Complete";
+    return state.liveStreaming ? "Streaming" : "Running";
+  }
+  return state.eof ? "No output" : "Waiting";
+}
+
 function OutputStream({
   label,
   state,
@@ -424,21 +434,7 @@ function OutputStream({
     tone === "error"
       ? "whitespace-pre-wrap font-mono text-sm leading-relaxed text-coral sm:text-xs"
       : "whitespace-pre-wrap font-mono text-sm leading-relaxed text-fg-3 sm:text-xs";
-  const status = state.error
-    ? "Failed to load"
-    : state.loading
-      ? "Waiting"
-      : content.length > 0
-        ? state.eof
-          ? state.casRef
-            ? "Stored"
-            : "Complete"
-          : state.liveStreaming
-            ? "Streaming"
-            : "Running"
-        : state.eof
-          ? "No output"
-          : "Waiting";
+  const status = streamStatus(state, content.length > 0);
 
   useEffect(() => {
     if (!forceExpanded) return;
@@ -502,9 +498,9 @@ function CommandBlock({
   runId: string | undefined;
   turn: Extract<TurnType, { kind: "command" }>;
 }) {
-  const failed = !turn.running && (turn.termination !== "exited" || turn.exitCode !== 0);
-  const stdout = useCommandLog(runId, turn.stageId, "stdout", turn.running);
-  const stderr = useCommandLog(runId, turn.stageId, "stderr", turn.running);
+  const failed = !turn.running && (turn.termination !== CommandTermination.EXITED || turn.exitCode !== 0);
+  const stdout = useCommandLog(runId, turn.stageId, CommandOutputStream.STDOUT, turn.running);
+  const stderr = useCommandLog(runId, turn.stageId, CommandOutputStream.STDERR, turn.running);
   const borderColor = turn.running ? "border-teal-500/20" : failed ? "border-coral/15" : "border-mint/15";
   const bgColor = turn.running ? "bg-teal-500/5" : failed ? "bg-coral/5" : "bg-mint/5";
 
@@ -519,9 +515,9 @@ function CommandBlock({
         <div className="ml-auto flex items-center gap-2">
           {turn.running ? (
             <StatusPill tone="running">Running…</StatusPill>
-          ) : turn.termination === "timed_out" ? (
+          ) : turn.termination === CommandTermination.TIMED_OUT ? (
             <StatusPill tone="failed">Timed out</StatusPill>
-          ) : turn.termination === "cancelled" ? (
+          ) : turn.termination === CommandTermination.CANCELLED ? (
             <StatusPill tone="failed">Cancelled</StatusPill>
           ) : (
             <>
@@ -620,7 +616,7 @@ export default function RunStages() {
   );
   const isRunning = selectedStage?.status === "running";
 
-  if (!stages.length) {
+  if (!id || !stages.length) {
     return (
       <div className="py-12">
         <EmptyState
@@ -636,7 +632,7 @@ export default function RunStages() {
 
   return (
     <div className="flex gap-6">
-      <StageSidebar stages={stages} runId={id!} selectedStageId={selectedStage.id} />
+      <StageSidebar stages={stages} runId={id} selectedStageId={selectedStage.id} />
 
       <div className="min-w-0 flex-1 space-y-3">
         <div className="sticky top-0 z-10 -mx-2 flex items-center gap-2 bg-page/85 px-2 py-2 backdrop-blur">
