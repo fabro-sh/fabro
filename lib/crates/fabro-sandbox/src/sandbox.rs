@@ -509,6 +509,15 @@ pub trait Sandbox: Send + Sync {
         env_vars: Option<&std::collections::HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
     ) -> crate::Result<ExecResult>;
+    /// Stream a command's output as it runs.
+    ///
+    /// **Production sandboxes must override this.** The default falls back to
+    /// the non-streaming [`exec_command`](Self::exec_command) and replays its
+    /// output through `output_callback` at the end, marking
+    /// `live_streaming: false`. That's the right behavior for test mocks but
+    /// silently drops live output for any real sandbox that wraps another —
+    /// decorators in particular must forward to the inner sandbox's streaming
+    /// implementation rather than relying on this default.
     async fn exec_command_streaming(
         &self,
         command: &str,

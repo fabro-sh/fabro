@@ -6,7 +6,10 @@ use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
 use crate::sandbox::fetch_source_run_ref;
-use crate::{DirEntry, ExecResult, GitRunInfo, GitSetupIntent, GrepOptions, Sandbox, shell_quote};
+use crate::{
+    CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GitRunInfo, GitSetupIntent,
+    GrepOptions, Sandbox, shell_quote,
+};
 
 /// Git command prefix that disables background maintenance.
 const GIT: &str = "git -c maintenance.auto=0 -c gc.auto=0";
@@ -224,6 +227,31 @@ impl Sandbox for WorktreeSandbox {
         let wd = working_dir.unwrap_or(&self.config.worktree_path);
         self.inner
             .exec_command(command, timeout_ms, Some(wd), env_vars, cancel_token)
+            .await
+    }
+
+    /// Stream a command's output, forwarding to the inner sandbox's streaming
+    /// implementation so live output and `streams_separated` / `live_streaming`
+    /// flags survive the worktree wrapping.
+    async fn exec_command_streaming(
+        &self,
+        command: &str,
+        timeout_ms: u64,
+        working_dir: Option<&str>,
+        env_vars: Option<&HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
+        output_callback: CommandOutputCallback,
+    ) -> crate::Result<ExecStreamingResult> {
+        let wd = working_dir.unwrap_or(&self.config.worktree_path);
+        self.inner
+            .exec_command_streaming(
+                command,
+                timeout_ms,
+                Some(wd),
+                env_vars,
+                cancel_token,
+                output_callback,
+            )
             .await
     }
 
