@@ -1523,25 +1523,21 @@ mod tests {
         assert_eq!(snapshot.bytes, expected_bytes);
 
         let push_error = snapshot.push_error.unwrap();
-        assert!(push_error.message.contains("git push origin"));
-        assert!(push_error.message.contains("hint:"));
+        let message = push_error.to_string();
+        assert!(message.contains("git push origin"));
+        assert!(message.contains("hint:"));
         assert!(
-            !push_error.message.contains("fatal:"),
-            "push error should be log-safe: {}",
-            push_error.message
+            !message.contains("fatal:"),
+            "push error should be log-safe: {message}"
         );
         assert!(
-            !push_error
-                .message
-                .contains(missing_origin.to_str().unwrap()),
-            "push error should not include raw git stderr paths: {}",
-            push_error.message
+            !message.contains(missing_origin.to_str().unwrap()),
+            "push error should not include raw git stderr paths: {message}"
         );
-        let stderr_tail = push_error
-            .exec_output_tail
-            .as_ref()
-            .and_then(|tail| tail.stderr.as_deref())
-            .expect("push failure stderr tail");
+        let tail = push_error
+            .exec_output_tail()
+            .expect("push failure exec output tail");
+        let stderr_tail = tail.stderr.as_deref().expect("push failure stderr tail");
         assert!(stderr_tail.contains("fatal:"), "{stderr_tail}");
     }
 

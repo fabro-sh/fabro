@@ -471,6 +471,7 @@ impl ExecResult {
     /// This stores raw stdout/stderr. Callers must not log these fields
     /// directly; use `default_redacted_output_tail()` for events and
     /// tracing metadata.
+    #[cfg(test)]
     pub fn from_process_output(output: std::process::Output, duration_ms: u64) -> Self {
         let std::process::Output {
             status,

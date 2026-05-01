@@ -200,10 +200,8 @@ pub async fn write_finalize_commit(
     match writer.write_snapshot(&dump, "finalize run").await {
         Ok(snapshot) => {
             if let Some(push_error) = snapshot.push_error.as_ref() {
-                let message = format!(
-                    "failed to push metadata ref refs/heads/{meta_branch}: {}",
-                    push_error.message
-                );
+                let message =
+                    format!("failed to push metadata ref refs/heads/{meta_branch}: {push_error}");
                 emit_metadata_snapshot_failed(
                     services,
                     phase,
@@ -215,7 +213,7 @@ pub async fn write_finalize_commit(
                     Some(snapshot.commit_sha.clone()),
                     Some(snapshot.entry_count),
                     Some(snapshot.bytes),
-                    push_error.exec_output_tail.clone(),
+                    push_error.exec_output_tail(),
                 );
                 emit_metadata_warning(services, "checkpoint_metadata_push_failed", message);
             } else {

@@ -90,6 +90,27 @@ impl ExecOutputTail {
     pub fn stderr_len(&self) -> usize {
         self.stderr.as_deref().map_or(0, str::len)
     }
+
+    #[must_use]
+    pub fn trace_summary(tail: Option<&Self>) -> ExecOutputTailTrace {
+        ExecOutputTailTrace {
+            present:          tail.is_some(),
+            stdout_bytes:     tail.map_or(0, Self::stdout_len),
+            stderr_bytes:     tail.map_or(0, Self::stderr_len),
+            stdout_truncated: tail.is_some_and(|t| t.stdout_truncated),
+            stderr_truncated: tail.is_some_and(|t| t.stderr_truncated),
+        }
+    }
+}
+
+/// Flat view of an `ExecOutputTail` for tracing field expansion.
+#[derive(Debug, Clone, Copy)]
+pub struct ExecOutputTailTrace {
+    pub present:          bool,
+    pub stdout_bytes:     usize,
+    pub stderr_bytes:     usize,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

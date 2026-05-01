@@ -738,25 +738,18 @@ impl Event {
                 exec_output_tail,
                 ..
             } => {
+                let tail = fabro_types::ExecOutputTail::trace_summary(exec_output_tail.as_ref());
                 warn!(
                     %phase,
                     branch,
                     duration_ms,
                     %failure_kind,
                     error,
-                    exec_output_tail_present = exec_output_tail.is_some(),
-                    exec_stdout_tail_bytes = exec_output_tail
-                        .as_ref()
-                        .map_or(0, fabro_types::ExecOutputTail::stdout_len),
-                    exec_stderr_tail_bytes = exec_output_tail
-                        .as_ref()
-                        .map_or(0, fabro_types::ExecOutputTail::stderr_len),
-                    exec_stdout_truncated = exec_output_tail
-                        .as_ref()
-                        .is_some_and(|tail| tail.stdout_truncated),
-                    exec_stderr_truncated = exec_output_tail
-                        .as_ref()
-                        .is_some_and(|tail| tail.stderr_truncated),
+                    exec_output_tail_present = tail.present,
+                    exec_stdout_tail_bytes = tail.stdout_bytes,
+                    exec_stderr_tail_bytes = tail.stderr_bytes,
+                    exec_stdout_truncated = tail.stdout_truncated,
+                    exec_stderr_truncated = tail.stderr_truncated,
                     "Metadata snapshot failed"
                 );
             }
@@ -1057,23 +1050,16 @@ impl Event {
                 exec_output_tail,
                 ..
             } => {
+                let tail = fabro_types::ExecOutputTail::trace_summary(exec_output_tail.as_ref());
                 error!(
                     command,
                     index,
                     exit_code,
-                    exec_output_tail_present = exec_output_tail.is_some(),
-                    exec_stdout_tail_bytes = exec_output_tail
-                        .as_ref()
-                        .map_or(0, fabro_types::ExecOutputTail::stdout_len),
-                    exec_stderr_tail_bytes = exec_output_tail
-                        .as_ref()
-                        .map_or(0, fabro_types::ExecOutputTail::stderr_len),
-                    exec_stdout_truncated = exec_output_tail
-                        .as_ref()
-                        .is_some_and(|tail| tail.stdout_truncated),
-                    exec_stderr_truncated = exec_output_tail
-                        .as_ref()
-                        .is_some_and(|tail| tail.stderr_truncated),
+                    exec_output_tail_present = tail.present,
+                    exec_stdout_tail_bytes = tail.stdout_bytes,
+                    exec_stderr_tail_bytes = tail.stderr_bytes,
+                    exec_stdout_truncated = tail.stdout_truncated,
+                    exec_stderr_truncated = tail.stderr_truncated,
                     "Setup command failed"
                 );
             }
@@ -1142,24 +1128,17 @@ impl Event {
                 duration_ms,
                 exec_output_tail,
             } => {
+                let tail = fabro_types::ExecOutputTail::trace_summary(exec_output_tail.as_ref());
                 error!(
                     cli_name,
                     provider,
                     error,
                     duration_ms,
-                    exec_output_tail_present = exec_output_tail.is_some(),
-                    exec_stdout_tail_bytes = exec_output_tail
-                        .as_ref()
-                        .map_or(0, fabro_types::ExecOutputTail::stdout_len),
-                    exec_stderr_tail_bytes = exec_output_tail
-                        .as_ref()
-                        .map_or(0, fabro_types::ExecOutputTail::stderr_len),
-                    exec_stdout_truncated = exec_output_tail
-                        .as_ref()
-                        .is_some_and(|tail| tail.stdout_truncated),
-                    exec_stderr_truncated = exec_output_tail
-                        .as_ref()
-                        .is_some_and(|tail| tail.stderr_truncated),
+                    exec_output_tail_present = tail.present,
+                    exec_stdout_tail_bytes = tail.stdout_bytes,
+                    exec_stderr_tail_bytes = tail.stderr_bytes,
+                    exec_stdout_truncated = tail.stdout_truncated,
+                    exec_stderr_truncated = tail.stderr_truncated,
                     "CLI ensure failed"
                 );
             }
@@ -1276,24 +1255,17 @@ impl Event {
                 exec_output_tail,
                 ..
             } => {
+                let tail = fabro_types::ExecOutputTail::trace_summary(exec_output_tail.as_ref());
                 error!(
                     phase,
                     command,
                     index,
                     exit_code,
-                    exec_output_tail_present = exec_output_tail.is_some(),
-                    exec_stdout_tail_bytes = exec_output_tail
-                        .as_ref()
-                        .map_or(0, fabro_types::ExecOutputTail::stdout_len),
-                    exec_stderr_tail_bytes = exec_output_tail
-                        .as_ref()
-                        .map_or(0, fabro_types::ExecOutputTail::stderr_len),
-                    exec_stdout_truncated = exec_output_tail
-                        .as_ref()
-                        .is_some_and(|tail| tail.stdout_truncated),
-                    exec_stderr_truncated = exec_output_tail
-                        .as_ref()
-                        .is_some_and(|tail| tail.stderr_truncated),
+                    exec_output_tail_present = tail.present,
+                    exec_stdout_tail_bytes = tail.stdout_bytes,
+                    exec_stderr_tail_bytes = tail.stderr_bytes,
+                    exec_stdout_truncated = tail.stdout_truncated,
+                    exec_stderr_truncated = tail.stderr_truncated,
                     "Devcontainer lifecycle command failed"
                 );
             }

@@ -74,16 +74,11 @@ impl Error {
         }
     }
 
-    pub fn exec_result(&self) -> Option<&crate::ExecResult> {
+    pub fn default_redacted_output_tail(&self) -> Option<fabro_types::ExecOutputTail> {
         match self {
-            Self::Exec { result, .. } => Some(result),
+            Self::Exec { result, .. } => result.default_redacted_output_tail(),
             _ => None,
         }
-    }
-
-    pub fn default_redacted_output_tail(&self) -> Option<fabro_types::ExecOutputTail> {
-        self.exec_result()
-            .and_then(crate::ExecResult::default_redacted_output_tail)
     }
 
     #[cfg(feature = "docker")]

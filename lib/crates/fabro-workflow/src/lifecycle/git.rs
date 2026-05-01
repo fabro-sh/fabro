@@ -326,8 +326,7 @@ impl GitLifecycle {
             Ok(snapshot) => {
                 if let Some(push_error) = snapshot.push_error.as_ref() {
                     let message = format!(
-                        "failed to push metadata ref refs/heads/{meta_branch}: {}",
-                        push_error.message
+                        "failed to push metadata ref refs/heads/{meta_branch}: {push_error}"
                     );
                     self.emit_metadata_snapshot_failed(
                         phase,
@@ -339,7 +338,7 @@ impl GitLifecycle {
                         Some(snapshot.commit_sha.clone()),
                         Some(snapshot.entry_count),
                         Some(snapshot.bytes),
-                        push_error.exec_output_tail.clone(),
+                        push_error.exec_output_tail(),
                         scope,
                     );
                     self.emit_metadata_warning("checkpoint_metadata_push_failed", message);

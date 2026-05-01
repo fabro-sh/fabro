@@ -89,15 +89,9 @@ pub(crate) struct SandboxMetadataWriter<'a> {
 
 pub(crate) struct MetadataSnapshot {
     pub commit_sha:  String,
-    pub push_error:  Option<MetadataPushError>,
+    pub push_error:  Option<SandboxMetadataError>,
     pub entry_count: usize,
     pub bytes:       u64,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct MetadataPushError {
-    pub message:          String,
-    pub exec_output_tail: Option<fabro_types::ExecOutputTail>,
 }
 
 impl<'a> SandboxMetadataWriter<'a> {
@@ -207,14 +201,12 @@ impl<'a> SandboxMetadataWriter<'a> {
         .await?;
         let commit = parse_fast_import_mark(&stdout)?;
         let refspec = format!("{full_ref}:{full_ref}");
-        let push_result = self.sandbox.git_push_ref(&refspec).await;
-        let push_error = match push_result {
-            Ok(()) => None,
-            Err(err) => Some(MetadataPushError {
+        let push_error = self.sandbox.git_push_ref(&refspec).await.err().map(|err| {
+            SandboxMetadataError::Operation {
                 message:          err.display_with_causes(),
                 exec_output_tail: err.default_redacted_output_tail(),
-            }),
-        };
+            }
+        });
         Ok(MetadataSnapshot {
             commit_sha: commit,
             push_error,
