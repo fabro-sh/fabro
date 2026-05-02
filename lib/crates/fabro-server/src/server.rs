@@ -34,7 +34,7 @@ pub use fabro_api::types::{
     PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest,
     RewindRequest, RewindResponse, RunArtifactEntry, RunArtifactListResponse, RunBilling,
     RunBillingStage, RunBillingTotals, RunError, RunManifest, RunStage, RunStatusResponse,
-    SandboxFileEntry, SandboxFileListResponse, SshAccessRequest, SshAccessResponse, StageStatus,
+    SandboxFileEntry, SandboxFileListResponse, SshAccessRequest, SshAccessResponse, StageState,
     StartRunRequest, SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRunCounts,
     TimelineEntryResponse, WriteBlobResponse,
 };
@@ -2173,7 +2173,7 @@ async fn openapi_spec() -> Response {
     Json(value).into_response()
 }
 
-fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> StageStatus {
+fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> StageState {
     let latest = events.iter().rev().find(|envelope| {
         envelope.event.node_id.as_deref() == Some(node_id)
             && matches!(
@@ -2183,9 +2183,9 @@ fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> St
     });
 
     if latest.is_some_and(|e| e.event.event_name() == "stage.retrying") {
-        StageStatus::Retrying
+        StageState::Retrying
     } else {
-        StageStatus::Running
+        StageState::Running
     }
 }
 
@@ -2299,8 +2299,8 @@ async fn list_run_stages(
     for node_id in &checkpoint.completed_nodes {
         let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
         let status = match checkpoint.node_outcomes.get(node_id) {
-            Some(outcome) => StageStatus::from(outcome.status),
-            None => StageStatus::Succeeded,
+            Some(outcome) => StageState::from(outcome.status),
+            None => StageState::Succeeded,
         };
         stages.push(RunStage {
             id: node_id.clone(),
@@ -5393,7 +5393,7 @@ async fn get_run_stage_command_log(
         .map(str::to_string);
     let live_streaming = node
         .live_streaming
-        .unwrap_or_else(|| cas_ref.is_none() && node.status.is_none());
+        .unwrap_or_else(|| cas_ref.is_none() && node.completion.is_none());
     let run_dir = Storage::new(state.server_storage_dir())
         .run_scratch(&id)
         .root()
@@ -5456,7 +5456,7 @@ async fn get_run_stage_command_log(
         query.offset,
         limit,
         LogSource::Full(&[]),
-        node.status.is_some(),
+        node.completion.is_some(),
         None,
         live_streaming,
     )

@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
 
 use chrono::{TimeZone, Utc};
-use fabro_store::{RunProjection, SerializableProjection, StageId, StageState};
+use fabro_store::{RunProjection, SerializableProjection, StageId};
 use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
 use fabro_types::{
-    Checkpoint, NodeStatusRecord, RunStatus, SandboxRecord, StageOutcome, StartRecord,
-    TerminalStatus, WorkflowSettings, fixtures,
+    Checkpoint, RunStatus, SandboxRecord, StageCompletion, StageOutcome, StartRecord,
+    TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
 };
 use serde_json::json;
 
@@ -77,32 +77,25 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         clone_branch:      None,
     });
     projection.pending_interviews = BTreeMap::new();
-    projection.set_stage(stage_id.clone(), StageState {
-        seq:               7,
-        prompt:            Some("plan the work".to_string()),
-        response:          Some("done".to_string()),
-        status:            Some(NodeStatusRecord {
-            status:         StageOutcome::Succeeded,
-            notes:          Some("ok".to_string()),
-            failure_reason: None,
-            timestamp:      Utc
-                .with_ymd_and_hms(2026, 4, 20, 12, 1, 0)
-                .single()
-                .expect("timestamp should be representable"),
-        }),
-        provider_used:     Some(json!({ "provider": "openai", "model": "gpt-5.4" })),
-        diff:              Some("diff --git a/a b/a".to_string()),
-        script_invocation: Some(json!({ "command": "cargo test" })),
-        script_timing:     Some(json!({ "duration_ms": 10 })),
-        parallel_results:  Some(json!([{ "stage": "fanout@1" }])),
-        stdout:            Some("stdout".to_string()),
-        stderr:            Some("stderr".to_string()),
-        stdout_bytes:      None,
-        stderr_bytes:      None,
-        streams_separated: None,
-        live_streaming:    None,
-        termination:       None,
+    let stage = projection.stage_entry(stage_id.node_id(), stage_id.visit(), first_event_seq(2));
+    stage.prompt = Some("plan the work".to_string());
+    stage.response = Some("done".to_string());
+    stage.completion = Some(StageCompletion {
+        outcome:        StageOutcome::Succeeded,
+        notes:          Some("ok".to_string()),
+        failure_reason: None,
+        timestamp:      Utc
+            .with_ymd_and_hms(2026, 4, 20, 12, 1, 0)
+            .single()
+            .expect("timestamp should be representable"),
     });
+    stage.provider_used = Some(json!({ "provider": "openai", "model": "gpt-5.4" }));
+    stage.diff = Some("diff --git a/a b/a".to_string());
+    stage.script_invocation = Some(json!({ "command": "cargo test" }));
+    stage.script_timing = Some(json!({ "duration_ms": 10 }));
+    stage.parallel_results = Some(json!([{ "stage": "fanout@1" }]));
+    stage.stdout = Some("stdout".to_string());
+    stage.stderr = Some("stderr".to_string());
 
     let serialized = serde_json::to_value(SerializableProjection(&projection))
         .expect("projection should serialize");
@@ -120,12 +113,18 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
     );
     assert_eq!(round_tripped.status(), Some(RunStatus::Running));
     assert!(!round_tripped.is_terminal());
-    assert_eq!(node.seq, 7);
     assert_eq!(node.prompt, None);
     assert_eq!(node.response, None);
     assert_eq!(node.diff, None);
     assert_eq!(node.stdout, None);
     assert_eq!(node.stderr, None);
+    assert_eq!(node.first_event_seq, first_event_seq(2));
+    assert_eq!(
+        node.completion
+            .as_ref()
+            .map(|completion| completion.outcome),
+        Some(StageOutcome::Succeeded)
+    );
     assert_eq!(
         node.provider_used,
         Some(json!({ "provider": "openai", "model": "gpt-5.4" }))

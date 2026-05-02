@@ -58,10 +58,10 @@ fn run_projection_round_trips_populated_projection() {
         },
         "stages": {
             "build@2": {
-                "seq": 0,
+                "first_event_seq": 3,
                 "prompt": null,
                 "response": null,
-                "status": null,
+                "completion": null,
                 "provider_used": null,
                 "diff": "diff --git a/file b/file",
                 "script_invocation": null,

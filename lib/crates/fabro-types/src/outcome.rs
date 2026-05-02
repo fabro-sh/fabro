@@ -106,7 +106,7 @@ impl<'de> Deserialize<'de> for StageOutcome {
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
-pub enum StageStatus {
+pub enum StageState {
     Pending,
     Running,
     Retrying,
@@ -117,7 +117,7 @@ pub enum StageStatus {
     Cancelled,
 }
 
-impl StageStatus {
+impl StageState {
     #[must_use]
     pub fn is_terminal(self) -> bool {
         matches!(
@@ -131,7 +131,7 @@ impl StageStatus {
     }
 }
 
-impl From<StageOutcome> for StageStatus {
+impl From<StageOutcome> for StageState {
     fn from(outcome: StageOutcome) -> Self {
         match outcome {
             StageOutcome::Succeeded => Self::Succeeded,
@@ -301,7 +301,7 @@ impl<M: OutcomeMeta> Outcome<M> {
 mod tests {
     use serde_json::json;
 
-    use super::{StageOutcome, StageStatus};
+    use super::{StageOutcome, StageState};
 
     #[test]
     fn stage_outcome_failed_serde_is_lossy_for_retry_intent() {
@@ -321,23 +321,23 @@ mod tests {
     }
 
     #[test]
-    fn stage_status_projects_terminal_outcomes() {
+    fn stage_state_projects_terminal_outcomes() {
         assert_eq!(
-            StageStatus::from(StageOutcome::Succeeded),
-            StageStatus::Succeeded
+            StageState::from(StageOutcome::Succeeded),
+            StageState::Succeeded
         );
         assert_eq!(
-            StageStatus::from(StageOutcome::PartiallySucceeded),
-            StageStatus::PartiallySucceeded
+            StageState::from(StageOutcome::PartiallySucceeded),
+            StageState::PartiallySucceeded
         );
         assert_eq!(
-            StageStatus::from(StageOutcome::Failed {
+            StageState::from(StageOutcome::Failed {
                 retry_requested: true,
             }),
-            StageStatus::Failed
+            StageState::Failed
         );
-        assert!(StageStatus::Cancelled.is_terminal());
-        assert!(!StageStatus::Running.is_terminal());
+        assert!(StageState::Cancelled.is_terminal());
+        assert!(!StageState::Running.is_terminal());
     }
 }
 

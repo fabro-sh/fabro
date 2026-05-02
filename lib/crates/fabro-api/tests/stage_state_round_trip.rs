@@ -10,30 +10,51 @@ fn stage_state_reuses_canonical_type() {
 }
 
 #[test]
-fn stage_state_round_trips_representative_json() {
-    let value = json!({
-        "seq": 42,
-        "prompt": "build it",
-        "response": "done",
-        "status": {
-            "status": "succeeded",
-            "notes": null,
-            "failure_reason": null,
-            "timestamp": "2026-04-29T12:34:56Z"
-        },
-        "provider_used": { "provider": "openai", "model": "gpt-5.2" },
-        "diff": "diff --git a/file b/file",
-        "script_invocation": { "command": "cargo test" },
-        "script_timing": { "duration_ms": 42 },
-        "parallel_results": [{ "branch": 0, "status": "succeeded" }],
-        "stdout": "ok",
-        "stderr": "",
-        "termination": "exited"
-    });
+fn stage_state_serializes_as_lifecycle_strings() {
+    assert_eq!(
+        serde_json::to_value(StageState::Pending).unwrap(),
+        json!("pending")
+    );
+    assert_eq!(
+        serde_json::to_value(StageState::Running).unwrap(),
+        json!("running")
+    );
+    assert_eq!(
+        serde_json::to_value(StageState::Retrying).unwrap(),
+        json!("retrying")
+    );
+    assert_eq!(
+        serde_json::to_value(StageState::Succeeded).unwrap(),
+        json!("succeeded")
+    );
+    assert_eq!(
+        serde_json::to_value(StageState::PartiallySucceeded).unwrap(),
+        json!("partially_succeeded")
+    );
+    assert_eq!(
+        serde_json::to_value(StageState::Failed).unwrap(),
+        json!("failed")
+    );
+    assert_eq!(
+        serde_json::to_value(StageState::Skipped).unwrap(),
+        json!("skipped")
+    );
+    assert_eq!(
+        serde_json::to_value(StageState::Cancelled).unwrap(),
+        json!("cancelled")
+    );
+}
 
-    let state: StageState = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(state.seq, 42);
-    assert_eq!(serde_json::to_value(state).unwrap(), value);
+#[test]
+fn stage_state_deserializes_representative_values() {
+    assert_eq!(
+        serde_json::from_value::<ApiStageState>(json!("retrying")).unwrap(),
+        StageState::Retrying
+    );
+    assert_eq!(
+        serde_json::from_value::<ApiStageState>(json!("partially_succeeded")).unwrap(),
+        StageState::PartiallySucceeded
+    );
 }
 
 fn assert_same_type<T: 'static, U: 'static>() {

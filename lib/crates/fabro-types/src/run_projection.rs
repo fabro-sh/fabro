@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroU32;
 
 use chrono::{DateTime, Utc};
 
 use crate::{
-    Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition, NodeStatusRecord,
-    PullRequestRecord, Retro, RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord, StageId,
+    Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition, PullRequestRecord, Retro,
+    RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord, StageCompletion, StageId,
     StartRecord,
 };
 
@@ -28,8 +29,7 @@ pub struct RunProjection {
     pub pull_request:       Option<PullRequestRecord>,
     pub superseded_by:      Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
-    #[serde(alias = "nodes")]
-    stages:                 HashMap<StageId, StageState>,
+    stages:                 HashMap<StageId, StageProjection>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -38,13 +38,12 @@ pub struct PendingInterviewRecord {
     pub started_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct StageState {
-    #[serde(default)]
-    pub seq:               u32,
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StageProjection {
+    pub first_event_seq:   NonZeroU32,
     pub prompt:            Option<String>,
     pub response:          Option<String>,
-    pub status:            Option<NodeStatusRecord>,
+    pub completion:        Option<StageCompletion>,
     pub provider_used:     Option<serde_json::Value>,
     pub diff:              Option<String>,
     pub script_invocation: Option<serde_json::Value>,
@@ -64,21 +63,56 @@ pub struct StageState {
     pub termination:       Option<crate::CommandTermination>,
 }
 
+/// Convert a 1-based event sequence number into the `NonZeroU32` form used for
+/// `StageProjection::first_event_seq`. Run event seqs always start at 1.
+#[must_use]
+pub fn first_event_seq(seq: u32) -> NonZeroU32 {
+    NonZeroU32::new(seq).expect("event seq starts at 1")
+}
+
+impl StageProjection {
+    #[must_use]
+    pub fn new(first_event_seq: NonZeroU32) -> Self {
+        Self {
+            first_event_seq,
+            prompt: None,
+            response: None,
+            completion: None,
+            provider_used: None,
+            diff: None,
+            script_invocation: None,
+            script_timing: None,
+            parallel_results: None,
+            stdout: None,
+            stderr: None,
+            stdout_bytes: None,
+            stderr_bytes: None,
+            streams_separated: None,
+            live_streaming: None,
+            termination: None,
+        }
+    }
+}
+
 impl RunProjection {
-    pub fn stage(&self, stage_id: &StageId) -> Option<&StageState> {
-        self.stages.get(stage_id)
+    pub fn stage(&self, stage: &StageId) -> Option<&StageProjection> {
+        self.stages.get(stage)
     }
 
-    pub fn iter_stages(&self) -> impl Iterator<Item = (&StageId, &StageState)> {
+    pub fn iter_stages(&self) -> impl Iterator<Item = (&StageId, &StageProjection)> {
         self.stages.iter()
+    }
+
+    pub fn iter_stages_mut(&mut self) -> impl Iterator<Item = (&StageId, &mut StageProjection)> {
+        self.stages.iter_mut()
     }
 
     pub fn is_empty(&self) -> bool {
         self.stages.is_empty()
     }
 
-    pub fn set_stage(&mut self, stage_id: StageId, state: StageState) {
-        self.stages.insert(stage_id, state);
+    pub fn stage_mut(&mut self, stage: &StageId) -> Option<&mut StageProjection> {
+        self.stages.get_mut(stage)
     }
 
     pub fn list_node_visits(&self, node_id: &str) -> Vec<u32> {
@@ -113,17 +147,15 @@ impl RunProjection {
         &self.pending_interviews
     }
 
-    pub fn stage_entry_id(&mut self, stage_id: &StageId, seq: u32) -> &mut StageState {
+    pub fn stage_entry(
+        &mut self,
+        node_id: &str,
+        visit: u32,
+        first_event_seq: NonZeroU32,
+    ) -> &mut StageProjection {
         self.stages
-            .entry(stage_id.clone())
-            .or_insert_with(|| StageState {
-                seq,
-                ..Default::default()
-            })
-    }
-
-    pub fn stage_entry(&mut self, node_id: &str, visit: u32, seq: u32) -> &mut StageState {
-        self.stage_entry_id(&StageId::new(node_id, visit), seq)
+            .entry(StageId::new(node_id, visit))
+            .or_insert_with(|| StageProjection::new(first_event_seq))
     }
 
     pub fn current_visit_for(&self, node_id: &str) -> Option<u32> {

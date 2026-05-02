@@ -5103,14 +5103,14 @@ components:
         - failed
         - skipped
 
-    NodeStatusRecord:
-      description: Internal node status record.
+    StageCompletion:
+      description: Terminal completion metadata for a projected workflow stage.
       type: object
       required:
-        - status
+        - outcome
         - timestamp
       properties:
-        status:
+        outcome:
           $ref: "#/components/schemas/StageOutcome"
         notes:
           type: ["string", "null"]
@@ -5120,22 +5120,23 @@ components:
           type: string
           format: date-time
 
-    StageState:
-      description: Internal stage projection state.
+    StageProjection:
+      description: Observable projection data for one workflow stage execution.
       type: object
+      required:
+        - first_event_seq
       properties:
-        seq:
+        first_event_seq:
           type: integer
-          format: int32
-          minimum: 0
-          description: Event-log sequence number of the first event that created this stage. Used to order stages by execution.
+          format: uint32
+          minimum: 1
         prompt:
           type: ["string", "null"]
         response:
           type: ["string", "null"]
-        status:
+        completion:
           oneOf:
-            - $ref: "#/components/schemas/NodeStatusRecord"
+            - $ref: "#/components/schemas/StageCompletion"
             - type: "null"
         provider_used:
           type: ["object", "null"]
@@ -5356,9 +5357,9 @@ components:
             $ref: "#/components/schemas/PendingInterviewRecord"
         stages:
           type: object
-          description: Map from StageId (`node_id@visit`) to StageState.
+          description: Map from StageId (`node_id@visit`) to stage projection data.
           additionalProperties:
-            $ref: "#/components/schemas/StageState"
+            $ref: "#/components/schemas/StageProjection"
 
     RunSummary:
       description: Durable run summary derived from the backing store.
@@ -6141,7 +6142,7 @@ components:
 
     # ── Stage / Turn Schemas ─────────────────────────────────────────────
 
-    StageStatus:
+    StageState:
       description: Lifecycle projection state of a workflow stage.
       type: string
       enum:
@@ -6171,7 +6172,7 @@ components:
           description: Human-readable stage name.
           example: Propose Changes
         status:
-          $ref: "#/components/schemas/StageStatus"
+          $ref: "#/components/schemas/StageState"
         duration_secs:
           type: number
           description: Time spent in this stage, in seconds.

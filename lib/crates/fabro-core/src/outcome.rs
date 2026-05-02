@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 pub use fabro_types::outcome::{
-    FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageStatus,
+    FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,
 };
 
 use crate::error::Error;

@@ -367,11 +367,8 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let stage_state = state.stage(&StageId::new("classify", 1)).unwrap();
-        assert_eq!(
-            stage_state.provider_used.as_ref().unwrap()["mode"],
-            "prompt"
-        );
+        let node_state = state.stage(&StageId::new("classify", 1)).unwrap();
+        assert_eq!(node_state.provider_used.as_ref().unwrap()["mode"], "prompt");
     }
 
     struct OneShotCapturingBackend {

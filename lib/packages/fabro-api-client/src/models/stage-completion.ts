@@ -18,10 +18,10 @@
 import type { StageOutcome } from './stage-outcome';
 
 /**
- * Internal node status record.
+ * Terminal completion metadata for a projected workflow stage.
  */
-export interface NodeStatusRecord {
-    'status': StageOutcome;
+export interface StageCompletion {
+    'outcome': StageOutcome;
     'notes'?: string | null;
     'failure_reason'?: string | null;
     'timestamp': string;

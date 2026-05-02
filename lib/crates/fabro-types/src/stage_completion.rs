@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::outcome::StageOutcome;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NodeStatusRecord {
-    pub status:         StageOutcome,
+pub struct StageCompletion {
+    pub outcome:        StageOutcome,
     #[serde(default)]
     pub notes:          Option<String>,
     #[serde(default)]

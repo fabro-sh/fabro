@@ -312,7 +312,7 @@ Required new payload:
 
 Projection rule:
 
-- `NodeState.parallel_results` projects from `parallel.completed.properties.results`
+- `StageProjection.parallel_results` projects from `parallel.completed.properties.results`
 
 Why this is the right event:
 
@@ -330,7 +330,7 @@ We already added `checkpoint.completed.diff`, but the memoized plan should not p
 
 Decision required:
 
-- either `NodeState.diff` is “latest checkpoint diff for that node visit”
+- either `StageProjection.diff` is “latest checkpoint diff for that node visit”
 - or add a dedicated `node.diff_generated` event
 
 This follow-up plan should pick one and update docs/tests accordingly.

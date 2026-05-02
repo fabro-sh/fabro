@@ -8,9 +8,9 @@ use fabro_types::run_event::{
 };
 use fabro_types::{
     BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
-    NodeStatusRecord, Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunId,
-    RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageOutcome, StartRecord,
-    TerminalStatus,
+    Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunEvent, RunId,
+    RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion, StageOutcome,
+    StageProjection, StartRecord, TerminalStatus, first_event_seq,
 };
 use fabro_util::error::render_with_causes;
 use serde_json::Value;
@@ -200,8 +200,27 @@ impl RunProjectionReducer for RunProjection {
                         .and_then(|visit| u32::try_from(*visit).ok())
                         .unwrap_or(1);
                     if let Some(diff) = props.diff.clone() {
-                        stage_entry_for_event(self, event, node_id, visit).diff = Some(diff);
+                        self.stage_entry(node_id, visit, first_event_seq(event.seq))
+                            .diff = Some(diff);
                     }
+                }
+                for (node_id, outcome) in &checkpoint.node_outcomes {
+                    if outcome.status != StageOutcome::Skipped {
+                        continue;
+                    }
+                    let visit = checkpoint
+                        .node_visits
+                        .get(node_id)
+                        .and_then(|visit| u32::try_from(*visit).ok())
+                        .unwrap_or(1);
+                    if self
+                        .stage(&fabro_types::StageId::new(node_id, visit))
+                        .is_some()
+                    {
+                        continue;
+                    }
+                    self.stage_entry(node_id, visit, first_event_seq(event.seq))
+                        .completion = Some(stage_completion_from_outcome(outcome, ts));
                 }
                 self.checkpoint = Some(checkpoint.clone());
                 self.checkpoints.push((event.seq, checkpoint));
@@ -267,26 +286,28 @@ impl RunProjectionReducer for RunProjection {
             EventBody::InterviewInterrupted(props) if !props.question_id.is_empty() => {
                 self.pending_interviews.remove(&props.question_id);
             }
-            EventBody::StageStarted(_props) => {
+            EventBody::StageStarted(_) => {
                 let Some(stage_id) = stored.stage_id.as_ref() else {
                     return Ok(());
                 };
-                self.stage_entry_id(stage_id, event.seq);
+                self.stage_entry(
+                    stage_id.node_id(),
+                    stage_id.visit(),
+                    first_event_seq(event.seq),
+                );
             }
             EventBody::StagePrompt(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
                     return Ok(());
                 };
-                let stage = stage_entry_for_event(self, event, node_id, props.visit);
                 stage.prompt = Some(props.text.clone());
                 stage.provider_used = provider_used_from_prompt(props);
             }
             EventBody::PromptCompleted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
-                stage_entry_with_current_visit(self, event, node_id).response =
-                    Some(props.response.clone());
+                stage.response = Some(props.response.clone());
             }
             EventBody::StageCompleted(props) => {
                 let Some(node_id) = stored.node_id.as_deref() else {
@@ -295,19 +316,18 @@ impl RunProjectionReducer for RunProjection {
                 let visit = stage_visit(node_id, props.node_visits.as_ref(), self).unwrap_or(1);
                 let response = props.response.clone();
                 let outcome = stage_outcome_from_props(props);
-                let status = node_status_from_outcome(&outcome, ts);
-                let node = stage_entry_for_event(self, event, node_id, visit);
-                node.response = response;
-                node.status = Some(status);
+                let completion = stage_completion_from_outcome(&outcome, ts);
+                let stage = self.stage_entry(node_id, visit, first_event_seq(event.seq));
+                stage.response = response;
+                stage.completion = Some(completion);
             }
             EventBody::StageFailed(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let failure_reason = props.failure.as_ref().map(|detail| detail.message.clone());
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
-                let failure_reason = props.failure.as_ref().map(|detail| detail.message.clone());
-                let node = stage_entry_with_current_visit(self, event, node_id);
-                node.status = Some(NodeStatusRecord {
-                    status: StageOutcome::Failed {
+                stage.completion = Some(StageCompletion {
+                    outcome: StageOutcome::Failed {
                         retry_requested: false,
                     },
                     notes: None,
@@ -316,52 +336,50 @@ impl RunProjectionReducer for RunProjection {
                 });
             }
             EventBody::AgentSessionStarted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
                     return Ok(());
                 };
-                stage_entry_for_event(self, event, node_id, props.visit).provider_used =
-                    Some(provider_used_from_agent_session_started(props));
+                stage.provider_used = Some(provider_used_from_agent_session_started(props));
             }
             EventBody::AgentCliStarted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
                     return Ok(());
                 };
-                stage_entry_for_event(self, event, node_id, props.visit).provider_used =
-                    Some(provider_used_from_agent_cli_started(props));
+                stage.provider_used = Some(provider_used_from_agent_cli_started(props));
             }
             EventBody::CommandStarted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let script_invocation = serde_json::to_value(props).map_err(|err| {
+                    Error::InvalidEvent(format!("invalid command.started payload: {err}"))
+                })?;
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
-                stage_entry_with_current_visit(self, event, node_id).script_invocation =
-                    Some(serde_json::to_value(props).map_err(|err| {
-                        Error::InvalidEvent(format!("invalid command.started payload: {err}"))
-                    })?);
+                stage.script_invocation = Some(script_invocation);
             }
             EventBody::CommandCompleted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let script_timing = serde_json::to_value(props).map_err(|err| {
+                    Error::InvalidEvent(format!("invalid command.completed payload: {err}"))
+                })?;
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
-                let node = stage_entry_with_current_visit(self, event, node_id);
-                node.stdout = Some(props.stdout.clone());
-                node.stderr = Some(props.stderr.clone());
-                node.stdout_bytes = Some(props.stdout_bytes);
-                node.stderr_bytes = Some(props.stderr_bytes);
-                node.streams_separated = Some(props.streams_separated);
-                node.live_streaming = Some(props.live_streaming);
-                node.termination = Some(props.termination);
-                node.script_timing = Some(serde_json::to_value(props).map_err(|err| {
-                    Error::InvalidEvent(format!("invalid command.completed payload: {err}"))
-                })?);
+                stage.stdout = Some(props.stdout.clone());
+                stage.stderr = Some(props.stderr.clone());
+                stage.stdout_bytes = Some(props.stdout_bytes);
+                stage.stderr_bytes = Some(props.stderr_bytes);
+                stage.streams_separated = Some(props.streams_separated);
+                stage.live_streaming = Some(props.live_streaming);
+                stage.termination = Some(props.termination);
+                stage.script_timing = Some(script_timing);
             }
             EventBody::ParallelCompleted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let parallel_results = serde_json::to_value(&props.results).map_err(|err| {
+                    Error::InvalidEvent(format!("invalid parallel.completed payload: {err}"))
+                })?;
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
-                stage_entry_with_current_visit(self, event, node_id).parallel_results =
-                    Some(serde_json::to_value(&props.results).map_err(|err| {
-                        Error::InvalidEvent(format!("invalid parallel.completed payload: {err}"))
-                    })?);
+                stage.parallel_results = Some(parallel_results);
             }
             _ => {}
         }
@@ -370,30 +388,24 @@ impl RunProjectionReducer for RunProjection {
     }
 }
 
-fn stage_entry_for_event<'a>(
+fn stage_at_visit<'a>(
     state: &'a mut RunProjection,
-    event: &EventEnvelope,
-    node_id: &str,
+    stored: &RunEvent,
     visit: u32,
-) -> &'a mut fabro_types::StageState {
-    if let Some(stage_id) = event.event.stage_id.as_ref() {
-        state.stage_entry_id(stage_id, event.seq)
-    } else {
-        state.stage_entry(node_id, visit, event.seq)
-    }
+    seq: u32,
+) -> Option<&'a mut StageProjection> {
+    let node_id = stored.node_id.as_deref()?;
+    Some(state.stage_entry(node_id, visit, first_event_seq(seq)))
 }
 
-fn stage_entry_with_current_visit<'a>(
+fn stage_at_current_visit<'a>(
     state: &'a mut RunProjection,
-    event: &EventEnvelope,
-    node_id: &str,
-) -> &'a mut fabro_types::StageState {
-    if let Some(stage_id) = event.event.stage_id.as_ref() {
-        state.stage_entry_id(stage_id, event.seq)
-    } else {
-        let visit = state.current_visit_for(node_id).unwrap_or(1);
-        state.stage_entry(node_id, visit, event.seq)
-    }
+    stored: &RunEvent,
+    seq: u32,
+) -> Option<&'a mut StageProjection> {
+    let node_id = stored.node_id.as_deref()?;
+    let visit = state.current_visit_for(node_id).unwrap_or(1);
+    Some(state.stage_entry(node_id, visit, first_event_seq(seq)))
 }
 
 pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary {
@@ -540,12 +552,12 @@ fn stage_outcome_from_props(props: &StageCompletedProps) -> Outcome<Option<Bille
     }
 }
 
-fn node_status_from_outcome(
+fn stage_completion_from_outcome(
     outcome: &Outcome<Option<BilledModelUsage>>,
     timestamp: DateTime<Utc>,
-) -> NodeStatusRecord {
-    NodeStatusRecord {
-        status: outcome.status,
+) -> StageCompletion {
+    StageCompletion {
+        outcome: outcome.status,
         notes: outcome.notes.clone(),
         failure_reason: outcome
             .failure
@@ -595,18 +607,18 @@ fn provider_used_from_agent_cli_started(props: &AgentCliStartedProps) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     use chrono::Utc;
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
-        InterviewCompletedProps, InterviewOption, InterviewStartedProps, RunControlEffectProps,
-        StageStartedProps,
+        CheckpointCompletedProps, InterviewCompletedProps, InterviewOption, InterviewStartedProps,
+        RunControlEffectProps, StagePromptProps, StageStartedProps,
     };
     use fabro_types::{
-        BlockedReason, Checkpoint, EventBody, FailureReason, QuestionType, RunBlobId,
-        RunControlAction, RunEvent, RunStatus, StageState, SuccessReason, TerminalStatus,
-        WorkflowSettings, fixtures,
+        BlockedReason, Checkpoint, EventBody, FailureReason, Outcome, QuestionType, RunBlobId,
+        RunControlAction, RunEvent, RunStatus, StageOutcome, SuccessReason, TerminalStatus,
+        WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -631,6 +643,12 @@ mod tests {
         };
 
         EventEnvelope { seq, event }
+    }
+
+    fn test_stage_event(seq: u32, body: EventBody, stage_id: StageId) -> EventEnvelope {
+        let mut event = test_event(seq, body, Some(stage_id.node_id()));
+        event.event.stage_id = Some(stage_id);
+        event
     }
 
     fn test_raw_event(
@@ -675,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_projection_defaults_missing_nodes_and_checkpoints() {
+    fn deserialize_projection_defaults_missing_stages_and_checkpoints() {
         let state: RunProjection = serde_json::from_value(serde_json::json!({
             "pending_control": "pause"
         }))
@@ -687,7 +705,7 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_and_round_trip_projection_preserves_stage_ids_and_pending_control() {
+    fn deserialize_and_round_trip_projection_preserves_stages_and_pending_control() {
         let state: RunProjection = serde_json::from_value(serde_json::json!({
             "spec": {
                 "run_id": "01JW6A7VNFZSFF0SKXJG29Z2M3",
@@ -719,7 +737,7 @@ mod tests {
             ]],
             "stages": {
                 "build@2": {
-                    "seq": 0,
+                    "first_event_seq": 1,
                     "diff": "diff --git a/file b/file",
                     "stdout": "done"
                 }
@@ -729,6 +747,7 @@ mod tests {
 
         let stage_id = StageId::new("build", 2);
         let node = state.stage(&stage_id).unwrap();
+        assert_eq!(node.first_event_seq, first_event_seq(1));
         assert_eq!(node.diff.as_deref(), Some("diff --git a/file b/file"));
         assert_eq!(state.list_node_visits("build"), vec![2]);
         assert_eq!(state.pending_control, Some(RunControlAction::Cancel));
@@ -745,12 +764,10 @@ mod tests {
         );
         assert!(serialized.get("spec").is_some());
         assert!(serialized.get("run").is_none());
-        assert!(serialized.get("stages").is_some());
-        assert!(serialized.get("nodes").is_none());
     }
 
     #[test]
-    fn set_stage_round_trips_through_json() {
+    fn stage_entry_round_trips_through_json() {
         let mut state = RunProjection::default();
         state.pending_control = Some(RunControlAction::Unpause);
         state.checkpoints = vec![(7, Checkpoint {
@@ -766,10 +783,7 @@ mod tests {
             restart_failure_signatures: HashMap::new(),
             node_visits:                HashMap::from([("build".to_string(), 2usize)]),
         })];
-        state.set_stage(StageId::new("build", 2), StageState {
-            stdout: Some("done".to_string()),
-            ..StageState::default()
-        });
+        state.stage_entry("build", 2, first_event_seq(7)).stdout = Some("done".to_string());
 
         let round_tripped: RunProjection =
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
@@ -790,25 +804,97 @@ mod tests {
     }
 
     #[test]
-    fn stage_started_stamps_seq_from_stage_id() {
+    fn stage_started_sets_first_event_seq() {
         let mut state = RunProjection::default();
-        let stage_id = StageId::new("build", 2);
-        let mut event = test_event(
-            17,
-            EventBody::StageStarted(StageStartedProps {
-                index:        0,
-                handler_type: "command".to_string(),
-                attempt:      3,
-                max_attempts: 3,
-            }),
-            Some("build"),
-        );
-        event.event.stage_id = Some(stage_id.clone());
+        let stage_id = StageId::new("build", 1);
 
-        state.apply_event(&event).unwrap();
+        state
+            .apply_event(&test_stage_event(
+                3,
+                EventBody::StageStarted(StageStartedProps {
+                    index:        0,
+                    handler_type: "agent".to_string(),
+                    attempt:      1,
+                    max_attempts: 1,
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.seq, 17);
+        assert_eq!(stage.first_event_seq, first_event_seq(3));
+    }
+
+    #[test]
+    fn later_stage_events_do_not_overwrite_first_event_seq() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                3,
+                EventBody::StageStarted(StageStartedProps {
+                    index:        0,
+                    handler_type: "agent".to_string(),
+                    attempt:      1,
+                    max_attempts: 1,
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                4,
+                EventBody::StagePrompt(StagePromptProps {
+                    visit:    1,
+                    text:     "prompt".to_string(),
+                    mode:     None,
+                    provider: None,
+                    model:    None,
+                }),
+                Some("build"),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.first_event_seq, first_event_seq(3));
+        assert_eq!(stage.prompt.as_deref(), Some("prompt"));
+    }
+
+    #[test]
+    fn checkpoint_completed_creates_projection_entry_for_skipped_stage() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("skip_me", 1);
+
+        state
+            .apply_event(&test_event(
+                5,
+                EventBody::CheckpointCompleted(CheckpointCompletedProps {
+                    status: "running".to_string(),
+                    current_node: "next".to_string(),
+                    completed_nodes: vec!["skip_me".to_string()],
+                    node_retries: BTreeMap::new(),
+                    context_values: BTreeMap::new(),
+                    node_outcomes: BTreeMap::from([(
+                        "skip_me".to_string(),
+                        Outcome::skipped("condition was false"),
+                    )]),
+                    next_node_id: Some("next".to_string()),
+                    git_commit_sha: None,
+                    loop_failure_signatures: BTreeMap::new(),
+                    restart_failure_signatures: BTreeMap::new(),
+                    node_visits: BTreeMap::from([("skip_me".to_string(), 1usize)]),
+                    diff: None,
+                }),
+                None,
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.first_event_seq, first_event_seq(5));
+        let completion = stage.completion.as_ref().unwrap();
+        assert_eq!(completion.outcome, StageOutcome::Skipped);
+        assert_eq!(completion.notes.as_deref(), Some("condition was false"));
     }
 
     #[test]

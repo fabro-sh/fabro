@@ -39,7 +39,7 @@ Metadata branch snapshots and `fabro dump` exports now use the same core layout:
 - `run.json` for the current projection snapshot, including the current checkpoint
 - `graph.fabro` for workflow source
 - `stages/retro/*.md` for retro prompt/response text
-- `stages/{node_id}@{visit}/...` for per-stage prompt, response, status, diff, stdout, and stderr files
+- `stages/{rank:03}-{node_id}@{visit}/...` for execution-order-prefixed per-stage prompt, response, status, diff, stdout, and stderr files
 
 `fabro dump` adds export-only history surfaces on top of that shared layout:
 

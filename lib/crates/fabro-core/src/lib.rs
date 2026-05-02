@@ -23,7 +23,7 @@ pub use lifecycle::{
 };
 pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, NodeResultExt, Outcome, OutcomeMeta, StageOutcome,
-    StageStatus,
+    StageState,
 };
 pub use retry::{BackoffPolicy, RetryPolicy};
 pub use stall::{ActivityMonitor, StallGuard, StallWatchdog};

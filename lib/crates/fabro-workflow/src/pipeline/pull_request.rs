@@ -641,7 +641,7 @@ mod tests {
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
     use fabro_store::Database;
-    use fabro_types::{BilledTokenCounts, RunSpec, SuccessReason, fixtures};
+    use fabro_types::{BilledTokenCounts, RunSpec, SuccessReason, first_event_seq, fixtures};
     use fabro_vault::{SecretType, Vault};
     use futures::stream;
     use httpmock::Method::POST;
@@ -997,13 +997,8 @@ mod tests {
     #[test]
     fn read_plan_text_found() {
         let mut state = RunProjection::default();
-        state.set_stage(
-            fabro_store::StageId::new("plan", 1),
-            fabro_store::StageState {
-                response: Some("This is the plan".to_string()),
-                ..Default::default()
-            },
-        );
+        state.stage_entry("plan", 1, first_event_seq(1)).response =
+            Some("This is the plan".to_string());
 
         let result = read_plan_text(&state);
         assert_eq!(result, Some("This is the plan".to_string()));
@@ -1012,13 +1007,9 @@ mod tests {
     #[test]
     fn read_plan_text_prefix_match() {
         let mut state = RunProjection::default();
-        state.set_stage(
-            fabro_store::StageId::new("planning", 1),
-            fabro_store::StageState {
-                response: Some("Planning content".to_string()),
-                ..Default::default()
-            },
-        );
+        state
+            .stage_entry("planning", 1, first_event_seq(1))
+            .response = Some("Planning content".to_string());
 
         let result = read_plan_text(&state);
         assert_eq!(result, Some("Planning content".to_string()));
@@ -1027,20 +1018,11 @@ mod tests {
     #[test]
     fn read_plan_text_prefers_alphabetically_first_plan_node() {
         let mut state = RunProjection::default();
-        state.set_stage(
-            fabro_store::StageId::new("planning", 1),
-            fabro_store::StageState {
-                response: Some("Planning content".to_string()),
-                ..Default::default()
-            },
-        );
-        state.set_stage(
-            fabro_store::StageId::new("plan", 1),
-            fabro_store::StageState {
-                response: Some("Plan content".to_string()),
-                ..Default::default()
-            },
-        );
+        state
+            .stage_entry("planning", 1, first_event_seq(1))
+            .response = Some("Planning content".to_string());
+        state.stage_entry("plan", 1, first_event_seq(2)).response =
+            Some("Plan content".to_string());
 
         let result = read_plan_text(&state);
         assert_eq!(result, Some("Plan content".to_string()));
@@ -1049,10 +1031,7 @@ mod tests {
     #[test]
     fn read_plan_text_not_found() {
         let mut state = RunProjection::default();
-        state.set_stage(
-            fabro_store::StageId::new("implement", 1),
-            fabro_store::StageState::default(),
-        );
+        state.stage_entry("implement", 1, first_event_seq(1));
 
         let result = read_plan_text(&state);
         assert_eq!(result, None);

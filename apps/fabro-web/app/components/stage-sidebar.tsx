@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type ComponentType } from "react";
 import { Link } from "react-router";
-import type { StageStatus } from "@qltysh/fabro-api-client";
+import type { StageState } from "@qltysh/fabro-api-client";
 import {
   ArrowPathIcon,
   CheckCircleIcon,
@@ -16,12 +16,12 @@ import { ACTIVE_STAGE_STATES } from "../lib/stage-sidebar";
 export interface Stage {
   id: string;
   name: string;
-  status: StageStatus;
+  status: StageState;
   duration: string;
   dotId?: string;
 }
 
-export const statusConfig: Record<StageStatus, { icon: ComponentType<{ className?: string }>; color: string }> = {
+export const statusConfig: Record<StageState, { icon: ComponentType<{ className?: string }>; color: string }> = {
   pending: { icon: PauseCircleIcon, color: "text-fg-muted" },
   running: { icon: ArrowPathIcon, color: "text-teal-500" },
   retrying: { icon: ArrowPathIcon, color: "text-amber" },

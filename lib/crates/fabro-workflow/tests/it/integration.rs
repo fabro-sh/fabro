@@ -441,15 +441,18 @@ async fn end_to_end_linear_pipeline() {
             .contains(&"codergen_step".to_string())
     );
 
-    let stage_state = state
+    let node_state = state
         .stage(&fabro_types::StageId::new("codergen_step", 1))
         .unwrap();
     assert!(
-        stage_state.response.is_some(),
+        node_state.response.is_some(),
         "response should be projected"
     );
-    assert!(stage_state.status.is_some(), "status should be projected");
-    let prompt_content = stage_state.prompt.as_deref().unwrap();
+    assert!(
+        node_state.completion.is_some(),
+        "completion should be projected"
+    );
+    let prompt_content = node_state.prompt.as_deref().unwrap();
     assert!(
         prompt_content.ends_with("Implement the feature"),
         "prompt should end with original prompt, got: {prompt_content}"
@@ -9436,14 +9439,14 @@ async fn node_dir_uses_visit_count_on_revisit() {
         .stage(&fabro_types::StageId::new("gated_work", 2))
         .unwrap();
     assert_eq!(
-        first.status.as_ref().unwrap().status,
+        first.completion.as_ref().unwrap().outcome,
         StageOutcome::Failed {
             retry_requested: false,
         },
         "first visit should fail"
     );
     assert_eq!(
-        second.status.as_ref().unwrap().status,
+        second.completion.as_ref().unwrap().outcome,
         StageOutcome::Succeeded,
         "second visit should succeed"
     );
@@ -13003,10 +13006,8 @@ async fn asset_collection_local_sandbox_success() {
         "expected stored artifacts for both files"
     );
     assert_eq!(artifacts[0].node, StageId::new("create_assets", 1));
-    assert_eq!(artifacts[0].retry, 1);
     assert_eq!(artifacts[0].filename, "test-results/output.txt");
     assert_eq!(artifacts[1].node, StageId::new("create_assets", 1));
-    assert_eq!(artifacts[1].retry, 1);
     assert_eq!(artifacts[1].filename, "test-results/report.xml");
     let report_content = String::from_utf8(
         artifact_store

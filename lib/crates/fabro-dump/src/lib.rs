@@ -66,87 +66,81 @@ impl RunDump {
             entries.push(RunDumpEntry::text("graph.fabro", graph_source.clone()));
         }
 
-        let mut stage_order: Vec<_> = state
-            .iter_stages()
-            .map(|(stage_id, stage)| (stage_id.clone(), stage.seq))
-            .collect();
-        if stage_order.len() > MAX_STAGES_IN_DUMP {
+        let mut stages: Vec<_> = state.iter_stages().collect();
+        if stages.len() > MAX_STAGES_IN_DUMP {
             bail!(
                 "run dump supports at most {MAX_STAGES_IN_DUMP} stages with the current path prefix width (got {})",
-                stage_order.len()
+                stages.len()
             );
         }
-        stage_order.sort_by(|(left_id, left_seq), (right_id, right_seq)| {
-            left_seq.cmp(right_seq).then_with(|| left_id.cmp(right_id))
+        stages.sort_by(|(left_id, left), (right_id, right)| {
+            left.first_event_seq
+                .cmp(&right.first_event_seq)
+                .then_with(|| left_id.cmp(right_id))
         });
+
         let mut stage_ranks = HashMap::new();
-        for (index, (stage_id, _)) in stage_order.iter().enumerate() {
+        for (index, (stage_id, _)) in stages.iter().enumerate() {
             let rank = u32::try_from(index + 1).context("stage rank should fit in u32")?;
-            stage_ranks.insert(stage_id.clone(), rank);
+            stage_ranks.insert((*stage_id).clone(), rank);
         }
 
-        for (stage_id, _) in stage_order {
-            let Some(node) = state.stage(&stage_id) else {
-                continue;
-            };
-            let rank = stage_ranks
-                .get(&stage_id)
-                .copied()
-                .context("stage rank should exist")?;
-            let base = PathBuf::from("stages").join(stage_dir_name(rank, &stage_id));
+        for (index, (stage_id, stage)) in stages.into_iter().enumerate() {
+            let rank = u32::try_from(index + 1).context("stage rank should fit in u32")?;
+            let base = PathBuf::from("stages").join(stage_dir_name(rank, stage_id));
 
-            if let Some(prompt) = node.prompt.as_ref() {
+            if let Some(prompt) = stage.prompt.as_ref() {
                 entries.push(RunDumpEntry::text_path(
                     &base.join("prompt.md"),
                     prompt.clone(),
                 ));
             }
-            if let Some(response) = node.response.as_ref() {
+            if let Some(response) = stage.response.as_ref() {
                 entries.push(RunDumpEntry::text_path(
                     &base.join("response.md"),
                     response.clone(),
                 ));
             }
-            if let Some(status) = node.status.as_ref() {
-                push_json_entry_path(&mut entries, &base.join("status.json"), status)?;
+            if let Some(completion) = stage.completion.as_ref() {
+                push_json_entry_path(&mut entries, &base.join("status.json"), completion)?;
             }
-            if let Some(provider_used) = node.provider_used.as_ref() {
+            if let Some(provider_used) = stage.provider_used.as_ref() {
                 entries.push(RunDumpEntry::json_path(
                     &base.join("provider_used.json"),
                     provider_used.clone(),
                 ));
             }
-            if let Some(diff) = node.diff.as_ref() {
+            if let Some(diff) = stage.diff.as_ref() {
                 entries.push(RunDumpEntry::text_path(
                     &base.join("diff.patch"),
                     diff.clone(),
                 ));
             }
-            if let Some(script_invocation) = node.script_invocation.as_ref() {
+            if let Some(script_invocation) = stage.script_invocation.as_ref() {
                 entries.push(RunDumpEntry::json_path(
                     &base.join("script_invocation.json"),
                     script_invocation.clone(),
                 ));
             }
-            if let Some(script_timing) = node.script_timing.as_ref() {
+            if let Some(script_timing) = stage.script_timing.as_ref() {
                 entries.push(RunDumpEntry::json_path(
                     &base.join("script_timing.json"),
                     script_timing.clone(),
                 ));
             }
-            if let Some(parallel_results) = node.parallel_results.as_ref() {
+            if let Some(parallel_results) = stage.parallel_results.as_ref() {
                 entries.push(RunDumpEntry::json_path(
                     &base.join("parallel_results.json"),
                     parallel_results.clone(),
                 ));
             }
-            if let Some(stdout) = node.stdout.as_ref() {
+            if let Some(stdout) = stage.stdout.as_ref() {
                 entries.push(RunDumpEntry::text_path(
                     &base.join("stdout.log"),
                     stdout.clone(),
                 ));
             }
-            if let Some(stderr) = node.stderr.as_ref() {
+            if let Some(stderr) = stage.stderr.as_ref() {
                 entries.push(RunDumpEntry::text_path(
                     &base.join("stderr.log"),
                     stderr.clone(),
@@ -211,6 +205,20 @@ impl RunDump {
         Ok(())
     }
 
+    fn add_orphan_notice(&mut self, stage_id: &StageId) {
+        let line = format!("notice: artifact stage {stage_id} was not present in run projection\n");
+        if let Some(index) = self.dump_log_index {
+            if let Some(RunDumpContents::Text(text)) =
+                self.entries.get_mut(index).map(|entry| &mut entry.contents)
+            {
+                text.push_str(&line);
+                return;
+            }
+        }
+        self.dump_log_index = Some(self.entries.len());
+        self.entries.push(RunDumpEntry::text("dump.log", line));
+    }
+
     pub fn add_file_bytes(&mut self, path: impl Into<String>, contents: Vec<u8>) {
         self.entries.push(RunDumpEntry::bytes(path, contents));
     }
@@ -265,20 +273,6 @@ impl RunDump {
     #[must_use]
     pub fn file_count(&self) -> usize {
         self.entries.len()
-    }
-
-    fn add_orphan_notice(&mut self, stage_id: &StageId) {
-        let line = format!("notice: artifact stage {stage_id} was not present in run projection\n");
-        if let Some(index) = self.dump_log_index {
-            if let Some(RunDumpContents::Text(text)) =
-                self.entries.get_mut(index).map(|entry| &mut entry.contents)
-            {
-                text.push_str(&line);
-                return;
-            }
-        }
-        self.dump_log_index = Some(self.entries.len());
-        self.entries.push(RunDumpEntry::text("dump.log", line));
     }
 
     pub fn write_to_dir(&self, root: &Path) -> Result<usize> {
@@ -495,12 +489,12 @@ mod tests {
     use std::collections::HashMap;
 
     use chrono::{TimeZone, Utc};
-    use fabro_store::{RunProjection, StageId, StageState};
+    use fabro_store::{RunProjection, StageId};
     use fabro_types::graph::Graph;
     use fabro_types::run::RunSpec;
     use fabro_types::{
-        Checkpoint, Conclusion, NodeStatusRecord, RunStatus, SandboxRecord, StageOutcome,
-        StartRecord, SuccessReason, WorkflowSettings, fixtures,
+        Checkpoint, Conclusion, RunStatus, SandboxRecord, StageCompletion, StageOutcome,
+        StartRecord, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
     };
     use futures::executor;
 
@@ -590,32 +584,26 @@ mod tests {
         });
         projection.retro_prompt = Some("retro prompt".to_string());
         projection.retro_response = Some("retro response".to_string());
-        projection.set_stage(stage_id.clone(), StageState {
-            seq:               1,
-            prompt:            Some("plan".to_string()),
-            response:          Some("done".to_string()),
-            status:            Some(NodeStatusRecord {
-                status:         StageOutcome::Succeeded,
-                notes:          Some("ok".to_string()),
-                failure_reason: None,
-                timestamp:      Utc
-                    .with_ymd_and_hms(2026, 4, 20, 12, 1, 0)
-                    .single()
-                    .unwrap(),
-            }),
-            provider_used:     Some(serde_json::json!({ "provider": "openai" })),
-            diff:              Some("diff --git a/a b/a".to_string()),
-            script_invocation: Some(serde_json::json!({ "command": "cargo test" })),
-            script_timing:     Some(serde_json::json!({ "duration_ms": 10 })),
-            parallel_results:  Some(serde_json::json!([{ "stage": "fanout@1" }])),
-            stdout:            Some("stdout".to_string()),
-            stderr:            Some("stderr".to_string()),
-            stdout_bytes:      None,
-            stderr_bytes:      None,
-            streams_separated: None,
-            live_streaming:    None,
-            termination:       None,
+        let stage =
+            projection.stage_entry(stage_id.node_id(), stage_id.visit(), first_event_seq(2));
+        stage.prompt = Some("plan".to_string());
+        stage.response = Some("done".to_string());
+        stage.completion = Some(StageCompletion {
+            outcome:        StageOutcome::Succeeded,
+            notes:          Some("ok".to_string()),
+            failure_reason: None,
+            timestamp:      Utc
+                .with_ymd_and_hms(2026, 4, 20, 12, 1, 0)
+                .single()
+                .unwrap(),
         });
+        stage.provider_used = Some(serde_json::json!({ "provider": "openai" }));
+        stage.diff = Some("diff --git a/a b/a".to_string());
+        stage.script_invocation = Some(serde_json::json!({ "command": "cargo test" }));
+        stage.script_timing = Some(serde_json::json!({ "duration_ms": 10 }));
+        stage.parallel_results = Some(serde_json::json!([{ "stage": "fanout@1" }]));
+        stage.stdout = Some("stdout".to_string());
+        stage.stderr = Some("stderr".to_string());
 
         let dump = RunDump::from_projection(&projection).unwrap();
         let paths: Vec<&str> = dump
@@ -662,7 +650,6 @@ mod tests {
         assert!(round_tripped.checkpoint.is_some());
         assert!(round_tripped.conclusion.is_some());
         assert!(round_tripped.sandbox.is_some());
-        assert_eq!(node.seq, 1);
         assert_eq!(node.prompt, None);
         assert_eq!(node.response, None);
         assert_eq!(node.diff, None);
@@ -675,118 +662,51 @@ mod tests {
     }
 
     #[test]
-    fn from_projection_orders_stage_dirs_by_seq() {
+    fn from_projection_prefixes_stage_paths_but_not_artifact_paths() {
         let mut projection = RunProjection::default();
-        projection.set_stage(StageId::new("zebra", 1), StageState {
-            seq: 2,
-            prompt: Some("zebra".to_string()),
-            ..StageState::default()
-        });
-        projection.set_stage(StageId::new("apple", 1), StageState {
-            seq: 5,
-            prompt: Some("apple".to_string()),
-            ..StageState::default()
-        });
+        projection
+            .stage_entry("zebra", 1, first_event_seq(1))
+            .prompt = Some("first".to_string());
+        projection
+            .stage_entry("apple", 1, first_event_seq(2))
+            .prompt = Some("second".to_string());
 
-        let dump = RunDump::from_projection(&projection).unwrap();
-        let stage_prompt_paths = dump
-            .entries()
-            .iter()
-            .filter_map(|entry| {
-                entry
-                    .path
-                    .ends_with("prompt.md")
-                    .then_some(entry.path.as_str())
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(stage_prompt_paths, vec![
-            "stages/001-zebra@1/prompt.md",
-            "stages/002-apple@1/prompt.md",
-        ]);
-    }
-
-    #[test]
-    fn from_projection_reads_legacy_nodes_alias_and_ties_seq_zero_by_stage_id() {
-        let projection: RunProjection = serde_json::from_value(serde_json::json!({
-            "nodes": {
-                "zebra@1": { "prompt": "zebra" },
-                "apple@1": { "prompt": "apple" }
-            }
-        }))
-        .unwrap();
-
-        let dump = RunDump::from_projection(&projection).unwrap();
-        let stage_prompt_paths = dump
-            .entries()
-            .iter()
-            .filter_map(|entry| {
-                entry
-                    .path
-                    .ends_with("prompt.md")
-                    .then_some(entry.path.as_str())
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(stage_prompt_paths, vec![
-            "stages/001-apple@1/prompt.md",
-            "stages/002-zebra@1/prompt.md",
-        ]);
-        let serialized = serde_json::to_value(&projection).unwrap();
-        assert!(serialized.get("stages").is_some());
-        assert!(serialized.get("nodes").is_none());
-    }
-
-    #[test]
-    fn add_artifact_bytes_uses_stage_rank_and_retry() {
-        let stage_id = StageId::new("build", 1);
-        let mut projection = RunProjection::default();
-        projection.set_stage(stage_id.clone(), StageState {
-            seq: 7,
-            ..StageState::default()
-        });
         let mut dump = RunDump::from_projection(&projection).unwrap();
-
-        dump.add_artifact_bytes(&stage_id, 1, "logs/output.txt", b"first".to_vec())
+        dump.add_artifact_bytes(&StageId::new("zebra", 1), 0, "report.txt", b"z".to_vec())
             .unwrap();
-        dump.add_artifact_bytes(&stage_id, 2, "logs/output.txt", b"second".to_vec())
+        dump.add_artifact_bytes(&StageId::new("apple", 1), 0, "report.txt", b"a".to_vec())
             .unwrap();
 
-        let paths = dump
+        let paths: Vec<&str> = dump
             .entries()
             .iter()
             .map(|entry| entry.path.as_str())
-            .collect::<Vec<_>>();
-        assert!(paths.contains(&"artifacts/001-build@1/retry-0001/logs/output.txt"));
-        assert!(paths.contains(&"artifacts/001-build@1/retry-0002/logs/output.txt"));
+            .collect();
+
+        assert!(paths.contains(&"stages/001-zebra@1/prompt.md"));
+        assert!(paths.contains(&"stages/002-apple@1/prompt.md"));
+        assert!(paths.contains(&"artifacts/001-zebra@1/retry-0000/report.txt"));
+        assert!(paths.contains(&"artifacts/002-apple@1/retry-0000/report.txt"));
     }
 
     #[test]
     fn add_artifact_bytes_places_orphans_under_sentinel() {
-        let mut dump = RunDump::from_projection(&RunProjection::default()).unwrap();
+        let mut projection = RunProjection::default();
+        projection
+            .stage_entry("known", 1, first_event_seq(1))
+            .prompt = Some("present".to_string());
 
-        dump.add_artifact_bytes(
-            &StageId::new("missing", 1),
-            1,
-            "logs/output.txt",
-            b"orphan".to_vec(),
-        )
-        .unwrap();
+        let mut dump = RunDump::from_projection(&projection).unwrap();
+        dump.add_artifact_bytes(&StageId::new("missing", 1), 0, "report.txt", b"m".to_vec())
+            .unwrap();
 
-        let orphan = dump
+        let paths: Vec<&str> = dump
             .entries()
             .iter()
-            .find(|entry| entry.path == "artifacts/_orphans/missing@1/retry-0001/logs/output.txt");
-        assert!(orphan.is_some());
-        let notice = dump
-            .entries()
-            .iter()
-            .find(|entry| entry.path == "dump.log")
-            .expect("dump log should include orphan notice");
-        let RunDumpContents::Text(text) = &notice.contents else {
-            panic!("dump log should be text");
-        };
-        assert!(text.contains("missing@1"));
+            .map(|entry| entry.path.as_str())
+            .collect();
+        assert!(paths.contains(&"artifacts/_orphans/missing@1/retry-0000/report.txt"));
+        assert!(paths.contains(&"dump.log"));
     }
 
     #[test]

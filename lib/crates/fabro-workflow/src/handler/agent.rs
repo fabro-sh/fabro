@@ -505,9 +505,9 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let stage_state = state.stage(&StageId::new("plan", 1)).unwrap();
+        let node_state = state.stage(&StageId::new("plan", 1)).unwrap();
         assert_eq!(
-            stage_state.prompt.as_deref(),
+            node_state.prompt.as_deref(),
             Some("Achieve: Build a feature")
         );
     }
@@ -532,8 +532,8 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let stage_state = state.stage(&StageId::new("work", 1)).unwrap();
-        assert_eq!(stage_state.prompt.as_deref(), Some("Do work"));
+        let node_state = state.stage(&StageId::new("work", 1)).unwrap();
+        assert_eq!(node_state.prompt.as_deref(), Some("Do work"));
     }
 
     #[tokio::test]
@@ -774,9 +774,9 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let stage_state = state.stage(&StageId::new("step", 1)).unwrap();
+        let node_state = state.stage(&StageId::new("step", 1)).unwrap();
         assert_eq!(
-            stage_state.provider_used.as_ref().unwrap()["provider"],
+            node_state.provider_used.as_ref().unwrap()["provider"],
             "openai"
         );
     }
@@ -1262,8 +1262,8 @@ Some text in between.
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let stage_state = state.stage(&StageId::new("report", 1)).unwrap();
-        let prompt_content = stage_state.prompt.as_deref().unwrap();
+        let node_state = state.stage(&StageId::new("report", 1)).unwrap();
+        let prompt_content = node_state.prompt.as_deref().unwrap();
         assert!(
             prompt_content.contains("## Script Output\nAll tests passed"),
             "prompt.md should contain preamble"
