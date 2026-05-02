@@ -14,6 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cargo +nightly-2026-04-14 fmt --check --all` — check formatting (pinned nightly required for rustfmt config; CI uses the same date)
 - `cargo +nightly-2026-04-14 fmt --all` — auto-format
 - `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` — lint (CI runs nightly clippy to match; install with `rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt`)
+- `cargo dylint --all --workspace -- --all-targets` — run configured Dylint libraries (`try_io_result`); install with `rustup toolchain install nightly-2025-09-18 --profile minimal --component rustc-dev,llvm-tools-preview && cargo install cargo-dylint dylint-link --version 5.0.0`
 
 macOS note: if `cargo nextest run` fails with `Too many open files (os error 24)` / `EMFILE`, raise the shell's soft FD limit before running tests, for example `ulimit -n 4096 && cargo nextest run --workspace`. Some terminals and inherited agent sessions start with `ulimit -n 256`, which is too low for the shared CLI test daemon under parallel nextest load.
 

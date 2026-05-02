@@ -126,6 +126,11 @@ use_self = "warn"
 wildcard_imports = "warn"
 absolute_paths = "warn"
 
+[workspace.metadata.dylint]
+libraries = [
+  { git = "https://github.com/trailofbits/dylint", tag = "v5.0.0", pattern = "examples/restriction/try_io_result" },
+]
+
 [profile.release]
 lto = "thin"
 strip = true

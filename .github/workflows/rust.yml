@@ -74,6 +74,25 @@ jobs:
           cache-on-failure: true
       - run: cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings
 
+  dylint:
+    name: Dylint
+    runs-on: ubuntu-24.04-x86-32-cores
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          toolchain: nightly-2025-09-18
+          components: rustc-dev,llvm-tools-preview
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          cache-on-failure: true
+      - run: cargo install cargo-dylint dylint-link --version 5.0.0
+      - run: cargo dylint --all --workspace -- --all-targets
+
   generated-docs:
     name: Generated Docs
     runs-on: ubuntu-24.04-x86-32-cores
