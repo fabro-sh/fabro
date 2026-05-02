@@ -736,8 +736,8 @@ mod tests {
         assert!(results.is_some());
 
         let state = run_store.state().await.unwrap();
-        let node_state = state.node(&StageId::new("par", 1)).unwrap();
-        let parsed = node_state.parallel_results.as_ref().unwrap();
+        let stage_state = state.stage(&StageId::new("par", 1)).unwrap();
+        let parsed = stage_state.parallel_results.as_ref().unwrap();
         assert!(
             parsed.is_array(),
             "parallel_results.json should be a JSON array"
@@ -781,8 +781,8 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let node_state = state.node(&fabro_store::StageId::new("par", 1)).unwrap();
-        let results = node_state.parallel_results.as_ref().unwrap();
+        let stage_state = state.stage(&fabro_store::StageId::new("par", 1)).unwrap();
+        let results = stage_state.parallel_results.as_ref().unwrap();
         assert!(results.is_array());
         assert_eq!(results.as_array().unwrap().len(), 2);
     }

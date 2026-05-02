@@ -15,12 +15,20 @@
 
 
 /**
- * A single artifact filename.
+ * A single artifact file for a stage.
  */
 export interface ArtifactEntry {
     /**
      * Artifact filename.
      */
     'filename': string;
+    /**
+     * Retry attempt number.
+     */
+    'retry': number;
+    /**
+     * Artifact size in bytes.
+     */
+    'size': number;
 }
 

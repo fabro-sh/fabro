@@ -51,7 +51,7 @@ pub(crate) async fn run(args: DiffArgs, base_ctx: &CommandContext) -> Result<()>
 fn resolve_diff(state: &RunProjection, args: &DiffArgs) -> Result<String> {
     if let Some(ref node_id) = args.node {
         if let Some(visit) = state.list_node_visits(node_id).into_iter().max() {
-            if let Some(node) = state.node(&fabro_store::StageId::new(node_id, visit)) {
+            if let Some(node) = state.stage(&fabro_store::StageId::new(node_id, visit)) {
                 if let Some(patch) = node.diff.clone() {
                     debug!(node_id, visit, "Reading per-node diff from projected state");
                     return Ok(patch);

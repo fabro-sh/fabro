@@ -1,11 +1,11 @@
-import type { PaginatedRunStageList, StageState } from "@qltysh/fabro-api-client";
+import type { PaginatedRunStageList, StageStatus } from "@qltysh/fabro-api-client";
 
 import type { Stage } from "../components/stage-sidebar";
 import { isVisibleStage } from "../data/runs";
 import { formatDurationSecs } from "./format";
 
-export const ACTIVE_STAGE_STATES: ReadonlySet<StageState> = new Set(["running", "retrying"]);
-export const SUCCEEDED_STAGE_STATES: ReadonlySet<StageState> = new Set([
+export const ACTIVE_STAGE_STATES: ReadonlySet<StageStatus> = new Set(["running", "retrying"]);
+export const SUCCEEDED_STAGE_STATES: ReadonlySet<StageStatus> = new Set([
   "succeeded",
   "partially_succeeded",
 ]);

@@ -28,7 +28,8 @@ pub struct RunProjection {
     pub pull_request:       Option<PullRequestRecord>,
     pub superseded_by:      Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
-    nodes:                  HashMap<StageId, NodeState>,
+    #[serde(alias = "nodes")]
+    stages:                 HashMap<StageId, StageState>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -38,7 +39,9 @@ pub struct PendingInterviewRecord {
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct NodeState {
+pub struct StageState {
+    #[serde(default)]
+    pub seq:               u32,
     pub prompt:            Option<String>,
     pub response:          Option<String>,
     pub status:            Option<NodeStatusRecord>,
@@ -62,25 +65,25 @@ pub struct NodeState {
 }
 
 impl RunProjection {
-    pub fn node(&self, node: &StageId) -> Option<&NodeState> {
-        self.nodes.get(node)
+    pub fn stage(&self, stage_id: &StageId) -> Option<&StageState> {
+        self.stages.get(stage_id)
     }
 
-    pub fn iter_nodes(&self) -> impl Iterator<Item = (&StageId, &NodeState)> {
-        self.nodes.iter()
+    pub fn iter_stages(&self) -> impl Iterator<Item = (&StageId, &StageState)> {
+        self.stages.iter()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
+        self.stages.is_empty()
     }
 
-    pub fn set_node(&mut self, node: StageId, state: NodeState) {
-        self.nodes.insert(node, state);
+    pub fn set_stage(&mut self, stage_id: StageId, state: StageState) {
+        self.stages.insert(stage_id, state);
     }
 
     pub fn list_node_visits(&self, node_id: &str) -> Vec<u32> {
         let mut visits = self
-            .nodes
+            .stages
             .keys()
             .filter(|node| node.node_id() == node_id)
             .map(StageId::visit)
@@ -110,12 +113,25 @@ impl RunProjection {
         &self.pending_interviews
     }
 
-    pub fn node_mut(&mut self, node_id: &str, visit: u32) -> &mut NodeState {
-        self.nodes.entry(StageId::new(node_id, visit)).or_default()
+    pub fn stage_mut(&mut self, node_id: &str, visit: u32) -> &mut StageState {
+        self.stage_entry(node_id, visit, 0)
+    }
+
+    pub fn stage_entry_id(&mut self, stage_id: &StageId, seq: u32) -> &mut StageState {
+        self.stages
+            .entry(stage_id.clone())
+            .or_insert_with(|| StageState {
+                seq,
+                ..Default::default()
+            })
+    }
+
+    pub fn stage_entry(&mut self, node_id: &str, visit: u32, seq: u32) -> &mut StageState {
+        self.stage_entry_id(&StageId::new(node_id, visit), seq)
     }
 
     pub fn current_visit_for(&self, node_id: &str) -> Option<u32> {
-        self.nodes
+        self.stages
             .keys()
             .filter(|node| node.node_id() == node_id)
             .map(StageId::visit)

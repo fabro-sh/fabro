@@ -34,7 +34,7 @@ pub use fabro_api::types::{
     PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest,
     RewindRequest, RewindResponse, RunArtifactEntry, RunArtifactListResponse, RunBilling,
     RunBillingStage, RunBillingTotals, RunError, RunManifest, RunStage, RunStatusResponse,
-    SandboxFileEntry, SandboxFileListResponse, SshAccessRequest, SshAccessResponse, StageState,
+    SandboxFileEntry, SandboxFileListResponse, SshAccessRequest, SshAccessResponse, StageStatus,
     StartRunRequest, SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRunCounts,
     TimelineEntryResponse, WriteBlobResponse,
 };
@@ -63,7 +63,8 @@ use fabro_slack::threads::ThreadRegistry;
 use fabro_slack::{blocks as slack_blocks, connection as slack_connection};
 use fabro_static::EnvVars;
 use fabro_store::{
-    ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
+    ArtifactKey, ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord,
+    StageId,
 };
 #[cfg(test)]
 use fabro_types::BlockedReason;
@@ -222,6 +223,8 @@ struct GlobalAttachParams {
 struct ArtifactFilenameParams {
     #[serde(default)]
     filename: Option<String>,
+    #[serde(default)]
+    retry:    Option<u32>,
 }
 
 #[derive(serde::Deserialize)]
@@ -2170,7 +2173,7 @@ async fn openapi_spec() -> Response {
     Json(value).into_response()
 }
 
-fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> StageState {
+fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> StageStatus {
     let latest = events.iter().rev().find(|envelope| {
         envelope.event.node_id.as_deref() == Some(node_id)
             && matches!(
@@ -2180,9 +2183,9 @@ fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> St
     });
 
     if latest.is_some_and(|e| e.event.event_name() == "stage.retrying") {
-        StageState::Retrying
+        StageStatus::Retrying
     } else {
-        StageState::Running
+        StageStatus::Running
     }
 }
 
@@ -2296,8 +2299,8 @@ async fn list_run_stages(
     for node_id in &checkpoint.completed_nodes {
         let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
         let status = match checkpoint.node_outcomes.get(node_id) {
-            Some(outcome) => StageState::from(outcome.status),
-            None => StageState::Succeeded,
+            Some(outcome) => StageStatus::from(outcome.status),
+            None => StageStatus::Succeeded,
         };
         stages.push(RunStage {
             id: node_id.clone(),
@@ -3352,10 +3355,21 @@ pub(crate) fn parse_blob_id_path(blob_id: &str) -> Result<RunBlobId, Response> {
     clippy::result_large_err,
     reason = "Missing filename validation returns HTTP 400 responses directly."
 )]
-fn required_filename(params: ArtifactFilenameParams) -> Result<String, Response> {
-    match params.filename {
-        Some(filename) if !filename.is_empty() => Ok(filename),
+fn required_filename(params: &ArtifactFilenameParams) -> Result<String, Response> {
+    match params.filename.as_ref() {
+        Some(filename) if !filename.is_empty() => Ok(filename.clone()),
         _ => Err(ApiError::bad_request("Missing filename query parameter.").into_response()),
+    }
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "Missing retry validation returns HTTP 400 responses directly."
+)]
+fn required_retry(params: &ArtifactFilenameParams) -> Result<u32, Response> {
+    match params.retry {
+        Some(retry) => Ok(retry),
+        None => Err(ApiError::bad_request("Missing retry query parameter.").into_response()),
     }
 }
 
@@ -5366,7 +5380,7 @@ async fn get_run_stage_command_log(
                 .into_response();
         }
     };
-    let Some(node) = run_state.node(&stage_id) else {
+    let Some(node) = run_state.stage(&stage_id) else {
         return ApiError::not_found("Stage not found.").into_response();
     };
 
@@ -6182,7 +6196,7 @@ async fn list_run_artifacts(
                 .map(|entry| RunArtifactEntry {
                     stage_id:      entry.node.to_string(),
                     node_slug:     entry.node.node_id().to_string(),
-                    retry:         entry.node.visit().cast_signed(),
+                    retry:         entry.retry.cast_signed(),
                     relative_path: entry.filename,
                     size:          entry.size.cast_signed(),
                 })
@@ -6213,10 +6227,14 @@ async fn list_stage_artifacts(
     }
 
     match state.artifact_store.list_for_node(&id, &stage_id).await {
-        Ok(filenames) => Json(ArtifactListResponse {
-            data: filenames
+        Ok(entries) => Json(ArtifactListResponse {
+            data: entries
                 .into_iter()
-                .map(|filename| ArtifactEntry { filename })
+                .map(|entry| ArtifactEntry {
+                    filename: entry.filename,
+                    retry:    entry.retry.cast_signed(),
+                    size:     entry.size.cast_signed(),
+                })
                 .collect(),
         })
         .into_response(),
@@ -6398,6 +6416,7 @@ async fn upload_stage_artifact_octet_stream(
     state: &AppState,
     run_id: &RunId,
     stage_id: &StageId,
+    retry: u32,
     filename: String,
     body: Body,
     content_length: Option<u64>,
@@ -6413,10 +6432,10 @@ async fn upload_stage_artifact_octet_stream(
         ));
     }
 
-    let mut writer = match state
-        .artifact_store
-        .writer(run_id, stage_id, &relative_path)
-    {
+    let mut writer = match state.artifact_store.writer(
+        run_id,
+        &ArtifactKey::new(stage_id.clone(), retry, relative_path),
+    ) {
         Ok(writer) => writer,
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
@@ -6458,6 +6477,7 @@ async fn upload_stage_artifact_multipart(
     state: &AppState,
     run_id: &RunId,
     stage_id: &StageId,
+    retry: u32,
     boundary: String,
     body: Body,
 ) -> Response {
@@ -6503,7 +6523,10 @@ async fn upload_stage_artifact_multipart(
             return bad_request_response(format!("unexpected multipart part: {part_name}"));
         };
 
-        let mut writer = match state.artifact_store.writer(run_id, stage_id, &entry.path) {
+        let mut writer = match state.artifact_store.writer(
+            run_id,
+            &ArtifactKey::new(stage_id.clone(), retry, entry.path.clone()),
+        ) {
             Ok(writer) => writer,
             Err(err) => {
                 return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
@@ -6591,6 +6614,10 @@ async fn put_stage_artifact(
     if let Err(response) = load_run_spec(state.as_ref(), &id).await.map(|_| ()) {
         return response;
     }
+    let retry = match required_retry(&params) {
+        Ok(retry) => retry,
+        Err(response) => return response,
+    };
 
     let content_length = match content_length_from_headers(&parts.headers) {
         Ok(length) => length,
@@ -6598,7 +6625,7 @@ async fn put_stage_artifact(
     };
     match artifact_upload_content_type(&parts.headers) {
         Ok(ArtifactUploadContentType::OctetStream) => {
-            let filename = match required_filename(params) {
+            let filename = match required_filename(&params) {
                 Ok(filename) => filename,
                 Err(response) => return response,
             };
@@ -6606,6 +6633,7 @@ async fn put_stage_artifact(
                 state.as_ref(),
                 &id,
                 &stage_id,
+                retry,
                 filename,
                 body,
                 content_length,
@@ -6618,7 +6646,8 @@ async fn put_stage_artifact(
                     "multipart upload exceeds the {MAX_MULTIPART_REQUEST_BYTES} byte limit"
                 ));
             }
-            upload_stage_artifact_multipart(state.as_ref(), &id, &stage_id, boundary, body).await
+            upload_stage_artifact_multipart(state.as_ref(), &id, &stage_id, retry, boundary, body)
+                .await
         }
         Err(response) => response,
     }
@@ -6638,8 +6667,12 @@ async fn get_stage_artifact(
         Ok(stage_id) => stage_id,
         Err(response) => return response,
     };
-    let filename = match required_filename(params) {
+    let filename = match required_filename(&params) {
         Ok(filename) => filename,
+        Err(response) => return response,
+    };
+    let retry = match required_retry(&params) {
+        Ok(retry) => retry,
         Err(response) => return response,
     };
     let relative_path = match validate_relative_artifact_path("filename", &filename) {
@@ -6652,7 +6685,10 @@ async fn get_stage_artifact(
 
     match state
         .artifact_store
-        .get(&id, &stage_id, &relative_path)
+        .get(
+            &id,
+            &ArtifactKey::new(stage_id.clone(), retry, relative_path),
+        )
         .await
     {
         Ok(Some(bytes)) => octet_stream_response(bytes),
@@ -10890,7 +10926,7 @@ slug = "fabro"
 
         let response = app.oneshot(req).await.unwrap();
         let body = response_json!(response, StatusCode::OK).await;
-        assert!(body["nodes"].is_object());
+        assert!(body["stages"].is_object());
     }
 
     #[tokio::test]
@@ -12292,7 +12328,7 @@ slug = "fabro"
         let req = Request::builder()
             .method("POST")
             .uri(api(&format!(
-                "/runs/{run_id}/stages/{stage_id}/artifacts?filename=src/lib.rs"
+                "/runs/{run_id}/stages/{stage_id}/artifacts?filename=src/lib.rs&retry=1"
             )))
             .header("content-type", "application/octet-stream")
             .body(Body::from("fn main() {}"))
@@ -12308,6 +12344,8 @@ slug = "fabro"
         let response = app.clone().oneshot(req).await.unwrap();
         let body = response_json!(response, StatusCode::OK).await;
         assert_eq!(body["data"][0]["filename"], "src/lib.rs");
+        assert_eq!(body["data"][0]["retry"], 1);
+        assert_eq!(body["data"][0]["size"], 12);
 
         let req = Request::builder()
             .method("GET")
@@ -12316,9 +12354,64 @@ slug = "fabro"
             )))
             .body(Body::empty())
             .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_status!(response, StatusCode::BAD_REQUEST).await;
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/{stage_id}/artifacts/download?filename=src/lib.rs&retry=1"
+            )))
+            .body(Body::empty())
+            .unwrap();
         let response = app.oneshot(req).await.unwrap();
         let bytes = response_bytes!(response, StatusCode::OK).await;
         assert_eq!(&bytes[..], b"fn main() {}");
+    }
+
+    #[tokio::test]
+    async fn stage_artifacts_keep_same_filename_per_retry() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let run_id = create_run(&app, MINIMAL_DOT).await;
+        let stage_id = "code@2";
+
+        for (retry, body) in [(1, "first"), (2, "second")] {
+            let req = Request::builder()
+                .method("POST")
+                .uri(api(&format!(
+                    "/runs/{run_id}/stages/{stage_id}/artifacts?filename=logs/output.txt&retry={retry}"
+                )))
+                .header("content-type", "application/octet-stream")
+                .body(Body::from(body))
+                .unwrap();
+            let response = app.clone().oneshot(req).await.unwrap();
+            assert_status!(response, StatusCode::NO_CONTENT).await;
+        }
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/stages/{stage_id}/artifacts")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = response_json!(response, StatusCode::OK).await;
+        assert_eq!(body["data"][0]["filename"], "logs/output.txt");
+        assert_eq!(body["data"][0]["retry"], 1);
+        assert_eq!(body["data"][1]["filename"], "logs/output.txt");
+        assert_eq!(body["data"][1]["retry"], 2);
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/{stage_id}/artifacts/download?filename=logs/output.txt&retry=2"
+            )))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        let bytes = response_bytes!(response, StatusCode::OK).await;
+        assert_eq!(&bytes[..], b"second");
     }
 
     #[tokio::test]
@@ -12352,7 +12445,7 @@ slug = "fabro"
         let req = Request::builder()
             .method("POST")
             .uri(api(&format!(
-                "/runs/{run_id}/stages/code@2/artifacts?filename=../escape.txt"
+                "/runs/{run_id}/stages/code@2/artifacts?filename=../escape.txt&retry=1"
             )))
             .header("content-type", "application/octet-stream")
             .body(Body::from("nope"))
@@ -12493,7 +12586,7 @@ slug = "fabro"
                 Request::builder()
                     .method(Method::POST)
                     .uri(api(&format!(
-                        "/runs/{run_id}/stages/code@2/artifacts?filename=artifact.txt"
+                        "/runs/{run_id}/stages/code@2/artifacts?filename=artifact.txt&retry=1"
                     )))
                     .header(header::AUTHORIZATION, format!("Bearer {worker_token}"))
                     .header(header::CONTENT_TYPE, "application/octet-stream")
@@ -12510,7 +12603,7 @@ slug = "fabro"
                 Request::builder()
                     .method(Method::POST)
                     .uri(api(&format!(
-                        "/runs/{run_id}/stages/code@2/artifacts?filename=artifact.txt"
+                        "/runs/{run_id}/stages/code@2/artifacts?filename=artifact.txt&retry=1"
                     )))
                     .header(header::AUTHORIZATION, format!("Bearer {user_jwt}"))
                     .header(header::CONTENT_TYPE, "application/octet-stream")
@@ -12527,7 +12620,7 @@ slug = "fabro"
                 Request::builder()
                     .method(Method::POST)
                     .uri(api(&format!(
-                        "/runs/{run_id}/stages/code@2/artifacts?filename=artifact.txt"
+                        "/runs/{run_id}/stages/code@2/artifacts?filename=artifact.txt&retry=1"
                     )))
                     .header(
                         header::AUTHORIZATION,
@@ -12546,7 +12639,7 @@ slug = "fabro"
                 Request::builder()
                     .method(Method::POST)
                     .uri(api(&format!(
-                        "/runs/{run_id}/stages/code@2/artifacts?filename=artifact.txt"
+                        "/runs/{run_id}/stages/code@2/artifacts?filename=artifact.txt&retry=1"
                     )))
                     .header(header::CONTENT_TYPE, "application/octet-stream")
                     .body(Body::from("artifact"))
@@ -12744,7 +12837,9 @@ slug = "fabro"
 
         let req = Request::builder()
             .method("POST")
-            .uri(api(&format!("/runs/{run_id}/stages/{stage_id}/artifacts")))
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/{stage_id}/artifacts?retry=1"
+            )))
             .header(
                 "content-type",
                 format!("multipart/form-data; boundary={boundary}"),
@@ -12765,12 +12860,16 @@ slug = "fabro"
         let response = app.clone().oneshot(req).await.unwrap();
         let body = response_json!(response, StatusCode::OK).await;
         assert_eq!(body["data"][0]["filename"], "logs/output.txt");
+        assert_eq!(body["data"][0]["retry"], 1);
+        assert_eq!(body["data"][0]["size"], log_bytes.len());
         assert_eq!(body["data"][1]["filename"], "src/lib.rs");
+        assert_eq!(body["data"][1]["retry"], 1);
+        assert_eq!(body["data"][1]["size"], source_bytes.len());
 
         let req = Request::builder()
             .method("GET")
             .uri(api(&format!(
-                "/runs/{run_id}/stages/{stage_id}/artifacts/download?filename=logs/output.txt"
+                "/runs/{run_id}/stages/{stage_id}/artifacts/download?filename=logs/output.txt&retry=1"
             )))
             .body(Body::empty())
             .unwrap();
@@ -12792,7 +12891,9 @@ slug = "fabro"
 
         let req = Request::builder()
             .method("POST")
-            .uri(api(&format!("/runs/{run_id}/stages/code@2/artifacts")))
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/code@2/artifacts?retry=1"
+            )))
             .header(
                 "content-type",
                 format!("multipart/form-data; boundary={boundary}"),

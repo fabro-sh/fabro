@@ -31,9 +31,9 @@ pub mod types {
     pub use fabro_types::{
         ActorKind, ActorRef, BilledTokenCounts, CommandOutputStream, CommandTermination, DiffStats,
         DirtyStatus, EventEnvelope, GitContext, InterviewOption, InterviewQuestionRecord,
-        NodeState, NodeStatusRecord, PendingInterviewRecord, PreRunPushOutcome, QuestionType,
+        NodeStatusRecord, PendingInterviewRecord, PreRunPushOutcome, QuestionType,
         RepositoryReference, RunEvent, RunProjection, RunSummary, SecretMetadata, SecretType,
-        ServerSettings, StageOutcome, StageState, WorkflowSettings,
+        ServerSettings, StageOutcome, StageState, StageStatus, WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

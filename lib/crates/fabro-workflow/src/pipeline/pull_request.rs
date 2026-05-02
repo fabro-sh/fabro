@@ -213,7 +213,7 @@ fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
 /// directory scan behavior.
 fn read_plan_text(state: &RunProjection) -> Option<String> {
     let mut plan_nodes = state
-        .iter_nodes()
+        .iter_stages()
         .filter_map(|(stage_id, node)| {
             stage_id.node_id().starts_with("plan").then_some((
                 stage_id.node_id(),
@@ -997,9 +997,9 @@ mod tests {
     #[test]
     fn read_plan_text_found() {
         let mut state = RunProjection::default();
-        state.set_node(
+        state.set_stage(
             fabro_store::StageId::new("plan", 1),
-            fabro_store::NodeState {
+            fabro_store::StageState {
                 response: Some("This is the plan".to_string()),
                 ..Default::default()
             },
@@ -1012,9 +1012,9 @@ mod tests {
     #[test]
     fn read_plan_text_prefix_match() {
         let mut state = RunProjection::default();
-        state.set_node(
+        state.set_stage(
             fabro_store::StageId::new("planning", 1),
-            fabro_store::NodeState {
+            fabro_store::StageState {
                 response: Some("Planning content".to_string()),
                 ..Default::default()
             },
@@ -1027,16 +1027,16 @@ mod tests {
     #[test]
     fn read_plan_text_prefers_alphabetically_first_plan_node() {
         let mut state = RunProjection::default();
-        state.set_node(
+        state.set_stage(
             fabro_store::StageId::new("planning", 1),
-            fabro_store::NodeState {
+            fabro_store::StageState {
                 response: Some("Planning content".to_string()),
                 ..Default::default()
             },
         );
-        state.set_node(
+        state.set_stage(
             fabro_store::StageId::new("plan", 1),
-            fabro_store::NodeState {
+            fabro_store::StageState {
                 response: Some("Plan content".to_string()),
                 ..Default::default()
             },
@@ -1049,9 +1049,9 @@ mod tests {
     #[test]
     fn read_plan_text_not_found() {
         let mut state = RunProjection::default();
-        state.set_node(
+        state.set_stage(
             fabro_store::StageId::new("implement", 1),
-            fabro_store::NodeState::default(),
+            fabro_store::StageState::default(),
         );
 
         let result = read_plan_text(&state);

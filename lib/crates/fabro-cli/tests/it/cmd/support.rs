@@ -869,15 +869,24 @@ async fn seed_artifact_run(context: &TestContext) -> RunSetup {
     let (client, base_url) = server_endpoint(&context.storage_dir)
         .expect("test server endpoint should be available for seeded artifacts");
     append_seeded_artifact_run_events(&client, &base_url, &run, context).await;
-    for (stage_id, path, contents) in [
-        ("create_assets@1", "assets/node_a/summary.txt", "alpha"),
-        ("create_assets@1", "assets/shared/report.txt", "one"),
-        ("create_colliding@1", "assets/other/summary.txt", "beta"),
-        ("create_colliding@1", "assets/retry/report.txt", "second"),
-        ("retry_assets@1", "assets/retry/report.txt", "first"),
-        ("retry_assets@2", "assets/retry/report.txt", "second"),
+    for (stage_id, retry, path, contents) in [
+        ("create_assets@1", 1, "assets/node_a/summary.txt", "alpha"),
+        ("create_assets@1", 1, "assets/shared/report.txt", "one"),
+        ("create_colliding@1", 1, "assets/other/summary.txt", "beta"),
+        ("create_colliding@1", 1, "assets/retry/report.txt", "second"),
+        ("retry_assets@1", 1, "assets/retry/report.txt", "first"),
+        ("retry_assets@1", 2, "assets/retry/report.txt", "second"),
     ] {
-        upload_seeded_artifact(&client, &base_url, &run.run_id, stage_id, path, contents).await;
+        upload_seeded_artifact(
+            &client,
+            &base_url,
+            &run.run_id,
+            stage_id,
+            retry,
+            path,
+            contents,
+        )
+        .await;
     }
 
     run
@@ -1368,12 +1377,13 @@ async fn upload_seeded_artifact(
     base_url: &str,
     run_id: &str,
     stage_id: &str,
+    retry: u32,
     path: &str,
     contents: &str,
 ) {
     let response = client
         .post(format!(
-            "{base_url}/api/v1/runs/{run_id}/stages/{stage_id}/artifacts?filename={path}"
+            "{base_url}/api/v1/runs/{run_id}/stages/{stage_id}/artifacts?filename={path}&retry={retry}"
         ))
         .header(fabro_http::header::CONTENT_TYPE, "application/octet-stream")
         .body(contents.to_string())
@@ -1383,7 +1393,7 @@ async fn upload_seeded_artifact(
     expect_reqwest_status(
         response,
         fabro_http::StatusCode::NO_CONTENT,
-        format!("POST /api/v1/runs/{run_id}/stages/{stage_id}/artifacts ({path})"),
+        format!("POST /api/v1/runs/{run_id}/stages/{stage_id}/artifacts ({path}, retry {retry})"),
     )
     .await;
 }

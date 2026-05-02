@@ -31,7 +31,7 @@ use fabro_interview::{
     QueueInterviewer, RecordingInterviewer,
 };
 use fabro_llm::provider::Provider;
-use fabro_store::{ArtifactStore, Database};
+use fabro_store::{ArtifactKey, ArtifactStore, Database};
 use fabro_types::{CommandTermination, RunEvent, RunId, StageId, WorkflowSettings, parse_blob_ref};
 use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflow::context::Context;
@@ -441,15 +441,15 @@ async fn end_to_end_linear_pipeline() {
             .contains(&"codergen_step".to_string())
     );
 
-    let node_state = state
-        .node(&fabro_types::StageId::new("codergen_step", 1))
+    let stage_state = state
+        .stage(&fabro_types::StageId::new("codergen_step", 1))
         .unwrap();
     assert!(
-        node_state.response.is_some(),
+        stage_state.response.is_some(),
         "response should be projected"
     );
-    assert!(node_state.status.is_some(), "status should be projected");
-    let prompt_content = node_state.prompt.as_deref().unwrap();
+    assert!(stage_state.status.is_some(), "status should be projected");
+    let prompt_content = stage_state.prompt.as_deref().unwrap();
     assert!(
         prompt_content.ends_with("Implement the feature"),
         "prompt should end with original prompt, got: {prompt_content}"
@@ -1882,7 +1882,7 @@ async fn smoke_test_with_mock_codergen_backend() {
         "should NOT have traversed fix path"
     );
 
-    let plan_state = state.node(&fabro_types::StageId::new("plan", 1)).unwrap();
+    let plan_state = state.stage(&fabro_types::StageId::new("plan", 1)).unwrap();
     let plan_response = plan_state
         .response
         .as_deref()
@@ -3863,7 +3863,7 @@ async fn integration_smoke_plan_implement_review_done() {
     assert!(cp.completed_nodes.contains(&"implement".to_string()));
     assert!(cp.completed_nodes.contains(&"review".to_string()));
 
-    let plan_state = state.node(&fabro_types::StageId::new("plan", 1)).unwrap();
+    let plan_state = state.stage(&fabro_types::StageId::new("plan", 1)).unwrap();
     assert!(plan_state.prompt.is_some());
     assert!(plan_state.response.is_some());
 
@@ -6410,7 +6410,7 @@ mod real_llm {
 
         // Verify actual LLM responses were written
         let plan_response = state
-            .node(&fabro_types::StageId::new("plan", 1))
+            .stage(&fabro_types::StageId::new("plan", 1))
             .and_then(|node| node.response.as_deref())
             .unwrap();
         assert!(
@@ -6742,7 +6742,7 @@ mod real_llm {
         assert_eq!(outcome.status, StageOutcome::Succeeded);
 
         let response = state
-            .node(&fabro_types::StageId::new("classify", 1))
+            .stage(&fabro_types::StageId::new("classify", 1))
             .and_then(|node| node.response.as_deref())
             .unwrap();
         assert!(!response.is_empty(), "response.md should be non-empty");
@@ -7906,7 +7906,7 @@ async fn hook_stage_start_proceed_allows_execution() {
 
     assert!(
         state
-            .node(&fabro_types::StageId::new("work", 1))
+            .stage(&fabro_types::StageId::new("work", 1))
             .and_then(|node| node.response.as_ref())
             .is_some(),
         "response should exist when StageStart hook proceeds"
@@ -7933,7 +7933,7 @@ async fn hook_stage_start_skip_bypasses_node() {
 
     assert!(
         state
-            .node(&fabro_types::StageId::new("work", 1))
+            .stage(&fabro_types::StageId::new("work", 1))
             .and_then(|node| node.response.as_ref())
             .is_none(),
         "response should not exist when StageStart hook skips node"
@@ -7997,7 +7997,7 @@ async fn hook_stage_start_matcher_filters_by_node_id() {
 
     assert!(
         state
-            .node(&fabro_types::StageId::new("step1", 1))
+            .stage(&fabro_types::StageId::new("step1", 1))
             .and_then(|node| node.response.as_ref())
             .is_some(),
         "step1 should execute because matcher doesn't match it"
@@ -8005,7 +8005,7 @@ async fn hook_stage_start_matcher_filters_by_node_id() {
 
     assert!(
         state
-            .node(&fabro_types::StageId::new("step2", 1))
+            .stage(&fabro_types::StageId::new("step2", 1))
             .and_then(|node| node.response.as_ref())
             .is_none(),
         "step2 should be skipped because matcher matches it"
@@ -8498,14 +8498,14 @@ async fn hook_matcher_regex_pattern() {
 
     assert!(
         state
-            .node(&fabro_types::StageId::new("step1", 1))
+            .stage(&fabro_types::StageId::new("step1", 1))
             .and_then(|node| node.response.as_ref())
             .is_none(),
         "step1 should be skipped by regex ^step"
     );
     assert!(
         state
-            .node(&fabro_types::StageId::new("step2", 1))
+            .stage(&fabro_types::StageId::new("step2", 1))
             .and_then(|node| node.response.as_ref())
             .is_none(),
         "step2 should be skipped by regex ^step"
@@ -8715,7 +8715,7 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
         .expect("pipeline should succeed");
 
     state
-        .node(&fabro_types::StageId::new("report", 1))
+        .stage(&fabro_types::StageId::new("report", 1))
         .and_then(|node| node.prompt.clone())
         .expect("report prompt should exist")
 }
@@ -9430,10 +9430,10 @@ async fn node_dir_uses_visit_count_on_revisit() {
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let first = state
-        .node(&fabro_types::StageId::new("gated_work", 1))
+        .stage(&fabro_types::StageId::new("gated_work", 1))
         .unwrap();
     let second = state
-        .node(&fabro_types::StageId::new("gated_work", 2))
+        .stage(&fabro_types::StageId::new("gated_work", 2))
         .unwrap();
     assert_eq!(
         first.status.as_ref().unwrap().status,
@@ -10335,7 +10335,7 @@ async fn full_pipeline_with_cli_backend_node() {
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let api_response = state
-        .node(&fabro_types::StageId::new("api_work", 1))
+        .stage(&fabro_types::StageId::new("api_work", 1))
         .and_then(|node| node.response.as_deref())
         .unwrap();
     assert!(
@@ -10344,7 +10344,7 @@ async fn full_pipeline_with_cli_backend_node() {
     );
 
     let cli_response = state
-        .node(&fabro_types::StageId::new("cli_work", 1))
+        .stage(&fabro_types::StageId::new("cli_work", 1))
         .and_then(|node| node.response.as_deref())
         .unwrap();
     assert_eq!(
@@ -10353,7 +10353,7 @@ async fn full_pipeline_with_cli_backend_node() {
     );
 
     let provider_json = state
-        .node(&fabro_types::StageId::new("cli_work", 1))
+        .stage(&fabro_types::StageId::new("cli_work", 1))
         .unwrap()
         .provider_used
         .as_ref()
@@ -10454,7 +10454,7 @@ async fn stylesheet_backend_property_routes_to_cli() {
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     let response = state
-        .node(&fabro_types::StageId::new("work", 1))
+        .stage(&fabro_types::StageId::new("work", 1))
         .and_then(|node| node.response.as_deref())
         .unwrap();
     assert_eq!(
@@ -13003,15 +13003,20 @@ async fn asset_collection_local_sandbox_success() {
         "expected stored artifacts for both files"
     );
     assert_eq!(artifacts[0].node, StageId::new("create_assets", 1));
+    assert_eq!(artifacts[0].retry, 1);
     assert_eq!(artifacts[0].filename, "test-results/output.txt");
     assert_eq!(artifacts[1].node, StageId::new("create_assets", 1));
+    assert_eq!(artifacts[1].retry, 1);
     assert_eq!(artifacts[1].filename, "test-results/report.xml");
     let report_content = String::from_utf8(
         artifact_store
             .get(
                 &run_options.run_id,
-                &StageId::new("create_assets", 1),
-                "test-results/report.xml",
+                &ArtifactKey::new(
+                    StageId::new("create_assets", 1),
+                    1,
+                    "test-results/report.xml",
+                ),
             )
             .await
             .unwrap()
@@ -13132,8 +13137,11 @@ async fn asset_collection_local_sandbox_on_failure() {
         test_artifact_store(run_dir.path())
             .get(
                 &run_options.run_id,
-                &StageId::new("create_assets", 1),
-                "test-results/report.xml",
+                &ArtifactKey::new(
+                    StageId::new("create_assets", 1),
+                    1,
+                    "test-results/report.xml",
+                ),
             )
             .await
             .unwrap()
@@ -13236,8 +13244,11 @@ async fn asset_collection_docker_sandbox() {
         test_artifact_store(run_dir.path())
             .get(
                 &run_options.run_id,
-                &StageId::new("create_assets", 1),
-                "test-results/report.xml",
+                &ArtifactKey::new(
+                    StageId::new("create_assets", 1),
+                    1,
+                    "test-results/report.xml",
+                ),
             )
             .await
             .unwrap()

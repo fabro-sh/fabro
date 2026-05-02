@@ -248,7 +248,10 @@ include = ["assets/**"]
         "run export should hydrate blob refs\n{run_json}"
     );
     assert_eq!(
-        fs::read_to_string(output_dir.join("artifacts/big@1/assets/shared/report.txt")).unwrap(),
+        fs::read_to_string(
+            output_dir.join("artifacts/002-big@1/retry-0001/assets/shared/report.txt")
+        )
+        .unwrap(),
         "exported"
     );
 }
@@ -282,12 +285,12 @@ fn dump_exports_completed_run_snapshot() {
     graph.fabro
     run.json
     run.log
-    stages/exit@1/status.json
-    stages/report@1/response.md
-    stages/report@1/status.json
-    stages/run_tests@1/response.md
-    stages/run_tests@1/status.json
-    stages/start@1/status.json
+    stages/001-start@1/status.json
+    stages/002-run_tests@1/response.md
+    stages/002-run_tests@1/status.json
+    stages/003-report@1/response.md
+    stages/003-report@1/status.json
+    stages/004-exit@1/status.json
     ");
 }
 

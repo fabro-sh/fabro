@@ -93,7 +93,7 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
         ),
         (
             "POST",
-            format!("/runs/{run_id}/stages/fake@1/artifacts?filename=smoke.txt"),
+            format!("/runs/{run_id}/stages/fake@1/artifacts?filename=smoke.txt&retry=1"),
             "payload",
             "application/octet-stream",
         ),

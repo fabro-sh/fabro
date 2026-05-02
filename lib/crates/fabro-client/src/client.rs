@@ -1200,6 +1200,7 @@ impl Client {
         &self,
         run_id: &RunId,
         stage_id: &StageId,
+        retry: u32,
         filename: &str,
     ) -> Result<Vec<u8>> {
         let response = self
@@ -1208,6 +1209,7 @@ impl Client {
                     .get_stage_artifact()
                     .id(run_id.to_string())
                     .stage_id(stage_id.to_string())
+                    .retry(retry.cast_signed())
                     .filename(filename)
                     .send()
                     .await
@@ -1248,12 +1250,15 @@ impl Client {
         &self,
         run_id: &RunId,
         stage_id: &StageId,
+        retry: u32,
         filename: &str,
         path: &Path,
         bearer_token: &str,
     ) -> Result<()> {
         let mut url = self.stage_artifacts_url(run_id, stage_id)?;
         url.query_pairs_mut().append_pair("filename", filename);
+        url.query_pairs_mut()
+            .append_pair("retry", &retry.to_string());
 
         let file = File::open(path)
             .await
@@ -1286,11 +1291,14 @@ impl Client {
         &self,
         run_id: &RunId,
         stage_id: &StageId,
+        retry: u32,
         artifact_capture_dir: &Path,
         artifacts: &[ArtifactUpload],
         bearer_token: &str,
     ) -> Result<()> {
-        let url = self.stage_artifacts_url(run_id, stage_id)?;
+        let mut url = self.stage_artifacts_url(run_id, stage_id)?;
+        url.query_pairs_mut()
+            .append_pair("retry", &retry.to_string());
         let mut manifest_entries = Vec::with_capacity(artifacts.len());
         let mut file_parts = Vec::with_capacity(artifacts.len());
 

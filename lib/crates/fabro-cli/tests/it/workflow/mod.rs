@@ -76,6 +76,34 @@ pub(super) fn dump_export(context: &TestContext, run_id: &str) -> PathBuf {
     output_dir
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "integration test helpers inspect exported files synchronously"
+)]
+pub(super) fn stage_dump_dir(export_dir: &Path, stage_id: &str) -> PathBuf {
+    let stages_dir = export_dir.join("stages");
+    let mut matches: Vec<_> = std::fs::read_dir(&stages_dir)
+        .unwrap_or_else(|err| panic!("reading {} should succeed: {err}", stages_dir.display()))
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name == stage_id || name.split_once('-').is_some_and(|(_, id)| id == stage_id)
+                })
+        })
+        .collect();
+    matches.sort();
+    match matches.as_slice() {
+        [path] => path.clone(),
+        [] => panic!(
+            "stage dump dir for {stage_id} not found in {}",
+            stages_dir.display()
+        ),
+        _ => panic!("stage dump dir for {stage_id} was ambiguous: {matches:?}"),
+    }
+}
+
 /// Find the single run directory for this test context.
 pub(super) fn find_run_dir(context: &TestContext) -> PathBuf {
     context.single_run_dir()

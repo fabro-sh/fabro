@@ -290,16 +290,19 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
          * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
+         * @param {number} retry Retry attempt number for the artifact.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getStageArtifact: async (id: string, stageId: string, filename: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        getStageArtifact: async (id: string, stageId: string, filename: string, retry: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('getStageArtifact', 'id', id)
             // verify required parameter 'stageId' is not null or undefined
             assertParamExists('getStageArtifact', 'stageId', stageId)
             // verify required parameter 'filename' is not null or undefined
             assertParamExists('getStageArtifact', 'filename', filename)
+            // verify required parameter 'retry' is not null or undefined
+            assertParamExists('getStageArtifact', 'retry', retry)
             const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/artifacts/download`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)))
                 .replace(`{${"stageId"}}`, encodeURIComponent(String(stageId)));
@@ -322,6 +325,10 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
 
             if (filename !== undefined) {
                 localVarQueryParameter['filename'] = filename;
+            }
+
+            if (retry !== undefined) {
+                localVarQueryParameter['retry'] = retry;
             }
 
             localVarHeaderParameter['Accept'] = 'application/octet-stream,application/json';
@@ -578,16 +585,19 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {number} retry Retry attempt number for the artifact.
          * @param {File} body 
          * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        putStageArtifact: async (id: string, stageId: string, body: File, filename?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        putStageArtifact: async (id: string, stageId: string, retry: number, body: File, filename?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('putStageArtifact', 'id', id)
             // verify required parameter 'stageId' is not null or undefined
             assertParamExists('putStageArtifact', 'stageId', stageId)
+            // verify required parameter 'retry' is not null or undefined
+            assertParamExists('putStageArtifact', 'retry', retry)
             // verify required parameter 'body' is not null or undefined
             assertParamExists('putStageArtifact', 'body', body)
             const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/artifacts`
@@ -609,6 +619,10 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             // authentication BearerAuth required
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (retry !== undefined) {
+                localVarQueryParameter['retry'] = retry;
+            }
 
             if (filename !== undefined) {
                 localVarQueryParameter['filename'] = filename;
@@ -882,11 +896,12 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
          * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
+         * @param {number} retry Retry attempt number for the artifact.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async getStageArtifact(id: string, stageId: string, filename: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.getStageArtifact(id, stageId, filename, options);
+        async getStageArtifact(id: string, stageId: string, filename: string, retry: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getStageArtifact(id, stageId, filename, retry, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.getStageArtifact']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -969,13 +984,14 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {number} retry Retry attempt number for the artifact.
          * @param {File} body 
          * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async putStageArtifact(id: string, stageId: string, body: File, filename?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.putStageArtifact(id, stageId, body, filename, options);
+        async putStageArtifact(id: string, stageId: string, retry: number, body: File, filename?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.putStageArtifact(id, stageId, retry, body, filename, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.putStageArtifact']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -1105,11 +1121,12 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
          * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
+         * @param {number} retry Retry attempt number for the artifact.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getStageArtifact(id: string, stageId: string, filename: string, options?: RawAxiosRequestConfig): AxiosPromise<File> {
-            return localVarFp.getStageArtifact(id, stageId, filename, options).then((request) => request(axios, basePath));
+        getStageArtifact(id: string, stageId: string, filename: string, retry: number, options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.getStageArtifact(id, stageId, filename, retry, options).then((request) => request(axios, basePath));
         },
         /**
          * Lists captured artifact files for a run.
@@ -1174,13 +1191,14 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {number} retry Retry attempt number for the artifact.
          * @param {File} body 
          * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        putStageArtifact(id: string, stageId: string, body: File, filename?: string, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.putStageArtifact(id, stageId, body, filename, options).then((request) => request(axios, basePath));
+        putStageArtifact(id: string, stageId: string, retry: number, body: File, filename?: string, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.putStageArtifact(id, stageId, retry, body, filename, options).then((request) => request(axios, basePath));
         },
         /**
          * Reads a previously stored blob by identifier.
@@ -1298,11 +1316,12 @@ export class RunInternalsApi extends BaseAPI {
      * @param {string} id Unique run identifier (ULID).
      * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
      * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
+     * @param {number} retry Retry attempt number for the artifact.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public getStageArtifact(id: string, stageId: string, filename: string, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).getStageArtifact(id, stageId, filename, options).then((request) => request(this.axios, this.basePath));
+    public getStageArtifact(id: string, stageId: string, filename: string, retry: number, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).getStageArtifact(id, stageId, filename, retry, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1373,13 +1392,14 @@ export class RunInternalsApi extends BaseAPI {
      * @summary Put Stage Artifact
      * @param {string} id Unique run identifier (ULID).
      * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+     * @param {number} retry Retry attempt number for the artifact.
      * @param {File} body 
      * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public putStageArtifact(id: string, stageId: string, body: File, filename?: string, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).putStageArtifact(id, stageId, body, filename, options).then((request) => request(this.axios, this.basePath));
+    public putStageArtifact(id: string, stageId: string, retry: number, body: File, filename?: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).putStageArtifact(id, stageId, retry, body, filename, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

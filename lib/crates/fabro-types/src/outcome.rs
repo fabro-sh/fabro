@@ -106,7 +106,7 @@ impl<'de> Deserialize<'de> for StageOutcome {
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
-pub enum StageState {
+pub enum StageStatus {
     Pending,
     Running,
     Retrying,
@@ -117,7 +117,7 @@ pub enum StageState {
     Cancelled,
 }
 
-impl StageState {
+impl StageStatus {
     #[must_use]
     pub fn is_terminal(self) -> bool {
         matches!(
@@ -131,7 +131,7 @@ impl StageState {
     }
 }
 
-impl From<StageOutcome> for StageState {
+impl From<StageOutcome> for StageStatus {
     fn from(outcome: StageOutcome) -> Self {
         match outcome {
             StageOutcome::Succeeded => Self::Succeeded,
@@ -301,7 +301,7 @@ impl<M: OutcomeMeta> Outcome<M> {
 mod tests {
     use serde_json::json;
 
-    use super::{StageOutcome, StageState};
+    use super::{StageOutcome, StageStatus};
 
     #[test]
     fn stage_outcome_failed_serde_is_lossy_for_retry_intent() {
@@ -321,23 +321,23 @@ mod tests {
     }
 
     #[test]
-    fn stage_state_projects_terminal_outcomes() {
+    fn stage_status_projects_terminal_outcomes() {
         assert_eq!(
-            StageState::from(StageOutcome::Succeeded),
-            StageState::Succeeded
+            StageStatus::from(StageOutcome::Succeeded),
+            StageStatus::Succeeded
         );
         assert_eq!(
-            StageState::from(StageOutcome::PartiallySucceeded),
-            StageState::PartiallySucceeded
+            StageStatus::from(StageOutcome::PartiallySucceeded),
+            StageStatus::PartiallySucceeded
         );
         assert_eq!(
-            StageState::from(StageOutcome::Failed {
+            StageStatus::from(StageOutcome::Failed {
                 retry_requested: true,
             }),
-            StageState::Failed
+            StageStatus::Failed
         );
-        assert!(StageState::Cancelled.is_terminal());
-        assert!(!StageState::Running.is_terminal());
+        assert!(StageStatus::Cancelled.is_terminal());
+        assert!(!StageStatus::Running.is_terminal());
     }
 }
 

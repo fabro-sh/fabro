@@ -27,7 +27,7 @@ use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_static::EnvVars;
-use fabro_store::{ArtifactStore, Database};
+use fabro_store::{ArtifactKey, ArtifactStore, Database};
 use fabro_types::{RunId, StageId, WorkflowSettings};
 use fabro_workflow::artifact::sync_artifacts_to_env;
 use fabro_workflow::context::Context;
@@ -1387,8 +1387,11 @@ async fn daytona_asset_collection() {
         test_artifact_store(dir.path())
             .get(
                 &run_options.run_id,
-                &StageId::new("create_assets", 1),
-                "test-results/report.xml",
+                &ArtifactKey::new(
+                    StageId::new("create_assets", 1),
+                    1,
+                    "test-results/report.xml",
+                ),
             )
             .await
             .unwrap()

@@ -10,10 +10,14 @@ mod serializable_projection;
 mod slate;
 mod types;
 
-pub use artifact_store::{ArtifactStore, NodeArtifact, stage_storage_segment};
+pub use artifact_store::{
+    ArtifactKey, ArtifactStore, NodeArtifact, StageArtifactEntry, retry_storage_segment,
+    stage_storage_segment,
+};
 pub use error::{Error, Result};
 pub use fabro_types::{
-    EventEnvelope, NodeState, PendingInterviewRecord, RunBlobId, RunProjection, RunSummary, StageId,
+    EventEnvelope, PendingInterviewRecord, RunBlobId, RunProjection, RunSummary, StageId,
+    StageState,
 };
 pub(crate) use keyed_mutex::KeyedMutex;
 pub use run_state::RunProjectionReducer;

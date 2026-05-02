@@ -314,14 +314,14 @@ fn main() {
         ("QuestionType", "fabro_types::QuestionType", &[]),
         ("NodeStatusRecord", "fabro_types::NodeStatusRecord", &[]),
         ("StageOutcome", "fabro_types::StageOutcome", &[]),
-        ("StageState", "fabro_types::StageState", &[]),
+        ("StageStatus", "fabro_types::StageStatus", &[]),
         (
             "CommandOutputStream",
             "fabro_types::CommandOutputStream",
             &[],
         ),
         ("CommandTermination", "fabro_types::CommandTermination", &[]),
-        ("NodeState", "fabro_types::NodeState", &[]),
+        ("StageState", "fabro_types::StageState", &[]),
         ("SecretMetadata", "fabro_types::SecretMetadata", &[]),
         ("InterviewOption", "fabro_types::InterviewOption", &[]),
         (

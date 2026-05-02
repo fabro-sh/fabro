@@ -56,8 +56,9 @@ fn run_projection_round_trips_populated_projection() {
                 "started_at": "2026-04-29T12:35:00Z"
             }
         },
-        "nodes": {
+        "stages": {
             "build@2": {
+                "seq": 0,
                 "prompt": null,
                 "response": null,
                 "status": null,
@@ -96,7 +97,7 @@ fn run_projection_round_trips_with_pending_control_unset() {
         "pull_request": null,
         "superseded_by": null,
         "pending_interviews": {},
-        "nodes": {}
+        "stages": {}
     });
 
     let projection: RunProjection = serde_json::from_value(value.clone()).unwrap();

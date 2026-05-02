@@ -334,7 +334,7 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
     use fabro_agent::LocalSandbox;
-    use fabro_store::{NodeState, StageId};
+    use fabro_store::{StageId, StageState};
     use fabro_types::{NodeStatusRecord, StageOutcome};
     use tokio::fs;
 
@@ -410,7 +410,8 @@ mod tests {
         let stage_id = StageId::new("build", 2);
         let mut state = RunProjection::default();
         state.graph_source = Some("digraph Ship {}".to_string());
-        state.set_node(stage_id, NodeState {
+        state.set_stage(stage_id, StageState {
+            seq:               1,
             prompt:            Some("plan".to_string()),
             response:          Some("done".to_string()),
             status:            Some(NodeStatusRecord {
@@ -455,8 +456,8 @@ mod tests {
         .expect("run.json should parse");
         assert!(run_json.get("spec").is_some());
         assert!(run_json.get("run").is_none());
-        assert!(run_json["nodes"]["build@2"]["prompt"].is_null());
-        assert!(run_json["nodes"]["build@2"]["diff"].is_null());
+        assert!(run_json["stages"]["build@2"]["prompt"].is_null());
+        assert!(run_json["stages"]["build@2"]["diff"].is_null());
         assert_eq!(
             fs::read_to_string(target_dir.join("graph.fabro"))
                 .await
@@ -464,19 +465,19 @@ mod tests {
             "digraph Ship {}"
         );
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/build@2/prompt.md"))
+            fs::read_to_string(target_dir.join("stages/001-build@2/prompt.md"))
                 .await
                 .expect("prompt file should exist"),
             "plan"
         );
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/build@2/response.md"))
+            fs::read_to_string(target_dir.join("stages/001-build@2/response.md"))
                 .await
                 .expect("response file should exist"),
             "done"
         );
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/build@2/stdout.log"))
+            fs::read_to_string(target_dir.join("stages/001-build@2/stdout.log"))
                 .await
                 .expect("stdout file should exist"),
             "stdout"
@@ -494,7 +495,7 @@ mod tests {
             "server log\n"
         );
         assert!(
-            target_dir.join("stages/build@2/status.json").exists(),
+            target_dir.join("stages/001-build@2/status.json").exists(),
             "status file should exist"
         );
         assert!(
@@ -521,7 +522,7 @@ mod tests {
         let mut state = RunProjection::default();
         let stdout_ref = fabro_types::format_blob_ref(&stdout_id);
         let stderr_ref = fabro_types::format_blob_ref(&stderr_id);
-        state.set_node(stage_id, NodeState {
+        state.set_stage(stage_id, StageState {
             script_invocation: Some(serde_json::json!({
                 "command": "cargo test",
                 "stdout": stdout_ref,
@@ -534,7 +535,7 @@ mod tests {
             })),
             stdout: Some(stdout_ref),
             stderr: Some(stderr_ref),
-            ..NodeState::default()
+            ..StageState::default()
         });
 
         let reader: BlobReader = Box::new(move |blob_id| {
@@ -556,20 +557,20 @@ mod tests {
             .expect("retro files should upload");
 
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/build@1/stdout.log"))
+            fs::read_to_string(target_dir.join("stages/001-build@1/stdout.log"))
                 .await
                 .expect("stdout file should exist"),
             "resolved stdout"
         );
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/build@1/stderr.log"))
+            fs::read_to_string(target_dir.join("stages/001-build@1/stderr.log"))
                 .await
                 .expect("stderr file should exist"),
             "resolved stderr"
         );
 
         let script_timing: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(target_dir.join("stages/build@1/script_timing.json"))
+            &fs::read_to_string(target_dir.join("stages/001-build@1/script_timing.json"))
                 .await
                 .expect("script timing should exist"),
         )
@@ -578,7 +579,7 @@ mod tests {
         assert_eq!(script_timing["stderr"], "resolved stderr");
 
         let script_invocation: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(target_dir.join("stages/build@1/script_invocation.json"))
+            &fs::read_to_string(target_dir.join("stages/001-build@1/script_invocation.json"))
                 .await
                 .expect("script invocation should exist"),
         )
@@ -593,18 +594,18 @@ mod tests {
         )
         .expect("run.json should parse");
         assert_eq!(
-            run_json["nodes"]["build@1"]["script_timing"]["stdout"],
+            run_json["stages"]["build@1"]["script_timing"]["stdout"],
             "resolved stdout"
         );
         assert_eq!(
-            run_json["nodes"]["build@1"]["script_timing"]["stderr"],
+            run_json["stages"]["build@1"]["script_timing"]["stderr"],
             "resolved stderr"
         );
         assert_eq!(
-            run_json["nodes"]["build@1"]["script_invocation"]["stdout"],
+            run_json["stages"]["build@1"]["script_invocation"]["stdout"],
             "resolved stdout"
         );
-        assert!(run_json["nodes"]["build@1"]["stdout"].is_null());
-        assert!(run_json["nodes"]["build@1"]["stderr"].is_null());
+        assert!(run_json["stages"]["build@1"]["stdout"].is_null());
+        assert!(run_json["stages"]["build@1"]["stderr"].is_null());
     }
 }

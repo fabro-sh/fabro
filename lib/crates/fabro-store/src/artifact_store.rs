@@ -17,8 +17,34 @@ const ARTIFACT_SEGMENT_ENCODE_SET: &AsciiSet =
 const STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ArtifactKey {
+    pub stage_id:      StageId,
+    pub retry:         u32,
+    pub relative_path: String,
+}
+
+impl ArtifactKey {
+    #[must_use]
+    pub fn new(stage_id: StageId, retry: u32, relative_path: impl Into<String>) -> Self {
+        Self {
+            stage_id,
+            retry,
+            relative_path: relative_path.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeArtifact {
     pub node:     StageId,
+    pub retry:    u32,
+    pub filename: String,
+    pub size:     u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct StageArtifactEntry {
+    pub retry:    u32,
     pub filename: String,
     pub size:     u64,
 }
@@ -46,22 +72,16 @@ impl ArtifactStore {
         }
     }
 
-    pub async fn put(
-        &self,
-        run_id: &RunId,
-        node: &StageId,
-        filename: &str,
-        data: &[u8],
-    ) -> Result<()> {
-        let path = self.artifact_path(run_id, node, filename)?;
+    pub async fn put(&self, run_id: &RunId, key: &ArtifactKey, data: &[u8]) -> Result<()> {
+        let path = self.artifact_path(run_id, key)?;
         self.object_store
             .put(&path, Bytes::copy_from_slice(data).into())
             .await?;
         Ok(())
     }
 
-    pub fn writer(&self, run_id: &RunId, node: &StageId, filename: &str) -> Result<BufWriter> {
-        let path = self.artifact_path(run_id, node, filename)?;
+    pub fn writer(&self, run_id: &RunId, key: &ArtifactKey) -> Result<BufWriter> {
+        let path = self.artifact_path(run_id, key)?;
         Ok(BufWriter::with_capacity(
             Arc::clone(&self.object_store),
             path,
@@ -72,14 +92,13 @@ impl ArtifactStore {
     pub async fn put_stream<S>(
         &self,
         run_id: &RunId,
-        node: &StageId,
-        filename: &str,
+        key: &ArtifactKey,
         mut stream: S,
     ) -> Result<()>
     where
         S: futures::Stream<Item = Result<Bytes>> + Unpin,
     {
-        let mut writer = self.writer(run_id, node, filename)?;
+        let mut writer = self.writer(run_id, key)?;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
             writer
@@ -94,13 +113,8 @@ impl ArtifactStore {
         Ok(())
     }
 
-    pub async fn get(
-        &self,
-        run_id: &RunId,
-        node: &StageId,
-        filename: &str,
-    ) -> Result<Option<Bytes>> {
-        let path = self.artifact_path(run_id, node, filename)?;
+    pub async fn get(&self, run_id: &RunId, key: &ArtifactKey) -> Result<Option<Bytes>> {
+        let path = self.artifact_path(run_id, key)?;
         match self.object_store.get(&path).await {
             Ok(result) => Ok(Some(result.bytes().await?)),
             Err(object_store::Error::NotFound { .. }) => Ok(None),
@@ -123,15 +137,23 @@ impl ArtifactStore {
         Ok(artifacts)
     }
 
-    pub async fn list_for_node(&self, run_id: &RunId, node: &StageId) -> Result<Vec<String>> {
+    pub async fn list_for_node(
+        &self,
+        run_id: &RunId,
+        node: &StageId,
+    ) -> Result<Vec<StageArtifactEntry>> {
         let prefix = self.node_prefix(run_id, node)?;
         let mut stream = self.object_store.list(Some(&prefix));
-        let mut filenames = Vec::new();
+        let mut entries = Vec::new();
         while let Some(meta) = stream.next().await.transpose()? {
-            filenames.push(decode_filename(&prefix, &meta.location)?);
+            entries.push(decode_stage_artifact_entry(
+                &prefix,
+                &meta.location,
+                meta.size,
+            )?);
         }
-        filenames.sort();
-        Ok(filenames)
+        entries.sort();
+        Ok(entries)
     }
 
     pub async fn delete_for_run(&self, run_id: &RunId) -> Result<()> {
@@ -171,9 +193,18 @@ impl ArtifactStore {
         )
     }
 
-    fn artifact_path(&self, run_id: &RunId, node: &StageId, filename: &str) -> Result<ObjectPath> {
+    fn retry_prefix(&self, run_id: &RunId, node: &StageId, retry: u32) -> Result<ObjectPath> {
         let mut raw = self.node_prefix(run_id, node)?.to_string();
-        for segment in validate_filename_segments(filename)? {
+        raw.push('/');
+        raw.push_str(&retry_storage_segment(retry));
+        parse_object_path(&raw)
+    }
+
+    fn artifact_path(&self, run_id: &RunId, key: &ArtifactKey) -> Result<ObjectPath> {
+        let mut raw = self
+            .retry_prefix(run_id, &key.stage_id, key.retry)?
+            .to_string();
+        for segment in validate_filename_segments(&key.relative_path)? {
             raw.push('/');
             raw.push_str(&encode_path_segment(segment));
         }
@@ -225,6 +256,11 @@ pub fn stage_storage_segment(node: &StageId) -> String {
     )
 }
 
+#[must_use]
+pub fn retry_storage_segment(retry: u32) -> String {
+    format!("retry-{retry:04}")
+}
+
 fn decode_path_segment(kind: &str, value: &str) -> Result<String> {
     percent_decode_str(value)
         .decode_utf8()
@@ -258,6 +294,12 @@ fn decode_artifact_location(
             "artifact location {location} has an invalid visit number: {err}"
         ))
     })?;
+    let retry_part = parts.next().ok_or_else(|| {
+        Error::Other(format!(
+            "artifact location {location} is missing a retry segment"
+        ))
+    })?;
+    let retry = decode_retry_segment(location, retry_part.as_ref())?;
     let filename_segments = parts
         .map(|part| decode_path_segment("artifact filename segment", part.as_ref()))
         .collect::<Result<Vec<_>>>()?;
@@ -268,17 +310,28 @@ fn decode_artifact_location(
     }
     Ok(NodeArtifact {
         node: StageId::new(node_id, visit),
+        retry,
         filename: filename_segments.join("/"),
         size,
     })
 }
 
-fn decode_filename(prefix: &ObjectPath, location: &ObjectPath) -> Result<String> {
+fn decode_stage_artifact_entry(
+    prefix: &ObjectPath,
+    location: &ObjectPath,
+    size: u64,
+) -> Result<StageArtifactEntry> {
     let mut parts = location.prefix_match(prefix).ok_or_else(|| {
         Error::Other(format!(
             "artifact location {location} does not match expected prefix {prefix}"
         ))
     })?;
+    let retry_part = parts.next().ok_or_else(|| {
+        Error::Other(format!(
+            "artifact location {location} is missing a retry segment"
+        ))
+    })?;
+    let retry = decode_retry_segment(location, retry_part.as_ref())?;
     let filename_segments = parts
         .by_ref()
         .map(|part| decode_path_segment("artifact filename segment", part.as_ref()))
@@ -288,7 +341,24 @@ fn decode_filename(prefix: &ObjectPath, location: &ObjectPath) -> Result<String>
             "artifact location {location} is missing a filename"
         )));
     }
-    Ok(filename_segments.join("/"))
+    Ok(StageArtifactEntry {
+        retry,
+        filename: filename_segments.join("/"),
+        size,
+    })
+}
+
+fn decode_retry_segment(location: &ObjectPath, segment: &str) -> Result<u32> {
+    let Some(value) = segment.strip_prefix("retry-") else {
+        return Err(Error::Other(format!(
+            "artifact location {location} has an invalid retry segment"
+        )));
+    };
+    value.parse::<u32>().map_err(|err| {
+        Error::Other(format!(
+            "artifact location {location} has an invalid retry number: {err}"
+        ))
+    })
 }
 
 fn parse_object_path(raw: &str) -> Result<ObjectPath> {
@@ -334,19 +404,25 @@ mod tests {
         let run_id = fixtures::RUN_1;
         let node = StageId::new("build/naive @ alpha/π", 12);
         let filename = "logs/unicode/naive file ☃.txt";
+        let key = ArtifactKey::new(node.clone(), 3, filename);
 
-        store.put(&run_id, &node, filename, b"hello").await.unwrap();
+        store.put(&run_id, &key, b"hello").await.unwrap();
 
         assert_eq!(
-            store.get(&run_id, &node, filename).await.unwrap(),
+            store.get(&run_id, &key).await.unwrap(),
             Some(Bytes::from_static(b"hello"))
         );
         assert_eq!(store.list_for_node(&run_id, &node).await.unwrap(), vec![
-            filename.to_string()
+            StageArtifactEntry {
+                retry:    3,
+                filename: filename.to_string(),
+                size:     5,
+            }
         ]);
         assert_eq!(store.list_for_run(&run_id).await.unwrap(), vec![
             NodeArtifact {
                 node,
+                retry: 3,
                 filename: filename.to_string(),
                 size: 5,
             }
@@ -359,12 +435,12 @@ mod tests {
         let run_id = fixtures::RUN_1;
         let node = StageId::new("build", 2);
         let filename = "logs/output.txt";
+        let key = ArtifactKey::new(node, 1, filename);
 
         store
             .put_stream(
                 &run_id,
-                &node,
-                filename,
+                &key,
                 stream::iter(vec![
                     Ok(Bytes::from_static(b"hello ")),
                     Ok(Bytes::from_static(b"world")),
@@ -374,7 +450,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            store.get(&run_id, &node, filename).await.unwrap(),
+            store.get(&run_id, &key).await.unwrap(),
             Some(Bytes::from_static(b"hello world"))
         );
     }
@@ -392,10 +468,8 @@ mod tests {
             "logs/./output.txt",
             r"logs\output.txt",
         ] {
-            let err = store
-                .put(&run_id, &node, filename, b"boom")
-                .await
-                .unwrap_err();
+            let key = ArtifactKey::new(node.clone(), 1, filename);
+            let err = store.put(&run_id, &key, b"boom").await.unwrap_err();
             assert!(err.to_string().contains("artifact filename"));
         }
     }
@@ -407,13 +481,24 @@ mod tests {
         let other_run_id = fixtures::RUN_2;
         let node = StageId::new("build", 1);
 
-        store.put(&run_id, &node, "a.txt", b"a").await.unwrap();
         store
-            .put(&run_id, &node, "nested/b.txt", b"b")
+            .put(&run_id, &ArtifactKey::new(node.clone(), 1, "a.txt"), b"a")
             .await
             .unwrap();
         store
-            .put(&other_run_id, &node, "keep.txt", b"keep")
+            .put(
+                &run_id,
+                &ArtifactKey::new(node.clone(), 1, "nested/b.txt"),
+                b"b",
+            )
+            .await
+            .unwrap();
+        store
+            .put(
+                &other_run_id,
+                &ArtifactKey::new(node.clone(), 1, "keep.txt"),
+                b"keep",
+            )
             .await
             .unwrap();
 
@@ -422,7 +507,77 @@ mod tests {
         assert!(store.list_for_run(&run_id).await.unwrap().is_empty());
         assert_eq!(
             store.list_for_node(&other_run_id, &node).await.unwrap(),
-            vec!["keep.txt".to_string()]
+            vec![StageArtifactEntry {
+                retry:    1,
+                filename: "keep.txt".to_string(),
+                size:     4,
+            }]
         );
+    }
+
+    #[tokio::test]
+    async fn preserves_same_filename_across_retries() {
+        let store = test_store();
+        let run_id = fixtures::RUN_1;
+        let node = StageId::new("build", 1);
+        let first = ArtifactKey::new(node.clone(), 1, "logs/output.txt");
+        let second = ArtifactKey::new(node.clone(), 2, "logs/output.txt");
+
+        store.put(&run_id, &first, b"first").await.unwrap();
+        store.put(&run_id, &second, b"second").await.unwrap();
+
+        assert_eq!(
+            store.get(&run_id, &first).await.unwrap(),
+            Some(Bytes::from_static(b"first"))
+        );
+        assert_eq!(
+            store.get(&run_id, &second).await.unwrap(),
+            Some(Bytes::from_static(b"second"))
+        );
+        assert_eq!(store.list_for_node(&run_id, &node).await.unwrap(), vec![
+            StageArtifactEntry {
+                retry:    1,
+                filename: "logs/output.txt".to_string(),
+                size:     5,
+            },
+            StageArtifactEntry {
+                retry:    2,
+                filename: "logs/output.txt".to_string(),
+                size:     6,
+            },
+        ]);
+        assert_eq!(store.list_for_run(&run_id).await.unwrap(), vec![
+            NodeArtifact {
+                node:     node.clone(),
+                retry:    1,
+                filename: "logs/output.txt".to_string(),
+                size:     5,
+            },
+            NodeArtifact {
+                node,
+                retry: 2,
+                filename: "logs/output.txt".to_string(),
+                size: 6,
+            },
+        ]);
+    }
+
+    #[tokio::test]
+    async fn rejects_legacy_artifact_paths_without_retry_segment() {
+        let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let store = ArtifactStore::new(object_store.clone(), "artifacts");
+        let run_id = fixtures::RUN_1;
+        object_store
+            .put(
+                &ObjectPath::from(format!("artifacts/{run_id}/build@0001/output.txt")),
+                Bytes::from_static(b"legacy").into(),
+            )
+            .await
+            .unwrap();
+
+        let err = store.list_for_run(&run_id).await.unwrap_err();
+
+        assert!(err.to_string().contains("invalid retry segment"));
+        assert!(err.to_string().contains("build@0001/output.txt"));
     }
 }

@@ -21,7 +21,7 @@ fn live_run_state_response() -> serde_json::Value {
         "sandbox": null,
         "final_patch": null,
         "pull_request": null,
-        "nodes": {}
+        "stages": {}
     })
 }
 

@@ -13,23 +13,37 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { CommandTermination } from './command-termination';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { NodeStatusRecord } from './node-status-record';
 
 /**
- * Lifecycle projection state of a workflow stage.
+ * Internal stage projection state.
  */
-
-export const StageState = {
-    PENDING: 'pending',
-    RUNNING: 'running',
-    RETRYING: 'retrying',
-    SUCCEEDED: 'succeeded',
-    PARTIALLY_SUCCEEDED: 'partially_succeeded',
-    FAILED: 'failed',
-    SKIPPED: 'skipped',
-    CANCELLED: 'cancelled'
-} as const;
-
-export type StageState = typeof StageState[keyof typeof StageState];
+export interface StageState {
+    /**
+     * Event-log sequence number of the first event that created this stage. Used to order stages by execution.
+     */
+    'seq'?: number;
+    'prompt'?: string | null;
+    'response'?: string | null;
+    'status'?: NodeStatusRecord | null;
+    'provider_used'?: any;
+    'diff'?: string | null;
+    'script_invocation'?: any;
+    'script_timing'?: any;
+    'parallel_results'?: any;
+    'stdout'?: string | null;
+    'stderr'?: string | null;
+    'stdout_bytes'?: number | null;
+    'stderr_bytes'?: number | null;
+    'streams_separated'?: boolean | null;
+    'live_streaming'?: boolean | null;
+    'termination'?: CommandTermination | null;
+}
 
 
 

@@ -11,6 +11,7 @@ pub trait StageArtifactUploader: Send + Sync {
     async fn upload_stage_artifacts(
         &self,
         stage_id: &StageId,
+        retry: u32,
         artifact_capture_dir: &Path,
         artifacts: &[ArtifactUpload],
     ) -> Result<()>;

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use chrono::{TimeZone, Utc};
-use fabro_store::{NodeState, RunProjection, SerializableProjection, StageId};
+use fabro_store::{RunProjection, SerializableProjection, StageId, StageState};
 use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
 use fabro_types::{
@@ -77,7 +77,8 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         clone_branch:      None,
     });
     projection.pending_interviews = BTreeMap::new();
-    projection.set_node(stage_id.clone(), NodeState {
+    projection.set_stage(stage_id.clone(), StageState {
+        seq:               7,
         prompt:            Some("plan the work".to_string()),
         response:          Some("done".to_string()),
         status:            Some(NodeStatusRecord {
@@ -107,7 +108,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         .expect("projection should serialize");
     let round_tripped: RunProjection =
         serde_json::from_value(serialized).expect("serialized projection should deserialize");
-    let node = round_tripped.node(&stage_id).expect("node should remain");
+    let node = round_tripped.stage(&stage_id).expect("node should remain");
 
     assert_eq!(round_tripped.spec().map(RunSpec::id), Some(fixtures::RUN_1));
     assert_eq!(
@@ -119,6 +120,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
     );
     assert_eq!(round_tripped.status(), Some(RunStatus::Running));
     assert!(!round_tripped.is_terminal());
+    assert_eq!(node.seq, 7);
     assert_eq!(node.prompt, None);
     assert_eq!(node.response, None);
     assert_eq!(node.diff, None);

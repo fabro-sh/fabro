@@ -51,7 +51,7 @@ pub use graph::{AttrValue, Edge, Graph, Node, is_llm_handler_type, shape_to_hand
 pub use interview::{InterviewQuestionRecord, QuestionType};
 pub use node_status::NodeStatusRecord;
 pub use outcome::{
-    FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,
+    FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageStatus,
 };
 pub use pull_request::{
     PullRequestDetail, PullRequestGithubDetail, PullRequestRecord, PullRequestRef, PullRequestUser,
@@ -71,7 +71,7 @@ pub use run_event::{
     MetadataSnapshotPhase, RunEvent, RunNoticeLevel,
 };
 pub use run_id::{RunId, fixtures};
-pub use run_projection::{NodeState, PendingInterviewRecord, RunProjection};
+pub use run_projection::{PendingInterviewRecord, RunProjection, StageState};
 pub use run_summary::RunSummary;
 pub use sandbox_record::SandboxRecord;
 pub use secret::{SecretMetadata, SecretType};

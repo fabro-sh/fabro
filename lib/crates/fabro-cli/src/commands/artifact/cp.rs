@@ -142,7 +142,7 @@ async fn write_artifact_file(
             .with_context(|| format!("creating directory {}", parent.display()))?;
     }
     let bytes = client
-        .download_stage_artifact(run_id, &entry.stage_id, &entry.relative_path)
+        .download_stage_artifact(run_id, &entry.stage_id, entry.retry, &entry.relative_path)
         .await?;
     std::fs::write(dest_file, bytes)
         .with_context(|| format!("Failed to write {}", dest_file.display()))?;

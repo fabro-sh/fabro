@@ -8,7 +8,7 @@ use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, NodeDecision, RunLifecycle};
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
-use fabro_store::ArtifactStore;
+use fabro_store::{ArtifactKey, ArtifactStore};
 use fabro_types::{ArtifactUpload, RunId, StageId};
 use tokio::fs;
 use tokio::time::sleep;
@@ -95,7 +95,8 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         }
         let epoch = self.attempt_start_epoch.lock().unwrap().unwrap_or(0.0);
         let node_id = ctx.node.id();
-        let visit = state.node_visits.get(node_id).copied().unwrap_or(1);
+        let visit_count = state.node_visits.get(node_id).copied().unwrap_or(1);
+        let visit = u32::try_from(visit_count.max(1)).unwrap_or(u32::MAX);
         let node_slug = if visit <= 1 {
             node_id.to_string()
         } else {
@@ -113,10 +114,11 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         .await
         {
             Ok(summary) if summary.files_copied > 0 => {
-                let stage_id = StageId::new(node_id.to_string(), ctx.attempt);
+                let stage_id = StageId::new(node_id.to_string(), visit);
                 if let Err(err) = self
                     .persist_artifacts(
                         &stage_id,
+                        ctx.attempt,
                         artifact_capture_dir.path(),
                         &summary.captured_assets,
                     )
@@ -199,6 +201,7 @@ impl ArtifactLifecycle {
     async fn persist_artifacts(
         &self,
         stage_id: &StageId,
+        retry: u32,
         artifact_capture_dir: &std::path::Path,
         artifacts: &[ArtifactUpload],
     ) -> Result<()> {
@@ -209,7 +212,7 @@ impl ArtifactLifecycle {
         let mut last_error = None;
         for attempt in 0..=ARTIFACT_UPLOAD_RETRY_DELAYS.len() {
             match self
-                .persist_artifacts_once(sink, stage_id, artifact_capture_dir, artifacts)
+                .persist_artifacts_once(sink, stage_id, retry, artifact_capture_dir, artifacts)
                 .await
             {
                 Ok(()) => return Ok(()),
@@ -228,17 +231,18 @@ impl ArtifactLifecycle {
         &self,
         sink: &ArtifactSink,
         stage_id: &StageId,
+        retry: u32,
         artifact_capture_dir: &std::path::Path,
         artifacts: &[ArtifactUpload],
     ) -> Result<()> {
         match sink {
             ArtifactSink::Store(store) => {
-                self.store_artifacts(store, stage_id, artifact_capture_dir, artifacts)
+                self.store_artifacts(store, stage_id, retry, artifact_capture_dir, artifacts)
                     .await
             }
             ArtifactSink::Uploader(uploader) => {
                 uploader
-                    .upload_stage_artifacts(stage_id, artifact_capture_dir, artifacts)
+                    .upload_stage_artifacts(stage_id, retry, artifact_capture_dir, artifacts)
                     .await
             }
         }
@@ -248,6 +252,7 @@ impl ArtifactLifecycle {
         &self,
         store: &ArtifactStore,
         stage_id: &StageId,
+        retry: u32,
         artifact_capture_dir: &std::path::Path,
         artifacts: &[ArtifactUpload],
     ) -> Result<()> {
@@ -257,7 +262,11 @@ impl ArtifactLifecycle {
                 .await
                 .with_context(|| format!("failed to read artifact {}", local_path.display()))?;
             store
-                .put(&self.run_id, stage_id, &artifact.path, &bytes)
+                .put(
+                    &self.run_id,
+                    &ArtifactKey::new(stage_id.clone(), retry, artifact.path.clone()),
+                    &bytes,
+                )
                 .await
                 .map_err(anyhow::Error::new)?;
         }

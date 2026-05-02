@@ -15,7 +15,7 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { StageState } from './stage-state';
+import type { StageStatus } from './stage-status';
 
 /**
  * A single stage in a run\'s workflow graph.
@@ -29,7 +29,7 @@ export interface RunStage {
      * Human-readable stage name.
      */
     'name': string;
-    'status': StageState;
+    'status': StageStatus;
     /**
      * Time spent in this stage, in seconds.
      */

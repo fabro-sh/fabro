@@ -15,9 +15,6 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { NodeState } from './node-state';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { PendingInterviewRecord } from './pending-interview-record';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -34,6 +31,9 @@ import type { RunSpec } from './run-spec';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { RunStatus } from './run-status';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { StageState } from './stage-state';
 
 /**
  * Raw internal run projection derived from the event log.
@@ -60,9 +60,9 @@ export interface RunProjection {
     'superseded_by'?: string | null;
     'pending_interviews'?: { [key: string]: PendingInterviewRecord; };
     /**
-     * Map from StageId (`node_id@visit`) to NodeState.
+     * Map from StageId (`node_id@visit`) to StageState.
      */
-    'nodes': { [key: string]: NodeState; };
+    'stages': { [key: string]: StageState; };
 }
 
 

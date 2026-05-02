@@ -506,7 +506,7 @@ mod tests {
             "sandbox": null,
             "final_patch": null,
             "pull_request": null,
-            "nodes": {}
+            "stages": {}
         })
     }
 

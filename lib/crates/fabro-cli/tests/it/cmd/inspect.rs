@@ -83,7 +83,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
             .path(format!("/api/v1/runs/{}/state", run_id.as_str()));
         then.status(200)
             .header("content-type", "application/json")
-            .body(r#"{"nodes": {}}"#);
+            .body(r#"{"stages": {}}"#);
     });
 
     let mut cmd = context.command();

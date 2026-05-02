@@ -2064,6 +2064,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/StageId"
+        - $ref: "#/components/parameters/ArtifactRetry"
         - name: filename
           in: query
           required: false
@@ -2109,6 +2110,7 @@ paths:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/StageId"
         - $ref: "#/components/parameters/ArtifactFilename"
+        - $ref: "#/components/parameters/ArtifactRetry"
       responses:
         "200":
           description: Artifact contents
@@ -2118,7 +2120,7 @@ paths:
                 type: string
                 format: binary
         "400":
-          description: Missing filename
+          description: Missing filename or retry
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2979,6 +2981,17 @@ components:
       schema:
         type: string
       example: src/lib.rs
+
+    ArtifactRetry:
+      name: retry
+      in: query
+      required: true
+      description: Retry attempt number for the artifact.
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+      example: 1
 
     SinceSeq:
       name: since_seq
@@ -4949,18 +4962,32 @@ components:
           example: true
 
     ArtifactEntry:
-      description: A single artifact filename.
+      description: A single artifact file for a stage.
       type: object
       required:
         - filename
+        - retry
+        - size
       properties:
         filename:
           type: string
           description: Artifact filename.
           example: src/lib.rs
+        retry:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Retry attempt number.
+          example: 1
+        size:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Artifact size in bytes.
+          example: 1234
 
     ArtifactListResponse:
-      description: List of artifact filenames for a stage.
+      description: List of artifact files for a stage.
       type: object
       required:
         - data
@@ -5031,6 +5058,7 @@ components:
         retry:
           type: integer
           format: int32
+          minimum: 0
           description: Retry attempt number.
         relative_path:
           type: string
@@ -5038,6 +5066,7 @@ components:
         size:
           type: integer
           format: int64
+          minimum: 0
           description: Artifact size in bytes.
 
     RunArtifactListResponse:
@@ -5091,10 +5120,15 @@ components:
           type: string
           format: date-time
 
-    NodeState:
-      description: Internal node projection state.
+    StageState:
+      description: Internal stage projection state.
       type: object
       properties:
+        seq:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Event-log sequence number of the first event that created this stage. Used to order stages by execution.
         prompt:
           type: ["string", "null"]
         response:
@@ -5247,7 +5281,7 @@ components:
       description: Raw internal run projection derived from the event log.
       type: object
       required:
-        - nodes
+        - stages
       properties:
         spec:
           oneOf:
@@ -5310,11 +5344,11 @@ components:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/PendingInterviewRecord"
-        nodes:
+        stages:
           type: object
-          description: Map from StageId (`node_id@visit`) to NodeState.
+          description: Map from StageId (`node_id@visit`) to StageState.
           additionalProperties:
-            $ref: "#/components/schemas/NodeState"
+            $ref: "#/components/schemas/StageState"
 
     RunSummary:
       description: Durable run summary derived from the backing store.
@@ -6097,7 +6131,7 @@ components:
 
     # ── Stage / Turn Schemas ─────────────────────────────────────────────
 
-    StageState:
+    StageStatus:
       description: Lifecycle projection state of a workflow stage.
       type: string
       enum:
@@ -6127,7 +6161,7 @@ components:
           description: Human-readable stage name.
           example: Propose Changes
         status:
-          $ref: "#/components/schemas/StageState"
+          $ref: "#/components/schemas/StageStatus"
         duration_secs:
           type: number
           description: Time spent in this stage, in seconds.

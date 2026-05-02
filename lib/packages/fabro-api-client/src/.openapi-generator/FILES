@@ -154,7 +154,6 @@ models/model-reference.ts
 models/model-test-mode.ts
 models/model-test-result.ts
 models/model.ts
-models/node-state.ts
 models/node-status-record.ts
 models/notification-provider-settings.ts
 models/notification-route-settings.ts
@@ -289,6 +288,7 @@ models/ssh-access-request.ts
 models/ssh-access-response.ts
 models/stage-outcome.ts
 models/stage-state.ts
+models/stage-status.ts
 models/stage-turn.ts
 models/start-run-request.ts
 models/submit-answer-request.ts

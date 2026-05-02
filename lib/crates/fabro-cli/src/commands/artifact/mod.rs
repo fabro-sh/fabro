@@ -52,6 +52,7 @@ pub(super) async fn resolve_artifacts(
     entries.sort_by(|a, b| {
         a.stage_id
             .cmp(&b.stage_id)
+            .then_with(|| a.retry.cmp(&b.retry))
             .then_with(|| a.relative_path.cmp(&b.relative_path))
     });
 

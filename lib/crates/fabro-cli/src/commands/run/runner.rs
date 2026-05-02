@@ -268,6 +268,7 @@ impl StageArtifactUploader for HttpArtifactUploader {
     async fn upload_stage_artifacts(
         &self,
         stage_id: &fabro_types::StageId,
+        retry: u32,
         artifact_capture_dir: &Path,
         artifacts: &[ArtifactUpload],
     ) -> Result<()> {
@@ -282,6 +283,7 @@ impl StageArtifactUploader for HttpArtifactUploader {
                 .upload_stage_artifact_file(
                     &self.run_id,
                     stage_id,
+                    retry,
                     &artifact.path,
                     &artifact_capture_dir.join(&artifact.path),
                     &self.worker_token,
@@ -293,6 +295,7 @@ impl StageArtifactUploader for HttpArtifactUploader {
             .upload_stage_artifact_batch(
                 &self.run_id,
                 stage_id,
+                retry,
                 artifact_capture_dir,
                 artifacts,
                 &self.worker_token,

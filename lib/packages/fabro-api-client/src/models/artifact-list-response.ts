@@ -18,7 +18,7 @@
 import type { ArtifactEntry } from './artifact-entry';
 
 /**
- * List of artifact filenames for a stage.
+ * List of artifact files for a stage.
  */
 export interface ArtifactListResponse {
     'data': Array<ArtifactEntry>;
