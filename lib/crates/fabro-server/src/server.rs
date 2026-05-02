@@ -1101,13 +1101,14 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
     let response = next.run(req).await;
     let status = response.status().as_u16();
     let latency_ms = start.elapsed().as_millis();
-    let auth_context = auth_slot.snapshot();
+    let auth_context = auth_slot.log_snapshot();
     let principal_kind = auth_context.principal.kind();
     let auth_status = auth_context.auth_status.as_str();
 
     macro_rules! emit_http_log {
         ($level:ident $(, $field:ident = $value:expr)* $(,)?) => {{
             if let Some(auth_error_code) = auth_context.auth_error_code {
+                let auth_error_code = auth_error_code.as_str();
                 $level!(
                     %method,
                     %path,

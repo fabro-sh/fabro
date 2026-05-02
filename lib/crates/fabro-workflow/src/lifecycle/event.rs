@@ -10,7 +10,7 @@ use fabro_core::lifecycle::{
 };
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
-use fabro_types::{Principal, RunId, SystemActorKind};
+use fabro_types::{Principal, RunId};
 
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
@@ -68,15 +68,9 @@ fn snapshot_failure_signatures(
 }
 
 fn actor_for_stage_failure(failure: &FailureDetail) -> Option<Principal> {
-    if failure.category == FailureCategory::TransientInfra
-        && failure.message.starts_with("handler timed out after ")
-    {
-        Some(Principal::System {
-            system_kind: SystemActorKind::Timeout,
-        })
-    } else {
-        None
-    }
+    failure
+        .system_actor
+        .map(|system_kind| Principal::System { system_kind })
 }
 
 fn response_from_outcome(node_id: &str, outcome: &Outcome) -> Option<String> {

@@ -10,7 +10,7 @@ use fabro_util::dev_token::validate_dev_token_format;
 use tracing::trace;
 
 use crate::auth::{self, JwtSubject, REFRESH_TOKEN_PREFIX};
-use crate::jwt_auth::{AuthMode, ConfiguredAuth, dev_token_matches};
+use crate::jwt_auth::{self, AuthMode, ConfiguredAuth, dev_token_matches};
 use crate::server::AppState;
 use crate::web_auth::{self, SessionCookie};
 
@@ -39,14 +39,10 @@ pub(crate) async fn auth_translation_middleware(
         .extensions()
         .get::<AuthMode>()
         .expect("AuthMode extension must be added to the router");
-    let translated = if let Some(auth_header) = req.headers().get(header::AUTHORIZATION) {
-        auth_header
-            .to_str()
-            .ok()
-            .and_then(|value| value.strip_prefix("Bearer "))
-            .and_then(|token| translate_bearer_token(token, config))
-    } else {
-        translate_session_cookie(req.headers(), state.as_ref(), config)
+    let translated = match jwt_auth::bearer_token_from_headers(req.headers()) {
+        Some(Ok(token)) => translate_bearer_token(token, config),
+        Some(Err(_)) => None,
+        None => translate_session_cookie(req.headers(), state.as_ref(), config),
     };
 
     if let Some(token) = translated {
@@ -95,10 +91,7 @@ fn translate_session_cookie(
     let session = web_auth::read_private_session(headers, &session_key)?;
     let jwt_key = config.jwt_key.as_ref()?;
     let jwt_issuer = config.jwt_issuer.as_deref()?;
-    let identity = session
-        .identity
-        .clone()
-        .or_else(|| legacy_dev_identity(&session))?;
+    let identity = session.identity.clone();
 
     let ttl = session_ttl(&session)?;
     trace!(auth_method = ?session.auth_method, "Translated session cookie into JWT");
@@ -123,10 +116,6 @@ fn session_ttl(session: &SessionCookie) -> Option<Duration> {
     let ttl_seconds =
         remaining_seconds.min(Duration::minutes(ACCESS_TOKEN_TTL_MINUTES).num_seconds());
     (ttl_seconds > 0).then_some(Duration::seconds(ttl_seconds))
-}
-
-fn legacy_dev_identity(session: &SessionCookie) -> Option<IdpIdentity> {
-    (session.auth_method == AuthMethod::DevToken).then(dev_identity)
 }
 
 fn dev_identity() -> IdpIdentity {
@@ -256,7 +245,7 @@ methods = ["dev-token"]
             v:           2,
             login:       "octocat".to_string(),
             auth_method: AuthMethod::Github,
-            identity:    Some(IdpIdentity::new("https://github.com", "12345").unwrap()),
+            identity:    IdpIdentity::new("https://github.com", "12345").unwrap(),
             name:        "The Octocat".to_string(),
             email:       "octocat@example.com".to_string(),
             avatar_url:  "https://example.com/octocat.png".to_string(),
@@ -266,18 +255,18 @@ methods = ["dev-token"]
         }
     }
 
-    fn dev_session(identity: Option<IdpIdentity>) -> SessionCookie {
+    fn dev_session() -> SessionCookie {
         SessionCookie {
-            v: 2,
-            login: "dev".to_string(),
+            v:           2,
+            login:       "dev".to_string(),
             auth_method: AuthMethod::DevToken,
-            identity,
-            name: "Development User".to_string(),
-            email: "dev@localhost".to_string(),
-            avatar_url: "/images/logo.svg".to_string(),
-            user_url: String::new(),
-            iat: chrono::Utc::now().timestamp(),
-            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp(),
+            identity:    IdpIdentity::new("fabro:dev", "dev").unwrap(),
+            name:        "Development User".to_string(),
+            email:       "dev@localhost".to_string(),
+            avatar_url:  "/images/logo.svg".to_string(),
+            user_url:    String::new(),
+            iat:         chrono::Utc::now().timestamp(),
+            exp:         (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp(),
         }
     }
 
@@ -409,9 +398,9 @@ methods = ["dev-token"]
     }
 
     #[tokio::test]
-    async fn auth_translation_applies_legacy_dev_session_identity_fallback() {
+    async fn auth_translation_mints_jwt_from_dev_session_cookie() {
         let state = test_state();
-        let cookie = session_cookie(&dev_session(None), state.as_ref());
+        let cookie = session_cookie(&dev_session(), state.as_ref());
         let response = translation_router(Arc::clone(&state))
             .oneshot(
                 Request::builder()

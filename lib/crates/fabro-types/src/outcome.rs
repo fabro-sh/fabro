@@ -8,6 +8,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use strum::{Display, EnumString, IntoStaticStr};
 
+use crate::SystemActorKind;
+
 pub trait OutcomeMeta:
     Default + Clone + Send + Sync + fmt::Debug + Serialize + DeserializeOwned + 'static
 {
@@ -207,15 +209,17 @@ impl FailureCategory {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FailureDetail {
-    pub message:   String,
+    pub message:      String,
     #[serde(rename = "failure_class")]
-    pub category:  FailureCategory,
+    pub category:     FailureCategory,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_actor: Option<SystemActorKind>,
     #[serde(
         rename = "failure_signature",
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub signature: Option<String>,
+    pub signature:    Option<String>,
 }
 
 impl FailureDetail {
@@ -223,6 +227,7 @@ impl FailureDetail {
         Self {
             message: message.into(),
             category,
+            system_actor: None,
             signature: None,
         }
     }
@@ -280,9 +285,10 @@ impl<M: OutcomeMeta> Outcome<M> {
                 retry_requested: false,
             },
             failure: Some(FailureDetail {
-                message:   message.to_string(),
-                category:  FailureCategory::Deterministic,
-                signature: None,
+                message:      message.to_string(),
+                category:     FailureCategory::Deterministic,
+                system_actor: None,
+                signature:    None,
             }),
             ..Self::default()
         }

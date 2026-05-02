@@ -12,15 +12,12 @@ use fabro_server::server::{
     RouterOptions, build_router, create_app_state,
     create_app_state_with_runtime_settings_and_options,
 };
+use fabro_server::test_support::{TEST_DEV_TOKEN, TEST_SESSION_SECRET};
 use tower::ServiceExt;
 
 use crate::helpers::{
     checked_response, response_json, response_status, response_text, settings_from_toml,
 };
-
-const DEV_TOKEN: &str =
-    "fabro_dev_abababababababababababababababababababababababababababababababab";
-const SESSION_SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn dev_token_enabled_auth_mode() -> AuthMode {
     let resolved = ServerSettingsBuilder::from_toml(
@@ -34,8 +31,8 @@ methods = ["dev-token"]
     .expect("settings should resolve")
     .server;
     resolve_auth_mode_with_lookup(&resolved, |name| match name {
-        "SESSION_SECRET" => Some(SESSION_SECRET.to_string()),
-        "FABRO_DEV_TOKEN" => Some(DEV_TOKEN.to_string()),
+        "SESSION_SECRET" => Some(TEST_SESSION_SECRET.to_string()),
+        "FABRO_DEV_TOKEN" => Some(TEST_DEV_TOKEN.to_string()),
         _ => None,
     })
     .expect("auth mode should resolve")
@@ -228,7 +225,7 @@ async fn web_enabled_serves_web_only_routes() {
     let demo_toggle_request = Request::builder()
         .method("POST")
         .uri("/api/v1/demo/toggle")
-        .header("authorization", format!("Bearer {DEV_TOKEN}"))
+        .header("authorization", format!("Bearer {TEST_DEV_TOKEN}"))
         .header("content-type", "application/json")
         .body(Body::from(r#"{"enabled":true}"#))
         .unwrap();
@@ -293,7 +290,7 @@ async fn toggle_demo_allows_authenticated_requests() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/demo/toggle")
-                .header("authorization", format!("Bearer {DEV_TOKEN}"))
+                .header("authorization", format!("Bearer {TEST_DEV_TOKEN}"))
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"enabled":true}"#))
                 .unwrap(),

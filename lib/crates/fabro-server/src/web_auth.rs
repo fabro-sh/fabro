@@ -34,7 +34,7 @@ pub struct SessionCookie {
     pub v:           u8,
     pub login:       String,
     pub auth_method: AuthMethod,
-    pub identity:    Option<IdpIdentity>,
+    pub identity:    IdpIdentity,
     pub name:        String,
     pub email:       String,
     pub avatar_url:  String,
@@ -167,10 +167,10 @@ pub(crate) fn session_cookie_present(headers: &HeaderMap) -> bool {
         .is_some()
 }
 
-pub(crate) fn auth_context_from_session(session: &SessionCookie) -> Option<RequestAuthContext> {
-    let identity = session.identity.clone()?;
+pub(crate) fn auth_context_from_session(session: &SessionCookie) -> RequestAuthContext {
+    let identity = session.identity.clone();
     let principal = Principal::user(identity, session.login.clone(), session.auth_method);
-    Some(RequestAuthContext::authenticated(
+    RequestAuthContext::authenticated(
         principal,
         Some(UserProfile {
             name:       session.name.clone(),
@@ -178,7 +178,7 @@ pub(crate) fn auth_context_from_session(session: &SessionCookie) -> Option<Reque
             avatar_url: session.avatar_url.clone(),
             user_url:   session.user_url.clone(),
         }),
-    ))
+    )
 }
 
 fn read_private_oauth_state(headers: &HeaderMap, key: &Key) -> Option<OAuthStateCookie> {
@@ -358,7 +358,7 @@ async fn login_dev_token(
         v:           2,
         login:       "dev".to_string(),
         auth_method: AuthMethod::DevToken,
-        identity:    Some(IdpIdentity::new("fabro:dev", "dev").expect("non-empty dev identity")),
+        identity:    IdpIdentity::new("fabro:dev", "dev").expect("non-empty dev identity"),
         name:        "Development User".to_string(),
         email:       "dev@localhost".to_string(),
         avatar_url:  "/images/logo.svg".to_string(),
@@ -366,9 +366,7 @@ async fn login_dev_token(
         iat:         now.timestamp(),
         exp:         (now + chrono::Duration::days(30)).timestamp(),
     };
-    if let Some(context) = auth_context_from_session(&session) {
-        auth_slot.replace(context);
-    }
+    auth_slot.replace(auth_context_from_session(&session));
 
     let mut jar = CookieJar::new();
     jar.private_mut(&session_key).add(
@@ -756,10 +754,8 @@ async fn callback_github(
         v:           2,
         login:       profile.login.clone(),
         auth_method: AuthMethod::Github,
-        identity:    Some(
-            IdpIdentity::new("https://github.com", profile.id.to_string())
-                .expect("GitHub profile id should produce a valid identity"),
-        ),
+        identity:    IdpIdentity::new("https://github.com", profile.id.to_string())
+            .expect("GitHub profile id should produce a valid identity"),
         name:        profile.name.unwrap_or_else(|| profile.login.clone()),
         email:       primary_email,
         avatar_url:  profile.avatar_url,
@@ -767,9 +763,7 @@ async fn callback_github(
         iat:         now.timestamp(),
         exp:         (now + chrono::Duration::days(30)).timestamp(),
     };
-    if let Some(context) = auth_context_from_session(&session) {
-        auth_slot.replace(context);
-    }
+    auth_slot.replace(auth_context_from_session(&session));
 
     info!(login = %session.login, "OAuth login succeeded");
 
@@ -810,9 +804,7 @@ async fn logout(
     let mut jar = CookieJar::new();
     if let Some(key) = state.session_key() {
         if let Some(session) = read_private_session(&headers, &key) {
-            if let Some(context) = auth_context_from_session(&session) {
-                auth_slot.replace(context);
-            }
+            auth_slot.replace(auth_context_from_session(&session));
         } else if session_cookie_present(&headers) {
             auth_slot.replace(RequestAuthContext::invalid());
         }
@@ -885,10 +877,7 @@ mod tests {
 
     use axum::Extension;
     use axum::body::{Body, to_bytes};
-    use axum::extract::State as AxumState;
     use axum::http::{HeaderMap, Request, StatusCode, header};
-    use axum::middleware::Next;
-    use axum::response::Response;
     use axum_extra::extract::cookie::Key;
     use fabro_config::{RunLayer, ServerSettingsBuilder};
     use fabro_types::settings::server::ServerAuthMethod;
@@ -899,9 +888,9 @@ mod tests {
     use super::{
         OAUTH_STATE_TTL_MINUTES, api_routes, read_private_oauth_state, read_private_session, routes,
     };
-    use crate::auth::{self, GithubEndpoints};
+    use crate::auth::{self, AuthErrorCode, GithubEndpoints};
     use crate::jwt_auth::{AuthMode, ConfiguredAuth};
-    use crate::principal_middleware::{AuthContextSlot, AuthStatus, RequestAuthContext};
+    use crate::principal_middleware::{AuthStatus, RequestAuthContext};
     use crate::server;
 
     const DEV_TOKEN: &str =
@@ -1008,21 +997,6 @@ client_id = "github-client-id"
             .with_state(state)
     }
 
-    async fn capture_auth_context(
-        AxumState(captured): AxumState<Arc<Mutex<Vec<RequestAuthContext>>>>,
-        mut req: axum::extract::Request,
-        next: Next,
-    ) -> Response {
-        let slot = AuthContextSlot::initial();
-        req.extensions_mut().insert(slot.clone());
-        let response = next.run(req).await;
-        captured
-            .lock()
-            .expect("captured auth contexts lock poisoned")
-            .push(slot.snapshot());
-        response
-    }
-
     fn test_auth_router_with_capture(
         settings: fabro_types::ServerSettings,
         auth_mode: AuthMode,
@@ -1037,7 +1011,7 @@ client_id = "github-client-id"
             .nest("/auth", routes())
             .layer(axum::middleware::from_fn_with_state(
                 Arc::clone(&captured),
-                capture_auth_context,
+                crate::test_support::capture_auth_context,
             ))
             .layer(Extension(Arc::new(GithubEndpoints::production_defaults())))
             .layer(Extension(auth_mode))
@@ -1104,7 +1078,7 @@ client_id = "github-client-id"
         assert_eq!(session.v, 2);
         assert_eq!(
             session.identity,
-            Some(IdpIdentity::new("fabro:dev", "dev").unwrap())
+            IdpIdentity::new("fabro:dev", "dev").unwrap()
         );
 
         let response = app
@@ -1242,7 +1216,10 @@ client_id = "github-client-id"
         assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
         assert!(matches!(contexts[0].principal, Principal::User(_)));
         assert_eq!(contexts[1].auth_status, AuthStatus::Invalid);
-        assert_eq!(contexts[1].auth_error_code, Some("unauthorized"));
+        assert_eq!(
+            contexts[1].auth_error_code,
+            Some(AuthErrorCode::Unauthorized)
+        );
     }
 
     #[tokio::test]

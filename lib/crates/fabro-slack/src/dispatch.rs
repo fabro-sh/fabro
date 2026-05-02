@@ -1,5 +1,5 @@
 use crate::interaction;
-use crate::payload::SlackAnswerSubmission;
+use crate::payload::{self, SlackAnswerSubmission};
 use crate::socket::{SocketEnvelope, SocketEventKind, classify_envelope};
 use crate::threads::{self, ThreadRegistry};
 
@@ -33,7 +33,7 @@ pub fn dispatch(envelope: &SocketEnvelope, thread_registry: &ThreadRegistry) -> 
             let Some(question_ref) = thread_registry.resolve(&thread_ts) else {
                 return DispatchAction::Ignored;
             };
-            let Some(actor) = event_actor(payload) else {
+            let Some(actor) = payload::event_actor(payload) else {
                 return DispatchAction::Ignored;
             };
             DispatchAction::SubmitAnswer(Box::new(SlackAnswerSubmission {
@@ -46,21 +46,6 @@ pub fn dispatch(envelope: &SocketEnvelope, thread_registry: &ThreadRegistry) -> 
         SocketEventKind::Disconnect => DispatchAction::Reconnect,
         SocketEventKind::Unknown => DispatchAction::Ignored,
     }
-}
-
-fn event_actor(payload: &serde_json::Value) -> Option<fabro_types::Principal> {
-    let event = &payload["event"];
-    let team_id = payload["team_id"]
-        .as_str()
-        .or_else(|| event["team"].as_str())?
-        .to_string();
-    let user_id = event["user"].as_str()?.to_string();
-    let user_name = event["user_name"].as_str().map(str::to_string);
-    Some(fabro_types::Principal::Slack {
-        team_id,
-        user_id,
-        user_name,
-    })
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ use crate::ApiError;
 use crate::auth::{self, JwtError, KeyDeriveError};
 
 pub(crate) const WORKER_TOKEN_ISSUER: &str = "fabro-server-worker";
+pub(crate) const WORKER_TOKEN_KID: &str = "fabro-worker";
 pub(crate) const WORKER_TOKEN_SCOPE: &str = "run:worker";
 pub(crate) const WORKER_TOKEN_TTL_SECS: u64 = 72 * 60 * 60;
 
@@ -73,12 +74,18 @@ pub(crate) fn issue_worker_token(
         scope:  WORKER_TOKEN_SCOPE.to_string(),
         jti:    Uuid::new_v4().simple().to_string(),
     };
-    jsonwebtoken::encode(&Header::new(Algorithm::HS256), &claims, &keys.encoding).map_err(|err| {
+    jsonwebtoken::encode(&worker_token_header(), &claims, &keys.encoding).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("failed to sign worker token: {err}"),
         )
     })
+}
+
+pub(crate) fn worker_token_header() -> Header {
+    let mut header = Header::new(Algorithm::HS256);
+    header.kid = Some(WORKER_TOKEN_KID.to_string());
+    header
 }
 
 pub(crate) fn decode_worker_token(token: &str, keys: &WorkerTokenKeys) -> Result<RunId, JwtError> {
@@ -109,13 +116,13 @@ pub(crate) fn decode_worker_token(token: &str, keys: &WorkerTokenKeys) -> Result
 mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use jsonwebtoken::{Algorithm, Header, decode};
+    use jsonwebtoken::{Algorithm, decode};
     use serde_json::json;
     use uuid::Uuid;
 
     use super::{
-        WORKER_TOKEN_ISSUER, WORKER_TOKEN_SCOPE, WorkerTokenClaims, WorkerTokenKeys,
-        decode_worker_token, issue_worker_token,
+        WORKER_TOKEN_ISSUER, WORKER_TOKEN_KID, WORKER_TOKEN_SCOPE, WorkerTokenClaims,
+        WorkerTokenKeys, decode_worker_token, issue_worker_token, worker_token_header,
     };
     use crate::auth::{self, JwtError};
 
@@ -139,7 +146,7 @@ mod tests {
             scope:  "wrong:scope".to_string(),
             jti:    Uuid::new_v4().simple().to_string(),
         };
-        jsonwebtoken::encode(&Header::new(Algorithm::HS256), &claims, &keys.encoding)
+        jsonwebtoken::encode(&worker_token_header(), &claims, &keys.encoding)
             .expect("test token should encode")
     }
 
@@ -152,7 +159,7 @@ mod tests {
             scope:  WORKER_TOKEN_SCOPE.to_string(),
             jti:    Uuid::new_v4().simple().to_string(),
         };
-        jsonwebtoken::encode(&Header::new(Algorithm::HS256), &claims, &keys.encoding)
+        jsonwebtoken::encode(&worker_token_header(), &claims, &keys.encoding)
             .expect("expired test token should encode")
     }
 
@@ -196,6 +203,7 @@ mod tests {
             jti:    decoded.claims.jti.clone(),
         });
         assert_eq!(decoded.header.alg, Algorithm::HS256);
+        assert_eq!(decoded.header.kid.as_deref(), Some(WORKER_TOKEN_KID));
         assert_eq!(decoded.claims.jti.len(), 32);
     }
 

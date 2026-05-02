@@ -28,13 +28,6 @@ fn git_error(msg: impl Into<String>) -> Error {
     Error::engine(msg.into())
 }
 
-fn git_error_with_source(
-    msg: impl Into<String>,
-    source: &(dyn std::error::Error + 'static),
-) -> Error {
-    Error::engine_with_source(msg.into(), source)
-}
-
 /// Return a pre-configured `git` command with auto-maintenance disabled.
 #[expect(
     clippy::disallowed_methods,
@@ -53,7 +46,7 @@ pub fn ensure_clean(repo: &Path) -> Result<()> {
     let output = git_cmd(repo)
         .args(["status", "--porcelain"])
         .output()
-        .map_err(|e| git_error_with_source("git status failed", &e))?;
+        .map_err(|e| Error::engine_with_source("git status failed", &e))?;
 
     if !output.status.success() {
         return Err(git_error("not a git repository"));
@@ -72,7 +65,7 @@ pub fn head_sha(repo: &Path) -> Result<String> {
     let output = git_cmd(repo)
         .args(["rev-parse", "HEAD"])
         .output()
-        .map_err(|e| git_error_with_source("git rev-parse failed", &e))?;
+        .map_err(|e| Error::engine_with_source("git rev-parse failed", &e))?;
 
     if !output.status.success() {
         return Err(git_error("git rev-parse HEAD failed"));
@@ -86,7 +79,7 @@ pub fn create_branch(repo: &Path, name: &str) -> Result<()> {
     let output = git_cmd(repo)
         .args(["branch", "--force", name, "HEAD"])
         .output()
-        .map_err(|e| git_error_with_source("git branch failed", &e))?;
+        .map_err(|e| Error::engine_with_source("git branch failed", &e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -103,7 +96,7 @@ pub fn add_worktree(repo: &Path, path: &Path, branch: &str) -> Result<()> {
         .arg(path)
         .arg(branch)
         .output()
-        .map_err(|e| git_error_with_source("git worktree add failed", &e))?;
+        .map_err(|e| Error::engine_with_source("git worktree add failed", &e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -119,7 +112,7 @@ pub fn remove_worktree(repo: &Path, path: &Path) -> Result<()> {
         .args(["worktree", "remove", "--force"])
         .arg(path)
         .output()
-        .map_err(|e| git_error_with_source("git worktree remove failed", &e))?;
+        .map_err(|e| Error::engine_with_source("git worktree remove failed", &e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -139,7 +132,7 @@ pub fn replace_worktree(repo: &Path, path: &Path, branch: &str) -> Result<()> {
 fn run_git_push(cmd: &mut Command) -> Result<()> {
     let output = cmd
         .output()
-        .map_err(|e| git_error_with_source("git push failed", &e))?;
+        .map_err(|e| Error::engine_with_source("git push failed", &e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(git_error(format!("git push failed: {stderr}")));

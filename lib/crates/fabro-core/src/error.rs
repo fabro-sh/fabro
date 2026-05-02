@@ -1,5 +1,7 @@
 use std::fmt;
 
+use fabro_types::SystemActorKind;
+
 use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeMeta, StageOutcome};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,10 +24,11 @@ impl fmt::Display for VisitLimitSource {
 /// to_fail_outcome().
 #[derive(Debug, Clone)]
 pub struct HandlerErrorDetail {
-    pub message:   String,
-    pub retryable: bool,
-    pub category:  Option<FailureCategory>,
-    pub signature: Option<String>,
+    pub message:      String,
+    pub retryable:    bool,
+    pub category:     Option<FailureCategory>,
+    pub system_actor: Option<SystemActorKind>,
+    pub signature:    Option<String>,
 }
 
 impl fmt::Display for HandlerErrorDetail {
@@ -83,9 +86,10 @@ impl Error {
                     retry_requested: false,
                 },
                 failure: Some(FailureDetail {
-                    message:   detail.message.clone(),
-                    category:  detail.category.unwrap_or(FailureCategory::Deterministic),
-                    signature: detail.signature.clone(),
+                    message:      detail.message.clone(),
+                    category:     detail.category.unwrap_or(FailureCategory::Deterministic),
+                    system_actor: detail.system_actor,
+                    signature:    detail.signature.clone(),
                 }),
                 ..Outcome::default()
             },
@@ -144,18 +148,20 @@ mod tests {
     #[test]
     fn core_error_handler_is_retryable() {
         let retryable = Error::handler(HandlerErrorDetail {
-            message:   "timeout".into(),
-            retryable: true,
-            category:  None,
-            signature: None,
+            message:      "timeout".into(),
+            retryable:    true,
+            category:     None,
+            system_actor: None,
+            signature:    None,
         });
         assert!(retryable.is_retryable());
 
         let not_retryable = Error::handler(HandlerErrorDetail {
-            message:   "bad input".into(),
-            retryable: false,
-            category:  None,
-            signature: None,
+            message:      "bad input".into(),
+            retryable:    false,
+            category:     None,
+            system_actor: None,
+            signature:    None,
         });
         assert!(!not_retryable.is_retryable());
     }
@@ -164,10 +170,11 @@ mod tests {
     fn core_error_handler_to_fail_outcome() {
         use crate::outcome::FailureCategory;
         let err = Error::handler(HandlerErrorDetail {
-            message:   "api down".into(),
-            retryable: true,
-            category:  Some(FailureCategory::TransientInfra),
-            signature: Some("sig123".into()),
+            message:      "api down".into(),
+            retryable:    true,
+            category:     Some(FailureCategory::TransientInfra),
+            system_actor: None,
+            signature:    Some("sig123".into()),
         });
         let outcome: Outcome = err.to_fail_outcome();
         assert_eq!(outcome.status, StageOutcome::Failed {

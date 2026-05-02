@@ -1,14 +1,15 @@
+use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use fabro_types::{Principal, SystemActorKind};
+use fabro_types::SystemActorKind;
 
 use crate::{Answer, AnswerSubmission, Interviewer, Question};
 
 /// Replays recorded answers in sequence. When recordings are exhausted,
 /// returns `Answer::interrupted()`.
 pub struct ReplayInterviewer {
-    submissions: Mutex<Vec<AnswerSubmission>>,
+    submissions: Mutex<VecDeque<AnswerSubmission>>,
 }
 
 impl ReplayInterviewer {
@@ -16,7 +17,7 @@ impl ReplayInterviewer {
     /// submissions.
     #[must_use]
     pub fn new(recordings: Vec<(Question, AnswerSubmission)>) -> Self {
-        let submissions: Vec<AnswerSubmission> = recordings
+        let submissions = recordings
             .into_iter()
             .map(|(_, submission)| submission)
             .collect();
@@ -30,19 +31,15 @@ impl ReplayInterviewer {
 impl Interviewer for ReplayInterviewer {
     async fn ask(&self, _question: Question) -> AnswerSubmission {
         let mut submissions = self.submissions.lock().expect("answers lock poisoned");
-        if submissions.is_empty() {
-            AnswerSubmission::new(Answer::interrupted(), Principal::System {
-                system_kind: SystemActorKind::Engine,
-            })
-        } else {
-            submissions.remove(0)
-        }
+        submissions.pop_front().unwrap_or_else(|| {
+            AnswerSubmission::system(Answer::interrupted(), SystemActorKind::Engine)
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::{AuthMethod, IdpIdentity, QuestionType};
+    use fabro_types::{AuthMethod, IdpIdentity, Principal, QuestionType};
 
     use super::*;
     use crate::AnswerValue;

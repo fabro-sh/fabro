@@ -1,8 +1,7 @@
 use fabro_interview::Answer;
-use fabro_types::Principal;
 use serde_json::Value;
 
-use crate::payload::{SlackActionPayload, SlackAnswerSubmission};
+use crate::payload::{self, SlackActionPayload, SlackAnswerSubmission};
 
 const MULTI_SELECT_BLOCK_ID: &str = "interview.checkboxes";
 const MULTI_SELECT_ACTION_ID: &str = "interview.select";
@@ -21,7 +20,7 @@ pub fn parse_interaction(payload: &Value) -> Option<SlackAnswerSubmission> {
     let value = action["value"].as_str()?;
     let routed: SlackActionPayload = serde_json::from_str(value).ok()?;
     let question_ref = routed.question_ref();
-    let actor = interaction_actor(payload)?;
+    let actor = payload::interaction_actor(payload)?;
 
     let action_type = action["type"].as_str().unwrap_or("button");
 
@@ -51,21 +50,6 @@ pub fn parse_interaction(payload: &Value) -> Option<SlackAnswerSubmission> {
         qid: question_ref.qid,
         answer,
         actor,
-    })
-}
-
-fn interaction_actor(payload: &Value) -> Option<Principal> {
-    let team_id = payload["team"]["id"].as_str()?.to_string();
-    let user = &payload["user"];
-    let user_id = user["id"].as_str()?.to_string();
-    let user_name = user["name"]
-        .as_str()
-        .or_else(|| user["username"].as_str())
-        .map(str::to_string);
-    Some(Principal::Slack {
-        team_id,
-        user_id,
-        user_name,
     })
 }
 

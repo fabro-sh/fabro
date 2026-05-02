@@ -388,10 +388,11 @@ impl ErrorHandler {
     pub fn retryable(message: &str, policy: RetryPolicy) -> Self {
         Self {
             detail:       HandlerErrorDetail {
-                message:   message.to_string(),
-                retryable: true,
-                category:  None,
-                signature: None,
+                message:      message.to_string(),
+                retryable:    true,
+                category:     None,
+                system_actor: None,
+                signature:    None,
             },
             retry_policy: policy,
         }
@@ -400,10 +401,11 @@ impl ErrorHandler {
     pub fn non_retryable(message: &str) -> Self {
         Self {
             detail:       HandlerErrorDetail {
-                message:   message.to_string(),
-                retryable: false,
-                category:  None,
-                signature: None,
+                message:      message.to_string(),
+                retryable:    false,
+                category:     None,
+                system_actor: None,
+                signature:    None,
             },
             retry_policy: RetryPolicy::none(),
         }

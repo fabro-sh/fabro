@@ -982,16 +982,18 @@ mod tests {
         let handler = Arc::new(
             CountingHandler::new(vec![
                 Err(Error::handler(HandlerErrorDetail {
-                    message:   "fail1".into(),
-                    retryable: true,
-                    category:  None,
-                    signature: None,
+                    message:      "fail1".into(),
+                    retryable:    true,
+                    category:     None,
+                    system_actor: None,
+                    signature:    None,
                 })),
                 Err(Error::handler(HandlerErrorDetail {
-                    message:   "fail2".into(),
-                    retryable: true,
-                    category:  None,
-                    signature: None,
+                    message:      "fail2".into(),
+                    retryable:    true,
+                    category:     None,
+                    system_actor: None,
+                    signature:    None,
                 })),
                 Ok(Outcome::success()),
             ])
@@ -1057,10 +1059,11 @@ mod tests {
     async fn executor_retry_non_retryable_error_no_retry() {
         let handler = Arc::new(
             CountingHandler::new(vec![Err(Error::handler(HandlerErrorDetail {
-                message:   "fatal".into(),
-                retryable: false,
-                category:  None,
-                signature: None,
+                message:      "fatal".into(),
+                retryable:    false,
+                category:     None,
+                system_actor: None,
+                signature:    None,
             }))])
             .with_retry_policy(RetryPolicy::with_max_attempts(3)),
         );
@@ -1080,10 +1083,11 @@ mod tests {
         // Default policy is RetryPolicy::none() (max_attempts=1)
         let handler = Arc::new(CountingHandler::new(vec![Err(Error::handler(
             HandlerErrorDetail {
-                message:   "fail".into(),
-                retryable: true,
-                category:  None,
-                signature: None,
+                message:      "fail".into(),
+                retryable:    true,
+                category:     None,
+                system_actor: None,
+                signature:    None,
             },
         ))]));
         let result = run_linear(
@@ -1202,10 +1206,11 @@ mod tests {
         let handler = Arc::new(
             CountingHandler::new(vec![
                 Err(Error::handler(HandlerErrorDetail {
-                    message:   "r".into(),
-                    retryable: true,
-                    category:  None,
-                    signature: None,
+                    message:      "r".into(),
+                    retryable:    true,
+                    category:     None,
+                    system_actor: None,
+                    signature:    None,
                 })),
                 Ok(Outcome::success()),
             ])
@@ -1246,10 +1251,11 @@ mod tests {
         let handler = Arc::new(
             CountingHandler::new(vec![
                 Err(Error::handler(HandlerErrorDetail {
-                    message:   "r".into(),
-                    retryable: true,
-                    category:  None,
-                    signature: None,
+                    message:      "r".into(),
+                    retryable:    true,
+                    category:     None,
+                    system_actor: None,
+                    signature:    None,
                 })),
                 Ok(Outcome::success()),
             ])
@@ -1296,10 +1302,11 @@ mod tests {
         let handler = Arc::new(
             CountingHandler::new(vec![
                 Err(Error::handler(HandlerErrorDetail {
-                    message:   "r".into(),
-                    retryable: true,
-                    category:  None,
-                    signature: None,
+                    message:      "r".into(),
+                    retryable:    true,
+                    category:     None,
+                    system_actor: None,
+                    signature:    None,
                 })),
                 Ok(Outcome::success()), // should not be reached
             ])
@@ -2099,10 +2106,11 @@ mod tests {
                     // First call: fail with retryable, then cancel stall during backoff
                     self.stall.cancel();
                     Err(Error::handler(HandlerErrorDetail {
-                        message:   "transient".into(),
-                        retryable: true,
-                        category:  None,
-                        signature: None,
+                        message:      "transient".into(),
+                        retryable:    true,
+                        category:     None,
+                        system_actor: None,
+                        signature:    None,
                     }))
                 } else {
                     Ok(Outcome::success())

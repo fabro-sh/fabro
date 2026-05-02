@@ -13,7 +13,7 @@ use tracing::info;
 
 #[cfg(test)]
 use crate::auth::REFRESH_TOKEN_PREFIX;
-use crate::auth::{self, JwtError, JwtSigningKey, KeyDeriveError};
+use crate::auth::{self, AuthErrorCode, JwtError, JwtSigningKey, KeyDeriveError};
 use crate::error::ApiError;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -27,7 +27,7 @@ pub struct VerifiedAuth {
     pub avatar_url:  String,
     pub user_url:    String,
     pub auth_method: AuthMethod,
-    pub identity:    Option<IdpIdentity>,
+    pub identity:    IdpIdentity,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -228,13 +228,13 @@ pub(crate) fn authenticate_jwt_bearer(
         Err(JwtError::AccessTokenExpired) => {
             return Err(ApiError::unauthorized_with_code(
                 "Authentication required.",
-                "access_token_expired",
+                AuthErrorCode::AccessTokenExpired.as_str(),
             ));
         }
         Err(JwtError::AccessTokenInvalid) => {
             return Err(ApiError::unauthorized_with_code(
                 "Authentication required.",
-                "access_token_invalid",
+                AuthErrorCode::AccessTokenInvalid.as_str(),
             ));
         }
     };
@@ -242,22 +242,25 @@ pub(crate) fn authenticate_jwt_bearer(
     if !config_allows_run_auth_method(config, claims.auth_method) {
         return Err(ApiError::unauthorized_with_code(
             "Authentication required.",
-            "access_token_invalid",
+            AuthErrorCode::AccessTokenInvalid.as_str(),
         ));
     }
 
     let identity = IdpIdentity::new(&claims.idp_issuer, &claims.idp_subject).map_err(|_| {
-        ApiError::unauthorized_with_code("Authentication required.", "access_token_invalid")
+        ApiError::unauthorized_with_code(
+            "Authentication required.",
+            AuthErrorCode::AccessTokenInvalid.as_str(),
+        )
     })?;
 
     Ok(VerifiedAuth {
-        login:       claims.login,
-        name:        claims.name,
-        email:       claims.email,
-        avatar_url:  claims.avatar_url,
-        user_url:    claims.user_url,
+        login: claims.login,
+        name: claims.name,
+        email: claims.email,
+        avatar_url: claims.avatar_url,
+        user_url: claims.user_url,
         auth_method: claims.auth_method,
-        identity:    Some(identity),
+        identity,
     })
 }
 
@@ -274,7 +277,7 @@ fn authenticate_bearer(
         );
         return Err(ApiError::unauthorized_with_code(
             "Authentication required.",
-            "unauthorized",
+            AuthErrorCode::Unauthorized.as_str(),
         ));
     }
 
@@ -763,7 +766,7 @@ client_id = "Iv1.test"
         assert_eq!(auth.user_url, "https://github.com/octocat");
         assert_eq!(
             auth.identity,
-            Some(IdpIdentity::new("https://github.com", "12345").unwrap())
+            IdpIdentity::new("https://github.com", "12345").unwrap()
         );
         assert_eq!(auth.auth_method, AuthMethod::Github);
     }
@@ -785,7 +788,7 @@ client_id = "Iv1.test"
         assert_eq!(auth.auth_method, AuthMethod::Github);
         assert_eq!(
             auth.identity,
-            Some(IdpIdentity::new("https://github.com", "12345").unwrap())
+            IdpIdentity::new("https://github.com", "12345").unwrap()
         );
     }
 

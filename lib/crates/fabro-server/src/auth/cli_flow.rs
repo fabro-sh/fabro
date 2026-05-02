@@ -27,7 +27,9 @@ use tracing::{info, warn};
 use url::{Host, Url};
 
 use crate::auth::browser_shell::browser_shell;
-use crate::auth::{self, AuthCode, ConsumeOutcome, JwtSubject, REFRESH_TOKEN_PREFIX, RefreshToken};
+use crate::auth::{
+    self, AuthCode, AuthErrorCode, ConsumeOutcome, JwtSubject, REFRESH_TOKEN_PREFIX, RefreshToken,
+};
 use crate::jwt_auth::{AuthMode, ConfiguredAuth, bearer_token_from_headers};
 use crate::principal_middleware::{AuthContextSlot, AuthStatus, RequestAuth, RequestAuthContext};
 use crate::server::AppState;
@@ -166,7 +168,7 @@ async fn start(
         return redirect_with_error(
             &redirect_uri,
             state_token,
-            "invalid_request",
+            AuthErrorCode::InvalidRequest.as_str(),
             "Invalid PKCE parameters",
         );
     };
@@ -174,7 +176,7 @@ async fn start(
         return redirect_with_error(
             &redirect_uri,
             state_token,
-            "invalid_request",
+            AuthErrorCode::InvalidRequest.as_str(),
             "Invalid PKCE parameters",
         );
     }
@@ -344,7 +346,7 @@ async fn token(
         return oauth_invalid(
             &auth_slot,
             StatusCode::BAD_REQUEST,
-            "invalid_request",
+            AuthErrorCode::InvalidRequest,
             "Invalid request",
         );
     };
@@ -352,7 +354,7 @@ async fn token(
         return oauth_invalid(
             &auth_slot,
             StatusCode::BAD_REQUEST,
-            "invalid_request",
+            AuthErrorCode::InvalidRequest,
             "Invalid request",
         );
     };
@@ -360,7 +362,7 @@ async fn token(
         return oauth_invalid(
             &auth_slot,
             StatusCode::BAD_REQUEST,
-            "invalid_request",
+            AuthErrorCode::InvalidRequest,
             "Invalid request",
         );
     };
@@ -372,7 +374,7 @@ async fn token(
         return oauth_invalid(
             &auth_slot,
             StatusCode::BAD_REQUEST,
-            "invalid_request",
+            AuthErrorCode::InvalidRequest,
             "Invalid request",
         );
     };
@@ -380,7 +382,7 @@ async fn token(
         return oauth_invalid(
             &auth_slot,
             StatusCode::BAD_REQUEST,
-            "invalid_request",
+            AuthErrorCode::InvalidRequest,
             "Invalid request",
         );
     }
@@ -410,7 +412,7 @@ async fn token(
         return oauth_invalid(
             &auth_slot,
             StatusCode::BAD_REQUEST,
-            "invalid_code",
+            AuthErrorCode::InvalidCode,
             "Invalid authorization code",
         );
     };
@@ -419,7 +421,7 @@ async fn token(
         return oauth_invalid(
             &auth_slot,
             StatusCode::BAD_REQUEST,
-            "pkce_verification_failed",
+            AuthErrorCode::PkceVerificationFailed,
             "PKCE verification failed",
         );
     }
@@ -429,7 +431,7 @@ async fn token(
         return oauth_invalid(
             &auth_slot,
             StatusCode::BAD_REQUEST,
-            "redirect_uri_mismatch",
+            AuthErrorCode::RedirectUriMismatch,
             "Redirect URI mismatch",
         );
     }
@@ -437,7 +439,7 @@ async fn token(
         return oauth_invalid(
             &auth_slot,
             StatusCode::FORBIDDEN,
-            "unauthorized",
+            AuthErrorCode::Unauthorized,
             "Login not permitted",
         );
     }
@@ -774,8 +776,7 @@ fn session_cookie_secure(state: &AppState) -> bool {
 }
 
 fn eligible_session(session: Option<&SessionCookie>) -> Option<&SessionCookie> {
-    session
-        .filter(|session| session.identity.is_some() && session.auth_method == AuthMethod::Github)
+    session.filter(|session| session.auth_method == AuthMethod::Github)
 }
 
 fn stamp_cli_session_auth_context(
@@ -785,9 +786,7 @@ fn stamp_cli_session_auth_context(
 ) -> Option<SessionCookie> {
     let session = read_private_session(headers, session_key);
     if let Some(session) = eligible_session(session.as_ref()) {
-        if let Some(context) = auth_context_from_session(session) {
-            auth_slot.replace(context);
-        }
+        auth_slot.replace(auth_context_from_session(session));
     } else if session_cookie_present(headers) {
         auth_slot.replace(RequestAuthContext::invalid());
     }
@@ -1035,14 +1034,14 @@ fn oauth_error(
 fn oauth_invalid(
     auth_slot: &AuthContextSlot,
     status: StatusCode,
-    error: &'static str,
+    error: AuthErrorCode,
     error_description: &'static str,
 ) -> Response {
     auth_slot.replace(RequestAuthContext::rejected(
         AuthStatus::Invalid,
         Some(error),
     ));
-    oauth_error(status, error, error_description)
+    oauth_error(status, error.as_str(), error_description)
 }
 
 fn random_secret() -> String {
@@ -1170,14 +1169,7 @@ async fn issue_auth_code_response(
     code_challenge: &str,
 ) -> Response {
     let code = random_auth_code();
-    let Some(identity) = session.identity.clone() else {
-        return redirect_with_error(
-            redirect_uri,
-            state_token,
-            "github_session_required",
-            "GitHub session required",
-        );
-    };
+    let identity = session.identity.clone();
     let Some(redirect_uri) = canonical_loopback_redirect_uri(redirect_uri) else {
         return static_error_page(INVALID_REDIRECT_URI);
     };
@@ -1225,10 +1217,7 @@ mod tests {
 
     use axum::Extension;
     use axum::body::{Body, to_bytes};
-    use axum::extract::State as AxumState;
     use axum::http::{HeaderMap, Request, StatusCode, header};
-    use axum::middleware::Next;
-    use axum::response::Response;
     use axum_extra::extract::cookie::Key;
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -1251,9 +1240,9 @@ mod tests {
         CliFlowCookie, DEV_TOKEN_LOGIN_INSTRUCTIONS, add_cli_flow_cookie, read_private_cli_flow,
         user_agent_fingerprint, web_routes,
     };
-    use crate::auth::{self, AuthCode, RefreshToken};
+    use crate::auth::{self, AuthCode, AuthErrorCode, RefreshToken};
     use crate::jwt_auth::{AuthMode, ConfiguredAuth};
-    use crate::principal_middleware::{AuthContextSlot, AuthStatus, RequestAuthContext};
+    use crate::principal_middleware::{AuthStatus, RequestAuthContext};
     use crate::server;
     use crate::web_auth::SessionCookie;
 
@@ -1326,21 +1315,6 @@ client_id = "github-client-id"
         (app, state)
     }
 
-    async fn capture_auth_context(
-        AxumState(captured): AxumState<Arc<StdMutex<Vec<RequestAuthContext>>>>,
-        mut req: axum::extract::Request,
-        next: Next,
-    ) -> Response {
-        let slot = AuthContextSlot::initial();
-        req.extensions_mut().insert(slot.clone());
-        let response = next.run(req).await;
-        captured
-            .lock()
-            .expect("captured auth contexts lock poisoned")
-            .push(slot.snapshot());
-        response
-    }
-
     fn test_router_with_auth_capture(
         settings: fabro_types::ServerSettings,
         auth_mode: AuthMode,
@@ -1353,7 +1327,7 @@ client_id = "github-client-id"
         let captured = Arc::new(StdMutex::new(Vec::new()));
         let app = app.layer(axum::middleware::from_fn_with_state(
             Arc::clone(&captured),
-            capture_auth_context,
+            crate::test_support::capture_auth_context,
         ));
         (app, state, captured)
     }
@@ -1363,10 +1337,8 @@ client_id = "github-client-id"
             v:           2,
             login:       "octocat".to_string(),
             auth_method: AuthMethod::Github,
-            identity:    Some(
-                fabro_types::IdpIdentity::new("https://github.com", "12345")
-                    .expect("identity should be valid"),
-            ),
+            identity:    fabro_types::IdpIdentity::new("https://github.com", "12345")
+                .expect("identity should be valid"),
             name:        "The Octocat".to_string(),
             email:       "octocat@example.com".to_string(),
             avatar_url:  "https://example.com/octocat.png".to_string(),
@@ -2089,7 +2061,10 @@ client_id = "github-client-id"
         assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
         assert_eq!(contexts[0].principal.display(), "octocat");
         assert_eq!(contexts[1].auth_status, AuthStatus::Invalid);
-        assert_eq!(contexts[1].auth_error_code, Some("invalid_code"));
+        assert_eq!(
+            contexts[1].auth_error_code,
+            Some(AuthErrorCode::InvalidCode)
+        );
     }
 
     #[tokio::test]
@@ -2272,7 +2247,10 @@ client_id = "github-client-id"
         assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
         assert_eq!(contexts[0].principal.display(), "octocat");
         assert_eq!(contexts[1].auth_status, AuthStatus::Invalid);
-        assert_eq!(contexts[1].auth_error_code, Some("unauthorized"));
+        assert_eq!(
+            contexts[1].auth_error_code,
+            Some(AuthErrorCode::Unauthorized)
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

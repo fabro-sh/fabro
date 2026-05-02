@@ -5,6 +5,27 @@ mod jwt;
 mod keys;
 mod translate;
 
+use strum::IntoStaticStr;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub(crate) enum AuthErrorCode {
+    Unauthorized,
+    AccessTokenInvalid,
+    AccessTokenExpired,
+    InvalidRequest,
+    InvalidCode,
+    PkceVerificationFailed,
+    RedirectUriMismatch,
+}
+
+impl AuthErrorCode {
+    #[must_use]
+    pub(crate) fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
 pub(crate) const REFRESH_TOKEN_PREFIX: &str = "fabro_refresh_";
 
 pub(crate) use browser_shell::browser_shell;

@@ -8,6 +8,7 @@ use fabro_core::handler::NodeHandler;
 use fabro_core::outcome::FailureCategory;
 use fabro_core::retry::RetryPolicy as CoreRetryPolicy;
 use fabro_graphviz::graph::types::Graph as GvGraph;
+use fabro_types::SystemActorKind;
 use futures::FutureExt;
 use tokio::time::timeout;
 
@@ -50,10 +51,11 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         .await
         .map_err(|err| {
             CoreError::handler(HandlerErrorDetail {
-                message:   err.to_string(),
-                retryable: true,
-                category:  Some(FailureCategory::TransientInfra),
-                signature: None,
+                message:      err.to_string(),
+                retryable:    true,
+                category:     Some(FailureCategory::TransientInfra),
+                system_actor: None,
+                signature:    None,
             })
         })?;
         let execution_snapshot = wf_context.snapshot();
@@ -78,10 +80,11 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
                 Ok(inner) => inner,
                 Err(_elapsed) => {
                     return Err(CoreError::handler(HandlerErrorDetail {
-                        message:   format!("handler timed out after {}ms", duration.as_millis()),
-                        retryable: true,
-                        category:  Some(FailureCategory::TransientInfra),
-                        signature: None,
+                        message:      format!("handler timed out after {}ms", duration.as_millis()),
+                        retryable:    true,
+                        category:     Some(FailureCategory::TransientInfra),
+                        system_actor: Some(SystemActorKind::Timeout),
+                        signature:    None,
                     }));
                 }
             }
@@ -108,16 +111,18 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
                     message: fabro_err.to_string(),
                     retryable,
                     category: Some(fabro_err.failure_category()),
+                    system_actor: None,
                     signature: fabro_err.failure_signature_hint(),
                 }))
             }
             Err(panic_payload) => {
                 let msg = format_panic_message(&panic_payload);
                 Err(CoreError::handler(HandlerErrorDetail {
-                    message:   msg,
-                    retryable: false,
-                    category:  Some(FailureCategory::Deterministic),
-                    signature: None,
+                    message:      msg,
+                    retryable:    false,
+                    category:     Some(FailureCategory::Deterministic),
+                    system_actor: None,
+                    signature:    None,
                 }))
             }
         }
@@ -132,10 +137,11 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             .await
             .map_err(|err| {
                 CoreError::handler(HandlerErrorDetail {
-                    message:   err.to_string(),
-                    retryable: true,
-                    category:  Some(FailureCategory::TransientInfra),
-                    signature: None,
+                    message:      err.to_string(),
+                    retryable:    true,
+                    category:     Some(FailureCategory::TransientInfra),
+                    system_actor: None,
+                    signature:    None,
                 })
             })
     }

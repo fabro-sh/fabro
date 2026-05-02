@@ -381,9 +381,10 @@ impl Error {
     /// Build a fail `Outcome` with structured `FailureDetail`.
     pub fn to_fail_outcome(&self) -> Outcome {
         let failure = FailureDetail {
-            message:   self.display_with_causes(),
-            category:  self.failure_category(),
-            signature: self.failure_signature_hint(),
+            message:      self.display_with_causes(),
+            category:     self.failure_category(),
+            system_actor: None,
+            signature:    self.failure_signature_hint(),
         };
         Outcome {
             status: StageOutcome::Failed {

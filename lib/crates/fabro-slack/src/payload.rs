@@ -1,6 +1,7 @@
 use fabro_interview::Answer;
 use fabro_types::Principal;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlackQuestionRef {
@@ -56,6 +57,39 @@ impl SlackActionPayload {
 #[must_use]
 pub fn encode_action_value(payload: &SlackActionPayload) -> String {
     serde_json::to_string(payload).expect("Slack action payload serialization should succeed")
+}
+
+pub fn interaction_actor(payload: &Value) -> Option<Principal> {
+    let team_id = payload["team"]["id"].as_str()?.to_string();
+    let user = &payload["user"];
+    Some(slack_actor(
+        team_id,
+        user["id"].as_str()?.to_string(),
+        user["name"]
+            .as_str()
+            .or_else(|| user["username"].as_str())
+            .map(str::to_string),
+    ))
+}
+
+pub fn event_actor(payload: &Value) -> Option<Principal> {
+    let event = &payload["event"];
+    Some(slack_actor(
+        payload["team_id"]
+            .as_str()
+            .or_else(|| event["team"].as_str())?
+            .to_string(),
+        event["user"].as_str()?.to_string(),
+        event["user_name"].as_str().map(str::to_string),
+    ))
+}
+
+fn slack_actor(team_id: String, user_id: String, user_name: Option<String>) -> Principal {
+    Principal::Slack {
+        team_id,
+        user_id,
+        user_name,
+    }
 }
 
 #[cfg(test)]

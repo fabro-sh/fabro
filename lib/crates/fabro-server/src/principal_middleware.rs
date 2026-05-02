@@ -7,21 +7,20 @@ use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use fabro_types::{CommandOutputStream, Principal, RunBlobId, RunId, StageId, UserPrincipal};
-use jsonwebtoken::dangerous::insecure_decode;
-use serde::Deserialize;
+use jsonwebtoken::decode_header;
 use strum::IntoStaticStr;
 
-use crate::auth::{JwtError, REFRESH_TOKEN_PREFIX};
+use crate::auth::{AuthErrorCode, JwtError, REFRESH_TOKEN_PREFIX};
 use crate::error::ApiError;
 use crate::jwt_auth::{self, AuthMode, ConfiguredAuth};
 use crate::server::{AppState, parse_blob_id_path, parse_run_id_path, parse_stage_id_path};
-use crate::worker_token::{self, WORKER_TOKEN_ISSUER};
+use crate::worker_token::{self, WORKER_TOKEN_KID};
 
 #[derive(Clone, Debug)]
 pub(crate) struct RequestAuthContext {
     pub principal:       Principal,
     pub auth_status:     AuthStatus,
-    pub auth_error_code: Option<&'static str>,
+    pub auth_error_code: Option<AuthErrorCode>,
     pub user_profile:    Option<UserProfile>,
 }
 
@@ -66,11 +65,6 @@ pub(crate) struct AuthenticatedUser {
     pub profile:   UserProfile,
 }
 
-#[derive(Debug, Deserialize)]
-struct IssuerOnlyClaims {
-    iss: String,
-}
-
 impl RequestAuthContext {
     #[must_use]
     pub(crate) fn initial() -> Self {
@@ -93,7 +87,7 @@ impl RequestAuthContext {
     }
 
     #[must_use]
-    pub(crate) fn rejected(status: AuthStatus, code: Option<&'static str>) -> Self {
+    pub(crate) fn rejected(status: AuthStatus, code: Option<AuthErrorCode>) -> Self {
         Self {
             principal:       Principal::Anonymous,
             auth_status:     status,
@@ -104,7 +98,7 @@ impl RequestAuthContext {
 
     #[must_use]
     pub(crate) fn invalid() -> Self {
-        Self::rejected(AuthStatus::Invalid, Some("unauthorized"))
+        Self::rejected(AuthStatus::Invalid, Some(AuthErrorCode::Unauthorized))
     }
 }
 
@@ -113,6 +107,13 @@ impl AuthStatus {
     pub(crate) fn as_str(self) -> &'static str {
         self.into()
     }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RequestAuthLogContext {
+    pub principal:       Principal,
+    pub auth_status:     AuthStatus,
+    pub auth_error_code: Option<AuthErrorCode>,
 }
 
 impl AuthContextSlot {
@@ -128,6 +129,16 @@ impl AuthContextSlot {
     #[must_use]
     pub(crate) fn snapshot(&self) -> RequestAuthContext {
         self.0.lock().expect("auth context lock poisoned").clone()
+    }
+
+    #[must_use]
+    pub(crate) fn log_snapshot(&self) -> RequestAuthLogContext {
+        let context = self.0.lock().expect("auth context lock poisoned");
+        RequestAuthLogContext {
+            principal:       context.principal.clone(),
+            auth_status:     context.auth_status,
+            auth_error_code: context.auth_error_code,
+        }
     }
 }
 
@@ -168,7 +179,7 @@ impl FromRequestParts<Arc<AppState>> for RequireRunScoped {
             .await
             .map_err(IntoResponse::into_response)?;
         let run_id = parse_run_id_path(&id)?;
-        require_worker_or_user_for_run(&auth_context_from_parts(parts), &run_id)
+        require_worker_or_user_for_run(&auth_slot_from_parts(parts), &run_id)
             .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id))
     }
@@ -186,7 +197,7 @@ impl FromRequestParts<Arc<AppState>> for RequireRunBlob {
             .map_err(IntoResponse::into_response)?;
         let run_id = parse_run_id_path(&id)?;
         let blob_id = parse_blob_id_path(&blob_id)?;
-        require_worker_or_user_for_run(&auth_context_from_parts(parts), &run_id)
+        require_worker_or_user_for_run(&auth_slot_from_parts(parts), &run_id)
             .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id, blob_id))
     }
@@ -204,7 +215,7 @@ impl FromRequestParts<Arc<AppState>> for RequireStageArtifact {
             .map_err(IntoResponse::into_response)?;
         let run_id = parse_run_id_path(&id)?;
         let stage_id = parse_stage_id_path(&stage_id)?;
-        require_worker_or_user_for_run(&auth_context_from_parts(parts), &run_id)
+        require_worker_or_user_for_run(&auth_slot_from_parts(parts), &run_id)
             .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id, stage_id))
     }
@@ -226,7 +237,7 @@ impl FromRequestParts<Arc<AppState>> for RequireCommandLog {
         let stream = stream
             .parse::<CommandOutputStream>()
             .map_err(|_| ApiError::bad_request("Invalid command log stream.").into_response())?;
-        require_worker_or_user_for_run(&auth_context_from_parts(parts), &run_id)
+        require_worker_or_user_for_run(&auth_slot_from_parts(parts), &run_id)
             .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id, stage_id, stream))
     }
@@ -252,17 +263,18 @@ pub(crate) async fn principal_middleware(
     next.run(req).await
 }
 
-fn auth_context_from_parts(parts: &Parts) -> RequestAuthContext {
+fn auth_slot_from_parts(parts: &Parts) -> AuthContextSlot {
     parts
         .extensions
         .get::<AuthContextSlot>()
-        .map_or_else(RequestAuthContext::initial, AuthContextSlot::snapshot)
+        .cloned()
+        .unwrap_or_else(AuthContextSlot::initial)
 }
 
 pub(crate) fn require_user(slot: &AuthContextSlot) -> Result<UserPrincipal, ApiError> {
-    let context = slot.snapshot();
-    match context.principal {
-        Principal::User(user) => Ok(user),
+    let context = slot.0.lock().expect("auth context lock poisoned");
+    match &context.principal {
+        Principal::User(user) => Ok(user.clone()),
         _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
     }
 }
@@ -286,9 +298,10 @@ pub(crate) fn require_authenticated_user(
 }
 
 fn require_worker_or_user_for_run(
-    context: &RequestAuthContext,
+    slot: &AuthContextSlot,
     route_run_id: &RunId,
 ) -> Result<(), ApiError> {
+    let context = slot.0.lock().expect("auth context lock poisoned");
     match &context.principal {
         Principal::User(_) => Ok(()),
         Principal::Worker { run_id } if run_id == route_run_id => Ok(()),
@@ -306,32 +319,45 @@ fn classify_request(req: &Request, state: &AppState) -> RequestAuthContext {
     let token = match jwt_auth::bearer_token_from_headers(req.headers()) {
         None => return RequestAuthContext::initial(),
         Some(Err(_)) => {
-            return rejected(AuthStatus::Invalid, Some("unauthorized"));
+            return RequestAuthContext::rejected(
+                AuthStatus::Invalid,
+                Some(AuthErrorCode::Unauthorized),
+            );
         }
         Some(Ok(token)) => token,
     };
 
     if token.starts_with(REFRESH_TOKEN_PREFIX) {
-        return rejected(AuthStatus::Invalid, Some("unauthorized"));
+        return RequestAuthContext::rejected(
+            AuthStatus::Invalid,
+            Some(AuthErrorCode::Unauthorized),
+        );
     }
     if !jwt_auth::looks_like_jwt(token) {
-        return rejected(AuthStatus::Invalid, Some("access_token_invalid"));
+        return RequestAuthContext::rejected(
+            AuthStatus::Invalid,
+            Some(AuthErrorCode::AccessTokenInvalid),
+        );
     }
 
-    let issuer = match insecure_decode::<IssuerOnlyClaims>(token) {
-        Ok(data) => data.claims.iss,
-        Err(_) => return rejected(AuthStatus::Invalid, Some("access_token_invalid")),
+    let Ok(header) = decode_header(token) else {
+        return RequestAuthContext::rejected(
+            AuthStatus::Invalid,
+            Some(AuthErrorCode::AccessTokenInvalid),
+        );
     };
 
-    if issuer == WORKER_TOKEN_ISSUER {
+    if header.kid.as_deref() == Some(WORKER_TOKEN_KID) {
         return match worker_token::decode_worker_token(token, state.worker_token_keys()) {
-            Ok(run_id) => authenticated(Principal::Worker { run_id }, None),
-            Err(JwtError::AccessTokenExpired) => {
-                rejected(AuthStatus::Expired, Some("access_token_expired"))
-            }
-            Err(JwtError::AccessTokenInvalid) => {
-                rejected(AuthStatus::Invalid, Some("access_token_invalid"))
-            }
+            Ok(run_id) => RequestAuthContext::authenticated(Principal::Worker { run_id }, None),
+            Err(JwtError::AccessTokenExpired) => RequestAuthContext::rejected(
+                AuthStatus::Expired,
+                Some(AuthErrorCode::AccessTokenExpired),
+            ),
+            Err(JwtError::AccessTokenInvalid) => RequestAuthContext::rejected(
+                AuthStatus::Invalid,
+                Some(AuthErrorCode::AccessTokenInvalid),
+            ),
         };
     }
 
@@ -341,39 +367,39 @@ fn classify_request(req: &Request, state: &AppState) -> RequestAuthContext {
 fn classify_user_token(token: &str, config: &ConfiguredAuth) -> RequestAuthContext {
     let auth = match jwt_auth::authenticate_jwt_bearer(token, config) {
         Ok(auth) => auth,
-        Err(err) if err.code() == Some("access_token_expired") => {
-            return rejected(AuthStatus::Expired, Some("access_token_expired"));
+        Err(err) if err.code() == Some(AuthErrorCode::AccessTokenExpired.as_str()) => {
+            return RequestAuthContext::rejected(
+                AuthStatus::Expired,
+                Some(AuthErrorCode::AccessTokenExpired),
+            );
         }
-        Err(err) if err.code() == Some("access_token_invalid") => {
-            return rejected(AuthStatus::Invalid, Some("access_token_invalid"));
+        Err(err) if err.code() == Some(AuthErrorCode::AccessTokenInvalid.as_str()) => {
+            return RequestAuthContext::rejected(
+                AuthStatus::Invalid,
+                Some(AuthErrorCode::AccessTokenInvalid),
+            );
         }
-        Err(_) => return rejected(AuthStatus::Invalid, Some("unauthorized")),
+        Err(_) => {
+            return RequestAuthContext::rejected(
+                AuthStatus::Invalid,
+                Some(AuthErrorCode::Unauthorized),
+            );
+        }
     };
-    let Some(identity) = auth.identity else {
-        return rejected(AuthStatus::Invalid, Some("access_token_invalid"));
-    };
-    let principal = Principal::user(identity, auth.login, auth.auth_method);
+    let principal = Principal::user(auth.identity, auth.login, auth.auth_method);
     let profile = UserProfile {
         name:       auth.name,
         email:      auth.email,
         avatar_url: auth.avatar_url,
         user_url:   auth.user_url,
     };
-    authenticated(principal, Some(profile))
+    RequestAuthContext::authenticated(principal, Some(profile))
 }
 
-fn authenticated(principal: Principal, user_profile: Option<UserProfile>) -> RequestAuthContext {
-    RequestAuthContext::authenticated(principal, user_profile)
-}
-
-fn rejected(status: AuthStatus, code: Option<&'static str>) -> RequestAuthContext {
-    RequestAuthContext::rejected(status, code)
-}
-
-fn auth_rejection(status: AuthStatus, code: Option<&'static str>) -> ApiError {
+fn auth_rejection(status: AuthStatus, code: Option<AuthErrorCode>) -> ApiError {
     match (status, code) {
         (AuthStatus::Expired | AuthStatus::Invalid, Some(code)) => {
-            ApiError::unauthorized_with_code("Authentication required.", code)
+            ApiError::unauthorized_with_code("Authentication required.", code.as_str())
         }
         _ => ApiError::unauthorized(),
     }
@@ -387,12 +413,15 @@ mod tests {
     use fabro_static::EnvVars;
     use fabro_types::settings::ServerAuthMethod;
     use fabro_types::{AuthMethod, IdpIdentity, RunId};
-    use jsonwebtoken::{Algorithm, EncodingKey, Header};
+    use jsonwebtoken::EncodingKey;
     use uuid::Uuid;
 
     use super::*;
-    use crate::auth;
-    use crate::worker_token::{WORKER_TOKEN_SCOPE, WorkerTokenClaims, issue_worker_token};
+    use crate::auth::{self, AuthErrorCode};
+    use crate::worker_token::{
+        WORKER_TOKEN_ISSUER, WORKER_TOKEN_SCOPE, WorkerTokenClaims, issue_worker_token,
+        worker_token_header,
+    };
 
     const TEST_JWT_ISSUER: &str = "https://fabro.example";
 
@@ -471,7 +500,7 @@ mod tests {
             jti: Uuid::new_v4().simple().to_string(),
         };
         jsonwebtoken::encode(
-            &Header::new(Algorithm::HS256),
+            &worker_token_header(),
             &claims,
             &EncodingKey::from_secret(&worker_key),
         )
@@ -506,7 +535,10 @@ mod tests {
         let context = classify_request(&request, state.as_ref());
 
         assert_eq!(context.auth_status, AuthStatus::Expired);
-        assert_eq!(context.auth_error_code, Some("access_token_expired"));
+        assert_eq!(
+            context.auth_error_code,
+            Some(AuthErrorCode::AccessTokenExpired)
+        );
     }
 
     #[test]
@@ -514,11 +546,14 @@ mod tests {
         let context = classify_token(Some(&issue_user_token_with_other_secret()));
 
         assert_eq!(context.auth_status, AuthStatus::Invalid);
-        assert_eq!(context.auth_error_code, Some("access_token_invalid"));
+        assert_eq!(
+            context.auth_error_code,
+            Some(AuthErrorCode::AccessTokenInvalid)
+        );
     }
 
     #[test]
-    fn routes_worker_issuer_to_worker_verifier() {
+    fn routes_worker_kid_to_worker_verifier() {
         let state = crate::server::create_app_state();
         let run_id = RunId::new();
         let token = issue_worker_token(state.worker_token_keys(), &run_id).unwrap();
@@ -539,7 +574,10 @@ mod tests {
         let context = classify_request(&request, state.as_ref());
 
         assert_eq!(context.auth_status, AuthStatus::Expired);
-        assert_eq!(context.auth_error_code, Some("access_token_expired"));
+        assert_eq!(
+            context.auth_error_code,
+            Some(AuthErrorCode::AccessTokenExpired)
+        );
     }
 
     #[test]
@@ -556,7 +594,10 @@ mod tests {
         let context = classify_request(&request, state.as_ref());
 
         assert_eq!(context.auth_status, AuthStatus::Invalid);
-        assert_eq!(context.auth_error_code, Some("access_token_invalid"));
+        assert_eq!(
+            context.auth_error_code,
+            Some(AuthErrorCode::AccessTokenInvalid)
+        );
     }
 
     #[test]
@@ -568,7 +609,10 @@ mod tests {
         let context = classify_request(&request, state.as_ref());
 
         assert_eq!(context.auth_status, AuthStatus::Invalid);
-        assert_eq!(context.auth_error_code, Some("access_token_invalid"));
+        assert_eq!(
+            context.auth_error_code,
+            Some(AuthErrorCode::AccessTokenInvalid)
+        );
     }
 
     #[test]
@@ -576,7 +620,7 @@ mod tests {
         let context = classify_token(Some("fabro_refresh_secret"));
 
         assert_eq!(context.auth_status, AuthStatus::Invalid);
-        assert_eq!(context.auth_error_code, Some("unauthorized"));
+        assert_eq!(context.auth_error_code, Some(AuthErrorCode::Unauthorized));
     }
 
     #[test]
@@ -584,7 +628,10 @@ mod tests {
         let context = classify_token(Some("not-a-jwt"));
 
         assert_eq!(context.auth_status, AuthStatus::Invalid);
-        assert_eq!(context.auth_error_code, Some("access_token_invalid"));
+        assert_eq!(
+            context.auth_error_code,
+            Some(AuthErrorCode::AccessTokenInvalid)
+        );
     }
 
     #[test]
@@ -598,10 +645,14 @@ mod tests {
 
     #[test]
     fn run_scoped_guard_preserves_expired_auth_error_code() {
-        let context =
-            RequestAuthContext::rejected(AuthStatus::Expired, Some("access_token_expired"));
+        let context = RequestAuthContext::rejected(
+            AuthStatus::Expired,
+            Some(AuthErrorCode::AccessTokenExpired),
+        );
 
-        let err = require_worker_or_user_for_run(&context, &RunId::new()).unwrap_err();
+        let slot = AuthContextSlot::initial();
+        slot.replace(context);
+        let err = require_worker_or_user_for_run(&slot, &RunId::new()).unwrap_err();
 
         assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
         assert_eq!(err.code(), Some("access_token_expired"));
@@ -609,10 +660,14 @@ mod tests {
 
     #[test]
     fn run_scoped_guard_preserves_invalid_auth_error_code() {
-        let context =
-            RequestAuthContext::rejected(AuthStatus::Invalid, Some("access_token_invalid"));
+        let context = RequestAuthContext::rejected(
+            AuthStatus::Invalid,
+            Some(AuthErrorCode::AccessTokenInvalid),
+        );
 
-        let err = require_worker_or_user_for_run(&context, &RunId::new()).unwrap_err();
+        let slot = AuthContextSlot::initial();
+        slot.replace(context);
+        let err = require_worker_or_user_for_run(&slot, &RunId::new()).unwrap_err();
 
         assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
         assert_eq!(err.code(), Some("access_token_invalid"));

@@ -15,6 +15,7 @@ use fabro_server::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
 use fabro_server::jwt_auth::{AuthMode, resolve_auth_mode_with_lookup};
 use fabro_server::serve::{ServeArgs, serve_command};
 use fabro_server::server::{RouterOptions, build_router_with_options, create_app_state};
+use fabro_server::test_support::{TEST_DEV_TOKEN, TEST_SESSION_SECRET};
 use fabro_util::terminal::Styles;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
@@ -22,11 +23,6 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::helpers::{api, reqwest_status};
-
-const TEST_DEV_TOKEN: &str =
-    "fabro_dev_abababababababababababababababababababababababababababababababab";
-const TEST_SESSION_SECRET: &str =
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 async fn start_tcp_server(auth_mode: AuthMode, ip_allowlist: Arc<IpAllowlistConfig>) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0")
