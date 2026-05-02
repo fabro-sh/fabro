@@ -71,6 +71,38 @@ The OpenAPI spec at `docs/public/api-reference/fabro-api.yaml` is the source of 
 - If a type is shared across crates and is part of the core product vocabulary, move it to a shared crate first, then make `fabro-api` reuse it.
 - For every new `with_replacement(...)`, add a `fabro-api` test that proves type identity and JSON parity with the OpenAPI schema.
 
+## Test support boundaries
+
+Test-only helpers, fixture constructors, fake credentials, in-memory stores, panic-heavy setup code, and test environment shims must not be exposed from production modules or linked into normal builds.
+
+Put shared test helpers in a dedicated `test_support` module gated behind tests or an explicit feature:
+
+```rust
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+```
+
+If another crate's tests need those helpers, enable the feature only through a dev-dependency using Cargo's dual-listing pattern:
+
+```toml
+[dependencies]
+fabro-server = { path = "../fabro-server" }
+
+[dev-dependencies]
+fabro-server = { path = "../fabro-server", features = ["test-support"] }
+```
+
+Do not enable `test-support` in default features, production dependencies, release builds, or binaries.
+
+Use names that make the boundary obvious: `test_app_state`, `test_store_bundle`, `test_auth_mode`, and similar. Avoid production-looking names such as `create_app_state` for test fixtures. `#[doc(hidden)]` is not a substitute for feature-gating; hidden public APIs still compile, link, and can be used accidentally.
+
+Before merging changes that add or move shared test helpers, verify:
+
+- `cargo build --workspace` succeeds without `test-support`
+- relevant tests compile and run with `test-support`
+- `rg -n "create_app_state|test-only-name"` does not show production call sites
+- release/debug artifacts do not contain fake secrets, fixture tokens, or test helper symbols when built without `test-support`
+
 ## Architecture
 
 Fabro is an AI-powered workflow orchestration platform. Workflows are defined as Graphviz graphs, where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
