@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use fabro_types::EventBody;
+
 use super::super::{
     ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, EventEnvelope, HashMap,
     IntoResponse, Json, ListResponse, ModelBillingTotals, ModelReference, PaginationParams, Path,
@@ -18,12 +20,15 @@ fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> St
     let latest = events.iter().rev().find(|envelope| {
         envelope.event.node_id.as_deref() == Some(node_id)
             && matches!(
-                envelope.event.event_name(),
-                "stage.retrying" | "stage.started" | "stage.completed" | "stage.failed"
+                &envelope.event.body,
+                EventBody::StageRetrying(_)
+                    | EventBody::StageStarted(_)
+                    | EventBody::StageCompleted(_)
+                    | EventBody::StageFailed(_)
             )
     });
 
-    if latest.is_some_and(|e| e.event.event_name() == "stage.retrying") {
+    if latest.is_some_and(|e| matches!(&e.event.body, EventBody::StageRetrying(_))) {
         StageState::Retrying
     } else {
         StageState::Running

@@ -212,22 +212,15 @@ impl StoreProgressLogger {
 mod tests {
     use std::sync::Arc;
 
-    use ::fabro_types::{AuthMethod, IdpIdentity, Principal, RunNoticeLevel, fixtures};
+    use ::fabro_types::{RunNoticeLevel, fixtures};
     use tokio::sync::Mutex as AsyncMutex;
 
     use super::*;
+    use crate::event::test_support::user_principal;
     use crate::event::{
         Emitter, Event, build_redacted_event_payload, event_payload_from_redacted_json,
         to_run_event,
     };
-
-    fn user_principal(login: &str) -> Principal {
-        Principal::user(
-            IdpIdentity::new("https://github.com", "12345").unwrap(),
-            login.to_string(),
-            AuthMethod::Github,
-        )
-    }
 
     #[tokio::test]
     async fn append_event_writes_store_event_shape() {

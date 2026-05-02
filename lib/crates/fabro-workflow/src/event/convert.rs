@@ -1161,8 +1161,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use ::fabro_types::{
-        AuthMethod, EventBody, FailureReason, IdpIdentity, ParallelBranchId, Principal,
-        RunProvenance, StageId, SystemActorKind, fixtures, run_event as fabro_types,
+        EventBody, FailureReason, ParallelBranchId, Principal, RunProvenance, StageId,
+        SystemActorKind, fixtures, run_event as fabro_types,
     };
     use chrono::Utc;
     use fabro_agent::{AgentEvent, SandboxEvent};
@@ -1170,16 +1170,9 @@ mod tests {
 
     use super::*;
     use crate::error::Error;
+    use crate::event::test_support::user_principal;
     use crate::event::{Event, StageScope};
     use crate::outcome::FailureDetail;
-
-    fn user_principal(login: &str) -> Principal {
-        Principal::user(
-            IdpIdentity::new("https://github.com", "12345").unwrap(),
-            login.to_string(),
-            AuthMethod::Github,
-        )
-    }
 
     #[derive(Debug)]
     struct EventTestCause;

@@ -48,7 +48,10 @@ pub use dense::{ServerSettings, UserSettings, WorkflowSettings};
 pub use diff::DiffStats;
 pub use event_envelope::EventEnvelope;
 pub use failure_signature::FailureSignature;
-pub use graph::{AttrValue, Edge, Graph, Node, is_llm_handler_type, shape_to_handler_type};
+pub use graph::{
+    AttrValue, Edge, Graph, KNOWN_HANDLER_TYPES, Node, is_known_handler_type, is_llm_handler_type,
+    shape_to_handler_type,
+};
 pub use interview::{InterviewQuestionRecord, QuestionType};
 pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,

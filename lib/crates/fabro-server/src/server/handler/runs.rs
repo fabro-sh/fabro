@@ -1,4 +1,42 @@
-use super::super::*;
+use std::io::ErrorKind;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use bytes::Bytes;
+use fabro_api::types::{RunManifest, RunStatusResponse, SubmitAnswerRequest};
+use fabro_config::Storage;
+use fabro_interview::AnswerSubmission;
+use fabro_types::{
+    CommandOutputStream, Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance,
+    UserPrincipal, parse_blob_ref,
+};
+use fabro_util::version::FABRO_VERSION;
+use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
+use fabro_workflow::run_status::RunStatus;
+use fabro_workflow::{Error as WorkflowError, operations};
+use tokio::fs;
+use tracing::info;
+
+use super::super::{
+    AppState, ListResponse, MAX_PAGE_OFFSET, PaginationParams, RunExecutionMode,
+    answer_from_request, api_question_from_pending_interview, default_page_limit,
+    delete_run_internal, load_pending_interview, managed_run, parse_run_id_path,
+    reject_if_archived, resolve_interp_string, submit_pending_interview_answer,
+};
+use crate::error::ApiError;
+use crate::principal_middleware::{
+    RequestAuth, RequireCommandLog, RequireRunScoped, RequiredUser, require_user,
+};
+use crate::run_files::list_run_files;
+use crate::run_manifest;
+use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
 
 pub(super) fn manifest_routes() -> Router<Arc<AppState>> {
     Router::new()

@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::str::FromStr;
@@ -72,21 +71,23 @@ use fabro_store::{
 };
 #[cfg(test)]
 use fabro_types::BlockedReason;
+#[cfg(test)]
+use fabro_types::CommandOutputStream;
 use fabro_types::settings::run::RunMode;
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, LogDestination,
 };
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
-    CommandOutputStream, EventBody, InterviewQuestionRecord, Principal, PullRequestRecord,
-    QuestionType, RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
-    RunServerProvenance, ServerSettings, UserPrincipal, parse_blob_ref,
+    EventBody, InterviewQuestionRecord, Principal, PullRequestRecord, QuestionType, RunBlobId,
+    RunControlAction, RunEvent, RunId, ServerSettings,
 };
 use fabro_util::error::{SharedError, collect_causes, render_with_causes};
 use fabro_util::version::FABRO_VERSION;
 use fabro_vault::{Error as VaultError, SecretType, Vault};
 use fabro_workflow::artifact_upload::ArtifactSink;
-use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
+#[cfg(test)]
+use fabro_workflow::command_log::command_log_path;
 use fabro_workflow::event::{self as workflow_event, Emitter};
 use fabro_workflow::handler::HandlerRegistry;
 use fabro_workflow::pipeline::Persisted;
@@ -123,12 +124,11 @@ use crate::github_webhooks::{
 use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{self, AuthMode};
 use crate::principal_middleware::{
-    AuthContextSlot, RequestAuth, RequestAuthContext, RequireCommandLog, RequireRunBlob,
-    RequireRunScoped, RequireStageArtifact, RequiredUser, principal_middleware, require_user,
+    AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunScoped,
+    RequireStageArtifact, RequiredUser, principal_middleware,
 };
 use crate::request_id::{self, RequestId};
-use crate::run_files::{FilesInFlight, list_run_files, new_files_in_flight};
-use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
+use crate::run_files::{FilesInFlight, new_files_in_flight};
 use crate::server_secrets::{LlmClientResult, ServerSecrets};
 use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
 use crate::worker_token::{WorkerTokenKeys, issue_worker_token};

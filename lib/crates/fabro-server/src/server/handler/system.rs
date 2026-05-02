@@ -231,8 +231,7 @@ async fn get_github_repo(
     let settings = state.server_settings();
     let github_settings = &settings.server.integrations.github;
     let base_url = fabro_github::github_api_base_url();
-    let mut client: Option<fabro_http::HttpClient> = None;
-    let token = match github_settings.strategy {
+    let (token, client) = match github_settings.strategy {
         GithubIntegrationStrategy::App => {
             let Some(app_id) = github_settings.app_id.as_ref() else {
                 return ApiError::new(
@@ -279,18 +278,15 @@ async fn get_github_repo(
                 None => format!("https://github.com/organizations/{owner}/settings/installations"),
             };
 
-            if client.is_none() {
-                client = Some(match state.http_client() {
-                    Ok(http) => http,
-                    Err(err) => {
-                        return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
-                            .into_response();
-                    }
-                });
-            }
-            let client_ref = client.as_ref().expect("client initialized above");
+            let client = match state.http_client() {
+                Ok(http) => http,
+                Err(err) => {
+                    return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
+                        .into_response();
+                }
+            };
             let installed =
-                match fabro_github::check_app_installed(client_ref, &jwt, &owner, &name, &base_url)
+                match fabro_github::check_app_installed(&client, &jwt, &owner, &name, &base_url)
                     .await
                 {
                     Ok(installed) => installed,
@@ -318,7 +314,7 @@ async fn get_github_repo(
             }
 
             match fabro_github::create_installation_access_token_with_permissions_and_install_url(
-                client_ref,
+                &client,
                 &jwt,
                 &owner,
                 &name,
@@ -328,7 +324,7 @@ async fn get_github_repo(
             )
             .await
             {
-                Ok(token) => token,
+                Ok(token) => (token, client),
                 Err(err) => {
                     tracing::error!(
                         error = ?err,
@@ -338,31 +334,30 @@ async fn get_github_repo(
                 }
             }
         }
-        GithubIntegrationStrategy::Token => match state.github_credentials(github_settings) {
-            Ok(Some(fabro_github::GitHubCredentials::Token(token))) => token,
-            Ok(Some(_)) => unreachable!("token strategy should not return app credentials"),
-            Ok(None) => {
-                return ApiError::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "GITHUB_TOKEN is not configured",
-                )
-                .into_response();
-            }
-            Err(err) => {
-                return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err).into_response();
-            }
-        },
-    };
-
-    let client = match client {
-        Some(client) => client,
-        None => match state.http_client() {
-            Ok(http) => http,
-            Err(err) => {
-                return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
+        GithubIntegrationStrategy::Token => {
+            let token = match state.github_credentials(github_settings) {
+                Ok(Some(fabro_github::GitHubCredentials::Token(token))) => token,
+                Ok(Some(_)) => unreachable!("token strategy should not return app credentials"),
+                Ok(None) => {
+                    return ApiError::new(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "GITHUB_TOKEN is not configured",
+                    )
                     .into_response();
-            }
-        },
+                }
+                Err(err) => {
+                    return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err).into_response();
+                }
+            };
+            let client = match state.http_client() {
+                Ok(http) => http,
+                Err(err) => {
+                    return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
+                        .into_response();
+                }
+            };
+            (token, client)
+        }
     };
     let repo_response = match client
         .get(format!("{base_url}/repos/{owner}/{name}"))

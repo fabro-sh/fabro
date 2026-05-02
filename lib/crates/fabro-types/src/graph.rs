@@ -77,6 +77,30 @@ pub fn is_llm_handler_type(handler_type: Option<&str>) -> bool {
     )
 }
 
+pub const KNOWN_HANDLER_TYPES: &[&str] = &[
+    "start",
+    "exit",
+    "agent",
+    "agent_loop",
+    "prompt",
+    "one_shot",
+    "human",
+    "conditional",
+    "parallel",
+    "parallel.fan_in",
+    "command",
+    "tool",
+    "stack.manager_loop",
+    "wait",
+];
+
+/// Returns true if the handler type is part of Fabro's built-in handler
+/// vocabulary, including legacy aliases.
+#[must_use]
+pub fn is_known_handler_type(handler_type: &str) -> bool {
+    KNOWN_HANDLER_TYPES.contains(&handler_type)
+}
+
 /// Maps Graphviz shapes to handler type strings (Section 2.8).
 #[must_use]
 pub fn shape_to_handler_type(shape: &str) -> Option<&'static str> {

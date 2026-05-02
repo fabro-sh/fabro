@@ -11,17 +11,10 @@ struct Rule;
 impl Rule {
     fn fix_message() -> String {
         use fabro_graphviz::Fidelity;
-        let modes: Vec<_> = [
-            Fidelity::Full,
-            Fidelity::Truncate,
-            Fidelity::Compact,
-            Fidelity::SummaryLow,
-            Fidelity::SummaryMedium,
-            Fidelity::SummaryHigh,
-        ]
-        .iter()
-        .map(ToString::to_string)
-        .collect();
+        let modes: Vec<_> = Fidelity::variants()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
         format!("Use one of: {}", modes.join(", "))
     }
 }

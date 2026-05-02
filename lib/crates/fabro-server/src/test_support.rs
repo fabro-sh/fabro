@@ -30,8 +30,8 @@ use crate::jwt_auth::{AuthMode, ConfiguredAuth};
 #[cfg(test)]
 use crate::principal_middleware::{AuthContextSlot, RequestAuthContext};
 use crate::server::{
-    self, AppState, AppStateConfig, EnvLookup, ResolvedAppStateSettings, RouterOptions,
-    build_app_state, process_env_var,
+    self, AppState, AppStateConfig, EnvLookup, RegistryFactoryOverride, ResolvedAppStateSettings,
+    RouterOptions, build_app_state, process_env_var,
 };
 use crate::server_secrets::ServerSecrets;
 
@@ -52,18 +52,131 @@ methods = ["dev-token"]
     .expect("default test server settings should resolve")
 }
 
+#[must_use]
+pub struct TestAppStateBuilder {
+    server_settings:           ServerSettings,
+    manifest_run_defaults:     RunLayer,
+    max_concurrent_runs:       usize,
+    registry_factory_override: Option<Box<RegistryFactoryOverride>>,
+    store_bundle:              Option<(Arc<Database>, ArtifactStore)>,
+    vault_path:                Option<PathBuf>,
+    server_env_path:           Option<PathBuf>,
+    server_secret_env:         HashMap<String, String>,
+    env_lookup:                EnvLookup,
+}
+
+impl Default for TestAppStateBuilder {
+    fn default() -> Self {
+        Self {
+            server_settings:           default_test_server_settings(),
+            manifest_run_defaults:     RunLayer::default(),
+            max_concurrent_runs:       5,
+            registry_factory_override: None,
+            store_bundle:              None,
+            vault_path:                None,
+            server_env_path:           None,
+            server_secret_env:         HashMap::new(),
+            env_lookup:                default_env_lookup(),
+        }
+    }
+}
+
+impl TestAppStateBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn runtime_settings(
+        mut self,
+        server_settings: ServerSettings,
+        manifest_run_defaults: RunLayer,
+    ) -> Self {
+        self.server_settings = server_settings;
+        self.manifest_run_defaults = manifest_run_defaults;
+        self
+    }
+
+    pub fn max_concurrent_runs(mut self, max_concurrent_runs: usize) -> Self {
+        self.max_concurrent_runs = max_concurrent_runs;
+        self
+    }
+
+    pub fn registry_factory(
+        mut self,
+        registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        self.registry_factory_override = Some(Box::new(registry_factory_override));
+        self
+    }
+
+    pub fn env_lookup(
+        mut self,
+        env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.env_lookup = Arc::new(env_lookup);
+        self
+    }
+
+    pub fn server_secret_env(mut self, server_secret_env: HashMap<String, String>) -> Self {
+        self.server_secret_env = server_secret_env;
+        self
+    }
+
+    pub fn store_bundle(mut self, store: Arc<Database>, artifact_store: ArtifactStore) -> Self {
+        self.store_bundle = Some((store, artifact_store));
+        self
+    }
+
+    fn server_env_path(mut self, server_env_path: PathBuf) -> Self {
+        self.server_env_path = Some(server_env_path);
+        self
+    }
+
+    fn vault_path(mut self, vault_path: PathBuf) -> Self {
+        self.vault_path = Some(vault_path);
+        self
+    }
+
+    pub fn build(self) -> Arc<AppState> {
+        let (store, artifact_store) = self.store_bundle.unwrap_or_else(test_store_bundle);
+        let vault_path = self.vault_path.unwrap_or_else(test_secret_store_path);
+        let server_env_path = self
+            .server_env_path
+            .unwrap_or_else(|| vault_path.with_file_name("server.env"));
+        build_app_state(AppStateConfig {
+            resolved_settings: resolved_runtime_settings_for_tests(
+                self.server_settings,
+                self.manifest_run_defaults,
+            ),
+            registry_factory_override: self.registry_factory_override,
+            max_concurrent_runs: self.max_concurrent_runs,
+            store,
+            artifact_store,
+            vault_path,
+            server_secrets: load_test_server_secrets(server_env_path, self.server_secret_env),
+            env_lookup: self.env_lookup,
+            github_api_base_url: None,
+            http_client: Some(
+                fabro_http::test_http_client().expect("test HTTP client should build"),
+            ),
+        })
+        .expect("test app state should build")
+    }
+}
+
 pub fn test_app_state() -> Arc<AppState> {
-    test_app_state_with_options(default_test_server_settings(), RunLayer::default(), 5)
+    TestAppStateBuilder::new().build()
 }
 
 pub fn test_app_state_with_registry_factory(
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    test_app_state_with_settings_and_registry_factory(
-        default_test_server_settings(),
-        RunLayer::default(),
-        registry_factory_override,
-    )
+    TestAppStateBuilder::new()
+        .registry_factory(registry_factory_override)
+        .build()
 }
 
 pub fn test_app_state_with_settings_and_registry_factory(
@@ -71,12 +184,10 @@ pub fn test_app_state_with_settings_and_registry_factory(
     manifest_run_defaults: RunLayer,
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    test_app_state_with_options_and_registry_factory(
-        server_settings,
-        manifest_run_defaults,
-        5,
-        registry_factory_override,
-    )
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .registry_factory(registry_factory_override)
+        .build()
 }
 
 pub fn test_app_state_with_options_and_registry_factory(
@@ -85,12 +196,11 @@ pub fn test_app_state_with_options_and_registry_factory(
     max_concurrent_runs: usize,
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    test_app_state_with_runtime_settings_and_options_and_registry_factory(
-        server_settings,
-        manifest_run_defaults,
-        max_concurrent_runs,
-        registry_factory_override,
-    )
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .max_concurrent_runs(max_concurrent_runs)
+        .registry_factory(registry_factory_override)
+        .build()
 }
 
 pub fn test_app_state_with_options(
@@ -98,11 +208,10 @@ pub fn test_app_state_with_options(
     manifest_run_defaults: RunLayer,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
-    test_app_state_with_runtime_settings_and_options(
-        server_settings,
-        manifest_run_defaults,
-        max_concurrent_runs,
-    )
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .max_concurrent_runs(max_concurrent_runs)
+        .build()
 }
 
 pub(crate) fn resolved_runtime_settings_for_tests(
@@ -122,12 +231,10 @@ pub fn test_app_state_with_runtime_settings_and_registry_factory(
     manifest_run_defaults: RunLayer,
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    test_app_state_with_runtime_settings_and_options_and_registry_factory(
-        server_settings,
-        manifest_run_defaults,
-        5,
-        registry_factory_override,
-    )
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .registry_factory(registry_factory_override)
+        .build()
 }
 
 pub fn test_app_state_with_runtime_settings_and_options_and_registry_factory(
@@ -136,27 +243,11 @@ pub fn test_app_state_with_runtime_settings_and_options_and_registry_factory(
     max_concurrent_runs: usize,
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    let (store, artifact_store) = test_store_bundle();
-    let vault_path = test_secret_store_path();
-    let server_env_path = vault_path.with_file_name("server.env");
-    let env_lookup = default_env_lookup();
-    let mut config = AppStateConfig {
-        resolved_settings: resolved_runtime_settings_for_tests(
-            server_settings,
-            manifest_run_defaults,
-        ),
-        registry_factory_override: None,
-        max_concurrent_runs,
-        store,
-        artifact_store,
-        vault_path,
-        server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
-        env_lookup,
-        github_api_base_url: None,
-        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
-    };
-    config.registry_factory_override = Some(Box::new(registry_factory_override));
-    build_app_state(config).expect("test app state should build")
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .max_concurrent_runs(max_concurrent_runs)
+        .registry_factory(registry_factory_override)
+        .build()
 }
 
 pub fn test_app_state_with_runtime_settings_and_options(
@@ -164,13 +255,10 @@ pub fn test_app_state_with_runtime_settings_and_options(
     manifest_run_defaults: RunLayer,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
-    test_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env(
-        server_settings,
-        manifest_run_defaults,
-        max_concurrent_runs,
-        process_env_var,
-        &HashMap::new(),
-    )
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .max_concurrent_runs(max_concurrent_runs)
+        .build()
 }
 
 pub fn test_app_state_with_runtime_settings_and_env_lookup(
@@ -179,13 +267,11 @@ pub fn test_app_state_with_runtime_settings_and_env_lookup(
     max_concurrent_runs: usize,
     env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    test_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env(
-        server_settings,
-        manifest_run_defaults,
-        max_concurrent_runs,
-        env_lookup,
-        &HashMap::new(),
-    )
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .max_concurrent_runs(max_concurrent_runs)
+        .env_lookup(env_lookup)
+        .build()
 }
 
 pub fn test_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env(
@@ -195,26 +281,12 @@ pub fn test_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env
     env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
     server_secret_env: &HashMap<String, String>,
 ) -> Arc<AppState> {
-    let (store, artifact_store) = test_store_bundle();
-    let env_lookup: EnvLookup = Arc::new(env_lookup);
-    let vault_path = test_secret_store_path();
-    let server_env_path = vault_path.with_file_name("server.env");
-    build_app_state(AppStateConfig {
-        resolved_settings: resolved_runtime_settings_for_tests(
-            server_settings,
-            manifest_run_defaults,
-        ),
-        registry_factory_override: None,
-        max_concurrent_runs,
-        store,
-        artifact_store,
-        vault_path,
-        server_secrets: load_test_server_secrets(server_env_path, server_secret_env.clone()),
-        env_lookup,
-        github_api_base_url: None,
-        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
-    })
-    .expect("test app state should build")
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .max_concurrent_runs(max_concurrent_runs)
+        .env_lookup(env_lookup)
+        .server_secret_env(server_secret_env.clone())
+        .build()
 }
 
 pub fn test_app_state_with_env_lookup(
@@ -223,12 +295,11 @@ pub fn test_app_state_with_env_lookup(
     max_concurrent_runs: usize,
     env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    test_app_state_with_runtime_settings_and_env_lookup(
-        server_settings,
-        manifest_run_defaults,
-        max_concurrent_runs,
-        env_lookup,
-    )
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .max_concurrent_runs(max_concurrent_runs)
+        .env_lookup(env_lookup)
+        .build()
 }
 
 pub fn test_app_state_with_env_lookup_and_server_secret_env(
@@ -238,13 +309,12 @@ pub fn test_app_state_with_env_lookup_and_server_secret_env(
     env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
     server_secret_env: &HashMap<String, String>,
 ) -> Arc<AppState> {
-    test_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env(
-        server_settings,
-        manifest_run_defaults,
-        max_concurrent_runs,
-        env_lookup,
-        server_secret_env,
-    )
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .max_concurrent_runs(max_concurrent_runs)
+        .env_lookup(env_lookup)
+        .server_secret_env(server_secret_env.clone())
+        .build()
 }
 
 #[expect(
@@ -268,24 +338,11 @@ pub fn test_app_state_with_runtime_settings_and_session_key(
         )
         .expect("test server env should be writable");
     }
-    let (store, artifact_store) = test_store_bundle();
-    let env_lookup = default_env_lookup();
-    build_app_state(AppStateConfig {
-        resolved_settings: resolved_runtime_settings_for_tests(
-            server_settings,
-            manifest_run_defaults,
-        ),
-        registry_factory_override: None,
-        max_concurrent_runs: 5,
-        store,
-        artifact_store,
-        vault_path,
-        server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
-        env_lookup,
-        github_api_base_url: None,
-        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
-    })
-    .expect("test app state should build")
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .vault_path(vault_path)
+        .server_env_path(server_env_path)
+        .build()
 }
 
 pub fn test_app_state_with_session_key(
@@ -307,13 +364,11 @@ pub fn test_app_state_with_store(
     store: Arc<Database>,
     artifact_store: ArtifactStore,
 ) -> Arc<AppState> {
-    test_app_state_with_store_and_runtime_settings(
-        server_settings,
-        manifest_run_defaults,
-        max_concurrent_runs,
-        store,
-        artifact_store,
-    )
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .max_concurrent_runs(max_concurrent_runs)
+        .store_bundle(store, artifact_store)
+        .build()
 }
 
 pub fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
@@ -335,24 +390,11 @@ pub fn test_app_state_with_store_and_runtime_settings(
     store: Arc<Database>,
     artifact_store: ArtifactStore,
 ) -> Arc<AppState> {
-    let vault_path = test_secret_store_path();
-    let server_env_path = vault_path.with_file_name("server.env");
-    build_app_state(AppStateConfig {
-        resolved_settings: resolved_runtime_settings_for_tests(
-            server_settings,
-            manifest_run_defaults,
-        ),
-        registry_factory_override: None,
-        max_concurrent_runs,
-        store,
-        artifact_store,
-        vault_path,
-        server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
-        env_lookup: default_env_lookup(),
-        github_api_base_url: None,
-        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
-    })
-    .expect("test app state should build")
+    TestAppStateBuilder::new()
+        .runtime_settings(server_settings, manifest_run_defaults)
+        .max_concurrent_runs(max_concurrent_runs)
+        .store_bundle(store, artifact_store)
+        .build()
 }
 
 pub(crate) fn default_env_lookup() -> EnvLookup {

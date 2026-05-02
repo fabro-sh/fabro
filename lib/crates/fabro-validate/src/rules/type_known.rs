@@ -1,4 +1,4 @@
-use fabro_graphviz::graph::Graph;
+use fabro_graphviz::graph::{Graph, KNOWN_HANDLER_TYPES, is_known_handler_type};
 
 use crate::{Diagnostic, LintRule, Severity};
 
@@ -7,23 +7,6 @@ pub(super) fn rule() -> Box<dyn LintRule> {
 }
 
 struct Rule;
-
-const KNOWN_HANDLER_TYPES: &[&str] = &[
-    "start",
-    "exit",
-    "agent",
-    "agent_loop", // legacy alias
-    "prompt",
-    "one_shot", // legacy alias
-    "human",
-    "conditional",
-    "parallel",
-    "parallel.fan_in",
-    "command",
-    "tool",
-    "stack.manager_loop",
-    "wait",
-];
 
 impl LintRule for Rule {
     fn name(&self) -> &'static str {
@@ -34,7 +17,7 @@ impl LintRule for Rule {
         let mut diagnostics = Vec::new();
         for node in graph.nodes.values() {
             if let Some(node_type) = node.node_type() {
-                if !KNOWN_HANDLER_TYPES.contains(&node_type) {
+                if !is_known_handler_type(node_type) {
                     diagnostics.push(Diagnostic {
                         rule:     self.name().to_string(),
                         severity: Severity::Warning,

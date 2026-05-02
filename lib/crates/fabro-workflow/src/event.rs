@@ -5,6 +5,8 @@ mod names;
 mod redaction;
 mod sink;
 mod stored_fields;
+#[cfg(test)]
+mod test_support;
 
 pub use fabro_types::{EventBody, RunNoticeLevel};
 

@@ -1,8 +1,8 @@
-use strum::{Display, EnumString};
+use strum::{Display, EnumString, VariantArray};
 
 /// Fidelity mode controlling how much prior context is provided to LLM
 /// sessions.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display, EnumString)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display, EnumString, VariantArray)]
 #[strum(serialize_all = "lowercase")]
 pub enum Fidelity {
     /// Complete context, no summarization — sessions share a thread.
@@ -24,6 +24,12 @@ pub enum Fidelity {
 }
 
 impl Fidelity {
+    /// All supported fidelity modes in display order.
+    #[must_use]
+    pub fn variants() -> &'static [Self] {
+        Self::VARIANTS
+    }
+
     /// Degrade full fidelity to summary:high (used on checkpoint resume).
     #[must_use]
     pub fn degraded(self) -> Self {
@@ -40,18 +46,10 @@ mod tests {
 
     #[test]
     fn fidelity_display_roundtrips() {
-        let modes = [
-            Fidelity::Full,
-            Fidelity::Truncate,
-            Fidelity::Compact,
-            Fidelity::SummaryLow,
-            Fidelity::SummaryMedium,
-            Fidelity::SummaryHigh,
-        ];
-        for mode in modes {
+        for mode in Fidelity::variants() {
             let s = mode.to_string();
             let parsed: Fidelity = s.parse().unwrap();
-            assert_eq!(parsed, mode);
+            assert_eq!(parsed, *mode);
         }
     }
 
