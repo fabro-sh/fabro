@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::{
-    ActorRef, BilledTokenCounts, BlockedReason, CommandTermination, FailureReason, ForkSourceRef,
-    GitContext, ParallelBranchId, PullRequestRecord, RunBlobId, RunControlAction, RunEvent, RunId,
+    BilledTokenCounts, BlockedReason, CommandTermination, FailureReason, ForkSourceRef, GitContext,
+    ParallelBranchId, Principal, PullRequestRecord, RunBlobId, RunControlAction, RunEvent, RunId,
     RunProvenance, StageId, StageOutcome, SuccessReason, run_event as fabro_types,
 };
 use anyhow::{Context, Result};
@@ -91,15 +91,15 @@ pub enum Event {
     RunRemoving,
     RunCancelRequested {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        actor: Option<ActorRef>,
+        actor: Option<Principal>,
     },
     RunPauseRequested {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        actor: Option<ActorRef>,
+        actor: Option<Principal>,
     },
     RunUnpauseRequested {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        actor: Option<ActorRef>,
+        actor: Option<Principal>,
     },
     RunPaused,
     RunUnpaused,
@@ -111,11 +111,11 @@ pub enum Event {
     },
     RunArchived {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        actor: Option<ActorRef>,
+        actor: Option<Principal>,
     },
     RunUnarchived {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        actor: Option<ActorRef>,
+        actor: Option<Principal>,
     },
     WorkflowRunCompleted {
         duration_ms:          u64,
@@ -275,18 +275,24 @@ pub enum Event {
         context_display: Option<String>,
     },
     InterviewCompleted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:       Option<Principal>,
         question_id: String,
         question:    String,
         answer:      String,
         duration_ms: u64,
     },
     InterviewTimeout {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:       Option<Principal>,
         question_id: String,
         question:    String,
         stage:       String,
         duration_ms: u64,
     },
     InterviewInterrupted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:       Option<Principal>,
         question_id: String,
         question:    String,
         stage:       String,
@@ -1434,7 +1440,7 @@ struct StoredEventFields {
     parallel_group_id:  Option<StageId>,
     parallel_branch_id: Option<ParallelBranchId>,
     tool_call_id:       Option<String>,
-    actor:              Option<ActorRef>,
+    actor:              Option<Principal>,
 }
 
 fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> Option<String> {
@@ -1508,7 +1514,8 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
         | Event::RunPauseRequested { actor }
         | Event::RunUnpauseRequested { actor }
         | Event::RunArchived { actor }
-        | Event::RunUnarchived { actor, .. } => StoredEventFields {
+        | Event::RunUnarchived { actor, .. }
+        | Event::InterviewCompleted { actor, .. } => StoredEventFields {
             actor: actor.clone(),
             ..StoredEventFields::default()
         },
@@ -1557,7 +1564,11 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
             let node_label = default_node_label(node_id.as_ref(), None);
             let stage_id = Some(StageId::new(stage.clone(), *visit));
             let tool_call_id = agent_tool_call_id(agent_event).map(str::to_string);
-            let actor = agent_actor_for_event(agent_event, session_id.as_deref());
+            let actor = agent_actor_for_event(
+                agent_event,
+                session_id.as_deref(),
+                parent_session_id.as_deref(),
+            );
             StoredEventFields {
                 session_id: session_id.clone(),
                 parent_session_id: parent_session_id.clone(),
@@ -1594,21 +1605,20 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
         }
         Event::Prompt { stage, .. }
         | Event::InterviewStarted { stage, .. }
-        | Event::InterviewTimeout { stage, .. }
-        | Event::InterviewInterrupted { stage, .. }
         | Event::Failover { stage, .. } => node_stored_fields(Some(stage.clone())),
+        Event::InterviewTimeout { actor, stage, .. }
+        | Event::InterviewInterrupted { actor, stage, .. } => {
+            let mut fields = node_stored_fields(Some(stage.clone()));
+            fields.actor.clone_from(actor);
+            fields
+        }
         Event::StallWatchdogTimeout { node, .. } => node_stored_fields(Some(node.clone())),
         _ => StoredEventFields::default(),
     }
 }
 
-fn actor_from_provenance(provenance: &RunProvenance) -> Option<ActorRef> {
-    provenance
-        .subject
-        .as_ref()?
-        .login
-        .clone()
-        .map(ActorRef::user)
+fn actor_from_provenance(provenance: &RunProvenance) -> Option<Principal> {
+    provenance.subject.clone()
 }
 
 fn agent_tool_call_id(event: &AgentEvent) -> Option<&str> {
@@ -1619,10 +1629,15 @@ fn agent_tool_call_id(event: &AgentEvent) -> Option<&str> {
     }
 }
 
-fn agent_actor_for_event(event: &AgentEvent, session_id: Option<&str>) -> Option<ActorRef> {
+fn agent_actor_for_event(
+    event: &AgentEvent,
+    session_id: Option<&str>,
+    parent_session_id: Option<&str>,
+) -> Option<Principal> {
     match event {
-        AgentEvent::AssistantMessage { model, .. } => Some(ActorRef::agent(
+        AgentEvent::AssistantMessage { model, .. } => Some(Principal::agent(
             session_id.map(str::to_string),
+            parent_session_id.map(str::to_string),
             Some(model.clone()),
         )),
         _ => None,
@@ -1731,13 +1746,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             target_node_id:            target_node_id.clone(),
             target_visit:              *target_visit,
         }),
-        Event::RunArchived { actor } => EventBody::RunArchived(fabro_types::RunArchivedProps {
-            actor: actor.clone(),
-        }),
-        Event::RunUnarchived { actor } => {
-            EventBody::RunUnarchived(fabro_types::RunUnarchivedProps {
-                actor: actor.clone(),
-            })
+        Event::RunArchived { .. } => {
+            EventBody::RunArchived(fabro_types::RunArchivedProps::default())
+        }
+        Event::RunUnarchived { .. } => {
+            EventBody::RunUnarchived(fabro_types::RunUnarchivedProps::default())
         }
         Event::WorkflowRunCompleted {
             duration_ms,
@@ -1962,6 +1975,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             context_display: context_display.clone(),
         }),
         Event::InterviewCompleted {
+            actor: _,
             question_id,
             question,
             answer,
@@ -1973,6 +1987,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             duration_ms: *duration_ms,
         }),
         Event::InterviewTimeout {
+            actor: _,
             question_id,
             question,
             stage,
@@ -1984,6 +1999,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             duration_ms: *duration_ms,
         }),
         Event::InterviewInterrupted {
+            actor: _,
             question_id,
             question,
             stage,
@@ -3172,9 +3188,17 @@ impl Emitter {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use ::fabro_types::{ActorKind, fixtures};
+    use ::fabro_types::{AuthMethod, IdpIdentity, fixtures};
 
     use super::*;
+
+    fn user_principal(login: &str) -> Principal {
+        Principal::user(
+            IdpIdentity::new("https://github.com", "12345").unwrap(),
+            login.to_string(),
+            AuthMethod::Github,
+        )
+    }
 
     #[test]
     fn event_emitter_new_has_no_listeners() {
@@ -3483,7 +3507,7 @@ mod tests {
         let second_events = Arc::clone(&second);
         let sink = RunEventSink::map(
             |mut event| {
-                event.actor = Some(ActorRef::user("alice".to_string()));
+                event.actor = Some(user_principal("alice"));
                 event
             },
             RunEventSink::fanout(vec![
@@ -3511,8 +3535,8 @@ mod tests {
         let second = second.lock().await;
         assert_eq!(first.len(), 1);
         assert_eq!(second.len(), 1);
-        assert_eq!(first[0].actor, Some(ActorRef::user("alice".to_string())));
-        assert_eq!(second[0].actor, Some(ActorRef::user("alice".to_string())));
+        assert_eq!(first[0].actor, Some(user_principal("alice")));
+        assert_eq!(second[0].actor, Some(user_principal("alice")));
     }
 
     #[tokio::test]
@@ -3767,11 +3791,7 @@ mod tests {
 
     #[test]
     fn control_action_events_carry_actor_in_envelope() {
-        let actor = ActorRef {
-            kind:    ActorKind::User,
-            id:      Some("alice".to_string()),
-            display: Some("alice".to_string()),
-        };
+        let actor = user_principal("alice");
 
         let cancel = to_run_event(&fixtures::RUN_1, &Event::RunCancelRequested {
             actor: Some(actor.clone()),
@@ -3804,11 +3824,7 @@ mod tests {
 
     #[test]
     fn run_archived_round_trips_actor_in_envelope() {
-        let actor = ActorRef {
-            kind:    ActorKind::User,
-            id:      Some("alice".to_string()),
-            display: Some("alice".to_string()),
-        };
+        let actor = user_principal("alice");
 
         let archived = to_run_event(&fixtures::RUN_1, &Event::RunArchived {
             actor: Some(actor.clone()),
@@ -3820,11 +3836,7 @@ mod tests {
 
     #[test]
     fn run_unarchived_round_trips_actor_in_envelope() {
-        let actor = ActorRef {
-            kind:    ActorKind::User,
-            id:      Some("bob".to_string()),
-            display: Some("bob".to_string()),
-        };
+        let actor = user_principal("bob");
 
         let unarchived = to_run_event(&fixtures::RUN_1, &Event::RunUnarchived {
             actor: Some(actor.clone()),
@@ -3832,9 +3844,7 @@ mod tests {
         assert_eq!(unarchived.event_name(), "run.unarchived");
         assert_eq!(unarchived.actor.as_ref().expect("actor set"), &actor);
         match &unarchived.body {
-            EventBody::RunUnarchived(props) => {
-                assert_eq!(props.actor.as_ref().expect("actor set"), &actor);
-            }
+            EventBody::RunUnarchived(_) => {}
             other => panic!("expected RunUnarchived body, got {other:?}"),
         }
     }
@@ -3956,24 +3966,24 @@ mod tests {
             parent_session_id: None,
         });
         let actor = stored.actor.as_ref().expect("actor set");
-        assert_eq!(actor.kind, ActorKind::Agent);
-        assert_eq!(actor.id.as_deref(), Some("ses_agent"));
-        assert_eq!(actor.display.as_deref(), Some("claude-sonnet"));
+        assert_eq!(
+            actor,
+            &Principal::agent(
+                Some("ses_agent".to_string()),
+                None,
+                Some("claude-sonnet".to_string()),
+            )
+        );
     }
 
     #[test]
     fn run_created_populates_user_actor_from_provenance() {
-        use ::fabro_types::{
-            Graph, RunAuthMethod, RunSubjectProvenance, WorkflowSettings, fixtures,
-        };
+        use ::fabro_types::{Graph, WorkflowSettings, fixtures};
 
         let provenance = RunProvenance {
             server:  None,
             client:  None,
-            subject: Some(RunSubjectProvenance {
-                login:       Some("alice".to_string()),
-                auth_method: RunAuthMethod::Github,
-            }),
+            subject: Some(user_principal("alice")),
         };
 
         let stored = to_run_event(&fixtures::RUN_1, &Event::RunCreated {
@@ -3994,8 +4004,6 @@ mod tests {
             in_place:         false,
         });
         let actor = stored.actor.as_ref().expect("actor set");
-        assert_eq!(actor.kind, ActorKind::User);
-        assert_eq!(actor.id.as_deref(), Some("alice"));
-        assert_eq!(actor.display.as_deref(), Some("alice"));
+        assert_eq!(actor, &user_principal("alice"));
     }
 }

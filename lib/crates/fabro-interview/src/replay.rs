@@ -1,13 +1,14 @@
 use std::sync::Mutex;
 
 use async_trait::async_trait;
+use fabro_types::{Principal, SystemActorKind};
 
-use crate::{Answer, Interviewer, Question};
+use crate::{Answer, AnswerSubmission, Interviewer, Question};
 
 /// Replays recorded answers in sequence. When recordings are exhausted,
 /// returns `Answer::interrupted()`.
 pub struct ReplayInterviewer {
-    answers: Mutex<Vec<Answer>>,
+    submissions: Mutex<Vec<AnswerSubmission>>,
 }
 
 impl ReplayInterviewer {
@@ -15,21 +16,28 @@ impl ReplayInterviewer {
     /// question-answer pairs. Only the answers are retained for replay.
     #[must_use]
     pub fn new(recordings: Vec<(Question, Answer)>) -> Self {
-        let answers: Vec<Answer> = recordings.into_iter().map(|(_, a)| a).collect();
+        let actor = Principal::system(SystemActorKind::Engine);
+        let submissions: Vec<AnswerSubmission> = recordings
+            .into_iter()
+            .map(|(_, answer)| AnswerSubmission::new(answer, actor.clone()))
+            .collect();
         Self {
-            answers: Mutex::new(answers),
+            submissions: Mutex::new(submissions),
         }
     }
 }
 
 #[async_trait]
 impl Interviewer for ReplayInterviewer {
-    async fn ask(&self, _question: Question) -> Answer {
-        let mut answers = self.answers.lock().expect("answers lock poisoned");
-        if answers.is_empty() {
-            Answer::interrupted()
+    async fn ask(&self, _question: Question) -> AnswerSubmission {
+        let mut submissions = self.submissions.lock().expect("answers lock poisoned");
+        if submissions.is_empty() {
+            AnswerSubmission::new(
+                Answer::interrupted(),
+                Principal::system(SystemActorKind::Engine),
+            )
         } else {
-            answers.remove(0)
+            submissions.remove(0)
         }
     }
 }
@@ -58,12 +66,14 @@ mod tests {
 
         let a1 = replayer
             .ask(Question::new("anything", QuestionType::YesNo))
-            .await;
+            .await
+            .answer;
         assert_eq!(a1.value, AnswerValue::Yes);
 
         let a2 = replayer
             .ask(Question::new("anything", QuestionType::Freeform))
-            .await;
+            .await
+            .answer;
         assert_eq!(a2.value, AnswerValue::Text("Alice".to_string()));
     }
 
@@ -78,17 +88,20 @@ mod tests {
 
         let a1 = replayer
             .ask(Question::new("first", QuestionType::YesNo))
-            .await;
+            .await
+            .answer;
         assert_eq!(a1.value, AnswerValue::Yes);
 
         let a2 = replayer
             .ask(Question::new("second", QuestionType::YesNo))
-            .await;
+            .await
+            .answer;
         assert_eq!(a2.value, AnswerValue::Interrupted);
 
         let a3 = replayer
             .ask(Question::new("third", QuestionType::YesNo))
-            .await;
+            .await
+            .answer;
         assert_eq!(a3.value, AnswerValue::Interrupted);
     }
 }

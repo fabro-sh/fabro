@@ -18,8 +18,6 @@ base.ts
 common.ts
 configuration.ts
 index.ts
-models/actor-kind.ts
-models/actor-ref.ts
 models/agent-permissions.ts
 models/aggregate-billing-totals.ts
 models/aggregate-billing.ts
@@ -33,6 +31,7 @@ models/artifact-entry.ts
 models/artifact-list-response.ts
 models/artifacts-settings.ts
 models/assistant-stage-turn.ts
+models/auth-method.ts
 models/billed-token-counts.ts
 models/billing-by-model.ts
 models/billing-stage-ref.ts
@@ -99,6 +98,7 @@ models/health-response.ts
 models/history-entry.ts
 models/hook-definition.ts
 models/hook-event.ts
+models/idp-identity.ts
 models/index.ts
 models/install-finish-response.ts
 models/install-github-app-manifest-input.ts
@@ -185,6 +185,14 @@ models/preflight-response.ts
 models/preflight-workflow-summary.ts
 models/preview-url-request.ts
 models/preview-url-response.ts
+models/principal-agent.ts
+models/principal-anonymous.ts
+models/principal-slack.ts
+models/principal-system.ts
+models/principal-user.ts
+models/principal-webhook.ts
+models/principal-worker.ts
+models/principal.ts
 models/project-namespace.ts
 models/provider.ts
 models/prune-run-entry.ts
@@ -293,6 +301,7 @@ models/stage-turn.ts
 models/start-run-request.ts
 models/submit-answer-request.ts
 models/success-reason.ts
+models/system-actor-kind.ts
 models/system-features.ts
 models/system-info-response.ts
 models/system-run-counts.ts

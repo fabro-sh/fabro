@@ -1,5 +1,5 @@
 use chrono::{Duration as ChronoDuration, Utc};
-use fabro_types::RunAuthMethod;
+use fabro_types::AuthMethod;
 use hkdf::Hkdf;
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use sha2::Sha256;
@@ -50,7 +50,7 @@ struct TestJwtClaims {
     email:       String,
     avatar_url:  String,
     user_url:    String,
-    auth_method: RunAuthMethod,
+    auth_method: AuthMethod,
 }
 
 pub(crate) fn issue_test_github_jwt(issuer: &str) -> String {
@@ -103,7 +103,7 @@ fn issue_github_jwt(
         email: subject.email,
         avatar_url: subject.avatar_url,
         user_url: subject.user_url,
-        auth_method: RunAuthMethod::Github,
+        auth_method: AuthMethod::Github,
     };
     jsonwebtoken::encode(
         &Header::new(Algorithm::HS256),

@@ -3,9 +3,8 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_interview::Interviewer;
-use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{
-    build_router, create_app_state_with_runtime_settings_and_registry_factory, spawn_scheduler,
+    create_app_state_with_runtime_settings_and_registry_factory, spawn_scheduler,
 };
 use fabro_workflow::handler::HandlerRegistry;
 use fabro_workflow::handler::agent::AgentHandler;
@@ -126,7 +125,7 @@ async fn full_http_lifecycle_approve_and_complete() {
         gate_registry,
     );
     spawn_scheduler(Arc::clone(&state));
-    let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(Arc::clone(&state));
 
     // 1. Create run
     let req = Request::builder()
@@ -214,7 +213,7 @@ async fn full_http_lifecycle_cancel() {
         gate_registry,
     );
     spawn_scheduler(Arc::clone(&state));
-    let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(Arc::clone(&state));
 
     // Create and start a run that will block at the human gate
     let req = Request::builder()
@@ -285,7 +284,7 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
         gate_registry,
     );
     spawn_scheduler(Arc::clone(&state));
-    let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(Arc::clone(&state));
 
     let req = Request::builder()
         .method("POST")

@@ -3,12 +3,12 @@ use std::io::IsTerminal;
 use async_trait::async_trait;
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
-use fabro_types::{InterviewOption, QuestionType};
+use fabro_types::{InterviewOption, Principal, QuestionType};
 use fabro_util::terminal::Styles;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::task;
 
-use crate::{Answer, AnswerValue, Interviewer, Question};
+use crate::{Answer, AnswerSubmission, AnswerValue, Interviewer, Question};
 
 enum PromptRead {
     Line(String),
@@ -20,12 +20,13 @@ enum PromptRead {
 /// 6.4.
 pub struct ConsoleInterviewer {
     styles: &'static Styles,
+    actor:  Principal,
 }
 
 impl ConsoleInterviewer {
     #[must_use]
-    pub fn new(styles: &'static Styles) -> Self {
-        Self { styles }
+    pub fn new(styles: &'static Styles, actor: Principal) -> Self {
+        Self { styles, actor }
     }
 }
 
@@ -222,7 +223,7 @@ impl Interviewer for ConsoleInterviewer {
         clippy::print_stderr,
         reason = "Interactive questions and options belong on stderr, not captured stdout."
     )]
-    async fn ask(&self, question: Question) -> Answer {
+    async fn ask(&self, question: Question) -> AnswerSubmission {
         // If stdin is a TTY, use dialoguer for interactive arrow-key navigation.
         // Otherwise, fall back to the line-based reader for piped input.
         #[expect(
@@ -237,7 +238,7 @@ impl Interviewer for ConsoleInterviewer {
                 eprint!("{rendered}");
             }
             let q = question;
-            return task::spawn_blocking(move || match q.question_type {
+            let answer = task::spawn_blocking(move || match q.question_type {
                 QuestionType::MultipleChoice => ask_select_interactive(&q),
                 QuestionType::MultiSelect => ask_multi_select_interactive(&q),
                 QuestionType::YesNo | QuestionType::Confirmation => ask_confirm_interactive(&q),
@@ -245,13 +246,14 @@ impl Interviewer for ConsoleInterviewer {
             })
             .await
             .unwrap_or_else(|_| Answer::interrupted());
+            return AnswerSubmission::new(answer, self.actor.clone());
         }
 
         // Non-TTY fallback: line-based stdin reading
         let s = self.styles;
         eprintln!("{} {}", s.bold_cyan.apply_to("?"), question.text);
 
-        match question.question_type {
+        let answer = match question.question_type {
             QuestionType::MultipleChoice | QuestionType::MultiSelect => {
                 for (i, opt) in question.options.iter().enumerate() {
                     eprintln!(
@@ -272,7 +274,8 @@ impl Interviewer for ConsoleInterviewer {
                 parse_non_tty_confirm_response(read_line("[Y/N]: ").await)
             }
             QuestionType::Freeform => parse_non_tty_freeform_response(read_line("> ").await),
-        }
+        };
+        AnswerSubmission::new(answer, self.actor.clone())
     }
 
     #[allow(

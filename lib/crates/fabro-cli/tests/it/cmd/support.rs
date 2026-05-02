@@ -1468,9 +1468,8 @@ async fn append_run_event(
         "event": event_name,
         "properties": properties,
         "actor": {
-            "kind": "system",
-            "id": "worker",
-            "display": "system:worker",
+            "kind": "worker",
+            "run_id": run_id,
         },
     });
     if let Some(node_id) = node_id {

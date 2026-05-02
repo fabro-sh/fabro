@@ -66,8 +66,9 @@ fn run_event_round_trips_agent_tool_started() {
         "tool_call_id": "call_1",
         "actor": {
             "kind": "agent",
-            "id": "ses_child",
-            "display": "claude-sonnet"
+            "session_id": "ses_child",
+            "parent_session_id": "ses_parent",
+            "model": "claude-sonnet"
         },
         "properties": {
             "tool_name": "Bash",

@@ -15,7 +15,7 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { ActorRef } from './actor-ref';
+import type { Principal } from './principal';
 
 /**
  * Internal RunEvent-compatible JSON payload. The server validates this body by deserializing into the typed RunEvent struct. 
@@ -46,7 +46,7 @@ export interface RunEvent {
      * Stable identifier for a tool call, present on agent.tool.* events and other durable events that directly describe the same tool call. 
      */
     'tool_call_id'?: string | null;
-    'actor'?: ActorRef | null;
+    'actor'?: Principal | null;
     /**
      * Event type discriminator.
      */

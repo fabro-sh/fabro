@@ -5,7 +5,7 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::middleware::Next;
 use axum::response::Response;
 use chrono::{Duration, Utc};
-use fabro_types::{IdpIdentity, RunAuthMethod};
+use fabro_types::{AuthMethod, IdpIdentity};
 use fabro_util::dev_token::validate_dev_token_format;
 use tracing::trace;
 
@@ -35,23 +35,18 @@ pub(crate) async fn auth_translation_middleware(
     mut req: Request,
     next: Next,
 ) -> Response {
-    let translated = match req
+    let AuthMode::Enabled(config) = req
         .extensions()
         .get::<AuthMode>()
-        .expect("AuthMode extension must be added to the router")
-    {
-        AuthMode::Disabled => return next.run(req).await,
-        AuthMode::Enabled(config) => {
-            if let Some(auth_header) = req.headers().get(header::AUTHORIZATION) {
-                auth_header
-                    .to_str()
-                    .ok()
-                    .and_then(|value| value.strip_prefix("Bearer "))
-                    .and_then(|token| translate_bearer_token(token, config))
-            } else {
-                translate_session_cookie(req.headers(), state.as_ref(), config)
-            }
-        }
+        .expect("AuthMode extension must be added to the router");
+    let translated = if let Some(auth_header) = req.headers().get(header::AUTHORIZATION) {
+        auth_header
+            .to_str()
+            .ok()
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .and_then(|token| translate_bearer_token(token, config))
+    } else {
+        translate_session_cookie(req.headers(), state.as_ref(), config)
     };
 
     if let Some(token) = translated {
@@ -85,7 +80,7 @@ fn translate_bearer_token(token: &str, config: &ConfiguredAuth) -> Option<String
             email:       "dev@fabro.local".to_string(),
             avatar_url:  String::new(),
             user_url:    String::new(),
-            auth_method: RunAuthMethod::DevToken,
+            auth_method: AuthMethod::DevToken,
         },
         Duration::minutes(ACCESS_TOKEN_TTL_MINUTES),
     ))
@@ -131,7 +126,7 @@ fn session_ttl(session: &SessionCookie) -> Option<Duration> {
 }
 
 fn legacy_dev_identity(session: &SessionCookie) -> Option<IdpIdentity> {
-    (session.auth_method == RunAuthMethod::DevToken).then(dev_identity)
+    (session.auth_method == AuthMethod::DevToken).then(dev_identity)
 }
 
 fn dev_identity() -> IdpIdentity {
@@ -155,7 +150,7 @@ mod tests {
     use cookie::{Cookie, CookieJar};
     use fabro_config::{RunLayer, ServerSettingsBuilder};
     use fabro_types::settings::ServerAuthMethod;
-    use fabro_types::{IdpIdentity, RunAuthMethod};
+    use fabro_types::{AuthMethod, IdpIdentity};
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -260,7 +255,7 @@ methods = ["dev-token"]
         SessionCookie {
             v:           2,
             login:       "octocat".to_string(),
-            auth_method: RunAuthMethod::Github,
+            auth_method: AuthMethod::Github,
             identity:    Some(IdpIdentity::new("https://github.com", "12345").unwrap()),
             name:        "The Octocat".to_string(),
             email:       "octocat@example.com".to_string(),
@@ -275,7 +270,7 @@ methods = ["dev-token"]
         SessionCookie {
             v: 2,
             login: "dev".to_string(),
-            auth_method: RunAuthMethod::DevToken,
+            auth_method: AuthMethod::DevToken,
             identity,
             name: "Development User".to_string(),
             email: "dev@localhost".to_string(),
@@ -297,7 +292,7 @@ methods = ["dev-token"]
                 email:       "octocat@example.com".to_string(),
                 avatar_url:  "https://example.com/octocat.png".to_string(),
                 user_url:    "https://github.com/octocat".to_string(),
-                auth_method: RunAuthMethod::Github,
+                auth_method: AuthMethod::Github,
             },
             chrono::Duration::minutes(10),
         )
@@ -379,7 +374,7 @@ methods = ["dev-token"]
         assert_eq!(claims.email, "dev@fabro.local");
         assert_eq!(claims.idp_issuer, "fabro:dev");
         assert_eq!(claims.idp_subject, "dev");
-        assert_eq!(claims.auth_method, RunAuthMethod::DevToken);
+        assert_eq!(claims.auth_method, AuthMethod::DevToken);
     }
 
     #[tokio::test]
@@ -410,7 +405,7 @@ methods = ["dev-token"]
         assert_eq!(claims.idp_subject, "12345");
         assert_eq!(claims.avatar_url, "https://example.com/octocat.png");
         assert_eq!(claims.user_url, "https://github.com/octocat");
-        assert_eq!(claims.auth_method, RunAuthMethod::Github);
+        assert_eq!(claims.auth_method, AuthMethod::Github);
     }
 
     #[tokio::test]
@@ -436,7 +431,7 @@ methods = ["dev-token"]
         let claims = auth::verify(&signing_key(), "https://fabro.example", token).unwrap();
         assert_eq!(claims.idp_issuer, "fabro:dev");
         assert_eq!(claims.idp_subject, "dev");
-        assert_eq!(claims.auth_method, RunAuthMethod::DevToken);
+        assert_eq!(claims.auth_method, AuthMethod::DevToken);
     }
 
     #[tokio::test]
@@ -538,7 +533,7 @@ methods = ["dev-token"]
             .expect("authorization should be minted despite demo header");
         let claims = auth::verify(&signing_key(), "https://fabro.example", token).unwrap();
         assert_eq!(claims.login, "octocat");
-        assert_eq!(claims.auth_method, RunAuthMethod::Github);
+        assert_eq!(claims.auth_method, AuthMethod::Github);
         assert_eq!(json["demo"], "1");
     }
 

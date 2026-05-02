@@ -41,6 +41,12 @@ Each serialized `RunEvent` uses this canonical envelope:
   "parent_session_id": "ses_parent",
   "node_id": "code",
   "node_label": "Code",
+  "actor": {
+    "kind": "agent",
+    "session_id": "ses_child",
+    "parent_session_id": "ses_parent",
+    "model": "gpt-5.2"
+  },
   "properties": {
     "tool_name": "read_file",
     "tool_call_id": "call_1",
@@ -66,6 +72,7 @@ Optional top-level fields:
 | `parent_session_id` | Forwarded child-session events |
 | `node_id` | Events tied to a graph node or branch |
 | `node_label` | Display label for `node_id`; omitted when not applicable |
+| `actor` | The principal responsible for the event |
 
 Everything else lives inside `properties`.
 
@@ -73,6 +80,8 @@ Important rules:
 
 - Optional envelope fields are omitted, not serialized as `null`.
 - Event-specific fields do not get flattened into the top level.
+- Actor identity lives only in top-level `actor: Principal`; never duplicate it in event-specific properties.
+- User actors must carry canonical IdP identity through `Principal::User { identity, login, auth_method }`, not a login-only string.
 - `EventPayload` validation requires `id`, `ts`, `run_id`, and `event`.
 
 ## Naming

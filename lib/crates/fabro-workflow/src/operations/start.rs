@@ -405,7 +405,7 @@ impl RunSession {
 
         let interviewer: Arc<dyn Interviewer> = if resolved.execution.approval == ApprovalMode::Auto
         {
-            Arc::new(AutoApproveInterviewer)
+            Arc::new(AutoApproveInterviewer::engine())
         } else {
             services.interviewer
         };
@@ -1107,7 +1107,7 @@ mod tests {
             run_id: fixtures::RUN_1,
             cancel_token: None,
             emitter,
-            interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
+            interviewer: Arc::new(fabro_interview::AutoApproveInterviewer::engine()),
             run_store: store.open_run(&fixtures::RUN_1).await.unwrap().into(),
             event_sink: RunEventSink::store(store.open_run(&fixtures::RUN_1).await.unwrap()),
             artifact_sink: None,

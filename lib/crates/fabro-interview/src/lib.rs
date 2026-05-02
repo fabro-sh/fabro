@@ -10,7 +10,7 @@ mod replay;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use fabro_types::{InterviewOption, QuestionType};
+use fabro_types::{InterviewOption, Principal, QuestionType, SystemActorKind};
 use serde::{Deserialize, Serialize};
 use tokio::time;
 
@@ -152,10 +152,35 @@ impl Answer {
     }
 }
 
+/// An answer plus the principal that supplied it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnswerSubmission {
+    pub answer: Answer,
+    pub actor:  Principal,
+}
+
+impl AnswerSubmission {
+    #[must_use]
+    pub fn new(answer: Answer, actor: Principal) -> Self {
+        Self { answer, actor }
+    }
+
+    #[must_use]
+    pub fn system(answer: Answer, system_kind: SystemActorKind) -> Self {
+        Self {
+            answer,
+            actor: Principal::system(system_kind),
+        }
+    }
+}
+
 /// Apply timeout enforcement to an interviewer ask call.
 /// Per spec 6.5: if `timeout_seconds` is set, returns default answer or
 /// `Answer::timeout()`.
-pub async fn ask_with_timeout(interviewer: &dyn Interviewer, question: Question) -> Answer {
+pub async fn ask_with_timeout(
+    interviewer: &dyn Interviewer,
+    question: Question,
+) -> AnswerSubmission {
     let timeout_secs = question.timeout_seconds;
     let default_answer = question.default.clone();
 
@@ -163,7 +188,10 @@ pub async fn ask_with_timeout(interviewer: &dyn Interviewer, question: Question)
         let duration = std::time::Duration::from_secs_f64(secs);
         match time::timeout(duration, interviewer.ask(question)).await {
             Ok(answer) => answer,
-            Err(_elapsed) => default_answer.unwrap_or_else(Answer::timeout),
+            Err(_elapsed) => AnswerSubmission::system(
+                default_answer.unwrap_or_else(Answer::timeout),
+                SystemActorKind::Timeout,
+            ),
         }
     } else {
         interviewer.ask(question).await
@@ -173,9 +201,9 @@ pub async fn ask_with_timeout(interviewer: &dyn Interviewer, question: Question)
 /// The interviewer trait for human-in-the-loop interactions.
 #[async_trait]
 pub trait Interviewer: Send + Sync {
-    async fn ask(&self, question: Question) -> Answer;
+    async fn ask(&self, question: Question) -> AnswerSubmission;
 
-    async fn ask_multiple(&self, questions: Vec<Question>) -> Vec<Answer> {
+    async fn ask_multiple(&self, questions: Vec<Question>) -> Vec<AnswerSubmission> {
         let mut answers = Vec::with_capacity(questions.len());
         for q in questions {
             answers.push(self.ask(q).await);
@@ -328,9 +356,9 @@ mod tests {
 
     #[async_trait]
     impl Interviewer for SlowInterviewer {
-        async fn ask(&self, _question: Question) -> Answer {
+        async fn ask(&self, _question: Question) -> AnswerSubmission {
             time::sleep(std::time::Duration::from_mins(1)).await;
-            Answer::yes()
+            AnswerSubmission::system(Answer::yes(), SystemActorKind::Engine)
         }
     }
 
@@ -340,7 +368,7 @@ mod tests {
         let mut q = Question::new("approve?", QuestionType::YesNo);
         q.timeout_seconds = Some(0.01);
 
-        let answer = ask_with_timeout(&interviewer, q).await;
+        let answer = ask_with_timeout(&interviewer, q).await.answer;
         assert_eq!(answer.value, AnswerValue::Timeout);
     }
 
@@ -351,16 +379,16 @@ mod tests {
         q.timeout_seconds = Some(0.01);
         q.default = Some(Answer::no());
 
-        let answer = ask_with_timeout(&interviewer, q).await;
+        let answer = ask_with_timeout(&interviewer, q).await.answer;
         assert_eq!(answer.value, AnswerValue::No);
     }
 
     #[tokio::test]
     async fn ask_with_timeout_no_timeout_returns_normally() {
-        let interviewer = AutoApproveInterviewer;
+        let interviewer = AutoApproveInterviewer::engine();
         let q = Question::new("approve?", QuestionType::YesNo);
 
-        let answer = ask_with_timeout(&interviewer, q).await;
+        let answer = ask_with_timeout(&interviewer, q).await.answer;
         assert_eq!(answer.value, AnswerValue::Yes);
     }
 
@@ -375,9 +403,15 @@ mod tests {
         let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
 
         time::sleep(std::time::Duration::from_millis(10)).await;
-        interviewer.submit("q-1", Answer::yes()).await.unwrap();
+        interviewer
+            .submit(
+                "q-1",
+                AnswerSubmission::system(Answer::yes(), SystemActorKind::Engine),
+            )
+            .await
+            .unwrap();
 
-        let answer = ask.await.unwrap();
+        let answer = ask.await.unwrap().answer;
         assert_eq!(answer.value, AnswerValue::Yes);
     }
 }

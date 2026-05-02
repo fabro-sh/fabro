@@ -14,12 +14,14 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use fabro_config::{ServerSettingsBuilder, Storage};
-use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage};
+use fabro_interview::{
+    AnswerSubmission, ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage,
+};
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunMode;
 use fabro_types::{
-    ActorRef, ArtifactUpload, EventBody, FailureReason, RunBlobId, RunEvent, RunId,
+    ArtifactUpload, EventBody, FailureReason, Principal, RunBlobId, RunEvent, RunId,
     WorkflowSettings,
 };
 use fabro_vault::Vault;
@@ -235,8 +237,10 @@ async fn apply_worker_control_line(
     };
 
     match message.message {
-        WorkerControlMessage::InterviewAnswer { qid, answer } => {
-            let _ = interviewer.submit(&qid, answer.into()).await;
+        WorkerControlMessage::InterviewAnswer { qid, answer, actor } => {
+            let _ = interviewer
+                .submit(&qid, AnswerSubmission::new(answer.into(), actor))
+                .await;
         }
         WorkerControlMessage::RunCancel => {
             cancel_token.store(true, Ordering::SeqCst);
@@ -403,14 +407,13 @@ impl RunStoreBackend for HttpRunStore {
     }
 
     async fn append_run_event(&self, event: &RunEvent) -> Result<()> {
-        let seq = self
-            .with_retries("append run event", || {
-                let client = self.client.clone_for_reuse();
-                let run_id = self.run_id;
-                let event = event.clone();
-                async move { client.append_run_event(&run_id, &event).await }
-            })
-            .await?;
+        let seq = Box::pin(self.with_retries("append run event", || {
+            let client = self.client.clone_for_reuse();
+            let run_id = self.run_id;
+            let event = event.clone();
+            async move { client.append_run_event(&run_id, &event).await }
+        }))
+        .await?;
         self.apply_acknowledged_event(seq, event).await
     }
 
@@ -498,7 +501,7 @@ fn update_worker_title_from_event(event: &RunEvent) {
 
 fn stamp_system_worker(mut event: RunEvent) -> RunEvent {
     if event.actor.is_none() {
-        event.actor = Some(ActorRef::system_worker());
+        event.actor = Some(Principal::worker(event.run_id));
     }
     event
 }
@@ -609,7 +612,10 @@ mod tests {
         InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
         RunFailedProps, RunStatusTransitionProps,
     };
-    use fabro_types::{ActorRef, EventBody, FailureReason, QuestionType, SuccessReason, fixtures};
+    use fabro_types::{
+        AuthMethod, EventBody, FailureReason, IdpIdentity, Principal, QuestionType, SuccessReason,
+        fixtures,
+    };
     use fabro_vault::{SecretType, Vault};
     use fabro_workflow::event::RunEventSink;
 
@@ -628,7 +634,15 @@ mod tests {
         assert!(!super::clone_sandbox_requires_github_credentials("local"));
     }
 
-    fn running_event(actor: Option<ActorRef>) -> fabro_types::RunEvent {
+    fn test_user_principal(login: &str) -> Principal {
+        Principal::user(
+            IdpIdentity::new("https://github.com", "12345").unwrap(),
+            login.to_string(),
+            AuthMethod::Github,
+        )
+    }
+
+    fn running_event(actor: Option<Principal>) -> fabro_types::RunEvent {
         fabro_types::RunEvent {
             id: "evt_1".to_string(),
             ts: Utc::now(),
@@ -744,9 +758,9 @@ mod tests {
     fn stamp_system_worker_fills_missing_actor_only() {
         let stamped = stamp_system_worker(running_event(None));
 
-        assert_eq!(stamped.actor, Some(ActorRef::system_worker()));
+        assert_eq!(stamped.actor, Some(Principal::worker(fixtures::RUN_1)));
 
-        let existing_actor = ActorRef::user("octocat".to_string());
+        let existing_actor = test_user_principal("octocat");
         let stamped = stamp_system_worker(running_event(Some(existing_actor.clone())));
         assert_eq!(stamped.actor, Some(existing_actor));
     }
@@ -782,8 +796,8 @@ mod tests {
 
         let first = first.lock().await;
         let second = second.lock().await;
-        assert_eq!(first[0].actor, Some(ActorRef::system_worker()));
-        assert_eq!(second[0].actor, Some(ActorRef::system_worker()));
+        assert_eq!(first[0].actor, Some(Principal::worker(fixtures::RUN_1)));
+        assert_eq!(second[0].actor, Some(Principal::worker(fixtures::RUN_1)));
     }
 
     #[tokio::test]
@@ -798,11 +812,11 @@ mod tests {
         apply_worker_control_line(
             &interviewer,
             &cancel_token,
-            r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"}}"#,
+            r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"},"actor":{"kind":"system","system_kind":"engine"}}"#,
         )
         .await;
 
-        let answer: fabro_interview::Answer = answer_task.await.unwrap();
+        let answer = answer_task.await.unwrap().answer;
         assert_eq!(answer.value, AnswerValue::Yes);
         assert!(!cancel_token.load(Ordering::SeqCst));
     }
@@ -824,7 +838,7 @@ mod tests {
         )
         .await;
 
-        let answer: fabro_interview::Answer = answer_task.await.unwrap();
+        let answer = answer_task.await.unwrap().answer;
         assert_eq!(answer.value, AnswerValue::Interrupted);
         assert!(cancel_token.load(Ordering::SeqCst));
     }
@@ -835,7 +849,7 @@ mod tests {
 
         read_worker_control_stream_blocking(
             std::io::Cursor::new(
-                b"{\"v\":1,\"type\":\"run.cancel\"}\n{\"v\":1,\"type\":\"interview.answer\",\"qid\":\"q-1\",\"answer\":{\"kind\":\"yes\"}}\n",
+                b"{\"v\":1,\"type\":\"run.cancel\"}\n{\"v\":1,\"type\":\"interview.answer\",\"qid\":\"q-1\",\"answer\":{\"kind\":\"yes\"},\"actor\":{\"kind\":\"system\",\"system_kind\":\"engine\"}}\n",
             ),
             &event_tx,
         );
@@ -849,7 +863,7 @@ mod tests {
         assert_eq!(
             event_rx.try_recv(),
             Ok(WorkerControlStreamEvent::Line(
-                r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"}}"#
+                r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"},"actor":{"kind":"system","system_kind":"engine"}}"#
                     .to_string()
             ))
         );
@@ -876,7 +890,7 @@ mod tests {
         )
         .await;
 
-        let answer: fabro_interview::Answer = answer_task.await.unwrap();
+        let answer = answer_task.await.unwrap().answer;
         assert_eq!(answer.value, AnswerValue::Interrupted);
         assert!(!cancel_token.load(Ordering::SeqCst));
     }

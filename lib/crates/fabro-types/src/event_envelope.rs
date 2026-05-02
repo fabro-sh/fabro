@@ -16,7 +16,7 @@ mod tests {
     use super::EventEnvelope;
     use crate::run_event::RunCompletedProps;
     use crate::{
-        ActorRef, EventBody, ParallelBranchId, RunEvent, StageId, SuccessReason, fixtures,
+        EventBody, ParallelBranchId, Principal, RunEvent, StageId, SuccessReason, fixtures,
     };
 
     #[test]
@@ -72,8 +72,9 @@ mod tests {
             session_id:         Some("ses_42".to_string()),
             parent_session_id:  Some("ses_root".to_string()),
             tool_call_id:       Some("tool_call_xyz".to_string()),
-            actor:              Some(ActorRef::agent(
+            actor:              Some(Principal::agent(
                 Some("ses_42".to_string()),
+                Some("ses_root".to_string()),
                 Some("claude-sonnet".to_string()),
             )),
             body:               EventBody::RunCompleted(RunCompletedProps {
@@ -99,8 +100,9 @@ mod tests {
         assert_eq!(wire["parent_session_id"], "ses_root");
         assert_eq!(wire["tool_call_id"], "tool_call_xyz");
         assert_eq!(wire["actor"]["kind"], "agent");
-        assert_eq!(wire["actor"]["id"], "ses_42");
-        assert_eq!(wire["actor"]["display"], "claude-sonnet");
+        assert_eq!(wire["actor"]["session_id"], "ses_42");
+        assert_eq!(wire["actor"]["parent_session_id"], "ses_root");
+        assert_eq!(wire["actor"]["model"], "claude-sonnet");
         assert_eq!(wire["event"], "run.completed");
 
         let parsed: EventEnvelope = serde_json::from_value(wire).unwrap();

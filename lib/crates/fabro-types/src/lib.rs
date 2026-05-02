@@ -14,6 +14,7 @@ pub mod failure_signature;
 pub mod graph;
 pub mod interview;
 pub mod outcome;
+pub mod principal;
 pub mod pull_request;
 pub mod repository;
 pub mod retro;
@@ -52,6 +53,7 @@ pub use interview::{InterviewQuestionRecord, QuestionType};
 pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,
 };
+pub use principal::{AuthMethod, Principal, PrincipalLogFields, SystemActorKind, UserPrincipal};
 pub use pull_request::{
     PullRequestDetail, PullRequestGithubDetail, PullRequestRecord, PullRequestRef, PullRequestUser,
 };
@@ -61,13 +63,13 @@ pub use retro::{
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,
 };
 pub use run::{
-    DirtyStatus, ForkSourceRef, GitContext, PreRunPushOutcome, RunAuthMethod, RunClientProvenance,
-    RunProvenance, RunServerProvenance, RunSpec, RunSubjectProvenance,
+    DirtyStatus, ForkSourceRef, GitContext, PreRunPushOutcome, RunClientProvenance, RunProvenance,
+    RunServerProvenance, RunSpec,
 };
 pub use run_blob_id::RunBlobId;
 pub use run_event::{
-    ActorKind, ActorRef, EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind,
-    MetadataSnapshotPhase, RunEvent, RunNoticeLevel,
+    EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind, MetadataSnapshotPhase,
+    RunEvent, RunNoticeLevel,
 };
 pub use run_id::{RunId, fixtures};
 pub use run_projection::{PendingInterviewRecord, RunProjection, StageProjection, first_event_seq};

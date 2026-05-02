@@ -844,9 +844,8 @@ fn dry_run_persists_event_history_in_store() {
     fabro_json_snapshot!(context, &live_content, @r#"
     {
       "actor": {
-        "display": "system:worker",
-        "id": "worker",
-        "kind": "system"
+        "kind": "worker",
+        "run_id": "[ULID]"
       },
       "event": "sandbox.cleanup.completed",
       "id": "[EVENT_ID]",

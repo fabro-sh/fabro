@@ -11,10 +11,7 @@
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use fabro_server::install::{InstallAppState, build_install_router};
-use fabro_server::jwt_auth::AuthMode;
-use fabro_server::server::{
-    build_router, create_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env,
-};
+use fabro_server::server::create_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env;
 use serde_yaml::Value;
 use tower::ServiceExt;
 
@@ -79,7 +76,7 @@ fn request_for(method: &Method, uri: &str) -> Request<Body> {
 #[tokio::test]
 async fn all_spec_routes_are_routable() {
     let spec = load_spec();
-    let normal_app = build_router(test_app_state(), AuthMode::Disabled);
+    let normal_app = fabro_server::test_support::build_test_router(test_app_state());
     let install_app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let paths = spec
@@ -148,7 +145,7 @@ fn github_webhook_spec_and_sdk_describe_a_json_body() {
 async fn github_webhook_spec_route_is_routable_when_webhook_secret_is_present() {
     let secret = "test-webhook-secret".to_string();
     let settings = test_settings();
-    let app = build_router(
+    let app = fabro_server::test_support::build_test_router(
         create_app_state_with_runtime_settings_and_env_lookup_and_server_secret_env(
             settings.server_settings,
             settings.manifest_run_defaults,
@@ -156,7 +153,6 @@ async fn github_webhook_spec_route_is_routable_when_webhook_secret_is_present() 
             |_| None,
             &std::collections::HashMap::from([("GITHUB_APP_WEBHOOK_SECRET".to_string(), secret)]),
         ),
-        AuthMode::Disabled,
     );
 
     let response = app
@@ -174,7 +170,7 @@ async fn github_webhook_spec_route_is_routable_when_webhook_secret_is_present() 
 #[tokio::test]
 async fn install_and_normal_routes_stay_isolated() {
     let spec = load_spec();
-    let normal_app = build_router(test_app_state(), AuthMode::Disabled);
+    let normal_app = fabro_server::test_support::build_test_router(test_app_state());
     let install_app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let paths = spec

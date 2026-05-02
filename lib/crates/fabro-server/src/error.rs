@@ -124,6 +124,10 @@ impl ApiError {
     pub fn status(&self) -> StatusCode {
         self.status
     }
+
+    pub(crate) fn code(&self) -> Option<&str> {
+        self.code.as_deref()
+    }
 }
 
 impl From<Error> for ApiError {

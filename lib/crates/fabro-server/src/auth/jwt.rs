@@ -1,5 +1,5 @@
 use chrono::{Duration, Utc};
-use fabro_types::{IdpIdentity, RunAuthMethod};
+use fabro_types::{AuthMethod, IdpIdentity};
 use jsonwebtoken::errors::{Error as JwtDecodeError, ErrorKind};
 use jsonwebtoken::{Algorithm, Header, Validation, decode, decode_header, encode};
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ pub(crate) struct JwtSubject {
     pub email:       String,
     pub avatar_url:  String,
     pub user_url:    String,
-    pub auth_method: RunAuthMethod,
+    pub auth_method: AuthMethod,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,7 +38,7 @@ pub(crate) struct Claims {
     pub avatar_url:  String,
     #[serde(default)]
     pub user_url:    String,
-    pub auth_method: RunAuthMethod,
+    pub auth_method: AuthMethod,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -127,7 +127,7 @@ mod tests {
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use chrono::{Duration, Utc};
-    use fabro_types::RunAuthMethod;
+    use fabro_types::AuthMethod;
     use jsonwebtoken::{Algorithm, Header, encode};
     use serde::Serialize;
     use uuid::Uuid;
@@ -148,7 +148,7 @@ mod tests {
             email:       "octocat@example.com".to_string(),
             avatar_url:  "https://example.com/octocat.png".to_string(),
             user_url:    "https://github.com/octocat".to_string(),
-            auth_method: RunAuthMethod::Github,
+            auth_method: AuthMethod::Github,
         }
     }
 
@@ -167,7 +167,7 @@ mod tests {
             email:       "octocat@example.com".to_string(),
             avatar_url:  "https://example.com/octocat.png".to_string(),
             user_url:    "https://github.com/octocat".to_string(),
-            auth_method: RunAuthMethod::Github,
+            auth_method: AuthMethod::Github,
         }
     }
 
@@ -202,7 +202,7 @@ mod tests {
         assert_eq!(claims.idp_subject, "12345");
         assert_eq!(claims.avatar_url, "https://example.com/octocat.png");
         assert_eq!(claims.user_url, "https://github.com/octocat");
-        assert_eq!(claims.auth_method, RunAuthMethod::Github);
+        assert_eq!(claims.auth_method, AuthMethod::Github);
         assert!(Uuid::parse_str(&claims.jti).is_ok());
     }
 
@@ -221,7 +221,7 @@ mod tests {
             login:       String,
             name:        String,
             email:       String,
-            auth_method: RunAuthMethod,
+            auth_method: AuthMethod,
         }
 
         let now = Utc::now().timestamp();
@@ -239,7 +239,7 @@ mod tests {
                 login:       "octocat".to_string(),
                 name:        "The Octocat".to_string(),
                 email:       "octocat@example.com".to_string(),
-                auth_method: RunAuthMethod::Github,
+                auth_method: AuthMethod::Github,
             },
             &signing_key().encoding_key(),
         );

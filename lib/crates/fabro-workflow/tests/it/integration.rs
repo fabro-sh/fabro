@@ -2375,7 +2375,7 @@ async fn tool_handler_e2e() {
     graph.edges.push(Edge::new("echo_task", "exit"));
 
     let dir = tempfile::tempdir().unwrap();
-    let interviewer = Arc::new(AutoApproveInterviewer);
+    let interviewer = Arc::new(AutoApproveInterviewer::engine());
     let engine = WorkflowRunner::new(
         make_full_registry(interviewer),
         Arc::new(Emitter::default()),
@@ -2446,7 +2446,7 @@ async fn auto_approve_interviewer_e2e() {
     graph.edges.push(Edge::new("reject", "exit"));
 
     let dir = tempfile::tempdir().unwrap();
-    let interviewer = Arc::new(AutoApproveInterviewer);
+    let interviewer = Arc::new(AutoApproveInterviewer::engine());
     let engine = WorkflowRunner::new(
         make_full_registry(interviewer),
         Arc::new(Emitter::default()),
@@ -2739,7 +2739,7 @@ async fn scenario_ship_a_feature() {
         "Plan to achieve: Ship the widget"
     );
 
-    let interviewer = Arc::new(AutoApproveInterviewer);
+    let interviewer = Arc::new(AutoApproveInterviewer::engine());
     let dir = tempfile::tempdir().unwrap();
     let emitter = Emitter::default();
     let events = collect_events(&emitter);
@@ -2813,7 +2813,9 @@ async fn scenario_parallel_expert_review() {
     let graph = parse(input).expect("parse");
     validate_or_raise(&graph, &[]).expect("validate");
 
-    let recorder = Arc::new(RecordingInterviewer::new(Box::new(AutoApproveInterviewer)));
+    let recorder = Arc::new(RecordingInterviewer::new(Box::new(
+        AutoApproveInterviewer::engine(),
+    )));
     let dir = tempfile::tempdir().unwrap();
 
     let interviewer: Arc<dyn Interviewer> = recorder.clone();
@@ -3832,7 +3834,7 @@ async fn integration_smoke_plan_implement_review_done() {
     assert_eq!(graph.nodes["plan"].model(), Some("test-model"));
 
     // Run pipeline
-    let interviewer = Arc::new(AutoApproveInterviewer);
+    let interviewer = Arc::new(AutoApproveInterviewer::engine());
     let dir = tempfile::tempdir().unwrap();
     let emitter = Emitter::default();
     let events = collect_events(&emitter);
@@ -6605,7 +6607,7 @@ mod real_llm {
         graph.edges.push(Edge::new("revise", "gate"));
 
         let dir = tempfile::tempdir().unwrap();
-        let interviewer = Arc::new(AutoApproveInterviewer);
+        let interviewer = Arc::new(AutoApproveInterviewer::engine());
 
         let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(
             make_llm_backend(Arc::clone(&client)),
@@ -13278,7 +13280,7 @@ async fn wait_timer_e2e() {
     graph.edges.push(Edge::new("wait60", "exit"));
 
     let dir = tempfile::tempdir().unwrap();
-    let interviewer = Arc::new(AutoApproveInterviewer);
+    let interviewer = Arc::new(AutoApproveInterviewer::engine());
     let engine = WorkflowRunner::new(
         make_full_registry(interviewer),
         Arc::new(Emitter::default()),

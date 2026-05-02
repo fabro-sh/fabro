@@ -921,7 +921,7 @@ mod tests {
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer: Arc::new(AutoApproveInterviewer),
+            interviewer: Arc::new(AutoApproveInterviewer::engine()),
             lifecycle: crate::run_options::LifecycleOptions {
                 setup_commands:           vec![command.to_string()],
                 setup_command_timeout_ms: 1_000,
@@ -976,7 +976,7 @@ mod tests {
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer:       Arc::new(AutoApproveInterviewer),
+            interviewer:       Arc::new(AutoApproveInterviewer::engine()),
             lifecycle:         crate::run_options::LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
@@ -1038,7 +1038,7 @@ mod tests {
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer: Arc::new(AutoApproveInterviewer),
+            interviewer: Arc::new(AutoApproveInterviewer::engine()),
             lifecycle: crate::run_options::LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
@@ -1122,7 +1122,7 @@ mod tests {
                 mcp_servers:    Vec::new(),
                 dry_run:        false,
             },
-            Arc::new(AutoApproveInterviewer),
+            Arc::new(AutoApproveInterviewer::engine()),
             &HashMap::new(),
             &graph,
             Arc::new(VaultCredentialSource::new(Arc::clone(&vault))),
@@ -1167,7 +1167,7 @@ mod tests {
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer: Arc::new(AutoApproveInterviewer),
+            interviewer: Arc::new(AutoApproveInterviewer::engine()),
             lifecycle: crate::run_options::LifecycleOptions {
                 setup_commands:           vec!["true".to_string()],
                 setup_command_timeout_ms: 1_000,
@@ -1279,7 +1279,7 @@ mod tests {
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer: Arc::new(AutoApproveInterviewer),
+            interviewer: Arc::new(AutoApproveInterviewer::engine()),
             lifecycle: crate::run_options::LifecycleOptions {
                 setup_commands:           vec!["sleep 5".to_string()],
                 setup_command_timeout_ms: 5_000,
@@ -1340,7 +1340,7 @@ mod tests {
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer: Arc::new(AutoApproveInterviewer),
+            interviewer: Arc::new(AutoApproveInterviewer::engine()),
             lifecycle: crate::run_options::LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 5_000,

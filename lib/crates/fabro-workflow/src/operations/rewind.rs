@@ -1,5 +1,5 @@
 use fabro_store::Database;
-use fabro_types::{ActorRef, RunId};
+use fabro_types::{Principal, RunId};
 use tracing::error;
 
 use super::archive;
@@ -32,7 +32,7 @@ pub enum RewindOutcome {
 pub async fn rewind(
     store: &Database,
     input: &RewindInput,
-    actor: Option<ActorRef>,
+    actor: Option<Principal>,
 ) -> Result<RewindOutcome, Error> {
     let projection = store
         .open_run(&input.run_id)

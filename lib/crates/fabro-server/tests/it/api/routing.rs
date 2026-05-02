@@ -9,7 +9,7 @@ use fabro_config::ServerSettingsBuilder;
 use fabro_server::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
 use fabro_server::jwt_auth::{AuthMode, resolve_auth_mode_with_lookup};
 use fabro_server::server::{
-    RouterOptions, build_router, build_router_with_options, create_app_state,
+    RouterOptions, build_router, create_app_state,
     create_app_state_with_runtime_settings_and_options,
 };
 use tower::ServiceExt;
@@ -47,7 +47,7 @@ fn spa_fixture_root() -> PathBuf {
 
 #[tokio::test]
 async fn old_unversioned_routes_return_404() {
-    let app = build_router(create_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(create_app_state());
 
     let cases = [(Method::POST, "/completions")];
 
@@ -64,9 +64,8 @@ async fn old_unversioned_routes_return_404() {
 
 #[tokio::test]
 async fn root_and_health_stay_at_root() {
-    let app = build_router_with_options(
+    let app = fabro_server::test_support::build_test_router_with_options(
         create_app_state(),
-        &AuthMode::Disabled,
         Arc::new(IpAllowlistConfig::default()),
         RouterOptions {
             static_asset_root: Some(spa_fixture_root()),
@@ -99,7 +98,7 @@ async fn root_and_health_stay_at_root() {
 
 #[tokio::test]
 async fn install_routes_are_absent_in_normal_mode() {
-    let app = build_router(create_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(create_app_state());
 
     let response = app
         .oneshot(
@@ -117,7 +116,7 @@ async fn install_routes_are_absent_in_normal_mode() {
 
 #[tokio::test]
 async fn moved_routes_not_at_root_of_api_prefix() {
-    let app = build_router(create_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(create_app_state());
 
     for path in ["/api/v1/health", "/api/v1/"] {
         let req = Request::builder()
@@ -132,7 +131,7 @@ async fn moved_routes_not_at_root_of_api_prefix() {
 
 #[tokio::test]
 async fn source_maps_are_not_served() {
-    let app = build_router(create_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(create_app_state());
 
     let request = Request::builder()
         .method("GET")
@@ -151,9 +150,10 @@ async fn source_maps_are_not_served() {
 
 #[tokio::test]
 async fn web_enabled_serves_web_only_routes() {
-    let app = build_router_with_options(
+    let auth_mode = dev_token_enabled_auth_mode();
+    let app = fabro_server::server::build_router_with_options(
         create_app_state(),
-        &AuthMode::Disabled,
+        &auth_mode,
         Arc::new(IpAllowlistConfig::default()),
         RouterOptions {
             static_asset_root: Some(spa_fixture_root()),
@@ -228,6 +228,7 @@ async fn web_enabled_serves_web_only_routes() {
     let demo_toggle_request = Request::builder()
         .method("POST")
         .uri("/api/v1/demo/toggle")
+        .header("authorization", format!("Bearer {DEV_TOKEN}"))
         .header("content-type", "application/json")
         .body(Body::from(r#"{"enabled":true}"#))
         .unwrap();
@@ -315,9 +316,8 @@ async fn toggle_demo_allows_authenticated_requests() {
 
 #[tokio::test]
 async fn security_headers_are_applied_to_all_responses() {
-    let app = build_router_with_options(
+    let app = fabro_server::test_support::build_test_router_with_options(
         create_app_state(),
-        &AuthMode::Disabled,
         Arc::new(IpAllowlistConfig::default()),
         RouterOptions {
             static_asset_root: Some(spa_fixture_root()),
@@ -450,13 +450,12 @@ _version = 1
 enabled = false
 ",
     );
-    let app = build_router_with_options(
+    let app = fabro_server::test_support::build_test_router_with_options(
         create_app_state_with_runtime_settings_and_options(
             settings.server_settings,
             settings.manifest_run_defaults,
             5,
         ),
-        &AuthMode::Disabled,
         Arc::new(IpAllowlistConfig::default()),
         RouterOptions {
             web_enabled: false,
@@ -515,13 +514,12 @@ _version = 1
 enabled = false
 ",
     );
-    let app = build_router_with_options(
+    let app = fabro_server::test_support::build_test_router_with_options(
         create_app_state_with_runtime_settings_and_options(
             settings.server_settings,
             settings.manifest_run_defaults,
             5,
         ),
-        &AuthMode::Disabled,
         Arc::new(IpAllowlistConfig::default()),
         RouterOptions {
             web_enabled: false,
@@ -543,9 +541,8 @@ enabled = false
 
 #[tokio::test]
 async fn allowlist_blocks_non_allowlisted_api_requests() {
-    let app = build_router_with_options(
+    let app = fabro_server::test_support::build_test_router_with_options(
         create_app_state(),
-        &AuthMode::Disabled,
         Arc::new(IpAllowlistConfig {
             allowlist:           IpAllowlist::new(vec!["10.0.0.0/8".parse().unwrap()]),
             trusted_proxy_count: 0,
@@ -566,9 +563,8 @@ async fn allowlist_blocks_non_allowlisted_api_requests() {
 
 #[tokio::test]
 async fn allowlist_exempts_health_checks() {
-    let app = build_router_with_options(
+    let app = fabro_server::test_support::build_test_router_with_options(
         create_app_state(),
-        &AuthMode::Disabled,
         Arc::new(IpAllowlistConfig {
             allowlist:           IpAllowlist::new(vec!["10.0.0.0/8".parse().unwrap()]),
             trusted_proxy_count: 0,

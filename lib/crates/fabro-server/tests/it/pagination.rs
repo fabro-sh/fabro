@@ -7,8 +7,6 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_server::jwt_auth::AuthMode;
-use fabro_server::server::build_router;
 use tower::ServiceExt;
 
 use super::helpers::{response_json, test_app_state};
@@ -75,7 +73,7 @@ const ENDPOINTS: &[PaginatedEndpoint] = &[
 #[tokio::test]
 async fn paginated_endpoints_return_correct_shape() {
     let state = test_app_state();
-    let app = build_router(state, AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(state);
 
     for ep in ENDPOINTS {
         // Large limit: paginated shape, has_more = false (all fixture items fit).

@@ -5,12 +5,11 @@ use std::time::Duration;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use fabro_config::{LocalSandboxLayer, RunLayer, RunSandboxLayer, ServerSettingsBuilder};
-use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{
-    AppState, build_router, create_app_state,
-    create_app_state_with_runtime_settings_and_env_lookup,
+    AppState, create_app_state, create_app_state_with_runtime_settings_and_env_lookup,
     create_app_state_with_runtime_settings_and_options_and_registry_factory, spawn_scheduler,
 };
+use fabro_server::test_support::build_test_router;
 use fabro_test::{
     assert_axum_status, assert_reqwest_status, expect_axum_json, expect_axum_status,
     expect_axum_status_in, expect_axum_text,
@@ -110,7 +109,7 @@ pub(crate) fn test_settings() -> TestAppSettings {
 
 pub(crate) fn test_app_with_scheduler(state: Arc<AppState>) -> axum::Router {
     spawn_scheduler(Arc::clone(&state));
-    build_router(state, AuthMode::Disabled)
+    build_test_router(state)
 }
 
 pub(crate) fn test_app_with_no_providers() -> axum::Router {
@@ -121,7 +120,7 @@ pub(crate) fn test_app_with_no_providers() -> axum::Router {
         5,
         |_| None,
     );
-    build_router(state, AuthMode::Disabled)
+    build_test_router(state)
 }
 
 pub(crate) fn test_app_with_mock_anthropic(mock_base_url: &str) -> axum::Router {
@@ -137,7 +136,7 @@ pub(crate) fn test_app_with_mock_anthropic(mock_base_url: &str) -> axum::Router 
             _ => None,
         },
     );
-    build_router(state, AuthMode::Disabled)
+    build_test_router(state)
 }
 
 pub(crate) fn api(path: &str) -> String {

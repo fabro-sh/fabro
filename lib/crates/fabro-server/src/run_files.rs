@@ -42,7 +42,7 @@ use serde::Deserialize;
 use tokio::sync::{Mutex, watch};
 
 use crate::error::ApiError;
-use crate::jwt_auth::AuthenticatedService;
+use crate::principal_middleware::RequiredUser;
 use crate::run_files_security::{RunFilesMetrics, is_sensitive};
 use crate::server::{AppState, parse_run_id_path};
 
@@ -185,7 +185,7 @@ where
 /// set enforced by [`RunFilesMetrics::emit`] — no paths, contents, or raw
 /// git stderr.
 pub async fn list_run_files(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(params): Query<ListRunFilesParams>,

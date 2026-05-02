@@ -1280,7 +1280,7 @@ mod tests {
         state
             .apply_event(&test_event(
                 2,
-                EventBody::RunArchived(RunArchivedProps { actor: None }),
+                EventBody::RunArchived(RunArchivedProps::default()),
                 None,
             ))
             .unwrap();
@@ -1343,14 +1343,14 @@ mod tests {
         state
             .apply_event(&test_event(
                 2,
-                EventBody::RunArchived(RunArchivedProps { actor: None }),
+                EventBody::RunArchived(RunArchivedProps::default()),
                 None,
             ))
             .unwrap();
         state
             .apply_event(&test_event(
                 3,
-                EventBody::RunUnarchived(RunUnarchivedProps { actor: None }),
+                EventBody::RunUnarchived(RunUnarchivedProps::default()),
                 None,
             ))
             .unwrap();
@@ -1440,7 +1440,7 @@ mod tests {
         let err = state
             .apply_event(&test_event(
                 2,
-                EventBody::RunArchived(RunArchivedProps { actor: None }),
+                EventBody::RunArchived(RunArchivedProps::default()),
                 None,
             ))
             .unwrap_err();
@@ -1475,7 +1475,7 @@ mod tests {
         state
             .apply_event(&test_event(
                 2,
-                EventBody::RunUnarchived(RunUnarchivedProps { actor: None }),
+                EventBody::RunUnarchived(RunUnarchivedProps::default()),
                 None,
             ))
             .unwrap();

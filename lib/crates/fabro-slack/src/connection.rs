@@ -131,9 +131,10 @@ pub async fn run_event_loop(
 
         match action {
             DispatchAction::SubmitAnswer(submission) => {
+                let submission = *submission;
                 debug!(
-                    run_id = submission.run_id,
-                    qid = submission.qid,
+                    run_id = submission.run_id.as_str(),
+                    qid = submission.qid.as_str(),
                     "Submitting answer from Slack"
                 );
                 on_submit(submission);
@@ -221,6 +222,8 @@ mod tests {
             "envelope_id": "env-1",
             "payload": {
                 "type": "block_actions",
+                "team": { "id": "T123" },
+                "user": { "id": "U123", "name": "ada" },
                 "actions": [{
                     "action_id": "interview.answer",
                     "type": "button",
@@ -234,6 +237,7 @@ mod tests {
         assert_eq!(outcome, ProcessOutcome::Continue);
         match action {
             DispatchAction::SubmitAnswer(submission) => {
+                let submission = *submission;
                 assert_eq!(submission.run_id, "run-1");
                 assert_eq!(submission.qid, "q-1");
                 assert_eq!(submission.answer.value, AnswerValue::Yes);
@@ -284,11 +288,13 @@ mod tests {
             "type": "events_api",
             "envelope_id": "env-50",
             "payload": {
+                "team_id": "T123",
                 "event": {
                     "type": "message",
                     "text": "my answer",
                     "thread_ts": "1234.5678",
-                    "user": "U123"
+                    "user": "U123",
+                    "user_name": "ada"
                 }
             }
         })
@@ -298,6 +304,7 @@ mod tests {
         assert_eq!(outcome, ProcessOutcome::Continue);
         match action {
             DispatchAction::SubmitAnswer(submission) => {
+                let submission = *submission;
                 assert_eq!(submission.run_id, "run-10");
                 assert_eq!(submission.qid, "q-10");
                 assert_eq!(
@@ -338,6 +345,8 @@ mod tests {
                     "envelope_id": "env-1",
                     "payload": {
                         "type": "block_actions",
+                        "team": { "id": "T123" },
+                        "user": { "id": "U123", "name": "ada" },
                         "actions": [{
                             "action_id": "interview.answer",
                             "type": "button",

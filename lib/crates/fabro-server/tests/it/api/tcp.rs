@@ -236,7 +236,7 @@ methods = ["dev-token"]
 #[tokio::test]
 async fn tcp_ip_allowlist_uses_connect_info() {
     let addr = start_tcp_server(
-        AuthMode::Disabled,
+        fabro_server::test_support::test_auth_mode(),
         Arc::new(IpAllowlistConfig {
             allowlist:           IpAllowlist::new(vec!["10.0.0.0/8".parse().unwrap()]),
             trusted_proxy_count: 0,

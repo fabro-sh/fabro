@@ -1,7 +1,5 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_server::jwt_auth::AuthMode;
-use fabro_server::server::build_router;
 use tower::ServiceExt;
 
 use crate::helpers::{
@@ -40,7 +38,8 @@ slug = "fabro-app"
         storage_dir.path().display()
     ));
 
-    let app = build_router(test_app_state_with_options(settings, 5), AuthMode::Disabled);
+    let app =
+        fabro_server::test_support::build_test_router(test_app_state_with_options(settings, 5));
     let mut manifest = minimal_manifest_json(MINIMAL_DOT);
     manifest["configs"] = serde_json::json!([{
         "type": "user",

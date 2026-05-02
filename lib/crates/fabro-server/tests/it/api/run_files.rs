@@ -12,8 +12,7 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_server::jwt_auth::AuthMode;
-use fabro_server::server::{build_router, create_app_state_with_store};
+use fabro_server::server::create_app_state_with_store;
 use fabro_store::{ArtifactStore, Database};
 use fabro_types::RunId;
 use fabro_workflow::event as workflow_event;
@@ -83,7 +82,7 @@ async fn append_completed_run_with_final_patch(
 
 #[tokio::test]
 async fn invalid_run_id_returns_400() {
-    let app = build_router(test_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(test_app_state());
     let req = Request::builder()
         .method("GET")
         .uri(files_url("not-a-ulid"))
@@ -100,7 +99,7 @@ async fn invalid_run_id_returns_400() {
 
 #[tokio::test]
 async fn unknown_run_returns_404() {
-    let app = build_router(test_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(test_app_state());
     // Valid ULID format but not a run we've created.
     let fake = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
     let req = Request::builder()
@@ -119,7 +118,7 @@ async fn unknown_run_returns_404() {
 
 #[tokio::test]
 async fn malformed_from_sha_query_returns_400() {
-    let app = build_router(test_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(test_app_state());
     let fake = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
     let req = Request::builder()
         .method("GET")
@@ -143,7 +142,7 @@ async fn malformed_from_sha_query_returns_400() {
 
 #[tokio::test]
 async fn non_default_from_sha_returns_400_even_when_hex() {
-    let app = build_router(test_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(test_app_state());
     let fake = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
     // Well-formed hex SHA but v1 reserves the parameter for a future
     // version; any non-default value must be rejected.
@@ -166,7 +165,7 @@ async fn non_default_from_sha_returns_400_even_when_hex() {
 
 #[tokio::test]
 async fn malformed_to_sha_returns_400() {
-    let app = build_router(test_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(test_app_state());
     let fake = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
     let req = Request::builder()
         .method("GET")
@@ -187,7 +186,7 @@ async fn submitted_run_without_sandbox_returns_empty_envelope() {
     // A run that has been created but not started has no base_sha or
     // sandbox record, so the handler returns an empty envelope. The UI
     // maps that to R4(a).
-    let app = build_router(test_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(test_app_state());
     let manifest = minimal_manifest_json(MINIMAL_DOT);
     let create_req = Request::builder()
         .method("POST")
@@ -232,7 +231,7 @@ async fn degraded_run_returns_file_diff_shape_without_meta_patch() {
         Arc::clone(&store),
         artifact_store,
     );
-    let app = build_router(state, AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(state);
     let run_id = RunId::new();
     let patch = "\
 diff --git a/src/lib.rs b/src/lib.rs
@@ -284,7 +283,7 @@ diff --git a/.env.production b/.env.production
 async fn demo_mode_returns_fixture_without_touching_store() {
     // R34: demo handler must return the illustrative fixture with no
     // cross-contamination with real run state.
-    let app = build_router(test_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(test_app_state());
     let arbitrary = "not-even-a-valid-ulid-for-run";
 
     let req = Request::builder()
@@ -314,7 +313,7 @@ async fn response_envelope_matches_openapi_paginated_run_file_list_shape() {
     // Sanity check that the happy-path envelope shape matches what the
     // OpenAPI spec + regenerated TS client expect. Uses demo mode so the
     // test stays deterministic without running a sandbox.
-    let app = build_router(test_app_state(), AuthMode::Disabled);
+    let app = fabro_server::test_support::build_test_router(test_app_state());
     let req = Request::builder()
         .method("GET")
         .uri(files_url("whatever"))

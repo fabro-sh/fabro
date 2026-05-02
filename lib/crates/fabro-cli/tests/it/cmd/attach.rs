@@ -446,9 +446,13 @@ fn attach_json_errors_without_prompting_for_human_input() {
     [
       {
         "actor": {
-          "display": "dev",
-          "id": "dev",
-          "kind": "user"
+          "auth_method": "dev_token",
+          "identity": {
+            "issuer": "fabro:dev",
+            "subject": "dev"
+          },
+          "kind": "user",
+          "login": "dev"
         },
         "event": "run.created",
         "id": "[EVENT_ID]",
@@ -566,6 +570,11 @@ fn attach_json_errors_without_prompting_for_human_input() {
             },
             "subject": {
               "auth_method": "dev_token",
+              "identity": {
+                "issuer": "fabro:dev",
+                "subject": "dev"
+              },
+              "kind": "user",
               "login": "dev"
             }
           },
@@ -678,9 +687,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "run.starting",
         "id": "[EVENT_ID]",
@@ -690,9 +698,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "sandbox.initializing",
         "id": "[EVENT_ID]",
@@ -704,9 +711,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "sandbox.ready",
         "id": "[EVENT_ID]",
@@ -719,9 +725,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "sandbox.initialized",
         "id": "[EVENT_ID]",
@@ -734,9 +739,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "run.started",
         "id": "[EVENT_ID]",
@@ -749,9 +753,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "run.running",
         "id": "[EVENT_ID]",
@@ -761,9 +764,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "stage.started",
         "id": "[EVENT_ID]",
@@ -781,9 +783,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "stage.completed",
         "id": "[EVENT_ID]",
@@ -814,9 +815,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "edge.selected",
         "id": "[EVENT_ID]",
@@ -832,9 +832,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "checkpoint.completed",
         "id": "[EVENT_ID]",
@@ -875,9 +874,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "stage.started",
         "id": "[EVENT_ID]",
@@ -895,9 +893,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "interview.started",
         "id": "[EVENT_ID]",
@@ -926,9 +923,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
       },
       {
         "actor": {
-          "display": "system:worker",
-          "id": "worker",
-          "kind": "system"
+          "kind": "worker",
+          "run_id": "[ULID]"
         },
         "event": "run.blocked",
         "id": "[EVENT_ID]",

@@ -4724,31 +4724,145 @@ components:
           items:
             type: string
 
-    ActorKind:
-      description: High-level category of an event actor.
+    AuthMethod:
+      description: Runtime user authentication method.
       type: string
       enum:
-        - user
-        - agent
-        - system
+        - github
+        - dev_token
 
-    ActorRef:
-      description: >
-        Optional primary actor associated with a run event. Present on control
-        actions and durable agent output where a stable user or agent identity
-        matters; omitted on routine runtime lifecycle events.
+    SystemActorKind:
+      type: string
+      enum:
+        - engine
+        - watchdog
+        - timeout
+
+    IdpIdentity:
+      type: object
+      required:
+        - issuer
+        - subject
+      properties:
+        issuer:
+          type: string
+        subject:
+          type: string
+
+    Principal:
+      oneOf:
+        - $ref: "#/components/schemas/PrincipalUser"
+        - $ref: "#/components/schemas/PrincipalWorker"
+        - $ref: "#/components/schemas/PrincipalWebhook"
+        - $ref: "#/components/schemas/PrincipalSlack"
+        - $ref: "#/components/schemas/PrincipalAgent"
+        - $ref: "#/components/schemas/PrincipalSystem"
+        - $ref: "#/components/schemas/PrincipalAnonymous"
+      discriminator:
+        propertyName: kind
+        mapping:
+          user: "#/components/schemas/PrincipalUser"
+          worker: "#/components/schemas/PrincipalWorker"
+          webhook: "#/components/schemas/PrincipalWebhook"
+          slack: "#/components/schemas/PrincipalSlack"
+          agent: "#/components/schemas/PrincipalAgent"
+          system: "#/components/schemas/PrincipalSystem"
+          anonymous: "#/components/schemas/PrincipalAnonymous"
+
+    PrincipalUser:
+      type: object
+      required:
+        - kind
+        - identity
+        - login
+        - auth_method
+      properties:
+        kind:
+          type: string
+          enum: [user]
+        identity:
+          $ref: "#/components/schemas/IdpIdentity"
+        login:
+          type: string
+        auth_method:
+          $ref: "#/components/schemas/AuthMethod"
+
+    PrincipalWorker:
+      type: object
+      required:
+        - kind
+        - run_id
+      properties:
+        kind:
+          type: string
+          enum: [worker]
+        run_id:
+          type: string
+
+    PrincipalWebhook:
+      type: object
+      required:
+        - kind
+        - delivery_id
+      properties:
+        kind:
+          type: string
+          enum: [webhook]
+        delivery_id:
+          type: string
+
+    PrincipalSlack:
+      type: object
+      required:
+        - kind
+        - team_id
+        - user_id
+      properties:
+        kind:
+          type: string
+          enum: [slack]
+        team_id:
+          type: string
+        user_id:
+          type: string
+        user_name:
+          type: ["string", "null"]
+
+    PrincipalAgent:
       type: object
       required:
         - kind
       properties:
         kind:
-          $ref: "#/components/schemas/ActorKind"
-        id:
           type: string
-          description: Stable actor identifier when available.
-        display:
+          enum: [agent]
+        session_id:
+          type: ["string", "null"]
+        parent_session_id:
+          type: ["string", "null"]
+        model:
+          type: ["string", "null"]
+
+    PrincipalSystem:
+      type: object
+      required:
+        - kind
+        - system_kind
+      properties:
+        kind:
           type: string
-          description: Display-friendly label for the actor.
+          enum: [system]
+        system_kind:
+          $ref: "#/components/schemas/SystemActorKind"
+
+    PrincipalAnonymous:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum: [anonymous]
 
     RunEvent:
       description: >
@@ -4797,7 +4911,7 @@ components:
             call.
         actor:
           oneOf:
-            - $ref: "#/components/schemas/ActorRef"
+            - $ref: "#/components/schemas/Principal"
             - type: "null"
         event:
           type: string

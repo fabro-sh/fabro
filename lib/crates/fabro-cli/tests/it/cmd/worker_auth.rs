@@ -369,12 +369,11 @@ async fn github_only_server_dispatched_worker_succeeds_without_worker_auth_store
     let events = wait_for_completed_events(&server.api_base_url, &run_id, &access_token).await;
 
     assert!(events.iter().any(|event| {
-        event
-            .event
-            .actor
-            .as_ref()
-            .and_then(|actor| actor.display.as_deref())
-            == Some("system:worker")
+        matches!(
+            event.event.actor.as_ref(),
+            Some(fabro_api::types::Principal::Worker { run_id: actor_run_id })
+                if actor_run_id.to_string() == run_id
+        )
     }));
     assert!(!server.worker_home.join("auth.json").exists());
     assert!(!server.worker_home.join("auth.lock").exists());

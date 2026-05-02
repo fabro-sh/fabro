@@ -10,7 +10,7 @@ use cookie::{Cookie, CookieJar, Key, SameSite};
 use fabro_redact::DisplaySafeUrl;
 use fabro_static::EnvVars;
 use fabro_types::settings::ServerAuthMethod;
-use fabro_types::{IdpIdentity, RunAuthMethod};
+use fabro_types::{AuthMethod, IdpIdentity};
 use fabro_util::dev_token::validate_dev_token_format;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
@@ -18,9 +18,8 @@ use serde_json::json;
 use tracing::{debug, error, info, warn};
 
 use crate::auth::{GithubEndpoints, browser_shell};
-use crate::jwt_auth::{
-    AuthMode, AuthenticatedService, AuthenticatedSubject, auth_method_name, dev_token_matches,
-};
+use crate::jwt_auth::{AuthMode, auth_method_name, dev_token_matches};
+use crate::principal_middleware::{RequestAuth, RequiredUser, require_authenticated_user};
 use crate::server::AppState;
 
 pub const SESSION_COOKIE_NAME: &str = "__fabro_session";
@@ -31,7 +30,7 @@ const OAUTH_STATE_TTL_MINUTES: i64 = 30;
 pub struct SessionCookie {
     pub v:           u8,
     pub login:       String,
-    pub auth_method: RunAuthMethod,
+    pub auth_method: AuthMethod,
     pub identity:    Option<IdpIdentity>,
     pub name:        String,
     pub email:       String,
@@ -255,32 +254,28 @@ fn callback_error_redirect(
 }
 
 fn auth_methods_from_mode(auth_mode: &AuthMode) -> Vec<String> {
-    match auth_mode {
-        AuthMode::Enabled(config) => config
-            .methods
-            .iter()
-            .map(|method| auth_method_name(*method).to_string())
-            .collect(),
-        AuthMode::Disabled => Vec::new(),
-    }
+    let AuthMode::Enabled(config) = auth_mode;
+    config
+        .methods
+        .iter()
+        .map(|method| auth_method_name(*method).to_string())
+        .collect()
 }
 
 fn auth_method_enabled(auth_mode: &AuthMode, method: ServerAuthMethod) -> bool {
-    matches!(auth_mode, AuthMode::Enabled(config) if config.methods.contains(&method))
+    let AuthMode::Enabled(config) = auth_mode;
+    config.methods.contains(&method)
 }
 
 fn dev_token_from_mode(auth_mode: &AuthMode) -> Option<String> {
-    match auth_mode {
-        AuthMode::Enabled(config) => config.dev_token.clone(),
-        AuthMode::Disabled => None,
-    }
+    let AuthMode::Enabled(config) = auth_mode;
+    config.dev_token.clone()
 }
 
-fn session_provider(auth_method: RunAuthMethod) -> &'static str {
+fn session_provider(auth_method: AuthMethod) -> &'static str {
     match auth_method {
-        RunAuthMethod::Disabled => "disabled",
-        RunAuthMethod::DevToken => "dev-token",
-        RunAuthMethod::Github => "github",
+        AuthMethod::DevToken => "dev-token",
+        AuthMethod::Github => "github",
     }
 }
 
@@ -332,7 +327,7 @@ async fn login_dev_token(
     let session = SessionCookie {
         v:           2,
         login:       "dev".to_string(),
-        auth_method: RunAuthMethod::DevToken,
+        auth_method: AuthMethod::DevToken,
         identity:    Some(IdpIdentity::new("fabro:dev", "dev").expect("non-empty dev identity")),
         name:        "Development User".to_string(),
         email:       "dev@localhost".to_string(),
@@ -724,7 +719,7 @@ async fn callback_github(
     let session = SessionCookie {
         v:           2,
         login:       profile.login.clone(),
-        auth_method: RunAuthMethod::Github,
+        auth_method: AuthMethod::Github,
         identity:    Some(
             IdpIdentity::new("https://github.com", profile.id.to_string())
                 .expect("GitHub profile id should produce a valid identity"),
@@ -784,42 +779,38 @@ async fn logout(State(state): State<Arc<AppState>>) -> Response {
     response
 }
 
-async fn auth_me(subject: AuthenticatedSubject, headers: HeaderMap) -> Response {
-    if subject.login.is_none() {
-        warn!(
-            has_cookie = headers.get(header::COOKIE).is_some(),
-            "Auth check failed: authenticated subject missing"
-        );
-        return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
-    }
-
+async fn auth_me(RequestAuth(auth_slot): RequestAuth, headers: HeaderMap) -> Response {
+    let authenticated = match require_authenticated_user(&auth_slot) {
+        Ok(authenticated) => authenticated,
+        Err(err) => {
+            warn!(
+                has_cookie = headers.get(header::COOKIE).is_some(),
+                "Auth check failed: authenticated subject missing"
+            );
+            return err.into_response();
+        }
+    };
     let demo_mode = parse_cookie_header(&headers)
         .get("fabro-demo")
         .is_some_and(|cookie| cookie.value() == "1");
     Json(AuthMeResponse {
         user: SessionUser {
-            login:       subject.login.expect("checked above"),
-            name:        subject.name,
-            email:       subject.email,
-            idp_issuer:  subject
-                .identity
-                .as_ref()
-                .map(|identity| identity.issuer().to_string()),
-            idp_subject: subject
-                .identity
-                .as_ref()
-                .map(|identity| identity.subject().to_string()),
-            avatar_url:  subject.avatar_url,
-            user_url:    subject.user_url,
+            login:       authenticated.principal.login.clone(),
+            name:        authenticated.profile.name,
+            email:       authenticated.profile.email,
+            idp_issuer:  Some(authenticated.principal.identity.issuer().to_string()),
+            idp_subject: Some(authenticated.principal.identity.subject().to_string()),
+            avatar_url:  authenticated.profile.avatar_url,
+            user_url:    authenticated.profile.user_url,
         },
-        provider: session_provider(subject.auth_method).to_string(),
+        provider: session_provider(authenticated.principal.auth_method).to_string(),
         demo_mode,
     })
     .into_response()
 }
 
 async fn toggle_demo(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Json(payload): Json<DemoToggleRequest>,
 ) -> Response {
@@ -848,7 +839,7 @@ mod tests {
     use axum_extra::extract::cookie::Key;
     use fabro_config::{RunLayer, ServerSettingsBuilder};
     use fabro_types::settings::server::ServerAuthMethod;
-    use fabro_types::{IdpIdentity, RunAuthMethod};
+    use fabro_types::{AuthMethod, IdpIdentity};
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -943,12 +934,19 @@ client_id = "github-client-id"
             RunLayer::default(),
             Some("web-auth-test-key-material-0123456789"),
         );
-        let middleware_state = state.clone();
+        let translation_state = state.clone();
+        let principal_state = state.clone();
         axum::Router::new()
             .nest("/auth", routes())
-            .nest("/api/v1", api_routes())
+            .nest(
+                "/api/v1",
+                api_routes().layer(axum::middleware::from_fn_with_state(
+                    principal_state,
+                    crate::principal_middleware::principal_middleware,
+                )),
+            )
             .layer(axum::middleware::from_fn_with_state(
-                middleware_state,
+                translation_state,
                 crate::auth::auth_translation_middleware,
             ))
             .layer(Extension(Arc::new(GithubEndpoints::production_defaults())))
@@ -1011,7 +1009,7 @@ client_id = "github-client-id"
             axum::http::HeaderValue::from_str(&session_cookie).unwrap(),
         );
         let session = read_private_session(&cookie_headers, &key).expect("session should decode");
-        assert_eq!(session.auth_method, RunAuthMethod::DevToken);
+        assert_eq!(session.auth_method, AuthMethod::DevToken);
         assert_eq!(session.v, 2);
         assert_eq!(
             session.identity,
@@ -1051,7 +1049,7 @@ client_id = "github-client-id"
                 email:       "octocat@example.com".to_string(),
                 avatar_url:  String::new(),
                 user_url:    String::new(),
-                auth_method: RunAuthMethod::Github,
+                auth_method: AuthMethod::Github,
             },
             chrono::Duration::minutes(10),
         );

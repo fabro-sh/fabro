@@ -1,5 +1,5 @@
 use fabro_store::Database;
-use fabro_types::{ActorRef, RunId, RunStatus, TerminalStatus};
+use fabro_types::{Principal, RunId, RunStatus, TerminalStatus};
 
 use super::run_store::map_open_run_error;
 use crate::error::Error;
@@ -47,7 +47,7 @@ pub enum UnarchiveOutcome {
 pub async fn archive(
     store: &Database,
     run_id: &RunId,
-    actor: Option<ActorRef>,
+    actor: Option<Principal>,
 ) -> Result<ArchiveOutcome, Error> {
     let run_store = store
         .open_run(run_id)
@@ -94,7 +94,7 @@ pub async fn archive(
 pub async fn unarchive(
     store: &Database,
     run_id: &RunId,
-    actor: Option<ActorRef>,
+    actor: Option<Principal>,
 ) -> Result<UnarchiveOutcome, Error> {
     let run_store = store
         .open_run(run_id)

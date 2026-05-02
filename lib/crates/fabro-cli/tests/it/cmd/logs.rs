@@ -131,8 +131,8 @@ fn logs_completed_run_reads_store_without_progress_jsonl() {
     success: true
     exit_code: 0
     ----- stdout -----
-    {"actor":{"display":"system:worker","id":"worker","kind":"system"},"event":"sandbox.cleanup.started","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
-    {"actor":{"display":"system:worker","id":"worker","kind":"system"},"event":"sandbox.cleanup.completed","id":"[EVENT_ID]","properties":{"duration_ms": [DURATION_MS],"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.cleanup.started","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.cleanup.completed","id":"[EVENT_ID]","properties":{"duration_ms": [DURATION_MS],"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     ----- stderr -----
     "#);
 }
@@ -165,8 +165,8 @@ fn logs_tail_limits_output() {
     success: true
     exit_code: 0
     ----- stdout -----
-    {"actor":{"display":"system:worker","id":"worker","kind":"system"},"event":"sandbox.cleanup.started","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
-    {"actor":{"display":"system:worker","id":"worker","kind":"system"},"event":"sandbox.cleanup.completed","id":"[EVENT_ID]","properties":{"duration_ms": [DURATION_MS],"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.cleanup.started","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.cleanup.completed","id":"[EVENT_ID]","properties":{"duration_ms": [DURATION_MS],"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     ----- stderr -----
     "#);
 }

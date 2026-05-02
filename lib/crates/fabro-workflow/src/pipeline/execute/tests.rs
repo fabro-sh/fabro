@@ -212,7 +212,7 @@ async fn execute_test_run_with_options(
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer: Arc::new(AutoApproveInterviewer),
+            interviewer: Arc::new(AutoApproveInterviewer::engine()),
             lifecycle: LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
@@ -270,7 +270,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer:       Arc::new(AutoApproveInterviewer),
+            interviewer:       Arc::new(AutoApproveInterviewer::engine()),
             lifecycle:         LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
@@ -342,7 +342,7 @@ async fn run_with_lifecycle(
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer: Arc::new(AutoApproveInterviewer),
+            interviewer: Arc::new(AutoApproveInterviewer::engine()),
             lifecycle,
             run_options,
             workflow_path: None,

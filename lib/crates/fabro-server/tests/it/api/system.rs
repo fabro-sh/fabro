@@ -117,10 +117,8 @@ async fn load_questions(app: &axum::Router, run_id: &str) -> serde_json::Value {
 async fn get_system_info_returns_runtime_fields() {
     let (_temp, settings, expected_storage_dir) = temp_storage_settings();
     let configured_server_url = settings.server_settings.server.web.url.as_source();
-    let app = fabro_server::server::build_router(
-        test_app_state_with_options(settings, 5),
-        fabro_server::jwt_auth::AuthMode::Disabled,
-    );
+    let app =
+        fabro_server::test_support::build_test_router(test_app_state_with_options(settings, 5));
 
     let request = Request::builder()
         .method("GET")

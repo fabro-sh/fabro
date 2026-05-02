@@ -43,7 +43,9 @@ use fabro_auth::{
 };
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{RunLayer, RunSettingsBuilder, ServerSettingsBuilder, Storage, envfile};
-use fabro_interview::{Answer, ControlInterviewer, Interviewer, Question, WorkerControlEnvelope};
+use fabro_interview::{
+    Answer, AnswerSubmission, ControlInterviewer, Interviewer, Question, WorkerControlEnvelope,
+};
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::model_test::run_model_test;
@@ -73,9 +75,9 @@ use fabro_types::settings::server::{
 };
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
-    ActorRef, CommandOutputStream, EventBody, InterviewQuestionRecord, PullRequestRecord,
+    CommandOutputStream, EventBody, InterviewQuestionRecord, Principal, PullRequestRecord,
     QuestionType, RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
-    RunServerProvenance, RunSubjectProvenance, ServerSettings, parse_blob_ref,
+    RunServerProvenance, ServerSettings, UserPrincipal, parse_blob_ref,
 };
 use fabro_util::error::{SharedError, collect_causes, render_with_causes};
 use fabro_util::version::FABRO_VERSION;
@@ -117,16 +119,18 @@ use crate::github_webhooks::{
     WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV, parse_event_metadata, verify_signature,
 };
 use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
-use crate::jwt_auth::{self, AuthMode, AuthenticatedService, AuthenticatedSubject};
+use crate::jwt_auth::{self, AuthMode};
+use crate::principal_middleware::{
+    AuthContextSlot, AuthStatus, RequestAuth, RequestAuthContext, RequireCommandLog,
+    RequireRunBlob, RequireRunScoped, RequireStageArtifact, RequiredUser, principal_middleware,
+    require_user,
+};
 use crate::request_id::{self, RequestId};
 use crate::run_files::{FilesInFlight, list_run_files, new_files_in_flight};
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
 use crate::server_secrets::{LlmClientResult, ServerSecrets};
 use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
-use crate::worker_token::{
-    AuthorizeCommandLog, AuthorizeRunBlob, AuthorizeRunScoped, AuthorizeStageArtifact,
-    WorkerTokenKeys, issue_worker_token,
-};
+use crate::worker_token::{WorkerTokenKeys, issue_worker_token};
 use crate::{
     canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
 };
@@ -361,17 +365,21 @@ enum AnswerTransportError {
 }
 
 impl RunAnswerTransport {
-    async fn submit(&self, qid: &str, answer: Answer) -> Result<(), AnswerTransportError> {
+    async fn submit(
+        &self,
+        qid: &str,
+        submission: AnswerSubmission,
+    ) -> Result<(), AnswerTransportError> {
         match self {
             Self::Subprocess { control_tx } => {
-                let message = WorkerControlEnvelope::interview_answer(qid.to_string(), answer);
+                let message = WorkerControlEnvelope::interview_answer(qid.to_string(), submission);
                 timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
                     .await
                     .map_err(|_| AnswerTransportError::Timeout)?
                     .map_err(|_| AnswerTransportError::Closed)
             }
             Self::InProcess { interviewer } => interviewer
-                .submit(qid, answer)
+                .submit(qid, submission)
                 .await
                 .map_err(|_| AnswerTransportError::Closed),
         }
@@ -536,7 +544,8 @@ impl SlackService {
         else {
             return;
         };
-        let _ = submit_pending_interview_answer(state.as_ref(), &pending, submission.answer).await;
+        let answer_submission = AnswerSubmission::new(submission.answer, submission.actor);
+        let _ = submit_pending_interview_answer(state.as_ref(), &pending, answer_submission).await;
     }
 }
 
@@ -958,6 +967,10 @@ pub fn build_router_with_options(
         .clone()
         .unwrap_or_else(|| Arc::new(GithubEndpoints::production_defaults()));
     let webhook_secret = state.server_secret(WEBHOOK_SECRET_ENV);
+    let demo_principal_layer =
+        middleware::from_fn_with_state(Arc::clone(&state), principal_middleware);
+    let real_principal_layer =
+        middleware::from_fn_with_state(Arc::clone(&state), principal_middleware);
     let api_common = if web_enabled {
         Router::new()
             .route("/openapi.json", get(openapi_spec))
@@ -967,12 +980,21 @@ pub fn build_router_with_options(
     };
 
     let demo_router = Router::new()
-        .nest("/api/v1", api_common.clone().merge(demo_routes()))
+        .nest(
+            "/api/v1",
+            api_common
+                .clone()
+                .merge(demo_routes())
+                .layer(demo_principal_layer),
+        )
         .layer(axum::Extension(auth_mode.clone()))
         .layer(axum::Extension(Arc::clone(&github_endpoints)))
         .with_state(state.clone());
 
-    let mut real_router = Router::new().nest("/api/v1", api_common.merge(real_routes()));
+    let mut real_router = Router::new().nest(
+        "/api/v1",
+        api_common.merge(real_routes()).layer(real_principal_layer),
+    );
     if web_enabled {
         real_router = real_router.nest("/auth", web_auth::routes().merge(auth::web_routes()));
     }
@@ -1056,7 +1078,7 @@ pub fn build_router_with_options(
         .layer(middleware::from_fn(request_id::layer))
 }
 
-async fn http_log_middleware(req: axum_extract::Request, next: Next) -> Response {
+async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Response {
     let path = req.uri().path();
     if path.starts_with("/assets/") || path.starts_with("/images/") {
         return next.run(req).await;
@@ -1069,14 +1091,64 @@ async fn http_log_middleware(req: axum_extract::Request, next: Next) -> Response
         .copied()
         .map(RequestId::render)
         .unwrap_or_default();
+    let auth_slot = AuthContextSlot::initial();
+    req.extensions_mut().insert(auth_slot.clone());
     let start = std::time::Instant::now();
     let response = next.run(req).await;
     let status = response.status().as_u16();
     let latency_ms = start.elapsed().as_millis();
+    let auth_context = auth_slot.snapshot();
+    let principal_fields = auth_context.principal.log_fields();
+    let user_auth_method = principal_fields.user_auth_method.unwrap_or("");
+    let idp_issuer = principal_fields.idp_issuer.as_deref().unwrap_or("");
+    let idp_subject = principal_fields.idp_subject.as_deref().unwrap_or("");
+    let login = principal_fields.login.as_deref().unwrap_or("");
+    let run_id = principal_fields.run_id.as_deref().unwrap_or("");
+    let delivery_id = principal_fields.delivery_id.as_deref().unwrap_or("");
+    let team_id = principal_fields.team_id.as_deref().unwrap_or("");
+    let user_id = principal_fields.user_id.as_deref().unwrap_or("");
+    let auth_status = auth_context.auth_status.as_str();
+    let auth_error_code = auth_context.auth_error_code.unwrap_or("");
     if status >= 500 {
-        error!(%method, %path, status, latency_ms, request_id = %request_id, "HTTP response");
+        error!(
+            %method,
+            %path,
+            status,
+            latency_ms,
+            request_id = %request_id,
+            principal_kind = principal_fields.principal_kind,
+            user_auth_method,
+            idp_issuer,
+            idp_subject,
+            login,
+            run_id,
+            delivery_id,
+            team_id,
+            user_id,
+            auth_status,
+            auth_error_code,
+            "HTTP response"
+        );
     } else {
-        info!(%method, %path, status, latency_ms, request_id = %request_id, "HTTP response");
+        info!(
+            %method,
+            %path,
+            status,
+            latency_ms,
+            request_id = %request_id,
+            principal_kind = principal_fields.principal_kind,
+            user_auth_method,
+            idp_issuer,
+            idp_subject,
+            login,
+            run_id,
+            delivery_id,
+            team_id,
+            user_id,
+            auth_status,
+            auth_error_code,
+            "HTTP response"
+        );
     }
     response
 }
@@ -1292,6 +1364,7 @@ async fn not_implemented() -> Response {
 
 async fn github_webhook(
     State(secret): State<Arc<[u8]>>,
+    RequestAuth(auth_slot): RequestAuth,
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
@@ -1304,14 +1377,33 @@ async fn github_webhook(
         .get("x-hub-signature-256")
         .and_then(|value| value.to_str().ok())
     else {
+        auth_slot.replace(RequestAuthContext {
+            principal:       Principal::anonymous(),
+            auth_status:     AuthStatus::Invalid,
+            auth_error_code: Some("unauthorized"),
+            user_profile:    None,
+        });
         warn!(delivery = %delivery_id, "Webhook missing X-Hub-Signature-256 header");
         return StatusCode::UNAUTHORIZED;
     };
 
     if !verify_signature(&secret, &body, signature) {
+        auth_slot.replace(RequestAuthContext {
+            principal:       Principal::anonymous(),
+            auth_status:     AuthStatus::Invalid,
+            auth_error_code: Some("unauthorized"),
+            user_profile:    None,
+        });
         warn!(delivery = %delivery_id, "Webhook HMAC signature mismatch");
         return StatusCode::UNAUTHORIZED;
     }
+
+    auth_slot.replace(RequestAuthContext {
+        principal:       Principal::webhook(delivery_id.to_string()),
+        auth_status:     AuthStatus::Authenticated,
+        auth_error_code: None,
+        user_profile:    None,
+    });
 
     let event_type = headers
         .get("x-github-event")
@@ -1345,10 +1437,7 @@ async fn health() -> Response {
     .into_response()
 }
 
-async fn get_server_settings(
-    _auth: AuthenticatedService,
-    State(state): State<Arc<AppState>>,
-) -> Response {
+async fn get_server_settings(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
     (
         StatusCode::OK,
         Json(state.server_settings().as_ref().clone()),
@@ -1356,10 +1445,7 @@ async fn get_server_settings(
         .into_response()
 }
 
-async fn get_system_info(
-    _auth: AuthenticatedService,
-    State(state): State<Arc<AppState>>,
-) -> Response {
+async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
     let manifest_run_settings = state.manifest_run_settings();
     let server_settings = state.server_settings();
     let (total_runs, active_runs) = {
@@ -1419,7 +1505,7 @@ fn system_features(
 }
 
 async fn get_system_df(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Query(params): Query<DfParams>,
 ) -> Response {
@@ -1456,7 +1542,7 @@ async fn get_system_df(
 }
 
 async fn prune_runs(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Json(body): Json<PruneRunsRequest>,
 ) -> Response {
@@ -1525,7 +1611,7 @@ async fn prune_runs(
 }
 
 async fn attach_events(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Query(params): Query<GlobalAttachParams>,
 ) -> Response {
@@ -1816,13 +1902,13 @@ where
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
-async fn list_secrets(_auth: AuthenticatedService, State(state): State<Arc<AppState>>) -> Response {
+async fn list_secrets(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
     let data = state.vault.read().await.list();
     (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response()
 }
 
 async fn create_secret(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateSecretRequest>,
 ) -> Response {
@@ -1867,7 +1953,7 @@ async fn create_secret(
 }
 
 async fn delete_secret_by_name(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Json(body): Json<DeleteSecretRequest>,
 ) -> Response {
@@ -1930,7 +2016,7 @@ fn validate_github_slug(kind: &str, value: &str, max_len: usize) -> Result<(), R
 }
 
 async fn get_github_repo(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path((owner, name)): Path<(String, String)>,
 ) -> Response {
@@ -2152,10 +2238,7 @@ async fn get_github_repo(
         .into_response()
 }
 
-async fn run_diagnostics(
-    _auth: AuthenticatedService,
-    State(state): State<Arc<AppState>>,
-) -> Response {
+async fn run_diagnostics(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
     (
         StatusCode::OK,
         Json(diagnostics::run_all(state.as_ref()).await),
@@ -2187,7 +2270,7 @@ fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> St
 }
 
 async fn get_aggregate_billing(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let agg = state
@@ -2237,7 +2320,7 @@ async fn get_aggregate_billing(
 }
 
 async fn list_run_stages(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(_pagination): Query<PaginationParams>,
@@ -2327,7 +2410,7 @@ async fn list_run_stages(
 }
 
 async fn get_run_billing(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<RunId>,
 ) -> Response {
@@ -2963,7 +3046,7 @@ fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, b
 }
 
 async fn list_board_runs(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
@@ -3010,7 +3093,7 @@ async fn list_board_runs(
 }
 
 async fn list_runs(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Query(params): Query<ListRunsParams>,
 ) -> Response {
@@ -3079,7 +3162,7 @@ struct CommandLogResponseBody {
 }
 
 async fn resolve_run(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Query(query): Query<ResolveRunQuery>,
 ) -> Response {
@@ -3116,7 +3199,7 @@ async fn resolve_run(
 }
 
 async fn delete_run(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Query(query): Query<DeleteRunQuery>,
     Path(id): Path<String>,
@@ -4132,10 +4215,10 @@ fn validate_answer_for_question(
 async fn submit_pending_interview_answer(
     state: &AppState,
     pending: &LoadedPendingInterview,
-    answer: Answer,
+    submission: AnswerSubmission,
 ) -> Result<(), Response> {
-    validate_answer_for_question(&pending.question, &answer)?;
-    deliver_answer_to_run(state, pending.run_id, &pending.qid, answer).await
+    validate_answer_for_question(&pending.question, &submission.answer)?;
+    deliver_answer_to_run(state, pending.run_id, &pending.qid, submission).await
 }
 
 #[allow(
@@ -4146,7 +4229,7 @@ async fn deliver_answer_to_run(
     state: &AppState,
     run_id: RunId,
     qid: &str,
-    answer: Answer,
+    submission: AnswerSubmission,
 ) -> Result<(), Response> {
     let transport = match claim_run_answer_transport(state, run_id, qid) {
         Ok(transport) => transport,
@@ -4167,7 +4250,7 @@ async fn deliver_answer_to_run(
         }
     };
 
-    if let Ok(()) = transport.submit(qid, answer).await {
+    if let Ok(()) = transport.submit(qid, submission).await {
         Ok(())
     } else {
         release_run_answer_claim(state, run_id, qid);
@@ -4216,11 +4299,15 @@ fn answer_from_request(
 }
 
 async fn create_run(
-    subject: AuthenticatedSubject,
+    RequestAuth(auth_slot): RequestAuth,
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    let subject = match require_user(&auth_slot) {
+        Ok(subject) => subject,
+        Err(err) => return err.into_response(),
+    };
     let req = match serde_json::from_slice::<RunManifest>(&body) {
         Ok(req) => req,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
@@ -4298,16 +4385,13 @@ async fn create_run(
         .into_response()
 }
 
-fn run_provenance(headers: &HeaderMap, subject: &AuthenticatedSubject) -> RunProvenance {
+fn run_provenance(headers: &HeaderMap, subject: &UserPrincipal) -> RunProvenance {
     RunProvenance {
         server:  Some(RunServerProvenance {
             version: FABRO_VERSION.to_string(),
         }),
         client:  run_client_provenance(headers),
-        subject: Some(RunSubjectProvenance {
-            login:       subject.login.clone(),
-            auth_method: subject.auth_method,
-        }),
+        subject: Some(Principal::User(subject.clone())),
     }
 }
 
@@ -4340,7 +4424,7 @@ fn parse_known_fabro_user_agent(user_agent: &str) -> Option<(&str, &str)> {
 }
 
 async fn run_preflight(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Json(req): Json<RunManifest>,
 ) -> Response {
@@ -4367,7 +4451,7 @@ async fn run_preflight(
 }
 
 async fn validate_run_manifest(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Json(req): Json<RunManifest>,
 ) -> Response {
@@ -4391,7 +4475,7 @@ async fn validate_run_manifest(
 }
 
 async fn render_graph_from_manifest(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Json(req): Json<RenderWorkflowGraphRequest>,
 ) -> Response {
@@ -4418,7 +4502,7 @@ async fn render_graph_from_manifest(
 }
 
 async fn start_run(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     body: Option<Json<StartRunRequest>>,
@@ -5193,7 +5277,7 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
 }
 
 async fn get_run_status(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -5217,7 +5301,7 @@ async fn get_run_status(
 }
 
 async fn get_run_settings(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -5249,7 +5333,7 @@ async fn get_run_settings(
 }
 
 async fn get_questions(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -5281,7 +5365,7 @@ async fn get_questions(
 }
 
 async fn submit_answer(
-    _auth: AuthenticatedService,
+    auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path((id, qid)): Path<(String, String)>,
     Json(req): Json<SubmitAnswerRequest>,
@@ -5301,14 +5385,15 @@ async fn submit_answer(
         Ok(answer) => answer,
         Err(response) => return response,
     };
-    match submit_pending_interview_answer(state.as_ref(), &pending, answer).await {
+    let submission = AnswerSubmission::new(answer, Principal::User(auth.0));
+    match submit_pending_interview_answer(state.as_ref(), &pending, submission).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(response) => response,
     }
 }
 
 async fn get_run_state(
-    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     match state.store.open_run_reader(&id).await {
@@ -5323,7 +5408,7 @@ async fn get_run_state(
 }
 
 async fn get_run_logs(
-    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     if state.store.open_run_reader(&id).await.is_err() {
@@ -5346,7 +5431,7 @@ async fn get_run_logs(
 }
 
 async fn get_run_stage_command_log(
-    AuthorizeCommandLog(id, stage_id, stream): AuthorizeCommandLog,
+    RequireCommandLog(id, stage_id, stream): RequireCommandLog,
     State(state): State<Arc<AppState>>,
     Query(query): Query<CommandLogQuery>,
 ) -> Response {
@@ -5691,7 +5776,7 @@ impl<'a> RunPrInputs<'a> {
 }
 
 async fn create_run_pull_request(
-    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateRunPullRequestRequest>,
 ) -> Response {
@@ -5765,7 +5850,7 @@ async fn create_run_pull_request(
 }
 
 async fn get_run_pull_request(
-    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let ctx = match load_pull_request_github_context(&state, &id).await {
@@ -5798,7 +5883,7 @@ async fn get_run_pull_request(
 }
 
 async fn merge_run_pull_request(
-    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
     Json(body): Json<MergeRunPullRequestRequest>,
 ) -> Response {
@@ -5835,7 +5920,7 @@ async fn merge_run_pull_request(
 }
 
 async fn close_run_pull_request(
-    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let ctx = match load_pull_request_github_context(&state, &id).await {
@@ -5869,7 +5954,7 @@ async fn close_run_pull_request(
 }
 
 async fn append_run_event(
-    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
     Json(value): Json<serde_json::Value>,
 ) -> Response {
@@ -5914,7 +5999,7 @@ async fn append_run_event(
 }
 
 async fn list_run_events(
-    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
     Query(params): Query<EventListParams>,
 ) -> Response {
@@ -5943,7 +6028,7 @@ async fn list_run_events(
 }
 
 async fn attach_run_events(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(params): Query<AttachParams>,
@@ -6069,7 +6154,7 @@ async fn attach_run_events(
 }
 
 async fn get_checkpoint(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -6107,7 +6192,7 @@ async fn get_checkpoint(
 }
 
 async fn write_run_blob(
-    AuthorizeRunScoped(id): AuthorizeRunScoped,
+    RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
     body: Bytes,
 ) -> Response {
@@ -6129,7 +6214,7 @@ async fn write_run_blob(
 }
 
 async fn read_run_blob(
-    AuthorizeRunBlob(id, blob_id): AuthorizeRunBlob,
+    RequireRunBlob(id, blob_id): RequireRunBlob,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     match state.store.open_run_reader(&id).await {
@@ -6163,7 +6248,7 @@ async fn load_run_spec(state: &AppState, run_id: &RunId) -> Result<fabro_types::
 }
 
 async fn list_run_artifacts(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -6196,7 +6281,7 @@ async fn list_run_artifacts(
 }
 
 async fn list_stage_artifacts(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path((id, stage_id)): Path<(String, String)>,
 ) -> Response {
@@ -6580,7 +6665,7 @@ async fn upload_stage_artifact_multipart(
 
 async fn put_stage_artifact(
     State(state): State<Arc<AppState>>,
-    AuthorizeStageArtifact(id, stage_id): AuthorizeStageArtifact,
+    RequireStageArtifact(id, stage_id): RequireStageArtifact,
     Query(params): Query<ArtifactFilenameParams>,
     request: axum_extract::Request,
 ) -> Response {
@@ -6625,7 +6710,7 @@ async fn put_stage_artifact(
 }
 
 async fn get_stage_artifact(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path((id, stage_id)): Path<(String, String)>,
     Query(params): Query<ArtifactFilenameParams>,
@@ -6664,7 +6749,7 @@ async fn get_stage_artifact(
 }
 
 async fn generate_preview_url(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(request): Json<PreviewUrlRequest>,
@@ -6716,7 +6801,7 @@ async fn generate_preview_url(
 }
 
 async fn create_ssh_access(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(request): Json<SshAccessRequest>,
@@ -6736,7 +6821,7 @@ async fn create_ssh_access(
 }
 
 async fn list_sandbox_files(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(params): Query<SandboxFilesParams>,
@@ -6766,7 +6851,7 @@ async fn list_sandbox_files(
 }
 
 async fn get_sandbox_file(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(params): Query<SandboxFileParams>,
@@ -6801,7 +6886,7 @@ async fn get_sandbox_file(
 }
 
 async fn put_sandbox_file(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(params): Query<SandboxFileParams>,
@@ -6909,7 +6994,7 @@ async fn append_control_request(
     state: &AppState,
     run_id: RunId,
     action: RunControlAction,
-    actor: Option<ActorRef>,
+    actor: Option<Principal>,
 ) -> anyhow::Result<()> {
     let run_store = state.store.open_run(&run_id).await?;
     let event = match action {
@@ -6920,8 +7005,8 @@ async fn append_control_request(
     workflow_event::append_event(&run_store, &run_id, &event).await
 }
 
-fn actor_from_subject(subject: &AuthenticatedSubject) -> Option<ActorRef> {
-    subject.login.clone().map(ActorRef::user)
+fn actor_from_subject(subject: &RequiredUser) -> Principal {
+    Principal::User(subject.0.clone())
 }
 
 /// Returns the wire event name if the given body has a dedicated operation
@@ -6972,7 +7057,7 @@ fn schedule_worker_kill(state: Arc<AppState>, run_id: RunId, worker_pid: u32) {
 }
 
 async fn cancel_run(
-    subject: AuthenticatedSubject,
+    subject: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -7049,7 +7134,7 @@ async fn cancel_run(
             state.as_ref(),
             id,
             RunControlAction::Cancel,
-            actor_from_subject(&subject),
+            Some(actor_from_subject(&subject)),
         )
         .await
         {
@@ -7128,7 +7213,7 @@ enum UnpauseMode {
 }
 
 async fn pause_run(
-    subject: AuthenticatedSubject,
+    subject: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -7177,7 +7262,7 @@ async fn pause_run(
         state.as_ref(),
         id,
         RunControlAction::Pause,
-        actor_from_subject(&subject),
+        Some(actor_from_subject(&subject)),
     )
     .await
     {
@@ -7230,7 +7315,7 @@ async fn pause_run(
 }
 
 async fn unpause_run(
-    subject: AuthenticatedSubject,
+    subject: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -7282,7 +7367,7 @@ async fn unpause_run(
         state.as_ref(),
         id,
         RunControlAction::Unpause,
-        actor_from_subject(&subject),
+        Some(actor_from_subject(&subject)),
     )
     .await
     {
@@ -7335,7 +7420,7 @@ async fn unpause_run(
 }
 
 async fn archive_run(
-    subject: AuthenticatedSubject,
+    subject: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -7343,7 +7428,7 @@ async fn archive_run(
 }
 
 async fn unarchive_run(
-    subject: AuthenticatedSubject,
+    subject: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -7351,7 +7436,7 @@ async fn unarchive_run(
 }
 
 async fn rewind_run(
-    subject: AuthenticatedSubject,
+    subject: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     body: Option<Json<RewindRequest>>,
@@ -7372,7 +7457,7 @@ async fn rewind_run(
     match Box::pin(operations::rewind(
         &state.store,
         &input,
-        actor_from_subject(&subject),
+        Some(actor_from_subject(&subject)),
     ))
     .await
     {
@@ -7412,7 +7497,7 @@ async fn rewind_run(
 }
 
 async fn fork_run(
-    _subject: AuthenticatedSubject,
+    _subject: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     body: Option<Json<ForkRequest>>,
@@ -7448,7 +7533,7 @@ async fn fork_run(
 }
 
 async fn run_timeline(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -7514,7 +7599,7 @@ enum ArchiveAction {
 
 async fn run_archive_action(
     state: Arc<AppState>,
-    subject: AuthenticatedSubject,
+    subject: RequiredUser,
     id: String,
     action: ArchiveAction,
 ) -> Response {
@@ -7522,7 +7607,7 @@ async fn run_archive_action(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let actor = actor_from_subject(&subject);
+    let actor = Some(actor_from_subject(&subject));
     let result = match action {
         ArchiveAction::Archive => operations::archive(&state.store, &id, actor)
             .await
@@ -7609,7 +7694,7 @@ async fn synchronous_transition(
 }
 
 async fn list_models(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Query(params): Query<ModelListParams>,
 ) -> Response {
@@ -7672,7 +7757,7 @@ async fn list_models(
 }
 
 async fn test_model(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(params): Query<ModelTestParams>,
@@ -7790,7 +7875,7 @@ fn convert_llm_message(msg: &LlmMessage) -> CompletionMessage {
 }
 
 async fn create_completion(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateCompletionRequest>,
 ) -> Response {
@@ -8178,7 +8263,7 @@ async fn load_run_dot_source(state: &AppState, id: &RunId) -> Result<String, Res
 }
 
 async fn get_graph(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(params): Query<GraphParams>,
@@ -8205,7 +8290,7 @@ async fn get_graph(
 }
 
 async fn get_graph_source(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -8244,9 +8329,9 @@ mod tests {
     use fabro_model::Provider;
     use fabro_types::settings::ServerAuthMethod;
     use fabro_types::{
-        AttrValue, CommandTermination, FailureCategory, FailureDetail, Graph,
-        InterviewQuestionRecord, Outcome, QuestionType, RunAuthMethod, RunBlobId, RunId, RunSpec,
-        StageOutcome, fixtures,
+        AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
+        InterviewQuestionRecord, Outcome, QuestionType, RunBlobId, RunId, RunSpec, StageOutcome,
+        SystemActorKind, fixtures,
     };
     use httpmock::Method::POST;
     use httpmock::MockServer;
@@ -8295,9 +8380,8 @@ mod tests {
 
     fn test_app_with() -> Router {
         let state = create_app_state();
-        build_router_with_options(
+        crate::test_support::build_test_router_with_options(
             state,
-            &AuthMode::Disabled,
             Arc::new(IpAllowlistConfig::default()),
             RouterOptions {
                 static_asset_root: Some(spa_fixture_root()),
@@ -8312,7 +8396,7 @@ mod tests {
 
     fn test_app_with_scheduler(state: Arc<AppState>) -> Router {
         spawn_scheduler(Arc::clone(&state));
-        build_router(state, AuthMode::Disabled)
+        crate::test_support::build_test_router(state)
     }
 
     fn create_app_state_with_isolated_storage() -> Arc<AppState> {
@@ -8489,7 +8573,7 @@ methods = ["dev-token"]
             email:       "octocat@example.com".to_string(),
             avatar_url:  "https://example.com/octocat.png".to_string(),
             user_url:    "https://github.com/octocat".to_string(),
-            auth_method: RunAuthMethod::Github,
+            auth_method: AuthMethod::Github,
         }
     }
 
@@ -8557,9 +8641,8 @@ url = "{url}"
             RunLayer::default(),
             5,
         );
-        build_router_with_options(
+        crate::test_support::build_test_router_with_options(
             state,
-            &AuthMode::Disabled,
             Arc::new(IpAllowlistConfig::default()),
             RouterOptions::default(),
         )
@@ -8870,7 +8953,7 @@ provider = "invalid-provider"
     #[tokio::test]
     async fn create_secret_stores_file_secret_and_excludes_it_from_snapshot() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let req = Request::builder()
             .method("POST")
             .uri(api("/secrets"))
@@ -8902,7 +8985,7 @@ provider = "invalid-provider"
 
     #[tokio::test]
     async fn github_webhook_rejects_missing_signature() {
-        let app = webhook_test_app(AuthMode::Disabled);
+        let app = webhook_test_app(crate::test_support::test_auth_mode());
         let body = br#"{"action":"opened"}"#;
 
         let response = app
@@ -8914,7 +8997,7 @@ provider = "invalid-provider"
 
     #[tokio::test]
     async fn github_webhook_rejects_signature_signed_with_wrong_secret() {
-        let app = webhook_test_app(AuthMode::Disabled);
+        let app = webhook_test_app(crate::test_support::test_auth_mode());
         let body = br#"{"action":"opened"}"#;
         let bad_signature = compute_signature(b"wrong-secret", body);
 
@@ -8929,7 +9012,7 @@ provider = "invalid-provider"
     async fn github_webhook_accepts_valid_signature_when_auth_disabled() {
         let body = br#"{"repository":{"full_name":"owner/repo"},"action":"opened"}"#;
         let signature = compute_signature(TEST_WEBHOOK_SECRET.as_bytes(), body);
-        let app = webhook_test_app(AuthMode::Disabled);
+        let app = webhook_test_app(crate::test_support::test_auth_mode());
 
         let response = app
             .oneshot(webhook_request(Some(&signature), None, body))
@@ -8971,7 +9054,7 @@ provider = "invalid-provider"
     #[tokio::test]
     async fn create_secret_stores_valid_credential_entries() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let credential = fabro_auth::AuthCredential {
             provider: Provider::OpenAi,
             details:  fabro_auth::AuthDetails::CodexOAuth {
@@ -9145,7 +9228,7 @@ provider = "invalid-provider"
                 )
                 .unwrap();
         }
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let response = app
             .oneshot(
@@ -9173,7 +9256,7 @@ provider = "invalid-provider"
     #[tokio::test]
     async fn create_secret_rejects_invalid_credential_json() {
         let state = create_app_state();
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
 
         let req = Request::builder()
             .method("POST")
@@ -9196,7 +9279,7 @@ provider = "invalid-provider"
     #[tokio::test]
     async fn create_secret_rejects_wrong_credential_name() {
         let state = create_app_state();
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
 
         let req = Request::builder()
             .method("POST")
@@ -9236,7 +9319,7 @@ provider = "invalid-provider"
     #[tokio::test]
     async fn delete_secret_by_name_removes_file_secret() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let create_req = Request::builder()
             .method("POST")
@@ -9706,7 +9789,7 @@ allowed_usernames = ["octocat"]
 
         transport.cancel_run().await.unwrap();
 
-        let answer = answer_task.await.unwrap();
+        let answer = answer_task.await.unwrap().answer;
         assert_eq!(answer.value, AnswerValue::Cancelled);
     }
 
@@ -9867,7 +9950,7 @@ allowed_usernames = ["octocat"]
     #[tokio::test]
     async fn list_run_stages_projects_retrying_until_completion() {
         let state = create_app_state_with_isolated_storage();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = RunId::new();
 
         create_durable_run_with_events(&state, run_id, &[
@@ -10102,7 +10185,7 @@ strategy = "token"
         github_api_base_url: Option<String>,
     ) -> (Arc<AppState>, Router, RunId) {
         let state = create_github_token_app_state(token, github_api_base_url);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         (state, app, fixtures::RUN_1)
     }
 
@@ -10115,7 +10198,7 @@ strategy = "token"
         github_api_base_url: Option<String>,
     ) -> (Arc<AppState>, Router, String) {
         let state = create_github_token_app_state(token, github_api_base_url);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = create_run(&app, MINIMAL_DOT).await;
         (state, app, run_id)
     }
@@ -10288,7 +10371,7 @@ strategy = "token"
             5,
             |_| None,
         );
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
 
         let req = Request::builder()
             .method("POST")
@@ -10311,7 +10394,7 @@ strategy = "token"
             5,
             |_| None,
         );
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
 
         let req = Request::builder()
             .method("POST")
@@ -10378,7 +10461,7 @@ strategy = "token"
             5,
             |name| (name == EnvVars::ANTHROPIC_API_KEY).then(|| "test-key".to_string()),
         );
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
 
         let req = Request::builder()
             .method("GET")
@@ -10414,7 +10497,7 @@ strategy = "token"
             5,
             |_| None,
         );
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
 
         let req = Request::builder()
             .method("GET")
@@ -10774,7 +10857,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_questions_returns_empty_list() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         // Start a run
         let req = Request::builder()
@@ -10843,7 +10926,10 @@ slug = "fabro"
         let response = submit_pending_interview_answer(
             state.as_ref(),
             &pending,
-            Answer::text("not a valid multiple choice answer"),
+            AnswerSubmission::system(
+                Answer::text("not a valid multiple choice answer"),
+                SystemActorKind::Engine,
+            ),
         )
         .await
         .unwrap_err();
@@ -10869,7 +10955,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_run_state_returns_projection() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("POST")
@@ -10896,7 +10982,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_run_logs_returns_per_run_log_file() {
         let state = create_app_state_with_isolated_storage();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = RunId::new();
         create_durable_run_with_events(&state, run_id, &[workflow_event::Event::RunSubmitted {
             definition_blob: None,
@@ -10934,7 +11020,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_run_logs_returns_not_found_for_missing_run() {
         let state = create_app_state_with_isolated_storage();
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
         let missing_run_id = RunId::new();
 
         let req = Request::builder()
@@ -10950,7 +11036,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_run_logs_returns_not_found_when_log_file_is_missing() {
         let state = create_app_state_with_isolated_storage();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = RunId::new();
         create_durable_run_with_events(&state, run_id, &[workflow_event::Event::RunSubmitted {
             definition_blob: None,
@@ -10970,7 +11056,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_run_stage_command_log_returns_scratch_slice() {
         let state = create_app_state_with_isolated_storage();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = RunId::new();
         let stage_id = StageId::new("script_node", 1);
         create_durable_run_with_events(&state, run_id, &[
@@ -11031,7 +11117,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_run_stage_command_log_returns_cas_slice() {
         let state = create_app_state_with_isolated_storage();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = RunId::new();
         let run_store = state.store.create_run(&run_id).await.unwrap();
         let stdout_blob = run_store
@@ -11101,7 +11187,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
         let state = create_app_state_with_isolated_storage();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = RunId::new();
         let stage_id = StageId::new("script_node", 1);
         let run_store = state.store.create_run(&run_id).await.unwrap();
@@ -11182,7 +11268,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_run_stage_command_log_returns_not_found_for_missing_stage() {
         let state = create_app_state_with_isolated_storage();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = RunId::new();
         create_durable_run_with_events(&state, run_id, &[workflow_event::Event::RunSubmitted {
             definition_blob: None,
@@ -11266,7 +11352,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_run_pull_request_returns_not_found_when_record_missing() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = create_run(&app, MINIMAL_DOT).await;
 
         let response = app
@@ -11427,7 +11513,7 @@ slug = "fabro"
                 None,
             )
             .unwrap();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = fixtures::RUN_1;
         create_completed_run_ready_for_pull_request(
             &state,
@@ -11638,7 +11724,7 @@ slug = "fabro"
         let state = create_github_token_app_state(Some("ghu_test"), Some(github.base_url()));
         assert_eq!(state.github_api_base_url, github.base_url());
 
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = fixtures::RUN_1;
         create_run_with_pull_request_record(
             &state,
@@ -11890,7 +11976,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_run_state_exposes_pending_interviews() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = fixtures::RUN_1;
 
         create_durable_run_with_events(&state, run_id, &[
@@ -11942,7 +12028,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_run_state_includes_provenance_from_user_agent() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("POST")
@@ -11974,11 +12060,16 @@ slug = "fabro"
         );
         assert_eq!(body["spec"]["provenance"]["client"]["name"], "fabro-cli");
         assert_eq!(body["spec"]["provenance"]["client"]["version"], "1.2.3");
+        assert_eq!(body["spec"]["provenance"]["subject"]["kind"], "user");
         assert_eq!(
             body["spec"]["provenance"]["subject"]["auth_method"],
-            "disabled"
+            "dev_token"
         );
-        assert!(body["spec"]["provenance"]["subject"]["login"].is_null());
+        assert_eq!(body["spec"]["provenance"]["subject"]["login"], "dev");
+        assert_eq!(
+            body["spec"]["provenance"]["subject"]["identity"]["issuer"],
+            "fabro:dev"
+        );
     }
 
     #[tokio::test]
@@ -12063,7 +12154,7 @@ slug = "fabro"
     #[tokio::test]
     async fn create_run_persists_manifest_and_definition_blobs_without_bundle_file() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let raw_manifest =
             serde_json::to_string_pretty(&minimal_manifest_json(MINIMAL_DOT)).unwrap();
 
@@ -12122,7 +12213,7 @@ slug = "fabro"
     #[tokio::test]
     async fn list_run_events_returns_paginated_json() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("POST")
@@ -12150,7 +12241,7 @@ slug = "fabro"
     #[tokio::test]
     async fn append_run_event_rejects_run_id_mismatch() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("POST")
@@ -12186,7 +12277,7 @@ slug = "fabro"
     #[tokio::test]
     async fn append_run_event_rejects_reserved_archive_event() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = create_run(&app, MINIMAL_DOT).await;
 
         let req = Request::builder()
@@ -12220,7 +12311,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_checkpoint_returns_null_initially() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         // Start a run
         let req = Request::builder()
@@ -12248,7 +12339,7 @@ slug = "fabro"
     #[tokio::test]
     async fn write_and_read_run_blob_round_trip() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("POST")
@@ -12284,7 +12375,7 @@ slug = "fabro"
     #[tokio::test]
     async fn stage_artifacts_round_trip() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let run_id = create_run(&app, MINIMAL_DOT).await;
         let stage_id = "code@2";
@@ -12324,7 +12415,7 @@ slug = "fabro"
     #[tokio::test]
     async fn create_run_persists_run_spec() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let run_id = create_run(&app, MINIMAL_DOT)
             .await
@@ -12345,7 +12436,7 @@ slug = "fabro"
     #[tokio::test]
     async fn stage_artifact_upload_rejects_invalid_filename() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let run_id = create_run(&app, MINIMAL_DOT).await;
 
@@ -12716,7 +12807,7 @@ slug = "fabro"
     #[tokio::test]
     async fn stage_artifacts_multipart_round_trip() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let run_id = create_run(&app, MINIMAL_DOT).await;
         let stage_id = "code@2";
@@ -12782,7 +12873,7 @@ slug = "fabro"
     #[tokio::test]
     async fn stage_artifacts_multipart_requires_manifest_first() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let run_id = create_run(&app, MINIMAL_DOT).await;
         let boundary = "fabro-test-boundary";
@@ -12806,7 +12897,7 @@ slug = "fabro"
     #[tokio::test]
     async fn create_run_returns_submitted() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("POST")
@@ -12823,7 +12914,7 @@ slug = "fabro"
     #[tokio::test]
     async fn start_run_transitions_to_queued() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         // Create a run
         let req = Request::builder()
@@ -12862,7 +12953,7 @@ slug = "fabro"
     #[tokio::test]
     async fn start_run_conflict_when_not_submitted() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         // Create a run
         let req = Request::builder()
@@ -12896,7 +12987,7 @@ slug = "fabro"
     #[tokio::test]
     async fn cancel_run_succeeds() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let run_id = create_and_start_run(&app, MINIMAL_DOT)
             .await
@@ -12937,7 +13028,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_graph_returns_svg() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         // Start a run
         let req = Request::builder()
@@ -12998,7 +13089,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_graph_source_returns_dot() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("POST")
@@ -13184,7 +13275,7 @@ slug = "fabro"
     #[tokio::test]
     async fn list_runs_returns_started_run() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         // List should be empty initially
         let req = Request::builder()
@@ -13235,7 +13326,7 @@ slug = "fabro"
     #[tokio::test]
     async fn archive_and_unarchive_updates_listing_visibility() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = fixtures::RUN_1;
 
         create_durable_run_with_events(&state, run_id, &[
@@ -13374,7 +13465,7 @@ slug = "fabro"
     #[tokio::test]
     async fn delete_run_removes_durable_run() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("POST")
@@ -13407,7 +13498,7 @@ slug = "fabro"
     #[tokio::test]
     async fn delete_active_run_requires_force() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("POST")
@@ -13448,7 +13539,7 @@ slug = "fabro"
     #[tokio::test]
     async fn delete_active_run_force_succeeds() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("POST")
@@ -13481,7 +13572,7 @@ slug = "fabro"
     #[tokio::test]
     async fn get_aggregate_billing_returns_zeros_initially() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("GET")
@@ -13502,7 +13593,7 @@ slug = "fabro"
     #[tokio::test]
     async fn post_runs_returns_submitted_status() {
         let state = create_app_state();
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
 
         let req = Request::builder()
             .method("POST")
@@ -13574,7 +13665,7 @@ level = "debug"
             manifest_run_defaults_from_toml(source),
             5,
         );
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let req = Request::builder()
             .method("POST")
@@ -13640,7 +13731,7 @@ level = "debug"
     #[tokio::test]
     async fn cancel_queued_run_succeeds() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let run_id = create_and_start_run(&app, MINIMAL_DOT)
             .await
@@ -13704,7 +13795,7 @@ level = "debug"
     #[tokio::test]
     async fn cancel_run_overwrites_pending_pause_request() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
@@ -13734,7 +13825,7 @@ level = "debug"
     #[tokio::test]
     async fn pause_run_rejects_when_control_is_already_pending() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
@@ -13763,7 +13854,7 @@ level = "debug"
     #[tokio::test]
     async fn pause_run_sets_pending_control_on_board_response() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
@@ -13817,7 +13908,7 @@ level = "debug"
     #[tokio::test]
     async fn pause_run_immediately_pauses_blocked_run() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
@@ -13882,7 +13973,7 @@ level = "debug"
     #[tokio::test]
     async fn unpause_run_sets_pending_control() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
@@ -13911,7 +14002,7 @@ level = "debug"
     #[tokio::test]
     async fn unpause_run_returns_blocked_when_human_gate_is_still_unresolved() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
@@ -14146,7 +14237,7 @@ provider = "local"
             manifest_run_defaults_from_toml(source),
             |interviewer| fabro_workflow::handler::default_registry(interviewer, || None),
         );
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
@@ -14245,7 +14336,7 @@ provider = "local"
             std::thread::sleep(std::time::Duration::from_millis(200));
             fabro_workflow::handler::default_registry(interviewer, || None)
         });
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
@@ -14279,7 +14370,7 @@ provider = "local"
     #[tokio::test]
     async fn queue_position_reported_for_queued_runs() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         // Create and start two runs (no scheduler, both stay queued)
         let first_run_id = create_and_start_run(&app, MINIMAL_DOT).await;
@@ -14332,7 +14423,7 @@ provider = "local"
     #[tokio::test]
     async fn submit_answer_to_queued_run_returns_conflict() {
         let state = create_app_state();
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
 
         let req = Request::builder()
             .method("POST")
@@ -14377,7 +14468,7 @@ provider = "local"
     #[tokio::test]
     async fn demo_boards_runs_returns_run_list_items() {
         let state = create_app_state();
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
         let req = Request::builder()
             .method("GET")
             .uri(api("/boards/runs"))
@@ -14403,7 +14494,7 @@ provider = "local"
     #[tokio::test]
     async fn demo_get_run_returns_run_summary_shape() {
         let state = create_app_state();
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
         let run_id = RunId::with_timestamp(
             "2026-03-06T14:30:00Z"
                 .parse()
@@ -14435,7 +14526,7 @@ provider = "local"
     #[tokio::test]
     async fn demo_get_run_returns_404_for_unknown_run() {
         let state = create_app_state();
-        let app = build_router(state, AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(state);
         let req = Request::builder()
             .method("GET")
             .uri(api("/runs/nonexistent-run-id"))
@@ -14449,7 +14540,7 @@ provider = "local"
     #[tokio::test]
     async fn boards_runs_returns_run_list_items_with_board_columns() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = create_and_start_run(&app, MINIMAL_DOT).await;
 
         // Set run to running so it appears on the board
@@ -14489,7 +14580,7 @@ provider = "local"
     #[tokio::test]
     async fn boards_runs_excludes_removing_status() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = fixtures::RUN_1;
 
         // A run in Removing status should not appear on the board
@@ -14520,7 +14611,7 @@ provider = "local"
     #[tokio::test]
     async fn get_run_exposes_canonical_operator_statuses() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let succeeded_id = fixtures::RUN_1;
         let removing_id = fixtures::RUN_2;
@@ -14592,7 +14683,7 @@ provider = "local"
     #[tokio::test]
     async fn boards_runs_maps_statuses_to_columns() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let paused_id = fixtures::RUN_1;
         let succeeded_id = fixtures::RUN_2;
@@ -14743,7 +14834,7 @@ provider = "local"
     #[tokio::test]
     async fn boards_runs_includes_live_board_metadata_from_run_state() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = create_and_start_run(&app, MINIMAL_DOT)
             .await
             .parse::<RunId>()
@@ -14811,7 +14902,7 @@ provider = "local"
     #[tokio::test]
     async fn boards_runs_page_limit_preserves_metadata_for_paged_items() {
         let state = create_app_state();
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let app = crate::test_support::build_test_router(Arc::clone(&state));
 
         let first_run_id = create_and_start_run(&app, MINIMAL_DOT)
             .await

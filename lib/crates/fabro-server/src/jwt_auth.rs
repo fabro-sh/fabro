@@ -1,13 +1,15 @@
 use anyhow::{Result, anyhow};
-use axum::extract::FromRequestParts;
+#[cfg(test)]
 use axum::http::header;
+#[cfg(test)]
 use axum::http::request::Parts;
 use fabro_static::EnvVars;
 use fabro_types::settings::{ServerAuthMethod, ServerNamespace};
-use fabro_types::{IdpIdentity, RunAuthMethod};
+use fabro_types::{AuthMethod, IdpIdentity};
 use fabro_util::dev_token::validate_dev_token_format;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+#[cfg(test)]
 use tracing::info;
 
 use crate::auth::{self, JwtError, JwtSigningKey, KeyDeriveError};
@@ -23,7 +25,7 @@ pub struct VerifiedAuth {
     pub email:       String,
     pub avatar_url:  String,
     pub user_url:    String,
-    pub auth_method: RunAuthMethod,
+    pub auth_method: AuthMethod,
     pub identity:    Option<IdpIdentity>,
 }
 
@@ -49,7 +51,6 @@ impl ConfiguredAuth {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AuthMode {
     Enabled(ConfiguredAuth),
-    Disabled,
 }
 
 pub fn resolve_auth_mode(settings: &ServerNamespace) -> Result<AuthMode> {
@@ -183,14 +184,14 @@ pub(crate) fn dev_token_matches(provided: &str, expected: &str) -> bool {
     expected_mac.verify_slice(&provided_mac).is_ok()
 }
 
-fn config_allows_run_auth_method(config: &ConfiguredAuth, method: RunAuthMethod) -> bool {
+fn config_allows_run_auth_method(config: &ConfiguredAuth, method: AuthMethod) -> bool {
     match method {
-        RunAuthMethod::Disabled => false,
-        RunAuthMethod::DevToken => config.methods.contains(&ServerAuthMethod::DevToken),
-        RunAuthMethod::Github => config.methods.contains(&ServerAuthMethod::Github),
+        AuthMethod::DevToken => config.methods.contains(&ServerAuthMethod::DevToken),
+        AuthMethod::Github => config.methods.contains(&ServerAuthMethod::Github),
     }
 }
 
+#[cfg(test)]
 pub(crate) fn bearer_token(parts: &Parts) -> Option<Result<&str, ApiError>> {
     let value = parts.headers.get(header::AUTHORIZATION)?;
     let Ok(value) = value.to_str() else {
@@ -203,7 +204,10 @@ pub(crate) fn bearer_token(parts: &Parts) -> Option<Result<&str, ApiError>> {
     )
 }
 
-fn authenticate_jwt_bearer(token: &str, config: &ConfiguredAuth) -> Result<VerifiedAuth, ApiError> {
+pub(crate) fn authenticate_jwt_bearer(
+    token: &str,
+    config: &ConfiguredAuth,
+) -> Result<VerifiedAuth, ApiError> {
     let Some(jwt_key) = config.jwt_key.as_ref() else {
         return Err(ApiError::unauthorized());
     };
@@ -252,6 +256,7 @@ fn authenticate_jwt_bearer(token: &str, config: &ConfiguredAuth) -> Result<Verif
     })
 }
 
+#[cfg(test)]
 fn authenticate_bearer(
     parts: &Parts,
     token: &str,
@@ -271,7 +276,7 @@ fn authenticate_bearer(
     authenticate_jwt_bearer(token, config)
 }
 
-fn looks_like_jwt(token: &str) -> bool {
+pub(crate) fn looks_like_jwt(token: &str) -> bool {
     let mut segments = token.split('.');
     matches!(
         (
@@ -285,15 +290,14 @@ fn looks_like_jwt(token: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 fn authenticate_parts(parts: &Parts) -> Result<Option<VerifiedAuth>, ApiError> {
     let auth_mode = parts
         .extensions
         .get::<AuthMode>()
         .expect("AuthMode extension must be added to the router");
 
-    let AuthMode::Enabled(config) = auth_mode else {
-        return Ok(None);
-    };
+    let AuthMode::Enabled(config) = auth_mode;
 
     authenticate_bearer(
         parts,
@@ -301,70 +305,6 @@ fn authenticate_parts(parts: &Parts) -> Result<Option<VerifiedAuth>, ApiError> {
         config,
     )
     .map(Some)
-}
-
-pub struct AuthenticatedService;
-
-pub fn authenticate_service_parts(parts: &Parts) -> Result<(), ApiError> {
-    authenticate_parts(parts).map(|_| ())
-}
-
-impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedService {
-    type Rejection = ApiError;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        authenticate_service_parts(parts)?;
-        Ok(Self)
-    }
-}
-
-pub struct AuthenticatedSubject {
-    pub login:       Option<String>,
-    pub name:        String,
-    pub email:       String,
-    pub avatar_url:  String,
-    pub user_url:    String,
-    pub identity:    Option<IdpIdentity>,
-    pub auth_method: RunAuthMethod,
-}
-
-impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
-    type Rejection = ApiError;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let auth_mode = parts
-            .extensions
-            .get::<AuthMode>()
-            .expect("AuthMode extension must be added to the router");
-
-        match auth_mode {
-            AuthMode::Disabled => Ok(Self {
-                login:       None,
-                name:        String::new(),
-                email:       String::new(),
-                avatar_url:  String::new(),
-                user_url:    String::new(),
-                identity:    None,
-                auth_method: RunAuthMethod::Disabled,
-            }),
-            AuthMode::Enabled(config) => {
-                let auth = authenticate_bearer(
-                    parts,
-                    bearer_token(parts).ok_or_else(ApiError::unauthorized)??,
-                    config,
-                )?;
-                Ok(Self {
-                    login:       Some(auth.login),
-                    name:        auth.name,
-                    email:       auth.email,
-                    avatar_url:  auth.avatar_url,
-                    user_url:    auth.user_url,
-                    identity:    auth.identity,
-                    auth_method: auth.auth_method,
-                })
-            }
-        }
-    }
 }
 
 pub fn auth_method_name(method: ServerAuthMethod) -> &'static str {
@@ -381,14 +321,11 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use axum::response::IntoResponse;
-    use axum::routing::get;
-    use axum::{Json, Router};
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use fabro_config::{Error as ConfigError, ServerSettingsBuilder};
     use fabro_types::IdpIdentity;
     use fabro_types::settings::ServerAuthMethod;
-    use tower::ServiceExt;
     use tracing::field::{Field, Visit};
     use tracing::{Event, Subscriber, subscriber};
     use tracing_subscriber::layer::{Context, SubscriberExt};
@@ -403,47 +340,6 @@ mod tests {
 
     fn empty_lookup(_name: &str) -> Option<String> {
         None
-    }
-
-    async fn protected_handler(_auth: AuthenticatedService) -> impl IntoResponse {
-        "ok"
-    }
-
-    async fn subject_handler(subject: AuthenticatedSubject) -> impl IntoResponse {
-        Json(serde_json::json!({
-            "login": subject.login,
-            "name": subject.name,
-            "email": subject.email,
-            "avatar_url": subject.avatar_url,
-            "user_url": subject.user_url,
-            "idp_issuer": subject.identity.as_ref().map(|identity| identity.issuer().to_string()),
-            "idp_subject": subject.identity.as_ref().map(|identity| identity.subject().to_string()),
-            "auth_method": subject.auth_method,
-        }))
-    }
-
-    fn test_router(mode: AuthMode) -> Router {
-        Router::new()
-            .route("/test", get(protected_handler))
-            .layer(axum::Extension(mode))
-    }
-
-    fn subject_router(mode: AuthMode) -> Router {
-        Router::new()
-            .route("/subject", get(subject_handler))
-            .layer(axum::Extension(mode))
-    }
-
-    macro_rules! response_json {
-        ($response:expr) => {
-            fabro_test::expect_axum_json($response, StatusCode::OK, concat!(file!(), ":", line!()))
-        };
-    }
-
-    macro_rules! assert_status {
-        ($response:expr, $expected:expr) => {
-            fabro_test::assert_axum_status($response, $expected, concat!(file!(), ":", line!()))
-        };
     }
 
     async fn error_json(err: ApiError) -> serde_json::Value {
@@ -491,7 +387,7 @@ mod tests {
             email:       "octocat@example.com".to_string(),
             avatar_url:  "https://example.com/octocat.png".to_string(),
             user_url:    "https://github.com/octocat".to_string(),
-            auth_method: RunAuthMethod::Github,
+            auth_method: AuthMethod::Github,
         }
     }
 
@@ -636,9 +532,7 @@ methods = ["dev-token"]
             _ => None,
         })
         .expect("dev-token auth should resolve");
-        let AuthMode::Enabled(config) = mode else {
-            panic!("expected enabled mode");
-        };
+        let AuthMode::Enabled(config) = mode;
         assert_eq!(config.methods, vec![ServerAuthMethod::DevToken]);
         assert!(config.dev_token.is_some());
         assert!(config.jwt_key.is_some());
@@ -672,9 +566,7 @@ url = "http://localhost:4000"
             _ => None,
         })
         .expect("dev-token auth should resolve");
-        let AuthMode::Enabled(config) = mode else {
-            panic!("expected enabled mode");
-        };
+        let AuthMode::Enabled(config) = mode;
         assert_eq!(config.jwt_issuer.as_deref(), Some("http://localhost:4000"));
     }
 
@@ -705,9 +597,7 @@ url = ""
             _ => None,
         })
         .expect("dev-token auth should resolve");
-        let AuthMode::Enabled(config) = mode else {
-            panic!("expected enabled mode");
-        };
+        let AuthMode::Enabled(config) = mode;
         assert_eq!(config.jwt_issuer.as_deref(), Some("fabro-server"));
     }
 
@@ -816,76 +706,61 @@ client_id = "Iv1.test"
         })
         .expect("github auth should resolve");
 
-        let AuthMode::Enabled(config) = mode else {
-            panic!("expected enabled mode");
-        };
+        let AuthMode::Enabled(config) = mode;
         assert_eq!(config.methods, vec![ServerAuthMethod::Github]);
         assert!(config.jwt_key.is_some());
         assert_eq!(config.jwt_issuer.as_deref(), Some("http://localhost:3000"));
     }
 
     #[tokio::test]
-    async fn disabled_mode_allows_request() {
-        let app = test_router(AuthMode::Disabled);
-        let response = app
-            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_status!(response, StatusCode::OK).await;
-    }
-
-    #[tokio::test]
     async fn rejects_missing_credentials() {
-        let app = test_router(dev_token_mode());
-        let response = app
-            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_status!(response, StatusCode::UNAUTHORIZED).await;
+        let parts = request_parts(
+            dev_token_mode(),
+            Request::builder().uri("/test").body(Body::empty()).unwrap(),
+        );
+        let err = authenticate_parts(&parts).unwrap_err();
+        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn rejects_dev_token_bearer_without_translation() {
-        let app = subject_router(dev_token_mode());
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/subject")
-                    .header(
-                        "authorization",
-                        "Bearer fabro_dev_abababababababababababababababababababababababababababababababab",
-                    )
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_status!(response, StatusCode::UNAUTHORIZED).await;
+        let parts = request_parts(
+            dev_token_mode(),
+            Request::builder()
+                .uri("/subject")
+                .header(
+                    "authorization",
+                    "Bearer fabro_dev_abababababababababababababababababababababababababababababab",
+                )
+                .body(Body::empty())
+                .unwrap(),
+        );
+        let err = authenticate_parts(&parts).unwrap_err();
+        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn subject_reports_profile_fields_from_jwt() {
-        let app = subject_router(github_jwt_mode());
         let token = issue_github_token(chrono::Duration::minutes(10));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/subject")
-                    .header("authorization", format!("Bearer {token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let json = response_json!(response).await;
-        assert_eq!(json["login"], "octocat");
-        assert_eq!(json["name"], "The Octocat");
-        assert_eq!(json["email"], "octocat@example.com");
-        assert_eq!(json["avatar_url"], "https://example.com/octocat.png");
-        assert_eq!(json["user_url"], "https://github.com/octocat");
-        assert_eq!(json["idp_issuer"], "https://github.com");
-        assert_eq!(json["idp_subject"], "12345");
-        assert_eq!(json["auth_method"], "github");
+        let parts = request_parts(
+            github_jwt_mode(),
+            Request::builder()
+                .uri("/subject")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        );
+        let auth = authenticate_parts(&parts).unwrap().unwrap();
+        assert_eq!(auth.login, "octocat");
+        assert_eq!(auth.name, "The Octocat");
+        assert_eq!(auth.email, "octocat@example.com");
+        assert_eq!(auth.avatar_url, "https://example.com/octocat.png");
+        assert_eq!(auth.user_url, "https://github.com/octocat");
+        assert_eq!(
+            auth.identity,
+            Some(IdpIdentity::new("https://github.com", "12345").unwrap())
+        );
+        assert_eq!(auth.auth_method, AuthMethod::Github);
     }
 
     #[test]
@@ -902,7 +777,7 @@ client_id = "Iv1.test"
 
         let auth = authenticate_parts(&parts).unwrap().unwrap();
         assert_eq!(auth.login, "octocat");
-        assert_eq!(auth.auth_method, RunAuthMethod::Github);
+        assert_eq!(auth.auth_method, AuthMethod::Github);
         assert_eq!(
             auth.identity,
             Some(IdpIdentity::new("https://github.com", "12345").unwrap())

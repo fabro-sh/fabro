@@ -1,4 +1,5 @@
 use fabro_interview::Answer;
+use fabro_types::Principal;
 use serde_json::Value;
 
 use crate::payload::{SlackActionPayload, SlackAnswerSubmission};
@@ -20,6 +21,7 @@ pub fn parse_interaction(payload: &Value) -> Option<SlackAnswerSubmission> {
     let value = action["value"].as_str()?;
     let routed: SlackActionPayload = serde_json::from_str(value).ok()?;
     let question_ref = routed.question_ref();
+    let actor = interaction_actor(payload)?;
 
     let action_type = action["type"].as_str().unwrap_or("button");
 
@@ -48,7 +50,19 @@ pub fn parse_interaction(payload: &Value) -> Option<SlackAnswerSubmission> {
         run_id: question_ref.run_id,
         qid: question_ref.qid,
         answer,
+        actor,
     })
+}
+
+fn interaction_actor(payload: &Value) -> Option<Principal> {
+    let team_id = payload["team"]["id"].as_str()?.to_string();
+    let user = &payload["user"];
+    let user_id = user["id"].as_str()?.to_string();
+    let user_name = user["name"]
+        .as_str()
+        .or_else(|| user["username"].as_str())
+        .map(str::to_string);
+    Some(Principal::slack(team_id, user_id, user_name))
 }
 
 /// Extract selected checkbox values from `payload.state.values`.
@@ -79,6 +93,8 @@ mod tests {
     fn parse_yes_button_click() {
         let payload = serde_json::json!({
             "type": "block_actions",
+            "team": { "id": "T123" },
+            "user": { "id": "U123", "name": "ada" },
             "actions": [{
                 "action_id": "interview.answer",
                 "type": "button",
@@ -89,12 +105,22 @@ mod tests {
         assert_eq!(result.run_id, "run-1");
         assert_eq!(result.qid, "q-1");
         assert_eq!(result.answer.value, AnswerValue::Yes);
+        assert_eq!(
+            result.actor,
+            fabro_types::Principal::slack(
+                "T123".to_string(),
+                "U123".to_string(),
+                Some("ada".to_string())
+            )
+        );
     }
 
     #[test]
     fn parse_no_button_click() {
         let payload = serde_json::json!({
             "type": "block_actions",
+            "team": { "id": "T123" },
+            "user": { "id": "U123", "name": "ada" },
             "actions": [{
                 "action_id": "interview.answer",
                 "type": "button",
@@ -111,6 +137,8 @@ mod tests {
     fn parse_multiple_choice_button() {
         let payload = serde_json::json!({
             "type": "block_actions",
+            "team": { "id": "T123" },
+            "user": { "id": "U123", "name": "ada" },
             "actions": [{
                 "action_id": "interview.answer",
                 "type": "button",
@@ -126,6 +154,8 @@ mod tests {
     fn checkbox_toggle_is_ignored() {
         let payload = serde_json::json!({
             "type": "block_actions",
+            "team": { "id": "T123" },
+            "user": { "id": "U123", "name": "ada" },
             "actions": [{
                 "action_id": "interview.select",
                 "type": "checkboxes",
@@ -142,6 +172,8 @@ mod tests {
     fn submit_button_reads_checkbox_state() {
         let payload = serde_json::json!({
             "type": "block_actions",
+            "team": { "id": "T123" },
+            "user": { "id": "U123", "name": "ada" },
             "actions": [{
                 "action_id": "interview.submit",
                 "type": "button",
@@ -173,6 +205,8 @@ mod tests {
     fn submit_button_with_no_checkboxes_selected() {
         let payload = serde_json::json!({
             "type": "block_actions",
+            "team": { "id": "T123" },
+            "user": { "id": "U123", "name": "ada" },
             "actions": [{
                 "action_id": "interview.submit",
                 "type": "button",

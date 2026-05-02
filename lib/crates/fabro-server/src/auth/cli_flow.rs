@@ -16,7 +16,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cookie::time::Duration;
 use cookie::{Cookie, CookieJar, Key, SameSite};
-use fabro_types::RunAuthMethod;
+use fabro_types::AuthMethod;
 use fabro_types::settings::ServerAuthMethod;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use rand::TryRngCore;
@@ -475,7 +475,7 @@ async fn token(
             email:       entry.email.clone(),
             avatar_url:  String::new(),
             user_url:    String::new(),
-            auth_method: RunAuthMethod::Github,
+            auth_method: AuthMethod::Github,
         },
         chrono::Duration::minutes(ACCESS_TOKEN_TTL_MINUTES),
     );
@@ -620,7 +620,7 @@ async fn refresh(
             email:       old.email.clone(),
             avatar_url:  String::new(),
             user_url:    String::new(),
-            auth_method: RunAuthMethod::Github,
+            auth_method: AuthMethod::Github,
         },
         chrono::Duration::minutes(ACCESS_TOKEN_TTL_MINUTES),
     );
@@ -701,7 +701,7 @@ fn github_config(auth_mode: &AuthMode) -> Option<&ConfiguredAuth> {
         AuthMode::Enabled(config) if config.methods.contains(&ServerAuthMethod::Github) => {
             Some(config)
         }
-        _ => None,
+        AuthMode::Enabled(_) => None,
     }
 }
 
@@ -722,9 +722,8 @@ fn session_cookie_secure(state: &AppState) -> bool {
 }
 
 fn eligible_session(session: Option<&SessionCookie>) -> Option<&SessionCookie> {
-    session.filter(|session| {
-        session.identity.is_some() && session.auth_method == RunAuthMethod::Github
-    })
+    session
+        .filter(|session| session.identity.is_some() && session.auth_method == AuthMethod::Github)
 }
 
 fn valid_state_token(state: &str) -> bool {
@@ -1133,7 +1132,7 @@ mod tests {
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use fabro_config::{RunLayer, ServerSettingsBuilder};
-    use fabro_types::RunAuthMethod;
+    use fabro_types::AuthMethod;
     use fabro_types::settings::server::ServerAuthMethod;
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -1229,7 +1228,7 @@ client_id = "github-client-id"
         let session = SessionCookie {
             v:           2,
             login:       "octocat".to_string(),
-            auth_method: RunAuthMethod::Github,
+            auth_method: AuthMethod::Github,
             identity:    Some(
                 fabro_types::IdpIdentity::new("https://github.com", "12345")
                     .expect("identity should be valid"),

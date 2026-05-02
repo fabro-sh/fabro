@@ -21,7 +21,7 @@ use fabro_api::types::{
 use serde_json::json;
 
 use crate::error::ApiError;
-use crate::jwt_auth::AuthenticatedService;
+use crate::principal_middleware::RequiredUser;
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
 use crate::server::{AppState, PaginationParams};
 
@@ -44,7 +44,7 @@ fn paginated_response<T: serde::Serialize>(
 // ── Runs ───────────────────────────────────────────────────────────────
 
 pub(crate) async fn list_runs(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
@@ -52,7 +52,7 @@ pub(crate) async fn list_runs(
 }
 
 pub(crate) async fn list_board_runs(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
@@ -74,7 +74,7 @@ pub(crate) async fn list_board_runs(
 }
 
 pub(crate) async fn create_run_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     (
@@ -85,7 +85,7 @@ pub(crate) async fn create_run_stub(
 }
 
 pub(crate) async fn resolve_run(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Query(params): Query<ResolveRunParams>,
 ) -> Response {
@@ -111,7 +111,7 @@ pub(crate) async fn resolve_run(
 }
 
 pub(crate) async fn start_run_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -125,7 +125,7 @@ pub(crate) async fn start_run_stub(
 }
 
 pub(crate) async fn get_run_stages(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
     Query(pagination): Query<PaginationParams>,
@@ -134,7 +134,7 @@ pub(crate) async fn get_run_stages(
 }
 
 pub(crate) async fn get_stage_turns(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path((_id, _stage_id)): Path<(String, String)>,
     Query(pagination): Query<PaginationParams>,
@@ -143,7 +143,7 @@ pub(crate) async fn get_stage_turns(
 }
 
 pub(crate) async fn list_run_artifacts_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -159,7 +159,7 @@ pub(crate) async fn list_run_artifacts_stub(
 /// `_state` parameters are intentionally ignored so demo responses cannot
 /// cross-contaminate with real run data (R34).
 pub(crate) async fn list_run_files_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -239,7 +239,7 @@ fn demo_run_files() -> PaginatedRunFileList {
 }
 
 pub(crate) async fn get_run_billing(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -247,7 +247,7 @@ pub(crate) async fn get_run_billing(
 }
 
 pub(crate) async fn get_run_settings(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -255,7 +255,7 @@ pub(crate) async fn get_run_settings(
 }
 
 pub(crate) async fn generate_preview_url_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -267,7 +267,7 @@ pub(crate) async fn generate_preview_url_stub(
 }
 
 pub(crate) async fn create_ssh_access_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -279,7 +279,7 @@ pub(crate) async fn create_ssh_access_stub(
 }
 
 pub(crate) async fn list_sandbox_files_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -296,7 +296,7 @@ pub(crate) async fn list_sandbox_files_stub(
 }
 
 pub(crate) async fn get_sandbox_file_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -304,7 +304,7 @@ pub(crate) async fn get_sandbox_file_stub(
 }
 
 pub(crate) async fn put_sandbox_file_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -312,7 +312,7 @@ pub(crate) async fn put_sandbox_file_stub(
 }
 
 pub(crate) async fn get_run_status(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -331,7 +331,7 @@ pub(crate) struct ResolveRunParams {
 }
 
 pub(crate) async fn get_questions_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
     Query(pagination): Query<PaginationParams>,
@@ -340,7 +340,7 @@ pub(crate) async fn get_questions_stub(
 }
 
 pub(crate) async fn answer_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path((_id, _qid)): Path<(String, String)>,
 ) -> Response {
@@ -348,7 +348,7 @@ pub(crate) async fn answer_stub(
 }
 
 pub(crate) async fn run_events_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -373,7 +373,7 @@ pub(crate) async fn run_events_stub(
 }
 
 pub(crate) async fn checkpoint_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -381,7 +381,7 @@ pub(crate) async fn checkpoint_stub(
 }
 
 pub(crate) async fn cancel_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -397,7 +397,7 @@ pub(crate) async fn cancel_stub(
 }
 
 pub(crate) async fn pause_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -411,7 +411,7 @@ pub(crate) async fn pause_stub(
 }
 
 pub(crate) async fn unpause_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -421,7 +421,7 @@ pub(crate) async fn unpause_stub(
 const DEMO_GRAPH_DOT: &str = "digraph demo {\n  graph [goal=\"Demo\"]\n  rankdir=LR\n  start [shape=Mdiamond, label=\"Start\"]\n  detect [label=\"Detect\\nDrift\"]\n  exit [shape=Msquare, label=\"Exit\"]\n  propose [label=\"Propose\\nChanges\"]\n  review [label=\"Review\\nChanges\"]\n  apply [label=\"Apply\\nChanges\"]\n  start -> detect\n  detect -> exit [label=\"No drift\"]\n  detect -> propose [label=\"Drift found\"]\n  propose -> review\n  review -> propose [label=\"Revise\"]\n  review -> apply [label=\"Accept\"]\n  apply -> exit\n}";
 
 pub(crate) async fn get_run_graph(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -429,7 +429,7 @@ pub(crate) async fn get_run_graph(
 }
 
 pub(crate) async fn get_run_graph_source(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -442,7 +442,7 @@ pub(crate) async fn get_run_graph_source(
 }
 
 pub(crate) async fn list_secrets(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     (
@@ -468,7 +468,7 @@ pub(crate) async fn list_secrets(
 }
 
 pub(crate) async fn create_secret(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Json(body): Json<CreateSecretRequest>,
 ) -> Response {
@@ -485,7 +485,7 @@ pub(crate) async fn create_secret(
 }
 
 pub(crate) async fn delete_secret_by_name(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Json(_body): Json<DeleteSecretRequest>,
 ) -> Response {
@@ -493,7 +493,7 @@ pub(crate) async fn delete_secret_by_name(
 }
 
 pub(crate) async fn get_github_repo(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path((owner, name)): Path<(String, String)>,
 ) -> Response {
@@ -513,7 +513,7 @@ pub(crate) async fn get_github_repo(
 }
 
 pub(crate) async fn run_diagnostics(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     (
@@ -545,7 +545,7 @@ pub(crate) async fn run_diagnostics(
 // ── Insights ───────────────────────────────────────────────────────────
 
 pub(crate) async fn list_saved_queries(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
@@ -553,7 +553,7 @@ pub(crate) async fn list_saved_queries(
 }
 
 pub(crate) async fn save_query_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     (
@@ -564,7 +564,7 @@ pub(crate) async fn save_query_stub(
 }
 
 pub(crate) async fn get_saved_query(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -575,7 +575,7 @@ pub(crate) async fn get_saved_query(
 }
 
 pub(crate) async fn update_query_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -587,7 +587,7 @@ pub(crate) async fn update_query_stub(
 }
 
 pub(crate) async fn delete_query_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
@@ -595,7 +595,7 @@ pub(crate) async fn delete_query_stub(
 }
 
 pub(crate) async fn execute_query_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     (
@@ -611,7 +611,7 @@ pub(crate) async fn execute_query_stub(
 }
 
 pub(crate) async fn list_query_history(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
@@ -621,7 +621,7 @@ pub(crate) async fn list_query_history(
 // ── Settings ───────────────────────────────────────────────────────────
 
 pub(crate) async fn get_server_settings(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     (StatusCode::OK, Json(settings::server_settings())).into_response()
@@ -630,7 +630,7 @@ pub(crate) async fn get_server_settings(
 // ── System ────────────────────────────────────────────────────────────
 
 pub(crate) async fn attach_events_stub(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     let events = vec![
@@ -663,7 +663,7 @@ pub(crate) async fn attach_events_stub(
 }
 
 pub(crate) async fn get_system_info(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     (
@@ -688,7 +688,7 @@ pub(crate) async fn get_system_info(
 }
 
 pub(crate) async fn get_system_disk_usage(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Query(params): Query<crate::server::DfParams>,
 ) -> Response {
@@ -732,7 +732,7 @@ pub(crate) async fn get_system_disk_usage(
 }
 
 pub(crate) async fn prune_runs(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     (
@@ -759,7 +759,7 @@ pub(crate) async fn prune_runs(
 // ── Usage ──────────────────────────────────────────────────────────────
 
 pub(crate) async fn get_aggregate_billing(
-    _auth: AuthenticatedService,
+    _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     (StatusCode::OK, Json(billing::aggregate())).into_response()

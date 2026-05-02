@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
 pub use stage::*;
 
-use crate::{ParallelBranchId, RunId, StageId};
+use crate::{ParallelBranchId, Principal, RunId, StageId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -24,52 +24,6 @@ pub enum RunNoticeLevel {
     Info,
     Warn,
     Error,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ActorKind {
-    User,
-    Agent,
-    System,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActorRef {
-    pub kind:    ActorKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id:      Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display: Option<String>,
-}
-
-impl ActorRef {
-    #[must_use]
-    pub fn user(login: String) -> Self {
-        Self {
-            kind:    ActorKind::User,
-            id:      Some(login.clone()),
-            display: Some(login),
-        }
-    }
-
-    #[must_use]
-    pub fn agent(session_id: Option<String>, display: Option<String>) -> Self {
-        Self {
-            kind: ActorKind::Agent,
-            id: session_id,
-            display,
-        }
-    }
-
-    #[must_use]
-    pub fn system_worker() -> Self {
-        Self {
-            kind:    ActorKind::System,
-            id:      Some("worker".to_string()),
-            display: Some("system:worker".to_string()),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -85,7 +39,7 @@ pub struct RunEvent {
     pub session_id:         Option<String>,
     pub parent_session_id:  Option<String>,
     pub tool_call_id:       Option<String>,
-    pub actor:              Option<ActorRef>,
+    pub actor:              Option<Principal>,
     pub body:               EventBody,
 }
 
@@ -352,7 +306,7 @@ struct RunEventRaw {
     #[serde(default)]
     tool_call_id:       Option<String>,
     #[serde(default)]
-    actor:              Option<ActorRef>,
+    actor:              Option<Principal>,
     event:              String,
     #[serde(default = "default_properties")]
     properties:         Value,
@@ -374,7 +328,7 @@ struct RunEventParts<'a> {
     session_id:         Option<String>,
     parent_session_id:  Option<String>,
     tool_call_id:       Option<String>,
-    actor:              Option<ActorRef>,
+    actor:              Option<Principal>,
     event:              &'a str,
     properties:         &'a Value,
 }
@@ -821,7 +775,17 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{Edge, Graph, Node, RunBlobId, WorkflowSettings, fixtures};
+    use crate::{
+        AuthMethod, Edge, Graph, IdpIdentity, Node, RunBlobId, WorkflowSettings, fixtures,
+    };
+
+    fn user_principal(login: &str) -> Principal {
+        Principal::user(
+            IdpIdentity::new("https://github.com", "12345").unwrap(),
+            login.to_string(),
+            AuthMethod::Github,
+        )
+    }
 
     #[test]
     fn run_event_round_trips_json() {
@@ -1029,8 +993,9 @@ mod tests {
             "tool_call_id": "call_1",
             "actor": {
                 "kind": "agent",
-                "id": "ses_child",
-                "display": "claude-sonnet"
+                "session_id": "ses_child",
+                "parent_session_id": "ses_parent",
+                "model": "claude-sonnet"
             },
             "properties": {
                 "tool_name": "read_file",
@@ -1050,9 +1015,14 @@ mod tests {
         );
         assert_eq!(parsed.tool_call_id.as_deref(), Some("call_1"));
         let actor = parsed.actor.as_ref().expect("actor present");
-        assert_eq!(actor.kind, ActorKind::Agent);
-        assert_eq!(actor.id.as_deref(), Some("ses_child"));
-        assert_eq!(actor.display.as_deref(), Some("claude-sonnet"));
+        assert_eq!(
+            actor,
+            &Principal::agent(
+                Some("ses_child".to_string()),
+                Some("ses_parent".to_string()),
+                Some("claude-sonnet".to_string()),
+            )
+        );
 
         let serialized = parsed.to_value().unwrap();
         assert_eq!(serialized["stage_id"], value["stage_id"]);
@@ -1138,19 +1108,16 @@ mod tests {
     }
 
     #[test]
-    fn run_archived_serializes_with_dotted_event_name_and_actor_property() {
-        let body = EventBody::RunArchived(RunArchivedProps {
-            actor: Some(ActorRef::user("alice".to_string())),
-        });
+    fn run_archived_serializes_with_dotted_event_name_without_actor_property() {
+        let body = EventBody::RunArchived(RunArchivedProps::default());
         let value = serde_json::to_value(&body).unwrap();
         assert_eq!(value["event"], "run.archived");
-        assert_eq!(value["properties"]["actor"]["kind"], "user");
-        assert_eq!(value["properties"]["actor"]["id"], "alice");
+        assert_eq!(value["properties"], json!({}));
     }
 
     #[test]
-    fn run_unarchived_serializes_with_actor_only() {
-        let body = EventBody::RunUnarchived(RunUnarchivedProps { actor: None });
+    fn run_unarchived_serializes_without_actor_property() {
+        let body = EventBody::RunUnarchived(RunUnarchivedProps::default());
         let value = serde_json::to_value(&body).unwrap();
         assert_eq!(value["event"], "run.unarchived");
         assert_eq!(value["properties"], json!({}));
@@ -1163,23 +1130,25 @@ mod tests {
             "ts": "2026-04-19T12:00:00.000Z",
             "run_id": fixtures::RUN_1,
             "event": "run.archived",
-            "properties": {
-                "actor": {
-                    "kind": "user",
-                    "id": "alice",
-                    "display": "alice"
-                }
-            }
+            "actor": {
+                "kind": "user",
+                "identity": {
+                    "issuer": "https://github.com",
+                    "subject": "12345"
+                },
+                "login": "alice",
+                "auth_method": "github"
+            },
+            "properties": {}
         });
 
         let parsed = RunEvent::from_value(value.clone()).unwrap();
         assert!(matches!(parsed.body, EventBody::RunArchived(_)));
+        assert_eq!(parsed.actor, Some(user_principal("alice")));
         let serialized = parsed.to_value().unwrap();
         assert_eq!(serialized["event"], "run.archived");
-        assert_eq!(
-            serialized["properties"]["actor"],
-            value["properties"]["actor"]
-        );
+        assert_eq!(serialized["actor"], value["actor"]);
+        assert_eq!(serialized["properties"], json!({}));
     }
 
     #[test]
@@ -1194,9 +1163,7 @@ mod tests {
 
         let parsed = RunEvent::from_value(value.clone()).unwrap();
         match &parsed.body {
-            EventBody::RunUnarchived(props) => {
-                assert!(props.actor.is_none());
-            }
+            EventBody::RunUnarchived(_) => {}
             other => panic!("expected RunUnarchived body, got {other:?}"),
         }
     }

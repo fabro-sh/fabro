@@ -1,6 +1,7 @@
+use fabro_types::Principal;
 use serde::{Deserialize, Serialize};
 
-use crate::{Answer, AnswerValue};
+use crate::{Answer, AnswerSubmission, AnswerValue};
 
 pub const WORKER_CONTROL_PROTOCOL_VERSION: u8 = 1;
 
@@ -13,12 +14,13 @@ pub struct WorkerControlEnvelope {
 
 impl WorkerControlEnvelope {
     #[must_use]
-    pub fn interview_answer(qid: impl Into<String>, answer: Answer) -> Self {
+    pub fn interview_answer(qid: impl Into<String>, submission: AnswerSubmission) -> Self {
         Self {
             v:       WORKER_CONTROL_PROTOCOL_VERSION,
             message: WorkerControlMessage::InterviewAnswer {
                 qid:    qid.into(),
-                answer: answer.into(),
+                answer: submission.answer.into(),
+                actor:  submission.actor,
             },
         }
     }
@@ -39,6 +41,7 @@ pub enum WorkerControlMessage {
     InterviewAnswer {
         qid:    String,
         answer: WorkerControlAnswer,
+        actor:  Principal,
     },
     #[serde(rename = "run.cancel")]
     RunCancel,
@@ -100,11 +103,17 @@ mod tests {
 
     #[test]
     fn interview_answer_round_trips_through_json() {
-        let envelope = WorkerControlEnvelope::interview_answer("q-1", Answer::text("ship it"));
+        let envelope = WorkerControlEnvelope::interview_answer(
+            "q-1",
+            AnswerSubmission::system(
+                Answer::text("ship it"),
+                fabro_types::SystemActorKind::Engine,
+            ),
+        );
         let json = serde_json::to_string(&envelope).unwrap();
         assert_eq!(
             json,
-            r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"text","text":"ship it"}}"#
+            r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"text","text":"ship it"},"actor":{"kind":"system","system_kind":"engine"}}"#
         );
 
         let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();

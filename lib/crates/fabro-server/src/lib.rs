@@ -25,6 +25,7 @@ pub mod install;
 pub mod ip_allowlist;
 pub mod jwt_auth;
 pub mod manifest_validation;
+mod principal_middleware;
 mod request_id;
 mod run_files;
 mod run_files_security;
@@ -37,6 +38,7 @@ mod server_secrets;
 mod spawn_env;
 mod startup;
 pub mod static_files;
+pub mod test_support;
 pub mod web_auth;
 mod worker_token;
 

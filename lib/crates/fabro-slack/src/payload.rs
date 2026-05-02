@@ -1,4 +1,5 @@
 use fabro_interview::Answer;
+use fabro_types::Principal;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -12,6 +13,7 @@ pub struct SlackAnswerSubmission {
     pub run_id: String,
     pub qid:    String,
     pub answer: Answer,
+    pub actor:  Principal,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

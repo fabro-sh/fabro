@@ -6,7 +6,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_interview::{Answer, AnswerValue, Interviewer, Question};
-use fabro_types::{BlockedReason, InterviewOption, QuestionType};
+use fabro_types::{BlockedReason, InterviewOption, Principal, QuestionType, SystemActorKind};
 use ulid::Ulid;
 
 use super::{EngineServices, Handler};
@@ -284,13 +284,16 @@ impl Handler for HumanHandler {
         self.tracker
             .interview_started(services.run.emitter.as_ref());
         let interview_start = Instant::now();
-        let answer = self.interviewer.ask(question).await;
+        let answer_submission = self.interviewer.ask(question).await;
+        let answer_actor = answer_submission.actor.clone();
+        let answer = answer_submission.answer;
 
         // 4. Handle timeout
         if answer.value == AnswerValue::Timeout {
             self.emit(
                 &services.run.emitter,
                 &Event::InterviewTimeout {
+                    actor:       Some(Principal::system(SystemActorKind::Timeout)),
                     question_id: question_id.clone(),
                     question:    question_text,
                     stage:       node.id.clone(),
@@ -331,6 +334,7 @@ impl Handler for HumanHandler {
             self.emit(
                 &services.run.emitter,
                 &Event::InterviewInterrupted {
+                    actor:       Some(Principal::system(SystemActorKind::Engine)),
                     question_id: question_id.clone(),
                     question:    question_text,
                     stage:       node.id.clone(),
@@ -349,6 +353,7 @@ impl Handler for HumanHandler {
             self.emit(
                 &services.run.emitter,
                 &Event::InterviewCompleted {
+                    actor: Some(answer_actor),
                     question_id,
                     question: question_text,
                     answer: answer_text(&answer),
@@ -365,6 +370,7 @@ impl Handler for HumanHandler {
         self.emit(
             &services.run.emitter,
             &Event::InterviewCompleted {
+                actor: Some(answer_actor),
                 question_id,
                 question: question_text,
                 answer: answer_text(&answer),
@@ -548,7 +554,7 @@ mod tests {
 
     #[tokio::test]
     async fn wait_human_auto_approve_selects_first() {
-        let interviewer = Arc::new(AutoApproveInterviewer);
+        let interviewer = Arc::new(AutoApproveInterviewer::engine());
         let handler = HumanHandler::new(interviewer);
         let graph = build_graph_with_human_gate();
         let node = graph.nodes.get("gate").unwrap();
@@ -570,7 +576,7 @@ mod tests {
 
     #[tokio::test]
     async fn wait_human_no_edges_returns_fail() {
-        let interviewer = Arc::new(AutoApproveInterviewer);
+        let interviewer = Arc::new(AutoApproveInterviewer::engine());
         let handler = HumanHandler::new(interviewer);
         let mut graph = Graph::new("test");
         let gate = Node::new("gate");
@@ -838,7 +844,7 @@ mod tests {
 
     #[tokio::test]
     async fn simulate_selects_first_choice() {
-        let interviewer = Arc::new(AutoApproveInterviewer);
+        let interviewer = Arc::new(AutoApproveInterviewer::engine());
         let handler = HumanHandler::new(interviewer);
         let graph = build_graph_with_human_gate();
         let node = graph.nodes.get("gate").unwrap();

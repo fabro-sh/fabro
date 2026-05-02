@@ -1087,10 +1087,11 @@ mod tests {
                         name:       Some("fabro-cli".to_string()),
                         version:    Some("0.9.0".to_string()),
                     }),
-                    subject: Some(fabro_types::RunSubjectProvenance {
-                        login:       None,
-                        auth_method: fabro_types::RunAuthMethod::Disabled,
-                    }),
+                    subject: Some(fabro_types::Principal::user(
+                        fabro_types::IdpIdentity::new("https://github.com", "12345").unwrap(),
+                        "octocat".to_string(),
+                        fabro_types::AuthMethod::Github,
+                    )),
                 }),
                 configured_providers: Vec::new(),
             },
@@ -1110,8 +1111,12 @@ mod tests {
             Some("fabro-cli")
         );
         assert_eq!(
-            provenance.subject.unwrap().auth_method,
-            fabro_types::RunAuthMethod::Disabled
+            provenance.subject.unwrap(),
+            fabro_types::Principal::user(
+                fabro_types::IdpIdentity::new("https://github.com", "12345").unwrap(),
+                "octocat".to_string(),
+                fabro_types::AuthMethod::Github,
+            )
         );
     }
 }

@@ -72,6 +72,10 @@ jobs:
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
           cache-on-failure: true
+      - name: Verify legacy auth identity removal
+        run: |
+          ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\bActorRef\b|\bActorKind\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\s*==\s*"disabled"' \
+            lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml
       - run: cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings
 
   generated-docs:

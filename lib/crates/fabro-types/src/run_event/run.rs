@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ActorRef, BilledTokenCounts, RunNoticeLevel};
+use super::{BilledTokenCounts, RunNoticeLevel};
 use crate::status::{BlockedReason, FailureReason, SuccessReason};
 use crate::{
     ForkSourceRef, GitContext, Graph, RunBlobId, RunControlAction, RunId, RunProvenance,
@@ -98,17 +98,19 @@ pub struct RunSupersededByProps {
     pub target_visit:              usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RunArchivedProps {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor: Option<ActorRef>,
-}
+#[allow(
+    clippy::empty_structs_with_brackets,
+    reason = "This type must serialize as {} rather than null."
+)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RunArchivedProps {}
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RunUnarchivedProps {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor: Option<ActorRef>,
-}
+#[allow(
+    clippy::empty_structs_with_brackets,
+    reason = "This type must serialize as {} rather than null."
+)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RunUnarchivedProps {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCompletedProps {

@@ -6,7 +6,7 @@ use crate::threads::{self, ThreadRegistry};
 #[derive(Debug)]
 pub enum DispatchAction {
     Connected,
-    SubmitAnswer(SlackAnswerSubmission),
+    SubmitAnswer(Box<SlackAnswerSubmission>),
     Reconnect,
     Ignored,
 }
@@ -19,7 +19,7 @@ pub fn dispatch(envelope: &SocketEnvelope, thread_registry: &ThreadRegistry) -> 
                 return DispatchAction::Ignored;
             };
             match interaction::parse_interaction(payload) {
-                Some(submission) => DispatchAction::SubmitAnswer(submission),
+                Some(submission) => DispatchAction::SubmitAnswer(Box::new(submission)),
                 None => DispatchAction::Ignored,
             }
         }
@@ -33,15 +33,30 @@ pub fn dispatch(envelope: &SocketEnvelope, thread_registry: &ThreadRegistry) -> 
             let Some(question_ref) = thread_registry.resolve(&thread_ts) else {
                 return DispatchAction::Ignored;
             };
-            DispatchAction::SubmitAnswer(SlackAnswerSubmission {
+            let Some(actor) = event_actor(payload) else {
+                return DispatchAction::Ignored;
+            };
+            DispatchAction::SubmitAnswer(Box::new(SlackAnswerSubmission {
                 run_id: question_ref.run_id,
-                qid:    question_ref.qid,
+                qid: question_ref.qid,
                 answer: fabro_interview::Answer::text(text),
-            })
+                actor,
+            }))
         }
         SocketEventKind::Disconnect => DispatchAction::Reconnect,
         SocketEventKind::Unknown => DispatchAction::Ignored,
     }
+}
+
+fn event_actor(payload: &serde_json::Value) -> Option<fabro_types::Principal> {
+    let event = &payload["event"];
+    let team_id = payload["team_id"]
+        .as_str()
+        .or_else(|| event["team"].as_str())?
+        .to_string();
+    let user_id = event["user"].as_str()?.to_string();
+    let user_name = event["user_name"].as_str().map(str::to_string);
+    Some(fabro_types::Principal::slack(team_id, user_id, user_name))
 }
 
 #[cfg(test)]
@@ -70,6 +85,8 @@ mod tests {
             envelope_id:   Some("env-1".to_string()),
             payload:       Some(serde_json::json!({
                 "type": "block_actions",
+                "team": { "id": "T123" },
+                "user": { "id": "U123", "name": "ada" },
                 "actions": [{
                     "action_id": "interview.answer",
                     "type": "button",
@@ -80,6 +97,7 @@ mod tests {
         let action = dispatch(&envelope, &registry);
         match action {
             DispatchAction::SubmitAnswer(submission) => {
+                let submission = *submission;
                 assert_eq!(submission.run_id, "run-1");
                 assert_eq!(submission.qid, "q-1");
                 assert_eq!(submission.answer.value, AnswerValue::Yes);
@@ -148,17 +166,20 @@ mod tests {
             envelope_type: "events_api".to_string(),
             envelope_id:   Some("env-5".to_string()),
             payload:       Some(serde_json::json!({
+                "team_id": "T123",
                 "event": {
                     "type": "message",
                     "text": "https://github.com/org/repo",
                     "thread_ts": "1234.5678",
-                    "user": "U123"
+                    "user": "U123",
+                    "user_name": "ada"
                 }
             })),
         };
         let action = dispatch(&envelope, &registry);
         match action {
             DispatchAction::SubmitAnswer(submission) => {
+                let submission = *submission;
                 assert_eq!(submission.run_id, "run-10");
                 assert_eq!(submission.qid, "q-10");
                 assert_eq!(
