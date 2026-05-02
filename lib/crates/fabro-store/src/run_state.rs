@@ -8,9 +8,9 @@ use fabro_types::run_event::{
 };
 use fabro_types::{
     BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
-    Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunId, RunProjection,
-    RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion, StageOutcome, StartRecord,
-    TerminalStatus, first_event_seq,
+    Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunEvent, RunId,
+    RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion, StageOutcome,
+    StageProjection, StartRecord, TerminalStatus, first_event_seq,
 };
 use fabro_util::error::render_with_causes;
 use serde_json::Value;
@@ -297,22 +297,17 @@ impl RunProjectionReducer for RunProjection {
                 );
             }
             EventBody::StagePrompt(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
                     return Ok(());
                 };
-                let visit = props.visit;
-                let provider_used = provider_used_from_prompt(props);
-                let stage = self.stage_entry(node_id, visit, first_event_seq(event.seq));
                 stage.prompt = Some(props.text.clone());
-                stage.provider_used = provider_used;
+                stage.provider_used = provider_used_from_prompt(props);
             }
             EventBody::PromptCompleted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
-                let visit = self.current_visit_for(node_id).unwrap_or(1);
-                self.stage_entry(node_id, visit, first_event_seq(event.seq))
-                    .response = Some(props.response.clone());
+                stage.response = Some(props.response.clone());
             }
             EventBody::StageCompleted(props) => {
                 let Some(node_id) = stored.node_id.as_deref() else {
@@ -327,12 +322,10 @@ impl RunProjectionReducer for RunProjection {
                 stage.completion = Some(completion);
             }
             EventBody::StageFailed(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let failure_reason = props.failure.as_ref().map(|detail| detail.message.clone());
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
-                let visit = self.current_visit_for(node_id).unwrap_or(1);
-                let failure_reason = props.failure.as_ref().map(|detail| detail.message.clone());
-                let stage = self.stage_entry(node_id, visit, first_event_seq(event.seq));
                 stage.completion = Some(StageCompletion {
                     outcome: StageOutcome::Failed {
                         retry_requested: false,
@@ -343,38 +336,33 @@ impl RunProjectionReducer for RunProjection {
                 });
             }
             EventBody::AgentSessionStarted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
                     return Ok(());
                 };
-                self.stage_entry(node_id, props.visit, first_event_seq(event.seq))
-                    .provider_used = Some(provider_used_from_agent_session_started(props));
+                stage.provider_used = Some(provider_used_from_agent_session_started(props));
             }
             EventBody::AgentCliStarted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
                     return Ok(());
                 };
-                self.stage_entry(node_id, props.visit, first_event_seq(event.seq))
-                    .provider_used = Some(provider_used_from_agent_cli_started(props));
+                stage.provider_used = Some(provider_used_from_agent_cli_started(props));
             }
             EventBody::CommandStarted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
+                let script_invocation = serde_json::to_value(props).map_err(|err| {
+                    Error::InvalidEvent(format!("invalid command.started payload: {err}"))
+                })?;
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
-                let visit = self.current_visit_for(node_id).unwrap_or(1);
-                self.stage_entry(node_id, visit, first_event_seq(event.seq))
-                    .script_invocation = Some(serde_json::to_value(props).map_err(|err| {
-                    Error::InvalidEvent(format!("invalid command.started payload: {err}"))
-                })?);
+                stage.script_invocation = Some(script_invocation);
             }
             EventBody::CommandCompleted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
-                    return Ok(());
-                };
-                let visit = self.current_visit_for(node_id).unwrap_or(1);
                 let script_timing = serde_json::to_value(props).map_err(|err| {
                     Error::InvalidEvent(format!("invalid command.completed payload: {err}"))
                 })?;
-                let stage = self.stage_entry(node_id, visit, first_event_seq(event.seq));
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                    return Ok(());
+                };
                 stage.stdout = Some(props.stdout.clone());
                 stage.stderr = Some(props.stderr.clone());
                 stage.stdout_bytes = Some(props.stdout_bytes);
@@ -385,21 +373,39 @@ impl RunProjectionReducer for RunProjection {
                 stage.script_timing = Some(script_timing);
             }
             EventBody::ParallelCompleted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
-                    return Ok(());
-                };
-                let visit = self.current_visit_for(node_id).unwrap_or(1);
                 let parallel_results = serde_json::to_value(&props.results).map_err(|err| {
                     Error::InvalidEvent(format!("invalid parallel.completed payload: {err}"))
                 })?;
-                self.stage_entry(node_id, visit, first_event_seq(event.seq))
-                    .parallel_results = Some(parallel_results);
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                    return Ok(());
+                };
+                stage.parallel_results = Some(parallel_results);
             }
             _ => {}
         }
 
         Ok(())
     }
+}
+
+fn stage_at_visit<'a>(
+    state: &'a mut RunProjection,
+    stored: &RunEvent,
+    visit: u32,
+    seq: u32,
+) -> Option<&'a mut StageProjection> {
+    let node_id = stored.node_id.as_deref()?;
+    Some(state.stage_entry(node_id, visit, first_event_seq(seq)))
+}
+
+fn stage_at_current_visit<'a>(
+    state: &'a mut RunProjection,
+    stored: &RunEvent,
+    seq: u32,
+) -> Option<&'a mut StageProjection> {
+    let node_id = stored.node_id.as_deref()?;
+    let visit = state.current_visit_for(node_id).unwrap_or(1);
+    Some(state.stage_entry(node_id, visit, first_event_seq(seq)))
 }
 
 pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary {
