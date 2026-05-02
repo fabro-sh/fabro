@@ -32,9 +32,10 @@ pub mod types {
         AuthMethod, BilledTokenCounts, CommandOutputStream, CommandTermination, DiffStats,
         DirtyStatus, EventEnvelope, GitContext, IdpIdentity, InterviewOption,
         InterviewQuestionRecord, PendingInterviewRecord, PreRunPushOutcome, Principal,
-        QuestionType, RepositoryReference, RunEvent, RunProjection, RunSummary, SecretMetadata,
-        SecretType, ServerSettings, StageCompletion, StageOutcome, StageProjection, StageState,
-        SystemActorKind, UserPrincipal, WorkflowSettings,
+        QuestionType, RepositoryReference, RunClientProvenance, RunEvent, RunProjection,
+        RunProvenance, RunServerProvenance, RunSummary, SecretMetadata, SecretType, ServerSettings,
+        StageCompletion, StageOutcome, StageProjection, StageState, SystemActorKind, UserPrincipal,
+        WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

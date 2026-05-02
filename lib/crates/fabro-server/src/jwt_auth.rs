@@ -1,8 +1,7 @@
 use anyhow::{Result, anyhow};
 #[cfg(test)]
-use axum::http::header;
-#[cfg(test)]
 use axum::http::request::Parts;
+use axum::http::{HeaderMap, header};
 use fabro_static::EnvVars;
 use fabro_types::settings::{ServerAuthMethod, ServerNamespace};
 use fabro_types::{AuthMethod, IdpIdentity};
@@ -191,9 +190,8 @@ fn config_allows_run_auth_method(config: &ConfiguredAuth, method: AuthMethod) ->
     }
 }
 
-#[cfg(test)]
-pub(crate) fn bearer_token(parts: &Parts) -> Option<Result<&str, ApiError>> {
-    let value = parts.headers.get(header::AUTHORIZATION)?;
+pub(crate) fn bearer_token_from_headers(headers: &HeaderMap) -> Option<Result<&str, ApiError>> {
+    let value = headers.get(header::AUTHORIZATION)?;
     let Ok(value) = value.to_str() else {
         return Some(Err(ApiError::unauthorized()));
     };
@@ -202,6 +200,11 @@ pub(crate) fn bearer_token(parts: &Parts) -> Option<Result<&str, ApiError>> {
             .strip_prefix("Bearer ")
             .ok_or_else(ApiError::unauthorized),
     )
+}
+
+#[cfg(test)]
+pub(crate) fn bearer_token(parts: &Parts) -> Option<Result<&str, ApiError>> {
+    bearer_token_from_headers(&parts.headers)
 }
 
 pub(crate) fn authenticate_jwt_bearer(

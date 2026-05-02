@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use ::fabro_types::{
     BilledTokenCounts, BlockedReason, CommandTermination, FailureReason, ForkSourceRef, GitContext,
     ParallelBranchId, Principal, PullRequestRecord, RunBlobId, RunControlAction, RunEvent, RunId,
-    RunProvenance, StageId, StageOutcome, SuccessReason, run_event as fabro_types,
+    RunProvenance, StageId, StageOutcome, SuccessReason, SystemActorKind, run_event as fabro_types,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -1612,7 +1612,11 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
             fields.actor.clone_from(actor);
             fields
         }
-        Event::StallWatchdogTimeout { node, .. } => node_stored_fields(Some(node.clone())),
+        Event::StallWatchdogTimeout { node, .. } => {
+            let mut fields = node_stored_fields(Some(node.clone()));
+            fields.actor = Some(Principal::system(SystemActorKind::Watchdog));
+            fields
+        }
         _ => StoredEventFields::default(),
     }
 }
@@ -1639,6 +1643,13 @@ fn agent_actor_for_event(
             session_id.map(str::to_string),
             parent_session_id.map(str::to_string),
             Some(model.clone()),
+        )),
+        AgentEvent::ToolCallStarted { .. }
+        | AgentEvent::ToolCallOutputDelta { .. }
+        | AgentEvent::ToolCallCompleted { .. } => Some(Principal::agent(
+            session_id.map(str::to_string),
+            parent_session_id.map(str::to_string),
+            None,
         )),
         _ => None,
     }
@@ -3718,6 +3729,10 @@ mod tests {
         );
         assert_eq!(stored.stage_id, Some(StageId::new("code", 3)));
         assert_eq!(stored.tool_call_id.as_deref(), Some("call_abc"));
+        assert_eq!(
+            stored.actor,
+            Some(Principal::agent(Some("ses_1".to_string()), None, None))
+        );
         assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
         assert_eq!(
             stored.parallel_branch_id,
@@ -3973,6 +3988,21 @@ mod tests {
                 None,
                 Some("claude-sonnet".to_string()),
             )
+        );
+    }
+
+    #[test]
+    fn stall_watchdog_timeout_populates_watchdog_actor() {
+        let stored = to_run_event(&fixtures::RUN_1, &Event::StallWatchdogTimeout {
+            node:         "code".to_string(),
+            idle_seconds: 60,
+        });
+
+        assert_eq!(stored.event_name(), "watchdog.timeout");
+        assert_eq!(stored.node_id.as_deref(), Some("code"));
+        assert_eq!(
+            stored.actor,
+            Some(Principal::system(SystemActorKind::Watchdog))
         );
     }
 

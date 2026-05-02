@@ -4749,6 +4749,40 @@ components:
         subject:
           type: string
 
+    RunServerProvenance:
+      type: object
+      required:
+        - version
+      properties:
+        version:
+          type: string
+
+    RunClientProvenance:
+      type: object
+      properties:
+        user_agent:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+
+    RunProvenance:
+      type: object
+      properties:
+        server:
+          oneOf:
+            - $ref: "#/components/schemas/RunServerProvenance"
+            - type: "null"
+        client:
+          oneOf:
+            - $ref: "#/components/schemas/RunClientProvenance"
+            - type: "null"
+        subject:
+          oneOf:
+            - $ref: "#/components/schemas/Principal"
+            - type: "null"
+
     Principal:
       oneOf:
         - $ref: "#/components/schemas/PrincipalUser"
@@ -5346,8 +5380,9 @@ components:
           additionalProperties:
             type: string
         provenance:
-          type: ["object", "null"]
-          additionalProperties: true
+          oneOf:
+            - $ref: "#/components/schemas/RunProvenance"
+            - type: "null"
         manifest_blob:
           type: ["string", "null"]
         definition_blob:

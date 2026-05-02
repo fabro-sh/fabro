@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -10,7 +11,7 @@ use cookie::{Cookie, CookieJar, Key, SameSite};
 use fabro_redact::DisplaySafeUrl;
 use fabro_static::EnvVars;
 use fabro_types::settings::ServerAuthMethod;
-use fabro_types::{AuthMethod, IdpIdentity};
+use fabro_types::{AuthMethod, IdpIdentity, Principal};
 use fabro_util::dev_token::validate_dev_token_format;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
@@ -19,7 +20,10 @@ use tracing::{debug, error, info, warn};
 
 use crate::auth::{GithubEndpoints, browser_shell};
 use crate::jwt_auth::{AuthMode, auth_method_name, dev_token_matches};
-use crate::principal_middleware::{RequestAuth, RequiredUser, require_authenticated_user};
+use crate::principal_middleware::{
+    AuthStatus, RequestAuth, RequestAuthContext, RequiredUser, UserProfile,
+    require_authenticated_user,
+};
 use crate::server::AppState;
 
 pub const SESSION_COOKIE_NAME: &str = "__fabro_session";
@@ -156,6 +160,30 @@ pub fn read_private_session(headers: &HeaderMap, key: &Key) -> Option<SessionCoo
         return None;
     }
     Some(session)
+}
+
+fn session_cookie_present(headers: &HeaderMap) -> bool {
+    parse_cookie_header(headers)
+        .get(SESSION_COOKIE_NAME)
+        .is_some()
+}
+
+fn auth_context_from_session(session: &SessionCookie) -> Option<RequestAuthContext> {
+    let identity = session.identity.clone()?;
+    let principal = Principal::user(identity, session.login.clone(), session.auth_method);
+    Some(RequestAuthContext::authenticated(
+        principal,
+        Some(UserProfile {
+            name:       session.name.clone(),
+            email:      session.email.clone(),
+            avatar_url: session.avatar_url.clone(),
+            user_url:   session.user_url.clone(),
+        }),
+    ))
+}
+
+fn invalid_auth_context() -> RequestAuthContext {
+    RequestAuthContext::rejected(AuthStatus::Invalid, Some("unauthorized"))
 }
 
 fn read_private_oauth_state(headers: &HeaderMap, key: &Key) -> Option<OAuthStateCookie> {
@@ -305,14 +333,21 @@ fn process_env_var(name: &str) -> Option<String> {
 async fn login_dev_token(
     State(state): State<Arc<AppState>>,
     Extension(auth_mode): Extension<AuthMode>,
-    Json(payload): Json<DevTokenLoginRequest>,
+    RequestAuth(auth_slot): RequestAuth,
+    payload: Result<Json<DevTokenLoginRequest>, JsonRejection>,
 ) -> Response {
+    let Ok(Json(payload)) = payload else {
+        auth_slot.replace(invalid_auth_context());
+        return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
+    };
     let expected = dev_token_from_mode(&auth_mode);
     let Some(expected) = expected else {
+        auth_slot.replace(invalid_auth_context());
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     };
 
     if !validate_dev_token_format(&payload.token) || !dev_token_matches(&payload.token, &expected) {
+        auth_slot.replace(invalid_auth_context());
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     }
 
@@ -336,6 +371,9 @@ async fn login_dev_token(
         iat:         now.timestamp(),
         exp:         (now + chrono::Duration::days(30)).timestamp(),
     };
+    if let Some(context) = auth_context_from_session(&session) {
+        auth_slot.replace(context);
+    }
 
     let mut jar = CookieJar::new();
     jar.private_mut(&session_key).add(
@@ -450,9 +488,12 @@ async fn callback_github(
     State(state): State<Arc<AppState>>,
     Extension(auth_mode): Extension<AuthMode>,
     Extension(github_endpoints): Extension<Arc<GithubEndpoints>>,
+    RequestAuth(auth_slot): RequestAuth,
     Query(params): Query<OAuthCallbackParams>,
     headers: HeaderMap,
 ) -> Response {
+    auth_slot.replace(invalid_auth_context());
+
     if !auth_method_enabled(&auth_mode, ServerAuthMethod::Github) {
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     }
@@ -731,6 +772,9 @@ async fn callback_github(
         iat:         now.timestamp(),
         exp:         (now + chrono::Duration::days(30)).timestamp(),
     };
+    if let Some(context) = auth_context_from_session(&session) {
+        auth_slot.replace(context);
+    }
 
     info!(login = %session.login, "OAuth login succeeded");
 
@@ -762,10 +806,21 @@ async fn callback_github(
     response
 }
 
-async fn logout(State(state): State<Arc<AppState>>) -> Response {
+async fn logout(
+    State(state): State<Arc<AppState>>,
+    RequestAuth(auth_slot): RequestAuth,
+    headers: HeaderMap,
+) -> Response {
     info!("User logged out");
     let mut jar = CookieJar::new();
     if let Some(key) = state.session_key() {
+        if let Some(session) = read_private_session(&headers, &key) {
+            if let Some(context) = auth_context_from_session(&session) {
+                auth_slot.replace(context);
+            }
+        } else if session_cookie_present(&headers) {
+            auth_slot.replace(invalid_auth_context());
+        }
         jar.private_mut(&key).remove(
             Cookie::build((SESSION_COOKIE_NAME, ""))
                 .path("/")
@@ -831,15 +886,18 @@ async fn toggle_demo(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use axum::Extension;
     use axum::body::{Body, to_bytes};
+    use axum::extract::State as AxumState;
     use axum::http::{HeaderMap, Request, StatusCode, header};
+    use axum::middleware::Next;
+    use axum::response::Response;
     use axum_extra::extract::cookie::Key;
     use fabro_config::{RunLayer, ServerSettingsBuilder};
     use fabro_types::settings::server::ServerAuthMethod;
-    use fabro_types::{AuthMethod, IdpIdentity};
+    use fabro_types::{AuthMethod, IdpIdentity, Principal};
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -848,6 +906,7 @@ mod tests {
     };
     use crate::auth::{self, GithubEndpoints};
     use crate::jwt_auth::{AuthMode, ConfiguredAuth};
+    use crate::principal_middleware::{AuthContextSlot, AuthStatus, RequestAuthContext};
     use crate::server;
 
     const DEV_TOKEN: &str =
@@ -952,6 +1011,43 @@ client_id = "github-client-id"
             .layer(Extension(Arc::new(GithubEndpoints::production_defaults())))
             .layer(Extension(auth_mode))
             .with_state(state)
+    }
+
+    async fn capture_auth_context(
+        AxumState(captured): AxumState<Arc<Mutex<Vec<RequestAuthContext>>>>,
+        mut req: axum::extract::Request,
+        next: Next,
+    ) -> Response {
+        let slot = AuthContextSlot::initial();
+        req.extensions_mut().insert(slot.clone());
+        let response = next.run(req).await;
+        captured
+            .lock()
+            .expect("captured auth contexts lock poisoned")
+            .push(slot.snapshot());
+        response
+    }
+
+    fn test_auth_router_with_capture(
+        settings: fabro_types::ServerSettings,
+        auth_mode: AuthMode,
+    ) -> (axum::Router, Arc<Mutex<Vec<RequestAuthContext>>>) {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let state = server::create_test_app_state_with_runtime_settings_and_session_key(
+            settings,
+            RunLayer::default(),
+            Some("web-auth-test-key-material-0123456789"),
+        );
+        let app = axum::Router::new()
+            .nest("/auth", routes())
+            .layer(axum::middleware::from_fn_with_state(
+                Arc::clone(&captured),
+                capture_auth_context,
+            ))
+            .layer(Extension(Arc::new(GithubEndpoints::production_defaults())))
+            .layer(Extension(auth_mode))
+            .with_state(state);
+        (app, captured)
     }
 
     fn test_auth_router(_key: &Key, auth_mode: AuthMode) -> axum::Router {
@@ -1110,6 +1206,48 @@ client_id = "github-client-id"
             .await
             .unwrap();
         assert_status!(response, StatusCode::UNAUTHORIZED).await;
+    }
+
+    #[tokio::test]
+    async fn login_dev_token_stamps_public_auth_context() {
+        let (app, captured) =
+            test_auth_router_with_capture(default_settings(), dev_token_auth_mode());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login/dev-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(json!({ "token": DEV_TOKEN }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login/dev-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "token": "fabro_dev_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd" })
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::UNAUTHORIZED).await;
+
+        let contexts = captured.lock().expect("captured auth contexts").clone();
+        assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
+        assert!(matches!(contexts[0].principal, Principal::User(_)));
+        assert_eq!(contexts[1].auth_status, AuthStatus::Invalid);
+        assert_eq!(contexts[1].auth_error_code, Some("unauthorized"));
     }
 
     #[tokio::test]

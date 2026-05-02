@@ -12,14 +12,13 @@ pub struct ReplayInterviewer {
 }
 
 impl ReplayInterviewer {
-    /// Creates a new `ReplayInterviewer` from a list of recorded
-    /// question-answer pairs. Only the answers are retained for replay.
+    /// Creates a new `ReplayInterviewer` from recorded question-answer
+    /// submissions.
     #[must_use]
-    pub fn new(recordings: Vec<(Question, Answer)>) -> Self {
-        let actor = Principal::system(SystemActorKind::Engine);
+    pub fn new(recordings: Vec<(Question, AnswerSubmission)>) -> Self {
         let submissions: Vec<AnswerSubmission> = recordings
             .into_iter()
-            .map(|(_, answer)| AnswerSubmission::new(answer, actor.clone()))
+            .map(|(_, submission)| submission)
             .collect();
         Self {
             submissions: Mutex::new(submissions),
@@ -44,44 +43,49 @@ impl Interviewer for ReplayInterviewer {
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::QuestionType;
+    use fabro_types::{AuthMethod, IdpIdentity, QuestionType};
 
     use super::*;
     use crate::AnswerValue;
 
     #[tokio::test]
     async fn replays_recorded_answers() {
+        let actor = Principal::user(
+            IdpIdentity::new("https://github.com", "12345").unwrap(),
+            "octocat".to_string(),
+            AuthMethod::Github,
+        );
         let recordings = vec![
             (
                 Question::new("approve?", QuestionType::YesNo),
-                Answer::yes(),
+                AnswerSubmission::new(Answer::yes(), actor.clone()),
             ),
             (
                 Question::new("name?", QuestionType::Freeform),
-                Answer::text("Alice"),
+                AnswerSubmission::new(Answer::text("Alice"), actor.clone()),
             ),
         ];
 
         let replayer = ReplayInterviewer::new(recordings);
 
-        let a1 = replayer
+        let s1 = replayer
             .ask(Question::new("anything", QuestionType::YesNo))
-            .await
-            .answer;
-        assert_eq!(a1.value, AnswerValue::Yes);
+            .await;
+        assert_eq!(s1.answer.value, AnswerValue::Yes);
+        assert_eq!(s1.actor, actor);
 
-        let a2 = replayer
+        let s2 = replayer
             .ask(Question::new("anything", QuestionType::Freeform))
-            .await
-            .answer;
-        assert_eq!(a2.value, AnswerValue::Text("Alice".to_string()));
+            .await;
+        assert_eq!(s2.answer.value, AnswerValue::Text("Alice".to_string()));
+        assert_eq!(s2.actor, actor);
     }
 
     #[tokio::test]
     async fn returns_interrupted_when_exhausted() {
         let recordings = vec![(
             Question::new("approve?", QuestionType::YesNo),
-            Answer::yes(),
+            AnswerSubmission::system(Answer::yes(), SystemActorKind::Engine),
         )];
 
         let replayer = ReplayInterviewer::new(recordings);

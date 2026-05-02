@@ -70,6 +70,9 @@
       "dependencies": {
         "axios": "^1.7.0",
       },
+      "devDependencies": {
+        "typescript": "^5.9.2",
+      },
     },
   },
   "packages": {

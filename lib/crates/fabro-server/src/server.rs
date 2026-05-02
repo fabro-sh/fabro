@@ -1099,56 +1099,93 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
     let latency_ms = start.elapsed().as_millis();
     let auth_context = auth_slot.snapshot();
     let principal_fields = auth_context.principal.log_fields();
-    let user_auth_method = principal_fields.user_auth_method.unwrap_or("");
-    let idp_issuer = principal_fields.idp_issuer.as_deref().unwrap_or("");
-    let idp_subject = principal_fields.idp_subject.as_deref().unwrap_or("");
-    let login = principal_fields.login.as_deref().unwrap_or("");
-    let run_id = principal_fields.run_id.as_deref().unwrap_or("");
-    let delivery_id = principal_fields.delivery_id.as_deref().unwrap_or("");
-    let team_id = principal_fields.team_id.as_deref().unwrap_or("");
-    let user_id = principal_fields.user_id.as_deref().unwrap_or("");
     let auth_status = auth_context.auth_status.as_str();
-    let auth_error_code = auth_context.auth_error_code.unwrap_or("");
+
+    macro_rules! emit_http_log {
+        ($level:ident $(, $field:ident = $value:expr)* $(,)?) => {{
+            if let Some(auth_error_code) = auth_context.auth_error_code {
+                $level!(
+                    %method,
+                    %path,
+                    status,
+                    latency_ms,
+                    request_id = %request_id,
+                    principal_kind = principal_fields.principal_kind,
+                    auth_status,
+                    auth_error_code,
+                    $($field = $value,)*
+                    "HTTP response"
+                );
+            } else {
+                $level!(
+                    %method,
+                    %path,
+                    status,
+                    latency_ms,
+                    request_id = %request_id,
+                    principal_kind = principal_fields.principal_kind,
+                    auth_status,
+                    $($field = $value,)*
+                    "HTTP response"
+                );
+            }
+        }};
+    }
+
+    macro_rules! emit_principal_http_log {
+        ($level:ident) => {{
+            match &auth_context.principal {
+                Principal::User(_) => emit_http_log!(
+                    $level,
+                    user_auth_method = principal_fields
+                        .user_auth_method
+                        .expect("user auth method field"),
+                    idp_issuer = principal_fields
+                        .idp_issuer
+                        .as_deref()
+                        .expect("user idp issuer field"),
+                    idp_subject = principal_fields
+                        .idp_subject
+                        .as_deref()
+                        .expect("user idp subject field"),
+                    login = principal_fields.login.as_deref().expect("user login field"),
+                ),
+                Principal::Worker { .. } => emit_http_log!(
+                    $level,
+                    run_id = principal_fields
+                        .run_id
+                        .as_deref()
+                        .expect("worker run id field"),
+                ),
+                Principal::Webhook { .. } => emit_http_log!(
+                    $level,
+                    delivery_id = principal_fields
+                        .delivery_id
+                        .as_deref()
+                        .expect("webhook delivery id field"),
+                ),
+                Principal::Slack { .. } => emit_http_log!(
+                    $level,
+                    team_id = principal_fields
+                        .team_id
+                        .as_deref()
+                        .expect("slack team id field"),
+                    user_id = principal_fields
+                        .user_id
+                        .as_deref()
+                        .expect("slack user id field"),
+                ),
+                Principal::Agent { .. } | Principal::System { .. } | Principal::Anonymous => {
+                    emit_http_log!($level)
+                }
+            }
+        }};
+    }
+
     if status >= 500 {
-        error!(
-            %method,
-            %path,
-            status,
-            latency_ms,
-            request_id = %request_id,
-            principal_kind = principal_fields.principal_kind,
-            user_auth_method,
-            idp_issuer,
-            idp_subject,
-            login,
-            run_id,
-            delivery_id,
-            team_id,
-            user_id,
-            auth_status,
-            auth_error_code,
-            "HTTP response"
-        );
+        emit_principal_http_log!(error);
     } else {
-        info!(
-            %method,
-            %path,
-            status,
-            latency_ms,
-            request_id = %request_id,
-            principal_kind = principal_fields.principal_kind,
-            user_auth_method,
-            idp_issuer,
-            idp_subject,
-            login,
-            run_id,
-            delivery_id,
-            team_id,
-            user_id,
-            auth_status,
-            auth_error_code,
-            "HTTP response"
-        );
+        emit_principal_http_log!(info);
     }
     response
 }
@@ -7005,10 +7042,6 @@ async fn append_control_request(
     workflow_event::append_event(&run_store, &run_id, &event).await
 }
 
-fn actor_from_subject(subject: &RequiredUser) -> Principal {
-    Principal::User(subject.0.clone())
-}
-
 /// Returns the wire event name if the given body has a dedicated operation
 /// endpoint that clients must use instead of injecting via `append_run_event`.
 /// These endpoints enforce authorization and status-transition preconditions
@@ -7134,7 +7167,7 @@ async fn cancel_run(
             state.as_ref(),
             id,
             RunControlAction::Cancel,
-            Some(actor_from_subject(&subject)),
+            Some(Principal::User(subject.0.clone())),
         )
         .await
         {
@@ -7262,7 +7295,7 @@ async fn pause_run(
         state.as_ref(),
         id,
         RunControlAction::Pause,
-        Some(actor_from_subject(&subject)),
+        Some(Principal::User(subject.0.clone())),
     )
     .await
     {
@@ -7367,7 +7400,7 @@ async fn unpause_run(
         state.as_ref(),
         id,
         RunControlAction::Unpause,
-        Some(actor_from_subject(&subject)),
+        Some(Principal::User(subject.0.clone())),
     )
     .await
     {
@@ -7457,7 +7490,7 @@ async fn rewind_run(
     match Box::pin(operations::rewind(
         &state.store,
         &input,
-        Some(actor_from_subject(&subject)),
+        Some(Principal::User(subject.0.clone())),
     ))
     .await
     {
@@ -7607,7 +7640,7 @@ async fn run_archive_action(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let actor = Some(actor_from_subject(&subject));
+    let actor = Some(Principal::User(subject.0.clone()));
     let result = match action {
         ArchiveAction::Archive => operations::archive(&state.store, &id, actor)
             .await
@@ -8317,6 +8350,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     #[cfg(unix)]
     use std::process::Stdio;
+    use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
     use axum::body::Body;
     use axum::http::{Method, Request, header};
@@ -8338,6 +8372,11 @@ mod tests {
     use serde_json::json;
     use tokio_stream::StreamExt as _;
     use tower::ServiceExt;
+    use tracing::field::{Field, Visit};
+    use tracing::{Event as TracingEvent, Subscriber, subscriber};
+    use tracing_subscriber::layer::Context as SubscriberContext;
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{Layer, Registry};
 
     use super::*;
     use crate::github_webhooks::compute_signature;
@@ -8472,6 +8511,80 @@ methods = ["dev-token"]
         };
     }
 
+    #[derive(Clone, Debug)]
+    struct CapturedTracingEvent {
+        fields: Vec<(String, String)>,
+    }
+
+    #[derive(Default)]
+    struct CaptureVisitor {
+        fields: Vec<(String, String)>,
+    }
+
+    impl Visit for CaptureVisitor {
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            self.fields
+                .push((field.name().to_string(), format!("{value:?}")));
+        }
+
+        fn record_str(&mut self, field: &Field, value: &str) {
+            self.fields
+                .push((field.name().to_string(), value.to_string()));
+        }
+
+        fn record_i64(&mut self, field: &Field, value: i64) {
+            self.fields
+                .push((field.name().to_string(), value.to_string()));
+        }
+
+        fn record_u64(&mut self, field: &Field, value: u64) {
+            self.fields
+                .push((field.name().to_string(), value.to_string()));
+        }
+    }
+
+    struct ServerLogCaptureLayer {
+        events: StdArc<StdMutex<Vec<CapturedTracingEvent>>>,
+    }
+
+    impl<S: Subscriber> Layer<S> for ServerLogCaptureLayer {
+        fn on_event(&self, event: &TracingEvent<'_>, _ctx: SubscriberContext<'_, S>) {
+            if !event
+                .metadata()
+                .target()
+                .starts_with("fabro_server::server")
+            {
+                return;
+            }
+            let mut visitor = CaptureVisitor::default();
+            event.record(&mut visitor);
+            if visitor
+                .fields
+                .iter()
+                .any(|(name, value)| name == "message" && value == "HTTP response")
+            {
+                self.events
+                    .lock()
+                    .expect("captured log events lock poisoned")
+                    .push(CapturedTracingEvent {
+                        fields: visitor.fields,
+                    });
+            }
+        }
+    }
+
+    fn capture_server_logs() -> (
+        tracing::dispatcher::DefaultGuard,
+        StdArc<StdMutex<Vec<CapturedTracingEvent>>>,
+    ) {
+        let events = StdArc::new(StdMutex::new(Vec::new()));
+        let subscriber = Registry::default().with(ServerLogCaptureLayer {
+            events: StdArc::clone(&events),
+        });
+        let guard = subscriber::set_default(subscriber);
+        (guard, events)
+    }
+
     macro_rules! response_json {
         ($response:expr, $expected:expr) => {
             fabro_test::expect_axum_json($response, $expected, concat!(file!(), ":", line!()))
@@ -8486,6 +8599,38 @@ methods = ["dev-token"]
 
     fn api(path: &str) -> String {
         format!("/api/v1{path}")
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn http_log_omits_unset_optional_auth_fields() {
+        let (_guard, events) = capture_server_logs();
+        let app = test_app_with();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+
+        let events = events.lock().expect("captured log events").clone();
+        assert_eq!(events.len(), 1);
+        let field_names = events[0]
+            .fields
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        assert!(field_names.contains(&"principal_kind"));
+        assert!(field_names.contains(&"auth_status"));
+        assert!(!field_names.contains(&"auth_error_code"));
+        assert!(!field_names.contains(&"user_auth_method"));
+        assert!(!field_names.contains(&"idp_issuer"));
+        assert!(!field_names.contains(&"run_id"));
     }
 
     #[allow(

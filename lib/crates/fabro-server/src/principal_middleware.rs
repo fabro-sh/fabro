@@ -2,8 +2,8 @@ use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::{FromRequestParts, Path, Request, State};
+use axum::http::StatusCode;
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use fabro_types::{CommandOutputStream, Principal, RunBlobId, RunId, StageId, UserPrincipal};
@@ -43,12 +43,6 @@ pub(crate) enum AuthStatus {
 #[derive(Clone)]
 pub(crate) struct AuthContextSlot(pub(crate) Arc<Mutex<RequestAuthContext>>);
 
-#[allow(
-    dead_code,
-    reason = "Route migrations use RequestAuth first; retained for principal-only guards."
-)]
-pub(crate) struct RequestPrincipal(pub(crate) Principal);
-
 pub(crate) struct RequestAuth(pub(crate) AuthContextSlot);
 
 pub(crate) struct RequiredUser(pub(crate) UserPrincipal);
@@ -82,6 +76,26 @@ impl RequestAuthContext {
             user_profile:    None,
         }
     }
+
+    #[must_use]
+    pub(crate) fn authenticated(principal: Principal, user_profile: Option<UserProfile>) -> Self {
+        Self {
+            principal,
+            auth_status: AuthStatus::Authenticated,
+            auth_error_code: None,
+            user_profile,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn rejected(status: AuthStatus, code: Option<&'static str>) -> Self {
+        Self {
+            principal:       Principal::anonymous(),
+            auth_status:     status,
+            auth_error_code: code,
+            user_profile:    None,
+        }
+    }
 }
 
 impl AuthStatus {
@@ -109,19 +123,6 @@ impl AuthContextSlot {
     #[must_use]
     pub(crate) fn snapshot(&self) -> RequestAuthContext {
         self.0.lock().expect("auth context lock poisoned").clone()
-    }
-}
-
-impl<S: Send + Sync> FromRequestParts<S> for RequestPrincipal {
-    type Rejection = Infallible;
-
-    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        let slot = parts
-            .extensions
-            .get::<AuthContextSlot>()
-            .cloned()
-            .unwrap_or_else(AuthContextSlot::initial);
-        Ok(Self(slot.snapshot().principal))
     }
 }
 
@@ -327,12 +328,12 @@ fn classify_request(req: &Request, state: &AppState) -> RequestAuthContext {
         .get::<AuthMode>()
         .expect("AuthMode extension must be added to the router");
 
-    let token = match bearer_from_headers(req.headers()) {
-        BearerCredential::Missing => return RequestAuthContext::initial(),
-        BearerCredential::Invalid => {
+    let token = match jwt_auth::bearer_token_from_headers(req.headers()) {
+        None => return RequestAuthContext::initial(),
+        Some(Err(_)) => {
             return rejected(AuthStatus::Invalid, Some("unauthorized"));
         }
-        BearerCredential::Present(token) => token,
+        Some(Ok(token)) => token,
     };
 
     if token.starts_with("fabro_refresh_") {
@@ -362,25 +363,6 @@ fn classify_request(req: &Request, state: &AppState) -> RequestAuthContext {
     classify_user_token(token, config)
 }
 
-enum BearerCredential<'a> {
-    Missing,
-    Invalid,
-    Present(&'a str),
-}
-
-fn bearer_from_headers(headers: &HeaderMap) -> BearerCredential<'_> {
-    let Some(value) = headers.get(header::AUTHORIZATION) else {
-        return BearerCredential::Missing;
-    };
-    let Ok(value) = value.to_str() else {
-        return BearerCredential::Invalid;
-    };
-    match value.strip_prefix("Bearer ") {
-        Some(token) => BearerCredential::Present(token),
-        None => BearerCredential::Invalid,
-    }
-}
-
 fn classify_user_token(token: &str, config: &ConfiguredAuth) -> RequestAuthContext {
     let auth = match jwt_auth::authenticate_jwt_bearer(token, config) {
         Ok(auth) => auth,
@@ -406,21 +388,11 @@ fn classify_user_token(token: &str, config: &ConfiguredAuth) -> RequestAuthConte
 }
 
 fn authenticated(principal: Principal, user_profile: Option<UserProfile>) -> RequestAuthContext {
-    RequestAuthContext {
-        principal,
-        auth_status: AuthStatus::Authenticated,
-        auth_error_code: None,
-        user_profile,
-    }
+    RequestAuthContext::authenticated(principal, user_profile)
 }
 
 fn rejected(status: AuthStatus, code: Option<&'static str>) -> RequestAuthContext {
-    RequestAuthContext {
-        principal:       Principal::anonymous(),
-        auth_status:     status,
-        auth_error_code: code,
-        user_profile:    None,
-    }
+    RequestAuthContext::rejected(status, code)
 }
 
 fn auth_rejection(status: AuthStatus, code: Option<&'static str>) -> ApiError {
@@ -429,5 +401,223 @@ fn auth_rejection(status: AuthStatus, code: Option<&'static str>) -> ApiError {
             ApiError::unauthorized_with_code("Authentication required.", code)
         }
         _ => ApiError::unauthorized(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Body;
+    use axum::http::{Request, header};
+    use chrono::Duration;
+    use fabro_static::EnvVars;
+    use fabro_types::settings::ServerAuthMethod;
+    use fabro_types::{AuthMethod, IdpIdentity, RunId};
+    use jsonwebtoken::{Algorithm, EncodingKey, Header};
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::auth;
+    use crate::worker_token::{WORKER_TOKEN_SCOPE, WorkerTokenClaims, issue_worker_token};
+
+    const TEST_JWT_ISSUER: &str = "https://fabro.example";
+
+    fn auth_mode_for_state(state: &AppState) -> AuthMode {
+        let secret = state
+            .server_secret(EnvVars::SESSION_SECRET)
+            .expect("test state should have session secret");
+        AuthMode::Enabled(ConfiguredAuth {
+            methods:    vec![ServerAuthMethod::Github],
+            dev_token:  None,
+            jwt_key:    Some(auth::derive_jwt_key(secret.as_bytes()).unwrap()),
+            jwt_issuer: Some(TEST_JWT_ISSUER.to_string()),
+        })
+    }
+
+    fn request_with_bearer(token: Option<&str>, auth_mode: AuthMode) -> Request<Body> {
+        let mut builder = Request::builder().uri("/api/v1/auth/me");
+        if let Some(token) = token {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        let mut request = builder.body(Body::empty()).unwrap();
+        request.extensions_mut().insert(auth_mode);
+        request
+    }
+
+    fn user_subject() -> auth::JwtSubject {
+        auth::JwtSubject {
+            identity:    IdpIdentity::new("https://github.com", "12345").unwrap(),
+            login:       "octocat".to_string(),
+            name:        "The Octocat".to_string(),
+            email:       "octocat@example.com".to_string(),
+            avatar_url:  "https://example.com/octocat.png".to_string(),
+            user_url:    "https://github.com/octocat".to_string(),
+            auth_method: AuthMethod::Github,
+        }
+    }
+
+    fn issue_user_token(state: &AppState, ttl: Duration) -> String {
+        let secret = state
+            .server_secret(EnvVars::SESSION_SECRET)
+            .expect("test state should have session secret");
+        let key = auth::derive_jwt_key(secret.as_bytes()).unwrap();
+        auth::issue(&key, TEST_JWT_ISSUER, &user_subject(), ttl)
+    }
+
+    fn issue_user_token_with_other_secret() -> String {
+        let key = auth::derive_jwt_key(b"other-principal-middleware-secret-0001").unwrap();
+        auth::issue(
+            &key,
+            TEST_JWT_ISSUER,
+            &user_subject(),
+            Duration::minutes(10),
+        )
+    }
+
+    fn issue_worker_claims(state: &AppState, run_id: RunId, exp: u64, scope: &str) -> String {
+        let secret = state
+            .server_secret(EnvVars::SESSION_SECRET)
+            .expect("test state should have session secret");
+        issue_worker_claims_with_secret(secret.as_bytes(), run_id, exp, scope)
+    }
+
+    fn issue_worker_claims_with_secret(
+        secret: &[u8],
+        run_id: RunId,
+        exp: u64,
+        scope: &str,
+    ) -> String {
+        let worker_key = auth::derive_worker_jwt_key(secret).unwrap();
+        let claims = WorkerTokenClaims {
+            iss: WORKER_TOKEN_ISSUER.to_string(),
+            iat: 1,
+            exp,
+            run_id: run_id.to_string(),
+            scope: scope.to_string(),
+            jti: Uuid::new_v4().simple().to_string(),
+        };
+        jsonwebtoken::encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(&worker_key),
+        )
+        .unwrap()
+    }
+
+    fn classify_token(token: Option<&str>) -> RequestAuthContext {
+        let state = crate::server::create_app_state();
+        let request = request_with_bearer(token, auth_mode_for_state(state.as_ref()));
+        classify_request(&request, state.as_ref())
+    }
+
+    #[test]
+    fn classifies_valid_user_jwt_as_user_principal() {
+        let state = crate::server::create_app_state();
+        let token = issue_user_token(state.as_ref(), Duration::minutes(10));
+        let request = request_with_bearer(Some(&token), auth_mode_for_state(state.as_ref()));
+
+        let context = classify_request(&request, state.as_ref());
+
+        assert_eq!(context.auth_status, AuthStatus::Authenticated);
+        assert!(matches!(context.principal, Principal::User(_)));
+        assert!(context.user_profile.is_some());
+    }
+
+    #[test]
+    fn classifies_expired_user_jwt_as_expired() {
+        let state = crate::server::create_app_state();
+        let token = issue_user_token(state.as_ref(), Duration::seconds(-60));
+        let request = request_with_bearer(Some(&token), auth_mode_for_state(state.as_ref()));
+
+        let context = classify_request(&request, state.as_ref());
+
+        assert_eq!(context.auth_status, AuthStatus::Expired);
+        assert_eq!(context.auth_error_code, Some("access_token_expired"));
+    }
+
+    #[test]
+    fn classifies_invalid_user_jwt_signature_as_invalid() {
+        let context = classify_token(Some(&issue_user_token_with_other_secret()));
+
+        assert_eq!(context.auth_status, AuthStatus::Invalid);
+        assert_eq!(context.auth_error_code, Some("access_token_invalid"));
+    }
+
+    #[test]
+    fn routes_worker_issuer_to_worker_verifier() {
+        let state = crate::server::create_app_state();
+        let run_id = RunId::new();
+        let token = issue_worker_token(state.worker_token_keys(), &run_id).unwrap();
+        let request = request_with_bearer(Some(&token), auth_mode_for_state(state.as_ref()));
+
+        let context = classify_request(&request, state.as_ref());
+
+        assert_eq!(context.auth_status, AuthStatus::Authenticated);
+        assert_eq!(context.principal, Principal::worker(run_id));
+    }
+
+    #[test]
+    fn classifies_expired_worker_jwt_as_expired_not_invalid() {
+        let state = crate::server::create_app_state();
+        let token = issue_worker_claims(state.as_ref(), RunId::new(), 2, WORKER_TOKEN_SCOPE);
+        let request = request_with_bearer(Some(&token), auth_mode_for_state(state.as_ref()));
+
+        let context = classify_request(&request, state.as_ref());
+
+        assert_eq!(context.auth_status, AuthStatus::Expired);
+        assert_eq!(context.auth_error_code, Some("access_token_expired"));
+    }
+
+    #[test]
+    fn classifies_invalid_worker_jwt_signature_as_invalid() {
+        let state = crate::server::create_app_state();
+        let token = issue_worker_claims_with_secret(
+            b"other-principal-middleware-secret-0001",
+            RunId::new(),
+            u64::MAX / 2,
+            WORKER_TOKEN_SCOPE,
+        );
+        let request = request_with_bearer(Some(&token), auth_mode_for_state(state.as_ref()));
+
+        let context = classify_request(&request, state.as_ref());
+
+        assert_eq!(context.auth_status, AuthStatus::Invalid);
+        assert_eq!(context.auth_error_code, Some("access_token_invalid"));
+    }
+
+    #[test]
+    fn classifies_wrong_scope_worker_jwt_as_invalid() {
+        let state = crate::server::create_app_state();
+        let token = issue_worker_claims(state.as_ref(), RunId::new(), u64::MAX / 2, "wrong:scope");
+        let request = request_with_bearer(Some(&token), auth_mode_for_state(state.as_ref()));
+
+        let context = classify_request(&request, state.as_ref());
+
+        assert_eq!(context.auth_status, AuthStatus::Invalid);
+        assert_eq!(context.auth_error_code, Some("access_token_invalid"));
+    }
+
+    #[test]
+    fn classifies_refresh_token_at_protected_endpoint_as_unauthorized() {
+        let context = classify_token(Some("fabro_refresh_secret"));
+
+        assert_eq!(context.auth_status, AuthStatus::Invalid);
+        assert_eq!(context.auth_error_code, Some("unauthorized"));
+    }
+
+    #[test]
+    fn classifies_malformed_bearer_as_invalid_access_token() {
+        let context = classify_token(Some("not-a-jwt"));
+
+        assert_eq!(context.auth_status, AuthStatus::Invalid);
+        assert_eq!(context.auth_error_code, Some("access_token_invalid"));
+    }
+
+    #[test]
+    fn classifies_missing_bearer_as_missing() {
+        let context = classify_token(None);
+
+        assert_eq!(context.auth_status, AuthStatus::Missing);
+        assert_eq!(context.auth_error_code, None);
+        assert_eq!(context.principal, Principal::anonymous());
     }
 }

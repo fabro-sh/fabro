@@ -222,6 +222,7 @@ models/run-billing-totals.ts
 models/run-billing.ts
 models/run-checkpoint-settings.ts
 models/run-checkpoint.ts
+models/run-client-provenance.ts
 models/run-control-action.ts
 models/run-error.ts
 models/run-event.ts
@@ -240,12 +241,14 @@ models/run-namespace.ts
 models/run-prepare-settings.ts
 models/run-projection-checkpoints-inner-inner.ts
 models/run-projection.ts
+models/run-provenance.ts
 models/run-pull-request.ts
 models/run-question.ts
 models/run-reference.ts
 models/run-sandbox-settings.ts
 models/run-sandbox.ts
 models/run-scm-settings.ts
+models/run-server-provenance.ts
 models/run-spec.ts
 models/run-stage.ts
 models/run-status-archived.ts

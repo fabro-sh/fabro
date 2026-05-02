@@ -16,8 +16,8 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cookie::time::Duration;
 use cookie::{Cookie, CookieJar, Key, SameSite};
-use fabro_types::AuthMethod;
 use fabro_types::settings::ServerAuthMethod;
+use fabro_types::{AuthMethod, Principal};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use rand::TryRngCore;
 use rand::rngs::OsRng;
@@ -29,6 +29,7 @@ use url::{Host, Url};
 use crate::auth::browser_shell::browser_shell;
 use crate::auth::{self, AuthCode, ConsumeOutcome, JwtSubject, RefreshToken};
 use crate::jwt_auth::{AuthMode, ConfiguredAuth};
+use crate::principal_middleware::{AuthStatus, RequestAuth, RequestAuthContext};
 use crate::server::AppState;
 use crate::web_auth::{SessionCookie, read_private_session};
 
@@ -500,17 +501,25 @@ async fn token(
 async fn refresh(
     State(state): State<Arc<AppState>>,
     Extension(auth_mode): Extension<AuthMode>,
+    RequestAuth(auth_slot): RequestAuth,
     headers: HeaderMap,
 ) -> Response {
+    let secret = match refresh_credential_from_headers(&headers) {
+        RefreshCredential::Missing => {
+            return oauth_error(
+                StatusCode::UNAUTHORIZED,
+                "refresh_token_expired",
+                "Refresh token expired",
+            );
+        }
+        RefreshCredential::Invalid => {
+            auth_slot.replace(invalid_auth_context());
+            return oauth_error(StatusCode::UNAUTHORIZED, "unauthorized", "Unauthorized");
+        }
+        RefreshCredential::Present(secret) => secret,
+    };
     let Some(config) = github_config(&auth_mode) else {
         return github_auth_not_configured();
-    };
-    let Some(secret) = refresh_secret_from_headers(&headers) else {
-        return oauth_error(
-            StatusCode::UNAUTHORIZED,
-            "refresh_token_expired",
-            "Refresh token expired",
-        );
     };
     let Some(jwt_key) = config.jwt_key.as_ref() else {
         return oauth_error(
@@ -574,6 +583,7 @@ async fn refresh(
 
     let (old, new_row) = match outcome {
         ConsumeOutcome::NotFound | ConsumeOutcome::Expired => {
+            auth_slot.replace(invalid_auth_context());
             if auth_tokens.was_recently_replay_revoked(&secret_hash, now) {
                 return oauth_error(
                     StatusCode::UNAUTHORIZED,
@@ -588,6 +598,7 @@ async fn refresh(
             );
         }
         ConsumeOutcome::Reused(old) => {
+            auth_slot.replace(invalid_auth_context());
             auth_tokens.mark_refresh_token_replay(secret_hash, now);
             if let Err(err) = auth_tokens.delete_chain(old.chain_id).await {
                 warn!(error = %err, chain_id = %old.chain_id, "Failed to revoke replayed refresh token chain");
@@ -603,6 +614,7 @@ async fn refresh(
     };
 
     if !login_allowed(state.as_ref(), &old.login) {
+        auth_slot.replace(invalid_auth_context());
         if let Err(err) = auth_tokens.delete_chain(old.chain_id).await {
             warn!(error = %err, chain_id = %old.chain_id, "Failed to revoke deauthorized refresh token chain");
         }
@@ -624,6 +636,7 @@ async fn refresh(
         },
         chrono::Duration::minutes(ACCESS_TOKEN_TTL_MINUTES),
     );
+    auth_slot.replace(refresh_user_context(&old));
 
     Json(CliTokenResponse {
         access_token,
@@ -638,14 +651,20 @@ async fn refresh(
 async fn logout(
     State(state): State<Arc<AppState>>,
     Extension(auth_mode): Extension<AuthMode>,
+    RequestAuth(auth_slot): RequestAuth,
     headers: HeaderMap,
 ) -> Response {
     if github_config(&auth_mode).is_none() {
         return github_auth_not_configured();
     }
 
-    let Some(secret) = refresh_secret_from_headers(&headers) else {
-        return StatusCode::NO_CONTENT.into_response();
+    let secret = match refresh_credential_from_headers(&headers) {
+        RefreshCredential::Missing => return StatusCode::NO_CONTENT.into_response(),
+        RefreshCredential::Invalid => {
+            auth_slot.replace(invalid_auth_context());
+            return StatusCode::NO_CONTENT.into_response();
+        }
+        RefreshCredential::Present(secret) => secret,
     };
     let auth_tokens = match state.store_ref().refresh_tokens().await {
         Ok(store) => store,
@@ -675,6 +694,7 @@ async fn logout(
     };
 
     if let Some(refresh_token) = existing {
+        auth_slot.replace(refresh_user_context(&refresh_token));
         if let Err(err) = auth_tokens.delete_chain(refresh_token.chain_id).await {
             warn!(error = %err, chain_id = %refresh_token.chain_id, "Failed to revoke refresh token chain during logout");
             return oauth_error(
@@ -684,6 +704,8 @@ async fn logout(
             );
         }
         log_cli_refresh_chain_logged_out(&refresh_token.login, &refresh_token.email);
+    } else {
+        auth_slot.replace(invalid_auth_context());
     }
 
     StatusCode::NO_CONTENT.into_response()
@@ -871,15 +893,41 @@ fn sanitize_user_agent(user_agent: &str) -> String {
     }
 }
 
-fn refresh_secret_from_headers(headers: &HeaderMap) -> Option<String> {
-    let bearer = headers
-        .get(header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")?;
-    bearer
-        .strip_prefix(REFRESH_TOKEN_PREFIX)
-        .map(std::string::ToString::to_string)
+enum RefreshCredential {
+    Missing,
+    Invalid,
+    Present(String),
+}
+
+fn refresh_credential_from_headers(headers: &HeaderMap) -> RefreshCredential {
+    let Some(value) = headers.get(header::AUTHORIZATION) else {
+        return RefreshCredential::Missing;
+    };
+    let Ok(value) = value.to_str() else {
+        return RefreshCredential::Invalid;
+    };
+    let Some(bearer) = value.strip_prefix("Bearer ") else {
+        return RefreshCredential::Invalid;
+    };
+    match bearer.strip_prefix(REFRESH_TOKEN_PREFIX) {
+        Some(secret) => RefreshCredential::Present(secret.to_string()),
+        None => RefreshCredential::Invalid,
+    }
+}
+
+fn refresh_user_context(refresh_token: &RefreshToken) -> RequestAuthContext {
+    RequestAuthContext::authenticated(
+        Principal::user(
+            refresh_token.identity.clone(),
+            refresh_token.login.clone(),
+            AuthMethod::Github,
+        ),
+        None,
+    )
+}
+
+fn invalid_auth_context() -> RequestAuthContext {
+    RequestAuthContext::rejected(AuthStatus::Invalid, Some("unauthorized"))
 }
 
 fn hash_refresh_secret(secret: &str) -> [u8; 32] {
@@ -1127,7 +1175,10 @@ mod tests {
 
     use axum::Extension;
     use axum::body::{Body, to_bytes};
+    use axum::extract::State as AxumState;
     use axum::http::{HeaderMap, Request, StatusCode, header};
+    use axum::middleware::Next;
+    use axum::response::Response;
     use axum_extra::extract::cookie::Key;
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -1152,6 +1203,7 @@ mod tests {
     };
     use crate::auth::{self, AuthCode, RefreshToken};
     use crate::jwt_auth::{AuthMode, ConfiguredAuth};
+    use crate::principal_middleware::{AuthContextSlot, AuthStatus, RequestAuthContext};
     use crate::server;
     use crate::web_auth::SessionCookie;
 
@@ -1222,6 +1274,38 @@ client_id = "github-client-id"
             .layer(Extension(auth_mode))
             .with_state(Arc::clone(&state));
         (app, state)
+    }
+
+    async fn capture_auth_context(
+        AxumState(captured): AxumState<Arc<StdMutex<Vec<RequestAuthContext>>>>,
+        mut req: axum::extract::Request,
+        next: Next,
+    ) -> Response {
+        let slot = AuthContextSlot::initial();
+        req.extensions_mut().insert(slot.clone());
+        let response = next.run(req).await;
+        captured
+            .lock()
+            .expect("captured auth contexts lock poisoned")
+            .push(slot.snapshot());
+        response
+    }
+
+    fn test_router_with_auth_capture(
+        settings: fabro_types::ServerSettings,
+        auth_mode: AuthMode,
+    ) -> (
+        axum::Router,
+        Arc<crate::server::AppState>,
+        Arc<StdMutex<Vec<RequestAuthContext>>>,
+    ) {
+        let (app, state) = test_router_with_auth_mode(settings, auth_mode);
+        let captured = Arc::new(StdMutex::new(Vec::new()));
+        let app = app.layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&captured),
+            capture_auth_context,
+        ));
+        (app, state, captured)
     }
 
     fn github_session_cookie(key: &Key) -> String {
@@ -1947,6 +2031,59 @@ client_id = "github-client-id"
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn refresh_stamps_public_auth_context() {
+        let (app, state, captured) = test_router_with_auth_capture(
+            github_settings("https://fabro.example"),
+            github_auth_mode(),
+        );
+        let initial_secret = "refresh-secret-auth-context";
+        state
+            .store_ref()
+            .refresh_tokens()
+            .await
+            .unwrap()
+            .insert_refresh_token(refresh_row(initial_secret))
+            .await
+            .unwrap();
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/cli/refresh")
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer fabro_refresh_{initial_secret}"),
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/cli/refresh")
+                    .header(header::AUTHORIZATION, "Bearer not-a-refresh-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let contexts = captured.lock().expect("captured auth contexts").clone();
+        assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
+        assert_eq!(contexts[0].principal.display(), "octocat");
+        assert_eq!(contexts[1].auth_status, AuthStatus::Invalid);
+        assert_eq!(contexts[1].auth_error_code, Some("unauthorized"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

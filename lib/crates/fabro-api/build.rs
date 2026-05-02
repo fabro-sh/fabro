@@ -311,6 +311,17 @@ fn main() {
         ),
         ("AuthMethod", "fabro_types::AuthMethod", &[]),
         ("IdpIdentity", "fabro_types::IdpIdentity", &[]),
+        (
+            "RunClientProvenance",
+            "fabro_types::RunClientProvenance",
+            &[],
+        ),
+        ("RunProvenance", "fabro_types::RunProvenance", &[]),
+        (
+            "RunServerProvenance",
+            "fabro_types::RunServerProvenance",
+            &[],
+        ),
         ("Principal", "fabro_types::Principal", &[]),
         ("PrincipalUser", "fabro_types::UserPrincipal", &[]),
         ("SystemActorKind", "fabro_types::SystemActorKind", &[]),
