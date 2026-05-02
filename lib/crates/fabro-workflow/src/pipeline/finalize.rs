@@ -67,14 +67,9 @@ pub(crate) async fn build_conclusion_from_store(
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
-    let checkpoint = run_store
-        .state()
-        .await
-        .ok()
-        .and_then(|state| state.checkpoint);
-    let stage_durations = run_store
-        .list_events()
-        .await
+    let (state_result, events_result) = tokio::join!(run_store.state(), run_store.list_events());
+    let checkpoint = state_result.ok().and_then(|state| state.checkpoint);
+    let stage_durations = events_result
         .map(|events| crate::extract_stage_durations_from_events(&events))
         .unwrap_or_default();
 

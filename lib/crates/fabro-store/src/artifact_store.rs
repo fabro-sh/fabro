@@ -256,9 +256,11 @@ pub fn stage_storage_segment(node: &StageId) -> String {
     )
 }
 
+const RETRY_SEGMENT_PREFIX: &str = "retry-";
+
 #[must_use]
 pub fn retry_storage_segment(retry: u32) -> String {
-    format!("retry-{retry:04}")
+    format!("{RETRY_SEGMENT_PREFIX}{retry:04}")
 }
 
 fn decode_path_segment(kind: &str, value: &str) -> Result<String> {
@@ -347,7 +349,7 @@ where
 }
 
 fn decode_retry_segment(location: &ObjectPath, segment: &str) -> Result<u32> {
-    let Some(value) = segment.strip_prefix("retry-") else {
+    let Some(value) = segment.strip_prefix(RETRY_SEGMENT_PREFIX) else {
         return Err(Error::Other(format!(
             "artifact location {location} has an invalid retry segment"
         )));
