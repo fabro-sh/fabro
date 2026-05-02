@@ -21,6 +21,21 @@ use futures::future::BoxFuture;
 
 pub type BlobReader = Box<dyn FnMut(RunBlobId) -> BoxFuture<'static, Result<Option<Bytes>>> + Send>;
 
+const STAGE_RANK_WIDTH: usize = 3;
+const MAX_STAGES_IN_DUMP: usize = {
+    let mut value = 1usize;
+    let mut i = 0usize;
+    while i < STAGE_RANK_WIDTH {
+        value *= 10;
+        i += 1;
+    }
+    value - 1
+};
+
+fn stage_dir_name(rank: u32, stage_id: &StageId) -> String {
+    format!("{rank:0>STAGE_RANK_WIDTH$}-{stage_id}")
+}
+
 #[derive(Debug, Clone)]
 pub struct RunDump {
     entries:        Vec<RunDumpEntry>,
@@ -55,9 +70,9 @@ impl RunDump {
             .iter_stages()
             .map(|(stage_id, stage)| (stage_id.clone(), stage.seq))
             .collect();
-        if stage_order.len() > 999 {
+        if stage_order.len() > MAX_STAGES_IN_DUMP {
             bail!(
-                "run dump supports at most 999 stages with the current path prefix width (got {})",
+                "run dump supports at most {MAX_STAGES_IN_DUMP} stages with the current path prefix width (got {})",
                 stage_order.len()
             );
         }
@@ -78,7 +93,7 @@ impl RunDump {
                 .get(&stage_id)
                 .copied()
                 .context("stage rank should exist")?;
-            let base = PathBuf::from("stages").join(format!("{rank:03}-{stage_id}"));
+            let base = PathBuf::from("stages").join(stage_dir_name(rank, &stage_id));
 
             if let Some(prompt) = node.prompt.as_ref() {
                 entries.push(RunDumpEntry::text_path(
@@ -458,7 +473,7 @@ fn artifact_dump_path(
     let filename_path = validate_relative_path("artifact filename", filename)?;
     let stage_dir = stage_ranks.get(stage_id).map_or_else(
         || PathBuf::from("_orphans").join(stage_id.to_string()),
-        |rank| PathBuf::from(format!("{rank:03}-{stage_id}")),
+        |rank| PathBuf::from(stage_dir_name(*rank, stage_id)),
     );
     Ok(PathBuf::from("artifacts")
         .join(stage_dir)

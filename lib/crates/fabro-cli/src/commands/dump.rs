@@ -96,8 +96,7 @@ async fn write_run_dump(
             .stage_id
             .parse()
             .with_context(|| format!("server returned invalid stage id {:?}", artifact.stage_id))?;
-        let retry = u32::try_from(artifact.retry)
-            .context("server returned invalid negative artifact retry")?;
+        let retry = artifact.retry.cast_unsigned();
         let data = client
             .download_stage_artifact(run_id, &stage_id, retry, &artifact.relative_path)
             .await
